@@ -1,0 +1,122 @@
+# Branche test : seules les PR depuis dev sont acceptées.
+# Vérifications → build de l'image → fusion automatique → publication Docker Hub.
+# La fusion et la publication se font dans ce même workflow : un push effectué
+# avec GITHUB_TOKEN ne déclenche aucun autre workflow.
+name: test
+
+on:
+  pull_request:
+    branches: [test]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: test-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: flux-de-fichiers
+
+jobs:
+  guard:
+    name: source-is-dev
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuser toute PR qui ne vient pas de dev
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ "$HEAD_REF" != "dev" ] || [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+            echo "::error::La branche test n'accepte que les PR depuis dev (reçu : $HEAD_REPO:$HEAD_REF)."
+            exit 1
+          fi
+
+  checks:
+    name: fmt-clippy-tests
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Installer la toolchain de rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
+  image-build:
+    name: docker-build
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Construire l'image (sans publier)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,scope=image,mode=max
+
+  merge:
+    name: auto-merge
+    needs: [checks, image-build]
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      sha: ${{ steps.merge.outputs.sha }}
+    steps:
+      - name: Fusionner la PR (merge commit)
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --merge --match-head-commit "$HEAD_SHA"
+          sha=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json mergeCommit --jq .mergeCommit.oid)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: docker-publish
+    needs: merge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.merge.outputs.sha }}
+      - name: Calculer les tags
+        id: meta
+        env:
+          SHA: ${{ needs.merge.outputs.sha }}
+          VERSION_FILE: Cargo.toml
+        run: |
+          echo "short=${SHA:0:12}" >> "$GITHUB_OUTPUT"
+          echo "version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$VERSION_FILE" | head -n1)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Publier :test et :test-<sha>
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
+            VCS_REF=${{ needs.merge.outputs.sha }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:test
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:test-${{ steps.meta.outputs.short }}
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,scope=image,mode=max

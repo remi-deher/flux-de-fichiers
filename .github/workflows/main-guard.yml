@@ -1,0 +1,29 @@
+# Branche main : n'accepte que les PR depuis test ou la PR de release de release-please.
+name: main-guard
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: source-is-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuser toute PR qui ne vient pas de test
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          RELEASE_PREFIX: release-please--branches--main
+        run: |
+          if [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+            echo "::error::PR externe refusée sur main."; exit 1
+          fi
+          case "$HEAD_REF" in
+            test|"$RELEASE_PREFIX"*) echo "Source autorisée : $HEAD_REF" ;;
+            *) echo "::error::main n'accepte que les PR depuis test (reçu : $HEAD_REF)."; exit 1 ;;
+          esac

@@ -1,0 +1,87 @@
+# Branche main : release-please tient la PR de release (version, CHANGELOG).
+# Quand elle est fusionnée : tag + GitHub Release, promotion de l'image déjà
+# testée (test-<sha>) en X.Y.Z / X.Y / latest, puis report de main dans dev.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: flux-de-fichiers
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+      major: ${{ steps.release.outputs.major }}
+      minor: ${{ steps.release.outputs.minor }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  promote-image:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Retrouver le commit de test livré
+        id: tested
+        run: echo "short=$(scripts/ci/find-tested-commit.sh HEAD origin/test | cut -c1-12)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Promouvoir test-<sha> sans recompiler
+        env:
+          REPO: ${{ secrets.DOCKERHUB_USERNAME }}/flux-de-fichiers
+          SOURCE_TAG: test-${{ steps.tested.outputs.short }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+          MAJOR_MINOR: ${{ needs.release-please.outputs.major }}.${{ needs.release-please.outputs.minor }}
+        run: |
+          docker buildx imagetools inspect "$REPO:$SOURCE_TAG" > /dev/null \
+            || { echo "::error::Image $SOURCE_TAG introuvable : la release ne recompile pas."; exit 1; }
+          docker buildx imagetools create \
+            --tag "$REPO:$VERSION" --tag "$REPO:$MAJOR_MINOR" --tag "$REPO:latest" \
+            "$REPO:$SOURCE_TAG"
+
+  back-merge:
+    needs: [release-please, promote-image]
+    if: ${{ needs.release-please.outputs.created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dev
+          fetch-depth: 0
+      - name: Reporter la version et le CHANGELOG de main dans dev
+        env:
+          TAG: ${{ needs.release-please.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --no-ff origin/main -m "chore: report de la release $TAG dans dev"
+          git push origin dev

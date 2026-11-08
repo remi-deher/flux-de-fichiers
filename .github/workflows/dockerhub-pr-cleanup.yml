@@ -1,0 +1,48 @@
+name: dockerhub-pr-cleanup
+
+on:
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Simuler sans supprimer de tag'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: dockerhub-pr-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Vérifier les garde-fous de purge
+        run: python3 -m unittest discover -s scripts/ci -p 'test_dockerhub_cleanup.py' -v
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Préserver les têtes de PR ouvertes vers test
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls?state=open&base=test&per_page=100" \
+            --jq '.[].head.sha' > "$RUNNER_TEMP/open-test-pr-heads"
+      - name: Purger uniquement les anciens tags pr-<sha12>
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          PR_IMAGE_RETENTION_DAYS: ${{ vars.PR_IMAGE_RETENTION_DAYS || '14' }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+        run: |
+          python3 scripts/ci/dockerhub_cleanup.py \
+            --open-heads "$RUNNER_TEMP/open-test-pr-heads"

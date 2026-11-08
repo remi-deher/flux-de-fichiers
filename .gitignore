@@ -1,18 +1,16 @@
 node_modules
 .env
-.env.local
+.env.*
 dist
 build
 .DS_Store
-prisma/dev.db
 .mcp.json
 .agentsroom/
 .claude/
-.agentsroom/handoff-transcript-*.txt
-.agentsroom/handoff-summary-*.md
-.agentsroom/fork-context-*.txt
-.agentsroom/transfer-context-*.txt
-.agentsroom/handoff-context-*.txt
+.agents/
+.grok/
+.vibe/
+.kimi-code/
 
 /target/
 /var/

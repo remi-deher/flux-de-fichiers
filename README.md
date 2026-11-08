@@ -5,6 +5,9 @@ Rust/Axum et PostgreSQL distribuent les tâches à un ou plusieurs agents Rust.
 Les agents utilisent **MKVToolNix (`mkvmerge`)**. L'interface Leptos est différée.
 FFmpeg est uniquement un outil de fabrication des médias synthétiques des tests.
 
+Pour contribuer : [guide de développement ciblé](docs/developpement.md)
+(points d'entrée, choix des vérifications et pièges).
+
 ## Démarrage local
 
 Prérequis : Docker Engine avec Compose v2, Node/npm, Python 3 et OpenSSL.

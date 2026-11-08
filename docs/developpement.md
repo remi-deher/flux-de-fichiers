@@ -31,8 +31,11 @@ Les migrations sont embarquées et appliquées au démarrage du coordinateur.
   `npm run scenarios` sur le laboratoire local disponible. Les scénarios suspendent
   des agents et redémarrent PostgreSQL : utiliser un laboratoire de développement.
   Ils ne prouvent ni la HA ni le fonctionnement sur plusieurs machines physiques.
-- CI : vérifier le workflow concerné. Les scénarios Docker ne sont pas exécutés
-  par `test.yml` ; une CI verte ne suffit pas à les déclarer validés.
+- CI : vérifier le workflow concerné. Le job `docker-scenarios` de `test.yml`
+  exécute les scénarios sur l'image `pr-<sha12>` sans reconstruire le service.
+  Le rapport `scenario-report` est conservé 14 jours, même après un échec.
+  Sans changement de code ni du laboratoire, les étapes sont sautées et le check
+  reste vert ; cela ne constitue pas une nouvelle exécution des scénarios.
 
 ## Pièges à consulter pour le remuxage
 

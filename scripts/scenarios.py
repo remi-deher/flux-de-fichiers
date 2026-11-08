@@ -233,13 +233,27 @@ def run():
     wait_for(restored)
     assert request("GET", f"/api/v1/jobs/{one['id']}/output", raw=True) == data
     passed("Redémarrage PostgreSQL : tâches et résultat persistants, reconnexion du coordinateur")
-    (ROOT / "var/scenario-report.json").write_text(json.dumps({"prefix": PREFIX, "passed": RESULTS}, ensure_ascii=False, indent=2))
     print(f"{len(RESULTS)} groupes de scénarios réussis. Rapport : var/scenario-report.json", flush=True)
 
 
-if __name__ == "__main__":
+def main():
+    started = time.monotonic()
+    status = "failed"
     try:
         run()
+        status = "passed"
     except Exception:
         print("ÉCHEC : consulter les journaux Docker et les journaux JSON locaux.", flush=True)
         raise
+    finally:
+        # Conserver la progression même en cas d'échec, sans copier d'erreur ou de secret.
+        (ROOT / "var/scenario-report.json").write_text(json.dumps({
+            "prefix": PREFIX,
+            "status": status,
+            "duration_seconds": round(time.monotonic() - started, 3),
+            "passed": RESULTS,
+        }, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()

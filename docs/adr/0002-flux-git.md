@@ -28,6 +28,18 @@ main ──────●────   PR test→main → release-please → t
   après fusion dans `dev` ; `dev`, `test` et `main` sont protégées contre la
   suppression.
 
+## Optimisations de la CI
+
+- L'image est construite une seule fois, pendant la PR, et poussée sous
+  `pr-<sha>`. Après la fusion elle est renommée `:test` et `:test-<sha du merge>`
+  sans recompiler. Les tags `pr-*` non fusionnés restent sur Docker Hub et
+  peuvent être purgés.
+- Si la PR ne modifie aucun chemin du build (`src/`, `migrations/`, `tests/`,
+  `Cargo.*`, `Dockerfile`, `rust-toolchain.toml`, `test.yml`), les vérifications
+  requises restent vertes mais sautent leurs étapes lourdes, et `:test` est
+  simplement renommée `:test-<sha du merge>`.
+- Le Dockerfile accepte `CARGO_JOBS` (1 par défaut, 4 en CI).
+
 ## Versionning
 
 release-please lit les commits conventionnels (`feat:`, `fix:`) et ouvre une

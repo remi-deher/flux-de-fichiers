@@ -1,0 +1,30 @@
+# Worker-only deployment on an additional Docker host.
+services:
+  worker:
+    image: ${FLUX_IMAGE:?Provide an immutable Flux image tag or digest}
+    command: [worker]
+    user: "10001:10001"
+    restart: unless-stopped
+    read_only: true
+    environment:
+      COORDINATOR_URL: ${COORDINATOR_URL:?Provide the HTTPS coordinator origin}
+      WORKER_NAME: ${WORKER_NAME:?Provide a unique worker name}
+      WORKER_KEY_FILE: /run/secrets/worker_key
+      CA_CERT: /run/secrets/ca_cert
+      MAX_FILE_BYTES: ${MAX_FILE_BYTES:-536870912}
+    secrets: [worker_key, ca_cert]
+    volumes: [work:/work, logs:/logs]
+    tmpfs: ["/tmp:size=64m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+volumes:
+  work:
+  logs:
+secrets:
+  worker_key:
+    file: ${WORKER_KEY_PATH:?Provide a secret file readable by UID 10001}
+  ca_cert:
+    file: ${CA_CERT_PATH:?Provide the coordinator CA certificate file}

@@ -2,9 +2,13 @@
 
 ## Stack
 
-Node + Fastify + TypeScript + Prisma
+Rust + Axum + Tokio + Leptos + SQLx + PostgreSQL + MKVToolNix.
 
-J'ai choisi api-node avec Node, Fastify et Prisma car cela permet de construire un backend robuste et scalable, adapté à la gestion concurrente de fichiers et à la coordination entre plusieurs nœuds. Ce choix facilite la mise en place d'une API performante et la gestion des bases de données, tout en restant simple à déployer localement pour un développement rapide.
+Stack validée avec l'utilisateur : Rust pour le backend, les agents et le frontend
+Leptos ; PostgreSQL local pour les métadonnées. Voir docs/adr/0001-stack.md.
+Exécution Docker ; interface Leptos différée. Remuxage via MKVToolNix.
+Mode centralisé de 1 à N serveurs. La haute disponibilité est optionnelle et sa
+bascule fera l'objet d'un cadrage ultérieur ; aucun seuil de nœuds ne l'active.
 
 Do not change the stack without being asked. It was chosen with the user before
 the first line of code.

@@ -1,0 +1,328 @@
+openapi: 3.1.0
+info:
+  title: Flux de Fichiers — API de remuxage
+  version: 0.1.0
+  description: >-
+    Coordinateur centralisé, agents MKVToolNix, sans interface.
+    Les noms de fichiers sont des noms MKV simples présents dans INPUT_DIR.
+    Les clés administrateur et agent sont distinctes. Le bail est un secret
+    temporaire transmis dans le corps des renouvellements ou dans un en-tête,
+    jamais dans une URL. Tous les échanges distants nécessitent HTTPS.
+servers:
+  - url: https://localhost:3443
+security:
+  - AdminKey: []
+paths:
+  /:
+    get:
+      security: []
+      summary: Informations publiques minimales du service
+      responses:
+        '200':
+          description: Service et absence d'interface
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service: {type: string}
+                  interface: {type: boolean, const: false}
+  /health:
+    get:
+      security: []
+      summary: Disponibilité du coordinateur et de PostgreSQL
+      responses:
+        '204': {description: PostgreSQL joignable}
+        '500': {$ref: '#/components/responses/Error'}
+  /api/v1/files:
+    get:
+      summary: Lister les entrées MKV admissibles, triées par nom, maximum 500
+      responses:
+        '200':
+          description: Fichiers non vides sous la limite de taille, sans liens symboliques
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [name, bytes]
+                  properties:
+                    name: {type: string}
+                    bytes: {type: integer, minimum: 1}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs:
+    get:
+      summary: Lister les tâches par ordre de création décroissant
+      parameters:
+        - in: query
+          name: limit
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+        - in: query
+          name: before
+          description: UUID de la dernière tâche de la page précédente
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Page, tableau vide en fin de liste ou si le curseur est inconnu
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Job'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      summary: Créer une tâche et figer l'empreinte de la source
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_name]
+              properties:
+                source_name: {type: string, maxLength: 240, example: exemple.mkv}
+                target_worker_id: {type: [string, 'null'], format: uuid}
+      responses:
+        '201':
+          description: Tâche créée ; les soumissions répétées créent des tâches distinctes
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Job'}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}:
+    parameters: [{$ref: '#/components/parameters/JobId'}]
+    get:
+      summary: Consulter l'état d'une tâche sans exposer son jeton de bail
+      responses:
+        '200':
+          description: Tâche
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Job'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/output:
+    parameters: [{$ref: '#/components/parameters/JobId'}]
+    get:
+      summary: Télécharger le résultat d'une tâche réussie
+      responses:
+        '200':
+          description: Résultat immuable, Content-Length fourni
+          content:
+            video/x-matroska:
+              schema: {type: string, format: binary}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/workers:
+    get:
+      summary: Lister les agents enregistrés, maximum 200
+      responses:
+        '200':
+          description: Agents par nom ; last_seen est actualisé à chaque demande de travail
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Worker'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      security: [{WorkerKey: []}]
+      summary: Enregistrer un agent ; le même nom conserve son UUID après redémarrage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 80, pattern: '^[A-Za-z0-9_.-]+$'}
+      responses:
+        '200':
+          description: Agent enregistré
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Worker'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/claims:
+    post:
+      security: [{WorkerKey: []}]
+      summary: Réserver atomiquement la prochaine tâche disponible pour cet agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [worker_id]
+              properties:
+                worker_id: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Bail de 120 secondes, ou null si aucune tâche ; trois tentatives maximum
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/Claim'}
+                  - {type: 'null'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/heartbeat:
+    parameters: [{$ref: '#/components/parameters/JobId'}]
+    post:
+      security: [{WorkerKey: []}]
+      summary: Renouveler un bail actif ; agent configuré à un renouvellement toutes les 20 s
+      requestBody: {$ref: '#/components/requestBodies/Lease'}
+      responses:
+        '204': {description: Bail prolongé de 120 secondes}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/failure:
+    parameters: [{$ref: '#/components/parameters/JobId'}]
+    post:
+      security: [{WorkerKey: []}]
+      summary: Marquer une tâche active en échec terminal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/Lease'}
+                - type: object
+                  required: [error_code]
+                  properties:
+                    error_code: {type: string, enum: [source_integrity, remux_failed, transfer_failed]}
+      responses:
+        '204': {description: Échec enregistré}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/source:
+    parameters:
+      - {$ref: '#/components/parameters/JobId'}
+      - {$ref: '#/components/parameters/WorkerId'}
+      - {$ref: '#/components/parameters/LeaseToken'}
+    get:
+      security: [{WorkerKey: []}]
+      summary: Télécharger la source pour un bail actif ; l'agent vérifie son empreinte
+      responses:
+        '200':
+          description: Fichier source, Content-Length fourni
+          content:
+            video/x-matroska:
+              schema: {type: string, format: binary}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/result:
+    parameters:
+      - {$ref: '#/components/parameters/JobId'}
+      - {$ref: '#/components/parameters/WorkerId'}
+      - {$ref: '#/components/parameters/LeaseToken'}
+    put:
+      security: [{WorkerKey: []}]
+      summary: Téléverser puis valider et publier le résultat atomiquement
+      parameters:
+        - in: header
+          name: x-remux-warning
+          schema: {type: boolean, default: false}
+      requestBody:
+        required: true
+        content:
+          video/x-matroska:
+            schema: {type: string, format: binary}
+      responses:
+        '204': {description: Résultat publié, bail consommé}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    AdminKey: {type: http, scheme: bearer, description: Clé administrateur}
+    WorkerKey: {type: http, scheme: bearer, description: Clé du groupe d'agents de confiance}
+  parameters:
+    JobId:
+      in: path
+      name: id
+      required: true
+      schema: {type: string, format: uuid}
+    WorkerId:
+      in: header
+      name: x-worker-id
+      required: true
+      schema: {type: string, format: uuid}
+    LeaseToken:
+      in: header
+      name: x-lease-token
+      required: true
+      schema: {type: string, format: uuid}
+  requestBodies:
+    Lease:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Lease'}
+  responses:
+    Error:
+      description: >-
+        Erreur applicative JSON : 400 entrée invalide, 401 clé absente/invalide ou mauvais rôle,
+        404 ressource absente, 409 bail expiré ou conflit, 413 taille dépassée,
+        500 défaillance interne. Les erreurs d'extraction HTTP (JSON/UUID) sont
+        également normalisées. x-request-id permet de retrouver la requête dans les journaux.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code]
+                properties:
+                  code: {type: string}
+  schemas:
+    Lease:
+      type: object
+      required: [worker_id, lease_token]
+      properties:
+        worker_id: {type: string, format: uuid}
+        lease_token: {type: string, format: uuid, writeOnly: true}
+    Worker:
+      type: object
+      required: [id, name, last_seen]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        last_seen: {type: string, format: date-time}
+    Claim:
+      type: object
+      required: [job_id, lease_token, source_name, source_sha256, source_bytes]
+      properties:
+        job_id: {type: string, format: uuid}
+        lease_token: {type: string, format: uuid}
+        source_name: {type: string}
+        source_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        source_bytes: {type: integer, minimum: 1}
+    Job:
+      type: object
+      required: [id, source_name, status, attempts, warning, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        source_name: {type: string}
+        source_sha256: {type: [string, 'null']}
+        source_bytes: {type: [integer, 'null']}
+        target_worker_id: {type: [string, 'null'], format: uuid}
+        worker_id: {type: [string, 'null'], format: uuid}
+        status: {type: string, enum: [queued, running, succeeded, failed]}
+        attempts: {type: integer, minimum: 0, maximum: 3}
+        leased_until: {type: [string, 'null'], format: date-time}
+        output_name: {type: [string, 'null']}
+        output_sha256: {type: [string, 'null']}
+        output_bytes: {type: [integer, 'null']}
+        warning: {type: boolean}
+        error_code: {type: [string, 'null']}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}

@@ -1,0 +1,115 @@
+x-app: &app
+  image: flux-de-fichiers:${IMAGE_TAG:-local}
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  mem_limit: 512m
+  cpus: 1.0
+  pids_limit: 128
+
+services:
+  db:
+    image: postgres:17.7-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: flux
+      POSTGRES_USER: flux
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    entrypoint: [/bin/bash, /init-postgres.sh]
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./deploy/init-postgres.sh:/init-postgres.sh:ro
+      - ./deploy/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    secrets: [db_password, db_cert, db_key, ca_cert]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U flux -d flux"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    mem_limit: 256m
+
+  coordinator:
+    <<: *app
+    build:
+      context: .
+      target: runtime
+    environment:
+      BIND: 0.0.0.0:3443
+      DATABASE_URL_FILE: /run/secrets/database_url
+      ADMIN_KEY_FILE: /run/secrets/admin_key
+      WORKER_KEY_FILE: /run/secrets/worker_key
+      TLS_CERT: /run/secrets/server_cert
+      TLS_KEY: /run/secrets/server_key
+      INPUT_DIR: /input
+    secrets: [database_url, admin_key, worker_key, server_cert, server_key, ca_cert]
+    volumes:
+      - data:/data
+      - coordinator_logs:/logs
+      - ./var/input:/input:ro
+    ports: ["127.0.0.1:3443:3443"]
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, --cacert, /run/secrets/ca_cert, https://localhost:3443/health]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  worker:
+    <<: *app
+    pull_policy: never
+    command: [worker]
+    environment:
+      COORDINATOR_URL: https://coordinator:3443
+      WORKER_KEY_FILE: /run/secrets/worker_key
+      CA_CERT: /run/secrets/ca_cert
+    secrets: [worker_key, ca_cert]
+    volumes:
+      - /work
+      - /logs
+    depends_on:
+      coordinator: {condition: service_healthy}
+
+  preview:
+    image: nginx:1.28.0-alpine
+    ports: ["127.0.0.1:3000:8080"]
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+    secrets: [ca_cert]
+    depends_on:
+      coordinator: {condition: service_healthy}
+    read_only: true
+    tmpfs: [/var/cache/nginx, /var/run, /tmp]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+
+  # Outils réservés aux scénarios : jamais inclus dans les services de traitement.
+  fixtures:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: deploy/fixtures.Dockerfile
+    image: flux-fixtures:local
+    volumes:
+      - ./var/input:/fixtures
+    entrypoint: [ffmpeg]
+
+volumes:
+  postgres:
+  data:
+  coordinator_logs:
+
+secrets:
+  db_password: {file: ./var/secrets/db_password}
+  database_url: {file: ./var/secrets/database_url}
+  admin_key: {file: ./var/secrets/admin_key}
+  worker_key: {file: ./var/secrets/worker_key}
+  server_cert: {file: ./var/secrets/server.crt}
+  server_key: {file: ./var/secrets/server.key}
+  db_cert: {file: ./var/secrets/db.crt}
+  db_key: {file: ./var/secrets/db.key}
+  ca_cert: {file: ./var/secrets/ca.crt}

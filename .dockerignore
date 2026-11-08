@@ -1,0 +1,13 @@
+.git
+.agentsroom
+.claude
+.agents
+.mcp.json
+.env*
+var
+.scenario
+.tools
+target
+node_modules
+docs
+tests

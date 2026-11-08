@@ -1,7 +1,10 @@
 # Branche test : seules les PR depuis dev sont acceptées.
-# Vérifications → build de l'image → fusion automatique → publication Docker Hub.
+# Vérifications → image poussée sous pr-<sha> → fusion automatique → l'image
+# validée est renommée :test et :test-<sha du merge>, sans recompiler.
 # La fusion et la publication se font dans ce même workflow : un push effectué
 # avec GITHUB_TOKEN ne déclenche aucun autre workflow.
+# Les vérifications requises par la protection de branche s'exécutent toujours ;
+# quand la PR ne touche pas au code, leurs étapes lourdes sont simplement sautées.
 name: test
 
 on:
@@ -18,6 +21,7 @@ permissions:
 
 env:
   IMAGE_NAME: flux-de-fichiers
+  CARGO_JOBS: 4
 
 jobs:
   guard:
@@ -34,38 +38,93 @@ jobs:
             exit 1
           fi
 
-  checks:
-    name: fmt-clippy-tests
+  changes:
+    name: detect-code-changes
     needs: guard
     runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Installer la toolchain de rust-toolchain.toml
+        with:
+          fetch-depth: 0
+      - name: Le code ou le build ont-ils changé ?
+        id: diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Chemins qui influencent le binaire ou l'image (voir Dockerfile).
+          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" \
+            | grep -qE '^(src/|migrations/|tests/|Cargo\.toml$|Cargo\.lock$|Dockerfile$|rust-toolchain\.toml$|\.github/workflows/test\.yml$)'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+            echo "Aucun changement de code : vérifications lourdes sautées."
+          fi
+
+  checks:
+    name: fmt-clippy-tests
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: needs.changes.outputs.code == 'true'
+        name: Installer la toolchain de rust-toolchain.toml
         run: rustup toolchain install
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets --locked -- -D warnings
-      - run: cargo test --locked
+      - if: needs.changes.outputs.code == 'true'
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - if: needs.changes.outputs.code == 'true'
+        run: cargo fmt --check
+      - if: needs.changes.outputs.code == 'true'
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - if: needs.changes.outputs.code == 'true'
+        run: cargo test --locked
 
   image-build:
     name: docker-build
-    needs: guard
+    needs: changes
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Construire l'image (sans publier)
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Calculer le tag et la version
+        id: meta
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          echo "tag=pr-${HEAD_SHA:0:12}" >> "$GITHUB_OUTPUT"
+          if [ -f Cargo.toml ]; then
+            echo "version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)" >> "$GITHUB_OUTPUT"
+          fi
+      - if: needs.changes.outputs.code == 'true'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - if: needs.changes.outputs.code == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - if: needs.changes.outputs.code == 'true'
+        name: Construire et pousser l'image de la PR (pr-<sha>)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64
-          push: false
+          push: true
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
+            VCS_REF=${{ github.event.pull_request.head.sha }}
+            CARGO_JOBS=${{ env.CARGO_JOBS }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
           cache-from: type=gha,scope=image
           cache-to: type=gha,scope=image,mode=max
 
   merge:
     name: auto-merge
-    needs: [checks, image-build]
+    needs: [guard, checks, image-build]
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     permissions:
@@ -87,36 +146,25 @@ jobs:
 
   publish:
     name: docker-publish
-    needs: merge
+    needs: [changes, image-build, merge]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.merge.outputs.sha }}
-      - name: Calculer les tags
-        id: meta
-        env:
-          SHA: ${{ needs.merge.outputs.sha }}
-          VERSION_FILE: Cargo.toml
-        run: |
-          echo "short=${SHA:0:12}" >> "$GITHUB_OUTPUT"
-          echo "version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$VERSION_FILE" | head -n1)" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Publier :test et :test-<sha>
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          build-args: |
-            APP_VERSION=${{ steps.meta.outputs.version }}
-            VCS_REF=${{ needs.merge.outputs.sha }}
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:test
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:test-${{ steps.meta.outputs.short }}
-          cache-from: type=gha,scope=image
-          cache-to: type=gha,scope=image,mode=max
+      - name: Renommer l'image validée en :test et :test-<sha du merge>
+        env:
+          REPO: ${{ secrets.DOCKERHUB_USERNAME }}/flux-de-fichiers
+          CODE_CHANGED: ${{ needs.changes.outputs.code }}
+          PR_TAG: ${{ needs.image-build.outputs.tag }}
+          MERGE_SHA: ${{ needs.merge.outputs.sha }}
+        run: |
+          # Sans changement de code, l'image est celle déjà publiée sous :test.
+          if [ "$CODE_CHANGED" = "true" ]; then source="$PR_TAG"; else source="test"; fi
+          docker buildx imagetools inspect "$REPO:$source" > /dev/null \
+            || { echo "::error::Image $REPO:$source introuvable."; exit 1; }
+          docker buildx imagetools create \
+            --tag "$REPO:test" --tag "$REPO:test-${MERGE_SHA:0:12}" \
+            "$REPO:$source"

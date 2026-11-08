@@ -24,6 +24,9 @@ main ──────●────   PR test→main → release-please → t
   diverger les branches longues et créerait de faux conflits à chaque PR.
 - Après une release, main est fusionnée dans dev (version et CHANGELOG).
 - Correctif urgent : même chemin `dev → test → main`, pas de raccourci.
+- Les branches de travail (`feat/…`, `fix/…`) sont supprimées automatiquement
+  après fusion dans `dev` ; `dev`, `test` et `main` sont protégées contre la
+  suppression.
 
 ## Versionning
 

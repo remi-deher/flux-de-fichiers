@@ -148,17 +148,49 @@ def run_browser_tests():
                 chip.click()
                 page.wait_for_timeout(200)
 
-        # Inspection d'une tâche si disponible
+        # Inspection d'une tâche réussie et vérification du bouton de téléchargement
+        page.click('.filter-chip[data-filter="succeeded"]')
+        page.wait_for_timeout(300)
+
+        # Vérification du bouton de téléchargement présent dans la ligne du tableau
+        row_dl_btns = page.locator(".job-download-btn")
+        if row_dl_btns.count() > 0:
+            first_row_dl = row_dl_btns.first
+            assert first_row_dl.is_visible(), "Bouton .job-download-btn non visible dans la ligne du tableau"
+            assert first_row_dl.is_enabled(), "Bouton .job-download-btn non actif"
+            print("   -> Bouton de téléchargement direct (.job-download-btn) vérifié visible et actif dans le tableau.")
+
+        # Inspection de la tâche et vérification du bouton de téléchargement dans la modale
         detail_btns = page.locator(".job-detail-btn")
         if detail_btns.count() > 0:
             detail_btns.first.click()
             page.wait_for_selector("#job-detail-dialog[open]", state="visible", timeout=3000)
             modal_content = page.locator("#job-detail-dialog")
-            assert modal_content.is_visible()
+            assert modal_content.is_visible(), "Modale #job-detail-dialog non visible"
+
+            # Assert explicite du bouton de téléchargement dans la modale d'inspection
+            modal_dl_btn = page.locator("#job-dialog-download-btn")
+            assert modal_dl_btn.is_visible(), "Le bouton #job-dialog-download-btn doit être visible pour une tâche réussie en session cookie"
+            assert modal_dl_btn.is_enabled(), "Le bouton #job-dialog-download-btn doit être actif/cliquable"
+            btn_text = modal_dl_btn.inner_text().strip()
+            assert "télécharger" in btn_text.lower(), f"Libellé inattendu pour le bouton de téléchargement : {btn_text!r}"
+            print(f"   -> Bouton de téléchargement (#job-dialog-download-btn) vérifié visible et actif ('{btn_text}').")
+
+            # Déclenchement et interception du flux de téléchargement direct via le navigateur
+            with page.expect_download(timeout=6000) as download_info:
+                modal_dl_btn.click()
+            download = download_info.value
+            filename = download.suggested_filename
+            assert filename, "Nom de fichier attendu pour le flux direct"
+            print(f"   -> Flux de téléchargement direct déclenché et intercepté (fichier: '{filename}').")
+
             # Fermer modale
             page.click("#job-dialog-close-btn")
             page.wait_for_selector("#job-detail-dialog:not([open])", state="hidden", timeout=3000)
-            print("   -> Modale d'inspection de tâche et action de téléchargement vérifiées.")
+            print("   -> Modale d'inspection de tâche refermée.")
+
+        # Rétablir le filtre global
+        page.click('.filter-chip[data-filter="all"]')
 
         # 7. Déconnexion
         print("7. Test de déconnexion et révocation de session...", flush=True)

@@ -39,7 +39,7 @@ pub async fn create(pool: &PgPool, ttl_seconds: i64) -> AppResult<WebSession> {
         .await?;
     sqlx::query("INSERT INTO sessions(token_hash, expires_at, csrf_hash) VALUES ($1, $2, $3)")
         .bind(&token_hash)
-        .bind(&expires_at)
+        .bind(expires_at)
         .bind(&csrf_hash)
         .execute(pool)
         .await?;

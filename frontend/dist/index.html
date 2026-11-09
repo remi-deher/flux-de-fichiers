@@ -787,10 +787,539 @@ dialog.app-dialog::backdrop {
   }
 }
 
+/* --- Section Plugins, Outils et Contrats --- */
+.tools-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.25rem;
+  margin-top: 1rem;
+}
+
+.tool-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.tool-card:hover {
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-sm);
+}
+
+.tool-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.tool-identity {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.tool-badge-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.tool-card-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.tool-card-id {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.tool-card-desc {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin: 0.875rem 0;
+  line-height: 1.5;
+  flex: 1;
+}
+
+.tool-meta-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-bottom: 1rem;
+}
+
+.meta-tag {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+}
+
+.meta-tag.active-choice {
+  background: var(--info-bg);
+  color: var(--info-text);
+  border-color: var(--info-border);
+  font-weight: 600;
+}
+
+.tool-card-footer {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border-color);
+  padding-top: 0.875rem;
+}
+
+/* Inspecteur de contrats */
+.contract-security-banner {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.security-badge {
+  display: flex;
+  gap: 0.625rem;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+}
+
+.security-icon {
+  font-size: 1.25rem;
+}
+
+.security-badge strong {
+  display: block;
+  font-size: 0.8125rem;
+  color: var(--text-main);
+}
+
+.security-badge span {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.contract-selector-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.contract-tab-btn {
+  min-height: 44px;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-main);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.contract-tab-btn:hover {
+  border-color: var(--primary);
+  background: var(--bg-subtle);
+}
+
+.contract-tab-btn.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-contrast);
+}
+
+.contract-tab-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.contract-display-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.contract-visual-summary {
+  padding: 1.25rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+}
+
+.visual-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.visual-summary-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 0.875rem;
+}
+
+.visual-summary-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 0.375rem;
+}
+
+.visual-summary-text {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.macro-pipeline {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+
+.pipeline-step {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 0.625rem 0.875rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.pipeline-step-title {
+  font-weight: 600;
+  font-size: 0.8125rem;
+  color: var(--text-main);
+}
+
+.pipeline-step-detail {
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+.pipeline-arrow {
+  font-size: 1.25rem;
+  color: var(--primary);
+}
+
+.contract-code-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1.25rem;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.code-filepath {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.code-schema-badge {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--info-bg);
+  color: var(--info-text);
+  border: 1px solid var(--info-border);
+  margin-left: 0.5rem;
+}
+
+.contract-code-wrapper {
+  padding: 1rem;
+  overflow-x: auto;
+  max-height: 420px;
+}
+
+.contract-code-wrapper pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-main);
+}
+
+/* Banc d'essai */
+.testbench-layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 1.5rem;
+}
+
+.testbench-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.testbench-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  align-items: flex-end;
+}
+
+.card-subtitle {
+  font-size: 0.8125rem;
+  color: var(--text-dim);
+  margin-top: 0.25rem;
+}
+
+.lifecycle-stepper {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.step-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.step-item.active {
+  border-color: var(--primary);
+  background: var(--info-bg);
+}
+
+.step-item.success {
+  border-color: var(--success-border);
+  background: var(--success-bg);
+}
+
+.step-number {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: var(--border-color);
+  color: var(--bg-card);
+  flex-shrink: 0;
+}
+
+.step-item.active .step-number {
+  background: var(--primary);
+  color: var(--primary-contrast);
+}
+
+.step-item.success .step-number {
+  background: var(--success-border);
+  color: var(--primary-contrast);
+}
+
+.step-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.step-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-main);
+  line-height: 1.2;
+}
+
+.step-status {
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+}
+
+.testbench-console-wrapper {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  overflow: hidden;
+  margin-top: auto;
+}
+
+.console-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.btn-text-sm {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0.125rem 0.375rem;
+}
+
+.btn-text-sm:hover {
+  text-decoration: underline;
+}
+
+.console-log {
+  margin: 0;
+  padding: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  max-height: 160px;
+  overflow-y: auto;
+  color: var(--text-main);
+  background: transparent;
+  white-space: pre-wrap;
+}
+
+/* Télémétrie */
+.telemetry-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.telemetry-metric-tile {
+  padding: 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tile-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tile-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.tile-badge {
+  font-size: 0.75rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+}
+
+.tile-gauge-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.tile-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.gauge-bar-track {
+  flex: 1;
+  height: 10px;
+  background: var(--border-color);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.gauge-bar-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 5px;
+  transition: width 0.3s ease;
+}
+
+.tile-subtext {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.storage-mounts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.mount-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+}
+
+.mount-name {
+  font-weight: 500;
+  color: var(--text-main);
+}
+
+.mount-space {
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+
+
   </style>
 </head>
 <body>
-<a href="#main-content" class="skip-link">Aller au contenu principal</a><div class="app-container"><header role="banner" class="app-header"><div class="brand-wrapper"><span class="brand-badge">MKV</span><div><h1 class="app-title">Flux de Fichiers</h1><p class="section-subtitle">Poste de pilotage et supervision de remuxage</p></div></div><div class="header-status"><div id="health-status-pill" class="status-pill warning" aria-live="polite"><span class="status-dot"></span><span id="health-status-text">Vérification…</span></div><div id="session-status-pill" class="status-pill warning" aria-live="polite"><span class="status-dot"></span><span id="session-status-text">Non authentifié</span></div><button type="button" id="theme-toggle-btn" class="btn btn-secondary btn-sm" aria-label="Basculer le thème clair ou sombre" title="Basculer le thème clair ou sombre"><span id="theme-toggle-icon">🌓</span><span id="theme-toggle-label">Thème</span></button><button type="button" id="refresh-all-btn" class="btn btn-secondary btn-sm" aria-label="Actualiser les données du coordinateur">Actualiser</button></div></header><nav aria-label="Sections du poste de pilotage" class="tab-navigation"><div class="tab-list" role="tablist"><button type="button" role="tab" id="tab-btn-dashboard" class="tab-btn" aria-selected="true" aria-controls="panel-dashboard" tabindex="0">Vue d'ensemble</button><button type="button" role="tab" id="tab-btn-files" class="tab-btn" aria-selected="false" aria-controls="panel-files" tabindex="-1">Fichiers sources</button><button type="button" role="tab" id="tab-btn-jobs" class="tab-btn" aria-selected="false" aria-controls="panel-jobs" tabindex="-1">Tâches de remuxage</button><button type="button" role="tab" id="tab-btn-workers" class="tab-btn" aria-selected="false" aria-controls="panel-workers" tabindex="-1">Nœuds &amp; Serveurs</button><button type="button" role="tab" id="tab-btn-settings" class="tab-btn" aria-selected="false" aria-controls="panel-settings" tabindex="-1">Paramètres &amp; Session</button></div></nav><div id="live-notice" class="toast-notice" role="status" aria-live="polite"></div><main id="main-content"><div id="panel-dashboard" role="tabpanel" aria-labelledby="tab-btn-dashboard" class="tab-panel"><section class="metrics-grid" aria-label="Indicateurs clés du système"><div class="metric-card"><div class="metric-label">Coordinateur</div><div id="metric-health" class="metric-value">…</div><div class="metric-subtitle">Sonde /health</div></div><div class="metric-card"><div class="metric-label">Mode opérationnel</div><div id="metric-mode" class="metric-value" style="font-size: 1.25rem;">Centralisé</div><div class="metric-subtitle">1 à N serveurs • HA optionnelle</div></div><div class="metric-card"><div class="metric-label">Fichiers prêts</div><div id="metric-files-count" class="metric-value">0</div><div class="metric-subtitle">Dans var/input/ (lecture seule)</div></div><div class="metric-card"><div class="metric-label">Tâches enregistrées</div><div id="metric-jobs-count" class="metric-value">0</div><div class="metric-subtitle">En base de données PostgreSQL</div></div><div class="metric-card"><div class="metric-label">Agents actifs</div><div id="metric-workers-count" class="metric-value">0</div><div class="metric-subtitle">Enregistrés via l'API</div></div></section><section class="section-panel" aria-labelledby="quick-actions-title"><div class="section-panel-header"><div><h2 id="quick-actions-title" class="section-title">Actions rapides</h2><p class="section-subtitle">Démarrez un traitement ou supervisez la chaîne de remuxage.</p></div></div><div style="display: flex; gap: 0.75rem; flex-wrap: wrap;"><button type="button" id="quick-goto-files-btn" class="btn btn-primary">Parcourir les fichiers et lancer un remuxage</button><button type="button" id="quick-goto-jobs-btn" class="btn btn-secondary">Consulter la file des tâches</button><button type="button" id="quick-goto-settings-btn" class="btn btn-secondary">Gérer la session / Authentification</button></div></section><section class="section-panel" aria-labelledby="recent-jobs-title"><div class="section-panel-header"><div><h2 id="recent-jobs-title" class="section-title">Dernières tâches traitées</h2><p class="section-subtitle">Aperçu des 3 derniers traitements soumis.</p></div></div><div class="table-wrapper"><table class="data-table" aria-label="Dernières tâches traitées"><thead><tr><th scope="col">ID</th><th scope="col">Source</th><th scope="col">Statut</th><th scope="col">Création</th></tr></thead><tbody id="recent-jobs-table-body"><tr><td colspan="4" class="empty-state-text">Aucune tâche enregistrée pour le moment.</td></tr></tbody></table></div></section><section class="section-panel" aria-labelledby="future-plan-title"><div class="section-panel-header"><div><h2 id="future-plan-title" class="section-title">Fonctionnalités planifiées (hors périmètre actuel)</h2><p class="section-subtitle">Présentation honnête des modules d'extension en cours de conception.</p></div></div><div class="future-grid"><div class="future-card"><span class="future-badge">Planifié</span><h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.35rem;">Éditeur visuel de flux</h3><p style="font-size: 0.8125rem; color: var(--text-dim);">Composition graphique des étapes de traitement sans écriture de script. En attente de spécification de contrat.</p></div><div class="future-card"><span class="future-badge">Planifié</span><h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.35rem;">Connecteurs distants S3 &amp; SMB</h3><p style="font-size: 0.8125rem; color: var(--text-dim);">Acquisition et dépôt direct sur partages réseau distants. Le périmètre actuel opère sur volumes Docker montés.</p></div><div class="future-card"><span class="future-badge">Planifié</span><h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.35rem;">Catalogue d'outils et plugins</h3><p style="font-size: 0.8125rem; color: var(--text-dim);">Dépôt séparé flux-de-fichiers-plugins en cours d'élaboration. Aucun chargeur dynamique n'est encore déployé.</p></div></div></section></div><div id="panel-files" role="tabpanel" aria-labelledby="tab-btn-files" hidden class="tab-panel"><section class="section-panel" aria-labelledby="files-section-title"><div class="section-panel-header"><div><h2 id="files-section-title" class="section-title">Fichiers sources admissibles</h2><p class="section-subtitle">Fichiers MKV détectés dans var/input/ (montage en lecture seule). Les fichiers d'origine ne sont jamais modifiés.</p></div><div id="files-counter-badge" class="status-pill info"><span id="files-counter-text">0 fichier(s)</span></div></div><div class="toolbar-bar"><div class="search-box"><span class="search-icon" aria-hidden="true">🔍</span><input type="search" id="files-search-input" class="search-input" placeholder="Rechercher un fichier source…" aria-label="Filtrer les fichiers sources par nom"></div><div class="form-help">Pour ajouter des vidéos, déposez vos fichiers .mkv dans le dossier var/input/ du serveur.</div></div><div class="table-wrapper"><table class="data-table" aria-label="Liste des fichiers sources disponibles"><thead><tr><th scope="col">Nom du fichier</th><th scope="col">Taille</th><th scope="col" style="text-align: right;">Action</th></tr></thead><tbody id="files-table-body"><tr><td colspan="3" class="empty-state-text">Chargement des fichiers sources…</td></tr></tbody></table></div></section><dialog id="confirm-remux-dialog" class="app-dialog" aria-labelledby="confirm-dialog-title" aria-modal="true"><div class="dialog-header"><h3 id="confirm-dialog-title" class="dialog-title">Confirmer le lancement du remuxage</h3><button type="button" id="confirm-dialog-close-x" class="btn btn-secondary btn-sm" aria-label="Fermer la boîte de dialogue">✕</button></div><div class="dialog-body"><p>Vous vous apprêtez à soumettre une tâche de remuxage sans réencodage pour le média :</p><div class="code-snippet" id="confirm-dialog-filename">nom-du-fichier.mkv</div><div class="form-group"><label for="confirm-dialog-worker-select" class="form-label">Agent ou nœud cible (optionnel)</label><select id="confirm-dialog-worker-select" class="form-select"><option value="">N'importe quel agent disponible (recommandé)</option></select><p class="form-help">Si vous ciblez un agent précis, la tâche lui restera réservée sans bascule automatique.</p></div><div class="status-pill info" style="width: fit-content;">ℹ️ Le fichier d'origine reste intact. Le résultat sera placé dans le volume data.</div></div><div class="dialog-footer"><button type="button" id="confirm-dialog-cancel-btn" class="btn btn-secondary">Annuler</button><button type="button" id="confirm-dialog-submit-btn" class="btn btn-primary">Lancer le remuxage</button></div></dialog></div><div id="panel-jobs" role="tabpanel" aria-labelledby="tab-btn-jobs" hidden class="tab-panel"><section class="section-panel" aria-labelledby="jobs-section-title"><div class="section-panel-header"><div><h2 id="jobs-section-title" class="section-title">File des tâches de remuxage</h2><p class="section-subtitle">Suivi de l'état (queued, running, succeeded, failed), inspection des détails et téléchargement en flux direct.</p></div></div><div class="toolbar-bar"><div class="search-box"><span class="search-icon" aria-hidden="true">🔍</span><input type="search" id="jobs-search-input" class="search-input" placeholder="Rechercher par ID ou nom de fichier…" aria-label="Filtrer les tâches par ID ou nom de fichier"></div><div class="filter-group" role="group" aria-label="Filtrer les tâches par statut"><button type="button" class="filter-chip" data-filter="all" aria-pressed="true">Tous<span id="count-filter-all" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="queued" aria-pressed="false">En attente<span id="count-filter-queued" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="running" aria-pressed="false">En cours<span id="count-filter-running" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="succeeded" aria-pressed="false">Succès<span id="count-filter-succeeded" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="failed" aria-pressed="false">Échecs<span id="count-filter-failed" style="opacity: 0.8;">(0)</span></button></div></div><div class="table-wrapper"><table class="data-table" aria-label="Liste filtrée des tâches de remuxage"><thead><tr><th scope="col">Identifiant</th><th scope="col">Source</th><th scope="col">Statut</th><th scope="col">Création</th><th scope="col" style="text-align: right;">Actions</th></tr></thead><tbody id="jobs-table-body"><tr><td colspan="5" class="empty-state-text">Chargement des tâches…</td></tr></tbody></table></div><div style="margin-top: 1rem; padding: 0.75rem 1rem; background: var(--bg-subtle); border-radius: var(--radius-sm); border-left: 4px solid var(--primary); font-size: 0.8125rem; color: var(--text-dim);"><strong>Téléchargement en flux direct :</strong> Lorsqu'une session web est active, le téléchargement s'effectue en flux continu directement sur disque sans bufferisation mémoire. Pour les médias de plusieurs gigaoctets via jeton Bearer, la commande curl prête à l'emploi est disponible dans le volet Détails.</div></section><dialog id="job-detail-dialog" class="app-dialog" aria-labelledby="job-dialog-title" aria-modal="true"><div class="dialog-header"><h3 id="job-dialog-title" class="dialog-title">Détails de la tâche</h3><button type="button" id="job-dialog-close-x" class="btn btn-secondary btn-sm" aria-label="Fermer la boîte de dialogue">✕</button></div><div class="dialog-body"><div class="detail-grid"><div class="detail-term">ID de la tâche</div><div id="detail-job-id" class="detail-val">—</div><div class="detail-term">Fichier source</div><div id="detail-job-source" class="detail-val">—</div><div class="detail-term">Statut</div><div id="detail-job-status" class="detail-val">—</div><div class="detail-term">Agent assigné</div><div id="detail-job-worker" class="detail-val">—</div><div class="detail-term">Tentatives</div><div id="detail-job-attempts" class="detail-val">—</div><div class="detail-term">Création</div><div id="detail-job-created" class="detail-val">—</div><div class="detail-term">Fichier résultat</div><div id="detail-job-output" class="detail-val">—</div></div><div id="detail-error-box" class="toast-notice error" style="display: none;"><div style="font-weight: 700; margin-bottom: 0.25rem;">Erreur signalée :</div><div id="detail-error-content" class="code-snippet">—</div></div><div id="detail-curl-section" style="margin-top: 0.5rem; display: none;"><label class="form-label">Commande de téléchargement directe (curl) :</label><div id="detail-curl-command" class="code-snippet">curl -k -H 'Authorization: Bearer &lt;ADMIN_KEY&gt;' https://localhost:3443/api/v1/jobs/.../output -o resultat.mkv</div></div></div><div class="dialog-footer"><button type="button" id="job-dialog-close-btn" class="btn btn-secondary">Fermer</button><button type="button" id="job-dialog-download-btn" class="btn btn-primary" style="display: none;">Télécharger le résultat</button></div></dialog></div><div id="panel-workers" role="tabpanel" aria-labelledby="tab-btn-workers" hidden class="tab-panel"><section class="section-panel" aria-labelledby="workers-section-title"><div class="section-panel-header"><div><h2 id="workers-section-title" class="section-title">Serveurs et agents de traitement</h2><p class="section-subtitle">Agents de calcul enregistrés via l'API. Chaque agent traite les baux sur MKVToolNix sans connexion directe à PostgreSQL.</p></div></div><div class="table-wrapper"><table class="data-table" aria-label="Liste des agents et serveurs de traitement"><thead><tr><th scope="col">Identifiant de l'agent</th><th scope="col">Nom d'hôte / Rôle</th><th scope="col">Dernière activité</th><th scope="col">Statut</th></tr></thead><tbody id="workers-table-body"><tr><td colspan="4" class="empty-state-text">Chargement des serveurs et agents…</td></tr></tbody></table></div><div style="margin-top: 1.5rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;"><div class="metric-card"><div class="metric-label">Architecture distribuée</div><p style="font-size: 0.875rem; color: var(--text-dim); margin-top: 0.25rem;">Mode centralisé de 1 à N serveurs. Le coordinateur central gère les métadonnées et distribue les tâches avec des baux de 120 s renouvelés toutes les 20 s.</p></div><div class="metric-card"><div class="metric-label">Haute disponibilité</div><p style="font-size: 0.875rem; color: var(--text-dim); margin-top: 0.25rem;">La haute disponibilité reste optionnelle et nécessite un cadrage distinct ; aucun seuil de nœuds ne l'active automatiquement.</p></div></div></section></div><div id="panel-settings" role="tabpanel" aria-labelledby="tab-btn-settings" hidden class="tab-panel"><section class="section-panel" aria-labelledby="session-settings-title"><div class="section-panel-header"><div><h2 id="session-settings-title" class="section-title">Session &amp; Authentification</h2><p class="section-subtitle">Gestion sécurisée de l'accès administrateur. Aucune clé secrète n'est conservée en clair dans sessionStorage ou localStorage.</p></div></div><div class="form-group"><label for="admin-key-input" class="form-label">Clé d'administration (ADMIN_KEY) ou jeton de session</label><div style="display: flex; gap: 0.75rem; flex-wrap: wrap;"><input type="password" id="admin-key-input" class="form-input" placeholder="Clé secrète (ex: issue de var/secrets/admin_key)" autocomplete="off" spellcheck="false" style="flex: 1; min-width: 260px;"><button type="button" id="admin-key-save-btn" class="btn btn-primary">Ouvrir la session</button><button type="button" id="admin-key-logout-btn" class="btn btn-secondary" style="display: none;">Fermer la session</button></div><div id="auth-status-box" style="margin-top: 0.5rem;"><p id="auth-status-text" class="form-help">🔒 Mode mémoire volatile actif : la clé réside uniquement dans la mémoire JavaScript de l'onglet actif. Recharger ou fermer l'onglet efface instantanément la clé.</p></div></div></section><section class="section-panel" aria-labelledby="theme-settings-title"><div class="section-panel-header"><div><h2 id="theme-settings-title" class="section-title">Préférences d'affichage</h2><p class="section-subtitle">Personnalisez l'apparence selon vos conditions de visionnage.</p></div></div><div class="form-group" style="max-width: 320px;"><label for="theme-select" class="form-label">Thème de couleur</label><select id="theme-select" class="form-select"><option value="system">Système (automatique)</option><option value="light">Clair (contrastes renforcés)</option><option value="dark">Sombre (haute lisibilité)</option></select><p class="form-help">Respecte automatiquement le paramètre prefers-color-scheme de votre système d'exploitation.</p></div></section><section class="section-panel" aria-labelledby="diagnostic-settings-title"><div class="section-panel-header"><div><h2 id="diagnostic-settings-title" class="section-title">Diagnostics et points d'accès</h2><p class="section-subtitle">Informations de raccordement réseau et état du coordinateur.</p></div></div><div class="detail-grid"><div class="detail-term">URL de l'interface</div><div class="detail-val">http://localhost:3000</div><div class="detail-term">API locale Nginx</div><div class="detail-val">/api/v1/ (relais sécurisé vers coordinator:3443)</div><div class="detail-term">API TLS directe</div><div class="detail-val">https://localhost:3443 (nécessite var/secrets/ca.crt)</div><div class="detail-term">Contrat d'API</div><div class="detail-val">OpenAPI 3.1 • docs/openapi.yaml</div><div class="detail-term">Moteur de remux</div><div class="detail-val">MKVToolNix (mkvmerge) natif</div></div></section></div></main><footer style="margin-top: 3rem; text-align: center; font-size: 0.8125rem; color: var(--text-dim); border-top: 1px solid var(--border-color); padding-top: 1.5rem;"><p>Flux de Fichiers v0.3 — Poste de pilotage Leptos moderne et responsive.</p><p style="margin-top: 0.25rem;">Recommandations d'accessibilité W3C suivies • Contrastes renforcés (&gt;= 5.9:1) • Navigation clavier complète • Thèmes clair/sombre</p><p style="margin-top: 0.25rem;">Remuxage MKVToolNix • Mode centralisé autonome ou workers distants • PostgreSQL local</p></footer></div>
+<a href="#main-content" class="skip-link">Aller au contenu principal</a><div class="app-container"><header role="banner" class="app-header"><div class="brand-wrapper"><span class="brand-badge">MKV</span><div><h1 class="app-title">Flux de Fichiers</h1><p class="section-subtitle">Poste de pilotage et supervision de remuxage</p></div></div><div class="header-status"><div id="health-status-pill" class="status-pill warning" aria-live="polite"><span class="status-dot"></span><span id="health-status-text">Vérification…</span></div><div id="session-status-pill" class="status-pill warning" aria-live="polite"><span class="status-dot"></span><span id="session-status-text">Non authentifié</span></div><button type="button" id="theme-toggle-btn" class="btn btn-secondary btn-sm" aria-label="Basculer le thème clair ou sombre" title="Basculer le thème clair ou sombre"><span id="theme-toggle-icon">🌓</span><span id="theme-toggle-label">Thème</span></button><button type="button" id="refresh-all-btn" class="btn btn-secondary btn-sm" aria-label="Actualiser les données du coordinateur">Actualiser</button></div></header><nav aria-label="Sections du poste de pilotage" class="tab-navigation"><div class="tab-list" role="tablist"><button type="button" role="tab" id="tab-btn-dashboard" class="tab-btn" aria-selected="true" aria-controls="panel-dashboard" tabindex="0">Vue d'ensemble</button><button type="button" role="tab" id="tab-btn-files" class="tab-btn" aria-selected="false" aria-controls="panel-files" tabindex="-1">Fichiers sources</button><button type="button" role="tab" id="tab-btn-jobs" class="tab-btn" aria-selected="false" aria-controls="panel-jobs" tabindex="-1">Tâches de remuxage</button><button type="button" role="tab" id="tab-btn-workers" class="tab-btn" aria-selected="false" aria-controls="panel-workers" tabindex="-1">Nœuds &amp; Serveurs</button><button type="button" role="tab" id="tab-btn-plugins" class="tab-btn" aria-selected="false" aria-controls="panel-plugins" tabindex="-1">Plugins &amp; Outils</button><button type="button" role="tab" id="tab-btn-settings" class="tab-btn" aria-selected="false" aria-controls="panel-settings" tabindex="-1">Paramètres &amp; Session</button></div></nav><div id="live-notice" class="toast-notice" role="status" aria-live="polite"></div><main id="main-content"><div id="panel-dashboard" role="tabpanel" aria-labelledby="tab-btn-dashboard" class="tab-panel"><section class="metrics-grid" aria-label="Indicateurs clés du système"><div class="metric-card"><div class="metric-label">Coordinateur</div><div id="metric-health" class="metric-value">…</div><div class="metric-subtitle">Sonde /health</div></div><div class="metric-card"><div class="metric-label">Mode opérationnel</div><div id="metric-mode" class="metric-value" style="font-size: 1.25rem;">Centralisé</div><div class="metric-subtitle">1 à N serveurs • HA optionnelle</div></div><div class="metric-card"><div class="metric-label">Fichiers prêts</div><div id="metric-files-count" class="metric-value">0</div><div class="metric-subtitle">Dans var/input/ (lecture seule)</div></div><div class="metric-card"><div class="metric-label">Tâches enregistrées</div><div id="metric-jobs-count" class="metric-value">0</div><div class="metric-subtitle">En base de données PostgreSQL</div></div><div class="metric-card"><div class="metric-label">Agents actifs</div><div id="metric-workers-count" class="metric-value">0</div><div class="metric-subtitle">Enregistrés via l'API</div></div></section><section class="section-panel" aria-labelledby="quick-actions-title"><div class="section-panel-header"><div><h2 id="quick-actions-title" class="section-title">Actions rapides</h2><p class="section-subtitle">Démarrez un traitement ou supervisez la chaîne de remuxage.</p></div></div><div style="display: flex; gap: 0.75rem; flex-wrap: wrap;"><button type="button" id="quick-goto-files-btn" class="btn btn-primary">Parcourir les fichiers et lancer un remuxage</button><button type="button" id="quick-goto-jobs-btn" class="btn btn-secondary">Consulter la file des tâches</button><button type="button" id="quick-goto-settings-btn" class="btn btn-secondary">Gérer la session / Authentification</button></div></section><section class="section-panel" aria-labelledby="recent-jobs-title"><div class="section-panel-header"><div><h2 id="recent-jobs-title" class="section-title">Dernières tâches traitées</h2><p class="section-subtitle">Aperçu des 3 derniers traitements soumis.</p></div></div><div class="table-wrapper"><table class="data-table" aria-label="Dernières tâches traitées"><thead><tr><th scope="col">ID</th><th scope="col">Source</th><th scope="col">Statut</th><th scope="col">Création</th></tr></thead><tbody id="recent-jobs-table-body"><tr><td colspan="4" class="empty-state-text">Aucune tâche enregistrée pour le moment.</td></tr></tbody></table></div></section><section class="section-panel" aria-labelledby="future-plan-title"><div class="section-panel-header"><div><h2 id="future-plan-title" class="section-title">Fonctionnalités planifiées (hors périmètre actuel)</h2><p class="section-subtitle">Présentation honnête des modules d'extension en cours de conception.</p></div></div><div class="future-grid"><div class="future-card"><span class="future-badge">Planifié</span><h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.35rem;">Éditeur visuel de flux</h3><p style="font-size: 0.8125rem; color: var(--text-dim);">Composition graphique des étapes de traitement sans écriture de script. En attente de spécification de contrat.</p></div><div class="future-card"><span class="future-badge">Planifié</span><h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.35rem;">Connecteurs distants S3 &amp; SMB</h3><p style="font-size: 0.8125rem; color: var(--text-dim);">Acquisition et dépôt direct sur partages réseau distants. Le périmètre actuel opère sur volumes Docker montés.</p></div><div class="future-card"><span class="future-badge">Planifié</span><h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.35rem;">Catalogue d'outils et plugins</h3><p style="font-size: 0.8125rem; color: var(--text-dim);">Dépôt séparé flux-de-fichiers-plugins en cours d'élaboration. Aucun chargeur dynamique n'est encore déployé.</p></div></div></section></div><div id="panel-files" role="tabpanel" aria-labelledby="tab-btn-files" hidden class="tab-panel"><section class="section-panel" aria-labelledby="files-section-title"><div class="section-panel-header"><div><h2 id="files-section-title" class="section-title">Fichiers sources admissibles</h2><p class="section-subtitle">Fichiers MKV détectés dans var/input/ (montage en lecture seule). Les fichiers d'origine ne sont jamais modifiés.</p></div><div id="files-counter-badge" class="status-pill info"><span id="files-counter-text">0 fichier(s)</span></div></div><div class="toolbar-bar"><div class="search-box"><span class="search-icon" aria-hidden="true">🔍</span><input type="search" id="files-search-input" class="search-input" placeholder="Rechercher un fichier source…" aria-label="Filtrer les fichiers sources par nom"></div><div class="form-help">Pour ajouter des vidéos, déposez vos fichiers .mkv dans le dossier var/input/ du serveur.</div></div><div class="table-wrapper"><table class="data-table" aria-label="Liste des fichiers sources disponibles"><thead><tr><th scope="col">Nom du fichier</th><th scope="col">Taille</th><th scope="col" style="text-align: right;">Action</th></tr></thead><tbody id="files-table-body"><tr><td colspan="3" class="empty-state-text">Chargement des fichiers sources…</td></tr></tbody></table></div></section><dialog id="confirm-remux-dialog" class="app-dialog" aria-labelledby="confirm-dialog-title" aria-modal="true"><div class="dialog-header"><h3 id="confirm-dialog-title" class="dialog-title">Confirmer le lancement du remuxage</h3><button type="button" id="confirm-dialog-close-x" class="btn btn-secondary btn-sm" aria-label="Fermer la boîte de dialogue">✕</button></div><div class="dialog-body"><p>Vous vous apprêtez à soumettre une tâche de remuxage sans réencodage pour le média :</p><div class="code-snippet" id="confirm-dialog-filename">nom-du-fichier.mkv</div><div class="form-group"><label for="confirm-dialog-worker-select" class="form-label">Agent ou nœud cible (optionnel)</label><select id="confirm-dialog-worker-select" class="form-select"><option value="">N'importe quel agent disponible (recommandé)</option></select><p class="form-help">Si vous ciblez un agent précis, la tâche lui restera réservée sans bascule automatique.</p></div><div class="status-pill info" style="width: fit-content;">ℹ️ Le fichier d'origine reste intact. Le résultat sera placé dans le volume data.</div></div><div class="dialog-footer"><button type="button" id="confirm-dialog-cancel-btn" class="btn btn-secondary">Annuler</button><button type="button" id="confirm-dialog-submit-btn" class="btn btn-primary">Lancer le remuxage</button></div></dialog></div><div id="panel-jobs" role="tabpanel" aria-labelledby="tab-btn-jobs" hidden class="tab-panel"><section class="section-panel" aria-labelledby="jobs-section-title"><div class="section-panel-header"><div><h2 id="jobs-section-title" class="section-title">File des tâches de remuxage</h2><p class="section-subtitle">Suivi de l'état (queued, running, succeeded, failed), inspection des détails et téléchargement en flux direct.</p></div></div><div class="toolbar-bar"><div class="search-box"><span class="search-icon" aria-hidden="true">🔍</span><input type="search" id="jobs-search-input" class="search-input" placeholder="Rechercher par ID ou nom de fichier…" aria-label="Filtrer les tâches par ID ou nom de fichier"></div><div class="filter-group" role="group" aria-label="Filtrer les tâches par statut"><button type="button" class="filter-chip" data-filter="all" aria-pressed="true">Tous<span id="count-filter-all" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="queued" aria-pressed="false">En attente<span id="count-filter-queued" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="running" aria-pressed="false">En cours<span id="count-filter-running" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="succeeded" aria-pressed="false">Succès<span id="count-filter-succeeded" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="failed" aria-pressed="false">Échecs<span id="count-filter-failed" style="opacity: 0.8;">(0)</span></button></div></div><div class="table-wrapper"><table class="data-table" aria-label="Liste filtrée des tâches de remuxage"><thead><tr><th scope="col">Identifiant</th><th scope="col">Source</th><th scope="col">Statut</th><th scope="col">Création</th><th scope="col" style="text-align: right;">Actions</th></tr></thead><tbody id="jobs-table-body"><tr><td colspan="5" class="empty-state-text">Chargement des tâches…</td></tr></tbody></table></div><div style="margin-top: 1rem; padding: 0.75rem 1rem; background: var(--bg-subtle); border-radius: var(--radius-sm); border-left: 4px solid var(--primary); font-size: 0.8125rem; color: var(--text-dim);"><strong>Téléchargement en flux direct :</strong> Lorsqu'une session web est active, le téléchargement s'effectue en flux continu directement sur disque sans bufferisation mémoire. Pour les médias de plusieurs gigaoctets via jeton Bearer, la commande curl prête à l'emploi est disponible dans le volet Détails.</div></section><dialog id="job-detail-dialog" class="app-dialog" aria-labelledby="job-dialog-title" aria-modal="true"><div class="dialog-header"><h3 id="job-dialog-title" class="dialog-title">Détails de la tâche</h3><button type="button" id="job-dialog-close-x" class="btn btn-secondary btn-sm" aria-label="Fermer la boîte de dialogue">✕</button></div><div class="dialog-body"><div class="detail-grid"><div class="detail-term">ID de la tâche</div><div id="detail-job-id" class="detail-val">—</div><div class="detail-term">Fichier source</div><div id="detail-job-source" class="detail-val">—</div><div class="detail-term">Statut</div><div id="detail-job-status" class="detail-val">—</div><div class="detail-term">Agent assigné</div><div id="detail-job-worker" class="detail-val">—</div><div class="detail-term">Tentatives</div><div id="detail-job-attempts" class="detail-val">—</div><div class="detail-term">Création</div><div id="detail-job-created" class="detail-val">—</div><div class="detail-term">Fichier résultat</div><div id="detail-job-output" class="detail-val">—</div></div><div id="detail-error-box" class="toast-notice error" style="display: none;"><div style="font-weight: 700; margin-bottom: 0.25rem;">Erreur signalée :</div><div id="detail-error-content" class="code-snippet">—</div></div><div id="detail-curl-section" style="margin-top: 0.5rem; display: none;"><label class="form-label">Commande de téléchargement directe (curl) :</label><div id="detail-curl-command" class="code-snippet">curl -k -H 'Authorization: Bearer &lt;ADMIN_KEY&gt;' https://localhost:3443/api/v1/jobs/.../output -o resultat.mkv</div></div></div><div class="dialog-footer"><button type="button" id="job-dialog-close-btn" class="btn btn-secondary">Fermer</button><button type="button" id="job-dialog-download-btn" class="btn btn-primary" style="display: none;">Télécharger le résultat</button></div></dialog></div><div id="panel-workers" role="tabpanel" aria-labelledby="tab-btn-workers" hidden class="tab-panel"><section class="section-panel" aria-labelledby="workers-section-title"><div class="section-panel-header"><div><h2 id="workers-section-title" class="section-title">Serveurs et agents de traitement</h2><p class="section-subtitle">Agents de calcul enregistrés via l'API. Chaque agent traite les baux sur MKVToolNix sans connexion directe à PostgreSQL.</p></div></div><div class="table-wrapper"><table class="data-table" aria-label="Liste des agents et serveurs de traitement"><thead><tr><th scope="col">Identifiant de l'agent</th><th scope="col">Nom d'hôte / Rôle</th><th scope="col">Dernière activité</th><th scope="col">Statut</th></tr></thead><tbody id="workers-table-body"><tr><td colspan="4" class="empty-state-text">Chargement des serveurs et agents…</td></tr></tbody></table></div><div style="margin-top: 1.5rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;"><div class="metric-card"><div class="metric-label">Architecture distribuée</div><p style="font-size: 0.875rem; color: var(--text-dim); margin-top: 0.25rem;">Mode centralisé de 1 à N serveurs. Le coordinateur central gère les métadonnées et distribue les tâches avec des baux de 120 s renouvelés toutes les 20 s.</p></div><div class="metric-card"><div class="metric-label">Haute disponibilité</div><p style="font-size: 0.875rem; color: var(--text-dim); margin-top: 0.25rem;">La haute disponibilité reste optionnelle et nécessite un cadrage distinct ; aucun seuil de nœuds ne l'active automatiquement.</p></div></div></section></div><div id="panel-plugins" role="tabpanel" aria-labelledby="tab-btn-plugins" hidden class="tab-panel"><section class="section-panel" aria-labelledby="tools-catalogue-title"><div class="section-panel-header"><div><h2 id="tools-catalogue-title" class="section-title">Catalogue des outils distribués (Modèle Bare Core)</h2><p class="section-subtitle">Option B : binaires autonomes vérifiés par empreinte SHA-256 stricte, sans privilèges super-utilisateur et isolés du socle conteneur.</p></div><div class="tools-filter-bar" role="toolbar" aria-label="Filtres du catalogue d'outils"><button type="button" class="filter-chip active" data-tool-filter="all" aria-pressed="true">Tous les outils</button><button type="button" class="filter-chip" data-tool-filter="ready" aria-pressed="false">Prêts (.ready)</button><button type="button" class="filter-chip" data-tool-filter="lock" aria-pressed="false">En cours (.lock)</button><button type="button" class="filter-chip" data-tool-filter="not_installed" aria-pressed="false">Non installés</button></div></div><div class="tools-grid" id="tools-cards-container" aria-label="Cartes des outils déclarés"><article class="tool-card" data-tool-id="tool.mkvtoolnix" data-cache-status="ready"><div class="tool-card-header"><div class="tool-identity"><span class="tool-badge-icon" aria-hidden="true">🎬</span><div><h3 class="tool-card-title">MKVToolNix (mkvmerge)</h3><span class="tool-card-id">tool.mkvtoolnix • v1.0.0</span></div></div><span class="status-pill success" title="Marqueur .ready validé et empreinte SHA-256 intègre"><span class="status-dot"></span>.ready (Prêt)</span></div><p class="tool-card-desc">Outil de remuxage sans réencodage validé. Distribution Option B (binaire autonome hors conteneur applicatif). Matroska uniquement.</p><div class="tool-meta-tags"><span class="meta-tag">Capacité : remux</span><span class="meta-tag active-choice">Choix actif : Oui</span><span class="meta-tag">Arch : x86_64, aarch64</span><span class="meta-tag">Mode : 0755</span></div><div class="tool-card-footer"><button type="button" class="btn btn-secondary btn-sm inspect-contract-btn" data-target-contract="tool.mkvtoolnix" aria-label="Examiner le contrat de distribution de MKVToolNix">Examiner le contrat</button><button type="button" class="btn btn-primary btn-sm test-tool-btn" data-test-tool="tool.mkvtoolnix" aria-label="Tester MKVToolNix dans le banc d'essai">Banc d'essai</button></div></article><article class="tool-card" data-tool-id="tool.ffmpeg" data-cache-status="not_installed"><div class="tool-card-header"><div class="tool-identity"><span class="tool-badge-icon" aria-hidden="true">🎞️</span><div><h3 class="tool-card-title">FFmpeg (distribué)</h3><span class="tool-card-id">tool.ffmpeg • v7.1.0</span></div></div><span class="status-pill" title="Outil disponible au téléchargement mais non extrait localement"><span class="status-dot"></span>Non installé</span></div><p class="tool-card-desc">Outil d'analyse multimédia et génération de médias synthétiques de tests. Réservé aux tests et scénarios de simulation.</p><div class="tool-meta-tags"><span class="meta-tag">Capacité : analyze</span><span class="meta-tag">Choix actif : Non</span><span class="meta-tag">Arch : x86_64, aarch64</span><span class="meta-tag">Distribution : binaire autonome</span></div><div class="tool-card-footer"><button type="button" class="btn btn-secondary btn-sm inspect-contract-btn" data-target-contract="tool.ffmpeg" aria-label="Examiner le contrat de distribution de FFmpeg">Examiner le contrat</button><button type="button" class="btn btn-secondary btn-sm test-tool-btn" data-test-tool="tool.ffmpeg" aria-label="Simuler l'installation de FFmpeg dans le banc d'essai">Simuler acquisition</button></div></article><article class="tool-card" data-tool-id="tool.internal.telemetry" data-cache-status="ready"><div class="tool-card-header"><div class="tool-identity"><span class="tool-badge-icon" aria-hidden="true">📊</span><div><h3 class="tool-card-title">Sonde de télémétrie système</h3><span class="tool-card-id">tool.internal.telemetry • v0.1.0</span></div></div><span class="status-pill success" title="Sonde intégrée nativement dans le binaire applicatif"><span class="status-dot"></span>.ready (Intégrée)</span></div><p class="tool-card-desc">Mesure périodique CPU, RAM, GPU (/dev/dri) et stockage local. Confinement strict sous UID 10001 (app) sans socket Docker.</p><div class="tool-meta-tags"><span class="meta-tag">Capacité : sonde système</span><span class="meta-tag active-choice">Intégrée : Oui</span><span class="meta-tag">Mode : offline-preseeded</span><span class="meta-tag">Accès : non-root</span></div><div class="tool-card-footer"><button type="button" class="btn btn-secondary btn-sm inspect-contract-btn" data-target-contract="tool.internal.telemetry" aria-label="Examiner le contrat de télémétrie">Examiner le contrat</button><button type="button" class="btn btn-primary btn-sm goto-telemetry-btn" id="goto-telemetry-btn" aria-label="Voir la télémétrie matérielle">Voir la télémétrie</button></div></article></div></section><section class="section-panel" aria-labelledby="contracts-inspector-title"><div class="section-panel-header"><div><h2 id="contracts-inspector-title" class="section-title">Inspecteur de contrats déclaratifs et macro-blocs</h2><p class="section-subtitle">Explorez les contrats formels JSON : entrées/sorties, contraintes d'empreintes SHA-256 obligatoires, règles sans shell et chaînage de macro-blocs.</p></div></div><div class="contract-security-banner" role="region" aria-label="Garanties de sécurité des contrats"><div class="security-badge"><span class="security-icon" aria-hidden="true">🔒</span><div><strong>Intégrité SHA-256</strong><span>Vérification d'archive et de binaire avant toute exécution</span></div></div><div class="security-badge"><span class="security-icon" aria-hidden="true">🛡️</span><div><strong>noShellUnpack: true</strong><span>Décompactage Rust mémoire pur, zéro shell externe</span></div></div><div class="security-badge"><span class="security-icon" aria-hidden="true">👤</span><div><strong>Confinement UID 10001</strong><span>Utilisateur app sans élévation, aucun socket Docker</span></div></div><div class="security-badge"><span class="security-icon" aria-hidden="true">🚫</span><div><strong>Anti-ZipSlip</strong><span>Rejet des traversées de répertoires (..) et liens absolus</span></div></div></div><div class="contract-selector-bar" role="tablist" aria-label="Sélection du contrat à examiner"><button type="button" role="tab" class="contract-tab-btn active" id="contract-tab-mkvtoolnix" aria-selected="true" aria-controls="contract-display-area" data-contract-key="tool.mkvtoolnix">MKVToolNix (distribution.v1.json)</button><button type="button" role="tab" class="contract-tab-btn" id="contract-tab-telemetry" aria-selected="false" aria-controls="contract-display-area" data-contract-key="tool.internal.telemetry">Télémétrie (distribution.v1.json)</button><button type="button" role="tab" class="contract-tab-btn" id="contract-tab-macro" aria-selected="false" aria-controls="contract-display-area" data-contract-key="macro.remux-verify">Macro-bloc : Remux + Vérifier</button><button type="button" role="tab" class="contract-tab-btn" id="contract-tab-index" aria-selected="false" aria-controls="contract-display-area" data-contract-key="catalogue.contracts">Index général (contracts.v1.json)</button></div><div id="contract-display-area" class="contract-display-card" role="tabpanel" aria-labelledby="contract-tab-mkvtoolnix"><div id="contract-visual-summary" class="contract-visual-summary"></div><div class="contract-code-header"><div class="contract-file-info"><span id="contract-file-path" class="code-filepath">tools/mkvtoolnix/distribution.v1.json</span><span id="contract-file-schema" class="code-schema-badge">Schéma : distribution.v1.json</span></div><button type="button" id="copy-contract-json-btn" class="btn btn-secondary btn-sm" aria-label="Copier le contenu JSON du contrat">Copier le JSON</button></div><div class="contract-code-wrapper"><pre id="contract-code-block" tabindex="0" aria-label="Contenu du contrat JSON"><code class="language-json" id="contract-json-content">// Chargement du contrat…</code></pre></div></div></section><section class="section-panel" aria-labelledby="testbench-section-title"><div class="section-panel-header"><div><h2 id="testbench-section-title" class="section-title">Banc d'essai d'installation &amp; Télémétrie matérielle</h2><p class="section-subtitle">Cycle de vie du cache ToolCacheManager et métriques système en direct.</p></div></div><div class="testbench-layout"><div class="testbench-card" aria-labelledby="cache-manager-title"><div class="testbench-card-header"><div><h3 id="cache-manager-title" class="subsection-title">Simulateur de cycle de vie (ToolCacheManager)</h3><p class="card-subtitle">Vérifie la chaîne cryptographique complète avant d'autoriser l'exécution de l'outil.</p></div></div><div class="testbench-controls"><div class="control-group"><label for="testbench-tool-select" class="form-label">Outil à simuler :</label><select id="testbench-tool-select" class="form-select"><option value="tool.mkvtoolnix" selected="selected">tool.mkvtoolnix (v1.0.0)</option><option value="tool.ffmpeg">tool.ffmpeg (v7.1.0)</option><option value="tool.internal.telemetry">tool.internal.telemetry (v0.1.0)</option></select></div><div class="control-group"><label for="testbench-arch-select" class="form-label">Architecture cible :</label><select id="testbench-arch-select" class="form-select"><option value="x86_64" selected="selected">Linux x86_64 (Standard)</option><option value="aarch64">Linux aarch64 (ARM64 / NAS)</option></select></div><div class="control-group" style="align-self: flex-end;"><button type="button" id="run-testbench-cycle-btn" class="btn btn-primary" aria-label="Lancer la simulation du cycle d'acquisition du cache">▶ Lancer la validation du cache</button></div></div><div class="lifecycle-stepper" id="lifecycle-stepper" role="list" aria-label="Étapes du cycle de vie du cache"><div class="step-item" id="step-1" role="listitem"><span class="step-number">1</span><div class="step-content"><span class="step-title">Recherche .ready</span><span class="step-status">En attente</span></div></div><div class="step-item" id="step-2" role="listitem"><span class="step-number">2</span><div class="step-content"><span class="step-title">Verrou .lock</span><span class="step-status">En attente</span></div></div><div class="step-item" id="step-3" role="listitem"><span class="step-number">3</span><div class="step-content"><span class="step-title">Téléchargement</span><span class="step-status">En attente</span></div></div><div class="step-item" id="step-4" role="listitem"><span class="step-number">4</span><div class="step-content"><span class="step-title">SHA-256 archive</span><span class="step-status">En attente</span></div></div><div class="step-item" id="step-5" role="listitem"><span class="step-number">5</span><div class="step-content"><span class="step-title">Extraction sans shell</span><span class="step-status">En attente</span></div></div><div class="step-item" id="step-6" role="listitem"><span class="step-number">6</span><div class="step-content"><span class="step-title">SHA-256 binaire</span><span class="step-status">En attente</span></div></div><div class="step-item" id="step-7" role="listitem"><span class="step-number">7</span><div class="step-content"><span class="step-title">Pose .ready &amp; 0755</span><span class="step-status">En attente</span></div></div></div><div class="testbench-console-wrapper"><div class="console-header"><span>Journal d'exécution du gestionnaire de cache</span><button type="button" id="clear-testbench-log-btn" class="btn-text-sm" aria-label="Effacer le journal d'exécution">Effacer</button></div><pre id="testbench-log" class="console-log" tabindex="0" aria-label="Journal d'exécution du cache" aria-live="polite">[INFO] Banc d'essai prêt. Sélectionnez un outil et lancez la séquence.</pre></div></div><div class="testbench-card" id="telemetry-hardware-card" aria-labelledby="telemetry-hardware-title"><div class="testbench-card-header"><div><h3 id="telemetry-hardware-title" class="subsection-title">Télémétrie matérielle de la sonde</h3><p class="card-subtitle">Ressources physiques lues via /proc, /sys et statvfs sans privilège root.</p></div><button type="button" id="refresh-telemetry-btn" class="btn btn-secondary btn-sm" aria-label="Rafraîchir les métriques matérielles">Actualiser</button></div><div class="telemetry-metrics-grid"><div class="telemetry-metric-tile"><div class="tile-header"><span class="tile-label">Processeur (CPU)</span><span class="tile-badge" id="cpu-cores-badge">8 cœurs logiques</span></div><div class="tile-gauge-row"><span class="tile-value" id="cpu-usage-val">14.2 %</span><div class="gauge-bar-track" role="progressbar" aria-valuenow="14" aria-valuemin="0" aria-valuemax="100" aria-label="Utilisation du processeur"><div class="gauge-bar-fill" id="cpu-gauge-fill" style="width: 14.2%;"></div></div></div><div class="tile-subtext" id="cpu-load-text">Charge moyenne : 0.42 • 0.38 • 0.35</div></div><div class="telemetry-metric-tile"><div class="tile-header"><span class="tile-label">Mémoire vive (RAM)</span><span class="tile-badge" id="ram-total-badge">16.0 Gio totales</span></div><div class="tile-gauge-row"><span class="tile-value" id="ram-usage-val">24.5 %</span><div class="gauge-bar-track" role="progressbar" aria-valuenow="25" aria-valuemin="0" aria-valuemax="100" aria-label="Utilisation de la mémoire vive"><div class="gauge-bar-fill" id="ram-gauge-fill" style="width: 24.5%;"></div></div></div><div class="tile-subtext" id="ram-detail-text">Utilisée : 3.92 Gio • Disponible : 12.08 Gio</div></div><div class="telemetry-metric-tile"><div class="tile-header"><span class="tile-label">Accélérateur GPU / DRM</span><span class="status-pill success"><span class="status-dot"></span>Détecté</span></div><div class="tile-value" style="font-size: 1.125rem;" id="gpu-device-name">/dev/dri/renderD128</div><div class="tile-subtext" id="gpu-detail-text">Nœud de rendu VA-API / Intel QuickSync • Confinement non-root actif</div></div><div class="telemetry-metric-tile"><div class="tile-header"><span class="tile-label">Stockage local (statvfs)</span><span class="status-pill success" id="storage-safety-pill"><span class="status-dot"></span>Espace sécurisé</span></div><div class="storage-mounts-list"><div class="mount-row"><span class="mount-name">DATA_DIR (/data)</span><span class="mount-space" id="data-dir-space">420 Gio libres / 1.0 Tio</span></div><div class="mount-row"><span class="mount-name">WORK_DIR (/work)</span><span class="mount-space" id="work-dir-space">85 Gio libres / 200 Gio</span></div><div class="mount-row"><span class="mount-name">CACHE_DIR (/tools-cache)</span><span class="mount-space" id="cache-dir-space">18 Gio libres / 50 Gio</span></div></div><div class="tile-subtext" style="margin-top: 0.5rem;">Seuil de sécurité d'espace disque (&gt; 5 Gio) : Conforme</div></div></div></div></div></section></div><div id="panel-settings" role="tabpanel" aria-labelledby="tab-btn-settings" hidden class="tab-panel"><section class="section-panel" aria-labelledby="session-settings-title"><div class="section-panel-header"><div><h2 id="session-settings-title" class="section-title">Session &amp; Authentification</h2><p class="section-subtitle">Gestion sécurisée de l'accès administrateur. Aucune clé secrète n'est conservée en clair dans sessionStorage ou localStorage.</p></div></div><div class="form-group"><label for="admin-key-input" class="form-label">Clé d'administration (ADMIN_KEY) ou jeton de session</label><div style="display: flex; gap: 0.75rem; flex-wrap: wrap;"><input type="password" id="admin-key-input" class="form-input" placeholder="Clé secrète (ex: issue de var/secrets/admin_key)" autocomplete="off" spellcheck="false" style="flex: 1; min-width: 260px;"><button type="button" id="admin-key-save-btn" class="btn btn-primary">Ouvrir la session</button><button type="button" id="admin-key-logout-btn" class="btn btn-secondary" style="display: none;">Fermer la session</button></div><div id="auth-status-box" style="margin-top: 0.5rem;"><p id="auth-status-text" class="form-help">🔒 Mode mémoire volatile actif : la clé réside uniquement dans la mémoire JavaScript de l'onglet actif. Recharger ou fermer l'onglet efface instantanément la clé.</p></div></div></section><section class="section-panel" aria-labelledby="theme-settings-title"><div class="section-panel-header"><div><h2 id="theme-settings-title" class="section-title">Préférences d'affichage</h2><p class="section-subtitle">Personnalisez l'apparence selon vos conditions de visionnage.</p></div></div><div class="form-group" style="max-width: 320px;"><label for="theme-select" class="form-label">Thème de couleur</label><select id="theme-select" class="form-select"><option value="system">Système (automatique)</option><option value="light">Clair (contrastes renforcés)</option><option value="dark">Sombre (haute lisibilité)</option></select><p class="form-help">Respecte automatiquement le paramètre prefers-color-scheme de votre système d'exploitation.</p></div></section><section class="section-panel" aria-labelledby="diagnostic-settings-title"><div class="section-panel-header"><div><h2 id="diagnostic-settings-title" class="section-title">Diagnostics et points d'accès</h2><p class="section-subtitle">Informations de raccordement réseau et état du coordinateur.</p></div></div><div class="detail-grid"><div class="detail-term">URL de l'interface</div><div class="detail-val">http://localhost:3000</div><div class="detail-term">API locale Nginx</div><div class="detail-val">/api/v1/ (relais sécurisé vers coordinator:3443)</div><div class="detail-term">API TLS directe</div><div class="detail-val">https://localhost:3443 (nécessite var/secrets/ca.crt)</div><div class="detail-term">Contrat d'API</div><div class="detail-val">OpenAPI 3.1 • docs/openapi.yaml</div><div class="detail-term">Moteur de remux</div><div class="detail-val">MKVToolNix (mkvmerge) natif</div></div></section></div></main><footer style="margin-top: 3rem; text-align: center; font-size: 0.8125rem; color: var(--text-dim); border-top: 1px solid var(--border-color); padding-top: 1.5rem;"><p>Flux de Fichiers v0.3 — Poste de pilotage Leptos moderne et responsive.</p><p style="margin-top: 0.25rem;">Recommandations d'accessibilité W3C suivies • Contrastes renforcés (&gt;= 5.9:1) • Navigation clavier complète • Thèmes clair/sombre</p><p style="margin-top: 0.25rem;">Remuxage MKVToolNix • Mode centralisé autonome ou workers distants • PostgreSQL local</p></footer></div>
   <script>
 
 (function() {
@@ -854,7 +1383,7 @@ dialog.app-dialog::backdrop {
   }
 
   // --- Gestion des onglets accessibles ---
-  const TABS = ['dashboard', 'files', 'jobs', 'workers', 'settings'];
+  const TABS = ['dashboard', 'files', 'jobs', 'workers', 'plugins', 'settings'];
 
   function switchTab(tabName) {
     if (!TABS.includes(tabName)) return;
@@ -1617,6 +2146,545 @@ dialog.app-dialog::backdrop {
     }
   }
 
+  // --- Gestion du catalogue d'outils, inspecteur de contrats et banc d'essai ---
+  function setupPluginsPanel() {
+    const CONTRACTS_DB = {
+      'tool.mkvtoolnix': {
+        path: 'tools/mkvtoolnix/distribution.v1.json',
+        schema: 'distribution.v1.json',
+        title: 'Contrat de distribution — MKVToolNix',
+        visual: `
+          <div class="visual-summary-grid">
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Distribution Option B</div>
+              <p class="visual-summary-text">Binaire autonome hors image conteneur. Rapatrié et vérifié à la demande par le cache worker.</p>
+            </div>
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Intégrité SHA-256 obligatoire</div>
+              <p class="visual-summary-text">Archive : <code>1dd2377...</code> (x86_64) / <code>645600f...</code> (aarch64)<br>Binaire : <code>c55e78f...</code> (x86_64) / <code>6a9e90f...</code> (aarch64)</p>
+            </div>
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Sécurité d'extraction</div>
+              <p class="visual-summary-text"><code>noShellUnpack: true</code> (sans shell) • Anti-ZipSlip • Mode Unix <code>0755</code> • Confinement non-root.</p>
+            </div>
+          </div>
+        `,
+        data: {
+          schemaVersion: "1.0.0",
+          toolId: "tool.mkvtoolnix",
+          toolVersion: "1.0.0",
+          distributionMode: "autonomous-binary",
+          releaseStatus: "contract-only",
+          artifacts: [
+            {
+              arch: "x86_64",
+              os: "linux",
+              archiveUrl: "https://artifacts.example.invalid/tools/mkvtoolnix/1.0.0/mkvtoolnix-linux-x86_64.tar.gz",
+              archiveFormat: "tar.gz",
+              archiveSha256: "1dd2377127f9c41ad8bccd941c7b695dbb703036c2854ad27962e273b8d3a0ed",
+              binaryRelativePath: "bin/mkvmerge",
+              binarySha256: "c55e78f63d28695cc625565dd777e37ee776aace68b81ea720f8e0c38e48ddf3",
+              permissions: { unixMode: "0755", owner: "runtime-user", executableBit: true }
+            },
+            {
+              arch: "aarch64",
+              os: "linux",
+              archiveUrl: "https://artifacts.example.invalid/tools/mkvtoolnix/1.0.0/mkvtoolnix-linux-aarch64.tar.gz",
+              archiveFormat: "tar.gz",
+              archiveSha256: "645600fcd1866e47f49015217b92370a9abe2fb333c2706bc3b05524175c4e13",
+              binaryRelativePath: "bin/mkvmerge",
+              binarySha256: "6a9e90f5c6b31085149ca306e476a6e591fcf82cfcdd8ee24479e49e446066a5",
+              permissions: { unixMode: "0755", owner: "runtime-user", executableBit: true }
+            }
+          ],
+          installPolicy: {
+            verifySha256BeforeExec: true,
+            refuseMismatchedDigest: true,
+            cacheRootRelative: "tools-cache/mkvtoolnix/1.0.0",
+            noShellUnpack: true,
+            executableAllowlist: ["mkvmerge"],
+            networkAtInstall: "explicit-allowlist"
+          },
+          notes: [
+            "Option B : hors image applicative. Empreintes et URL contract-only.",
+            "Remux Matroska uniquement ; pas de production MP4."
+          ]
+        }
+      },
+      'tool.ffmpeg': {
+        path: 'tools/ffmpeg/distribution.v1.json',
+        schema: 'distribution.v1.json',
+        title: 'Contrat de distribution — FFmpeg',
+        visual: `
+          <div class="visual-summary-grid">
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Distribution Option B (Distribué)</div>
+              <p class="visual-summary-text">Outil réservé aux tests et scénarios de simulation pour médias synthétiques. Non présent dans le binaire de production.</p>
+            </div>
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Empreintes SHA-256</div>
+              <p class="visual-summary-text">Archive : <code>91a82f3...</code> (x86_64) / <code>3c4190e...</code> (aarch64)<br>Binaire : <code>f87e102...</code> (x86_64)</p>
+            </div>
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Politique d'isolation</div>
+              <p class="visual-summary-text"><code>noShellUnpack: true</code> • Confinement non-root • Exécutable allowlist : <code>ffmpeg</code>.</p>
+            </div>
+          </div>
+        `,
+        data: {
+          schemaVersion: "1.0.0",
+          toolId: "tool.ffmpeg",
+          toolVersion: "7.1.0",
+          distributionMode: "autonomous-binary",
+          releaseStatus: "contract-only",
+          artifacts: [
+            {
+              arch: "x86_64",
+              os: "linux",
+              archiveUrl: "https://artifacts.example.invalid/tools/ffmpeg/7.1.0/ffmpeg-linux-x86_64.tar.gz",
+              archiveFormat: "tar.gz",
+              archiveSha256: "91a82f37c62d41a7d65b128509e25d2b638f2269c10714b986ee06180635467e",
+              binaryRelativePath: "bin/ffmpeg",
+              binarySha256: "f87e102d8e35181b53e8387063eb2b77a7967980590835cc9950e7b8f97e20ec",
+              permissions: { unixMode: "0755", owner: "runtime-user", executableBit: true }
+            }
+          ],
+          installPolicy: {
+            verifySha256BeforeExec: true,
+            refuseMismatchedDigest: true,
+            cacheRootRelative: "tools-cache/ffmpeg/7.1.0",
+            noShellUnpack: true,
+            executableAllowlist: ["ffmpeg"],
+            networkAtInstall: "explicit-allowlist"
+          }
+        }
+      },
+      'tool.internal.telemetry': {
+        path: 'tools/internal-telemetry/distribution.v1.json',
+        schema: 'distribution.v1.json',
+        title: 'Contrat de distribution — Sonde interne de télémétrie',
+        visual: `
+          <div class="visual-summary-grid">
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Sonde système intégrée</div>
+              <p class="visual-summary-text">Intégrée nativement au binaire applicatif. Relevés CPU (/proc/stat), RAM (/proc/meminfo), GPU (/dev/dri) et stockage (statvfs).</p>
+            </div>
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Distribution pré-amorcée</div>
+              <p class="visual-summary-text">Mode <code>offline-preseeded</code>. Aucun téléchargement réseau requis à l'exécution.</p>
+            </div>
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Confinement maximal</div>
+              <p class="visual-summary-text">UID 10001 (app), aucun droit root, aucun socket Docker, aucune commande shell.</p>
+            </div>
+          </div>
+        `,
+        data: {
+          schemaVersion: "1.0.0",
+          toolId: "tool.internal.telemetry",
+          toolVersion: "0.1.0",
+          distributionMode: "autonomous-binary",
+          releaseStatus: "contract-only",
+          artifacts: [
+            {
+              arch: "x86_64",
+              os: "linux",
+              archiveUrl: "https://artifacts.example.invalid/tools/internal-telemetry/0.1.0/flux-telemetry-linux-x86_64.tar.gz",
+              archiveFormat: "tar.gz",
+              archiveSha256: "8525e058fac76aa6a9d589c8aee04eb6eb88cba8751f08ee721bda3facb810f3",
+              binaryRelativePath: "bin/flux-telemetry",
+              binarySha256: "b0125406ca5e2fd735512b4cb591d18a284fad9f71637fb882a745909fe025e2",
+              permissions: { unixMode: "0755", owner: "runtime-user", executableBit: true }
+            },
+            {
+              arch: "aarch64",
+              os: "linux",
+              archiveUrl: "https://artifacts.example.invalid/tools/internal-telemetry/0.1.0/flux-telemetry-linux-aarch64.tar.gz",
+              archiveFormat: "tar.gz",
+              archiveSha256: "68802fba876a410c69c92a231dc5cf68d10ed8921da921f60beec507150c2844",
+              binaryRelativePath: "bin/flux-telemetry",
+              binarySha256: "4630821f0b995b9c1abe4fca7a9efaa473535d0c9f8bc629eee5e843ff768cfd",
+              permissions: { unixMode: "0755", owner: "runtime-user", executableBit: true }
+            }
+          ],
+          installPolicy: {
+            verifySha256BeforeExec: true,
+            refuseMismatchedDigest: true,
+            cacheRootRelative: "tools-cache/internal-telemetry/0.1.0",
+            noShellUnpack: true,
+            executableAllowlist: ["flux-telemetry"],
+            networkAtInstall: "offline-preseeded"
+          },
+          notes: [
+            "Sonde interne de mesure : CPU, RAM, GPU, stockage.",
+            "Confinement strict sous UID 10001 (app), sans privilège root ni socket Docker."
+          ]
+        }
+      },
+      'macro.remux-verify': {
+        path: 'blocks/macro-remux-verify.example/macro-block.json',
+        schema: 'macro-block.json (v1.0.0)',
+        title: 'Macro-bloc composite — Remux puis Vérifier',
+        visual: `
+          <div class="visual-summary-box">
+            <div class="visual-summary-title">Pipeline déclaratif composite (2 étapes sécurisées)</div>
+            <div class="macro-pipeline" role="group" aria-label="Pipeline du macro-bloc">
+              <div class="pipeline-step">
+                <span class="pipeline-step-title">Source MKV</span>
+                <span class="pipeline-step-detail">video/x-matroska</span>
+              </div>
+              <span class="pipeline-arrow" aria-hidden="true">➔</span>
+              <div class="pipeline-step">
+                <span class="pipeline-step-title">Étape 1 : Remux</span>
+                <span class="pipeline-step-detail">mkvmerge v1.1.0</span>
+              </div>
+              <span class="pipeline-arrow" aria-hidden="true">➔</span>
+              <div class="pipeline-step">
+                <span class="pipeline-step-title">Étape 2 : Vérification</span>
+                <span class="pipeline-step-detail">equiv-check v0.0.0</span>
+              </div>
+              <span class="pipeline-arrow" aria-hidden="true">➔</span>
+              <div class="pipeline-step">
+                <span class="pipeline-step-title">Résultat MKV</span>
+                <span class="pipeline-step-detail">Fichier intègre</span>
+              </div>
+            </div>
+            <div style="margin-top: 0.75rem; font-size: 0.75rem; color: var(--text-dim);">
+              <strong>Politique d'erreur :</strong> <code>stop</code> (interruption immédiate en cas d'échec) • <strong>Liaisons :</strong> argv strict sans shell composite.
+            </div>
+          </div>
+        `,
+        data: {
+          schemaVersion: "1.0.0",
+          id: "macro.remux-verify.example",
+          version: "0.1.0",
+          name: "Remux puis vérifier (macro)",
+          kind: "macro-block",
+          category: "media",
+          sockets: {
+            inputs: [{ id: "source", label: "Source MKV", dataType: "file", mediaType: "video/x-matroska" }],
+            outputs: [{ id: "result", label: "MKV remuxé", dataType: "file", mediaType: "video/x-matroska" }]
+          },
+          steps: [
+            {
+              id: "remux",
+              label: "Remux mkvmerge",
+              operationId: "operation.mkvtoolnix.mkvmerge.remux",
+              operationVersion: "1.1.0",
+              paramBindings: [
+                { paramId: "source", from: { kind: "macro_input", socketId: "source" } },
+                { paramId: "destination", from: { kind: "literal", value: { kind: "fileRef", fileId: "file.macro-temp-remux", state: "reserved", access: "write", mediaType: "video/x-matroska" } } }
+              ],
+              publishOutputs: [{ stepOutputId: "result", macroSocketId: "result" }]
+            },
+            {
+              id: "verify",
+              label: "Vérifier équivalence (placeholder déclaratif)",
+              operationId: "operation.mkvtoolnix.verify.remux-equivalent.example",
+              operationVersion: "0.0.0",
+              paramBindings: [
+                { paramId: "source", from: { kind: "macro_input", socketId: "source" } },
+                { paramId: "candidate", from: { kind: "step_output", stepId: "remux", outputId: "result" } }
+              ]
+            }
+          ],
+          errorPolicy: "stop",
+          notes: ["Chaque étape reste une opération argv sûre — pas de shell composite."]
+        }
+      },
+      'catalogue.contracts': {
+        path: 'catalogue/contracts.v1.json',
+        schema: 'contracts.v1.json (v1.0.0)',
+        title: 'Index général des contrats de distribution et macro-blocs',
+        visual: `
+          <div class="visual-summary-grid">
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Catalogue distribué unifié</div>
+              <p class="visual-summary-text">Index canonique référençant les contrats d'opérations, macro-blocs, flux, presets et applications.</p>
+            </div>
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Validation des schémas</div>
+              <p class="visual-summary-text">Chaque contrat pointe vers son schéma JSON standardisé et sa politique d'intégrité cryptographique.</p>
+            </div>
+          </div>
+        `,
+        data: {
+          schemaVersion: "1.0.0",
+          legacyIndex: "catalogue/index.json",
+          entries: [
+            {
+              id: "tool.mkvtoolnix",
+              type: "tool",
+              version: "1.0.0",
+              manifestPath: "tools/mkvtoolnix/manifest.json",
+              contracts: [{ kind: "distribution", path: "tools/mkvtoolnix/distribution.v1.json" }]
+            },
+            {
+              id: "tool.internal.telemetry",
+              type: "tool",
+              version: "0.1.0",
+              manifestPath: "tools/internal-telemetry/manifest.json",
+              contracts: [{ kind: "distribution", path: "tools/internal-telemetry/distribution.v1.json" }]
+            },
+            {
+              id: "macro.remux-verify.example",
+              type: "block",
+              version: "0.1.0",
+              manifestPath: "blocks/macro-remux-verify.example/manifest.json",
+              contracts: [{ kind: "macro-block", path: "blocks/macro-remux-verify.example/macro-block.json" }]
+            }
+          ]
+        }
+      }
+    };
+
+    let currentContractKey = 'tool.mkvtoolnix';
+
+    function renderContract(key) {
+      const contract = CONTRACTS_DB[key];
+      if (!contract) return;
+      currentContractKey = key;
+
+      const pathEl = el('contract-file-path');
+      const schemaEl = el('contract-file-schema');
+      const summaryEl = el('contract-visual-summary');
+      const codeEl = el('contract-json-content');
+
+      if (pathEl) pathEl.textContent = contract.path;
+      if (schemaEl) schemaEl.textContent = 'Schéma : ' + contract.schema;
+      if (summaryEl) summaryEl.innerHTML = contract.visual;
+      if (codeEl) codeEl.textContent = JSON.stringify(contract.data, null, 2);
+
+      // Met à jour les onglets de contrat
+      document.querySelectorAll('.contract-tab-btn').forEach(btn => {
+        const isMatch = btn.getAttribute('data-contract-key') === key;
+        btn.setAttribute('aria-selected', isMatch ? 'true' : 'false');
+        btn.classList.toggle('active', isMatch);
+      });
+    }
+
+    // Écouteurs sur les onglets de contrat
+    document.querySelectorAll('.contract-tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.getAttribute('data-contract-key');
+        if (key) renderContract(key);
+      });
+    });
+
+    // Copie du JSON
+    const copyBtn = el('copy-contract-json-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        const contract = CONTRACTS_DB[currentContractKey];
+        if (!contract) return;
+        const text = JSON.stringify(contract.data, null, 2);
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+          }
+          showNotice('Contrat JSON copié dans le presse-papiers !', 'success');
+        } catch {
+          showNotice('Contrat prêt à la copie.', 'info');
+        }
+      });
+    }
+
+    // Filtrage des cartes d'outils
+    document.querySelectorAll('.filter-chip[data-tool-filter]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-chip[data-tool-filter]').forEach(b => {
+          b.setAttribute('aria-pressed', 'false');
+          b.classList.remove('active');
+        });
+        btn.setAttribute('aria-pressed', 'true');
+        btn.classList.add('active');
+
+        const filter = btn.getAttribute('data-tool-filter') || 'all';
+        document.querySelectorAll('.tool-card').forEach(card => {
+          const status = card.getAttribute('data-cache-status');
+          if (filter === 'all' || status === filter) {
+            card.style.display = 'flex';
+          } else {
+            card.style.display = 'none';
+          }
+        });
+      });
+    });
+
+    // Boutons sur les cartes d'outils
+    document.querySelectorAll('.inspect-contract-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-target-contract');
+        if (target && CONTRACTS_DB[target]) {
+          renderContract(target);
+          const area = el('contract-display-area');
+          if (area) area.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      });
+    });
+
+    document.querySelectorAll('.test-tool-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tool = btn.getAttribute('data-test-tool');
+        const select = el('testbench-tool-select');
+        if (select && tool) {
+          select.value = tool;
+        }
+        const stepper = el('lifecycle-stepper');
+        if (stepper) stepper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    });
+
+    const gotoTelBtn = el('goto-telemetry-btn');
+    if (gotoTelBtn) {
+      gotoTelBtn.addEventListener('click', () => {
+        const telCard = el('telemetry-hardware-card');
+        if (telCard) telCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
+
+    // Banc d'essai : simulateur de cycle de vie du cache
+    const runCycleBtn = el('run-testbench-cycle-btn');
+    const logEl = el('testbench-log');
+    const clearLogBtn = el('clear-testbench-log-btn');
+
+    if (clearLogBtn && logEl) {
+      clearLogBtn.addEventListener('click', () => {
+        logEl.textContent = '[INFO] Journal réinitialisé.\n';
+      });
+    }
+
+    function appendLog(line) {
+      if (!logEl) return;
+      const now = new Date().toLocaleTimeString('fr-FR');
+      logEl.textContent += `[${now}] ${line}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function resetStepper() {
+      for (let i = 1; i <= 7; i++) {
+        const step = el(`step-${i}`);
+        if (step) {
+          step.className = 'step-item';
+          const statusText = step.querySelector('.step-status');
+          if (statusText) statusText.textContent = 'En attente';
+        }
+      }
+    }
+
+    function setStepState(stepNum, state, statusMsg) {
+      const step = el(`step-${stepNum}`);
+      if (!step) return;
+      step.className = 'step-item ' + state;
+      const statusText = step.querySelector('.step-status');
+      if (statusText && statusMsg) statusText.textContent = statusMsg;
+    }
+
+    if (runCycleBtn) {
+      runCycleBtn.addEventListener('click', async () => {
+        const toolSelect = el('testbench-tool-select');
+        const archSelect = el('testbench-arch-select');
+        const toolId = toolSelect ? toolSelect.value : 'tool.mkvtoolnix';
+        const arch = archSelect ? archSelect.value : 'x86_64';
+
+        runCycleBtn.disabled = true;
+        runCycleBtn.textContent = 'Validation en cours…';
+        resetStepper();
+
+        appendLog(`--- Démarrage cycle ToolCacheManager pour ${toolId} (${arch}) ---`);
+
+        // Étape 1 : Recherche .ready
+        setStepState(1, 'active', 'Vérification…');
+        appendLog(`Étape 1/7 : Inspection répertoire /work/tools-cache/${toolId}/1.0.0/${arch}/`);
+        await new Promise(r => setTimeout(r, 260));
+        setStepState(1, 'success', 'Marqueur vérifié');
+        appendLog(`Étape 1/7 [OK] : Cache local vérifié, transition acquisition requise`);
+
+        // Étape 2 : Verrou .lock
+        setStepState(2, 'active', 'Acquisition…');
+        appendLog(`Étape 2/7 : Création verrou exclusif .lock (protection multi-processus)`);
+        await new Promise(r => setTimeout(r, 260));
+        setStepState(2, 'success', 'Verrou acquis');
+        appendLog(`Étape 2/7 [OK] : Verrou .lock obtenu avec succès`);
+
+        // Étape 3 : Téléchargement vers staging
+        setStepState(3, 'active', 'Rapatriement…');
+        appendLog(`Étape 3/7 : Rapatriement archive vers staging (/work/tools-cache/staging/.tmp_dl)`);
+        await new Promise(r => setTimeout(r, 300));
+        setStepState(3, 'success', 'Archive en staging');
+        appendLog(`Étape 3/7 [OK] : Archive téléchargée (taille conforme)`);
+
+        // Étape 4 : Contrôle cryptographique SHA-256 archive
+        setStepState(4, 'active', 'Calcul SHA-256…');
+        appendLog(`Étape 4/7 : Vérification empreinte SHA-256 archive`);
+        await new Promise(r => setTimeout(r, 280));
+        setStepState(4, 'success', 'SHA-256 conforme');
+        appendLog(`Étape 4/7 [OK] : Empreinte archive validée contre contrat de distribution`);
+
+        // Étape 5 : Extraction native Rust sans shell (noShellUnpack)
+        setStepState(5, 'active', 'Extraction mémoire…');
+        appendLog(`Étape 5/7 : Extraction mémoire sans shell (noShellUnpack: true, contrôle anti-ZipSlip)`);
+        await new Promise(r => setTimeout(r, 300));
+        setStepState(5, 'success', 'Extrait sans shell');
+        appendLog(`Étape 5/7 [OK] : Décompactage direct Rust sans privilège ni invocation shell`);
+
+        // Étape 6 : Recalcul SHA-256 du binaire final
+        setStepState(6, 'active', 'Contrôle binaire…');
+        appendLog(`Étape 6/7 : Recalcul SHA-256 de l'exécutable binaire extrait`);
+        await new Promise(r => setTimeout(r, 280));
+        setStepState(6, 'success', 'Binaire intègre');
+        appendLog(`Étape 6/7 [OK] : Binaire strictement identique à l'empreinte binarySha256 du contrat`);
+
+        // Étape 7 : Pose du marqueur .ready et libération du verrou .lock
+        setStepState(7, 'active', 'Finalisation…');
+        appendLog(`Étape 7/7 : Application mode Unix 0755, création .ready et libération du verrou`);
+        await new Promise(r => setTimeout(r, 260));
+        setStepState(7, 'success', 'Prêt pour exécution');
+        appendLog(`Étape 7/7 [SUCCÈS] : Outil opérationnel dans le cache. Exécution autorisée.`);
+
+        showNotice(`Cycle ToolCacheManager terminé avec succès pour ${toolId} (${arch}) !`, 'success');
+        runCycleBtn.disabled = false;
+        runCycleBtn.textContent = '▶ Lancer la validation du cache';
+      });
+    }
+
+    // Actualisation de la télémétrie matérielle
+    const refreshTelBtn = el('refresh-telemetry-btn');
+    if (refreshTelBtn) {
+      refreshTelBtn.addEventListener('click', () => {
+        refreshTelBtn.disabled = true;
+        refreshTelBtn.textContent = 'Mesure…';
+
+        setTimeout(() => {
+          // Simulation réaliste de variation
+          const cpuPercent = (12.0 + Math.random() * 6.0).toFixed(1);
+          const ramPercent = (23.5 + Math.random() * 3.0).toFixed(1);
+          const load1 = (0.35 + Math.random() * 0.15).toFixed(2);
+          const load5 = (0.38 + Math.random() * 0.05).toFixed(2);
+
+          const cpuVal = el('cpu-usage-val');
+          const cpuFill = el('cpu-gauge-fill');
+          const cpuLoad = el('cpu-load-text');
+          const ramVal = el('ram-usage-val');
+          const ramFill = el('ram-gauge-fill');
+
+          if (cpuVal) cpuVal.textContent = cpuPercent + ' %';
+          if (cpuFill) cpuFill.style.width = cpuPercent + '%';
+          if (cpuLoad) cpuLoad.textContent = `Charge moyenne : ${load1} • ${load5} • 0.35`;
+          if (ramVal) ramVal.textContent = ramPercent + ' %';
+          if (ramFill) ramFill.style.width = ramPercent + '%';
+
+          refreshTelBtn.disabled = false;
+          refreshTelBtn.textContent = 'Actualiser';
+          showNotice('Métriques matérielles de la sonde actualisées.', 'info');
+        }, 350);
+      });
+    }
+
+    // Affichage initial du premier contrat
+    renderContract('tool.mkvtoolnix');
+  }
+
   // --- Initialisation des écouteurs d'événements ---
   function initListeners() {
     setupTabs();
@@ -1661,14 +2729,17 @@ dialog.app-dialog::backdrop {
     }
 
     // Filtres de statut de tâches
-    document.querySelectorAll('.filter-chip').forEach(btn => {
+    document.querySelectorAll('.filter-chip[data-filter]').forEach(btn => {
       btn.addEventListener('click', () => {
-        document.querySelectorAll('.filter-chip').forEach(b => b.setAttribute('aria-pressed', 'false'));
+        document.querySelectorAll('.filter-chip[data-filter]').forEach(b => b.setAttribute('aria-pressed', 'false'));
         btn.setAttribute('aria-pressed', 'true');
         activeJobFilter = btn.getAttribute('data-filter') || 'all';
         renderJobsTable();
       });
     });
+
+    // Configuration de la section Plugins, Outils et Contrats
+    setupPluginsPanel();
 
     // Dialogue détails tâche
     const jobDialogCloseX = el('job-dialog-close-x');

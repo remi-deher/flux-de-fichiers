@@ -108,6 +108,7 @@ pub async fn failure(
         &LeaseRequest {
             worker_id: r.worker_id,
             lease_token: r.lease_token,
+            telemetry: None,
         },
         &r.error_code,
     )

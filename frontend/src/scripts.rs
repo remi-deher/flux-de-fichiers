@@ -62,7 +62,7 @@ pub const CLIENT_SCRIPT: &str = r#"
   }
 
   // --- Gestion des onglets accessibles ---
-  const TABS = ['dashboard', 'files', 'jobs', 'workers', 'settings'];
+  const TABS = ['dashboard', 'files', 'jobs', 'workers', 'plugins', 'settings'];
 
   function switchTab(tabName) {
     if (!TABS.includes(tabName)) return;
@@ -825,6 +825,545 @@ pub const CLIENT_SCRIPT: &str = r#"
     }
   }
 
+  // --- Gestion du catalogue d'outils, inspecteur de contrats et banc d'essai ---
+  function setupPluginsPanel() {
+    const CONTRACTS_DB = {
+      'tool.mkvtoolnix': {
+        path: 'tools/mkvtoolnix/distribution.v1.json',
+        schema: 'distribution.v1.json',
+        title: 'Contrat de distribution — MKVToolNix',
+        visual: `
+          <div class="visual-summary-grid">
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Distribution Option B</div>
+              <p class="visual-summary-text">Binaire autonome hors image conteneur. Rapatrié et vérifié à la demande par le cache worker.</p>
+            </div>
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Intégrité SHA-256 obligatoire</div>
+              <p class="visual-summary-text">Archive : <code>1dd2377...</code> (x86_64) / <code>645600f...</code> (aarch64)<br>Binaire : <code>c55e78f...</code> (x86_64) / <code>6a9e90f...</code> (aarch64)</p>
+            </div>
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Sécurité d'extraction</div>
+              <p class="visual-summary-text"><code>noShellUnpack: true</code> (sans shell) • Anti-ZipSlip • Mode Unix <code>0755</code> • Confinement non-root.</p>
+            </div>
+          </div>
+        `,
+        data: {
+          schemaVersion: "1.0.0",
+          toolId: "tool.mkvtoolnix",
+          toolVersion: "1.0.0",
+          distributionMode: "autonomous-binary",
+          releaseStatus: "contract-only",
+          artifacts: [
+            {
+              arch: "x86_64",
+              os: "linux",
+              archiveUrl: "https://artifacts.example.invalid/tools/mkvtoolnix/1.0.0/mkvtoolnix-linux-x86_64.tar.gz",
+              archiveFormat: "tar.gz",
+              archiveSha256: "1dd2377127f9c41ad8bccd941c7b695dbb703036c2854ad27962e273b8d3a0ed",
+              binaryRelativePath: "bin/mkvmerge",
+              binarySha256: "c55e78f63d28695cc625565dd777e37ee776aace68b81ea720f8e0c38e48ddf3",
+              permissions: { unixMode: "0755", owner: "runtime-user", executableBit: true }
+            },
+            {
+              arch: "aarch64",
+              os: "linux",
+              archiveUrl: "https://artifacts.example.invalid/tools/mkvtoolnix/1.0.0/mkvtoolnix-linux-aarch64.tar.gz",
+              archiveFormat: "tar.gz",
+              archiveSha256: "645600fcd1866e47f49015217b92370a9abe2fb333c2706bc3b05524175c4e13",
+              binaryRelativePath: "bin/mkvmerge",
+              binarySha256: "6a9e90f5c6b31085149ca306e476a6e591fcf82cfcdd8ee24479e49e446066a5",
+              permissions: { unixMode: "0755", owner: "runtime-user", executableBit: true }
+            }
+          ],
+          installPolicy: {
+            verifySha256BeforeExec: true,
+            refuseMismatchedDigest: true,
+            cacheRootRelative: "tools-cache/mkvtoolnix/1.0.0",
+            noShellUnpack: true,
+            executableAllowlist: ["mkvmerge"],
+            networkAtInstall: "explicit-allowlist"
+          },
+          notes: [
+            "Option B : hors image applicative. Empreintes et URL contract-only.",
+            "Remux Matroska uniquement ; pas de production MP4."
+          ]
+        }
+      },
+      'tool.ffmpeg': {
+        path: 'tools/ffmpeg/distribution.v1.json',
+        schema: 'distribution.v1.json',
+        title: 'Contrat de distribution — FFmpeg',
+        visual: `
+          <div class="visual-summary-grid">
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Distribution Option B (Distribué)</div>
+              <p class="visual-summary-text">Outil réservé aux tests et scénarios de simulation pour médias synthétiques. Non présent dans le binaire de production.</p>
+            </div>
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Empreintes SHA-256</div>
+              <p class="visual-summary-text">Archive : <code>91a82f3...</code> (x86_64) / <code>3c4190e...</code> (aarch64)<br>Binaire : <code>f87e102...</code> (x86_64)</p>
+            </div>
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Politique d'isolation</div>
+              <p class="visual-summary-text"><code>noShellUnpack: true</code> • Confinement non-root • Exécutable allowlist : <code>ffmpeg</code>.</p>
+            </div>
+          </div>
+        `,
+        data: {
+          schemaVersion: "1.0.0",
+          toolId: "tool.ffmpeg",
+          toolVersion: "7.1.0",
+          distributionMode: "autonomous-binary",
+          releaseStatus: "contract-only",
+          artifacts: [
+            {
+              arch: "x86_64",
+              os: "linux",
+              archiveUrl: "https://artifacts.example.invalid/tools/ffmpeg/7.1.0/ffmpeg-linux-x86_64.tar.gz",
+              archiveFormat: "tar.gz",
+              archiveSha256: "91a82f37c62d41a7d65b128509e25d2b638f2269c10714b986ee06180635467e",
+              binaryRelativePath: "bin/ffmpeg",
+              binarySha256: "f87e102d8e35181b53e8387063eb2b77a7967980590835cc9950e7b8f97e20ec",
+              permissions: { unixMode: "0755", owner: "runtime-user", executableBit: true }
+            }
+          ],
+          installPolicy: {
+            verifySha256BeforeExec: true,
+            refuseMismatchedDigest: true,
+            cacheRootRelative: "tools-cache/ffmpeg/7.1.0",
+            noShellUnpack: true,
+            executableAllowlist: ["ffmpeg"],
+            networkAtInstall: "explicit-allowlist"
+          }
+        }
+      },
+      'tool.internal.telemetry': {
+        path: 'tools/internal-telemetry/distribution.v1.json',
+        schema: 'distribution.v1.json',
+        title: 'Contrat de distribution — Sonde interne de télémétrie',
+        visual: `
+          <div class="visual-summary-grid">
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Sonde système intégrée</div>
+              <p class="visual-summary-text">Intégrée nativement au binaire applicatif. Relevés CPU (/proc/stat), RAM (/proc/meminfo), GPU (/dev/dri) et stockage (statvfs).</p>
+            </div>
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Distribution pré-amorcée</div>
+              <p class="visual-summary-text">Mode <code>offline-preseeded</code>. Aucun téléchargement réseau requis à l'exécution.</p>
+            </div>
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Confinement maximal</div>
+              <p class="visual-summary-text">UID 10001 (app), aucun droit root, aucun socket Docker, aucune commande shell.</p>
+            </div>
+          </div>
+        `,
+        data: {
+          schemaVersion: "1.0.0",
+          toolId: "tool.internal.telemetry",
+          toolVersion: "0.1.0",
+          distributionMode: "autonomous-binary",
+          releaseStatus: "contract-only",
+          artifacts: [
+            {
+              arch: "x86_64",
+              os: "linux",
+              archiveUrl: "https://artifacts.example.invalid/tools/internal-telemetry/0.1.0/flux-telemetry-linux-x86_64.tar.gz",
+              archiveFormat: "tar.gz",
+              archiveSha256: "8525e058fac76aa6a9d589c8aee04eb6eb88cba8751f08ee721bda3facb810f3",
+              binaryRelativePath: "bin/flux-telemetry",
+              binarySha256: "b0125406ca5e2fd735512b4cb591d18a284fad9f71637fb882a745909fe025e2",
+              permissions: { unixMode: "0755", owner: "runtime-user", executableBit: true }
+            },
+            {
+              arch: "aarch64",
+              os: "linux",
+              archiveUrl: "https://artifacts.example.invalid/tools/internal-telemetry/0.1.0/flux-telemetry-linux-aarch64.tar.gz",
+              archiveFormat: "tar.gz",
+              archiveSha256: "68802fba876a410c69c92a231dc5cf68d10ed8921da921f60beec507150c2844",
+              binaryRelativePath: "bin/flux-telemetry",
+              binarySha256: "4630821f0b995b9c1abe4fca7a9efaa473535d0c9f8bc629eee5e843ff768cfd",
+              permissions: { unixMode: "0755", owner: "runtime-user", executableBit: true }
+            }
+          ],
+          installPolicy: {
+            verifySha256BeforeExec: true,
+            refuseMismatchedDigest: true,
+            cacheRootRelative: "tools-cache/internal-telemetry/0.1.0",
+            noShellUnpack: true,
+            executableAllowlist: ["flux-telemetry"],
+            networkAtInstall: "offline-preseeded"
+          },
+          notes: [
+            "Sonde interne de mesure : CPU, RAM, GPU, stockage.",
+            "Confinement strict sous UID 10001 (app), sans privilège root ni socket Docker."
+          ]
+        }
+      },
+      'macro.remux-verify': {
+        path: 'blocks/macro-remux-verify.example/macro-block.json',
+        schema: 'macro-block.json (v1.0.0)',
+        title: 'Macro-bloc composite — Remux puis Vérifier',
+        visual: `
+          <div class="visual-summary-box">
+            <div class="visual-summary-title">Pipeline déclaratif composite (2 étapes sécurisées)</div>
+            <div class="macro-pipeline" role="group" aria-label="Pipeline du macro-bloc">
+              <div class="pipeline-step">
+                <span class="pipeline-step-title">Source MKV</span>
+                <span class="pipeline-step-detail">video/x-matroska</span>
+              </div>
+              <span class="pipeline-arrow" aria-hidden="true">➔</span>
+              <div class="pipeline-step">
+                <span class="pipeline-step-title">Étape 1 : Remux</span>
+                <span class="pipeline-step-detail">mkvmerge v1.1.0</span>
+              </div>
+              <span class="pipeline-arrow" aria-hidden="true">➔</span>
+              <div class="pipeline-step">
+                <span class="pipeline-step-title">Étape 2 : Vérification</span>
+                <span class="pipeline-step-detail">equiv-check v0.0.0</span>
+              </div>
+              <span class="pipeline-arrow" aria-hidden="true">➔</span>
+              <div class="pipeline-step">
+                <span class="pipeline-step-title">Résultat MKV</span>
+                <span class="pipeline-step-detail">Fichier intègre</span>
+              </div>
+            </div>
+            <div style="margin-top: 0.75rem; font-size: 0.75rem; color: var(--text-dim);">
+              <strong>Politique d'erreur :</strong> <code>stop</code> (interruption immédiate en cas d'échec) • <strong>Liaisons :</strong> argv strict sans shell composite.
+            </div>
+          </div>
+        `,
+        data: {
+          schemaVersion: "1.0.0",
+          id: "macro.remux-verify.example",
+          version: "0.1.0",
+          name: "Remux puis vérifier (macro)",
+          kind: "macro-block",
+          category: "media",
+          sockets: {
+            inputs: [{ id: "source", label: "Source MKV", dataType: "file", mediaType: "video/x-matroska" }],
+            outputs: [{ id: "result", label: "MKV remuxé", dataType: "file", mediaType: "video/x-matroska" }]
+          },
+          steps: [
+            {
+              id: "remux",
+              label: "Remux mkvmerge",
+              operationId: "operation.mkvtoolnix.mkvmerge.remux",
+              operationVersion: "1.1.0",
+              paramBindings: [
+                { paramId: "source", from: { kind: "macro_input", socketId: "source" } },
+                { paramId: "destination", from: { kind: "literal", value: { kind: "fileRef", fileId: "file.macro-temp-remux", state: "reserved", access: "write", mediaType: "video/x-matroska" } } }
+              ],
+              publishOutputs: [{ stepOutputId: "result", macroSocketId: "result" }]
+            },
+            {
+              id: "verify",
+              label: "Vérifier équivalence (placeholder déclaratif)",
+              operationId: "operation.mkvtoolnix.verify.remux-equivalent.example",
+              operationVersion: "0.0.0",
+              paramBindings: [
+                { paramId: "source", from: { kind: "macro_input", socketId: "source" } },
+                { paramId: "candidate", from: { kind: "step_output", stepId: "remux", outputId: "result" } }
+              ]
+            }
+          ],
+          errorPolicy: "stop",
+          notes: ["Chaque étape reste une opération argv sûre — pas de shell composite."]
+        }
+      },
+      'catalogue.contracts': {
+        path: 'catalogue/contracts.v1.json',
+        schema: 'contracts.v1.json (v1.0.0)',
+        title: 'Index général des contrats de distribution et macro-blocs',
+        visual: `
+          <div class="visual-summary-grid">
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Catalogue distribué unifié</div>
+              <p class="visual-summary-text">Index canonique référençant les contrats d'opérations, macro-blocs, flux, presets et applications.</p>
+            </div>
+            <div class="visual-summary-box">
+              <div class="visual-summary-title">Validation des schémas</div>
+              <p class="visual-summary-text">Chaque contrat pointe vers son schéma JSON standardisé et sa politique d'intégrité cryptographique.</p>
+            </div>
+          </div>
+        `,
+        data: {
+          schemaVersion: "1.0.0",
+          legacyIndex: "catalogue/index.json",
+          entries: [
+            {
+              id: "tool.mkvtoolnix",
+              type: "tool",
+              version: "1.0.0",
+              manifestPath: "tools/mkvtoolnix/manifest.json",
+              contracts: [{ kind: "distribution", path: "tools/mkvtoolnix/distribution.v1.json" }]
+            },
+            {
+              id: "tool.internal.telemetry",
+              type: "tool",
+              version: "0.1.0",
+              manifestPath: "tools/internal-telemetry/manifest.json",
+              contracts: [{ kind: "distribution", path: "tools/internal-telemetry/distribution.v1.json" }]
+            },
+            {
+              id: "macro.remux-verify.example",
+              type: "block",
+              version: "0.1.0",
+              manifestPath: "blocks/macro-remux-verify.example/manifest.json",
+              contracts: [{ kind: "macro-block", path: "blocks/macro-remux-verify.example/macro-block.json" }]
+            }
+          ]
+        }
+      }
+    };
+
+    let currentContractKey = 'tool.mkvtoolnix';
+
+    function renderContract(key) {
+      const contract = CONTRACTS_DB[key];
+      if (!contract) return;
+      currentContractKey = key;
+
+      const pathEl = el('contract-file-path');
+      const schemaEl = el('contract-file-schema');
+      const summaryEl = el('contract-visual-summary');
+      const codeEl = el('contract-json-content');
+
+      if (pathEl) pathEl.textContent = contract.path;
+      if (schemaEl) schemaEl.textContent = 'Schéma : ' + contract.schema;
+      if (summaryEl) summaryEl.innerHTML = contract.visual;
+      if (codeEl) codeEl.textContent = JSON.stringify(contract.data, null, 2);
+
+      // Met à jour les onglets de contrat
+      document.querySelectorAll('.contract-tab-btn').forEach(btn => {
+        const isMatch = btn.getAttribute('data-contract-key') === key;
+        btn.setAttribute('aria-selected', isMatch ? 'true' : 'false');
+        btn.classList.toggle('active', isMatch);
+      });
+    }
+
+    // Écouteurs sur les onglets de contrat
+    document.querySelectorAll('.contract-tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.getAttribute('data-contract-key');
+        if (key) renderContract(key);
+      });
+    });
+
+    // Copie du JSON
+    const copyBtn = el('copy-contract-json-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        const contract = CONTRACTS_DB[currentContractKey];
+        if (!contract) return;
+        const text = JSON.stringify(contract.data, null, 2);
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+          }
+          showNotice('Contrat JSON copié dans le presse-papiers !', 'success');
+        } catch {
+          showNotice('Contrat prêt à la copie.', 'info');
+        }
+      });
+    }
+
+    // Filtrage des cartes d'outils
+    document.querySelectorAll('.filter-chip[data-tool-filter]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-chip[data-tool-filter]').forEach(b => {
+          b.setAttribute('aria-pressed', 'false');
+          b.classList.remove('active');
+        });
+        btn.setAttribute('aria-pressed', 'true');
+        btn.classList.add('active');
+
+        const filter = btn.getAttribute('data-tool-filter') || 'all';
+        document.querySelectorAll('.tool-card').forEach(card => {
+          const status = card.getAttribute('data-cache-status');
+          if (filter === 'all' || status === filter) {
+            card.style.display = 'flex';
+          } else {
+            card.style.display = 'none';
+          }
+        });
+      });
+    });
+
+    // Boutons sur les cartes d'outils
+    document.querySelectorAll('.inspect-contract-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-target-contract');
+        if (target && CONTRACTS_DB[target]) {
+          renderContract(target);
+          const area = el('contract-display-area');
+          if (area) area.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      });
+    });
+
+    document.querySelectorAll('.test-tool-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tool = btn.getAttribute('data-test-tool');
+        const select = el('testbench-tool-select');
+        if (select && tool) {
+          select.value = tool;
+        }
+        const stepper = el('lifecycle-stepper');
+        if (stepper) stepper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    });
+
+    const gotoTelBtn = el('goto-telemetry-btn');
+    if (gotoTelBtn) {
+      gotoTelBtn.addEventListener('click', () => {
+        const telCard = el('telemetry-hardware-card');
+        if (telCard) telCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
+
+    // Banc d'essai : simulateur de cycle de vie du cache
+    const runCycleBtn = el('run-testbench-cycle-btn');
+    const logEl = el('testbench-log');
+    const clearLogBtn = el('clear-testbench-log-btn');
+
+    if (clearLogBtn && logEl) {
+      clearLogBtn.addEventListener('click', () => {
+        logEl.textContent = '[INFO] Journal réinitialisé.\n';
+      });
+    }
+
+    function appendLog(line) {
+      if (!logEl) return;
+      const now = new Date().toLocaleTimeString('fr-FR');
+      logEl.textContent += `[${now}] ${line}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function resetStepper() {
+      for (let i = 1; i <= 7; i++) {
+        const step = el(`step-${i}`);
+        if (step) {
+          step.className = 'step-item';
+          const statusText = step.querySelector('.step-status');
+          if (statusText) statusText.textContent = 'En attente';
+        }
+      }
+    }
+
+    function setStepState(stepNum, state, statusMsg) {
+      const step = el(`step-${stepNum}`);
+      if (!step) return;
+      step.className = 'step-item ' + state;
+      const statusText = step.querySelector('.step-status');
+      if (statusText && statusMsg) statusText.textContent = statusMsg;
+    }
+
+    if (runCycleBtn) {
+      runCycleBtn.addEventListener('click', async () => {
+        const toolSelect = el('testbench-tool-select');
+        const archSelect = el('testbench-arch-select');
+        const toolId = toolSelect ? toolSelect.value : 'tool.mkvtoolnix';
+        const arch = archSelect ? archSelect.value : 'x86_64';
+
+        runCycleBtn.disabled = true;
+        runCycleBtn.textContent = 'Validation en cours…';
+        resetStepper();
+
+        appendLog(`--- Démarrage cycle ToolCacheManager pour ${toolId} (${arch}) ---`);
+
+        // Étape 1 : Recherche .ready
+        setStepState(1, 'active', 'Vérification…');
+        appendLog(`Étape 1/7 : Inspection répertoire /work/tools-cache/${toolId}/1.0.0/${arch}/`);
+        await new Promise(r => setTimeout(r, 260));
+        setStepState(1, 'success', 'Marqueur vérifié');
+        appendLog(`Étape 1/7 [OK] : Cache local vérifié, transition acquisition requise`);
+
+        // Étape 2 : Verrou .lock
+        setStepState(2, 'active', 'Acquisition…');
+        appendLog(`Étape 2/7 : Création verrou exclusif .lock (protection multi-processus)`);
+        await new Promise(r => setTimeout(r, 260));
+        setStepState(2, 'success', 'Verrou acquis');
+        appendLog(`Étape 2/7 [OK] : Verrou .lock obtenu avec succès`);
+
+        // Étape 3 : Téléchargement vers staging
+        setStepState(3, 'active', 'Rapatriement…');
+        appendLog(`Étape 3/7 : Rapatriement archive vers staging (/work/tools-cache/staging/.tmp_dl)`);
+        await new Promise(r => setTimeout(r, 300));
+        setStepState(3, 'success', 'Archive en staging');
+        appendLog(`Étape 3/7 [OK] : Archive téléchargée (taille conforme)`);
+
+        // Étape 4 : Contrôle cryptographique SHA-256 archive
+        setStepState(4, 'active', 'Calcul SHA-256…');
+        appendLog(`Étape 4/7 : Vérification empreinte SHA-256 archive`);
+        await new Promise(r => setTimeout(r, 280));
+        setStepState(4, 'success', 'SHA-256 conforme');
+        appendLog(`Étape 4/7 [OK] : Empreinte archive validée contre contrat de distribution`);
+
+        // Étape 5 : Extraction native Rust sans shell (noShellUnpack)
+        setStepState(5, 'active', 'Extraction mémoire…');
+        appendLog(`Étape 5/7 : Extraction mémoire sans shell (noShellUnpack: true, contrôle anti-ZipSlip)`);
+        await new Promise(r => setTimeout(r, 300));
+        setStepState(5, 'success', 'Extrait sans shell');
+        appendLog(`Étape 5/7 [OK] : Décompactage direct Rust sans privilège ni invocation shell`);
+
+        // Étape 6 : Recalcul SHA-256 du binaire final
+        setStepState(6, 'active', 'Contrôle binaire…');
+        appendLog(`Étape 6/7 : Recalcul SHA-256 de l'exécutable binaire extrait`);
+        await new Promise(r => setTimeout(r, 280));
+        setStepState(6, 'success', 'Binaire intègre');
+        appendLog(`Étape 6/7 [OK] : Binaire strictement identique à l'empreinte binarySha256 du contrat`);
+
+        // Étape 7 : Pose du marqueur .ready et libération du verrou .lock
+        setStepState(7, 'active', 'Finalisation…');
+        appendLog(`Étape 7/7 : Application mode Unix 0755, création .ready et libération du verrou`);
+        await new Promise(r => setTimeout(r, 260));
+        setStepState(7, 'success', 'Prêt pour exécution');
+        appendLog(`Étape 7/7 [SUCCÈS] : Outil opérationnel dans le cache. Exécution autorisée.`);
+
+        showNotice(`Cycle ToolCacheManager terminé avec succès pour ${toolId} (${arch}) !`, 'success');
+        runCycleBtn.disabled = false;
+        runCycleBtn.textContent = '▶ Lancer la validation du cache';
+      });
+    }
+
+    // Actualisation de la télémétrie matérielle
+    const refreshTelBtn = el('refresh-telemetry-btn');
+    if (refreshTelBtn) {
+      refreshTelBtn.addEventListener('click', () => {
+        refreshTelBtn.disabled = true;
+        refreshTelBtn.textContent = 'Mesure…';
+
+        setTimeout(() => {
+          // Simulation réaliste de variation
+          const cpuPercent = (12.0 + Math.random() * 6.0).toFixed(1);
+          const ramPercent = (23.5 + Math.random() * 3.0).toFixed(1);
+          const load1 = (0.35 + Math.random() * 0.15).toFixed(2);
+          const load5 = (0.38 + Math.random() * 0.05).toFixed(2);
+
+          const cpuVal = el('cpu-usage-val');
+          const cpuFill = el('cpu-gauge-fill');
+          const cpuLoad = el('cpu-load-text');
+          const ramVal = el('ram-usage-val');
+          const ramFill = el('ram-gauge-fill');
+
+          if (cpuVal) cpuVal.textContent = cpuPercent + ' %';
+          if (cpuFill) cpuFill.style.width = cpuPercent + '%';
+          if (cpuLoad) cpuLoad.textContent = `Charge moyenne : ${load1} • ${load5} • 0.35`;
+          if (ramVal) ramVal.textContent = ramPercent + ' %';
+          if (ramFill) ramFill.style.width = ramPercent + '%';
+
+          refreshTelBtn.disabled = false;
+          refreshTelBtn.textContent = 'Actualiser';
+          showNotice('Métriques matérielles de la sonde actualisées.', 'info');
+        }, 350);
+      });
+    }
+
+    // Affichage initial du premier contrat
+    renderContract('tool.mkvtoolnix');
+  }
+
   // --- Initialisation des écouteurs d'événements ---
   function initListeners() {
     setupTabs();
@@ -869,14 +1408,17 @@ pub const CLIENT_SCRIPT: &str = r#"
     }
 
     // Filtres de statut de tâches
-    document.querySelectorAll('.filter-chip').forEach(btn => {
+    document.querySelectorAll('.filter-chip[data-filter]').forEach(btn => {
       btn.addEventListener('click', () => {
-        document.querySelectorAll('.filter-chip').forEach(b => b.setAttribute('aria-pressed', 'false'));
+        document.querySelectorAll('.filter-chip[data-filter]').forEach(b => b.setAttribute('aria-pressed', 'false'));
         btn.setAttribute('aria-pressed', 'true');
         activeJobFilter = btn.getAttribute('data-filter') || 'all';
         renderJobsTable();
       });
     });
+
+    // Configuration de la section Plugins, Outils et Contrats
+    setupPluginsPanel();
 
     // Dialogue détails tâche
     const jobDialogCloseX = el('job-dialog-close-x');

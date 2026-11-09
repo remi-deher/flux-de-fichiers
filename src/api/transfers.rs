@@ -26,6 +26,7 @@ fn lease(h: &HeaderMap) -> AppResult<LeaseRequest> {
     Ok(LeaseRequest {
         worker_id: uuid("x-worker-id")?,
         lease_token: uuid("x-lease-token")?,
+        telemetry: None,
     })
 }
 

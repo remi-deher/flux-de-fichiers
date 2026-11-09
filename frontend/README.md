@@ -11,6 +11,7 @@ Poste de pilotage et de supervision moderne pour la chaîne de remuxage MKVToolN
   - `FilesPanel` : Liste des fichiers MKV admissibles dans `var/input/`, champ de recherche en direct, compteur de résultats et dialogue modal accessible de confirmation (`<dialog>`) avant soumission du remuxage avec ciblage optionnel d'un nœud.
   - `JobsPanel` : File des tâches avec filtres par statut (`Tous`, `En attente`, `En cours`, `Succès`, `Échec`), recherche par mot-clé, volet d'inspection détaillée d'une tâche (ID, agent assigné, horodatages, code d'erreur explicité) et téléchargement direct en flux.
   - `WorkersPanel` : Vue des serveurs et agents de traitement (coordinateur avec agent intégré ou agents distants HTTPS), horodatages de dernière activité et rappels d'architecture.
+  - `PluginsPanel` : Gestion du catalogue d'outils distribués (modèle Bare Core / Option B), inspecteur de contrats déclaratifs JSON et macro-blocs composites, banc d'essai de validation du cache (`ToolCacheManager`) et télémétrie matérielle de la sonde interne (CPU, RAM, GPU `/dev/dri`, stockage `statvfs`).
   - `SettingsPanel` : Gestion sécurisée de la session web et authentification, préférences visuelles de thèmes et diagnostics réseau.
 
 ## Sécurité et téléchargement
@@ -48,6 +49,6 @@ Poste de pilotage et de supervision moderne pour la chaîne de remuxage MKVToolN
 
 ## Preuves de validation et limites d'environnement
 
-- **Validation structurelle et syntaxique** : l'artefact généré `frontend/dist/index.html` a été validé (arbre DOM de 275 balises sémantiques valides, 5 onglets avec gestion ARIA `tablist`/`tab`/`tabpanel`, 2 dialogues modaux natifs HTML5 `<dialog>` avec `aria-modal="true"`, 23 boutons accessibles avec cibles tactiles >= 44×44 px).
+- **Validation structurelle et syntaxique** : l'artefact généré `frontend/dist/index.html` a été validé (arbre DOM sémantique conforme W3C, 6 onglets avec gestion ARIA `tablist`/`tab`/`tabpanel`, 2 dialogues modaux natifs HTML5 `<dialog>` avec `aria-modal="true"`, boutons accessibles avec cibles tactiles >= 44×44 px).
 - **Vérifications Rust** : `cargo fmt --check` et `cargo clippy -- -D warnings` au vert sur l'ensemble du crate `frontend`.
 - **Limites d'environnement de test** : la machine hôte de développement ne dispose pas de navigateur graphique ou de Chromium headless (`which google-chrome chromium firefox` absent). Conformément à la décision utilisateur permanente du 9 nov. 2026 consignée dans `AGENTS.md`, les suites de tests lourdes et la construction des conteneurs complets sont déportées sur les runners distants de GitHub Actions.

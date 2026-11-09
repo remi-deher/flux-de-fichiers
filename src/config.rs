@@ -1,5 +1,9 @@
 use std::{env, net::SocketAddr, path::PathBuf};
 
+const DEFAULT_WEB_ORIGIN: &str = "http://localhost:3000";
+const DEFAULT_WEB_SESSION_TTL_SECONDS: i64 = 28_800;
+const MAX_WEB_SESSION_TTL_SECONDS: i64 = 2_592_000;
+
 #[derive(Clone)]
 pub struct Config {
     pub bind: SocketAddr,
@@ -10,6 +14,8 @@ pub struct Config {
     pub worker_key: String,
     pub max_file_bytes: u64,
     pub local_worker: bool,
+    pub web_origin: String,
+    pub web_session_ttl_seconds: i64,
     pub tls: Option<(PathBuf, PathBuf)>,
 }
 
@@ -72,6 +78,31 @@ impl Config {
             max_file_bytes > 0 && max_file_bytes <= i64::MAX as u64,
             "MAX_FILE_BYTES must be positive"
         );
+        let web_origin = env::var("WEB_ORIGIN").unwrap_or_else(|_| DEFAULT_WEB_ORIGIN.into());
+        let parsed_origin = reqwest::Url::parse(&web_origin)?;
+        let local_http_origin = parsed_origin.scheme() == "http"
+            && matches!(
+                parsed_origin.host_str(),
+                Some("localhost" | "127.0.0.1" | "[::1]")
+            );
+        anyhow::ensure!(
+            (parsed_origin.scheme() == "https" || local_http_origin)
+                && parsed_origin.host_str().is_some()
+                && parsed_origin.path() == "/"
+                && parsed_origin.query().is_none()
+                && parsed_origin.fragment().is_none()
+                && parsed_origin.username().is_empty()
+                && parsed_origin.password().is_none()
+                && parsed_origin.origin().ascii_serialization() == web_origin,
+            "WEB_ORIGIN must be a canonical origin without path or credentials"
+        );
+        let web_session_ttl_seconds = env::var("WEB_SESSION_TTL_SECONDS")
+            .unwrap_or_else(|_| DEFAULT_WEB_SESSION_TTL_SECONDS.to_string())
+            .parse()?;
+        anyhow::ensure!(
+            (60..=MAX_WEB_SESSION_TTL_SECONDS).contains(&web_session_ttl_seconds),
+            "WEB_SESSION_TTL_SECONDS must be between 60 and 2592000"
+        );
         Ok(Self {
             bind,
             tls,
@@ -81,6 +112,8 @@ impl Config {
             local_worker: env::var("LOCAL_WORKER")
                 .map(|value| value != "false" && value != "0")
                 .unwrap_or(true),
+            web_origin,
+            web_session_ttl_seconds,
             database_url: value("DATABASE_URL")?,
             data_dir: env::var("DATA_DIR").unwrap_or_else(|_| "var".into()).into(),
             input_dir: env::var("INPUT_DIR")

@@ -3,11 +3,12 @@ info:
   title: Flux de Fichiers — API de remuxage
   version: 0.1.0
   description: >-
-    Coordinateur centralisé, agents MKVToolNix, sans interface.
+    Coordinateur centralisé, workers MKVToolNix et frontend Leptos.
     Les noms de fichiers sont des noms MKV simples présents dans INPUT_DIR.
     Les clés administrateur et agent sont distinctes. Le bail est un secret
     temporaire transmis dans le corps des renouvellements ou dans un en-tête,
-    jamais dans une URL. Tous les échanges distants nécessitent HTTPS.
+    jamais dans une URL. L'API accepte les clés Bearer et, pour le navigateur,
+    une session cookie avec CSRF/origine. Tous les échanges distants nécessitent HTTPS.
 servers:
   - url: https://localhost:3443
 security:
@@ -36,6 +37,7 @@ paths:
         '500': {$ref: '#/components/responses/Error'}
   /api/v1/files:
     get:
+      security: [{AdminKey: []}, {WebSession: []}]
       summary: Lister les entrées MKV admissibles, triées par nom, maximum 500
       responses:
         '200':
@@ -53,6 +55,7 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /api/v1/jobs:
     get:
+      security: [{AdminKey: []}, {WebSession: []}]
       summary: Lister les tâches par ordre de création décroissant
       parameters:
         - in: query
@@ -72,7 +75,15 @@ paths:
                 items: {$ref: '#/components/schemas/Job'}
         default: {$ref: '#/components/responses/Error'}
     post:
+      security: [{AdminKey: []}, {WebSession: []}]
       summary: Créer une tâche et figer l'empreinte de la source
+      parameters:
+        - {$ref: '#/components/parameters/CsrfHeader'}
+        - in: header
+          name: Origin
+          required: false
+          description: Requis et égal à WEB_ORIGIN pour l'authentification par cookie ; Bearer reste indépendant.
+          schema: {type: string, format: uri}
       requestBody:
         required: true
         content:
@@ -96,6 +107,7 @@ paths:
   /api/v1/jobs/{id}:
     parameters: [{$ref: '#/components/parameters/JobId'}]
     get:
+      security: [{AdminKey: []}, {WebSession: []}]
       summary: Consulter l'état d'une tâche sans exposer son jeton de bail
       responses:
         '200':
@@ -107,17 +119,92 @@ paths:
   /api/v1/jobs/{id}/output:
     parameters: [{$ref: '#/components/parameters/JobId'}]
     get:
+      security: [{AdminKey: []}, {WebSession: []}]
       summary: Télécharger le résultat d'une tâche réussie
       responses:
         '200':
-          description: Résultat immuable, Content-Length fourni
+          description: Résultat immuable, téléchargement attachment en flux avec Cache-Control no-store
+          headers:
+            Content-Length:
+              description: Taille exacte du fichier
+              schema: {type: integer, minimum: 1}
+            Cache-Control:
+              description: Le média ne doit pas être mis en cache.
+              schema: {type: string, const: no-store}
+            Content-Disposition:
+              description: Téléchargement direct, sans mise en mémoire du média.
+              schema: {type: string}
           content:
             video/x-matroska:
               schema: {type: string, format: binary}
         '404': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/auth/session:
+    get:
+      security: [{WebSession: []}]
+      summary: Lire le statut de session et récupérer le jeton CSRF après rechargement
+      responses:
+        '200':
+          description: Session valide et réponse non mise en cache
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WebSession'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      security: []
+      summary: Ouvrir une session web avec la clé administrateur
+      description: >-
+        Origin doit correspondre exactement à WEB_ORIGIN. La clé est transmise
+        dans un corps JSON, jamais dans une URL. Le serveur pose un cookie de
+        session HttpOnly, SameSite=Strict, Secure lorsque WEB_ORIGIN est HTTPS,
+        et un cookie CSRF lisible par le frontend. Durée par défaut 8 h.
+      parameters:
+        - in: header
+          name: Origin
+          required: true
+          description: Doit correspondre exactement à WEB_ORIGIN.
+          schema: {type: string, format: uri}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [admin_key]
+              properties:
+                admin_key: {type: string, writeOnly: true}
+      responses:
+        '200':
+          description: Session créée ; les deux cookies sont posés et la réponse n'est pas mise en cache
+          headers:
+            Set-Cookie:
+              description: flux_session (HttpOnly) et flux_csrf (lisible par le client), Path=/, SameSite=Strict
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WebSession'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/auth/logout:
+    post:
+      security: [{WebSession: []}]
+      summary: Révoquer la session en cours
+      description: Requiert Origin exact, cookie CSRF et en-tête X-CSRF-Token ; supprime la session côté serveur et expire les cookies.
+      parameters:
+        - in: header
+          name: X-CSRF-Token
+          required: true
+          schema: {type: string}
+        - {$ref: '#/components/parameters/OriginHeader'}
+      responses:
+        '204': {description: Session révoquée et cookies expirés}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/workers:
     get:
+      security: [{AdminKey: []}, {WebSession: []}]
       summary: Lister les agents enregistrés, maximum 200
       responses:
         '200':
@@ -241,7 +328,8 @@ paths:
         default: {$ref: '#/components/responses/Error'}
 components:
   securitySchemes:
-    AdminKey: {type: http, scheme: bearer, description: Clé administrateur}
+    AdminKey: {type: http, scheme: bearer, description: Clé administrateur ; si Authorization existe elle a priorité sur le cookie, sans repli en cas d'invalidité}
+    WebSession: {type: apiKey, in: cookie, name: flux_session, description: Session web administrateur avec CSRF sur les méthodes mutantes}
     WorkerKey: {type: http, scheme: bearer, description: Clé du groupe d'agents de confiance}
   parameters:
     JobId:
@@ -259,6 +347,18 @@ components:
       name: x-lease-token
       required: true
       schema: {type: string, format: uuid}
+    CsrfHeader:
+      in: header
+      name: X-CSRF-Token
+      required: false
+      description: Doit correspondre au cookie flux_csrf pour les requêtes authentifiées par session.
+      schema: {type: string}
+    OriginHeader:
+      in: header
+      name: Origin
+      required: false
+      description: Doit correspondre exactement à WEB_ORIGIN.
+      schema: {type: string, format: uri}
   requestBodies:
     Lease:
       required: true
@@ -284,6 +384,12 @@ components:
                 properties:
                   code: {type: string}
   schemas:
+    WebSession:
+      type: object
+      required: [csrf_token, expires_at]
+      properties:
+        csrf_token: {type: string, description: CSRF cookie echo for frontend bootstrap}
+        expires_at: {type: string, format: date-time}
     Lease:
       type: object
       required: [worker_id, lease_token]

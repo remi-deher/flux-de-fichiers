@@ -9,6 +9,10 @@ pub fn authorize(headers: &HeaderMap, key: &str) -> AppResult<()> {
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or(AppError::Unauthorized)?;
+    verify_key(actual, key)
+}
+
+pub fn verify_key(actual: &str, key: &str) -> AppResult<()> {
     let matches = Sha256::digest(actual.as_bytes()).ct_eq(&Sha256::digest(key.as_bytes()));
     if bool::from(matches) {
         Ok(())

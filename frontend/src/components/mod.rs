@@ -1,17 +1,17 @@
-//! Composants de l'interface Leptos Flux de Fichiers.
+//! Composants actifs du poste de pilotage Flux de Fichiers.
 
-pub mod auth_card;
-pub mod files_table;
-pub mod future_section;
+pub mod dashboard_panel;
+pub mod files_panel;
 pub mod header;
-pub mod jobs_table;
+pub mod jobs_panel;
 pub mod metrics_bar;
-pub mod workers_table;
+pub mod settings_panel;
+pub mod workers_panel;
 
-pub use auth_card::AuthCard;
-pub use files_table::FilesTable;
-pub use future_section::FutureSection;
+pub use dashboard_panel::DashboardPanel;
+pub use files_panel::FilesPanel;
 pub use header::Header;
-pub use jobs_table::JobsTable;
+pub use jobs_panel::JobsPanel;
 pub use metrics_bar::MetricsBar;
-pub use workers_table::WorkersTable;
+pub use settings_panel::SettingsPanel;
+pub use workers_panel::WorkersPanel;

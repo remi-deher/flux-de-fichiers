@@ -1,4 +1,4 @@
-//! Racine de l'application Leptos pour Flux de Fichiers.
+//! Racine de l'application Leptos pour le poste de pilotage Flux de Fichiers.
 
 use crate::components::*;
 use leptos::prelude::*;
@@ -18,22 +18,21 @@ pub fn App() -> impl IntoView {
                 aria-live="polite"
             ></div>
             <main id="main-content">
-                <MetricsBar />
-                <AuthCard />
-                <FilesTable />
-                <JobsTable />
-                <WorkersTable />
-                <FutureSection />
+                <DashboardPanel />
+                <FilesPanel />
+                <JobsPanel />
+                <WorkersPanel />
+                <SettingsPanel />
             </main>
             <footer style="margin-top: 3rem; text-align: center; font-size: 0.8125rem; color: var(--text-dim); border-top: 1px solid var(--border-color); padding-top: 1.5rem;">
                 <p>
-                    "Flux de Fichiers v0.2 — Interface de pilotage Leptos moderne et responsive."
+                    "Flux de Fichiers v0.3 — Poste de pilotage Leptos moderne et responsive."
                 </p>
                 <p style="margin-top: 0.25rem;">
-                    "Conçue selon les recommandations d'accessibilité (contrastes renforcés, navigation clavier, repères W3C)."
+                    "Recommandations d'accessibilité W3C suivies • Contrastes renforcés (>= 5.9:1) • Navigation clavier complète • Thèmes clair/sombre"
                 </p>
                 <p style="margin-top: 0.25rem;">
-                    "Remuxage sans réencodage MKVToolNix • Coordinateur Axum / Tokio • PostgreSQL local"
+                    "Remuxage MKVToolNix • Mode centralisé autonome ou workers distants • PostgreSQL local"
                 </p>
             </footer>
         </div>

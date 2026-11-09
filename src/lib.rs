@@ -13,5 +13,6 @@ pub mod plugins;
 pub mod repository;
 pub mod security;
 pub mod storage;
+pub mod web_session;
 pub mod worker;
 pub mod workers;

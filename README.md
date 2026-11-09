@@ -70,6 +70,8 @@ Créer une tâche : `POST /api/v1/jobs`, corps
 peut remplacer `null`. Lire son état avec `GET /api/v1/jobs/{id}` et télécharger
 le résultat avec `GET /api/v1/jobs/{id}/output` lorsqu'il est `succeeded`.
 
+Pour l'interface web, voir le [contrat de session et de téléchargement en flux](docs/api/session-web.md).
+
 Les tâches ont un bail de 120 s renouvelé toutes les 20 s. Les expirations sont
 réévaluées à chaque demande de travail ; trois tentatives maximum. Une tâche liée
 à un agent précis attend cet agent et n'est pas transférée automatiquement à un
@@ -109,7 +111,8 @@ connexion directe à PostgreSQL ni montage des fichiers source.
 
 Paramètres coordinateur : `BIND`, `DATABASE_URL_FILE`, `ADMIN_KEY_FILE`,
 `WORKER_KEY_FILE`, `TLS_CERT`, `TLS_KEY`, `INPUT_DIR`, `DATA_DIR`, `LOG_DIR`,
-`LOCAL_WORKER` (`true` par défaut), `LOCAL_WORKER_NAME` (sinon `coordinator-<HOSTNAME>`).
+`LOCAL_WORKER` (`true` par défaut), `LOCAL_WORKER_NAME` (sinon `coordinator-<HOSTNAME>`),
+`WEB_ORIGIN` (`http://localhost:3000` par défaut), `WEB_SESSION_TTL_SECONDS` (28 800 par défaut).
 Paramètres agent : `COORDINATOR_URL=https://nom-central:3443`, `CA_CERT`,
 `WORKER_KEY_FILE`, `WORKER_NAME` (unique ; sinon nom du conteneur), `WORK_DIR`, `LOG_DIR`.
 Le certificat serveur doit couvrir le nom DNS utilisé par les agents. En dehors

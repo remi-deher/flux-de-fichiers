@@ -1,0 +1,53 @@
+{
+  "ticket": "#38",
+  "date": "2026-11-09T17:33:40Z",
+  "assignment": "asg-0mw9jg997-ec4d724b",
+  "truenas": {
+    "app": "flux-essai",
+    "startCommand": "midclt call -j app.start '\"flux-essai\"'",
+    "startResult": "Started 'flux-essai' app (100%)",
+    "stateAfter": "RUNNING",
+    "image": "mrcryllix/flux-de-fichiers:test-a759c6179cdc",
+    "ports": {
+      "frontend": 18480,
+      "api": 18443
+    }
+  },
+  "artemis": {
+    "workerApp": "flux-essai-worker",
+    "workerState": "RUNNING",
+    "workerImage": "mrcryllix/flux-de-fichiers:test-a759c6179cdc",
+    "centralApp": "flux-essai",
+    "centralState": "STOPPED"
+  },
+  "checks": [
+    {
+      "name": "frontend GET https://192.168.1.50:18480/",
+      "ok": true,
+      "http": 200,
+      "contentType": "text/html"
+    },
+    {
+      "name": "API GET https://192.168.1.50:18443/health",
+      "ok": true,
+      "http": 204,
+      "note": "Endpoint réel /health (pas /api/v1/health qui renvoie 404)"
+    },
+    {
+      "name": "frontend proxy GET https://192.168.1.50:18480/health",
+      "ok": true,
+      "http": 204
+    },
+    {
+      "name": "worker artemis-essai recognized",
+      "ok": true,
+      "lastSeenAgeSec": 0.6,
+      "fresh": true
+    }
+  ],
+  "limits": [
+    "Anciens coordinator-* encore listés dans /api/v1/workers (historique)",
+    "Certificats d'essai auto-signés",
+    "Pas de campagne remux complète dans ce ticket (contrôle démarrage + connectivité)"
+  ]
+}

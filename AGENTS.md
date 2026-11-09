@@ -2,12 +2,16 @@
 
 ## Décisions permanentes
 
-- Stack validée : Rust, Axum/Tokio, SQLx/PostgreSQL local, Docker, MKVToolNix.
-  Leptos retenu mais différé ; aucune interface actuellement. Ne pas changer la
-  stack sans demande utilisateur. Détails : `docs/adr/0001-stack.md`.
+- Stack validée : Rust, Axum/Tokio, SQLx/PostgreSQL local, Docker, MKVToolNix,
+  et interface Leptos dans frontend/ (décision utilisateur du 9 nov. 2026). Ne pas
+  changer la stack sans demande utilisateur. Détails : `docs/adr/0001-stack.md`.
 - Mode centralisé de 1 à N serveurs. HA optionnelle, bascule à cadrer ; aucun
   seuil de nœuds ne l'active. FFmpeg réservé aux médias synthétiques des tests.
 - `npm run dev` doit démarrer sur http://localhost:3000 (bouton de prévisualisation).
+- Builds et tests à distance : ne pas initialiser ni exécuter de builds Docker lourds
+  ou de suites de tests en local (faible puissance de la machine hôte, décision utilisateur
+  du 9 nov. 2026). Les tests et la construction des images s'exécutent à distance sur
+  GitHub CI, et les images sont tirées directement pour la production.
 
 ## Sécurité
 

@@ -2,7 +2,7 @@
 
 Chaîne de remuxage Matroska sans réencodage, exécutée sous Docker. Un coordinateur
 Rust/Axum et PostgreSQL distribuent les tâches à un ou plusieurs agents Rust.
-Les agents utilisent **MKVToolNix (`mkvmerge`)**. L'interface Leptos est différée.
+Les agents utilisent **MKVToolNix (`mkvmerge`)**. L'interface de pilotage Leptos est disponible sur http://localhost:3000.
 FFmpeg est uniquement un outil de fabrication des médias synthétiques des tests.
 
 Pour contribuer : [guide de développement ciblé](docs/developpement.md)
@@ -21,7 +21,7 @@ développement**, construit l'image, puis lance PostgreSQL, un coordinateur et t
 agents dans des conteneurs distincts. Le terminal reste attaché aux journaux.
 Le premier build Rust peut prendre plusieurs minutes.
 
-- `http://localhost:3000` : API via un proxy local, sans interface graphique.
+- `http://localhost:3000` : Interface de pilotage Leptos et proxy local vers l'API.
 - `https://localhost:3443` : API TLS directe, avec `var/secrets/ca.crt` comme CA.
 - Les deux ports sont publiés uniquement sur la boucle locale. PostgreSQL n'est
   pas publié sur l'hôte. Les communications internes passent par TLS, y compris SQLx/PostgreSQL.

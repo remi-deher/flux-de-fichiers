@@ -38,7 +38,16 @@ def prepare():
     path = directory / "database_url"
     path.write_text(f"postgresql://flux:{password}@db/flux?sslmode=verify-full&sslrootcert=/run/secrets/ca_cert")
     path.chmod(0o644)
-    print("Secrets locaux prêts ; démarrage de Docker Compose sur http://localhost:3000", flush=True)
+    dist_file = ROOT / "frontend/dist/index.html"
+    frontend_sources = list((ROOT / "frontend/src").glob("**/*.rs")) + [ROOT / "frontend/Cargo.toml"]
+    needs_build = not dist_file.exists() or any(
+        src.exists() and src.stat().st_mtime > dist_file.stat().st_mtime for src in frontend_sources
+    )
+    if needs_build:
+        (ROOT / "frontend/dist").mkdir(parents=True, exist_ok=True)
+        print("Génération de l'interface Leptos...", flush=True)
+        subprocess.run(["cargo", "run", "--manifest-path", str(ROOT / "frontend/Cargo.toml")], check=True)
+    print("Secrets locaux et frontend prêts ; démarrage de Docker Compose sur http://localhost:3000", flush=True)
 
 
 if __name__ == "__main__":

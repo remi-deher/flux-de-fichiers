@@ -13,8 +13,12 @@ build
 .kimi-code/
 
 /target/
+frontend/target/
+!frontend/dist/
+!frontend/dist/index.html
 /var/
 /.tools/
 /.scenario/
 
 __pycache__/
+.cursor/mcp.json

@@ -41,3 +41,27 @@ pub struct SessionInfo {
     pub authenticated: bool,
     pub auth_mode: String,
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ToolManifestSummary {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub capability: String,
+    pub current_choice: bool,
+    pub distribution_mode: String,
+    pub cache_status: String, // "ready", "lock", "not_installed"
+    pub architectures: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct HardwareTelemetrySummary {
+    pub cpu_usage_percent: f32,
+    pub cpu_logical_cores: u32,
+    pub cpu_load_avg: [f32; 3],
+    pub ram_used_bytes: u64,
+    pub ram_total_bytes: u64,
+    pub gpu_device: Option<String>,
+    pub storage_free_bytes: u64,
+    pub storage_total_bytes: u64,
+}

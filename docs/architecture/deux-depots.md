@@ -55,7 +55,8 @@ flux-de-fichiers-plugins (catalogue)             │
 ```
 
 Le dépôt d'outillage porte les déploiements et dépendances d'infrastructure,
-notamment PostgreSQL ; il ne reçoit pas les migrations de l'application. Les
-plugins et outils futurs ne remplacent pas les choix actifs PostgreSQL et
-MKVToolNix sans décision ultérieure. La haute disponibilité et la bascule entre
-coordinateurs ne sont pas impliquées par l'existence de plusieurs nœuds.
+notamment PostgreSQL ; il ne reçoit pas les migrations de l'application. La
+décision utilisateur du 9 novembre 2026 formalise le modèle Bare Core et la
+distribution d'outils par plugins (Option B, documentée dans l'ADR 0004 et dans
+`docs/architecture/socle-execution-outils-distribues.md`). La haute disponibilité
+et la bascule entre coordinateurs ne sont pas impliquées par l'existence de plusieurs nœuds.

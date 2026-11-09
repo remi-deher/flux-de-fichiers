@@ -44,6 +44,7 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
     let lease = LeaseRequest {
         worker_id,
         lease_token: claim.lease_token,
+        telemetry: None,
     };
     let job = match repository::active(&state.pool, claim.job_id, &lease).await {
         Ok(job) => job,

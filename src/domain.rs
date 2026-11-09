@@ -69,6 +69,8 @@ pub struct MediaFile {
 pub struct LeaseRequest {
     pub worker_id: Uuid,
     pub lease_token: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<crate::telemetry::TelemetrySnapshot>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -5,6 +5,7 @@ pub mod files_panel;
 pub mod header;
 pub mod jobs_panel;
 pub mod metrics_bar;
+pub mod plugins_panel;
 pub mod settings_panel;
 pub mod workers_panel;
 
@@ -13,5 +14,6 @@ pub use files_panel::FilesPanel;
 pub use header::Header;
 pub use jobs_panel::JobsPanel;
 pub use metrics_bar::MetricsBar;
+pub use plugins_panel::PluginsPanel;
 pub use settings_panel::SettingsPanel;
 pub use workers_panel::WorkersPanel;

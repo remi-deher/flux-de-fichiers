@@ -92,6 +92,17 @@ pub fn Header() -> impl IntoView {
                 <button
                     type="button"
                     role="tab"
+                    id="tab-btn-plugins"
+                    class="tab-btn"
+                    aria-selected="false"
+                    aria-controls="panel-plugins"
+                    tabindex="-1"
+                >
+                    "Plugins & Outils"
+                </button>
+                <button
+                    type="button"
+                    role="tab"
                     id="tab-btn-settings"
                     class="tab-btn"
                     aria-selected="false"

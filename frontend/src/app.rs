@@ -22,6 +22,7 @@ pub fn App() -> impl IntoView {
                 <FilesPanel />
                 <JobsPanel />
                 <WorkersPanel />
+                <PluginsPanel />
                 <SettingsPanel />
             </main>
             <footer style="margin-top: 3rem; text-align: center; font-size: 0.8125rem; color: var(--text-dim); border-top: 1px solid var(--border-color); padding-top: 1.5rem;">

@@ -60,6 +60,7 @@ impl Agent {
             .header("x-lease-token", claim.lease_token.to_string())
     }
     async fn heartbeat(&self, claim: &Claim, worker: Uuid) -> anyhow::Result<()> {
+        let probe = crate::telemetry::TelemetryProbe::with_storage_path(&self.config.work_dir);
         loop {
             tokio::time::sleep(Duration::from_secs(20)).await;
             self.request(
@@ -70,6 +71,7 @@ impl Agent {
             .json(&LeaseRequest {
                 worker_id: worker,
                 lease_token: claim.lease_token,
+                telemetry: Some(probe.sample()),
             })
             .send()
             .await?

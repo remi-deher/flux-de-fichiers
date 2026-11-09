@@ -1,5 +1,5 @@
 mod jobs;
-mod transfers;
+pub(crate) mod transfers;
 use crate::{auth::authorize, config::Config, domain::*, error::AppResult, repository};
 use axum::{
     Router,
@@ -95,10 +95,14 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     tokio::fs::create_dir_all(&config.input_dir).await?;
     let addr = config.bind;
     let tls = config.tls.clone();
-    let app = router(AppState {
+    let state = AppState {
         pool: pool.clone(),
         config: Arc::new(config),
-    });
+    };
+    if state.config.local_worker {
+        tokio::spawn(crate::workers::run_local(state.clone()));
+    }
+    let app = router(state);
     tracing::info!(%addr, "coordinator started");
     if let Some((cert, key)) = tls {
         let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key).await?;

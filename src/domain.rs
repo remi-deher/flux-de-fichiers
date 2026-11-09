@@ -65,7 +65,7 @@ pub struct MediaFile {
     pub bytes: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LeaseRequest {
     pub worker_id: Uuid,
     pub lease_token: Uuid,

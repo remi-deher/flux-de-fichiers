@@ -1,32 +1,33 @@
 # Flux de Fichiers
 
-## Stack
+## Décisions permanentes
 
-Rust + Axum + Tokio + Leptos + SQLx + PostgreSQL + MKVToolNix.
+- Stack validée : Rust, Axum/Tokio, SQLx/PostgreSQL local, Docker, MKVToolNix,
+  et interface Leptos dans frontend/ (décision utilisateur du 9 nov. 2026). Ne pas
+  changer la stack sans demande utilisateur. Détails : `docs/adr/0001-stack.md`.
+- Mode centralisé de 1 à N serveurs. HA optionnelle, bascule à cadrer ; aucun
+  seuil de nœuds ne l'active. FFmpeg réservé aux médias synthétiques des tests.
+- `npm run dev` doit démarrer sur http://localhost:3000 (bouton de prévisualisation).
+- Builds et tests à distance : ne pas initialiser ni exécuter de builds Docker lourds
+  ou de suites de tests en local (faible puissance de la machine hôte, décision utilisateur
+  du 9 nov. 2026). Les tests et la construction des images s'exécutent à distance sur
+  GitHub CI, et les images sont tirées directement pour la production.
 
-Stack validée avec l'utilisateur : Rust pour le backend, les agents et le frontend
-Leptos ; PostgreSQL local pour les métadonnées. Voir docs/adr/0001-stack.md.
-Exécution Docker ; interface Leptos différée. Remuxage via MKVToolNix.
-Mode centralisé de 1 à N serveurs. La haute disponibilité est optionnelle et sa
-bascule fera l'objet d'un cadrage ultérieur ; aucun seuil de nœuds ne l'active.
+## Sécurité
 
-Do not change the stack without being asked. It was chosen with the user before
-the first line of code.
+- TLS entre nœuds ; accès API authentifiés et autorisés.
+- Aucune donnée sensible en clair en base ; erreurs et accès journalisés localement.
+- Aucun secret versionné ou affiché. Secrets locaux dans `var/secrets/` ou `.env*`
+  ignorés ; en déploiement, fournis par fichiers via l'orchestrateur.
 
-## Security rules
+## Travail
 
-- Les communications entre nœuds doivent être sécurisées par TLS pour éviter toute interception.
-- Les accès à l'API doivent être authentifiés et autorisés pour éviter les usages non autorisés.
-- Les données sensibles ne doivent jamais être stockées en clair dans la base de données.
-- Les erreurs et accès doivent être journalisés localement pour audit et débogage.
-
-## Run contract
-
-`npm run dev` must start the project on http://localhost:3000. Keep that true: it is the command the preview button runs.
-
-## Conventions
-
-- Small files, one responsibility each. Split a file before it becomes hard to read.
-- Explicit names over clever ones. No magic numbers.
-- Never commit a secret. Anything sensitive goes in `.env` and stays out of git.
-- Say what you are about to do in two lines before writing code.
+- Petits fichiers à responsabilité unique ; scinder avant de nuire à la lisibilité.
+- Noms explicites, aucune constante numérique sans nom.
+- Annoncer en deux lignes l'action prévue avant d'écrire du code.
+- Lire seulement la rubrique utile de `docs/developpement.md` pour localiser le
+  code, choisir les vérifications et retrouver les pièges. Ne pas charger toute
+  la documentation au démarrage.
+- Pour Git/CI/releases, lire `docs/adr/0002-flux-git.md` : flux `dev → test → main`,
+  fusions par merge commit. Les exemples génériques des compétences ne décrivent
+  pas nécessairement ce dépôt.

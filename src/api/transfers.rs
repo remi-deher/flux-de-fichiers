@@ -131,13 +131,28 @@ async fn receive(
     }
     file.sync_all().await?;
     drop(file);
-    let (hash, size) = storage::fingerprint(staging, s.config.max_file_bytes).await?;
     let source = storage::input_path(&s.config.input_dir, &job.source_name).await?;
-    let (source_hash, _) = storage::fingerprint(&source, s.config.max_file_bytes).await?;
-    if Some(&source_hash) != job.source_sha256.as_ref() {
+    publish_staged(s, id, lease, job, &source, staging, warning).await?;
+    Ok(())
+}
+
+pub(crate) async fn publish_staged(
+    s: &AppState,
+    id: Uuid,
+    lease: &LeaseRequest,
+    job: &Job,
+    source: &std::path::Path,
+    staging: &std::path::Path,
+    warning: bool,
+) -> AppResult<()> {
+    let (hash, size) = storage::fingerprint(staging, s.config.max_file_bytes).await?;
+    let (source_hash, source_size) = storage::fingerprint(source, s.config.max_file_bytes).await?;
+    if Some(&source_hash) != job.source_sha256.as_ref()
+        || job.source_bytes != Some(source_size as i64)
+    {
         return Err(AppError::Conflict);
     }
-    media::validate_remux(&source, staging)
+    media::validate_remux(source, staging)
         .await
         .map_err(|_| AppError::Invalid)?;
     let mut tx = s.pool.begin().await?;

@@ -1,11 +1,11 @@
 # 0001 — Rust, PostgreSQL et exécution Docker
 
-Statut : accepté par l'utilisateur.
+Statut : accepté par l'utilisateur. Amendé le 9 novembre 2026.
 
 Rust avec Axum/Tokio pour le coordinateur et les agents, SQLx et PostgreSQL pour
-les métadonnées. Leptos est retenu pour une interface future mais son implémentation
-est différée à la demande de l'utilisateur. Le périmètre présent est la validation
-de la chaîne et des scénarios à un ou plusieurs nœuds.
+les métadonnées. L'interface Leptos, initialement différée lors du cadrage initial,
+est mise en place dans `frontend/` suite à la décision utilisateur du 9 novembre 2026
+afin de fournir l'interface de pilotage sur `localhost:3000`.
 
 Tous les services s'exécutent sous Docker. Le remuxage sans réencodage repose sur
 MKVToolNix, demandé explicitement en remplacement de FFmpeg pour cette opération.

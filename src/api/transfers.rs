@@ -152,7 +152,7 @@ pub(crate) async fn publish_staged(
     {
         return Err(AppError::Conflict);
     }
-    media::validate_remux(&source, staging)
+    media::validate_remux(source, staging)
         .await
         .map_err(|_| AppError::Invalid)?;
     let mut tx = s.pool.begin().await?;

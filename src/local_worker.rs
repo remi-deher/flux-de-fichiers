@@ -166,9 +166,9 @@ async fn report_failure(state: &AppState, job: Uuid, lease: &LeaseRequest, code:
 }
 
 async fn cleanup(path: &std::path::Path) {
-    if let Err(error) = tokio::fs::remove_dir_all(path).await {
-        if error.kind() != std::io::ErrorKind::NotFound {
-            tracing::warn!(error=%error, "local work directory cleanup failed");
-        }
+    if let Err(error) = tokio::fs::remove_dir_all(path).await
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(error=%error, "local work directory cleanup failed");
     }
 }

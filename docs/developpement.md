@@ -16,7 +16,11 @@ Ce guide se consulte à la demande. Le README reste la référence d'utilisation
 | Laboratoire Docker | `package.json`, `scripts/dev.py`, `compose.yaml` | Scénarios du README, `deploy/fixtures.Dockerfile` |
 | CI, branches, publication | `docs/adr/0002-flux-git.md` | Workflow concerné dans `.github/workflows/`, `scripts/ci/` |
 
-Un seul crate et un seul binaire, deux modes : coordinateur ou agent. Seul le
+Un seul crate et un seul binaire, deux modes : coordinateur ou agent. Les façades
+`node`, `coordinator`, `execution`, `workers`, `plugins`, `flows`, `storage` et
+`security` rendent les responsabilités visibles ; voir
+[`architecture/deux-depots.md`](architecture/deux-depots.md) pour les frontières
+entre socle et dépôt plugins. Seul le
 coordinateur accède à PostgreSQL ; les agents échangent avec lui par HTTPS.
 Les migrations sont embarquées et appliquées au démarrage du coordinateur.
 

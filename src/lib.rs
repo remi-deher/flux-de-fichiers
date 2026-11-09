@@ -1,9 +1,17 @@
 pub mod api;
 pub mod auth;
 pub mod config;
+pub mod coordinator;
 pub mod domain;
 pub mod error;
+pub mod execution;
+pub mod flows;
+pub mod local_worker;
 pub mod media;
+pub mod node;
+pub mod plugins;
 pub mod repository;
+pub mod security;
 pub mod storage;
 pub mod worker;
+pub mod workers;

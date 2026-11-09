@@ -9,6 +9,7 @@ pub struct Config {
     pub admin_key: String,
     pub worker_key: String,
     pub max_file_bytes: u64,
+    pub local_worker: bool,
     pub tls: Option<(PathBuf, PathBuf)>,
 }
 
@@ -77,6 +78,9 @@ impl Config {
             admin_key,
             worker_key,
             max_file_bytes,
+            local_worker: env::var("LOCAL_WORKER")
+                .map(|value| value != "false" && value != "0")
+                .unwrap_or(true),
             database_url: value("DATABASE_URL")?,
             data_dir: env::var("DATA_DIR").unwrap_or_else(|_| "var".into()).into(),
             input_dir: env::var("INPUT_DIR")

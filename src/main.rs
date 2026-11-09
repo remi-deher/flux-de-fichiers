@@ -1,4 +1,4 @@
-use flux_de_fichiers::{api, config::Config, worker};
+use flux_de_fichiers::node;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -12,13 +12,5 @@ async fn main() -> anyhow::Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
-    match std::env::args().nth(1).as_deref() {
-        Some("worker") => worker::run(worker::WorkerConfig::load()?).await,
-        Some("coordinator") | None => api::serve(Config::load()?).await,
-        Some("--version") => {
-            println!("{}", env!("CARGO_PKG_VERSION"));
-            Ok(())
-        }
-        _ => anyhow::bail!("Usage: flux-de-fichiers [coordinator|worker|--version]"),
-    }
+    node::run(std::env::args().nth(1).as_deref()).await
 }

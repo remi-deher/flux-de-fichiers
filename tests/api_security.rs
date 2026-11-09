@@ -19,6 +19,7 @@ fn app() -> anyhow::Result<axum::Router> {
         admin_key: "test-admin-key-not-a-real-credential".into(),
         worker_key: "test-worker-key-not-a-real-credential".into(),
         max_file_bytes: 1024,
+        local_worker: false,
         tls: None,
     };
     let pool = PgPoolOptions::new().connect_lazy(&config.database_url)?;

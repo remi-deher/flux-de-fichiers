@@ -85,7 +85,19 @@ est effectuée dans les scénarios de test.
 
 ## Déploiement sur plusieurs machines
 
-La même image exécute `coordinator` ou `worker`.
+La même image exécute `coordinator` ou `worker`. En mode `coordinator`, un agent
+intégré est activé par défaut sous le nom `coordinator-<HOSTNAME>` : il prend les
+baux via PostgreSQL et traite les tâches sans conteneur worker séparé. Il lit la
+source directement dans `INPUT_DIR` monté en lecture seule. MKVToolNix, la
+validation des métadonnées, le contrôle du bail et la publication immuable sont
+partagés avec le chemin des agents distants.
+
+`LOCAL_WORKER=false` (ou `0`) désactive l'agent intégré pour un coordinateur
+dédié à la coordination. Une tâche ciblée sur un worker reste réservée à celui-ci.
+Le traitement local utilise les ressources CPU et disque du coordinateur et ne
+déclenche aucune bascule automatique entre coordinateurs. Le Compose de laboratoire
+désactive ce mode afin de garder les scénarios de disponibilité des workers
+déterministes.
 [deploy/worker.compose.yaml](deploy/worker.compose.yaml) permet de lancer uniquement
 un agent sur un autre hôte, avec une image immuable et des secrets fournis par fichiers. Le fichier Compose fourni est
 une **configuration locale de développement**, pas un déploiement automatique.
@@ -96,7 +108,8 @@ image applicative en mode `worker`, volume de travail et journaux locaux, sans
 connexion directe à PostgreSQL ni montage des fichiers source.
 
 Paramètres coordinateur : `BIND`, `DATABASE_URL_FILE`, `ADMIN_KEY_FILE`,
-`WORKER_KEY_FILE`, `TLS_CERT`, `TLS_KEY`, `INPUT_DIR`, `DATA_DIR`, `LOG_DIR`.
+`WORKER_KEY_FILE`, `TLS_CERT`, `TLS_KEY`, `INPUT_DIR`, `DATA_DIR`, `LOG_DIR`,
+`LOCAL_WORKER` (`true` par défaut), `LOCAL_WORKER_NAME` (sinon `coordinator-<HOSTNAME>`).
 Paramètres agent : `COORDINATOR_URL=https://nom-central:3443`, `CA_CERT`,
 `WORKER_KEY_FILE`, `WORKER_NAME` (unique ; sinon nom du conteneur), `WORK_DIR`, `LOG_DIR`.
 Le certificat serveur doit couvrir le nom DNS utilisé par les agents. En dehors

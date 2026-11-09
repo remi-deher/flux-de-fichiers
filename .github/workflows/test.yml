@@ -126,9 +126,10 @@ jobs:
 
   scenarios:
     # Nom stable : destiné aux checks requis du ruleset de test.
+    # ubuntu-24.04 : Playwright (chromium) ne prend pas encore en charge ubuntu-26.04.
     name: docker-scenarios
     needs: [changes, image-build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       COMPOSE_PROJECT_NAME: flux-ci

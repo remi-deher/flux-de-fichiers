@@ -45,6 +45,7 @@ services:
       TLS_CERT: /run/secrets/server_cert
       TLS_KEY: /run/secrets/server_key
       INPUT_DIR: /input
+      WEB_ORIGIN: http://localhost:3000
       # The scenario lab controls worker availability explicitly.
       LOCAL_WORKER: "false"
     secrets: [database_url, admin_key, worker_key, server_cert, server_key, ca_cert]

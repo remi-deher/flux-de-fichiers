@@ -16,6 +16,7 @@
   --bg-card: #ffffff;
   --bg-subtle: #f1f5f9;
   --border-color: #94a3b8;
+  --border-focus: #0369a1;
   --text-main: #0f172a;
   --text-muted: #334155;
   --text-dim: #475569;
@@ -49,11 +50,12 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg-app: #0b0f17;
     --bg-card: #151d2c;
     --bg-subtle: #1e293b;
     --border-color: #64748b;
+    --border-focus: #38bdf8;
     --text-main: #f8fafc;
     --text-muted: #e2e8f0;
     --text-dim: #cbd5e1;
@@ -84,6 +86,76 @@
   }
 }
 
+:root[data-theme="dark"] {
+  --bg-app: #0b0f17;
+  --bg-card: #151d2c;
+  --bg-subtle: #1e293b;
+  --border-color: #64748b;
+  --border-focus: #38bdf8;
+  --text-main: #f8fafc;
+  --text-muted: #e2e8f0;
+  --text-dim: #cbd5e1;
+
+  --primary: #38bdf8;
+  --primary-hover: #7dd3fc;
+  --primary-contrast: #0f172a;
+
+  --success-bg: #064e3b;
+  --success-border: #34d399;
+  --success-text: #ecfdf5;
+
+  --warning-bg: #78350f;
+  --warning-border: #fbbf24;
+  --warning-text: #fffbeb;
+
+  --info-bg: #0c4a6e;
+  --info-border: #38bdf8;
+  --info-text: #f0f9ff;
+
+  --danger-bg: #7f1d1d;
+  --danger-border: #f87171;
+  --danger-text: #fef2f2;
+
+  --focus-ring: #38bdf8;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+}
+
+:root[data-theme="light"] {
+  --bg-app: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-subtle: #f1f5f9;
+  --border-color: #94a3b8;
+  --border-focus: #0369a1;
+  --text-main: #0f172a;
+  --text-muted: #334155;
+  --text-dim: #475569;
+
+  --primary: #0369a1;
+  --primary-hover: #075985;
+  --primary-contrast: #ffffff;
+
+  --success-bg: #ecfdf5;
+  --success-border: #047857;
+  --success-text: #064e3b;
+
+  --warning-bg: #fffbeb;
+  --warning-border: #b45309;
+  --warning-text: #78350f;
+
+  --info-bg: #f0f9ff;
+  --info-border: #0284c7;
+  --info-text: #075985;
+
+  --danger-bg: #fef2f2;
+  --danger-border: #b91c1c;
+  --danger-text: #7f1d1d;
+
+  --focus-ring: #0369a1;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+}
+
 /* Reset et typographie de base */
 *, *::before, *::after {
   box-sizing: border-box;
@@ -108,46 +180,32 @@ body {
   background: var(--primary);
   color: var(--primary-contrast);
   padding: 0.75rem 1.25rem;
-  border-radius: var(--radius-sm);
-  z-index: 1000;
-  font-weight: 600;
+  font-weight: 700;
   text-decoration: none;
-}
-.skip-link:focus {
-  top: 1rem;
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+  z-index: 9999;
 }
 
-/* Conteneur principal */
+.skip-link:focus {
+  top: 1rem;
+}
+
 .app-container {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 1.5rem 1rem 3rem 1rem;
+  padding: 1.25rem 1rem 3rem 1rem;
 }
 
-@media (min-width: 640px) {
-  .app-container {
-    padding: 2rem 1.5rem 4rem 1.5rem;
-  }
-}
-
-/* En-tête */
-header.app-header {
+/* Header */
+.app-header {
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 1rem;
-  padding-bottom: 1.5rem;
+  padding-bottom: 1rem;
   border-bottom: 1px solid var(--border-color);
-  margin-bottom: 2rem;
-}
-
-@media (min-width: 768px) {
-  header.app-header {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-  }
+  margin-bottom: 1.25rem;
 }
 
 .brand-wrapper {
@@ -162,7 +220,7 @@ header.app-header {
   color: var(--primary-contrast);
   font-weight: 700;
   font-size: 0.75rem;
-  padding: 0.2rem 0.5rem;
+  padding: 0.25rem 0.6rem;
   border-radius: var(--radius-sm);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -180,6 +238,62 @@ h1.app-title {
   align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
+}
+
+/* Barre de navigation par onglets (Tabs) */
+.tab-navigation {
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tab-list {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  min-height: 44px;
+  min-width: 44px;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.tab-btn:hover {
+  color: var(--text-main);
+}
+
+.tab-btn[aria-selected="true"] {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.tab-btn:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.tab-panel {
+  display: block;
+}
+
+.tab-panel[hidden] {
+  display: none;
 }
 
 /* Badges d'état */
@@ -226,27 +340,15 @@ h1.app-title {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: currentColor;
+  background-color: currentColor;
 }
 
-/* Grille de statistiques */
+/* Grilles et panneaux */
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(1, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 1rem;
-  margin-bottom: 2rem;
-}
-
-@media (min-width: 640px) {
-  .metrics-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (min-width: 1024px) {
-  .metrics-grid {
-    grid-template-columns: repeat(4, 1fr);
-  }
+  margin-bottom: 1.5rem;
 }
 
 .metric-card {
@@ -255,129 +357,178 @@ h1.app-title {
   border-radius: var(--radius-md);
   padding: 1.25rem;
   box-shadow: var(--shadow-sm);
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
 }
 
 .metric-label {
   font-size: 0.8125rem;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.35rem;
 }
 
 .metric-value {
   font-size: 1.75rem;
   font-weight: 700;
   color: var(--text-main);
-  line-height: 1;
+  font-family: var(--font-mono);
 }
 
-.metric-desc {
+.metric-subtitle {
   font-size: 0.8125rem;
   color: var(--text-dim);
+  margin-top: 0.25rem;
 }
 
-/* Sections et cartes */
 .section-panel {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   padding: 1.5rem;
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
   box-shadow: var(--shadow-sm);
 }
 
 .section-panel-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  margin-bottom: 1.25rem;
+  align-items: flex-start;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
 }
 
 .section-title {
-  font-size: 1.125rem;
+  font-size: 1.25rem;
   font-weight: 700;
   color: var(--text-main);
+  letter-spacing: -0.01em;
 }
 
 .section-subtitle {
   font-size: 0.875rem;
-  color: var(--text-muted);
+  color: var(--text-dim);
   margin-top: 0.25rem;
 }
 
-/* Tableaux modernes et accessibles */
-.table-wrapper {
-  overflow-x: auto;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-color);
+/* Barres d'outils et recherche */
+.toolbar-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
 }
 
-table.data-table {
+.search-box {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 1;
+  min-width: 240px;
+  max-width: 400px;
+}
+
+.search-input {
+  width: 100%;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  padding: 0.625rem 0.875rem 0.625rem 2.25rem;
+  min-height: 44px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-main);
+}
+
+.search-icon {
+  position: absolute;
+  left: 0.75rem;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+.filter-group {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  min-height: 44px;
+  min-width: 44px;
+  border-radius: 9999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+  color: var(--text-main);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.filter-chip[aria-pressed="true"] {
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border-color: var(--primary);
+}
+
+.filter-chip:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Tableaux de données */
+.table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.data-table {
   width: 100%;
   border-collapse: collapse;
   text-align: left;
   font-size: 0.875rem;
 }
 
-table.data-table th {
-  background: var(--bg-subtle);
-  color: var(--text-muted);
-  font-weight: 600;
+.data-table th,
+.data-table td {
   padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--border-color);
-  white-space: nowrap;
-}
-
-table.data-table td {
-  padding: 0.875rem 1rem;
-  border-bottom: 1px solid var(--border-color);
-  color: var(--text-main);
   vertical-align: middle;
 }
 
-table.data-table tr:last-child td {
+.data-table th {
+  background: var(--bg-subtle);
+  font-weight: 600;
+  color: var(--text-dim);
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.data-table tr:last-child td {
   border-bottom: none;
 }
 
-table.data-table tr:hover {
-  background: var(--bg-subtle);
-}
-
-.code-cell {
-  font-family: var(--font-mono);
-  font-size: 0.8125rem;
-}
-
-/* États vides honnêtes */
-.empty-state {
-  text-align: center;
-  padding: 2.5rem 1.5rem;
-  background: var(--bg-subtle);
-  border-radius: var(--radius-md);
-  border: 1px dashed var(--border-color);
-}
-
-.empty-state-title {
-  font-weight: 600;
-  font-size: 1rem;
-  color: var(--text-main);
-  margin-bottom: 0.35rem;
+.data-table tr:hover td {
+  background-color: var(--bg-subtle);
 }
 
 .empty-state-text {
-  font-size: 0.875rem;
-  color: var(--text-muted);
-  max-width: 480px;
-  margin: 0 auto;
+  text-align: center;
+  padding: 2.5rem 1rem !important;
+  color: var(--text-dim);
+  font-style: italic;
 }
 
-/* Formulaires et boutons */
+/* Boutons et formulaires */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -445,7 +596,8 @@ table.data-table tr:hover {
   color: var(--text-main);
 }
 
-.form-input {
+.form-input,
+.form-select {
   font-family: var(--font-mono);
   font-size: 0.875rem;
   padding: 0.625rem 0.875rem;
@@ -456,10 +608,12 @@ table.data-table tr:hover {
   color: var(--text-main);
 }
 
-.form-input:focus {
+.form-input:focus,
+.form-select:focus,
+.search-input:focus {
   outline: 3px solid var(--focus-ring);
-  outline-offset: 1px;
-  border-color: var(--primary);
+  outline-offset: 2px;
+  border-color: var(--border-focus);
 }
 
 .form-help {
@@ -467,36 +621,97 @@ table.data-table tr:hover {
   color: var(--text-dim);
 }
 
-/* Badge de fonctionnalité future */
-.badge-future {
-  display: inline-flex;
+/* Modale dialog HTML5 */
+dialog.app-dialog {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text-main);
+  padding: 0;
+  max-width: 600px;
+  width: calc(100% - 2rem);
+  box-shadow: var(--shadow-md);
+  margin: auto;
+}
+
+dialog.app-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+}
+
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 0.35rem;
-  font-size: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.dialog-title {
+  font-size: 1.125rem;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 0.2rem 0.5rem;
-  border-radius: var(--radius-sm);
+}
+
+.dialog-body {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+  border-bottom-left-radius: var(--radius-md);
+  border-bottom-right-radius: var(--radius-md);
+}
+
+/* Grille de détail de tâche */
+.detail-grid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 0.75rem 1rem;
+  font-size: 0.875rem;
+}
+
+.detail-term {
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.detail-val {
+  font-family: var(--font-mono);
+  word-break: break-all;
+  color: var(--text-main);
+}
+
+.code-snippet {
   background: var(--bg-subtle);
   border: 1px solid var(--border-color);
-  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  overflow-x: auto;
+  user-select: all;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
-.future-card {
-  background: var(--bg-subtle);
-  border: 1px dashed var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 1.25rem;
-}
-
-/* Zone d'alerte / message en direct */
+/* Toast Notice */
 .toast-notice {
-  padding: 0.75rem 1rem;
+  display: none;
+  padding: 0.75rem 1.25rem;
   border-radius: var(--radius-sm);
   font-size: 0.875rem;
+  font-weight: 600;
   margin-bottom: 1rem;
-  display: none;
 }
 
 .toast-notice.visible {
@@ -504,15 +719,9 @@ table.data-table tr:hover {
 }
 
 .toast-notice.info {
-  background: var(--bg-subtle);
-  border: 1px solid var(--border-color);
-  color: var(--text-main);
-}
-
-.toast-notice.success {
-  background: var(--success-bg);
-  border: 1px solid var(--success-border);
-  color: var(--success-text);
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  color: var(--info-text);
 }
 
 .toast-notice.error {
@@ -521,27 +730,83 @@ table.data-table tr:hover {
   color: var(--danger-text);
 }
 
-/* Accessibilité pour mouvements réduits */
-@media (prefers-reduced-motion: reduce) {
-  * {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+.toast-notice.success {
+  background: var(--success-bg);
+  border: 1px solid var(--success-border);
+  color: var(--success-text);
+}
+
+/* Cartes fonctionnalités futures */
+.future-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.future-card {
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  background: var(--bg-subtle);
+  opacity: 0.85;
+}
+
+.future-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  border: 1px solid var(--warning-border);
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+}
+
+/* Adaptation petits écrans */
+@media (max-width: 640px) {
+  .app-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .header-status {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .detail-grid {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+  .toolbar-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .search-box {
+    max-width: 100%;
   }
 }
 
   </style>
 </head>
 <body>
-<a href="#main-content" class="skip-link">Aller au contenu principal</a><div class="app-container"><header role="banner" class="app-header"><div class="brand-wrapper"><span class="brand-badge">MKV</span><div><h1 class="app-title">Flux de Fichiers</h1><p class="section-subtitle">Console de pilotage et supervision de remuxage</p></div></div><div class="header-status"><div id="health-status-pill" class="status-pill warning" aria-live="polite"><span class="status-dot"></span><span id="health-status-text">Vérification…</span></div><button type="button" id="refresh-all-btn" class="btn btn-secondary btn-sm" aria-label="Actualiser les données du coordinateur">Actualiser</button></div></header><div id="live-notice" class="toast-notice" role="status" aria-live="polite"></div><main id="main-content"><section aria-label="Indicateurs de fonctionnement" class="metrics-grid"><div class="metric-card"><span class="metric-label">Coordinateur</span><span id="metric-health" class="metric-value">—</span><span class="metric-desc">Sonde /health</span></div><div class="metric-card"><span class="metric-label">Agents enregistrés</span><span id="metric-workers" class="metric-value">—</span><span class="metric-desc">Enregistrés en base</span></div><div class="metric-card"><span class="metric-label">Fichiers sources</span><span id="metric-files" class="metric-value">—</span><span class="metric-desc">Dans INPUT_DIR</span></div><div class="metric-card"><span class="metric-label">Tâches enregistrées</span><span id="metric-jobs" class="metric-value">—</span><span class="metric-desc">Historique et file</span></div></section><section aria-labelledby="auth-card-title" class="section-panel"><div class="section-panel-header"><div><h2 id="auth-card-title" class="section-title">Authentification API</h2><p class="section-subtitle">Les routes d'administration requièrent une clé Bearer. La clé reste confinée à votre navigateur local.</p></div></div><div class="form-group"><label for="admin-key-input" class="form-label">Clé administrateur (ADMIN_KEY)</label><div style="display: flex; gap: 0.75rem; flex-wrap: wrap;"><input type="password" id="admin-key-input" class="form-input" placeholder="Exemple : secret généré dans var/secrets/admin_key" autocomplete="off" spellcheck="false" style="flex: 1; min-width: 260px;"><button type="button" id="admin-key-save-btn" class="btn btn-primary">Enregistrer en session</button></div><p id="auth-status-text" class="form-help">En développement local, retrouvez la clé dans var/secrets/admin_key.</p></div></section><section aria-labelledby="files-section-title" class="section-panel"><div class="section-panel-header"><div><h2 id="files-section-title" class="section-title">Fichiers sources admissibles</h2><p class="section-subtitle">Fichiers MKV détectés dans INPUT_DIR, prêts pour un remuxage sans réencodage.</p></div></div><div class="table-wrapper"><table class="data-table" aria-label="Liste des fichiers sources disponibles"><thead><tr><th scope="col">Nom du fichier</th><th scope="col">Taille</th><th scope="col">Action</th></tr></thead><tbody id="files-table-body"><tr><td colspan="3" class="empty-state-text">Chargement des fichiers sources…</td></tr></tbody></table></div></section><section aria-labelledby="jobs-section-title" class="section-panel"><div class="section-panel-header"><div><h2 id="jobs-section-title" class="section-title">File des tâches de remuxage</h2><p class="section-subtitle">Suivi de l'état (queued, running, succeeded, failed) et téléchargement authentifié des résultats.</p></div></div><div class="table-wrapper"><table class="data-table" aria-label="Liste des tâches de remuxage"><thead><tr><th scope="col">Identifiant</th><th scope="col">Source</th><th scope="col">Statut</th><th scope="col">Création</th><th scope="col">Téléchargement</th></tr></thead><tbody id="jobs-table-body"><tr><td colspan="5" class="empty-state-text">Chargement des tâches…</td></tr></tbody></table></div><p class="form-help" style="margin-top: 0.75rem;">Note sur les fichiers volumineux : le téléchargement s'effectue via l'API avec la clé en mémoire locale. Pour les médias de plusieurs gigaoctets, privilégier curl en direct avec en-tête Bearer ou l'accès au volume partagé.</p></section><section aria-labelledby="workers-section-title" class="section-panel"><div class="section-panel-header"><div><h2 id="workers-section-title" class="section-title">Agents de traitement (Workers)</h2><p class="section-subtitle">Conteneurs MKVToolNix exécutant les baux de remuxage sans FFmpeg en production.</p></div></div><div class="table-wrapper"><table class="data-table" aria-label="Liste des agents de remuxage enregistrés"><thead><tr><th scope="col">UUID de l'agent</th><th scope="col">Nom d'enregistrement</th><th scope="col">Statut</th><th scope="col">Dernier signalement</th></tr></thead><tbody id="workers-table-body"><tr><td colspan="4" class="empty-state-text">Chargement des agents…</td></tr></tbody></table></div></section><section aria-labelledby="future-section-title" class="section-panel"><div class="section-panel-header"><div><h2 id="future-section-title" class="section-title">Évolutions et fonctionnalités futures</h2><p class="section-subtitle">État honnête du périmètre actuel : aucun bouton trompeur ni fausse télémétrie.</p></div></div><div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;"><div class="future-card"><span class="badge-future">Hors périmètre actuel</span><h3 style="font-size: 1rem; font-weight: 700; margin: 0.5rem 0 0.25rem 0;">Éditeur visuel de flux</h3><p class="metric-desc">Le catalogue et l'éditeur graphique de pipelines de fichiers font l'objet d'un cadrage ultérieur dans le dépôt flux-de-fichiers-plugins.</p></div><div class="future-card"><span class="badge-future">En réserve</span><h3 style="font-size: 1rem; font-weight: 700; margin: 0.5rem 0 0.25rem 0;">Connecteurs de stockage distants</h3><p class="metric-desc">L'intégration directe avec des partages SMB ou compartiments S3 sera déployée lors des phases multi-machines. Actuellement, les échanges s'effectuent via les volumes Docker.</p></div><div class="future-card"><span class="badge-future">Règle de sécurité</span><h3 style="font-size: 1rem; font-weight: 700; margin: 0.5rem 0 0.25rem 0;">Purge automatique non destructive</h3><p class="metric-desc">Conformément à AGENTS.md, aucune suppression automatique destructive n'est déclenchée sur les répertoires de staging ou de données.</p></div></div></section></main><footer style="margin-top: 3rem; text-align: center; font-size: 0.8125rem; color: var(--text-dim); border-top: 1px solid var(--border-color); padding-top: 1.5rem;"><p>Flux de Fichiers v0.2 — Interface de pilotage Leptos moderne et responsive.</p><p style="margin-top: 0.25rem;">Conçue selon les recommandations d'accessibilité (contrastes renforcés, navigation clavier, repères W3C).</p><p style="margin-top: 0.25rem;">Remuxage sans réencodage MKVToolNix • Coordinateur Axum / Tokio • PostgreSQL local</p></footer></div>
+<a href="#main-content" class="skip-link">Aller au contenu principal</a><div class="app-container"><header role="banner" class="app-header"><div class="brand-wrapper"><span class="brand-badge">MKV</span><div><h1 class="app-title">Flux de Fichiers</h1><p class="section-subtitle">Poste de pilotage et supervision de remuxage</p></div></div><div class="header-status"><div id="health-status-pill" class="status-pill warning" aria-live="polite"><span class="status-dot"></span><span id="health-status-text">Vérification…</span></div><div id="session-status-pill" class="status-pill warning" aria-live="polite"><span class="status-dot"></span><span id="session-status-text">Non authentifié</span></div><button type="button" id="theme-toggle-btn" class="btn btn-secondary btn-sm" aria-label="Basculer le thème clair ou sombre" title="Basculer le thème clair ou sombre"><span id="theme-toggle-icon">🌓</span><span id="theme-toggle-label">Thème</span></button><button type="button" id="refresh-all-btn" class="btn btn-secondary btn-sm" aria-label="Actualiser les données du coordinateur">Actualiser</button></div></header><nav aria-label="Sections du poste de pilotage" class="tab-navigation"><div class="tab-list" role="tablist"><button type="button" role="tab" id="tab-btn-dashboard" class="tab-btn" aria-selected="true" aria-controls="panel-dashboard" tabindex="0">Vue d'ensemble</button><button type="button" role="tab" id="tab-btn-files" class="tab-btn" aria-selected="false" aria-controls="panel-files" tabindex="-1">Fichiers sources</button><button type="button" role="tab" id="tab-btn-jobs" class="tab-btn" aria-selected="false" aria-controls="panel-jobs" tabindex="-1">Tâches de remuxage</button><button type="button" role="tab" id="tab-btn-workers" class="tab-btn" aria-selected="false" aria-controls="panel-workers" tabindex="-1">Nœuds &amp; Serveurs</button><button type="button" role="tab" id="tab-btn-settings" class="tab-btn" aria-selected="false" aria-controls="panel-settings" tabindex="-1">Paramètres &amp; Session</button></div></nav><div id="live-notice" class="toast-notice" role="status" aria-live="polite"></div><main id="main-content"><div id="panel-dashboard" role="tabpanel" aria-labelledby="tab-btn-dashboard" class="tab-panel"><section class="metrics-grid" aria-label="Indicateurs clés du système"><div class="metric-card"><div class="metric-label">Coordinateur</div><div id="metric-health" class="metric-value">…</div><div class="metric-subtitle">Sonde /health</div></div><div class="metric-card"><div class="metric-label">Mode opérationnel</div><div id="metric-mode" class="metric-value" style="font-size: 1.25rem;">Centralisé</div><div class="metric-subtitle">1 à N serveurs • HA optionnelle</div></div><div class="metric-card"><div class="metric-label">Fichiers prêts</div><div id="metric-files-count" class="metric-value">0</div><div class="metric-subtitle">Dans var/input/ (lecture seule)</div></div><div class="metric-card"><div class="metric-label">Tâches enregistrées</div><div id="metric-jobs-count" class="metric-value">0</div><div class="metric-subtitle">En base de données PostgreSQL</div></div><div class="metric-card"><div class="metric-label">Agents actifs</div><div id="metric-workers-count" class="metric-value">0</div><div class="metric-subtitle">Enregistrés via l'API</div></div></section><section class="section-panel" aria-labelledby="quick-actions-title"><div class="section-panel-header"><div><h2 id="quick-actions-title" class="section-title">Actions rapides</h2><p class="section-subtitle">Démarrez un traitement ou supervisez la chaîne de remuxage.</p></div></div><div style="display: flex; gap: 0.75rem; flex-wrap: wrap;"><button type="button" id="quick-goto-files-btn" class="btn btn-primary">Parcourir les fichiers et lancer un remuxage</button><button type="button" id="quick-goto-jobs-btn" class="btn btn-secondary">Consulter la file des tâches</button><button type="button" id="quick-goto-settings-btn" class="btn btn-secondary">Gérer la session / Authentification</button></div></section><section class="section-panel" aria-labelledby="recent-jobs-title"><div class="section-panel-header"><div><h2 id="recent-jobs-title" class="section-title">Dernières tâches traitées</h2><p class="section-subtitle">Aperçu des 3 derniers traitements soumis.</p></div></div><div class="table-wrapper"><table class="data-table" aria-label="Dernières tâches traitées"><thead><tr><th scope="col">ID</th><th scope="col">Source</th><th scope="col">Statut</th><th scope="col">Création</th></tr></thead><tbody id="recent-jobs-table-body"><tr><td colspan="4" class="empty-state-text">Aucune tâche enregistrée pour le moment.</td></tr></tbody></table></div></section><section class="section-panel" aria-labelledby="future-plan-title"><div class="section-panel-header"><div><h2 id="future-plan-title" class="section-title">Fonctionnalités planifiées (hors périmètre actuel)</h2><p class="section-subtitle">Présentation honnête des modules d'extension en cours de conception.</p></div></div><div class="future-grid"><div class="future-card"><span class="future-badge">Planifié</span><h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.35rem;">Éditeur visuel de flux</h3><p style="font-size: 0.8125rem; color: var(--text-dim);">Composition graphique des étapes de traitement sans écriture de script. En attente de spécification de contrat.</p></div><div class="future-card"><span class="future-badge">Planifié</span><h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.35rem;">Connecteurs distants S3 &amp; SMB</h3><p style="font-size: 0.8125rem; color: var(--text-dim);">Acquisition et dépôt direct sur partages réseau distants. Le périmètre actuel opère sur volumes Docker montés.</p></div><div class="future-card"><span class="future-badge">Planifié</span><h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.35rem;">Catalogue d'outils et plugins</h3><p style="font-size: 0.8125rem; color: var(--text-dim);">Dépôt séparé flux-de-fichiers-plugins en cours d'élaboration. Aucun chargeur dynamique n'est encore déployé.</p></div></div></section></div><div id="panel-files" role="tabpanel" aria-labelledby="tab-btn-files" hidden class="tab-panel"><section class="section-panel" aria-labelledby="files-section-title"><div class="section-panel-header"><div><h2 id="files-section-title" class="section-title">Fichiers sources admissibles</h2><p class="section-subtitle">Fichiers MKV détectés dans var/input/ (montage en lecture seule). Les fichiers d'origine ne sont jamais modifiés.</p></div><div id="files-counter-badge" class="status-pill info"><span id="files-counter-text">0 fichier(s)</span></div></div><div class="toolbar-bar"><div class="search-box"><span class="search-icon" aria-hidden="true">🔍</span><input type="search" id="files-search-input" class="search-input" placeholder="Rechercher un fichier source…" aria-label="Filtrer les fichiers sources par nom"></div><div class="form-help">Pour ajouter des vidéos, déposez vos fichiers .mkv dans le dossier var/input/ du serveur.</div></div><div class="table-wrapper"><table class="data-table" aria-label="Liste des fichiers sources disponibles"><thead><tr><th scope="col">Nom du fichier</th><th scope="col">Taille</th><th scope="col" style="text-align: right;">Action</th></tr></thead><tbody id="files-table-body"><tr><td colspan="3" class="empty-state-text">Chargement des fichiers sources…</td></tr></tbody></table></div></section><dialog id="confirm-remux-dialog" class="app-dialog" aria-labelledby="confirm-dialog-title" aria-modal="true"><div class="dialog-header"><h3 id="confirm-dialog-title" class="dialog-title">Confirmer le lancement du remuxage</h3><button type="button" id="confirm-dialog-close-x" class="btn btn-secondary btn-sm" aria-label="Fermer la boîte de dialogue">✕</button></div><div class="dialog-body"><p>Vous vous apprêtez à soumettre une tâche de remuxage sans réencodage pour le média :</p><div class="code-snippet" id="confirm-dialog-filename">nom-du-fichier.mkv</div><div class="form-group"><label for="confirm-dialog-worker-select" class="form-label">Agent ou nœud cible (optionnel)</label><select id="confirm-dialog-worker-select" class="form-select"><option value="">N'importe quel agent disponible (recommandé)</option></select><p class="form-help">Si vous ciblez un agent précis, la tâche lui restera réservée sans bascule automatique.</p></div><div class="status-pill info" style="width: fit-content;">ℹ️ Le fichier d'origine reste intact. Le résultat sera placé dans le volume data.</div></div><div class="dialog-footer"><button type="button" id="confirm-dialog-cancel-btn" class="btn btn-secondary">Annuler</button><button type="button" id="confirm-dialog-submit-btn" class="btn btn-primary">Lancer le remuxage</button></div></dialog></div><div id="panel-jobs" role="tabpanel" aria-labelledby="tab-btn-jobs" hidden class="tab-panel"><section class="section-panel" aria-labelledby="jobs-section-title"><div class="section-panel-header"><div><h2 id="jobs-section-title" class="section-title">File des tâches de remuxage</h2><p class="section-subtitle">Suivi de l'état (queued, running, succeeded, failed), inspection des détails et téléchargement en flux direct.</p></div></div><div class="toolbar-bar"><div class="search-box"><span class="search-icon" aria-hidden="true">🔍</span><input type="search" id="jobs-search-input" class="search-input" placeholder="Rechercher par ID ou nom de fichier…" aria-label="Filtrer les tâches par ID ou nom de fichier"></div><div class="filter-group" role="group" aria-label="Filtrer les tâches par statut"><button type="button" class="filter-chip" data-filter="all" aria-pressed="true">Tous<span id="count-filter-all" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="queued" aria-pressed="false">En attente<span id="count-filter-queued" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="running" aria-pressed="false">En cours<span id="count-filter-running" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="succeeded" aria-pressed="false">Succès<span id="count-filter-succeeded" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="failed" aria-pressed="false">Échecs<span id="count-filter-failed" style="opacity: 0.8;">(0)</span></button></div></div><div class="table-wrapper"><table class="data-table" aria-label="Liste filtrée des tâches de remuxage"><thead><tr><th scope="col">Identifiant</th><th scope="col">Source</th><th scope="col">Statut</th><th scope="col">Création</th><th scope="col" style="text-align: right;">Actions</th></tr></thead><tbody id="jobs-table-body"><tr><td colspan="5" class="empty-state-text">Chargement des tâches…</td></tr></tbody></table></div><div style="margin-top: 1rem; padding: 0.75rem 1rem; background: var(--bg-subtle); border-radius: var(--radius-sm); border-left: 4px solid var(--primary); font-size: 0.8125rem; color: var(--text-dim);"><strong>Téléchargement en flux direct :</strong> Lorsqu'une session web est active, le téléchargement s'effectue en flux continu directement sur disque sans bufferisation mémoire. Pour les médias de plusieurs gigaoctets via jeton Bearer, la commande curl prête à l'emploi est disponible dans le volet Détails.</div></section><dialog id="job-detail-dialog" class="app-dialog" aria-labelledby="job-dialog-title" aria-modal="true"><div class="dialog-header"><h3 id="job-dialog-title" class="dialog-title">Détails de la tâche</h3><button type="button" id="job-dialog-close-x" class="btn btn-secondary btn-sm" aria-label="Fermer la boîte de dialogue">✕</button></div><div class="dialog-body"><div class="detail-grid"><div class="detail-term">ID de la tâche</div><div id="detail-job-id" class="detail-val">—</div><div class="detail-term">Fichier source</div><div id="detail-job-source" class="detail-val">—</div><div class="detail-term">Statut</div><div id="detail-job-status" class="detail-val">—</div><div class="detail-term">Agent assigné</div><div id="detail-job-worker" class="detail-val">—</div><div class="detail-term">Tentatives</div><div id="detail-job-attempts" class="detail-val">—</div><div class="detail-term">Création</div><div id="detail-job-created" class="detail-val">—</div><div class="detail-term">Fichier résultat</div><div id="detail-job-output" class="detail-val">—</div></div><div id="detail-error-box" class="toast-notice error" style="display: none;"><div style="font-weight: 700; margin-bottom: 0.25rem;">Erreur signalée :</div><div id="detail-error-content" class="code-snippet">—</div></div><div id="detail-curl-section" style="margin-top: 0.5rem; display: none;"><label class="form-label">Commande de téléchargement directe (curl) :</label><div id="detail-curl-command" class="code-snippet">curl -k -H 'Authorization: Bearer &lt;ADMIN_KEY&gt;' https://localhost:3443/api/v1/jobs/.../output -o resultat.mkv</div></div></div><div class="dialog-footer"><button type="button" id="job-dialog-close-btn" class="btn btn-secondary">Fermer</button><button type="button" id="job-dialog-download-btn" class="btn btn-primary" style="display: none;">Télécharger le résultat</button></div></dialog></div><div id="panel-workers" role="tabpanel" aria-labelledby="tab-btn-workers" hidden class="tab-panel"><section class="section-panel" aria-labelledby="workers-section-title"><div class="section-panel-header"><div><h2 id="workers-section-title" class="section-title">Serveurs et agents de traitement</h2><p class="section-subtitle">Agents de calcul enregistrés via l'API. Chaque agent traite les baux sur MKVToolNix sans connexion directe à PostgreSQL.</p></div></div><div class="table-wrapper"><table class="data-table" aria-label="Liste des agents et serveurs de traitement"><thead><tr><th scope="col">Identifiant de l'agent</th><th scope="col">Nom d'hôte / Rôle</th><th scope="col">Dernière activité</th><th scope="col">Statut</th></tr></thead><tbody id="workers-table-body"><tr><td colspan="4" class="empty-state-text">Chargement des serveurs et agents…</td></tr></tbody></table></div><div style="margin-top: 1.5rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;"><div class="metric-card"><div class="metric-label">Architecture distribuée</div><p style="font-size: 0.875rem; color: var(--text-dim); margin-top: 0.25rem;">Mode centralisé de 1 à N serveurs. Le coordinateur central gère les métadonnées et distribue les tâches avec des baux de 120 s renouvelés toutes les 20 s.</p></div><div class="metric-card"><div class="metric-label">Haute disponibilité</div><p style="font-size: 0.875rem; color: var(--text-dim); margin-top: 0.25rem;">La haute disponibilité reste optionnelle et nécessite un cadrage distinct ; aucun seuil de nœuds ne l'active automatiquement.</p></div></div></section></div><div id="panel-settings" role="tabpanel" aria-labelledby="tab-btn-settings" hidden class="tab-panel"><section class="section-panel" aria-labelledby="session-settings-title"><div class="section-panel-header"><div><h2 id="session-settings-title" class="section-title">Session &amp; Authentification</h2><p class="section-subtitle">Gestion sécurisée de l'accès administrateur. Aucune clé secrète n'est conservée en clair dans sessionStorage ou localStorage.</p></div></div><div class="form-group"><label for="admin-key-input" class="form-label">Clé d'administration (ADMIN_KEY) ou jeton de session</label><div style="display: flex; gap: 0.75rem; flex-wrap: wrap;"><input type="password" id="admin-key-input" class="form-input" placeholder="Clé secrète (ex: issue de var/secrets/admin_key)" autocomplete="off" spellcheck="false" style="flex: 1; min-width: 260px;"><button type="button" id="admin-key-save-btn" class="btn btn-primary">Ouvrir la session</button><button type="button" id="admin-key-logout-btn" class="btn btn-secondary" style="display: none;">Fermer la session</button></div><div id="auth-status-box" style="margin-top: 0.5rem;"><p id="auth-status-text" class="form-help">🔒 Mode mémoire volatile actif : la clé réside uniquement dans la mémoire JavaScript de l'onglet actif. Recharger ou fermer l'onglet efface instantanément la clé.</p></div></div></section><section class="section-panel" aria-labelledby="theme-settings-title"><div class="section-panel-header"><div><h2 id="theme-settings-title" class="section-title">Préférences d'affichage</h2><p class="section-subtitle">Personnalisez l'apparence selon vos conditions de visionnage.</p></div></div><div class="form-group" style="max-width: 320px;"><label for="theme-select" class="form-label">Thème de couleur</label><select id="theme-select" class="form-select"><option value="system">Système (automatique)</option><option value="light">Clair (contrastes renforcés)</option><option value="dark">Sombre (haute lisibilité)</option></select><p class="form-help">Respecte automatiquement le paramètre prefers-color-scheme de votre système d'exploitation.</p></div></section><section class="section-panel" aria-labelledby="diagnostic-settings-title"><div class="section-panel-header"><div><h2 id="diagnostic-settings-title" class="section-title">Diagnostics et points d'accès</h2><p class="section-subtitle">Informations de raccordement réseau et état du coordinateur.</p></div></div><div class="detail-grid"><div class="detail-term">URL de l'interface</div><div class="detail-val">http://localhost:3000</div><div class="detail-term">API locale Nginx</div><div class="detail-val">/api/v1/ (relais sécurisé vers coordinator:3443)</div><div class="detail-term">API TLS directe</div><div class="detail-val">https://localhost:3443 (nécessite var/secrets/ca.crt)</div><div class="detail-term">Contrat d'API</div><div class="detail-val">OpenAPI 3.1 • docs/openapi.yaml</div><div class="detail-term">Moteur de remux</div><div class="detail-val">MKVToolNix (mkvmerge) natif</div></div></section></div></main><footer style="margin-top: 3rem; text-align: center; font-size: 0.8125rem; color: var(--text-dim); border-top: 1px solid var(--border-color); padding-top: 1.5rem;"><p>Flux de Fichiers v0.3 — Poste de pilotage Leptos moderne et responsive.</p><p style="margin-top: 0.25rem;">Recommandations d'accessibilité W3C suivies • Contrastes renforcés (&gt;= 5.9:1) • Navigation clavier complète • Thèmes clair/sombre</p><p style="margin-top: 0.25rem;">Remuxage MKVToolNix • Mode centralisé autonome ou workers distants • PostgreSQL local</p></footer></div>
   <script>
 
 (function() {
   'use strict';
 
-  const STORAGE_KEY = 'flux_admin_key';
-  let adminKey = sessionStorage.getItem(STORAGE_KEY) || '';
+  // Sécurité : la clé d'administration réside UNIQUEMENT en mémoire volatile JavaScript de l'onglet actif.
+  // Aucun stockage en clair dans sessionStorage ni localStorage.
+  let volatileAdminKey = '';
+  let csrfToken = '';
+  let activeTab = 'dashboard';
+  let cachedFiles = [];
+  let cachedJobs = [];
+  let cachedWorkers = [];
+  let activeJobFilter = 'all';
+  let selectedFileForRemux = null;
+  let sessionMode = 'none'; // 'none' | 'memory_key' | 'cookie_session'
 
   const el = (id) => document.getElementById(id);
 
@@ -578,6 +843,301 @@ table.data-table tr:hover {
     }
   }
 
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  // --- Gestion des onglets accessibles ---
+  const TABS = ['dashboard', 'files', 'jobs', 'workers', 'settings'];
+
+  function switchTab(tabName) {
+    if (!TABS.includes(tabName)) return;
+    activeTab = tabName;
+
+    TABS.forEach(name => {
+      const btn = el(`tab-btn-${name}`);
+      const panel = el(`panel-${name}`);
+      const isSelected = name === tabName;
+
+      if (btn) {
+        btn.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+        btn.setAttribute('tabindex', isSelected ? '0' : '-1');
+      }
+      if (panel) {
+        if (isSelected) {
+          panel.removeAttribute('hidden');
+        } else {
+          panel.setAttribute('hidden', '');
+        }
+      }
+    });
+  }
+
+  function setupTabs() {
+    TABS.forEach((name, index) => {
+      const btn = el(`tab-btn-${name}`);
+      if (!btn) return;
+
+      btn.addEventListener('click', () => switchTab(name));
+
+      btn.addEventListener('keydown', (e) => {
+        let targetIndex = index;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          targetIndex = (index + 1) % TABS.length;
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          targetIndex = (index - 1 + TABS.length) % TABS.length;
+        } else if (e.key === 'Home') {
+          e.preventDefault();
+          targetIndex = 0;
+        } else if (e.key === 'End') {
+          e.preventDefault();
+          targetIndex = TABS.length - 1;
+        } else {
+          return;
+        }
+        const nextBtn = el(`tab-btn-${TABS[targetIndex]}`);
+        if (nextBtn) {
+          nextBtn.focus();
+          switchTab(TABS[targetIndex]);
+        }
+      });
+    });
+
+    const qFiles = el('quick-goto-files-btn');
+    if (qFiles) qFiles.addEventListener('click', () => switchTab('files'));
+
+    const qJobs = el('quick-goto-jobs-btn');
+    if (qJobs) qJobs.addEventListener('click', () => switchTab('jobs'));
+
+    const qSettings = el('quick-goto-settings-btn');
+    if (qSettings) qSettings.addEventListener('click', () => switchTab('settings'));
+  }
+
+  // --- Gestion du Thème (Clair / Sombre / Système) ---
+  function applyTheme(theme) {
+    if (theme === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else if (theme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+    const select = el('theme-select');
+    if (select) select.value = theme;
+    try {
+      localStorage.setItem('flux_theme_pref', theme);
+    } catch {}
+  }
+
+  function setupTheme() {
+    let saved = 'system';
+    try {
+      saved = localStorage.getItem('flux_theme_pref') || 'system';
+    } catch {}
+    applyTheme(saved);
+
+    const select = el('theme-select');
+    if (select) {
+      select.addEventListener('change', (e) => applyTheme(e.target.value));
+    }
+
+    const toggleBtn = el('theme-toggle-btn');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme');
+        if (current === 'dark') {
+          applyTheme('light');
+        } else if (current === 'light') {
+          applyTheme('system');
+        } else {
+          applyTheme('dark');
+        }
+      });
+    }
+  }
+
+  // --- Gestion de la session et de l'authentification (Contrat #29) ---
+  function updateSessionUI() {
+    const pill = el('session-status-pill');
+    const label = el('session-status-text');
+    const authStatusText = el('auth-status-text');
+    const logoutBtn = el('admin-key-logout-btn');
+    const saveBtn = el('admin-key-save-btn');
+    const input = el('admin-key-input');
+
+    if (sessionMode === 'cookie_session') {
+      if (pill) {
+        pill.className = 'status-pill online';
+        pill.setAttribute('aria-label', 'Session web sécurisée active');
+      }
+      if (label) label.textContent = 'Session web active';
+      if (authStatusText) {
+        authStatusText.textContent = '✅ Session web sécurisée active (cookie HttpOnly et protection CSRF). Téléchargement natif en flux direct sans mémoire tampon.';
+      }
+      if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+      if (saveBtn) saveBtn.textContent = 'Changer de clé';
+    } else if (sessionMode === 'memory_key' && volatileAdminKey) {
+      if (pill) {
+        pill.className = 'status-pill online';
+        pill.setAttribute('aria-label', 'Authentifié via clé en mémoire volatile');
+      }
+      if (label) label.textContent = 'Connecté (Mémoire)';
+      if (authStatusText) {
+        authStatusText.textContent = '🔒 Clé active en mémoire vive volatile de l\'onglet (non persistée sur disque, effacée à la fermeture).';
+      }
+      if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+      if (saveBtn) saveBtn.textContent = 'Mettre à jour la clé';
+    } else {
+      if (pill) {
+        pill.className = 'status-pill warning';
+        pill.setAttribute('aria-label', 'Session non authentifiée');
+      }
+      if (label) label.textContent = 'Non authentifié';
+      if (authStatusText) {
+        authStatusText.textContent = '🔒 Mode mémoire volatile actif : la clé ne sera stockée ni dans sessionStorage ni dans localStorage.';
+      }
+      if (logoutBtn) logoutBtn.style.display = 'none';
+      if (saveBtn) saveBtn.textContent = 'Ouvrir la session';
+      if (input) input.value = '';
+    }
+  }
+
+  async function checkSession() {
+    // Vérification de la session active via GET /api/v1/auth/session (contrat #29)
+    try {
+      const res = await fetch('/api/v1/auth/session', {
+        method: 'GET',
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (data.csrf_token) {
+          csrfToken = data.csrf_token;
+        }
+        sessionMode = 'cookie_session';
+        updateSessionUI();
+        return;
+      }
+    } catch {}
+
+    if (volatileAdminKey) {
+      sessionMode = 'memory_key';
+    } else {
+      sessionMode = 'none';
+    }
+    updateSessionUI();
+  }
+
+  async function login(key) {
+    if (!key || !key.trim()) {
+      showNotice('Veuillez saisir une clé d\'administration.', 'error');
+      return;
+    }
+    const cleanKey = key.trim();
+
+    // 1. Tenter d'ouvrir la session web backend officielle (#29)
+    try {
+      const res = await fetch('/api/v1/auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ admin_key: cleanKey })
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (data.csrf_token) {
+          csrfToken = data.csrf_token;
+        }
+        sessionMode = 'cookie_session';
+        volatileAdminKey = ''; // Purge immédiate de la clé en mémoire vive une fois le cookie posé
+        updateSessionUI();
+        showNotice('Session web sécurisée ouverte avec succès (cookie HttpOnly).', 'success');
+        refreshAll();
+        return;
+      }
+    } catch {}
+
+    // 2. Fallback mémoire volatile avec jeton Bearer
+    volatileAdminKey = cleanKey;
+    sessionMode = 'memory_key';
+    updateSessionUI();
+    showNotice('Clé mémorisée en mémoire volatile (aucun stockage disque ou sessionStorage).', 'success');
+    refreshAll();
+  }
+
+  async function logout() {
+    // Révocation de session web côté backend si active
+    if (sessionMode === 'cookie_session') {
+      try {
+        const headers = {};
+        if (csrfToken) {
+          headers['x-csrf-token'] = csrfToken;
+        }
+        await fetch('/api/v1/auth/logout', {
+          method: 'POST',
+          headers,
+          credentials: 'include'
+        });
+      } catch {}
+    }
+
+    volatileAdminKey = '';
+    csrfToken = '';
+    sessionMode = 'none';
+    updateSessionUI();
+    showNotice('Session fermée et mémoire purgée.', 'info');
+    refreshAll();
+  }
+
+  // --- Requêtes API authentifiées ---
+  async function apiFetch(endpoint, options = {}) {
+    const method = (options.method || 'GET').toUpperCase();
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    };
+
+    // Protection CSRF pour les méthodes non sûres (contrat #29)
+    if (csrfToken && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      headers['x-csrf-token'] = csrfToken;
+    }
+
+    // Authentification Bearer si clé volatile présente
+    if (volatileAdminKey) {
+      headers['Authorization'] = 'Bearer ' + volatileAdminKey;
+    }
+
+    const res = await fetch(endpoint, {
+      ...options,
+      headers,
+      credentials: 'include'
+    });
+
+    if (res.status === 401) {
+      volatileAdminKey = '';
+      sessionMode = 'none';
+      csrfToken = '';
+      updateSessionUI();
+      showNotice('Accès non autorisé (401) : clé révoquée ou session invalide. Mémoire purgée.', 'error');
+      throw new Error('Non autorisé');
+    }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.code || 'Erreur HTTP ' + res.status);
+    }
+    return res;
+  }
+
+  // --- Vérification de santé ---
   async function checkHealth() {
     const pill = el('health-status-pill');
     const label = el('health-status-text');
@@ -607,269 +1167,538 @@ table.data-table tr:hover {
     }
   }
 
-  async function apiFetch(endpoint, options = {}) {
-    if (!adminKey) {
-      throw new Error('Clé administrateur manquante');
-    }
-    const headers = {
-      'Authorization': 'Bearer ' + adminKey,
-      'Content-Type': 'application/json',
-      ...(options.headers || {})
-    };
-    const res = await fetch(endpoint, { ...options, headers });
-    if (res.status === 401) {
-      showNotice('Clé administrateur refusée (401 Non autorisé)', 'error');
-      throw new Error('Authentification échouée');
-    }
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.code || 'Erreur HTTP ' + res.status);
-    }
-    return res;
-  }
-
-  async function downloadJobOutput(jobId, filename) {
-    if (!adminKey) {
-      showNotice('Clé administrateur requise pour télécharger le résultat.', 'error');
-      return;
-    }
-    showNotice(`Téléchargement authentifié de la tâche ${jobId.slice(0, 8)}…`, 'info');
-    try {
-      const res = await fetch(`/api/v1/jobs/${jobId}/output`, {
-        headers: {
-          'Authorization': 'Bearer ' + adminKey
-        }
-      });
-      if (res.status === 401) {
-        showNotice('Téléchargement refusé : clé administrateur invalide ou expirée.', 'error');
-        return;
-      }
-      if (!res.ok) {
-        showNotice(`Erreur lors du téléchargement : code HTTP ${res.status}`, 'error');
-        return;
-      }
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const tempLink = document.createElement('a');
-      tempLink.href = objectUrl;
-      tempLink.download = filename || `remux-${jobId.slice(0, 8)}.mkv`;
-      document.body.appendChild(tempLink);
-      tempLink.click();
-      document.body.removeChild(tempLink);
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
-      showNotice(`Téléchargement de ${tempLink.download} terminé.`, 'success');
-    } catch (e) {
-      showNotice(`Échec du téléchargement en mémoire : ${e.message}. Pour les fichiers de plusieurs Go, privilégiez curl en direct.`, 'error');
-    }
-  }
-
+  // --- Fichiers sources ---
   async function loadFiles() {
     const tbody = el('files-table-body');
-    const countEl = el('metric-files');
-    if (!adminKey) {
-      if (tbody) tbody.innerHTML = '<tr><td colspan="3" class="empty-state-text">Veuillez renseigner votre clé administrateur ci-dessus pour lister les fichiers sources.</td></tr>';
-      if (countEl) countEl.textContent = '—';
-      return;
-    }
+    const metricCount = el('metric-files-count');
 
     try {
       const res = await apiFetch('/api/v1/files');
-      const files = await res.json();
-      if (countEl) countEl.textContent = files.length.toString();
+      const data = await res.json();
+      cachedFiles = Array.isArray(data) ? data : (data.files || []);
 
-      if (!tbody) return;
-      if (files.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="3"><div class="empty-state"><p class="empty-state-title">Aucun fichier source disponible</p><p class="empty-state-text">Le répertoire d\'entrée (INPUT_DIR) ne contient actuellement aucun fichier .mkv admissible.</p></div></td></tr>';
-        return;
+      if (metricCount) metricCount.textContent = String(cachedFiles.length);
+      renderFilesTable();
+    } catch (e) {
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="3" class="empty-state-text" style="color: var(--danger-text);">
+          ${escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session dans l\'onglet Paramètres pour lister les fichiers.' : 'Impossible de récupérer les fichiers sources.')}
+        </td></tr>`;
       }
+    }
+  }
 
-      tbody.innerHTML = files.map(f => `
+  function renderFilesTable() {
+    const tbody = el('files-table-body');
+    const countBadge = el('files-counter-text');
+    const searchInput = el('files-search-input');
+    const term = (searchInput ? searchInput.value : '').toLowerCase().trim();
+
+    if (!tbody) return;
+
+    const filtered = cachedFiles.filter(f => !term || f.name.toLowerCase().includes(term));
+
+    if (countBadge) {
+      countBadge.textContent = `${filtered.length} / ${cachedFiles.length} fichier(s)`;
+    }
+
+    if (filtered.length === 0) {
+      const msg = cachedFiles.length === 0
+        ? 'Aucun fichier source .mkv détecté dans var/input/. Déposez des fichiers pour commencer.'
+        : 'Aucun fichier ne correspond à votre recherche.';
+      tbody.innerHTML = `<tr><td colspan="3" class="empty-state-text">${escapeHtml(msg)}</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(file => {
+      const safeName = escapeHtml(file.name);
+      return `
         <tr>
-          <td><strong class="code-cell">${escapeHtml(f.name)}</strong></td>
-          <td>${formatBytes(f.bytes)}</td>
           <td>
-            <button type="button" class="btn btn-primary btn-sm btn-action-remux" data-filename="${escapeHtml(f.name)}">
+            <div style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600;">
+              <span aria-hidden="true" style="color: var(--primary);">🎬</span>
+              <span>${safeName}</span>
+            </div>
+          </td>
+          <td style="font-family: var(--font-mono);">${formatBytes(file.bytes)}</td>
+          <td style="text-align: right;">
+            <button
+              type="button"
+              class="btn btn-primary btn-sm remux-launch-btn"
+              data-filename="${safeName}"
+              aria-label="Lancer le remuxage du fichier ${safeName}"
+            >
               Lancer le remuxage
             </button>
           </td>
         </tr>
-      `).join('');
+      `;
+    }).join('');
 
-      tbody.querySelectorAll('.btn-action-remux').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const filename = btn.getAttribute('data-filename');
-          if (filename) createJob(filename);
-        });
+    tbody.querySelectorAll('.remux-launch-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openConfirmRemuxDialog(btn.getAttribute('data-filename'));
       });
-    } catch (e) {
-      if (tbody) tbody.innerHTML = `<tr><td colspan="3" class="empty-state-text">Erreur de chargement des fichiers : ${escapeHtml(e.message)}</td></tr>`;
-    }
+    });
   }
 
-  async function loadJobs() {
-    const tbody = el('jobs-table-body');
-    const countEl = el('metric-jobs');
-    if (!adminKey) {
-      if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="empty-state-text">Clé administrateur requise pour afficher les tâches.</td></tr>';
-      if (countEl) countEl.textContent = '—';
-      return;
-    }
+  // --- Modale de confirmation de remuxage ---
+  function openConfirmRemuxDialog(filename) {
+    selectedFileForRemux = filename;
+    const dialog = el('confirm-remux-dialog');
+    const filenameEl = el('confirm-dialog-filename');
+    const workerSelect = el('confirm-dialog-worker-select');
 
-    try {
-      const res = await apiFetch('/api/v1/jobs');
-      const jobs = await res.json();
-      if (countEl) countEl.textContent = jobs.length.toString();
+    if (!dialog) return;
 
-      if (!tbody) return;
-      if (jobs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><p class="empty-state-title">Aucune tâche enregistrée</p><p class="empty-state-text">Aucun traitement de remuxage n\'a encore été soumis ou historisé dans PostgreSQL.</p></div></td></tr>';
-        return;
-      }
+    if (filenameEl) filenameEl.textContent = filename;
 
-      tbody.innerHTML = jobs.map(j => {
-        const status = j.status || 'inconnu';
-        let statusPill = `<span class="status-pill queued"><span class="status-dot"></span>En attente</span>`;
-        let downloadAction = '<span class="metric-desc">Non disponible</span>';
-
-        if (status === 'queued') {
-          statusPill = `<span class="status-pill queued"><span class="status-dot"></span>En file d'attente</span>`;
-        } else if (status === 'running') {
-          statusPill = `<span class="status-pill running"><span class="status-dot"></span>En cours</span>`;
-        } else if (status === 'succeeded') {
-          statusPill = `<span class="status-pill succeeded"><span class="status-dot"></span>Succès</span>`;
-          downloadAction = `<button type="button" class="btn btn-secondary btn-sm btn-action-download" data-jobid="${j.id}" data-filename="${escapeHtml(j.output_name || j.source_name)}">Télécharger (API)</button>`;
-        } else if (status === 'failed') {
-          const errDetail = j.error_code ? ` (${escapeHtml(j.error_code)})` : '';
-          statusPill = `<span class="status-pill failed"><span class="status-dot"></span>Échec${errDetail}</span>`;
-        }
-
-        return `
-          <tr>
-            <td class="code-cell">${j.id.slice(0, 8)}…</td>
-            <td><strong>${escapeHtml(j.source_name)}</strong></td>
-            <td>${statusPill}</td>
-            <td>${formatDate(j.created_at)}</td>
-            <td>${downloadAction}</td>
-          </tr>
-        `;
-      }).join('');
-
-      tbody.querySelectorAll('.btn-action-download').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const jobId = btn.getAttribute('data-jobid');
-          const filename = btn.getAttribute('data-filename');
-          if (jobId) downloadJobOutput(jobId, filename);
-        });
+    // Alimenter la sélection des agents
+    if (workerSelect) {
+      workerSelect.innerHTML = '<option value="">N\'importe quel agent disponible (recommandé)</option>';
+      cachedWorkers.forEach(w => {
+        const opt = document.createElement('option');
+        opt.value = w.id;
+        opt.textContent = `${w.name} (${w.id.slice(0, 8)})`;
+        workerSelect.appendChild(opt);
       });
-    } catch (e) {
-      if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="empty-state-text">Erreur de chargement des tâches : ${escapeHtml(e.message)}</td></tr>`;
     }
+
+    dialog.showModal();
+    const submitBtn = el('confirm-dialog-submit-btn');
+    if (submitBtn) submitBtn.focus();
   }
 
-  async function loadWorkers() {
-    const tbody = el('workers-table-body');
-    const countEl = el('metric-workers');
-    if (!adminKey) {
-      if (tbody) tbody.innerHTML = '<tr><td colspan="4" class="empty-state-text">Clé administrateur requise pour lister les agents.</td></tr>';
-      if (countEl) countEl.textContent = '—';
-      return;
+  function closeConfirmRemuxDialog() {
+    const dialog = el('confirm-remux-dialog');
+    if (dialog && dialog.open) {
+      dialog.close();
     }
-
-    try {
-      const res = await apiFetch('/api/v1/workers');
-      const workers = await res.json();
-      if (countEl) countEl.textContent = workers.length.toString();
-
-      if (!tbody) return;
-      if (workers.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4"><div class="empty-state"><p class="empty-state-title">Aucun agent enregistré</p><p class="empty-state-text">Aucun worker ne s\'est encore enregistré auprès du coordinateur.</p></div></td></tr>';
-        return;
-      }
-
-      tbody.innerHTML = workers.map(w => `
-        <tr>
-          <td class="code-cell">${w.id.slice(0, 8)}…</td>
-          <td><strong>${escapeHtml(w.name)}</strong></td>
-          <td><span class="status-pill online"><span class="status-dot"></span>Enregistré</span></td>
-          <td>${formatDate(w.last_seen)}</td>
-        </tr>
-      `).join('');
-    } catch (e) {
-      if (tbody) tbody.innerHTML = `<tr><td colspan="4" class="empty-state-text">Erreur de chargement des agents : ${escapeHtml(e.message)}</td></tr>`;
-    }
+    selectedFileForRemux = null;
   }
 
-  async function createJob(sourceName) {
-    if (!adminKey) {
-      showNotice('Veuillez d\'abord saisir votre clé administrateur ci-dessus.', 'error');
-      return;
-    }
-    showNotice(`Création de la tâche pour "${sourceName}"…`, 'info');
+  async function submitRemuxJob() {
+    if (!selectedFileForRemux) return;
+    const workerSelect = el('confirm-dialog-worker-select');
+    const targetWorker = workerSelect && workerSelect.value ? workerSelect.value : null;
+
+    closeConfirmRemuxDialog();
+    showNotice(`Soumission du remuxage pour ${selectedFileForRemux}…`, 'info');
+
     try {
       const res = await apiFetch('/api/v1/jobs', {
         method: 'POST',
-        body: JSON.stringify({ source_name: sourceName, target_worker_id: null })
+        body: JSON.stringify({
+          source_name: selectedFileForRemux,
+          target_worker_id: targetWorker
+        })
       });
       const job = await res.json();
-      showNotice(`Tâche ${job.id.slice(0, 8)} créée avec succès pour ${sourceName}`, 'success');
-      loadJobs();
+      showNotice(`Tâche créée avec succès (ID: ${job.id.slice(0, 8)}).`, 'success');
+      switchTab('jobs');
+      refreshAll();
     } catch (e) {
-      showNotice(`Échec de création de la tâche : ${e.message}`, 'error');
+      showNotice('Échec de la soumission de la tâche : ' + e.message, 'error');
     }
   }
 
-  function escapeHtml(str) {
-    if (!str) return '';
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  // --- Tâches de remuxage ---
+  async function loadJobs() {
+    const tbody = el('jobs-table-body');
+    const metricJobs = el('metric-jobs-count');
+
+    try {
+      const res = await apiFetch('/api/v1/jobs');
+      const data = await res.json();
+      cachedJobs = Array.isArray(data) ? data : (data.jobs || []);
+
+      if (metricJobs) metricJobs.textContent = String(cachedJobs.length);
+      renderRecentJobs();
+      renderJobsTable();
+    } catch (e) {
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="5" class="empty-state-text" style="color: var(--danger-text);">
+          ${escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session pour afficher la file des tâches.' : 'Impossible de récupérer les tâches.')}
+        </td></tr>`;
+      }
+    }
   }
 
-  function setupAuthForm() {
-    const keyInput = el('admin-key-input');
-    const saveBtn = el('admin-key-save-btn');
-    const statusText = el('auth-status-text');
+  function renderRecentJobs() {
+    const tbody = el('recent-jobs-table-body');
+    if (!tbody) return;
 
-    if (keyInput && adminKey) {
-      keyInput.value = adminKey;
-      if (statusText) statusText.textContent = 'Clé enregistrée en session locale (navigateur uniquement).';
+    const recent = cachedJobs.slice(0, 3);
+    if (recent.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="empty-state-text">Aucune tâche enregistrée pour le moment.</td></tr>`;
+      return;
     }
 
-    if (saveBtn && keyInput) {
-      saveBtn.addEventListener('click', () => {
-        adminKey = keyInput.value.trim();
-        sessionStorage.setItem(STORAGE_KEY, adminKey);
-        if (statusText) {
-          statusText.textContent = adminKey ? 'Clé enregistrée dans la session locale.' : 'Clé effacée.';
-        }
-        showNotice('Configuration de la clé mise à jour.', 'info');
-        loadAll();
+    tbody.innerHTML = recent.map(j => {
+      const statusClass = j.status === 'succeeded' ? 'succeeded' : (j.status === 'failed' ? 'failed' : (j.status === 'running' ? 'running' : 'queued'));
+      return `
+        <tr>
+          <td style="font-family: var(--font-mono); font-weight: 600;">${escapeHtml(j.id.slice(0, 8))}…</td>
+          <td>${escapeHtml(j.source_name)}</td>
+          <td><span class="status-pill ${statusClass}"><span class="status-dot"></span>${escapeHtml(j.status)}</span></td>
+          <td>${formatDate(j.created_at)}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function updateJobFiltersCount() {
+    const counts = { all: cachedJobs.length, queued: 0, running: 0, succeeded: 0, failed: 0 };
+    cachedJobs.forEach(j => {
+      if (counts[j.status] !== undefined) counts[j.status]++;
+    });
+
+    Object.keys(counts).forEach(k => {
+      const counterEl = el(`count-filter-${k}`);
+      if (counterEl) counterEl.textContent = `(${counts[k]})`;
+    });
+  }
+
+  function renderJobsTable() {
+    const tbody = el('jobs-table-body');
+    const searchInput = el('jobs-search-input');
+    const term = (searchInput ? searchInput.value : '').toLowerCase().trim();
+
+    if (!tbody) return;
+
+    updateJobFiltersCount();
+
+    const filtered = cachedJobs.filter(j => {
+      const matchFilter = activeJobFilter === 'all' || j.status === activeJobFilter;
+      const matchSearch = !term || j.id.toLowerCase().includes(term) || j.source_name.toLowerCase().includes(term);
+      return matchFilter && matchSearch;
+    });
+
+    if (filtered.length === 0) {
+      const msg = cachedJobs.length === 0
+        ? 'Aucune tâche de remuxage dans la file d\'attente.'
+        : 'Aucune tâche ne correspond aux critères sélectionnés.';
+      tbody.innerHTML = `<tr><td colspan="5" class="empty-state-text">${escapeHtml(msg)}</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(j => {
+      const safeId = escapeHtml(j.id);
+      const safeSource = escapeHtml(j.source_name);
+      const statusClass = j.status === 'succeeded' ? 'succeeded' : (j.status === 'failed' ? 'failed' : (j.status === 'running' ? 'running' : 'queued'));
+      const isSucceeded = j.status === 'succeeded';
+
+      return `
+        <tr>
+          <td style="font-family: var(--font-mono); font-weight: 600;">${safeId.slice(0, 8)}…</td>
+          <td>${safeSource}</td>
+          <td>
+            <span class="status-pill ${statusClass}">
+              <span class="status-dot"></span>
+              ${escapeHtml(j.status)}
+            </span>
+          </td>
+          <td>${formatDate(j.created_at)}</td>
+          <td style="text-align: right;">
+            <div style="display: inline-flex; gap: 0.5rem; justify-content: flex-end;">
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm job-detail-btn"
+                data-job-id="${safeId}"
+                aria-label="Inspecter les détails de la tâche ${safeId}"
+              >
+                Détails
+              </button>
+              ${isSucceeded ? `
+                <button
+                  type="button"
+                  class="btn btn-primary btn-sm job-download-btn"
+                  data-job-id="${safeId}"
+                  data-output-name="${escapeHtml(j.output_name || 'resultat.mkv')}"
+                  aria-label="Télécharger en flux le résultat de la tâche ${safeId}"
+                >
+                  Télécharger
+                </button>
+              ` : ''}
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    tbody.querySelectorAll('.job-detail-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openJobDetailDialog(btn.getAttribute('data-job-id'));
       });
+    });
+
+    tbody.querySelectorAll('.job-download-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        downloadJobStream(btn.getAttribute('data-job-id'), btn.getAttribute('data-output-name'));
+      });
+    });
+  }
+
+  // --- Téléchargement en flux direct (sans Blob en mémoire RAM) ---
+  function downloadJobStream(jobId, filename) {
+    const url = `/api/v1/jobs/${encodeURIComponent(jobId)}/output`;
+
+    // Si une session web par cookie HttpOnly est active (contrat #29), le téléchargement direct
+    // par le navigateur s'effectue en streaming continu sans tampon mémoire JavaScript !
+    if (sessionMode === 'cookie_session') {
+      showNotice(`Téléchargement direct en flux pour ${filename}…`, 'info');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename || 'resultat.mkv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return;
+    }
+
+    // Si authentifié via clé volatile en mémoire (sans cookie de session) :
+    // Une navigation <a> ne transmet pas l'en-tête Authorization (provoquant un 401).
+    // On oriente l'utilisateur vers l'ouverture d'une session web dans Paramètres ou curl.
+    if (volatileAdminKey) {
+      showNotice('Pour un streaming direct en un clic, ouvrez une session web dans Paramètres. Affichage de la commande curl dans Détails…', 'info');
+      openJobDetailDialog(jobId);
+      return;
+    }
+
+    showNotice('Session ou clé administrateur requise pour télécharger le résultat.', 'error');
+    switchTab('settings');
+  }
+
+  // --- Modale de détails d'une tâche ---
+  function openJobDetailDialog(jobId) {
+    const job = cachedJobs.find(j => j.id === jobId);
+    if (!job) return;
+
+    const dialog = el('job-detail-dialog');
+    if (!dialog) return;
+
+    const idEl = el('detail-job-id');
+    const sourceEl = el('detail-job-source');
+    const statusEl = el('detail-job-status');
+    const workerEl = el('detail-job-worker');
+    const attemptsEl = el('detail-job-attempts');
+    const createdEl = el('detail-job-created');
+    const outputEl = el('detail-job-output');
+    const errorBox = el('detail-error-box');
+    const errorContent = el('detail-error-content');
+    const curlSec = el('detail-curl-section');
+    const curlCmd = el('detail-curl-command');
+    const dlBtn = el('job-dialog-download-btn');
+
+    if (idEl) idEl.textContent = job.id;
+    if (sourceEl) sourceEl.textContent = job.source_name;
+    if (statusEl) {
+      const statusClass = job.status === 'succeeded' ? 'succeeded' : (job.status === 'failed' ? 'failed' : (job.status === 'running' ? 'running' : 'queued'));
+      statusEl.innerHTML = `<span class="status-pill ${statusClass}"><span class="status-dot"></span>${escapeHtml(job.status)}</span>`;
+    }
+    if (workerEl) workerEl.textContent = job.worker_id || job.target_worker_id || 'N\'importe quel agent (ou central autonome)';
+    if (attemptsEl) attemptsEl.textContent = `${job.attempts || 1} tentative(s)`;
+    if (createdEl) createdEl.textContent = formatDate(job.created_at);
+    if (outputEl) outputEl.textContent = job.output_name || 'Non généré';
+
+    if (errorBox && errorContent) {
+      if (job.status === 'failed' || job.error_code) {
+        errorBox.style.display = 'block';
+        errorContent.textContent = job.error_code
+          ? `Code d'erreur: ${job.error_code}`
+          : 'Traitement en échec sans code spécifique.';
+      } else {
+        errorBox.style.display = 'none';
+      }
+    }
+
+    if (curlSec && curlCmd) {
+      curlCmd.textContent = `curl -k -H "Authorization: Bearer <ADMIN_KEY>" "https://localhost:3443/api/v1/jobs/${encodeURIComponent(job.id)}/output" -o "${job.output_name || 'resultat.mkv'}"`;
+      curlSec.style.display = 'block';
+    }
+
+    if (dlBtn) {
+      if (job.status === 'succeeded' && sessionMode === 'cookie_session') {
+        dlBtn.style.display = 'inline-flex';
+        dlBtn.textContent = 'Télécharger le résultat (flux direct)';
+        dlBtn.onclick = () => {
+          downloadJobStream(job.id, job.output_name || 'resultat.mkv');
+        };
+      } else {
+        dlBtn.style.display = 'none';
+      }
+    }
+
+    dialog.showModal();
+    const closeBtn = el('job-dialog-close-btn');
+    if (closeBtn) closeBtn.focus();
+  }
+
+  function closeJobDetailDialog() {
+    const dialog = el('job-detail-dialog');
+    if (dialog && dialog.open) {
+      dialog.close();
     }
   }
 
-  function setupRefresh() {
+  // --- Serveurs et agents ---
+  async function loadWorkers() {
+    const tbody = el('workers-table-body');
+    const metricWorkers = el('metric-workers-count');
+
+    try {
+      const res = await apiFetch('/api/v1/workers');
+      const data = await res.json();
+      cachedWorkers = Array.isArray(data) ? data : (data.workers || []);
+
+      if (metricWorkers) metricWorkers.textContent = String(cachedWorkers.length);
+      renderWorkersTable();
+    } catch (e) {
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="4" class="empty-state-text" style="color: var(--danger-text);">
+          ${escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session pour afficher les agents enregistrés.' : 'Impossible de récupérer la liste des agents.')}
+        </td></tr>`;
+      }
+    }
+  }
+
+  function renderWorkersTable() {
+    const tbody = el('workers-table-body');
+    if (!tbody) return;
+
+    if (cachedWorkers.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="empty-state-text">
+        Aucun agent distant enregistré. Le coordinateur central traite les tâches en mode autonome (agent intégré).
+      </td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = cachedWorkers.map(w => {
+      const safeId = escapeHtml(w.id);
+      const safeName = escapeHtml(w.name);
+      return `
+        <tr>
+          <td style="font-family: var(--font-mono); font-weight: 600;">${safeId}</td>
+          <td>
+            <div style="font-weight: 600;">${safeName}</div>
+            <div style="font-size: 0.75rem; color: var(--text-dim);">${safeName.startsWith('coordinator') ? 'Coordinateur avec agent intégré' : 'Agent distant HTTPS'}</div>
+          </td>
+          <td>${formatDate(w.last_seen)}</td>
+          <td>
+            <span class="status-pill online">
+              <span class="status-dot"></span>
+              Enregistré
+            </span>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // --- Synchronisation globale ---
+  async function refreshAll() {
     const refreshBtn = el('refresh-all-btn');
     if (refreshBtn) {
-      refreshBtn.addEventListener('click', () => {
-        showNotice('Actualisation des données…', 'info');
-        loadAll();
-      });
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = 'Actualisation…';
+    }
+
+    await checkHealth();
+    await checkSession();
+    await Promise.allSettled([
+      loadFiles(),
+      loadJobs(),
+      loadWorkers()
+    ]);
+
+    if (refreshBtn) {
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = 'Actualiser';
     }
   }
 
-  function loadAll() {
-    checkHealth();
-    loadFiles();
-    loadJobs();
-    loadWorkers();
+  // --- Initialisation des écouteurs d'événements ---
+  function initListeners() {
+    setupTabs();
+    setupTheme();
+
+    const refreshBtn = el('refresh-all-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', refreshAll);
+
+    // Formulaire de session
+    const saveKeyBtn = el('admin-key-save-btn');
+    const inputKey = el('admin-key-input');
+    if (saveKeyBtn && inputKey) {
+      saveKeyBtn.addEventListener('click', () => login(inputKey.value));
+      inputKey.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') login(inputKey.value);
+      });
+    }
+
+    const logoutBtn = el('admin-key-logout-btn');
+    if (logoutBtn) logoutBtn.addEventListener('click', logout);
+
+    // Recherche de fichiers
+    const filesSearch = el('files-search-input');
+    if (filesSearch) {
+      filesSearch.addEventListener('input', renderFilesTable);
+    }
+
+    // Dialogue confirmation remux
+    const closeDialogX = el('confirm-dialog-close-x');
+    if (closeDialogX) closeDialogX.addEventListener('click', closeConfirmRemuxDialog);
+
+    const cancelDialogBtn = el('confirm-dialog-cancel-btn');
+    if (cancelDialogBtn) cancelDialogBtn.addEventListener('click', closeConfirmRemuxDialog);
+
+    const submitRemuxBtn = el('confirm-dialog-submit-btn');
+    if (submitRemuxBtn) submitRemuxBtn.addEventListener('click', submitRemuxJob);
+
+    // Recherche de tâches
+    const jobsSearch = el('jobs-search-input');
+    if (jobsSearch) {
+      jobsSearch.addEventListener('input', renderJobsTable);
+    }
+
+    // Filtres de statut de tâches
+    document.querySelectorAll('.filter-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-chip').forEach(b => b.setAttribute('aria-pressed', 'false'));
+        btn.setAttribute('aria-pressed', 'true');
+        activeJobFilter = btn.getAttribute('data-filter') || 'all';
+        renderJobsTable();
+      });
+    });
+
+    // Dialogue détails tâche
+    const jobDialogCloseX = el('job-dialog-close-x');
+    if (jobDialogCloseX) jobDialogCloseX.addEventListener('click', closeJobDetailDialog);
+
+    const jobDialogCloseBtn = el('job-dialog-close-btn');
+    if (jobDialogCloseBtn) jobDialogCloseBtn.addEventListener('click', closeJobDetailDialog);
+
+    // Fermeture avec Échap pour les modales
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeConfirmRemuxDialog();
+        closeJobDetailDialog();
+      }
+    });
+
+    // Polling régulier de santé toutes les 30 s
+    setInterval(checkHealth, 30000);
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
-    setupAuthForm();
-    setupRefresh();
-    loadAll();
-    // Interrogation périodique de santé toutes les 30 secondes
-    setInterval(checkHealth, 30000);
-  });
+  // Démarrage
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      initListeners();
+      refreshAll();
+    });
+  } else {
+    initListeners();
+    refreshAll();
+  }
 })();
 
   </script>

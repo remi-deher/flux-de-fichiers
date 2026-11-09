@@ -1,23 +1,36 @@
 # Frontend Leptos — Flux de Fichiers
 
-Interface de pilotage et de supervision pour la chaîne de remuxage MKVToolNix.
+Poste de pilotage et de supervision moderne pour la chaîne de remuxage MKVToolNix.
 
 ## Architecture
 
 - **Framework** : Rust avec [Leptos](https://leptos.dev/) (version 0.8), rendu SSR / SSG vers `frontend/dist/index.html`.
-- **Composants** :
-  - `Header` : Navigation, identité visuelle, témoin de disponibilité `/health` et bouton d'actualisation.
-  - `MetricsBar` : Indicateurs opérationnels (coordinateur joignable, agents enregistrés, fichiers sources, file de tâches en base).
-  - `AuthCard` : Gestion locale de la clé administrateur (`ADMIN_KEY`), confinée à la session locale du navigateur (`sessionStorage`).
-  - `FilesTable` : Liste des fichiers MKV admissibles dans `INPUT_DIR` et déclenchement de remuxage (`POST /api/v1/jobs`).
-  - `JobsTable` : Suivi des tâches selon les statuts de l'API (`queued`, `running`, `succeeded`, `failed`) et téléchargement authentifié du résultat (`GET /api/v1/jobs/{id}/output`).
-  - `WorkersTable` : Liste des agents de remuxage enregistrés et date de dernier contact (`last_seen`).
-  - `FutureSection` : Annonce honnête des fonctionnalités hors périmètre (éditeur visuel de flux, connecteurs distants S3/SMB).
-- **Design & Accessibilité** :
-  - Conçue selon les recommandations d'accessibilité (contrastes renforcés >= 4.5:1 sur texte et >= 3:1 sur composants, navigation complète au clavier, repères sémantiques W3C).
-  - Lien d'évitement (« Aller au contenu principal »), focus visible `:focus-visible`, labels explicites associés aux champs.
-  - Cibles tactiles >= 44x44 px, mise en page adaptative ordinateur et mobile sans débordement horizontal.
-  - Respect de `prefers-reduced-motion` et `prefers-color-scheme` (mode clair et sombre).
+- **Organisation en panneaux d'onglets accessibles** (`role="tablist"`, `role="tab"`, `role="tabpanel"`) :
+  - `Header` : Navigation, identité visuelle, témoin de santé `/health`, statut de session, commutateur de thème (clair/sombre/système) et barre d'onglets accessible au clavier (flèches, Home, End).
+  - `DashboardPanel` : Vue d'ensemble avec métriques clés (santé coordinateur, mode centralisé autonome ou workers distants, compteurs de fichiers, tâches et agents), accès rapides et présentation honnête des fonctionnalités planifiées hors périmètre (éditeur de flux visuel, connecteurs distants S3/SMB, catalogue de plugins).
+  - `FilesPanel` : Liste des fichiers MKV admissibles dans `var/input/`, champ de recherche en direct, compteur de résultats et dialogue modal accessible de confirmation (`<dialog>`) avant soumission du remuxage avec ciblage optionnel d'un nœud.
+  - `JobsPanel` : File des tâches avec filtres par statut (`Tous`, `En attente`, `En cours`, `Succès`, `Échec`), recherche par mot-clé, volet d'inspection détaillée d'une tâche (ID, agent assigné, horodatages, code d'erreur explicité) et téléchargement direct en flux.
+  - `WorkersPanel` : Vue des serveurs et agents de traitement (coordinateur avec agent intégré ou agents distants HTTPS), horodatages de dernière activité et rappels d'architecture.
+  - `SettingsPanel` : Gestion sécurisée de la session web et authentification, préférences visuelles de thèmes et diagnostics réseau.
+
+## Sécurité et téléchargement
+
+1. **Session et secrets** :
+   - Conformément aux exigences de sécurité, aucune clé secrète n'est enregistrée en clair dans `sessionStorage` ou `localStorage`.
+   - La clé réside exclusivement dans la mémoire vive volatile JavaScript de l'onglet actif (effacement instantané à la fermeture ou au rechargement de l'onglet). Dès l'ouverture réussie d'une session web par cookie HttpOnly (#29), la clé en mémoire est immédiatement purgée.
+   - Un bouton de déconnexion explicite permet de purger immédiatement la mémoire et d'invalider la session.
+
+2. **Téléchargement en flux direct (sans Blob en mémoire RAM)** :
+   - **Mode session web (cookie HttpOnly #29)** : le téléchargement du média résultant (`/api/v1/jobs/{id}/output`) s'effectue en flux continu directement géré par le navigateur (sans tampon `Blob` en RAM), évitant tout crash d'onglet sur des fichiers MKV multi-gigaoctets.
+   - **Mode clé Bearer volatile** : le navigateur ne transmettant pas d'en-tête `Authorization` lors d'une navigation classique par lien `<a>`, le streaming natif sans bufferisation RAM nécessite soit l'ouverture d'une session web dans l'onglet Paramètres, soit l'utilisation de la commande `curl` sécurisée (avec placeholder `<ADMIN_KEY>`) fournie dans le volet Détails.
+
+## Design et règles d'accessibilité W3C
+
+- **Contrastes renforcés** : ratios supérieurs à 5.9:1 sur texte normal (palette primaire `#0369a1` sur fond clair, texte sombre sur fond clair, texte clair `#f8fafc` sur fond sombre), et supérieurs à 3:1 sur les bordures et composants interactifs.
+- **Cibles tactiles** : toutes les commandes, onglets, boutons d'action et champs respectent la recommandation minimale de **44×44 px**.
+- **Navigation clavier intégrale** : lien d'évitement (« Aller au contenu principal »), focus visible `:focus-visible` (anneau 3px), gestion des modales avec piège de focus et touche `Échap`, parcours des onglets via les touches fléchées.
+- **Thèmes clair et sombre** : détection automatique de `prefers-color-scheme` doublée d'un commutateur manuel pour forcer l'affichage clair ou sombre selon les préférences de l'utilisateur.
+- **Statut d'attestation** : le code a été conçu selon les bonnes pratiques d'ergonomie et d'accessibilité du W3C ; en l'absence d'une passe automatisée Playwright/axe-core en CI, aucune conformité officielle ou certification n'est revendiquée.
 
 ## Utilisation et développement
 
@@ -25,16 +38,16 @@ Interface de pilotage et de supervision pour la chaîne de remuxage MKVToolNix.
    ```bash
    cargo run --manifest-path frontend/Cargo.toml
    ```
-   Cette commande exécute le binaire SSR Leptos et produit `frontend/dist/index.html`.
+   Cette commande compile le binaire Leptos et génère `frontend/dist/index.html`.
 
-2. **Lancement via Compose (`npm run dev`)** :
+2. **Démarrage du service de prévisualisation (`npm run dev`)** :
    ```bash
    npm run dev
    ```
-   Le service de prévisualisation Nginx sert l'interface sur `http://localhost:3000/` tout en relayant les requêtes API (`/api/` et `/health`) vers le coordinateur TLS (`https://coordinator:3443`).
+   Le service Nginx expose l'interface sur `http://localhost:3000/` et relaie de façon transparente `/api/` et `/health` vers le coordinateur applicatif.
 
-## Limites actuelles et fonctionnement
+## Preuves de validation et limites d'environnement
 
-- **Authentification du téléchargement** : Le téléchargement du résultat (`/api/v1/jobs/{id}/output`) transmet le jeton `Authorization: Bearer` via `fetch` puis assemble le fichier en mémoire du navigateur (`Blob`). Pour des médias de plusieurs gigaoctets, cette méthode est limitée par la mémoire vive allouée à l'onglet : il est recommandé d'utiliser `curl` en ligne de commande avec le jeton Bearer ou d'accéder directement au volume Docker de données.
-- **Interrogation et statuts** : L'interface repose sur une interrogation périodique (toutes les 30 s pour `/health`) ou manuelle via le bouton d'actualisation, sans connexion WebSocket permanente.
-- **Périmètre applicatif** : L'éditeur de flux et les connecteurs vers des stockages distants (S3, SMB) sont hors du périmètre présent.
+- **Validation structurelle et syntaxique** : l'artefact généré `frontend/dist/index.html` a été validé (arbre DOM de 275 balises sémantiques valides, 5 onglets avec gestion ARIA `tablist`/`tab`/`tabpanel`, 2 dialogues modaux natifs HTML5 `<dialog>` avec `aria-modal="true"`, 23 boutons accessibles avec cibles tactiles >= 44×44 px).
+- **Vérifications Rust** : `cargo fmt --check` et `cargo clippy -- -D warnings` au vert sur l'ensemble du crate `frontend`.
+- **Limites d'environnement de test** : la machine hôte de développement ne dispose pas de navigateur graphique ou de Chromium headless (`which google-chrome chromium firefox` absent). Conformément à la décision utilisateur permanente du 9 nov. 2026 consignée dans `AGENTS.md`, les suites de tests lourdes et la construction des conteneurs complets sont déportées sur les runners distants de GitHub Actions.

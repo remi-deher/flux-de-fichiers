@@ -1,4 +1,5 @@
 mod jobs;
+mod session;
 pub(crate) mod transfers;
 use crate::{auth::authorize, config::Config, domain::*, error::AppResult, repository};
 use axum::{
@@ -25,6 +26,8 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(|| async { axum::Json(serde_json::json!({"service":"flux-de-fichiers", "interface":false})) }))
         .route("/health", get(health))
         .route("/api/v1/files", get(jobs::files))
+        .route("/api/v1/auth/session", get(session::current).post(session::login))
+        .route("/api/v1/auth/logout", post(session::logout))
         .route("/api/v1/jobs", get(jobs::list).post(jobs::create))
         .route("/api/v1/jobs/{id}", get(jobs::get_job))
         .route("/api/v1/jobs/{id}/output", get(transfers::output))

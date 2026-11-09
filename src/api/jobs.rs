@@ -14,7 +14,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 pub async fn files(State(s): State<AppState>, h: HeaderMap) -> AppResult<Json<Vec<MediaFile>>> {
-    authorize(&h, &s.config.admin_key)?;
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     Ok(Json(
         storage::list_inputs(&s.config.input_dir, s.config.max_file_bytes).await?,
     ))
@@ -25,7 +25,7 @@ pub async fn create(
     h: HeaderMap,
     Json(r): Json<NewJob>,
 ) -> AppResult<(StatusCode, Json<Job>)> {
-    authorize(&h, &s.config.admin_key)?;
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::POST).await?;
     let path = storage::input_path(&s.config.input_dir, &r.source_name).await?;
     let (hash, bytes) = storage::fingerprint(&path, s.config.max_file_bytes).await?;
     if let Some(worker) = r.target_worker_id {
@@ -52,7 +52,7 @@ pub async fn list(
     h: HeaderMap,
     Query(p): Query<Page>,
 ) -> AppResult<Json<Vec<Job>>> {
-    authorize(&h, &s.config.admin_key)?;
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     let limit = p.limit.unwrap_or(50);
     if !(1..=200).contains(&limit) {
         return Err(AppError::Invalid);
@@ -65,7 +65,7 @@ pub async fn get_job(
     h: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<Job>> {
-    authorize(&h, &s.config.admin_key)?;
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     Ok(Json(
         sqlx::query_as("SELECT * FROM jobs WHERE id=$1")
             .bind(id)
@@ -75,7 +75,7 @@ pub async fn get_job(
     ))
 }
 pub async fn workers(State(s): State<AppState>, h: HeaderMap) -> AppResult<Json<Vec<Worker>>> {
-    authorize(&h, &s.config.admin_key)?;
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     Ok(Json(
         sqlx::query_as("SELECT * FROM workers ORDER BY name LIMIT 200")
             .fetch_all(&s.pool)

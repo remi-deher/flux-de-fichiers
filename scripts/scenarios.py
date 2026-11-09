@@ -3,6 +3,7 @@ N'utilise ni les NAS ni des médias utilisateur. Les trois agents sont des conte
 sur la même machine : ce test ne revendique pas une validation multi-hôte.
 """
 from concurrent.futures import ThreadPoolExecutor
+from http.cookiejar import CookieJar
 import hashlib
 import json
 from pathlib import Path
@@ -21,6 +22,7 @@ CONTEXT = ssl.create_default_context(cafile=str(ROOT / "var/secrets/ca.crt"))
 ADMIN = (ROOT / "var/secrets/admin_key").read_text().strip()
 WORKER = (ROOT / "var/secrets/worker_key").read_text().strip()
 RESULTS = []
+WEB_ORIGIN = "http://localhost:3000"
 
 
 def compose(*args, capture=True, **kwargs):
@@ -44,6 +46,36 @@ def request(method, path, payload=None, key=ADMIN, expected=200, headers=None, r
         status, data = error.code, error.read()
     assert status == expected, f"{method} {path}: {status} != {expected}: {data[:200]!r}"
     return data if raw else json.loads(data) if data else None
+
+
+def web_opener():
+    cookies = CookieJar()
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(cookies),
+        urllib.request.HTTPSHandler(context=CONTEXT),
+    )
+    return opener, cookies
+
+
+def web_request(opener, method, path, payload=None, expected=200, headers=None):
+    body = json.dumps(payload).encode() if payload is not None else None
+    request_headers = {"Origin": WEB_ORIGIN}
+    if payload is not None:
+        request_headers["Content-Type"] = "application/json"
+    request_headers.update(headers or {})
+    req = urllib.request.Request(
+        "https://localhost:3443" + path,
+        data=body,
+        method=method,
+        headers=request_headers,
+    )
+    try:
+        with opener.open(req, timeout=90) as response:
+            status, data, response_headers = response.status, response.read(), response.headers
+    except urllib.error.HTTPError as error:
+        status, data, response_headers = error.code, error.read(), error.headers
+    assert status == expected, f"{method} {path}: {status} != {expected}: {data[:200]!r}"
+    return data, response_headers
 
 
 def wait_for(predicate, timeout=90):
@@ -134,6 +166,66 @@ def run():
     assert plaintext.returncode != 0 and b"no encryption" in plaintext.stderr
     assert int(sql("SELECT count(*) FROM pg_stat_ssl WHERE ssl")) >= 1
     passed("TLS : CA obligatoire, connexions SQL chiffrées et accès SQL en clair refusé")
+
+    web, cookies = web_opener()
+    login_body, login_headers = web_request(
+        web,
+        "POST",
+        "/api/v1/auth/session",
+        {"admin_key": ADMIN},
+    )
+    assert login_headers.get("Cache-Control") == "no-store"
+    assert {cookie.name for cookie in cookies} >= {"flux_session", "flux_csrf"}
+    session = json.loads(login_body)
+    csrf = session["csrf_token"]
+    restored_body, _ = web_request(web, "GET", "/api/v1/auth/session")
+    assert json.loads(restored_body)["csrf_token"] == csrf
+    web_request(
+        web,
+        "POST",
+        "/api/v1/jobs",
+        {"source_name": source, "target_worker_id": None},
+        expected=403,
+        headers={"X-CSRF-Token": "invalid-token"},
+    )
+    session_job_body, _ = web_request(
+        web,
+        "POST",
+        "/api/v1/jobs",
+        {"source_name": source, "target_worker_id": None},
+        expected=201,
+        headers={"X-CSRF-Token": csrf},
+    )
+    session_job = json.loads(session_job_body)
+    completed_session_job = wait_for(lambda: terminal(session_job))
+    assert completed_session_job["status"] == "succeeded", completed_session_job
+    download_request = urllib.request.Request(
+        "https://localhost:3443" + f"/api/v1/jobs/{session_job['id']}/output",
+        headers={"Origin": WEB_ORIGIN},
+    )
+    streamed_hash = hashlib.sha256()
+    streamed_size = 0
+    with web.open(download_request, timeout=90) as response:
+        assert response.status == 200
+        assert response.headers.get("Cache-Control") == "no-store"
+        assert response.headers.get("Content-Disposition", "").startswith("attachment;")
+        while True:
+            chunk = response.read(64 * 1024)
+            if not chunk:
+                break
+            streamed_hash.update(chunk)
+            streamed_size += len(chunk)
+        assert streamed_size == int(response.headers["Content-Length"])
+    assert streamed_hash.hexdigest() == completed_session_job["output_sha256"]
+    web_request(
+        web,
+        "POST",
+        "/api/v1/auth/logout",
+        headers={"X-CSRF-Token": csrf},
+        expected=204,
+    )
+    web_request(web, "GET", "/api/v1/files", expected=401)
+    passed("Session web : origine/CSRF, révocation et téléchargement authentifié streamé sans Blob")
 
     # One active worker on the same host as coordinator; pause the other two.
     paused = containers[1:]

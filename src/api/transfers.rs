@@ -29,17 +29,29 @@ fn lease(h: &HeaderMap) -> AppResult<LeaseRequest> {
     })
 }
 
-async fn stream_file(path: &std::path::Path) -> AppResult<Response> {
+async fn stream_file(path: &std::path::Path, attachment_name: Option<&str>) -> AppResult<Response> {
     let file = tokio::fs::File::open(path).await?;
     let size = file.metadata().await?.len();
-    Ok((
+    let mut response = (
         [
             ("content-type", "video/x-matroska".to_owned()),
             ("content-length", size.to_string()),
         ],
         Body::from_stream(ReaderStream::new(file)),
     )
-        .into_response())
+        .into_response();
+    response.headers_mut().insert(
+        axum::http::header::X_CONTENT_TYPE_OPTIONS,
+        axum::http::HeaderValue::from_static("nosniff"),
+    );
+    if let Some(name) = attachment_name {
+        let value = format!("attachment; filename=\"{name}\"");
+        let value = axum::http::HeaderValue::from_str(&value).map_err(|_| AppError::Internal)?;
+        response
+            .headers_mut()
+            .insert(axum::http::header::CONTENT_DISPOSITION, value);
+    }
+    Ok(response)
 }
 
 pub async fn source(
@@ -49,27 +61,37 @@ pub async fn source(
 ) -> AppResult<Response> {
     authorize(&h, &s.config.worker_key)?;
     let job = repository::active(&s.pool, id, &lease(&h)?).await?;
-    stream_file(&storage::input_path(&s.config.input_dir, &job.source_name).await?).await
+    stream_file(
+        &storage::input_path(&s.config.input_dir, &job.source_name).await?,
+        None,
+    )
+    .await
 }
 pub async fn output(
     State(s): State<AppState>,
     h: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> AppResult<Response> {
-    authorize(&h, &s.config.admin_key)?;
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     let name: Option<String> =
         sqlx::query_scalar("SELECT output_name FROM jobs WHERE id=$1 AND status='succeeded'")
             .bind(id)
             .fetch_optional(&s.pool)
             .await?
             .flatten();
-    stream_file(
+    let mut response = stream_file(
         &s.config
             .data_dir
             .join("output")
             .join(name.ok_or(AppError::NotFound)?),
+        Some(&format!("job-{id}.mkv")),
     )
-    .await
+    .await?;
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    Ok(response)
 }
 
 pub async fn result(

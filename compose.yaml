@@ -49,7 +49,10 @@ services:
       - work:/work
       - logs:/logs
     healthcheck:
-      disable: true
+      test: [CMD-SHELL, "grep -qa worker /proc/1/cmdline"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
     depends_on:
       coordinator: {condition: service_healthy}
 

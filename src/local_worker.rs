@@ -87,7 +87,10 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
             claim.source_bytes,
         )
         .await?;
-        let warning = media::remux(&source_snapshot, &output)
+        let cache_mgr = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
+        let mkvmerge_bin =
+            cache_mgr.resolve_executable("tool.mkvtoolnix", "1.0.0", "mkvmerge", "MKVMERGE");
+        let warning = media::remux_with(&mkvmerge_bin, &source_snapshot, &output)
             .await
             .map_err(|error| anyhow::anyhow!("remux_failed: {error}"))?;
         crate::api::transfers::publish_staged(

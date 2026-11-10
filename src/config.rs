@@ -14,6 +14,8 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub input_dir: PathBuf,
     pub config_dir: PathBuf,
+    pub tools_cache_dir: PathBuf,
+    pub plugins_dir: Option<PathBuf>,
     pub static_dir: PathBuf,
     pub admin_key: String,
     pub worker_key: String,
@@ -193,6 +195,8 @@ impl Config {
             format!("sqlite://{}", config_dir.join("flux.db").display())
         };
 
+        let data_dir: PathBuf = env::var("DATA_DIR").unwrap_or_else(|_| "var".into()).into();
+
         Ok(Self {
             bind,
             tls,
@@ -205,11 +209,27 @@ impl Config {
             web_origin,
             web_session_ttl_seconds,
             database_url,
-            data_dir: env::var("DATA_DIR").unwrap_or_else(|_| "var".into()).into(),
+            data_dir: data_dir.clone(),
             input_dir: env::var("INPUT_DIR")
                 .unwrap_or_else(|_| "var/input".into())
                 .into(),
             config_dir,
+            tools_cache_dir: env::var("TOOLS_CACHE_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| data_dir.join("tools-cache")),
+            plugins_dir: env::var("PLUGINS_DIR").map(PathBuf::from).ok().or_else(|| {
+                let container_path = PathBuf::from("/plugins");
+                if container_path.is_dir() {
+                    Some(container_path)
+                } else {
+                    let dev_path = PathBuf::from("../flux-de-fichiers-plugins");
+                    if dev_path.is_dir() {
+                        Some(dev_path)
+                    } else {
+                        None
+                    }
+                }
+            }),
             static_dir,
         })
     }

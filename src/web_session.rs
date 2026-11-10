@@ -189,10 +189,10 @@ fn cookie_header(
 }
 
 fn secure_attribute(config: &Config) -> &'static str {
-    if let Some(ref origin) = config.web_origin {
-        if origin.starts_with("https://") {
-            return "; Secure";
-        }
+    if let Some(ref origin) = config.web_origin
+        && origin.starts_with("https://")
+    {
+        return "; Secure";
     }
     ""
 }

@@ -4,7 +4,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const DEFAULT_WEB_ORIGIN: &str = "http://localhost:3000";
 const DEFAULT_WEB_SESSION_TTL_SECONDS: i64 = 28_800;
 const MAX_WEB_SESSION_TTL_SECONDS: i64 = 2_592_000;
 

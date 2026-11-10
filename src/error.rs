@@ -39,13 +39,13 @@ pub enum AppError {
 
 impl From<sqlx::Error> for AppError {
     fn from(err: sqlx::Error) -> Self {
-        if let Some(db_err) = err.as_database_error() {
-            if let Some(code) = db_err.code() {
-                match code.as_ref() {
-                    "2067" | "1555" => return AppError::Conflict,
-                    "787" => return AppError::Invalid,
-                    _ => {}
-                }
+        if let Some(db_err) = err.as_database_error()
+            && let Some(code) = db_err.code()
+        {
+            match code.as_ref() {
+                "2067" | "1555" => return AppError::Conflict,
+                "787" => return AppError::Invalid,
+                _ => {}
             }
         }
         AppError::Database(err)

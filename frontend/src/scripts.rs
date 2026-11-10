@@ -15,6 +15,7 @@ pub const CLIENT_SCRIPT: &str = r#"
   let activeJobFilter = 'all';
   let selectedFileForRemux = null;
   let sessionMode = 'none'; // 'none' | 'memory_key' | 'cookie_session'
+  let manualLogout = false;
 
   const el = (id) => document.getElementById(id);
 
@@ -236,6 +237,27 @@ pub const CLIENT_SCRIPT: &str = r#"
       }
     } catch {}
 
+    // Auto-session style *arr si pas de déconnexion manuelle
+    if (!manualLogout) {
+      try {
+        const res = await fetch('/api/v1/auth/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({})
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          if (data.csrf_token) {
+            csrfToken = data.csrf_token;
+          }
+          sessionMode = 'cookie_session';
+          updateSessionUI();
+          return;
+        }
+      } catch {}
+    }
+
     if (volatileAdminKey) {
       sessionMode = 'memory_key';
     } else {
@@ -245,11 +267,8 @@ pub const CLIENT_SCRIPT: &str = r#"
   }
 
   async function login(key) {
-    if (!key || !key.trim()) {
-      showNotice('Veuillez saisir une clé d\'administration.', 'error');
-      return;
-    }
-    const cleanKey = key.trim();
+    manualLogout = false;
+    const cleanKey = (key || '').trim();
 
     // 1. Tenter d'ouvrir la session web backend officielle (#29)
     try {
@@ -273,15 +292,20 @@ pub const CLIENT_SCRIPT: &str = r#"
       }
     } catch {}
 
-    // 2. Fallback mémoire volatile avec jeton Bearer
-    volatileAdminKey = cleanKey;
-    sessionMode = 'memory_key';
-    updateSessionUI();
-    showNotice('Clé mémorisée en mémoire volatile (aucun stockage disque ou sessionStorage).', 'success');
-    refreshAll();
+    // 2. Fallback mémoire volatile avec jeton Bearer (si clé fournie)
+    if (cleanKey) {
+      volatileAdminKey = cleanKey;
+      sessionMode = 'memory_key';
+      updateSessionUI();
+      showNotice('Clé mémorisée en mémoire volatile (aucun stockage disque ou sessionStorage).', 'success');
+      refreshAll();
+    } else {
+      showNotice('Impossible d\'ouvrir la session.', 'error');
+    }
   }
 
   async function logout() {
+    manualLogout = true;
     // Révocation de session web côté backend si active
     if (sessionMode === 'cookie_session') {
       try {
@@ -330,11 +354,14 @@ pub const CLIENT_SCRIPT: &str = r#"
     });
 
     if (res.status === 401) {
+      const hadActiveSession = sessionMode !== 'none';
       volatileAdminKey = '';
       sessionMode = 'none';
       csrfToken = '';
       updateSessionUI();
-      showNotice('Accès non autorisé (401) : clé révoquée ou session invalide. Mémoire purgée.', 'error');
+      if (hadActiveSession) {
+        showNotice('Accès non autorisé (401) : clé révoquée ou session invalide. Mémoire purgée.', 'error');
+      }
       throw new Error('Non autorisé');
     }
 

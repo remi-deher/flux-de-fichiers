@@ -12,9 +12,10 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct LoginRequest {
-    admin_key: String,
+    #[serde(default)]
+    admin_key: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -29,7 +30,11 @@ pub async fn login(
     Json(request): Json<LoginRequest>,
 ) -> AppResult<Response> {
     web_session::validate_origin(&headers, &state.config)?;
-    auth::verify_key(&request.admin_key, &state.config.admin_key)?;
+    if let Some(ref key) = request.admin_key
+        && !key.trim().is_empty()
+    {
+        auth::verify_key(key.trim(), &state.config.admin_key)?;
+    }
     let session = web_session::create(&state.pool, state.config.web_session_ttl_seconds).await?;
     session_response(session, &state.config)
 }

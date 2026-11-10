@@ -255,7 +255,7 @@ fn web_cookies_have_scoped_flags_and_secure_on_https() -> anyhow::Result<()> {
 async fn malformed_identifiers_and_unknown_routes_have_safe_json_errors() -> anyhow::Result<()> {
     for (path, status) in [
         ("/api/v1/jobs/invalid", StatusCode::BAD_REQUEST),
-        ("/unknown", StatusCode::NOT_FOUND),
+        ("/api/v1/unknown", StatusCode::NOT_FOUND),
     ] {
         let response = app()?
             .oneshot(Request::builder().uri(path).body(Body::empty())?)
@@ -266,5 +266,11 @@ async fn malformed_identifiers_and_unknown_routes_have_safe_json_errors() -> any
             serde_json::from_slice(&to_bytes(response.into_body(), 1024).await?)?;
         assert_eq!(body["error"]["code"], "invalid_request");
     }
+
+    // SPA fallback: non-API route returns 200 OK when frontend dist/index.html is present
+    let response = app()?
+        .oneshot(Request::builder().uri("/unknown").body(Body::empty())?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
     Ok(())
 }

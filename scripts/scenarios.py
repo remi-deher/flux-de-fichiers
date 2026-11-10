@@ -111,7 +111,13 @@ def fixture(*args, entrypoint="ffmpeg"):
     return compose("--profile", "test", "run", "--rm", "--no-deps", "--entrypoint", entrypoint, "fixtures", *args)
 
 
+def where_id(uid):
+    raw_hex = uid.replace("-", "")
+    return f"(id=X'{raw_hex}' OR id='{uid}')"
+
+
 def sql(statement):
+    compose("exec", "-T", "coordinator", "sh", "-c", "chmod 666 /config/flux.db* 2>/dev/null || true")
     db_path = ROOT / "var/config/flux.db"
     conn = sqlite3.connect(str(db_path), timeout=30)
     try:
@@ -304,9 +310,9 @@ def run():
     old = request("POST", "/api/v1/claims", {"worker_id": ghost["id"]}, key=worker_key)
     assert old["job_id"] == interrupted["id"]
     request("POST", f"/api/v1/jobs/{interrupted['id']}/heartbeat", {"worker_id": ghost["id"], "lease_token": old["lease_token"]}, key=worker_key, expected=204)
-    remaining_secs = float(sql(f"SELECT (strftime('%s', leased_until) - strftime('%s', 'now')) FROM jobs WHERE id='{interrupted['id']}'"))
+    remaining_secs = float(sql(f"SELECT (strftime('%s', leased_until) - strftime('%s', 'now')) FROM jobs WHERE {where_id(interrupted['id'])}"))
     assert remaining_secs > 100, f"Bail restant insuffisant: {remaining_secs}"
-    sql(f"UPDATE jobs SET leased_until=datetime('now', '-1 second'), target_worker_id=NULL WHERE id='{interrupted['id']}'")
+    sql(f"UPDATE jobs SET leased_until=datetime('now', '-1 second'), target_worker_id=NULL WHERE {where_id(interrupted['id'])}")
     request("POST", f"/api/v1/jobs/{interrupted['id']}/heartbeat", {"worker_id": ghost["id"], "lease_token": old["lease_token"]}, key=worker_key, expected=409)
     request("PUT", f"/api/v1/jobs/{interrupted['id']}/result", data, key=worker_key, headers=lease_headers(old, ghost["id"]), expected=409)
     recovered = wait_for(lambda: terminal(interrupted))
@@ -324,14 +330,14 @@ def run():
     (directory / changed).write_bytes((directory / source).read_bytes())
     mutation = submit(changed, reserved["id"])
     (directory / changed).write_bytes(b"changed")
-    sql(f"UPDATE jobs SET target_worker_id=NULL WHERE id='{mutation['id']}'")
+    sql(f"UPDATE jobs SET target_worker_id=NULL WHERE {where_id(mutation['id'])}")
     failed = wait_for(lambda: terminal(mutation))
     assert failed["status"] == "failed" and failed["error_code"] == "source_integrity"
     invalid = submit(source, reserved["id"])
     claim = request("POST", "/api/v1/claims", {"worker_id": reserved["id"]}, key=worker_key)
     request("PUT", f"/api/v1/jobs/{invalid['id']}/result", b"invalid", key=worker_key, headers=lease_headers(claim, reserved["id"]), expected=400)
     request("GET", f"/api/v1/jobs/{invalid['id']}/output", expected=404)
-    sql(f"UPDATE jobs SET attempts=3,leased_until=datetime('now', '-1 second') WHERE id='{invalid['id']}'")
+    sql(f"UPDATE jobs SET attempts=3,leased_until=datetime('now', '-1 second') WHERE {where_id(invalid['id'])}")
     exhausted = wait_for(lambda: terminal(invalid))
     assert exhausted["status"] == "failed" and exhausted["error_code"] == "lease_expired"
     passed("Échecs contrôlés : source invalide/modifiée, résultat invalide non publié, limite de reprises")

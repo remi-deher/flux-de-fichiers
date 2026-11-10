@@ -48,6 +48,8 @@ services:
       - ./var/config:/config:ro
       - work:/work
       - logs:/logs
+    healthcheck:
+      disable: true
     depends_on:
       coordinator: {condition: service_healthy}
 

@@ -35,6 +35,6 @@ ENV CONFIG_DIR=/config DATA_DIR=/data WORK_DIR=/work LOG_DIR=/logs STATIC_DIR=/u
 VOLUME ["/config", "/data", "/work", "/logs"]
 USER 10001
 EXPOSE 3000
-HEALTHCHECK --interval=10s --timeout=3s --retries=3 CMD curl -f http://localhost:3000/health || exit 1
+HEALTHCHECK --interval=10s --timeout=3s --retries=3 CMD grep -qa worker /proc/1/cmdline || curl -fsS http://localhost:3000/health || exit 1
 ENTRYPOINT ["flux-de-fichiers"]
 CMD ["coordinator"]

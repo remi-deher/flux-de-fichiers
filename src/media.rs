@@ -11,8 +11,12 @@ pub fn executable() -> String {
 }
 
 pub async fn inspect(path: &Path) -> anyhow::Result<Value> {
+    inspect_with(Path::new(&executable()), path).await
+}
+
+pub async fn inspect_with(bin: &Path, path: &Path) -> anyhow::Result<Value> {
     tokio::time::timeout(Duration::from_secs(60), async {
-        let mut child = Command::new(executable())
+        let mut child = Command::new(bin)
             .arg("--output-charset")
             .arg("UTF-8")
             .arg("-J")
@@ -79,8 +83,12 @@ fn track_signature(data: &Value) -> Vec<Value> {
 }
 
 pub async fn validate_remux(source: &Path, output: &Path) -> anyhow::Result<()> {
-    let before = inspect(source).await?;
-    let after = inspect(output).await?;
+    validate_remux_with(Path::new(&executable()), source, output).await
+}
+
+pub async fn validate_remux_with(bin: &Path, source: &Path, output: &Path) -> anyhow::Result<()> {
+    let before = inspect_with(bin, source).await?;
+    let after = inspect_with(bin, output).await?;
     anyhow::ensure!(
         track_signature(&before) == track_signature(&after),
         "track metadata mismatch"
@@ -115,10 +123,14 @@ pub async fn validate_remux(source: &Path, output: &Path) -> anyhow::Result<()> 
 
 /// MKVToolNix: 0 = success, 1 = success with warnings, 2 = error.
 pub async fn remux(source: &Path, output: &Path) -> anyhow::Result<bool> {
-    inspect(source).await?;
+    remux_with(Path::new(&executable()), source, output).await
+}
+
+pub async fn remux_with(bin: &Path, source: &Path, output: &Path) -> anyhow::Result<bool> {
+    inspect_with(bin, source).await?;
     let status = tokio::time::timeout(
         TOOL_TIMEOUT,
-        Command::new(executable())
+        Command::new(bin)
             .arg("--output-charset")
             .arg("UTF-8")
             .arg("--disable-track-statistics-tags")
@@ -138,6 +150,6 @@ pub async fn remux(source: &Path, output: &Path) -> anyhow::Result<bool> {
         Some(1) => true,
         _ => anyhow::bail!("mkvmerge failed"),
     };
-    validate_remux(source, output).await?;
+    validate_remux_with(bin, source, output).await?;
     Ok(warning)
 }

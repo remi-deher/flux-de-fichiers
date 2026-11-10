@@ -13,38 +13,55 @@ const DEFAULT_SAFE_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 
 /// Déclaration d'un artefact d'outil pour une architecture donnée.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolArtifact {
     pub arch: String,
+    #[serde(alias = "archive_url")]
     pub archive_url: String,
+    #[serde(alias = "archive_format")]
     pub archive_format: String,
+    #[serde(alias = "archive_sha256")]
     pub archive_sha256: String,
+    #[serde(alias = "binary_relative_path")]
     pub binary_relative_path: String,
+    #[serde(default, alias = "binary_sha256")]
     pub binary_sha256: Option<String>,
     #[serde(default)]
     pub permissions: Option<ArtifactPermissions>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct ArtifactPermissions {
+    #[serde(alias = "unix_mode")]
     pub unix_mode: Option<String>,
     pub owner: Option<String>,
+    #[serde(alias = "executable_bit")]
     pub executable_bit: Option<bool>,
 }
 
 /// Fiche déclarative de distribution d'un outil (Option B).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolDistribution {
-    #[serde(default)]
+    #[serde(default, alias = "schema_version")]
     pub schema_version: Option<String>,
+    #[serde(alias = "tool_id")]
     pub tool_id: String,
+    #[serde(alias = "tool_version")]
     pub tool_version: String,
-    #[serde(default = "default_distribution_mode")]
+    #[serde(default = "default_distribution_mode", alias = "distribution_mode")]
     pub distribution_mode: String,
     pub artifacts: Vec<ToolArtifact>,
 }
 
 fn default_distribution_mode() -> String {
     "autonomous-binary".to_string()
+}
+
+/// Identifie l'architecture cible du système hôte en cours d'exécution.
+pub fn host_arch() -> &'static str {
+    std::env::consts::ARCH
 }
 
 /// Verrou garantissant l'exclusion mutuelle lors du téléchargement et de l'extraction.
@@ -146,6 +163,27 @@ impl ToolCacheManager {
         }
 
         Ok(binary_path)
+    }
+
+    /// Résout le chemin d'un exécutable : vérifie d'abord le cache chaud Option B,
+    /// puis se replie sur une variable d'environnement ou le binaire système disponible.
+    pub fn resolve_executable(
+        &self,
+        tool_id: &str,
+        tool_version: &str,
+        binary_relative_path: &str,
+        fallback_env_var: &str,
+    ) -> PathBuf {
+        let arch = host_arch();
+        if let Ok(cached) =
+            self.verify_cached_binary(tool_id, tool_version, arch, binary_relative_path, None)
+        {
+            return cached;
+        }
+        if let Ok(env_bin) = std::env::var(fallback_env_var) {
+            return PathBuf::from(env_bin);
+        }
+        PathBuf::from(binary_relative_path)
     }
 
     /// Extrait nativement une archive en mémoire (tar.gz), vérifie les empreintes SHA-256,

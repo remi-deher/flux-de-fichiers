@@ -958,13 +958,45 @@ pub const CLIENT_SCRIPT: &str = r#"
       loadFiles(),
       loadJobs(),
       loadWorkers(),
-      loadSystemConfig()
+      loadSystemConfig(),
+      loadToolsStatus()
     ]);
 
     if (refreshBtn) {
       refreshBtn.disabled = false;
       refreshBtn.textContent = 'Actualiser';
     }
+  }
+
+  // --- Outils et catalogue dynamiques ---
+  async function loadToolsStatus() {
+    try {
+      const res = await apiFetch('/api/v1/tools');
+      const tools = await res.json();
+      if (!Array.isArray(tools)) return;
+      tools.forEach(tool => {
+        const card = document.querySelector(`.tool-card[data-tool-id="${tool.id}"]`);
+        if (card) {
+          card.setAttribute('data-cache-status', tool.status);
+          const pill = card.querySelector('.status-pill');
+          if (pill) {
+            if (tool.status === 'ready') {
+              pill.className = 'status-pill success';
+              pill.title = 'Marqueur .ready validé et binaire intègre';
+              pill.innerHTML = '<span class="status-dot"></span>.ready (Prêt)';
+            } else if (tool.status === 'locked') {
+              pill.className = 'status-pill warning';
+              pill.title = 'Verrou .lock actif (acquisition en cours)';
+              pill.innerHTML = '<span class="status-dot"></span>.lock (En cours)';
+            } else {
+              pill.className = 'status-pill';
+              pill.title = 'Outil non extrait dans le cache worker';
+              pill.innerHTML = '<span class="status-dot"></span>Non installé';
+            }
+          }
+        }
+      });
+    } catch {}
   }
 
   // --- Gestion du catalogue d'outils, inspecteur de contrats et banc d'essai ---
@@ -1334,12 +1366,23 @@ pub const CLIENT_SCRIPT: &str = r#"
 
     // Boutons sur les cartes d'outils
     document.querySelectorAll('.inspect-contract-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const target = btn.getAttribute('data-target-contract');
-        if (target && CONTRACTS_DB[target]) {
-          renderContract(target);
-          const area = el('contract-display-area');
-          if (area) area.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        if (target) {
+          try {
+            const res = await apiFetch('/api/v1/tools/' + encodeURIComponent(target) + '/distribution');
+            if (res.ok) {
+              const liveDist = await res.json();
+              if (CONTRACTS_DB[target]) {
+                CONTRACTS_DB[target].data = liveDist;
+              }
+            }
+          } catch {}
+          if (CONTRACTS_DB[target]) {
+            renderContract(target);
+            const area = el('contract-display-area');
+            if (area) area.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
         }
       });
     });

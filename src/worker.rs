@@ -16,18 +16,24 @@ pub struct WorkerConfig {
     pub key: String,
     pub name: String,
     pub work_dir: PathBuf,
+    pub tools_cache_dir: PathBuf,
     pub ca: Option<PathBuf>,
     pub max_bytes: u64,
 }
 impl WorkerConfig {
     pub fn load() -> anyhow::Result<Self> {
+        let work_dir: PathBuf = env::var("WORK_DIR")
+            .unwrap_or_else(|_| "var/work".into())
+            .into();
+        let tools_cache_dir = env::var("TOOLS_CACHE_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| work_dir.join("tools-cache"));
         Ok(Self {
             url: config::coordinator_url(&env::var("COORDINATOR_URL")?)?,
             key: config::secret("WORKER_KEY")?,
             name: env::var("WORKER_NAME").or_else(|_| env::var("HOSTNAME"))?,
-            work_dir: env::var("WORK_DIR")
-                .unwrap_or_else(|_| "var/work".into())
-                .into(),
+            work_dir,
+            tools_cache_dir,
             ca: env::var("CA_CERT").ok().map(Into::into),
             max_bytes: env::var("MAX_FILE_BYTES")
                 .unwrap_or_else(|_| "536870912".into())
@@ -111,7 +117,10 @@ impl Agent {
             hash == claim.source_sha256 && bytes as i64 == claim.source_bytes,
             "source_integrity"
         );
-        let warning = media::remux(&input, &output)
+        let cache_mgr = crate::tools_cache::ToolCacheManager::new(&self.config.tools_cache_dir);
+        let mkvmerge_bin =
+            cache_mgr.resolve_executable("tool.mkvtoolnix", "1.0.0", "mkvmerge", "MKVMERGE");
+        let warning = media::remux_with(&mkvmerge_bin, &input, &output)
             .await
             .context("remux_failed")?;
         let (_, output_size) = storage::fingerprint(&output, self.config.max_bytes).await?;

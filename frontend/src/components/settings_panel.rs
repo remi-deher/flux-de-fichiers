@@ -85,11 +85,17 @@ pub fn SettingsPanel() -> impl IntoView {
                     <div class="detail-term">"URL de l'interface"</div>
                     <div class="detail-val">"http://localhost:3000"</div>
 
-                    <div class="detail-term">"API locale Nginx"</div>
-                    <div class="detail-val">"/api/v1/ (relais sécurisé vers coordinator:3443)"</div>
+                    <div class="detail-term">"API REST unifiée"</div>
+                    <div class="detail-val">"/api/v1/ (same-origin, port unique HTTP 3000)"</div>
 
-                    <div class="detail-term">"API TLS directe"</div>
-                    <div class="detail-val">"https://localhost:3443 (nécessite var/secrets/ca.crt)"</div>
+                    <div class="detail-term">"Architecture & Stockage"</div>
+                    <div class="detail-val">"Modèle *arr conteneur unique • SQLite /config/flux.db (WAL)"</div>
+
+                    <div class="detail-term">"Worker local intégré"</div>
+                    <div class="detail-val" id="settings-local-worker">"—"</div>
+
+                    <div class="detail-term">"Version"</div>
+                    <div class="detail-val" id="settings-version">"—"</div>
 
                     <div class="detail-term">"Contrat d'API"</div>
                     <div class="detail-val">"OpenAPI 3.1 • docs/openapi.yaml"</div>

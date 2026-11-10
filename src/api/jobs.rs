@@ -10,7 +10,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub async fn files(State(s): State<AppState>, h: HeaderMap) -> AppResult<Json<Vec<MediaFile>>> {
@@ -29,7 +29,7 @@ pub async fn create(
     let path = storage::input_path(&s.config.input_dir, &r.source_name).await?;
     let (hash, bytes) = storage::fingerprint(&path, s.config.max_file_bytes).await?;
     if let Some(worker) = r.target_worker_id {
-        let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM workers WHERE id=$1)")
+        let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM workers WHERE id=?1)")
             .bind(worker)
             .fetch_one(&s.pool)
             .await?;
@@ -37,7 +37,7 @@ pub async fn create(
             return Err(AppError::Invalid);
         }
     }
-    let job = sqlx::query_as("INSERT INTO jobs(id,source_name,target_worker_id,source_sha256,source_bytes) VALUES($1,$2,$3,$4,$5) RETURNING *")
+    let job = sqlx::query_as("INSERT INTO jobs(id,source_name,target_worker_id,source_sha256,source_bytes) VALUES(?1,?2,?3,?4,?5) RETURNING *")
         .bind(Uuid::new_v4()).bind(r.source_name).bind(r.target_worker_id).bind(hash).bind(bytes as i64).fetch_one(&s.pool).await?;
     Ok((StatusCode::CREATED, Json(job)))
 }
@@ -57,7 +57,7 @@ pub async fn list(
     if !(1..=200).contains(&limit) {
         return Err(AppError::Invalid);
     }
-    Ok(Json(sqlx::query_as("SELECT * FROM jobs WHERE ($1::uuid IS NULL OR (created_at,id) < (SELECT created_at,id FROM jobs WHERE id=$1)) ORDER BY created_at DESC,id DESC LIMIT $2")
+    Ok(Json(sqlx::query_as("SELECT * FROM jobs WHERE (?1 IS NULL OR (created_at,id) < (SELECT created_at,id FROM jobs WHERE id=?1)) ORDER BY created_at DESC,id DESC LIMIT ?2")
         .bind(p.before).bind(limit).fetch_all(&s.pool).await?))
 }
 pub async fn get_job(
@@ -67,7 +67,7 @@ pub async fn get_job(
 ) -> AppResult<Json<Job>> {
     crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     Ok(Json(
-        sqlx::query_as("SELECT * FROM jobs WHERE id=$1")
+        sqlx::query_as("SELECT * FROM jobs WHERE id=?1")
             .bind(id)
             .fetch_optional(&s.pool)
             .await?
@@ -114,4 +114,25 @@ pub async fn failure(
     )
     .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+pub struct SystemConfigResponse {
+    pub worker_key: String,
+    pub max_file_bytes: u64,
+    pub local_worker: bool,
+    pub version: &'static str,
+}
+
+pub async fn system_config(
+    State(s): State<AppState>,
+    h: HeaderMap,
+) -> AppResult<Json<SystemConfigResponse>> {
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
+    Ok(Json(SystemConfigResponse {
+        worker_key: s.config.worker_key.clone(),
+        max_file_bytes: s.config.max_file_bytes,
+        local_worker: s.config.local_worker,
+        version: env!("CARGO_PKG_VERSION"),
+    }))
 }

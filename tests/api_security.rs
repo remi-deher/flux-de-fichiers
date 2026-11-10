@@ -6,25 +6,27 @@ use flux_de_fichiers::{
     api::{AppState, router},
     config::Config,
 };
-use sqlx::postgres::PgPoolOptions;
+use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::Arc;
 use tower::ServiceExt;
 
 fn app() -> anyhow::Result<axum::Router> {
     let config = Config {
         bind: "127.0.0.1:3000".parse()?,
-        database_url: "postgresql://unused@localhost/unused".into(),
+        database_url: "sqlite::memory:".into(),
         data_dir: "var".into(),
         input_dir: "var/input".into(),
+        config_dir: "var/config".into(),
+        static_dir: "frontend/dist".into(),
         admin_key: "test-admin-key-not-a-real-credential".into(),
         worker_key: "test-worker-key-not-a-real-credential".into(),
         max_file_bytes: 1024,
         local_worker: false,
-        web_origin: "http://localhost:3000".into(),
+        web_origin: None,
         web_session_ttl_seconds: 28_800,
         tls: None,
     };
-    let pool = PgPoolOptions::new().connect_lazy(&config.database_url)?;
+    let pool = SqlitePoolOptions::new().connect_lazy(&config.database_url)?;
     Ok(router(AppState {
         pool,
         config: Arc::new(config),
@@ -36,6 +38,7 @@ async fn protected_routes_reject_missing_keys_before_accessing_resources() -> an
     for path in [
         "/api/v1/jobs",
         "/api/v1/files",
+        "/api/v1/config",
         "/api/v1/auth/session",
         "/api/v1/workers",
         "/api/v1/jobs/00000000-0000-0000-0000-000000000001/output",
@@ -59,6 +62,7 @@ async fn session_login_rejects_untrusted_origin_and_invalid_key() -> anyhow::Res
     let request = Request::builder()
         .method("POST")
         .uri("/api/v1/auth/session")
+        .header("host", "localhost:3000")
         .header("content-type", "application/json")
         .header("origin", "https://attacker.example")
         .body(Body::from(r#"{"admin_key":"not-the-admin-key"}"#))?;
@@ -68,6 +72,7 @@ async fn session_login_rejects_untrusted_origin_and_invalid_key() -> anyhow::Res
     let request = Request::builder()
         .method("POST")
         .uri("/api/v1/auth/session")
+        .header("host", "localhost:3000")
         .header("content-type", "application/json")
         .header("origin", "http://localhost:3000")
         .body(Body::from(r#"{"admin_key":"not-the-admin-key"}"#))?;
@@ -77,23 +82,94 @@ async fn session_login_rejects_untrusted_origin_and_invalid_key() -> anyhow::Res
 }
 
 #[tokio::test]
+async fn session_login_accepts_nas_ip_when_web_origin_not_set() -> anyhow::Result<()> {
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/session")
+        .header("host", "192.168.1.50:3000")
+        .header("content-type", "application/json")
+        .header("origin", "http://192.168.1.50:3000")
+        .body(Body::from(r#"{"admin_key":"not-the-admin-key"}"#))?;
+    let response = app()?.oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/session")
+        .header("host", "192.168.1.50:3000")
+        .header("content-type", "application/json")
+        .header("origin", "http://attacker.example")
+        .body(Body::from(r#"{"admin_key":"not-the-admin-key"}"#))?;
+    let response = app()?.oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    Ok(())
+}
+
+#[tokio::test]
+async fn explicit_web_origin_strictly_enforces_configured_origin() -> anyhow::Result<()> {
+    let config = Config {
+        bind: "127.0.0.1:3000".parse()?,
+        database_url: "sqlite::memory:".into(),
+        data_dir: "var".into(),
+        input_dir: "var/input".into(),
+        config_dir: "var/config".into(),
+        static_dir: "frontend/dist".into(),
+        admin_key: "test-admin-key-not-a-real-credential".into(),
+        worker_key: "test-worker-key-not-a-real-credential".into(),
+        max_file_bytes: 1024,
+        local_worker: false,
+        web_origin: Some("http://custom.domain.local:3000".into()),
+        web_session_ttl_seconds: 28_800,
+        tls: None,
+    };
+    let pool = SqlitePoolOptions::new().connect_lazy(&config.database_url)?;
+    let app = router(AppState {
+        pool,
+        config: Arc::new(config),
+    });
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/session")
+        .header("host", "custom.domain.local:3000")
+        .header("content-type", "application/json")
+        .header("origin", "http://custom.domain.local:3000")
+        .body(Body::from(r#"{"admin_key":"not-the-admin-key"}"#))?;
+    let response = app.clone().oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/session")
+        .header("host", "other.domain.local:3000")
+        .header("content-type", "application/json")
+        .header("origin", "http://other.domain.local:3000")
+        .body(Body::from(r#"{"admin_key":"not-the-admin-key"}"#))?;
+    let response = app.oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    Ok(())
+}
+
+#[tokio::test]
 async fn authorization_header_takes_priority_over_web_session_cookie() -> anyhow::Result<()> {
     use axum::http::{HeaderMap, Method};
     use flux_de_fichiers::web_session::authorize_admin;
     let config = Config {
         bind: "127.0.0.1:3000".parse()?,
-        database_url: "postgresql://unused@localhost/unused".into(),
+        database_url: "sqlite::memory:".into(),
         data_dir: "var".into(),
         input_dir: "var/input".into(),
+        config_dir: "var/config".into(),
+        static_dir: "frontend/dist".into(),
         admin_key: "test-admin-key-not-a-real-credential".into(),
         worker_key: "test-worker-key-not-a-real-credential".into(),
         max_file_bytes: 1024,
         local_worker: false,
-        web_origin: "http://localhost:3000".into(),
+        web_origin: None,
         web_session_ttl_seconds: 28_800,
         tls: None,
     };
-    let pool = PgPoolOptions::new().connect_lazy(&config.database_url)?;
+    let pool = SqlitePoolOptions::new().connect_lazy(&config.database_url)?;
     let mut headers = HeaderMap::new();
     headers.insert(
         "authorization",
@@ -145,14 +221,16 @@ fn web_cookies_have_scoped_flags_and_secure_on_https() -> anyhow::Result<()> {
     };
     let config = Config {
         bind: "127.0.0.1:3000".parse()?,
-        database_url: "postgresql://unused@localhost/unused".into(),
+        database_url: "sqlite::memory:".into(),
         data_dir: "var".into(),
         input_dir: "var/input".into(),
+        config_dir: "var/config".into(),
+        static_dir: "frontend/dist".into(),
         admin_key: "test-admin-key-not-a-real-credential".into(),
         worker_key: "test-worker-key-not-a-real-credential".into(),
         max_file_bytes: 1024,
         local_worker: false,
-        web_origin: "https://localhost:3000".into(),
+        web_origin: Some("https://localhost:3000".into()),
         web_session_ttl_seconds: 600,
         tls: None,
     };

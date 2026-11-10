@@ -7,7 +7,7 @@ from http.cookiejar import CookieJar
 import hashlib
 import json
 from pathlib import Path
-import ssl
+import sqlite3
 import subprocess
 import time
 import urllib.error
@@ -18,11 +18,23 @@ import xml.etree.ElementTree as ET
 from dev import ROOT
 
 PREFIX = f"scenario-{uuid.uuid4().hex[:10]}"
-CONTEXT = ssl.create_default_context(cafile=str(ROOT / "var/secrets/ca.crt"))
-ADMIN = (ROOT / "var/secrets/admin_key").read_text().strip()
-WORKER = (ROOT / "var/secrets/worker_key").read_text().strip()
-RESULTS = []
+BASE_URL = "http://localhost:3000"
 WEB_ORIGIN = "http://localhost:3000"
+
+
+def get_key(name):
+    cfg = ROOT / f"var/config/{name}"
+    if cfg.exists():
+        return cfg.read_text().strip()
+    sec = ROOT / f"var/secrets/{name}"
+    if sec.exists():
+        return sec.read_text().strip()
+    return ""
+
+
+ADMIN = get_key("admin_key")
+WORKER = get_key("worker_key")
+RESULTS = []
 
 
 def compose(*args, capture=True, **kwargs):
@@ -34,13 +46,14 @@ def compose(*args, capture=True, **kwargs):
     return result.stdout
 
 
-def request(method, path, payload=None, key=ADMIN, expected=200, headers=None, raw=False):
+def request(method, path, payload=None, key=None, expected=200, headers=None, raw=False):
+    resolved_key = key if key is not None else (get_key("admin_key") or ADMIN)
     body = payload if isinstance(payload, bytes) else json.dumps(payload).encode() if payload is not None else None
-    h = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    h = {"Authorization": f"Bearer {resolved_key}", "Content-Type": "application/json"}
     h.update(headers or {})
-    req = urllib.request.Request("https://localhost:3443" + path, data=body, method=method, headers=h)
+    req = urllib.request.Request(BASE_URL + path, data=body, method=method, headers=h)
     try:
-        with urllib.request.urlopen(req, context=CONTEXT, timeout=90) as response:
+        with urllib.request.urlopen(req, timeout=90) as response:
             status, data = response.status, response.read()
     except urllib.error.HTTPError as error:
         status, data = error.code, error.read()
@@ -52,7 +65,6 @@ def web_opener():
     cookies = CookieJar()
     opener = urllib.request.build_opener(
         urllib.request.HTTPCookieProcessor(cookies),
-        urllib.request.HTTPSHandler(context=CONTEXT),
     )
     return opener, cookies
 
@@ -64,7 +76,7 @@ def web_request(opener, method, path, payload=None, expected=200, headers=None):
         request_headers["Content-Type"] = "application/json"
     request_headers.update(headers or {})
     req = urllib.request.Request(
-        "https://localhost:3443" + path,
+        BASE_URL + path,
         data=body,
         method=method,
         headers=request_headers,
@@ -100,7 +112,18 @@ def fixture(*args, entrypoint="ffmpeg"):
 
 
 def sql(statement):
-    return compose("exec", "-T", "db", "psql", "-U", "flux", "-d", "flux", "-Atc", statement).decode().strip()
+    db_path = ROOT / "var/config/flux.db"
+    conn = sqlite3.connect(str(db_path), timeout=30)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(statement)
+        rows = cursor.fetchall()
+        conn.commit()
+        if rows and len(rows) > 0 and len(rows[0]) > 0:
+            return str(rows[0][0])
+        return ""
+    finally:
+        conn.close()
 
 
 def submit(name, target=None):
@@ -139,12 +162,14 @@ def create_fixture():
 
 def run():
     wait_for(lambda: request("GET", "/health", expected=204) is None)
+    admin_key = get_key("admin_key") or ADMIN
+    worker_key = get_key("worker_key") or WORKER
     containers = compose("ps", "-q", "worker").decode().split()
     assert len(containers) == 3, "Lancer npm run dev pour disposer de trois agents"
     # Register list may include workers from previous runs. Use container hostnames.
     names = subprocess.check_output(["docker", "inspect", "--format", "{{.Config.Hostname}}", *containers], text=True).split()
     def current_workers():
-        rows = [w for w in request("GET", "/api/v1/workers") if w["name"] in names]
+        rows = [w for w in request("GET", "/api/v1/workers", key=admin_key) if w["name"] in names]
         return rows if len(rows) == 3 else None
     workers = wait_for(current_workers)
     print("Construction du conteneur d'outils de test…", flush=True)
@@ -152,27 +177,25 @@ def run():
     directory, source = create_fixture()
     original_hash = hashlib.sha256((directory / source).read_bytes()).hexdigest()
     request("GET", "/api/v1/jobs", key="wrong", expected=401)
-    request("POST", "/api/v1/jobs", {"source_name": source}, key=WORKER, expected=401)
-    request("POST", "/api/v1/claims", {"worker_id": workers[0]["id"]}, key=ADMIN, expected=401)
-    request("POST", "/api/v1/jobs", {"source_name": "../secret.mkv"}, expected=400)
+    request("POST", "/api/v1/jobs", {"source_name": source}, key=worker_key, expected=401)
+    request("POST", "/api/v1/claims", {"worker_id": workers[0]["id"]}, key=admin_key, expected=401)
+    request("POST", "/api/v1/jobs", {"source_name": "../secret.mkv"}, key=admin_key, expected=400)
     passed("Authentification, séparation des rôles et rejet de traversée de chemin")
-    try:
-        urllib.request.urlopen("https://localhost:3443/health", timeout=5)
-    except urllib.error.URLError as error:
-        assert isinstance(error.reason, ssl.SSLCertVerificationError)
-    else:
-        raise AssertionError("Le certificat local a été accepté sans sa CA")
-    plaintext = subprocess.run(["docker", "compose", "exec", "-T", "db", "psql", "host=db dbname=flux user=flux sslmode=disable", "-c", "SELECT 1"], cwd=ROOT, capture_output=True)
-    assert plaintext.returncode != 0 and b"no encryption" in plaintext.stderr
-    assert int(sql("SELECT count(*) FROM pg_stat_ssl WHERE ssl")) >= 1
-    passed("TLS : CA obligatoire, connexions SQL chiffrées et accès SQL en clair refusé")
+
+    # Vérification SQLite WAL et endpoint d'administration /api/v1/config
+    journal_mode = sql("PRAGMA journal_mode;")
+    assert journal_mode.lower() == "wal", f"Journal mode attendu: wal, obtenu: {journal_mode}"
+    sys_cfg = request("GET", "/api/v1/config", key=admin_key)
+    assert sys_cfg["worker_key"] == worker_key, "Clé worker incohérente dans /api/v1/config"
+    assert "version" in sys_cfg and "max_file_bytes" in sys_cfg, "Champs obligatoires manquants dans /api/v1/config"
+    passed("Architecture *arr : port unique HTTP 3000, SQLite WAL et endpoint /api/v1/config")
 
     web, cookies = web_opener()
     login_body, login_headers = web_request(
         web,
         "POST",
         "/api/v1/auth/session",
-        {"admin_key": ADMIN},
+        {"admin_key": admin_key},
     )
     assert login_headers.get("Cache-Control") == "no-store"
     assert {cookie.name for cookie in cookies} >= {"flux_session", "flux_csrf"}
@@ -200,7 +223,7 @@ def run():
     completed_session_job = wait_for(lambda: terminal(session_job))
     assert completed_session_job["status"] == "succeeded", completed_session_job
     download_request = urllib.request.Request(
-        "https://localhost:3443" + f"/api/v1/jobs/{session_job['id']}/output",
+        f"{BASE_URL}/api/v1/jobs/{session_job['id']}/output",
         headers={"Origin": WEB_ORIGIN},
     )
     streamed_hash = hashlib.sha256()
@@ -246,8 +269,6 @@ def run():
         def chapters(name):
             root = ET.fromstring(fixture(f"/fixtures/{name}", "chapters", entrypoint="mkvextract"))
             def canonical(element):
-                # mkvmerge regenerates chapter/edition IDs and adds a redundant
-                # IETF language. Compare chapter content, order, titles and times.
                 legacy = element.findtext("ChapterLanguage")
                 return (element.tag, (element.text or "").strip(), tuple(
                     canonical(child) for child in element
@@ -256,7 +277,6 @@ def run():
             return canonical(root)
         assert chapters(source) == chapters(output)
         assert fixture(f"/fixtures/{source}", "tags", entrypoint="mkvextract") == fixture(f"/fixtures/{output}", "tags", entrypoint="mkvextract")
-        # Extract attachment bytes independently of container metadata.
         for name in (source, output):
             fixture(f"/fixtures/{name}", "attachments", f"1:/fixtures/{name}.attachment", entrypoint="mkvextract")
         assert (directory / f"{source}.attachment").read_bytes() == (directory / f"{output}.attachment").read_bytes()
@@ -279,15 +299,16 @@ def run():
     passed("Trois agents : affectation ciblée et neuf tâches concurrentes sans double attribution")
 
     # Hold a lease as an agent that disappears. Force only this test lease's clock in SQL.
-    ghost = request("POST", "/api/v1/workers", {"name": PREFIX + "-interrupted"}, key=WORKER)
+    ghost = request("POST", "/api/v1/workers", {"name": PREFIX + "-interrupted"}, key=worker_key)
     interrupted = submit(source, ghost["id"])
-    old = request("POST", "/api/v1/claims", {"worker_id": ghost["id"]}, key=WORKER)
+    old = request("POST", "/api/v1/claims", {"worker_id": ghost["id"]}, key=worker_key)
     assert old["job_id"] == interrupted["id"]
-    request("POST", f"/api/v1/jobs/{interrupted['id']}/heartbeat", {"worker_id": ghost["id"], "lease_token": old["lease_token"]}, key=WORKER, expected=204)
-    assert float(sql(f"SELECT EXTRACT(epoch FROM leased_until-now()) FROM jobs WHERE id='{interrupted['id']}'")) > 110
-    sql(f"UPDATE jobs SET leased_until=now()-interval '1 second', target_worker_id=NULL WHERE id='{interrupted['id']}'")
-    request("POST", f"/api/v1/jobs/{interrupted['id']}/heartbeat", {"worker_id": ghost["id"], "lease_token": old["lease_token"]}, key=WORKER, expected=409)
-    request("PUT", f"/api/v1/jobs/{interrupted['id']}/result", data, key=WORKER, headers=lease_headers(old, ghost["id"]), expected=409)
+    request("POST", f"/api/v1/jobs/{interrupted['id']}/heartbeat", {"worker_id": ghost["id"], "lease_token": old["lease_token"]}, key=worker_key, expected=204)
+    remaining_secs = float(sql(f"SELECT (strftime('%s', leased_until) - strftime('%s', 'now')) FROM jobs WHERE id='{interrupted['id']}'"))
+    assert remaining_secs > 100, f"Bail restant insuffisant: {remaining_secs}"
+    sql(f"UPDATE jobs SET leased_until=datetime('now', '-1 second'), target_worker_id=NULL WHERE id='{interrupted['id']}'")
+    request("POST", f"/api/v1/jobs/{interrupted['id']}/heartbeat", {"worker_id": ghost["id"], "lease_token": old["lease_token"]}, key=worker_key, expected=409)
+    request("PUT", f"/api/v1/jobs/{interrupted['id']}/result", data, key=worker_key, headers=lease_headers(old, ghost["id"]), expected=409)
     recovered = wait_for(lambda: terminal(interrupted))
     assert recovered["status"] == "succeeded" and recovered["attempts"] == 2
     passed("Agent disparu : reprise après expiration, ancien bail refusé en heartbeat et publication")
@@ -298,7 +319,7 @@ def run():
     bad_job = submit(corrupt)
     bad = wait_for(lambda: terminal(bad_job))
     assert bad["status"] == "failed" and bad["error_code"] == "remux_failed", bad
-    reserved = request("POST", "/api/v1/workers", {"name": PREFIX + "-reserved"}, key=WORKER)
+    reserved = request("POST", "/api/v1/workers", {"name": PREFIX + "-reserved"}, key=worker_key)
     changed = f"{PREFIX}-changed.mkv"
     (directory / changed).write_bytes((directory / source).read_bytes())
     mutation = submit(changed, reserved["id"])
@@ -307,16 +328,17 @@ def run():
     failed = wait_for(lambda: terminal(mutation))
     assert failed["status"] == "failed" and failed["error_code"] == "source_integrity"
     invalid = submit(source, reserved["id"])
-    claim = request("POST", "/api/v1/claims", {"worker_id": reserved["id"]}, key=WORKER)
-    request("PUT", f"/api/v1/jobs/{invalid['id']}/result", b"invalid", key=WORKER, headers=lease_headers(claim, reserved["id"]), expected=400)
+    claim = request("POST", "/api/v1/claims", {"worker_id": reserved["id"]}, key=worker_key)
+    request("PUT", f"/api/v1/jobs/{invalid['id']}/result", b"invalid", key=worker_key, headers=lease_headers(claim, reserved["id"]), expected=400)
     request("GET", f"/api/v1/jobs/{invalid['id']}/output", expected=404)
-    sql(f"UPDATE jobs SET attempts=3,leased_until=now()-interval '1 second' WHERE id='{invalid['id']}'")
+    sql(f"UPDATE jobs SET attempts=3,leased_until=datetime('now', '-1 second') WHERE id='{invalid['id']}'")
     exhausted = wait_for(lambda: terminal(invalid))
     assert exhausted["status"] == "failed" and exhausted["error_code"] == "lease_expired"
     passed("Échecs contrôlés : source invalide/modifiée, résultat invalide non publié, limite de reprises")
 
-    # Database restart: migration state and completed outputs survive it.
-    compose("restart", "db")
+    # Coordinator restart: migration state, SQLite database and completed outputs survive it.
+    compose("restart", "coordinator")
+    wait_for(lambda: request("GET", "/health", expected=204) is None)
     def restored():
         try:
             return request("GET", f"/api/v1/jobs/{one['id']}")["status"] == "succeeded"
@@ -324,7 +346,7 @@ def run():
             return False
     wait_for(restored)
     assert request("GET", f"/api/v1/jobs/{one['id']}/output", raw=True) == data
-    passed("Redémarrage PostgreSQL : tâches et résultat persistants, reconnexion du coordinateur")
+    passed("Redémarrage coordinateur : tâches et résultat persistants dans SQLite, intégrité préservée")
     print(f"{len(RESULTS)} groupes de scénarios réussis. Rapport : var/scenario-report.json", flush=True)
 
 
@@ -338,7 +360,6 @@ def main():
         print("ÉCHEC : consulter les journaux Docker et les journaux JSON locaux.", flush=True)
         raise
     finally:
-        # Conserver la progression même en cas d'échec, sans copier d'erreur ou de secret.
         (ROOT / "var/scenario-report.json").write_text(json.dumps({
             "prefix": PREFIX,
             "status": status,

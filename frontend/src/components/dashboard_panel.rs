@@ -25,7 +25,7 @@ pub fn DashboardPanel() -> impl IntoView {
                 <div class="metric-card">
                     <div class="metric-label">"Tâches enregistrées"</div>
                     <div id="metric-jobs-count" class="metric-value">"0"</div>
-                    <div class="metric-subtitle">"En base de données PostgreSQL"</div>
+                    <div class="metric-subtitle">"En base de données SQLite (/config)"</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">"Agents actifs"</div>

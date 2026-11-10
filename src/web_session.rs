@@ -6,7 +6,7 @@ use crate::{
 use axum::http::{HeaderMap, Method, header};
 use chrono::{DateTime, Duration, Utc};
 use sha2::{Digest, Sha256};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
@@ -28,16 +28,16 @@ pub struct ValidatedSession {
     pub expires_at: DateTime<Utc>,
 }
 
-pub async fn create(pool: &PgPool, ttl_seconds: i64) -> AppResult<WebSession> {
+pub async fn create(pool: &SqlitePool, ttl_seconds: i64) -> AppResult<WebSession> {
     let token = Uuid::new_v4().to_string();
     let csrf_token = Uuid::new_v4().to_string();
     let token_hash = digest(&token);
     let csrf_hash = digest(&csrf_token);
     let expires_at = Utc::now() + Duration::seconds(ttl_seconds);
-    sqlx::query("DELETE FROM sessions WHERE expires_at <= now()")
+    sqlx::query("DELETE FROM sessions WHERE datetime(expires_at) <= datetime('now')")
         .execute(pool)
         .await?;
-    sqlx::query("INSERT INTO sessions(token_hash, expires_at, csrf_hash) VALUES ($1, $2, $3)")
+    sqlx::query("INSERT INTO sessions(token_hash, expires_at, csrf_hash) VALUES (?1, ?2, ?3)")
         .bind(&token_hash)
         .bind(expires_at)
         .bind(&csrf_hash)
@@ -52,18 +52,46 @@ pub async fn create(pool: &PgPool, ttl_seconds: i64) -> AppResult<WebSession> {
 
 pub fn validate_origin(headers: &HeaderMap, config: &Config) -> AppResult<()> {
     let origin = single_header(headers, header::ORIGIN.as_str()).ok_or(AppError::Forbidden)?;
-    if bool::from(origin.as_bytes().ct_eq(config.web_origin.as_bytes())) {
-        Ok(())
+    if let Some(ref configured_origin) = config.web_origin {
+        if bool::from(origin.as_bytes().ct_eq(configured_origin.as_bytes())) {
+            Ok(())
+        } else {
+            Err(AppError::Forbidden)
+        }
     } else {
-        Err(AppError::Forbidden)
+        let origin_url = reqwest::Url::parse(origin).map_err(|_| AppError::Forbidden)?;
+        if origin_url.scheme() != "http" && origin_url.scheme() != "https" {
+            return Err(AppError::Forbidden);
+        }
+        let host_header =
+            single_header(headers, header::HOST.as_str()).ok_or(AppError::Forbidden)?;
+        let origin_host = match origin_url.port() {
+            Some(port) => format!("{}:{}", origin_url.host_str().unwrap_or(""), port),
+            None => origin_url.host_str().unwrap_or("").to_string(),
+        };
+        let matches = bool::from(origin_host.as_bytes().ct_eq(host_header.as_bytes()))
+            || (origin_url.port().is_none() && {
+                let default_port = match origin_url.scheme() {
+                    "https" => ":443",
+                    "http" => ":80",
+                    _ => "",
+                };
+                let with_port = format!("{}{default_port}", origin_url.host_str().unwrap_or(""));
+                bool::from(with_port.as_bytes().ct_eq(host_header.as_bytes()))
+            });
+        if matches {
+            Ok(())
+        } else {
+            Err(AppError::Forbidden)
+        }
     }
 }
 
-pub async fn from_headers(pool: &PgPool, headers: &HeaderMap) -> AppResult<ValidatedSession> {
+pub async fn from_headers(pool: &SqlitePool, headers: &HeaderMap) -> AppResult<ValidatedSession> {
     let token = cookie(headers, SESSION_COOKIE).ok_or(AppError::Unauthorized)?;
     let token_hash = digest(token);
     let row: Option<(String, DateTime<Utc>)> = sqlx::query_as(
-        "SELECT csrf_hash, expires_at FROM sessions WHERE token_hash=$1 AND csrf_hash IS NOT NULL AND expires_at>now()",
+        "SELECT csrf_hash, expires_at FROM sessions WHERE token_hash=?1 AND csrf_hash IS NOT NULL AND datetime(expires_at) > datetime('now')",
     )
     .bind(&token_hash)
     .fetch_optional(pool)
@@ -102,7 +130,7 @@ pub fn validate_csrf_cookie<'a>(
 }
 
 pub async fn authorize_admin(
-    pool: &PgPool,
+    pool: &SqlitePool,
     config: &Config,
     headers: &HeaderMap,
     method: &Method,
@@ -120,8 +148,8 @@ pub async fn authorize_admin(
     Ok(())
 }
 
-pub async fn revoke(pool: &PgPool, session: &ValidatedSession) -> AppResult<()> {
-    sqlx::query("DELETE FROM sessions WHERE token_hash=$1")
+pub async fn revoke(pool: &SqlitePool, session: &ValidatedSession) -> AppResult<()> {
+    sqlx::query("DELETE FROM sessions WHERE token_hash=?1")
         .bind(&session.token_hash)
         .execute(pool)
         .await?;
@@ -161,11 +189,12 @@ fn cookie_header(
 }
 
 fn secure_attribute(config: &Config) -> &'static str {
-    if config.web_origin.starts_with("https://") {
-        "; Secure"
-    } else {
-        ""
+    if let Some(ref origin) = config.web_origin {
+        if origin.starts_with("https://") {
+            return "; Secure";
+        }
     }
+    ""
 }
 
 fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {

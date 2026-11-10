@@ -1,4 +1,4 @@
-//! Coordinateur HTTP, état PostgreSQL et traitement local intégré facultatif.
+//! Coordinateur HTTP, état SQLite et traitement local intégré facultatif.
 
 pub use crate::api::{AppState, router};
 

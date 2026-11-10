@@ -65,3 +65,11 @@ pub struct HardwareTelemetrySummary {
     pub storage_free_bytes: u64,
     pub storage_total_bytes: u64,
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SystemConfig {
+    pub worker_key: String,
+    pub max_file_bytes: u64,
+    pub local_worker: bool,
+    pub version: String,
+}

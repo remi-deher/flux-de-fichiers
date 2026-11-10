@@ -7,12 +7,11 @@ services:
     restart: unless-stopped
     read_only: true
     environment:
-      COORDINATOR_URL: ${COORDINATOR_URL:?Provide the HTTPS coordinator origin}
+      COORDINATOR_URL: ${COORDINATOR_URL:?Provide the HTTP or HTTPS coordinator origin}
       WORKER_NAME: ${WORKER_NAME:?Provide a unique worker name}
-      WORKER_KEY_FILE: /run/secrets/worker_key
-      CA_CERT: /run/secrets/ca_cert
+      WORKER_KEY: ${WORKER_KEY:-}
+      WORKER_KEY_FILE: ${WORKER_KEY_FILE:-/run/secrets/worker_key}
       MAX_FILE_BYTES: ${MAX_FILE_BYTES:-536870912}
-    secrets: [worker_key, ca_cert]
     volumes: [work:/work, logs:/logs]
     tmpfs: ["/tmp:size=64m,mode=1777"]
     cap_drop: [ALL]
@@ -23,8 +22,3 @@ services:
 volumes:
   work:
   logs:
-secrets:
-  worker_key:
-    file: ${WORKER_KEY_PATH:?Provide a secret file readable by UID 10001}
-  ca_cert:
-    file: ${CA_CERT_PATH:?Provide the coordinator CA certificate file}

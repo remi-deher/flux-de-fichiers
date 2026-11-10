@@ -1,6 +1,9 @@
-use std::{env, net::SocketAddr, path::PathBuf};
+use std::{
+    env,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+};
 
-const DEFAULT_WEB_ORIGIN: &str = "http://localhost:3000";
 const DEFAULT_WEB_SESSION_TTL_SECONDS: i64 = 28_800;
 const MAX_WEB_SESSION_TTL_SECONDS: i64 = 2_592_000;
 
@@ -10,11 +13,13 @@ pub struct Config {
     pub database_url: String,
     pub data_dir: PathBuf,
     pub input_dir: PathBuf,
+    pub config_dir: PathBuf,
+    pub static_dir: PathBuf,
     pub admin_key: String,
     pub worker_key: String,
     pub max_file_bytes: u64,
     pub local_worker: bool,
-    pub web_origin: String,
+    pub web_origin: Option<String>,
     pub web_session_ttl_seconds: i64,
     pub tls: Option<(PathBuf, PathBuf)>,
 }
@@ -33,12 +38,63 @@ pub fn secret(name: &str) -> anyhow::Result<String> {
     Ok(value)
 }
 
+fn resolve_config_dir() -> PathBuf {
+    if let Ok(dir) = env::var("CONFIG_DIR") {
+        return PathBuf::from(dir);
+    }
+    let default_dir = PathBuf::from("/config");
+    if default_dir.is_dir() || std::fs::create_dir_all(&default_dir).is_ok() {
+        default_dir
+    } else {
+        PathBuf::from("var/config")
+    }
+}
+
+fn bootstrap_secret(config_dir: &Path, env_name: &str, file_name: &str) -> anyhow::Result<String> {
+    if env::var(env_name).is_ok() || env::var(format!("{env_name}_FILE")).is_ok() {
+        return secret(env_name);
+    }
+    let key_path = config_dir.join(file_name);
+    if key_path.is_file() {
+        let val = std::fs::read_to_string(&key_path)?.trim().to_owned();
+        if val.len() >= 32 {
+            return Ok(val);
+        }
+    }
+    let mut bytes = [0u8; 32];
+    let mut urandom = std::fs::File::open("/dev/urandom")?;
+    use std::io::Read;
+    urandom.read_exact(&mut bytes)?;
+    let generated: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    write_secure_file(&key_path, &generated)?;
+    Ok(generated)
+}
+
+fn write_secure_file(path: &Path, content: &str) -> anyhow::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(content.as_bytes())?;
+    file.flush()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
 pub fn coordinator_url(raw: &str) -> anyhow::Result<reqwest::Url> {
     let url = reqwest::Url::parse(raw)?;
-    let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
     anyhow::ensure!(
-        url.scheme() == "https" || (url.scheme() == "http" && local),
-        "Coordinator requires HTTPS except on loopback"
+        url.scheme() == "https" || url.scheme() == "http",
+        "Coordinator requires HTTP or HTTPS"
     );
     anyhow::ensure!(
         url.path() == "/"
@@ -53,24 +109,37 @@ pub fn coordinator_url(raw: &str) -> anyhow::Result<reqwest::Url> {
 
 impl Config {
     pub fn load() -> anyhow::Result<Self> {
-        let bind: SocketAddr = env::var("BIND")
-            .unwrap_or_else(|_| "127.0.0.1:3000".into())
-            .parse()?;
+        let config_dir = resolve_config_dir();
+        std::fs::create_dir_all(&config_dir)?;
+
+        let bind_str = env::var("BIND_ADDR")
+            .or_else(|_| env::var("BIND"))
+            .unwrap_or_else(|_| "0.0.0.0:3000".into());
+        let bind: SocketAddr = bind_str.parse()?;
+
         let tls = match (env::var("TLS_CERT"), env::var("TLS_KEY")) {
             (Ok(cert), Ok(key)) => Some((cert.into(), key.into())),
             (Err(_), Err(_)) => None,
             _ => anyhow::bail!("TLS_CERT and TLS_KEY must be supplied together"),
         };
-        anyhow::ensure!(
-            bind.ip().is_loopback() || tls.is_some(),
-            "Non-loopback listener requires TLS"
-        );
-        let admin_key = secret("ADMIN_KEY")?;
-        let worker_key = secret("WORKER_KEY")?;
+
+        let admin_key = bootstrap_secret(&config_dir, "ADMIN_KEY", "admin_key")?;
+        let mut worker_key = bootstrap_secret(&config_dir, "WORKER_KEY", "worker_key")?;
+        if admin_key == worker_key {
+            // If identical, regenerate a distinct worker key file
+            let key_path = config_dir.join("worker_key");
+            let mut bytes = [0u8; 32];
+            let mut urandom = std::fs::File::open("/dev/urandom")?;
+            use std::io::Read;
+            urandom.read_exact(&mut bytes)?;
+            worker_key = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            write_secure_file(&key_path, &worker_key)?;
+        }
         anyhow::ensure!(
             admin_key != worker_key,
             "Admin and worker credentials must differ"
         );
+
         let max_file_bytes = env::var("MAX_FILE_BYTES")
             .unwrap_or_else(|_| "536870912".into())
             .parse()?;
@@ -78,24 +147,25 @@ impl Config {
             max_file_bytes > 0 && max_file_bytes <= i64::MAX as u64,
             "MAX_FILE_BYTES must be positive"
         );
-        let web_origin = env::var("WEB_ORIGIN").unwrap_or_else(|_| DEFAULT_WEB_ORIGIN.into());
-        let parsed_origin = reqwest::Url::parse(&web_origin)?;
-        let local_http_origin = parsed_origin.scheme() == "http"
-            && matches!(
-                parsed_origin.host_str(),
-                Some("localhost" | "127.0.0.1" | "[::1]")
+
+        let web_origin = if let Ok(val) = env::var("WEB_ORIGIN") {
+            let parsed_origin = reqwest::Url::parse(&val)?;
+            anyhow::ensure!(
+                (parsed_origin.scheme() == "https" || parsed_origin.scheme() == "http")
+                    && parsed_origin.host_str().is_some()
+                    && parsed_origin.path() == "/"
+                    && parsed_origin.query().is_none()
+                    && parsed_origin.fragment().is_none()
+                    && parsed_origin.username().is_empty()
+                    && parsed_origin.password().is_none()
+                    && parsed_origin.origin().ascii_serialization() == val,
+                "WEB_ORIGIN must be a canonical origin without path or credentials"
             );
-        anyhow::ensure!(
-            (parsed_origin.scheme() == "https" || local_http_origin)
-                && parsed_origin.host_str().is_some()
-                && parsed_origin.path() == "/"
-                && parsed_origin.query().is_none()
-                && parsed_origin.fragment().is_none()
-                && parsed_origin.username().is_empty()
-                && parsed_origin.password().is_none()
-                && parsed_origin.origin().ascii_serialization() == web_origin,
-            "WEB_ORIGIN must be a canonical origin without path or credentials"
-        );
+            Some(val)
+        } else {
+            None
+        };
+
         let web_session_ttl_seconds = env::var("WEB_SESSION_TTL_SECONDS")
             .unwrap_or_else(|_| DEFAULT_WEB_SESSION_TTL_SECONDS.to_string())
             .parse()?;
@@ -103,6 +173,26 @@ impl Config {
             (60..=MAX_WEB_SESSION_TTL_SECONDS).contains(&web_session_ttl_seconds),
             "WEB_SESSION_TTL_SECONDS must be between 60 and 2592000"
         );
+
+        let static_dir: PathBuf = env::var("STATIC_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                let default_path = PathBuf::from("/usr/share/flux-de-fichiers/frontend");
+                if default_path.is_dir() {
+                    default_path
+                } else if PathBuf::from("frontend/dist").is_dir() {
+                    PathBuf::from("frontend/dist")
+                } else {
+                    default_path
+                }
+            });
+
+        let database_url = if let Ok(url) = value("DATABASE_URL") {
+            url
+        } else {
+            format!("sqlite://{}", config_dir.join("flux.db").display())
+        };
+
         Ok(Self {
             bind,
             tls,
@@ -114,11 +204,13 @@ impl Config {
                 .unwrap_or(true),
             web_origin,
             web_session_ttl_seconds,
-            database_url: value("DATABASE_URL")?,
+            database_url,
             data_dir: env::var("DATA_DIR").unwrap_or_else(|_| "var".into()).into(),
             input_dir: env::var("INPUT_DIR")
                 .unwrap_or_else(|_| "var/input".into())
                 .into(),
+            config_dir,
+            static_dir,
         })
     }
 }

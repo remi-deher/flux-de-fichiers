@@ -33,7 +33,7 @@ pub fn App() -> impl IntoView {
                     "Recommandations d'accessibilité W3C suivies • Contrastes renforcés (>= 5.9:1) • Navigation clavier complète • Thèmes clair/sombre"
                 </p>
                 <p style="margin-top: 0.25rem;">
-                    "Remuxage MKVToolNix • Mode centralisé autonome ou workers distants • PostgreSQL local"
+                    "Remuxage MKVToolNix • Mode centralisé autonome ou workers distants • SQLite /config"
                 </p>
             </footer>
         </div>

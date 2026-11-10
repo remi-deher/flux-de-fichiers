@@ -75,7 +75,7 @@ pub async fn output(
 ) -> AppResult<Response> {
     crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     let name: Option<String> =
-        sqlx::query_scalar("SELECT output_name FROM jobs WHERE id=$1 AND status='succeeded'")
+        sqlx::query_scalar("SELECT output_name FROM jobs WHERE id=?1 AND status='succeeded'")
             .bind(id)
             .fetch_optional(&s.pool)
             .await?
@@ -178,9 +178,9 @@ pub(crate) async fn publish_staged(
     media::validate_remux(source, staging)
         .await
         .map_err(|_| AppError::Invalid)?;
-    let mut tx = s.pool.begin().await?;
+    let mut tx = s.pool.begin_with("BEGIN IMMEDIATE").await?;
     // Fence a former lease even if it finishes after another agent has taken over.
-    let active: Option<Uuid> = sqlx::query_scalar("SELECT id FROM jobs WHERE id=$1 AND worker_id=$2 AND lease_token=$3 AND status='running' AND leased_until>now() FOR UPDATE")
+    let active: Option<Uuid> = sqlx::query_scalar("SELECT id FROM jobs WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND status='running' AND leased_until > datetime('now')")
         .bind(id).bind(lease.worker_id).bind(lease.lease_token).fetch_optional(&mut *tx).await?;
     if active.is_none() {
         return Err(AppError::Conflict);
@@ -189,7 +189,7 @@ pub(crate) async fn publish_staged(
     let destination = s.config.data_dir.join("output").join(&name);
     // Hard-link publication is atomic, cannot overwrite, and stays on the data filesystem.
     tokio::fs::hard_link(staging, &destination).await?;
-    let updated = sqlx::query("UPDATE jobs SET status='succeeded',output_name=$2,output_sha256=$3,output_bytes=$4,warning=$5,lease_token=NULL,leased_until=NULL,error_code=NULL,updated_at=now() WHERE id=$1")
+    let updated = sqlx::query("UPDATE jobs SET status='succeeded',output_name=?2,output_sha256=?3,output_bytes=?4,warning=?5,lease_token=NULL,leased_until=NULL,error_code=NULL,updated_at=datetime('now') WHERE id=?1")
         .bind(id).bind(name).bind(hash).bind(size as i64).bind(warning).execute(&mut *tx).await;
     let completed = match updated {
         Ok(_) => tx.commit().await,

@@ -12,7 +12,7 @@ Ce guide se consulte à la demande. Le README reste la référence d'utilisation
 | Baux, attribution, reprises | `src/repository.rs`, `src/domain.rs` | `migrations/`, `src/worker.rs` |
 | Transferts, intégrité, publication | `src/api/transfers.rs`, `src/storage.rs` | `src/media.rs`, `src/worker.rs` |
 | Remuxage MKV | `src/media.rs`, `src/worker.rs` | `scripts/scenarios.py` |
-| Interface Leptos | `frontend/`, `deploy/nginx.conf` | `frontend/README.md` |
+| Interface Leptos | `frontend/` | `frontend/README.md` |
 | Configuration, TLS | `src/config.rs`, `tests/configuration.rs` | `compose.yaml`, `deploy/` ; déploiement dans le README |
 | Laboratoire Docker | `package.json`, `scripts/dev.py`, `compose.yaml` | Scénarios du README, `deploy/fixtures.Dockerfile` |
 | CI, branches, publication | `docs/adr/0002-flux-git.md` | Workflow concerné dans `.github/workflows/`, `scripts/ci/` |

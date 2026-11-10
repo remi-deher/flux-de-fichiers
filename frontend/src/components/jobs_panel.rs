@@ -142,7 +142,7 @@ pub fn JobsPanel() -> impl IntoView {
                     <div id="detail-curl-section" style="margin-top: 0.5rem; display: none;">
                         <label class="form-label">"Commande de téléchargement directe (curl) :"</label>
                         <div id="detail-curl-command" class="code-snippet">
-                            "curl -k -H 'Authorization: Bearer <ADMIN_KEY>' https://localhost:3443/api/v1/jobs/.../output -o resultat.mkv"
+                            "curl -H 'Authorization: Bearer <ADMIN_KEY>' http://localhost:3000/api/v1/jobs/.../output -o resultat.mkv"
                         </div>
                     </div>
                 </div>

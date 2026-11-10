@@ -127,7 +127,11 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
     cleanup(&work_dir).await;
 }
 
-async fn heartbeat_loop(pool: sqlx::PgPool, job: Uuid, lease: LeaseRequest) -> anyhow::Result<()> {
+async fn heartbeat_loop(
+    pool: sqlx::SqlitePool,
+    job: Uuid,
+    lease: LeaseRequest,
+) -> anyhow::Result<()> {
     loop {
         tokio::time::sleep(HEARTBEAT_INTERVAL).await;
         repository::heartbeat(&pool, job, &lease).await?;

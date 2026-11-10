@@ -10,9 +10,9 @@ Poste de pilotage et de supervision moderne pour la chaîne de remuxage MKVToolN
   - `DashboardPanel` : Vue d'ensemble avec métriques clés (santé coordinateur, mode centralisé autonome ou workers distants, compteurs de fichiers, tâches et agents), accès rapides et présentation honnête des fonctionnalités planifiées hors périmètre (éditeur de flux visuel, connecteurs distants S3/SMB, catalogue de plugins).
   - `FilesPanel` : Liste des fichiers MKV admissibles dans `var/input/`, champ de recherche en direct, compteur de résultats et dialogue modal accessible de confirmation (`<dialog>`) avant soumission du remuxage avec ciblage optionnel d'un nœud.
   - `JobsPanel` : File des tâches avec filtres par statut (`Tous`, `En attente`, `En cours`, `Succès`, `Échec`), recherche par mot-clé, volet d'inspection détaillée d'une tâche (ID, agent assigné, horodatages, code d'erreur explicité) et téléchargement direct en flux.
-  - `WorkersPanel` : Vue des serveurs et agents de traitement (coordinateur avec agent intégré ou agents distants HTTPS), horodatages de dernière activité et rappels d'architecture.
+  - `WorkersPanel` : Vue des serveurs et agents de traitement, configuration *arr auto-amorcée (/config), clé worker copiable et commande Docker pour adjoindre un worker distant en HTTP.
   - `PluginsPanel` : Gestion du catalogue d'outils distribués (modèle Bare Core / Option B), inspecteur de contrats déclaratifs JSON et macro-blocs composites, banc d'essai de validation du cache (`ToolCacheManager`) et télémétrie matérielle de la sonde interne (CPU, RAM, GPU `/dev/dri`, stockage `statvfs`).
-  - `SettingsPanel` : Gestion sécurisée de la session web et authentification, préférences visuelles de thèmes et diagnostics réseau.
+  - `SettingsPanel` : Gestion sécurisée de la session web et authentification, préférences visuelles de thèmes et diagnostics réseau unifiés (port HTTP unique 3000).
 
 ## Sécurité et téléchargement
 
@@ -45,7 +45,7 @@ Poste de pilotage et de supervision moderne pour la chaîne de remuxage MKVToolN
    ```bash
    npm run dev
    ```
-   Le service Nginx expose l'interface sur `http://localhost:3000/` et relaie de façon transparente `/api/` et `/health` vers le coordinateur applicatif.
+   Le service Axum expose l'interface et l'API sur `http://localhost:3000/` en conteneur unique autonome style *arr.
 
 ## Preuves de validation et limites d'environnement
 

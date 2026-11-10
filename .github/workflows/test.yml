@@ -150,7 +150,7 @@ jobs:
           python3 -c 'import sys; sys.path.insert(0, "scripts"); from dev import prepare; prepare()'
           docker pull "$PR_IMAGE"
           docker tag "$PR_IMAGE" "flux-de-fichiers:$IMAGE_TAG"
-          docker compose up --detach --no-build --wait --wait-timeout 120 --scale worker=3 db coordinator worker preview
+          docker compose up --detach --no-build --wait --wait-timeout 120 --scale worker=3 coordinator worker
       - if: needs.changes.outputs.code == 'true'
         name: Exécuter les scénarios et mesurer leur durée
         run: |

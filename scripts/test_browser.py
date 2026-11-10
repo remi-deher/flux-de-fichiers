@@ -35,9 +35,11 @@ def wait_for_server(timeout=30):
 def run_browser_tests():
     from playwright.sync_api import sync_playwright
 
-    admin_key_path = ROOT / "var/secrets/admin_key"
+    admin_key_path = ROOT / "var/config/admin_key"
     if not admin_key_path.exists():
-        raise FileNotFoundError(f"Clé admin introuvable dans {admin_key_path}")
+        admin_key_path = ROOT / "var/secrets/admin_key"
+    if not admin_key_path.exists():
+        raise FileNotFoundError(f"Clé admin introuvable dans var/config ou var/secrets")
     admin_key = admin_key_path.read_text().strip()
 
     print("=== Démarrage des tests navigateur automatisés ===", flush=True)

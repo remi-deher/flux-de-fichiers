@@ -8,8 +8,11 @@ use axum::{
     http::{HeaderMap, StatusCode},
     routing::{get, post, put},
 };
-use sqlx::{PgPool, postgres::PgPoolOptions};
-use std::{sync::Arc, time::Duration};
+use sqlx::{
+    SqlitePool,
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
+};
+use std::{str::FromStr, sync::Arc, time::Duration};
 use tower_http::{
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     trace::TraceLayer,
@@ -17,14 +20,14 @@ use tower_http::{
 
 #[derive(Clone)]
 pub struct AppState {
-    pub pool: PgPool,
+    pub pool: SqlitePool,
     pub config: Arc<Config>,
 }
 
 pub fn router(state: AppState) -> Router {
     Router::new()
-        .route("/", get(|| async { axum::Json(serde_json::json!({"service":"flux-de-fichiers", "interface":false})) }))
         .route("/health", get(health))
+        .route("/api/v1/config", get(jobs::system_config))
         .route("/api/v1/files", get(jobs::files))
         .route("/api/v1/auth/session", get(session::current).post(session::login))
         .route("/api/v1/auth/logout", post(session::logout))
@@ -37,6 +40,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/jobs/{id}/failure", post(jobs::failure))
         .route("/api/v1/jobs/{id}/source", get(transfers::source))
         .route("/api/v1/jobs/{id}/result", put(transfers::result))
+        .fallback(spa_fallback)
         .layer(tower_http::timeout::TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(3600)))
         .layer(axum::middleware::map_response(|response: axum::response::Response| async move {
             let status = response.status();
@@ -54,6 +58,38 @@ pub fn router(state: AppState) -> Router {
         }).on_response(tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO)))
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
         .with_state(state)
+}
+
+async fn spa_fallback(
+    State(state): State<AppState>,
+    req: axum::extract::Request,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    use tower::ServiceExt;
+    let path = req.uri().path();
+    if path.starts_with("/api/") {
+        return (
+            StatusCode::NOT_FOUND,
+            axum::Json(serde_json::json!({"error":{"code":"invalid_request"}})),
+        )
+            .into_response();
+    }
+    let static_dir = &state.config.static_dir;
+    let index_file = static_dir.join("index.html");
+    if index_file.is_file() {
+        let serve_service = tower_http::services::ServeDir::new(static_dir)
+            .fallback(tower_http::services::ServeFile::new(&index_file));
+        match serve_service.oneshot(req).await {
+            Ok(res) => res.into_response(),
+            Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        }
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            axum::Json(serde_json::json!({"error":{"code":"invalid_request"}})),
+        )
+            .into_response()
+    }
 }
 
 async fn health(State(s): State<AppState>) -> AppResult<StatusCode> {
@@ -87,15 +123,28 @@ async fn claim(
 }
 
 pub async fn serve(config: Config) -> anyhow::Result<()> {
-    let pool = PgPoolOptions::new()
-        .max_connections(10)
+    let connect_options = if config.database_url.starts_with("sqlite:") {
+        SqliteConnectOptions::from_str(&config.database_url)?
+    } else {
+        SqliteConnectOptions::new().filename(&config.database_url)
+    }
+    .create_if_missing(true)
+    .journal_mode(SqliteJournalMode::Wal)
+    .synchronous(SqliteSynchronous::Normal)
+    .foreign_keys(true)
+    .busy_timeout(Duration::from_secs(5));
+
+    let pool = SqlitePoolOptions::new()
+        .max_connections(5)
         .acquire_timeout(Duration::from_secs(5))
-        .connect(&config.database_url)
+        .connect_with(connect_options)
         .await?;
+
     sqlx::migrate!().run(&pool).await?;
     tokio::fs::create_dir_all(config.data_dir.join("output")).await?;
     tokio::fs::create_dir_all(config.data_dir.join("staging")).await?;
     tokio::fs::create_dir_all(&config.input_dir).await?;
+    tokio::fs::create_dir_all(&config.config_dir).await?;
     let addr = config.bind;
     let tls = config.tls.clone();
     let state = AppState {

@@ -42,6 +42,7 @@ async fn protected_routes_reject_missing_keys_before_accessing_resources() -> an
     for path in [
         "/api/v1/jobs",
         "/api/v1/jobs/events",
+        "/api/v1/flows",
         "/api/v1/files",
         "/api/v1/plugins",
         "/api/v1/tools",

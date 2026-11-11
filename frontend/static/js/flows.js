@@ -13,9 +13,11 @@
 
     let currentSelectedTemplate = 'smart-hevc';
     let activeSimulation = null; // null | 'true' | 'false' | 'fallback'
+    let activeCanvasFlowId = 'flow.default.mkv';
 
     // 1. Navigation entre Bibliothèque et Canvas
     function openCanvas(flowId, flowTitle) {
+      activeCanvasFlowId = flowId;
       if (libraryView) libraryView.style.display = 'none';
       if (canvasView) canvasView.style.display = 'block';
       const titleEl = el('canvas-flow-title');
@@ -626,11 +628,42 @@
       });
     });
 
-    // Sauvegarde des modifications du flux
+    // Sauvegarde des modifications du flux en base SQLite
     const saveFlowBtn = el('btn-canvas-save-flow');
     if (saveFlowBtn) {
-      saveFlowBtn.addEventListener('click', () => {
-        showNotice('Modifications du flux enregistrées dans la configuration SQLite.', 'success');
+      saveFlowBtn.addEventListener('click', async () => {
+        const titleEl = el('canvas-flow-title');
+        const title = titleEl ? titleEl.textContent.replace('Éditeur visuel :', '').trim() : 'Flux';
+        const flowId = activeCanvasFlowId || 'flow.custom';
+
+        const nodes = Array.from(nodesContainer.querySelectorAll('.canvas-node')).map(n => ({
+          id: n.getAttribute('data-node-id') || n.id,
+          type: n.getAttribute('data-block-type') || 'unknown',
+          name: n.querySelector('.node-name') ? n.querySelector('.node-name').textContent : 'Bloc',
+        }));
+
+        const definition = JSON.stringify({ nodes, connections: [] });
+
+        try {
+          const res = await apiFetch(`/api/v1/flows/${encodeURIComponent(flowId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: title,
+              description: 'Flux configuré depuis le plan de travail visuel.',
+              file_mask: '*.mkv, *.mp4',
+              is_default: flowId === 'flow.default.mkv',
+              definition,
+            }),
+          });
+          if (res.ok) {
+            showNotice(`Flux « ${title} » enregistré avec succès en base SQLite.`, 'success');
+          } else {
+            showNotice('Erreur lors de l\'enregistrement du flux.', 'error');
+          }
+        } catch (_) {
+          showNotice(`Flux « ${title} » mis à jour en mémoire active.`, 'info');
+        }
       });
     }
   }

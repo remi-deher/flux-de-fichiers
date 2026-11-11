@@ -9,8 +9,11 @@ use axum::{
     Json,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
+    response::sse::{Event, KeepAlive, Sse},
 };
+use futures_util::stream::Stream;
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
 use uuid::Uuid;
 
 pub async fn files(State(s): State<AppState>, h: HeaderMap) -> AppResult<Json<Vec<MediaFile>>> {
@@ -37,8 +40,9 @@ pub async fn create(
             return Err(AppError::Invalid);
         }
     }
-    let job = sqlx::query_as("INSERT INTO jobs(id,source_name,target_worker_id,source_sha256,source_bytes) VALUES(?1,?2,?3,?4,?5) RETURNING *")
+    let job: Job = sqlx::query_as("INSERT INTO jobs(id,source_name,target_worker_id,source_sha256,source_bytes) VALUES(?1,?2,?3,?4,?5) RETURNING *")
         .bind(Uuid::new_v4()).bind(r.source_name).bind(r.target_worker_id).bind(hash).bind(bytes as i64).fetch_one(&s.pool).await?;
+    s.notify_job_event("job_created", job.id, &job.status, None);
     Ok((StatusCode::CREATED, Json(job)))
 }
 
@@ -60,6 +64,30 @@ pub async fn list(
     Ok(Json(sqlx::query_as("SELECT * FROM jobs WHERE (?1 IS NULL OR (created_at,id) < (SELECT created_at,id FROM jobs WHERE id=?1)) ORDER BY created_at DESC,id DESC LIMIT ?2")
         .bind(p.before).bind(limit).fetch_all(&s.pool).await?))
 }
+
+pub async fn events(
+    State(s): State<AppState>,
+    h: HeaderMap,
+) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
+    let rx = s.events_tx.subscribe();
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    let data = serde_json::to_string(&event).unwrap_or_default();
+                    let sse_event = Event::default().event(&event.event_type).data(data);
+                    return Some((Ok(sse_event), rx));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    });
+
+    Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15))))
+}
+
 pub async fn get_job(
     State(s): State<AppState>,
     h: HeaderMap,
@@ -90,6 +118,7 @@ pub async fn heartbeat(
 ) -> AppResult<StatusCode> {
     authorize(&h, &s.config.worker_key)?;
     repository::heartbeat(&s.pool, id, &r).await?;
+    s.notify_job_event("job_heartbeat", id, "running", None);
     Ok(StatusCode::NO_CONTENT)
 }
 pub async fn failure(
@@ -113,6 +142,7 @@ pub async fn failure(
         &r.error_code,
     )
     .await?;
+    s.notify_job_event("job_failed", id, "failed", Some(r.error_code));
     Ok(StatusCode::NO_CONTENT)
 }
 

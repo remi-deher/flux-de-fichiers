@@ -1,7 +1,10 @@
 use anyhow::Context;
 use serde_json::Value;
 use std::{path::Path, process::Stdio, time::Duration};
-use tokio::{io::AsyncReadExt, process::Command};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncReadExt},
+    process::Command,
+};
 
 const TOOL_TIMEOUT: Duration = Duration::from_secs(3600);
 const MAX_IDENTIFICATION_BYTES: u64 = 8 * 1024 * 1024;
@@ -127,23 +130,61 @@ pub async fn remux(source: &Path, output: &Path) -> anyhow::Result<bool> {
 }
 
 pub async fn remux_with(bin: &Path, source: &Path, output: &Path) -> anyhow::Result<bool> {
+    remux_with_progress(bin, source, output, |_, _| {}).await
+}
+
+pub async fn remux_with_progress<F>(
+    bin: &Path,
+    source: &Path,
+    output: &Path,
+    mut on_progress: F,
+) -> anyhow::Result<bool>
+where
+    F: FnMut(u32, &str) + Send + 'static,
+{
     inspect_with(bin, source).await?;
-    let status = tokio::time::timeout(
-        TOOL_TIMEOUT,
-        Command::new(bin)
-            .arg("--output-charset")
-            .arg("UTF-8")
-            .arg("--disable-track-statistics-tags")
-            .arg("--output")
-            .arg(output)
-            .arg(source)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .status(),
-    )
+    let mut child = Command::new(bin)
+        .arg("--output-charset")
+        .arg("UTF-8")
+        .arg("--disable-track-statistics-tags")
+        .arg("--output")
+        .arg(output)
+        .arg(source)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()?;
+
+    let stdout = child.stdout.take().context("missing stdout")?;
+    let mut reader = tokio::io::BufReader::new(stdout).lines();
+
+    let read_progress = async {
+        while let Ok(Some(line)) = reader.next_line().await {
+            if let Some(pct_str) = line.strip_prefix("Progress: ") {
+                let trimmed = pct_str.trim().trim_end_matches('%');
+                if let Ok(pct) = trimmed.parse::<u32>() {
+                    on_progress(pct, &line);
+                }
+            } else if line.contains('%') {
+                on_progress(0, &line);
+            }
+        }
+    };
+
+    let wait_child = async {
+        let status = child.wait().await?;
+        anyhow::Ok(status)
+    };
+
+    let (status, _) = tokio::time::timeout(TOOL_TIMEOUT, async {
+        tokio::try_join!(wait_child, async {
+            read_progress.await;
+            anyhow::Ok(())
+        })
+    })
     .await
     .context("remux timed out")??;
+
     tracing::info!(exit_code = ?status.code(), "mkvmerge finished");
     let warning = match status.code() {
         Some(0) => false,

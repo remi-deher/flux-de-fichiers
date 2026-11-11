@@ -29,9 +29,11 @@ fn app() -> anyhow::Result<axum::Router> {
         tls: None,
     };
     let pool = SqlitePoolOptions::new().connect_lazy(&config.database_url)?;
+    let (events_tx, _) = tokio::sync::broadcast::channel(128);
     Ok(router(AppState {
         pool,
         config: Arc::new(config),
+        events_tx,
     }))
 }
 
@@ -39,6 +41,7 @@ fn app() -> anyhow::Result<axum::Router> {
 async fn protected_routes_reject_missing_keys_before_accessing_resources() -> anyhow::Result<()> {
     for path in [
         "/api/v1/jobs",
+        "/api/v1/jobs/events",
         "/api/v1/files",
         "/api/v1/plugins",
         "/api/v1/tools",
@@ -129,9 +132,11 @@ async fn explicit_web_origin_strictly_enforces_configured_origin() -> anyhow::Re
         tls: None,
     };
     let pool = SqlitePoolOptions::new().connect_lazy(&config.database_url)?;
+    let (events_tx, _) = tokio::sync::broadcast::channel(128);
     let app = router(AppState {
         pool,
         config: Arc::new(config),
+        events_tx,
     });
 
     let request = Request::builder()

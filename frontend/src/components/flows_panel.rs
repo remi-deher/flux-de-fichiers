@@ -183,6 +183,62 @@ pub fn FlowsPanel() -> impl IntoView {
                                 </div>
                             </div>
                         </article>
+
+                        // Flow 4 : Aiguillage conditionnel intelligent & Exécution In-Place (ADR-0008)
+                        <article class="flow-card" data-flow-id="flow.smart.adr0008">
+                            <div class="flow-card-header">
+                                <div>
+                                    <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                                        <h3 class="flow-card-title">"Aiguillage conditionnel &amp; In-Place (ADR-0008)"</h3>
+                                        <span class="status-pill success">"Tri-sorties &amp; Zéro copie"</span>
+                                    </div>
+                                    <p class="flow-card-desc">
+                                        "Inspecte automatiquement le média : si déjà HEVC, applique les drapeaux en-têtes directement en place (mkvpropedit) sans copie ; sinon transcode par GPU avec repli CPU garanti."
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div class="flow-pipeline-container" aria-label="Chaîne des blocs du flux ADR-0008">
+                                <div class="flow-pipeline">
+                                    <div class="flow-block-step">
+                                        <span class="step-badge">"1"</span>
+                                        <span class="step-name">"📄 Détection source"</span>
+                                        <span class="step-type">"MediaInfo implicite"</span>
+                                    </div>
+                                    <span class="flow-arrow" aria-hidden="true">"➔"</span>
+                                    <div class="flow-block-step condition-step">
+                                        <span class="step-badge" style="background: var(--warning-border);">"2"</span>
+                                        <span class="step-name">"🔀 Si Codec == HEVC ?"</span>
+                                        <span class="step-type">"Aiguillage 3 sorties"</span>
+                                    </div>
+                                    <span class="flow-arrow" aria-hidden="true">"➔"</span>
+                                    <div class="flow-block-step in-place-step">
+                                        <span class="step-badge" style="background: #10b981;">"✓"</span>
+                                        <span class="step-name">"⚡ In-Place (mkvpropedit)"</span>
+                                        <span class="step-type">"En-têtes directes sans /work"</span>
+                                    </div>
+                                    <span class="flow-arrow" aria-hidden="true">"ou"</span>
+                                    <div class="flow-block-step">
+                                        <span class="step-badge" style="background: #f59e0b;">"✗"</span>
+                                        <span class="step-name">"🎞️ Transcodage GPU"</span>
+                                        <span class="step-type">"HEVC QSV (Repli: CPU)"</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="flow-card-footer">
+                                <span class="flow-pattern-tag">"Masque : *.mkv, *.mp4, *.m2ts, *.ts"</span>
+                                <div style="display: flex; gap: 0.5rem;">
+                                    <button
+                                        type="button"
+                                        class="btn btn-primary btn-sm open-canvas-btn"
+                                        data-flow="flow.smart.adr0008"
+                                    >
+                                        "Ouvrir l'éditeur visuel (Canvas)"
+                                    </button>
+                                </div>
+                            </div>
+                        </article>
                     </div>
                 </section>
             </div>
@@ -203,6 +259,13 @@ pub fn FlowsPanel() -> impl IntoView {
                             "Éditeur visuel : Transcodage HEVC"
                         </h2>
                         <span class="status-pill success">"Mode Édition"</span>
+                    </div>
+                    <div class="canvas-simulation-bar" role="toolbar" aria-label="Banc de test de simulation conditionnelle">
+                        <span class="sim-label">"Simuler le routage :"</span>
+                        <button type="button" class="btn btn-secondary btn-sm sim-btn" data-sim="true" title="Condition vérifiée (ex: HEVC) : routage direct In-Place sans copie">"✓ Vrai (In-Place)"</button>
+                        <button type="button" class="btn btn-secondary btn-sm sim-btn" data-sim="false" title="Condition non vérifiée : transcodage GPU">"✗ Faux (Transcodage)"</button>
+                        <button type="button" class="btn btn-secondary btn-sm sim-btn" data-sim="fallback" title="Échec transcodeur matériel : bascule automatique sur encodeur logiciel">"⚡ Repli (CPU)"</button>
+                        <button type="button" class="btn btn-secondary btn-sm sim-btn" data-sim="reset">"Réinitialiser"</button>
                     </div>
                     <div style="display: flex; gap: 0.5rem;">
                         <button
@@ -264,6 +327,14 @@ pub fn FlowsPanel() -> impl IntoView {
                                 <div class="block-drag-info">
                                     <strong>"Remuxer MKV"</strong>
                                     <span>"MKVToolNix (mkvmerge)"</span>
+                                </div>
+                                <span class="block-add-plus">"+"</span>
+                            </div>
+                            <div class="draggable-block-item addable" data-block-type="mkvpropedit" data-tool="mkvtoolnix">
+                                <span class="block-drag-icon">"⚡"</span>
+                                <div class="block-drag-info">
+                                    <strong>"Édition En-têtes (In-Place)"</strong>
+                                    <span>"mkvpropedit (Sans copie disque)"</span>
                                 </div>
                                 <span class="block-add-plus">"+"</span>
                             </div>

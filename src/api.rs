@@ -23,6 +23,41 @@ use tower_http::{
 pub struct AppState {
     pub pool: SqlitePool,
     pub config: Arc<Config>,
+    pub events_tx: tokio::sync::broadcast::Sender<JobEvent>,
+}
+
+impl AppState {
+    pub fn notify_job_event(
+        &self,
+        event_type: &str,
+        job_id: uuid::Uuid,
+        status: &str,
+        error_code: Option<String>,
+    ) {
+        let event = JobEvent {
+            event_type: event_type.to_string(),
+            job_id,
+            status: status.to_string(),
+            timestamp: chrono::Utc::now(),
+            progress: None,
+            message: None,
+            error_code,
+        };
+        let _ = self.events_tx.send(event);
+    }
+
+    pub fn notify_job_progress(&self, job_id: uuid::Uuid, progress: u32, message: Option<String>) {
+        let event = JobEvent {
+            event_type: "job_progress".to_string(),
+            job_id,
+            status: "running".to_string(),
+            timestamp: chrono::Utc::now(),
+            progress: Some(progress),
+            message,
+            error_code: None,
+        };
+        let _ = self.events_tx.send(event);
+    }
 }
 
 pub fn router(state: AppState) -> Router {
@@ -37,6 +72,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/auth/session", get(session::current).post(session::login))
         .route("/api/v1/auth/logout", post(session::logout))
         .route("/api/v1/jobs", get(jobs::list).post(jobs::create))
+        .route("/api/v1/jobs/events", get(jobs::events))
         .route("/api/v1/jobs/{id}", get(jobs::get_job))
         .route("/api/v1/jobs/{id}/output", get(transfers::output))
         .route("/api/v1/workers", get(jobs::workers).post(register))
@@ -124,7 +160,11 @@ async fn claim(
     axum::Json(r): axum::Json<ClaimRequest>,
 ) -> AppResult<axum::Json<Option<Claim>>> {
     authorize(&h, &s.config.worker_key)?;
-    Ok(axum::Json(repository::claim(&s.pool, r.worker_id).await?))
+    let claim_res = repository::claim(&s.pool, r.worker_id).await?;
+    if let Some(ref c) = claim_res {
+        s.notify_job_event("job_claimed", c.job_id, "running", None);
+    }
+    Ok(axum::Json(claim_res))
 }
 
 pub async fn serve(config: Config) -> anyhow::Result<()> {
@@ -152,9 +192,11 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     tokio::fs::create_dir_all(&config.config_dir).await?;
     let addr = config.bind;
     let tls = config.tls.clone();
+    let (events_tx, _) = tokio::sync::broadcast::channel(128);
     let state = AppState {
         pool: pool.clone(),
         config: Arc::new(config),
+        events_tx,
     };
     if state.config.local_worker {
         tokio::spawn(crate::workers::run_local(state.clone()));

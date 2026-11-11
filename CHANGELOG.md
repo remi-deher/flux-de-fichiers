@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.7.0...v0.8.0) (2026-11-11)
+
+
+### Features
+
+* **core:** transition bare core, distribution des flows par plugins et stabilisation des agents ([f672b9f](https://github.com/remi-deher/flux-de-fichiers/commit/f672b9f0a1dcb18986683c9513e382e304f1ac5f))
+* **flows:** transition vers le modele bare core avec distribution par plugins ([cc581d6](https://github.com/remi-deher/flux-de-fichiers/commit/cc581d60fbac37f370f79a9df02b072636713729))
+
+
+### Bug Fixes
+
+* **ci:** verrouillage du cache cargo registry contre les acces concurrents dans buildx ([2b2377f](https://github.com/remi-deher/flux-de-fichiers/commit/2b2377f14b06ec383377194cd60cb514389627d6))
+* **core:** suppression des donnees mockees et stabilisation des agents ([6d31bb9](https://github.com/remi-deher/flux-de-fichiers/commit/6d31bb9b998ea49f66e30f9c288844358a04496f))
+* **core:** suppression des donnees mockees et stabilisation des agents ([601a5ca](https://github.com/remi-deher/flux-de-fichiers/commit/601a5cace3e51c7abfea49f2d6cb8455237f440b))
+
 ## [0.7.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.6.0...v0.7.0) (2026-11-11)
 
 

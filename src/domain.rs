@@ -41,6 +41,10 @@ pub struct JobEvent {
     pub status: String,
     pub timestamp: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error_code: Option<String>,
 }
 

@@ -65,6 +65,27 @@
       jobsEventSource.addEventListener('job_succeeded', handleJobEvent);
       jobsEventSource.addEventListener('job_failed', handleJobEvent);
 
+      jobsEventSource.addEventListener('job_progress', (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          const job = cachedJobs.find((j) => j.id === payload.job_id);
+          if (job) {
+            job.status = 'running';
+            job.progress = payload.progress;
+            renderJobsTable();
+          }
+
+          const dialog = el('job-detail-dialog');
+          const idEl = el('detail-job-id');
+          if (dialog && dialog.open && idEl && idEl.textContent === payload.job_id) {
+            const statusEl = el('detail-job-status');
+            if (statusEl && payload.progress !== undefined) {
+              statusEl.innerHTML = `<span class="status-pill running"><span class="status-dot"></span>En cours (${payload.progress}%)</span>`;
+            }
+          }
+        } catch (_) {}
+      });
+
       jobsEventSource.onerror = () => {
         updateSseBadge('info', 'Reconnexion SSE…');
         if (jobsEventSource) {
@@ -180,6 +201,7 @@
 
     tbody.innerHTML = filtered.map(j => {
       const statusClass = j.status === 'succeeded' ? 'succeeded' : (j.status === 'failed' ? 'failed' : (j.status === 'running' ? 'running' : 'queued'));
+      const statusLabel = j.status === 'running' && j.progress !== undefined ? `En cours (${j.progress}%)` : escapeHtml(j.status);
       const canDownload = j.status === 'succeeded' && sessionMode === 'cookie_session';
       const dlBtnHtml = canDownload
         ? `<button type="button" class="btn btn-secondary btn-sm job-download-btn" data-job-id="${escapeHtml(j.id)}" data-output="${escapeHtml(j.output_name || 'resultat.mkv')}" title="Télécharger le flux MKV directement sans charger la RAM">Télécharger</button>`
@@ -189,7 +211,7 @@
         <tr>
           <td style="font-family: var(--font-mono); font-weight: 600;">${escapeHtml(j.id.slice(0, 8))}…</td>
           <td>${escapeHtml(j.source_name)}</td>
-          <td><span class="status-pill ${statusClass}"><span class="status-dot"></span>${escapeHtml(j.status)}</span></td>
+          <td><span class="status-pill ${statusClass}"><span class="status-dot"></span>${statusLabel}</span></td>
           <td>${formatDate(j.created_at)}</td>
           <td>
             <div style="display: flex; gap: 0.5rem; align-items: center;">

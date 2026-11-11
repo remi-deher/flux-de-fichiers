@@ -39,7 +39,22 @@ impl AppState {
             job_id,
             status: status.to_string(),
             timestamp: chrono::Utc::now(),
+            progress: None,
+            message: None,
             error_code,
+        };
+        let _ = self.events_tx.send(event);
+    }
+
+    pub fn notify_job_progress(&self, job_id: uuid::Uuid, progress: u32, message: Option<String>) {
+        let event = JobEvent {
+            event_type: "job_progress".to_string(),
+            job_id,
+            status: "running".to_string(),
+            timestamp: chrono::Utc::now(),
+            progress: Some(progress),
+            message,
+            error_code: None,
         };
         let _ = self.events_tx.send(event);
     }

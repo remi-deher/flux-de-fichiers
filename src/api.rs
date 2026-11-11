@@ -84,6 +84,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/jobs/{id}", get(jobs::get_job))
         .route("/api/v1/jobs/{id}/output", get(transfers::output))
         .route("/api/v1/workers", get(jobs::workers).post(register))
+        .route("/api/v1/workers/{id}", axum::routing::delete(jobs::delete_worker))
         .route("/api/v1/claims", post(claim))
         .route("/api/v1/jobs/{id}/heartbeat", post(jobs::heartbeat))
         .route("/api/v1/jobs/{id}/failure", post(jobs::failure))

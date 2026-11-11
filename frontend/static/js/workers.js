@@ -8,7 +8,8 @@
       const data = await res.json();
       cachedWorkers = Array.isArray(data) ? data : (data.workers || []);
 
-      if (metricWorkers) metricWorkers.textContent = String(cachedWorkers.length);
+      const activeCount = cachedWorkers.filter(w => (Date.now() - new Date(w.last_seen).getTime()) < 120000).length;
+      if (metricWorkers) metricWorkers.textContent = String(activeCount);
       renderWorkersTable();
     } catch (e) {
       if (tbody) {
@@ -30,26 +31,52 @@
       return;
     }
 
+    const now = Date.now();
     tbody.innerHTML = cachedWorkers.map(w => {
       const safeId = escapeHtml(w.id);
       const safeName = escapeHtml(w.name);
+      const lastSeenMs = new Date(w.last_seen).getTime();
+      const isOnline = (now - lastSeenMs) < 120000;
+      const statusHtml = isOnline
+        ? `<span class="status-pill online"><span class="status-dot"></span>En ligne</span>`
+        : `<span class="status-pill offline"><span class="status-dot"></span>Hors ligne</span>`;
+      const isLocal = safeName.startsWith('coordinator');
+      const deleteAction = !isOnline
+        ? `<button type="button" class="btn btn-secondary btn-sm delete-worker-btn" data-worker-id="${safeId}" style="color: var(--danger-text); padding: 0.2rem 0.5rem; font-size: 0.75rem; margin-left: 0.5rem;" title="Supprimer cet agent hors ligne">Supprimer</button>`
+        : '';
       return `
         <tr>
           <td style="font-family: var(--font-mono); font-weight: 600;">${safeId}</td>
           <td>
             <div style="font-weight: 600;">${safeName}</div>
-            <div style="font-size: 0.75rem; color: var(--text-dim);">${safeName.startsWith('coordinator') ? 'Coordinateur avec agent intégré' : 'Agent distant HTTP'}</div>
+            <div style="font-size: 0.75rem; color: var(--text-dim);">${isLocal ? 'Agent local intégré' : 'Agent distant HTTP'}</div>
           </td>
           <td>${formatDate(w.last_seen)}</td>
           <td>
-            <span class="status-pill online">
-              <span class="status-dot"></span>
-              Enregistré
-            </span>
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              ${statusHtml}
+              ${deleteAction}
+            </div>
           </td>
         </tr>
       `;
     }).join('');
+
+    tbody.querySelectorAll('.delete-worker-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-worker-id');
+        if (!id || !confirm('Confirmer la suppression de cet agent hors ligne ?')) return;
+        try {
+          const res = await apiFetch(`/api/v1/workers/${id}`, { method: 'DELETE' });
+          if (!res.ok) throw new Error('Échec suppression');
+          showNotice('Agent supprimé avec succès.', 'success');
+          await loadWorkers();
+        } catch {
+          showNotice('Impossible de supprimer cet agent.', 'error');
+        }
+      });
+    });
   }
 
   // --- Configuration système & raccordement *arr ---

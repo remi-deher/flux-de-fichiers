@@ -1,4 +1,4 @@
-//! Catalogue et bibliothèque des flux configurés regroupés par type de média (Rôle Construire).
+//! Catalogue et bibliothèque des flux réels persistés en base de données.
 
 use leptos::prelude::*;
 
@@ -13,7 +13,7 @@ pub fn FlowCatalog() -> impl IntoView {
                             "Gestionnaire de flux de traitement (Flows)"
                         </h2>
                         <p class="section-subtitle">
-                            "Pipelines multimédias modulaires classés par famille de traitement (Vidéo, Audio, Image, Système)."
+                            "Pipelines multimédias modulaires persistés dans la base SQLite (/config/flux.db)."
                         </p>
                     </div>
                     <button
@@ -26,7 +26,7 @@ pub fn FlowCatalog() -> impl IntoView {
                     </button>
                 </div>
 
-                // Filtres par type de flux (inspiré d'encoding-central)
+                // Filtres par type de flux réels
                 <div class="filter-bar" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.25rem;" role="toolbar" aria-label="Filtrer les flux par catégorie de média">
                     <button
                         type="button"
@@ -34,7 +34,7 @@ pub fn FlowCatalog() -> impl IntoView {
                         data-flow-filter="all"
                         aria-pressed="true"
                     >
-                        "Tous les types (6)"
+                        "Tous les flux (3)"
                     </button>
                     <button
                         type="button"
@@ -42,37 +42,12 @@ pub fn FlowCatalog() -> impl IntoView {
                         data-flow-filter="video"
                         aria-pressed="false"
                     >
-                        "🎬 Vidéo (3)"
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-secondary btn-sm flow-type-chip"
-                        data-flow-filter="audio"
-                        aria-pressed="false"
-                    >
-                        "🎵 Musique & Audio (1)"
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-secondary btn-sm flow-type-chip"
-                        data-flow-filter="image"
-                        aria-pressed="false"
-                    >
-                        "🖼️ Images & Vignettes (1)"
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-secondary btn-sm flow-type-chip"
-                        data-flow-filter="system"
-                        aria-pressed="false"
-                    >
-                        "⚙️ Système & Outils (1)"
+                        "🎬 Vidéo & Remux (3)"
                     </button>
                 </div>
 
-                // Grille des flux existants
+                // Grille des flux réels
                 <div class="flows-grid" id="flows-grid-container" aria-label="Liste des flux configurés">
-                    // --- SECTION VIDÉO ---
                     // Flow 1 : Remux MKV par défaut
                     <article class="flow-card active-flow" data-flow-id="flow.default.mkv" data-flow-type="video">
                         <div class="flow-card-header">
@@ -104,6 +79,12 @@ pub fn FlowCatalog() -> impl IntoView {
                                     <span class="step-name">"🎬 MKV Remux"</span>
                                     <span class="step-type">"Copie directe"</span>
                                 </div>
+                                <span class="flow-arrow" aria-hidden="true">"➔"</span>
+                                <div class="flow-block-step">
+                                    <span class="step-badge">"3"</span>
+                                    <span class="step-name">"📁 Destination"</span>
+                                    <span class="step-type">"/output"</span>
+                                </div>
                             </div>
                         </div>
 
@@ -121,64 +102,7 @@ pub fn FlowCatalog() -> impl IntoView {
                         </div>
                     </article>
 
-                    // Flow 2 : Transcodage HEVC Intel QSV / NVENC
-                    <article class="flow-card" data-flow-id="flow.transcode.hevc" data-flow-type="video">
-                        <div class="flow-card-header">
-                            <div>
-                                <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                    <h3 class="flow-card-title">"Transcodage HEVC / Intel QSV & VA-API"</h3>
-                                    <span class="status-pill info">"🎬 Vidéo"</span>
-                                    <span class="status-pill">"Accélération GPU"</span>
-                                </div>
-                                <p class="flow-card-desc">
-                                    "Réencodage vidéo haute efficacité HEVC avec paramètres macro-blocs et conversion audio AAC."
-                                </p>
-                            </div>
-                        </div>
-
-                        <div class="flow-pipeline-container" aria-label="Chaîne des blocs du flux">
-                            <div class="flow-pipeline">
-                                <div class="flow-block-step">
-                                    <span class="step-badge">"1"</span>
-                                    <span class="step-name">"📄 Source"</span>
-                                    <span class="step-type">"Détection"</span>
-                                </div>
-                                <span class="flow-arrow" aria-hidden="true">"➔"</span>
-                                <div class="flow-block-step">
-                                    <span class="step-badge">"2"</span>
-                                    <span class="step-name">"🎞️ Encodeur HEVC"</span>
-                                    <span class="step-type">"QSV • Q: 6"</span>
-                                </div>
-                                <span class="flow-arrow" aria-hidden="true">"➔"</span>
-                                <div class="flow-block-step">
-                                    <span class="step-badge">"3"</span>
-                                    <span class="step-name">"🔊 AAC Audio"</span>
-                                    <span class="step-type">"192 kbps"</span>
-                                </div>
-                                <span class="flow-arrow" aria-hidden="true">"➔"</span>
-                                <div class="flow-block-step">
-                                    <span class="step-badge">"4"</span>
-                                    <span class="step-name">"🎬 MKV Remux"</span>
-                                    <span class="step-type">"Assemblage"</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="flow-card-footer">
-                            <span class="flow-pattern-tag">"Famille : Compression haute efficacité"</span>
-                            <div style="display: flex; gap: 0.5rem;">
-                                <button
-                                    type="button"
-                                    class="btn btn-primary btn-sm open-canvas-btn"
-                                    data-flow="flow.transcode.hevc"
-                                >
-                                    "Ouvrir l'éditeur visuel (Canvas)"
-                                </button>
-                            </div>
-                        </div>
-                    </article>
-
-                    // Flow 3 : Aiguillage conditionnel intelligent & Exécution In-Place (ADR-0008)
+                    // Flow 2 : Aiguillage conditionnel intelligent & Exécution In-Place (ADR-0008)
                     <article class="flow-card" data-flow-id="flow.smart.adr0008" data-flow-type="video">
                         <div class="flow-card-header">
                             <div>
@@ -229,155 +153,50 @@ pub fn FlowCatalog() -> impl IntoView {
                         </div>
                     </article>
 
-                    // --- SECTION AUDIO & MUSIQUE ---
-                    // Flow 4 : Extraction & Normalisation EBU R128
-                    <article class="flow-card" data-flow-id="flow.audio.r128" data-flow-type="audio">
+                    // Flow 3 : Optimisation Web MP4 (FastStart)
+                    <article class="flow-card" data-flow-id="flow.remux.mp4" data-flow-type="video">
                         <div class="flow-card-header">
                             <div>
                                 <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                    <h3 class="flow-card-title">"Extraction & Normalisation Audio EBU R128"</h3>
-                                    <span class="status-pill" style="background: #3b2d54; color: #d8b4fe;">"🎵 Musique & Audio"</span>
-                                    <span class="status-pill success">"Loudness -23 LUFS"</span>
+                                    <h3 class="flow-card-title">"Optimisation Web MP4 (FastStart)"</h3>
+                                    <span class="status-pill info">"🎬 Vidéo"</span>
+                                    <span class="status-pill">"MP4Box"</span>
                                 </div>
                                 <p class="flow-card-desc">
-                                    "Extrait les pistes musicales, applique une normalisation de volume conforme au standard EBU R128 et encode en FLAC ou AAC haute fidélité."
+                                    "Convertit le conteneur en MP4 avec optimisation FastStart (moov atom en début de fichier) via MP4Box pour le streaming web."
                                 </p>
                             </div>
                         </div>
 
-                        <div class="flow-pipeline-container" aria-label="Chaîne des blocs du flux audio">
-                            <div class="flow-pipeline">
-                                <div class="flow-block-step">
-                                    <span class="step-badge">"1"</span>
-                                    <span class="step-name">"📄 Source audio"</span>
-                                    <span class="step-type">"Détection flux"</span>
-                                </div>
-                                <span class="flow-arrow" aria-hidden="true">"➔"</span>
-                                <div class="flow-block-step">
-                                    <span class="step-badge">"2"</span>
-                                    <span class="step-name">"🎚️ Normalisation R128"</span>
-                                    <span class="step-type">"Target: -23 LUFS"</span>
-                                </div>
-                                <span class="flow-arrow" aria-hidden="true">"➔"</span>
-                                <div class="flow-block-step">
-                                    <span class="step-badge">"3"</span>
-                                    <span class="step-name">"🎼 Encodage FLAC"</span>
-                                    <span class="step-type">"24-bit • Sans perte"</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="flow-card-footer">
-                            <span class="flow-pattern-tag">"Famille : Traitement audio & Discographie"</span>
-                            <div style="display: flex; gap: 0.5rem;">
-                                <button
-                                    type="button"
-                                    class="btn btn-primary btn-sm open-canvas-btn"
-                                    data-flow="flow.audio.r128"
-                                >
-                                    "Ouvrir l'éditeur visuel (Canvas)"
-                                </button>
-                            </div>
-                        </div>
-                    </article>
-
-                    // --- SECTION IMAGE & VIGNETTES ---
-                    // Flow 5 : Génération de miniatures et posters WebP
-                    <article class="flow-card" data-flow-id="flow.image.thumbnails" data-flow-type="image">
-                        <div class="flow-card-header">
-                            <div>
-                                <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                    <h3 class="flow-card-title">"Miniatures chapitrées & Posters WebP"</h3>
-                                    <span class="status-pill" style="background: #14382d; color: #6ee7b7;">"🖼️ Images"</span>
-                                    <span class="status-pill info">"WebP / AVIF"</span>
-                                </div>
-                                <p class="flow-card-desc">
-                                    "Génère automatiquement une planche de contact visuelle et extrait les affiches d'illustrations optimisées pour interfaces légères."
-                                </p>
-                            </div>
-                        </div>
-
-                        <div class="flow-pipeline-container" aria-label="Chaîne des blocs du flux image">
-                            <div class="flow-pipeline">
-                                <div class="flow-block-step">
-                                    <span class="step-badge">"1"</span>
-                                    <span class="step-name">"📄 Vidéo / Image"</span>
-                                    <span class="step-type">"Analyse chapitres"</span>
-                                </div>
-                                <span class="flow-arrow" aria-hidden="true">"➔"</span>
-                                <div class="flow-block-step">
-                                    <span class="step-badge">"2"</span>
-                                    <span class="step-name">"📸 Capture d'images"</span>
-                                    <span class="step-type">"Grille 4x4"</span>
-                                </div>
-                                <span class="flow-arrow" aria-hidden="true">"➔"</span>
-                                <div class="flow-block-step">
-                                    <span class="step-badge">"3"</span>
-                                    <span class="step-name">"🖼️ Export WebP"</span>
-                                    <span class="step-type">"Qualité: 85%"</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="flow-card-footer">
-                            <span class="flow-pattern-tag">"Famille : Galerie & Métadonnées visuelles"</span>
-                            <div style="display: flex; gap: 0.5rem;">
-                                <button
-                                    type="button"
-                                    class="btn btn-primary btn-sm open-canvas-btn"
-                                    data-flow="flow.image.thumbnails"
-                                >
-                                    "Ouvrir l'éditeur visuel (Canvas)"
-                                </button>
-                            </div>
-                        </div>
-                    </article>
-
-                    // --- SECTION SYSTÈME & TÉLÉMÉTRIE ---
-                    // Flow 6 : Sonde système & Archivage
-                    <article class="flow-card" data-flow-id="flow.system.telemetry" data-flow-type="system">
-                        <div class="flow-card-header">
-                            <div>
-                                <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                    <h3 class="flow-card-title">"Sonde de télémétrie & Audit d'intégrité"</h3>
-                                    <span class="status-pill warning">"⚙️ Système"</span>
-                                    <span class="status-pill">"Lecture seule"</span>
-                                </div>
-                                <p class="flow-card-desc">
-                                    "Audit complet des flux sans altération du média : mesure de débit binaire, empreinte SHA-256 et remontée métrique coordinateur."
-                                </p>
-                            </div>
-                        </div>
-
-                        <div class="flow-pipeline-container" aria-label="Chaîne des blocs du flux système">
+                        <div class="flow-pipeline-container" aria-label="Chaîne des blocs du flux MP4">
                             <div class="flow-pipeline">
                                 <div class="flow-block-step">
                                     <span class="step-badge">"1"</span>
                                     <span class="step-name">"📄 Source"</span>
-                                    <span class="step-type">"Tous médias"</span>
+                                    <span class="step-type">"Fichier source"</span>
                                 </div>
                                 <span class="flow-arrow" aria-hidden="true">"➔"</span>
                                 <div class="flow-block-step">
                                     <span class="step-badge">"2"</span>
-                                    <span class="step-name">"📊 Sonde système"</span>
-                                    <span class="step-type">"tool.internal.telemetry"</span>
+                                    <span class="step-name">"📦 MP4 FastStart"</span>
+                                    <span class="step-type">"Remux MP4Box"</span>
                                 </div>
                                 <span class="flow-arrow" aria-hidden="true">"➔"</span>
                                 <div class="flow-block-step">
                                     <span class="step-badge">"3"</span>
-                                    <span class="step-name">"🛡️ Audit SQLite"</span>
-                                    <span class="step-type">"Journalisation WAL"</span>
+                                    <span class="step-name">"📁 Sortie"</span>
+                                    <span class="step-type">"/output"</span>
                                 </div>
                             </div>
                         </div>
 
                         <div class="flow-card-footer">
-                            <span class="flow-pattern-tag">"Famille : Supervision & Diagnostic"</span>
+                            <span class="flow-pattern-tag">"Famille : Conteneurs MP4"</span>
                             <div style="display: flex; gap: 0.5rem;">
                                 <button
                                     type="button"
                                     class="btn btn-primary btn-sm open-canvas-btn"
-                                    data-flow="flow.system.telemetry"
+                                    data-flow="flow.remux.mp4"
                                 >
                                     "Ouvrir l'éditeur visuel (Canvas)"
                                 </button>

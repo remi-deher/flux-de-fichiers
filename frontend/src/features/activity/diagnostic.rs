@@ -20,19 +20,19 @@ pub fn ActivityDiagnostic() -> impl IntoView {
                 <div class="filter-group" role="group" aria-label="Filtrer l'historique">
                     <button
                         type="button"
-                        class="filter-chip"
-                        data-filter="failed"
+                        class="filter-chip diag-chip"
+                        data-diag-filter="failed"
                         aria-pressed="false"
                     >
-                        "Échecs" <span id="count-filter-failed" style="opacity: 0.8;">"(0)"</span>
+                        "Échecs" <span id="diag-count-failed" style="opacity: 0.8;">"(0)"</span>
                     </button>
                     <button
                         type="button"
-                        class="filter-chip"
-                        data-filter="succeeded"
+                        class="filter-chip diag-chip"
+                        data-diag-filter="succeeded"
                         aria-pressed="false"
                     >
-                        "Succès" <span id="count-filter-succeeded" style="opacity: 0.8;">"(0)"</span>
+                        "Succès" <span id="diag-count-succeeded" style="opacity: 0.8;">"(0)"</span>
                     </button>
                 </div>
             </div>

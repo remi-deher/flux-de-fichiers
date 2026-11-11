@@ -30,6 +30,7 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         web_session_ttl_seconds: 28_800,
         tls: None,
     };
+    std::fs::create_dir_all(&config.input_dir)?;
     let pool = SqlitePoolOptions::new()
         .connect(&config.database_url)
         .await?;

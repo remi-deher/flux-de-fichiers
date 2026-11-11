@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.3.0...v0.4.0) (2026-11-11)
+
+
+### Features
+
+* **flows:** moteur pipeline engine et persistance sqlite des flux ([d5ed350](https://github.com/remi-deher/flux-de-fichiers/commit/d5ed3508e9a615f68338f905ecacd612b78107e5))
+* **flows:** pipeline engine avec persistance sqlite, api rest et execution conditionnelle ([eca74c0](https://github.com/remi-deher/flux-de-fichiers/commit/eca74c01a19b80d4ddeca1291d90037d2ba17f02))
+
 ## [0.3.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.2.0...v0.3.0) (2026-11-11)
 
 

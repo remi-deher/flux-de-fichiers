@@ -1,6 +1,6 @@
 //! Script client pour le poste de pilotage Flux de Fichiers.
 
-pub const CLIENT_SCRIPT: &str = r#"
+pub const CLIENT_SCRIPT: &str = r##"
 (function() {
   'use strict';
 
@@ -1022,6 +1022,78 @@ pub const CLIENT_SCRIPT: &str = r#"
         });
       });
     });
+
+    // Gestion du dialogue de configuration de plugin
+    document.querySelectorAll('.open-plugin-config-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const pluginId = btn.getAttribute('data-plugin') || '';
+        const pluginName = btn.getAttribute('data-plugin-name') || pluginId;
+        const dialog = el('plugin-config-dialog');
+        const titleEl = el('plugin-config-title');
+        const hiddenId = el('plugin-config-current-id');
+        const urlInput = el('plugin-cfg-url');
+        const keyInput = el('plugin-cfg-apikey');
+        const localInput = el('plugin-cfg-local-path');
+        const remoteInput = el('plugin-cfg-remote-path');
+
+        if (titleEl) titleEl.textContent = `Paramètres par défaut : ${pluginName}`;
+        if (hiddenId) hiddenId.value = pluginId;
+
+        try {
+          const res = await apiFetch(`/api/v1/plugins/${encodeURIComponent(pluginId)}/settings`);
+          if (res && res.settings && Object.keys(res.settings).length > 0) {
+            if (urlInput) urlInput.value = res.settings.url || '';
+            if (keyInput) keyInput.value = res.settings.apiKey || '';
+            if (localInput) localInput.value = res.settings.pathMappingLocal || '/data';
+            if (remoteInput) remoteInput.value = res.settings.pathMappingRemote || (pluginId.includes('sonarr') ? '/tv' : '/movies');
+          } else {
+            if (urlInput) urlInput.value = pluginId.includes('sonarr') ? 'http://192.168.1.50:8989' : 'http://192.168.1.50:7878';
+            if (keyInput) keyInput.value = '';
+            if (localInput) localInput.value = '/data';
+            if (remoteInput) remoteInput.value = pluginId.includes('sonarr') ? '/tv' : '/movies';
+          }
+        } catch {
+          if (urlInput) urlInput.value = pluginId.includes('sonarr') ? 'http://192.168.1.50:8989' : 'http://192.168.1.50:7878';
+          if (keyInput) keyInput.value = '';
+          if (localInput) localInput.value = '/data';
+          if (remoteInput) remoteInput.value = pluginId.includes('sonarr') ? '/tv' : '/movies';
+        }
+
+        if (dialog && typeof dialog.showModal === 'function') {
+          dialog.showModal();
+        }
+      });
+    });
+
+    const saveBtn = el('plugin-config-save-btn');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async () => {
+        const pluginId = (el('plugin-config-current-id') && el('plugin-config-current-id').value) || '';
+        if (!pluginId) return;
+
+        const url = el('plugin-cfg-url') ? el('plugin-cfg-url').value.trim() : '';
+        const apiKey = el('plugin-cfg-apikey') ? el('plugin-cfg-apikey').value.trim() : '';
+        const pathMappingLocal = el('plugin-cfg-local-path') ? el('plugin-cfg-local-path').value.trim() : '/data';
+        const pathMappingRemote = el('plugin-cfg-remote-path') ? el('plugin-cfg-remote-path').value.trim() : '/media';
+
+        try {
+          await apiFetch(`/api/v1/plugins/${encodeURIComponent(pluginId)}/settings`, {
+            method: 'PUT',
+            body: JSON.stringify({ url, apiKey, pathMappingLocal, pathMappingRemote }),
+          });
+          showNotice(`Paramètres par défaut pour ${pluginId} enregistrés ! Transmis aux flux.`, 'success');
+          const dialog = el('plugin-config-dialog');
+          if (dialog && dialog.open) dialog.close();
+        } catch (e) {
+          showNotice(`Erreur de sauvegarde : ${e.message || 'Échec API'}`, 'error');
+        }
+      });
+    }
+
+    const closeX = el('plugin-config-close-x');
+    const cancelBtn = el('plugin-config-cancel-btn');
+    if (closeX) closeX.addEventListener('click', () => { const d = el('plugin-config-dialog'); if (d) d.close(); });
+    if (cancelBtn) cancelBtn.addEventListener('click', () => { const d = el('plugin-config-dialog'); if (d) d.close(); });
   }
 
   // --- Concepteur et Gestionnaire de Flux (Flows) type Zapier / FileFlows ---
@@ -1122,21 +1194,26 @@ pub const CLIENT_SCRIPT: &str = r#"
         // Reconstituer les nœuds selon le template choisi
         if (nodesContainer) {
           nodesContainer.innerHTML = `
-            <div class="canvas-node implicit-node selected" id="node-1" data-node-id="node-1" data-block-type="inspect">
+            <div class="canvas-node selected" id="node-1" data-node-id="node-1" data-block-type="file-input">
               <div class="node-connector connector-out"></div>
               <div class="node-header">
-                <span class="node-icon">🔍</span>
+                <span class="node-icon">📄</span>
                 <div class="node-title-box">
-                  <span class="node-kind">MediaInfo • Début de flux</span>
-                  <h4 class="node-name">Inspecter métadonnées</h4>
+                  <span class="node-kind">Déclencheur entrant</span>
+                  <h4 class="node-name">Fichier source</h4>
                 </div>
-                <span class="status-pill info node-pill">Implicite</span>
+                <span class="status-pill success node-pill">Entrée</span>
               </div>
-              <div class="node-summary">Extraction exhaustive de toutes les pistes et propriétés du média.</div>
+              <div class="node-summary">Détection du média • Métadonnées inspectées automatiquement en sous-main.</div>
             </div>
           `;
 
-          if (currentSelectedTemplate === 'hevc') {
+          if (currentSelectedTemplate === 'smart-hevc') {
+            appendNodeToCanvas('condition', 'Logique de décision', 'Condition : Est déjà HEVC ?', 'Si Codec == HEVC ➔ Saut remux • Sinon ➔ Encodage QSV • Repli ➔ CPU');
+            appendNodeToCanvas('video-encode', 'FFmpeg Builder', 'Réencodage Vidéo (GPU)', 'HEVC • Intel QSV • Qualité : 6 • Vitesse : 3');
+            appendNodeToCanvas('remux-mkv', 'MKVToolNix', 'Remuxage Matroska', 'Assemblage final sans perte • Langues : fre, eng');
+            appendNodeToCanvas('file-output', 'Système', 'Destination finale', 'Remplacement sécurisé de l\'original ou dossier de sortie');
+          } else if (currentSelectedTemplate === 'hevc') {
             appendNodeToCanvas('video-encode', 'FFmpeg Builder', 'Réencodage Vidéo', 'HEVC • Intel QSV • Qualité : 6 • Vitesse : 3');
             appendNodeToCanvas('audio-encode', 'FFmpeg Builder', 'Réencodage Audio', 'Codec : AAC • 192 kbps • Stéréo');
             appendNodeToCanvas('remux-mkv', 'MKVToolNix', 'Remuxage Matroska', 'Assemblage final MKV • Langues : fre, eng');
@@ -1164,8 +1241,17 @@ pub const CLIENT_SCRIPT: &str = r#"
       const boardRect = nodesContainer.parentElement.getBoundingClientRect();
       let pathsHtml = `
         <defs>
-          <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <marker id="arrow-blue" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--primary)" />
+          </marker>
+          <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#10b981" />
+          </marker>
+          <marker id="arrow-orange" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#f59e0b" />
+          </marker>
+          <marker id="arrow-purple" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#8b5cf6" />
           </marker>
         </defs>
       `;
@@ -1174,23 +1260,37 @@ pub const CLIENT_SCRIPT: &str = r#"
         const fromNode = nodes[i];
         const toNode = nodes[i + 1];
 
-        const outConn = fromNode.querySelector('.connector-out');
+        const outConnectors = Array.from(fromNode.querySelectorAll('.connector-out'));
         const inConn = toNode.querySelector('.connector-in');
 
-        if (outConn && inConn) {
-          const rOut = outConn.getBoundingClientRect();
+        if (outConnectors.length > 0 && inConn) {
           const rIn = inConn.getBoundingClientRect();
-
-          const x1 = rOut.left + rOut.width / 2 - boardRect.left + nodesContainer.parentElement.scrollLeft;
-          const y1 = rOut.top + rOut.height / 2 - boardRect.top + nodesContainer.parentElement.scrollTop;
-
           const x2 = rIn.left + rIn.width / 2 - boardRect.left + nodesContainer.parentElement.scrollLeft;
           const y2 = rIn.top + rIn.height / 2 - boardRect.top + nodesContainer.parentElement.scrollTop;
 
-          const cy1 = y1 + 18;
-          const cy2 = y2 - 18;
+          outConnectors.forEach(outConn => {
+            const rOut = outConn.getBoundingClientRect();
+            const x1 = rOut.left + rOut.width / 2 - boardRect.left + nodesContainer.parentElement.scrollLeft;
+            const y1 = rOut.top + rOut.height / 2 - boardRect.top + nodesContainer.parentElement.scrollTop;
 
-          pathsHtml += `<path d="M ${x1} ${y1} C ${x1} ${cy1}, ${x2} ${cy2}, ${x2} ${y2}" stroke="var(--primary)" stroke-width="2.5" fill="none" marker-end="url(#arrow)" />`;
+            let strokeColor = 'var(--primary)';
+            let markerId = 'arrow-blue';
+
+            if (outConn.classList.contains('out-true')) {
+              strokeColor = '#10b981';
+              markerId = 'arrow-green';
+            } else if (outConn.classList.contains('out-false')) {
+              strokeColor = '#f59e0b';
+              markerId = 'arrow-orange';
+            } else if (outConn.classList.contains('out-fallback')) {
+              strokeColor = '#8b5cf6';
+              markerId = 'arrow-purple';
+            }
+
+            const cy1 = y1 + 18;
+            const cy2 = y2 - 18;
+            pathsHtml += `<path d="M ${x1} ${y1} C ${x1} ${cy1}, ${x2} ${cy2}, ${x2} ${y2}" stroke="${strokeColor}" stroke-width="2.5" fill="none" marker-end="url(#${markerId})" />`;
+          });
         }
       }
       svgLines.innerHTML = pathsHtml;
@@ -1203,26 +1303,56 @@ pub const CLIENT_SCRIPT: &str = r#"
       if (!nodesContainer) return;
       const count = nodesContainer.querySelectorAll('.canvas-node').length + 1;
       const nodeId = `node-${count}`;
-      const icon = blockType.includes('video') ? '🎞️' : blockType.includes('audio') ? '🔊' : blockType.includes('mp4') ? '📦' : '🎬';
+      const icon = blockType === 'condition' ? '🔀' : blockType === 'file-output' ? '💾' : blockType === 'sonarr' ? '📡' : blockType === 'radarr' ? '🎬' : blockType.includes('video') ? '🎞️' : blockType.includes('audio') ? '🔊' : blockType.includes('mp4') ? '📦' : '🎬';
 
       const div = document.createElement('div');
       div.className = 'canvas-node';
       div.id = nodeId;
       div.setAttribute('data-node-id', nodeId);
       div.setAttribute('data-block-type', blockType);
-      div.innerHTML = `
-        <div class="node-connector connector-in"></div>
-        <div class="node-connector connector-out"></div>
-        <div class="node-header">
-          <span class="node-icon">${icon}</span>
-          <div class="node-title-box">
-            <span class="node-kind">${kind}</span>
-            <h4 class="node-name">${title}</h4>
+
+      if (blockType === 'condition') {
+        div.innerHTML = `
+          <div class="node-connector connector-in"></div>
+          <div class="node-header">
+            <span class="node-icon">🔀</span>
+            <div class="node-title-box">
+              <span class="node-kind">${kind}</span>
+              <h4 class="node-name">${title}</h4>
+            </div>
+            <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
           </div>
-          <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
-        </div>
-        <div class="node-summary" id="${nodeId}-summary">${summary}</div>
-      `;
+          <div class="node-summary" id="${nodeId}-summary">${summary}</div>
+          <div class="node-multi-outputs">
+            <div class="multi-output-port port-true" title="Condition vérifiée : saut direct vers remux">
+              <span class="port-label">✓ Vrai (Match)</span>
+              <div class="node-connector connector-out out-true" data-port="true"></div>
+            </div>
+            <div class="multi-output-port port-false" title="Condition non vérifiée : encodage nécessaire">
+              <span class="port-label">✗ Faux (Else)</span>
+              <div class="node-connector connector-out out-false" data-port="false"></div>
+            </div>
+            <div class="multi-output-port port-fallback" title="Repli d'urgence (si échec GPU)">
+              <span class="port-label">⚡ Repli (CPU)</span>
+              <div class="node-connector connector-out out-fallback" data-port="fallback"></div>
+            </div>
+          </div>
+        `;
+      } else {
+        div.innerHTML = `
+          <div class="node-connector connector-in"></div>
+          ${blockType === 'file-output' ? '' : '<div class="node-connector connector-out"></div>'}
+          <div class="node-header">
+            <span class="node-icon">${icon}</span>
+            <div class="node-title-box">
+              <span class="node-kind">${kind}</span>
+              <h4 class="node-name">${title}</h4>
+            </div>
+            <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
+          </div>
+          <div class="node-summary" id="${nodeId}-summary">${summary}</div>
+        `;
+      }
 
       nodesContainer.appendChild(div);
       bindNodeEvents(div);
@@ -1236,7 +1366,7 @@ pub const CLIENT_SCRIPT: &str = r#"
       document.querySelectorAll('.canvas-node').forEach(n => n.classList.remove('selected'));
       nodeEl.classList.add('selected');
 
-      const blockType = nodeEl.getAttribute('data-block-type') || 'inspect';
+      const blockType = nodeEl.getAttribute('data-block-type') || 'file-input';
       const nodeName = nodeEl.querySelector('.node-name') ? nodeEl.querySelector('.node-name').textContent : 'Bloc';
       const nodeKind = nodeEl.querySelector('.node-kind') ? nodeEl.querySelector('.node-kind').textContent : 'Outil';
 
@@ -1248,14 +1378,88 @@ pub const CLIENT_SCRIPT: &str = r#"
       if (toolEl) toolEl.textContent = nodeKind.split('•')[0].trim();
 
       if (formContainer) {
-        if (blockType === 'inspect') {
+        if (blockType === 'file-input') {
           formContainer.innerHTML = `
-            <div class="status-pill info" style="width: 100%; margin-bottom: 0.75rem; justify-content: center;">
-              Bloc implicite non configurable
+            <div class="form-group">
+              <label for="node-cfg-mask" class="form-label">Masque de surveillance</label>
+              <input type="text" id="node-cfg-mask" class="form-input" value="*.mkv, *.mp4, *.avi" />
+              <span class="form-help">Filtre les extensions déclenchant ce flux.</span>
             </div>
-            <p style="font-size: 0.8125rem; color: var(--text-dim); line-height: 1.5;">
-              Ce bloc s'exécute automatiquement en début de flux. MediaInfo extrait l'intégralité des flux (codecs, pistes audio, sous-titres, langues, métadonnées) et les injecte dans le contexte d'exécution des blocs suivants.
+            <div class="status-pill success" style="width: 100%; margin-top: 0.75rem; justify-content: center;">
+              ✓ Métadonnées inspectées automatiquement
+            </div>
+            <p style="font-size: 0.8125rem; color: var(--text-dim); line-height: 1.5; margin-top: 0.5rem;">
+              À l'instar de FileFlows, les caractéristiques (codecs, résolutions, débits, langues audio et sous-titres) sont analysées et transmises en tâche de fond à chaque bloc de travail.
             </p>
+          `;
+        } else if (blockType === 'condition') {
+          formContainer.innerHTML = `
+            <div class="form-group">
+              <label for="node-cfg-prop" class="form-label">Propriété à tester</label>
+              <select id="node-cfg-prop" class="form-select">
+                <option value="video.codec" selected>Codec Vidéo</option>
+                <option value="video.resolution">Résolution (1080p, 4K...)</option>
+                <option value="audio.language">Langue Audio présente</option>
+                <option value="video.hdr">Profil HDR (HDR10, DV)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="node-cfg-op" class="form-label">Opérateur</label>
+              <select id="node-cfg-op" class="form-select">
+                <option value="equals" selected>Est égal à</option>
+                <option value="contains">Contient</option>
+                <option value="not_equals">Est différent de</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="node-cfg-val" class="form-label">Valeur attendue</label>
+              <input type="text" id="node-cfg-val" class="form-input" value="HEVC" />
+            </div>
+            <div style="background: var(--bg-subtle); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.75rem; margin-top: 0.75rem; font-size: 0.8125rem;">
+              <strong style="display: block; margin-bottom: 0.35rem; color: var(--text-main);">Aiguillage des 3 sorties :</strong>
+              <div style="color: #10b981; margin-bottom: 0.25rem;">✓ <strong>Sortie 1 (Vrai)</strong> : Saut direct vers le remuxage sans transcodage.</div>
+              <div style="color: #f59e0b; margin-bottom: 0.25rem;">✗ <strong>Sortie 2 (Faux)</strong> : Encodage GPU Intel QSV / NVENC.</div>
+              <div style="color: #8b5cf6;">⚡ <strong>Sortie 3 (Repli)</strong> : Bascule CPU de secours si le matériel échoue.</div>
+            </div>
+          `;
+        } else if (blockType === 'file-output') {
+          formContainer.innerHTML = `
+            <div class="form-group">
+              <label for="node-cfg-dest-mode" class="form-label">Mode d'enregistrement</label>
+              <select id="node-cfg-dest-mode" class="form-select">
+                <option value="replace" selected>Remplacer le fichier original</option>
+                <option value="folder">Déplacer vers un dossier cible</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="node-cfg-dest-path" class="form-label">Dossier cible (si déplacement)</label>
+              <input type="text" id="node-cfg-dest-path" class="form-input" value="/data/complete" />
+            </div>
+          `;
+        } else if (blockType === 'sonarr' || blockType === 'radarr') {
+          const appName = blockType === 'sonarr' ? 'Sonarr' : 'Radarr';
+          const defaultItem = blockType === 'sonarr' ? 'de la série' : 'du film';
+          formContainer.innerHTML = `
+            <div class="status-pill success" style="width: 100%; margin-bottom: 0.75rem; justify-content: center;">
+              ✓ Paramètres par défaut ${appName} hérités
+            </div>
+            <p style="font-size: 0.8125rem; color: var(--text-dim); line-height: 1.5; margin-bottom: 0.75rem;">
+              Ce bloc communique de manière transparente avec votre instance ${appName} en utilisant l'URL et la clé d'API enregistrées dans le gestionnaire de plugins.
+            </p>
+            <div class="form-group">
+              <label for="node-cfg-arr-action" class="form-label">Action post-traitement</label>
+              <select id="node-cfg-arr-action" class="form-select">
+                <option value="both" selected>Actualiser (Rescan) & Renommer le fichier</option>
+                <option value="rescan">Actualiser uniquement (Rescan ${defaultItem})</option>
+                <option value="rename">Renommer uniquement selon les conventions</option>
+                <option value="notify">Notifier uniquement l'achèvement</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="node-cfg-arr-override" class="form-label">Surcharge d'URL (optionnelle)</label>
+              <input type="text" id="node-cfg-arr-override" class="form-input" placeholder="Laisser vide pour utiliser la config du plugin" />
+              <span class="form-help">À renseigner uniquement si vous ciblez une instance spécifique pour ce flux.</span>
+            </div>
           `;
         } else if (blockType === 'video-encode') {
           formContainer.innerHTML = `
@@ -1381,7 +1585,8 @@ pub const CLIENT_SCRIPT: &str = r#"
       item.addEventListener('click', () => {
         const blockType = item.getAttribute('data-block-type') || 'block';
         const title = item.querySelector('strong') ? item.querySelector('strong').textContent : 'Nouveau bloc';
-        const kind = item.querySelector('span') ? item.querySelector('span').textContent : 'Outil';
+        const kindEl = item.querySelector('.block-drag-info span') || item.querySelector('span');
+        const kind = kindEl ? kindEl.textContent : 'Outil';
         appendNodeToCanvas(blockType, kind, title, 'Configuration par défaut appliquée.');
         showNotice(`Bloc « ${title} » ajouté à votre chaîne d'exécution !`, 'success');
       });
@@ -1514,4 +1719,4 @@ pub const CLIENT_SCRIPT: &str = r#"
     refreshAll();
   }
 })();
-"#;
+"##;

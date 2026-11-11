@@ -129,9 +129,14 @@ pub fn list_tools_status(
                 description = default_tool_description(&entry.id);
             }
 
-            let status = if entry.id == "tool.internal.telemetry"
-                || cache_mgr.is_ready(&entry.id, &entry.version, arch)
-            {
+            let is_system_ready = match entry.id.as_str() {
+                "tool.internal.telemetry" => true,
+                "tool.mkvtoolnix" => Path::new("/usr/bin/mkvmerge").exists(),
+                "tool.mediainfo" => Path::new("/usr/bin/mediainfo").exists(),
+                _ => false,
+            };
+
+            let status = if is_system_ready || cache_mgr.is_ready(&entry.id, &entry.version, arch) {
                 "ready".to_string()
             } else {
                 "not_installed".to_string()
@@ -189,6 +194,26 @@ fn default_catalog_entries() -> Vec<CatalogEntry> {
             distribution: Some("autonomous-binary".into()),
         },
         CatalogEntry {
+            id: "tool.mediainfo".into(),
+            entry_type: "tool".into(),
+            version: "24.06".into(),
+            name: "MediaInfo CLI".into(),
+            manifest_path: "tools/mediainfo/manifest.json".into(),
+            capability: Some("probe".into()),
+            current_choice: Some(true),
+            distribution: Some("autonomous-binary".into()),
+        },
+        CatalogEntry {
+            id: "tool.mp4box".into(),
+            entry_type: "tool".into(),
+            version: "2.4.0".into(),
+            name: "MP4Box (GPAC)".into(),
+            manifest_path: "tools/mp4box/manifest.json".into(),
+            capability: Some("remux".into()),
+            current_choice: Some(false),
+            distribution: Some("autonomous-binary".into()),
+        },
+        CatalogEntry {
             id: "tool.internal.telemetry".into(),
             entry_type: "tool".into(),
             version: "0.1.0".into(),
@@ -197,6 +222,26 @@ fn default_catalog_entries() -> Vec<CatalogEntry> {
             capability: Some("other".into()),
             current_choice: Some(true),
             distribution: Some("autonomous-binary".into()),
+        },
+        CatalogEntry {
+            id: "plugin.sonarr".into(),
+            entry_type: "plugin".into(),
+            version: "1.0.0".into(),
+            name: "Sonarr Integration".into(),
+            manifest_path: "plugins/sonarr/manifest.json".into(),
+            capability: Some("integration".into()),
+            current_choice: Some(true),
+            distribution: None,
+        },
+        CatalogEntry {
+            id: "plugin.radarr".into(),
+            entry_type: "plugin".into(),
+            version: "1.0.0".into(),
+            name: "Radarr Integration".into(),
+            manifest_path: "plugins/radarr/manifest.json".into(),
+            capability: Some("integration".into()),
+            current_choice: Some(true),
+            distribution: None,
         },
         CatalogEntry {
             id: "macro.remux-verify.example".into(),

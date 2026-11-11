@@ -84,3 +84,38 @@ pub async fn tool_distribution(
         _ => Err(AppError::NotFound),
     }
 }
+
+/// Renvoie la configuration enregistrée pour un plugin donné.
+pub async fn get_settings(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
+    let saved = crate::repository::get_plugin_settings(&s.pool, &id).await?;
+    let settings_val = match saved {
+        Some(s) => serde_json::from_str(&s).unwrap_or(serde_json::json!({})),
+        None => serde_json::json!({}),
+    };
+    Ok(Json(serde_json::json!({
+        "pluginId": id,
+        "settings": settings_val,
+    })))
+}
+
+/// Enregistre la configuration (valeurs par défaut des blocs) d'un plugin.
+pub async fn save_settings(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    Json(payload): Json<Value>,
+) -> AppResult<Json<Value>> {
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::PUT).await?;
+    let settings_str = serde_json::to_string(&payload).map_err(|_| AppError::Invalid)?;
+    crate::repository::set_plugin_settings(&s.pool, &id, &settings_str).await?;
+    Ok(Json(serde_json::json!({
+        "pluginId": id,
+        "status": "saved",
+        "settings": payload,
+    })))
+}

@@ -66,3 +66,25 @@ pub async fn fail(pool: &SqlitePool, id: Uuid, lease: &LeaseRequest, code: &str)
     }
     Ok(())
 }
+
+pub async fn get_plugin_settings(pool: &SqlitePool, plugin_id: &str) -> AppResult<Option<String>> {
+    let settings: Option<String> =
+        sqlx::query_scalar("SELECT settings FROM plugin_settings WHERE plugin_id = ?1")
+            .bind(plugin_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(settings)
+}
+
+pub async fn set_plugin_settings(
+    pool: &SqlitePool,
+    plugin_id: &str,
+    settings_json: &str,
+) -> AppResult<()> {
+    sqlx::query("INSERT INTO plugin_settings (plugin_id, settings, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(plugin_id) DO UPDATE SET settings = ?2, updated_at = datetime('now')")
+        .bind(plugin_id)
+        .bind(settings_json)
+        .execute(pool)
+        .await?;
+    Ok(())
+}

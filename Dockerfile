@@ -25,7 +25,7 @@ FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d
 ARG APP_VERSION=0.1.0
 ARG VCS_REF=local
 LABEL org.opencontainers.image.title="Flux de Fichiers" org.opencontainers.image.version=$APP_VERSION org.opencontainers.image.revision=$VCS_REF
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates mkvtoolnix curl && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates mkvtoolnix curl mediainfo && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 app \
     && mkdir -p /config /data /work /logs /usr/share/flux-de-fichiers/frontend \
     && chown -R app:app /config /data /work /logs /usr/share/flux-de-fichiers/frontend

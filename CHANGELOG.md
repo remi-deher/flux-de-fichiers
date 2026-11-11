@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.5.0...v0.6.0) (2026-11-11)
+
+
+### Features
+
+* **frontend:** refonte des flows par type et des bibliotheques sans masque avec acces par noeud ([a75425d](https://github.com/remi-deher/flux-de-fichiers/commit/a75425d6d1cebac0aacfcd7a30e8f3bb625e9cca))
+* **frontend:** refonte des flows par type et des bibliotheques sans masque avec acces par noeud ([4787eb5](https://github.com/remi-deher/flux-de-fichiers/commit/4787eb5e3b0ff3cc5f9ce1d8be89df9b598bbb04))
+
 ## [0.5.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.4.1...v0.5.0) (2026-11-11)
 
 

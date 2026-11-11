@@ -1,4 +1,4 @@
-//! Explorateur de médias sources et dialogue de confirmation de remuxage.
+//! Explorateur de médias sources et dialogue de confirmation de traitement.
 
 use leptos::prelude::*;
 
@@ -9,10 +9,10 @@ pub fn FileBrowser() -> impl IntoView {
             <div class="section-panel-header">
                 <div>
                     <h2 id="files-section-title" class="section-title">
-                        "Fichiers sources admissibles"
+                        "Médias sources admissibles"
                     </h2>
                     <p class="section-subtitle">
-                        "Fichiers MKV détectés dans var/input/ (montage en lecture seule). Les fichiers d'origine ne sont jamais modifiés."
+                        "Fichiers détectés dans les volumes surveillés (montage en lecture seule). Les fichiers d'origine ne sont jamais modifiés."
                     </p>
                 </div>
                 <div id="files-counter-badge" class="status-pill info">
@@ -27,12 +27,12 @@ pub fn FileBrowser() -> impl IntoView {
                         type="search"
                         id="files-search-input"
                         class="search-input"
-                        placeholder="Rechercher un fichier source…"
-                        aria-label="Filtrer les fichiers sources par nom"
+                        placeholder="Rechercher un média source…"
+                        aria-label="Filtrer les médias sources par nom"
                     />
                 </div>
                 <div class="form-help">
-                    "Pour ajouter des vidéos, déposez vos fichiers .mkv dans le dossier var/input/ du serveur."
+                    "Déposez vos médias dans les dossiers de bibliothèques surveillés. Tous formats admissibles automatiquement."
                 </div>
             </div>
 
@@ -40,7 +40,7 @@ pub fn FileBrowser() -> impl IntoView {
                 <table class="data-table" aria-label="Liste des fichiers sources disponibles">
                     <thead>
                         <tr>
-                            <th scope="col">"Nom du fichier"</th>
+                            <th scope="col">"Nom du média"</th>
                             <th scope="col">"Taille"</th>
                             <th scope="col" style="text-align: right;">"Action"</th>
                         </tr>
@@ -48,7 +48,7 @@ pub fn FileBrowser() -> impl IntoView {
                     <tbody id="files-table-body">
                         <tr>
                             <td colspan="3" class="empty-state-text">
-                                "Chargement des fichiers sources…"
+                                "Chargement des médias sources…"
                             </td>
                         </tr>
                     </tbody>
@@ -85,10 +85,12 @@ pub fn FileBrowser() -> impl IntoView {
                     <select id="confirm-dialog-flow-select" class="form-select">
                         <option value="flow.default.mkv" selected="selected">"Remuxage Matroska propre (défaut)"</option>
                         <option value="flow.transcode.hevc">"Transcodage HEVC / Intel QSV & VA-API"</option>
-                        <option value="flow.remux.mp4">"Optimisation Web MP4 (FastStart)"</option>
+                        <option value="flow.audio.r128">"Extraction & Normalisation Audio EBU R128"</option>
+                        <option value="flow.image.thumbnails">"Miniatures chapitrées & Posters WebP"</option>
+                        <option value="flow.remux.mp4">"Optimisation Streaming MP4 (FastStart)"</option>
                     </select>
                     <p class="form-help">
-                        "Sélectionnez la chaîne de blocs configurée dans l'onglet Flux de traitement."
+                        "Sélectionnez le pipeline à exécuter ou laissez le flux assigné à la bibliothèque."
                     </p>
                 </div>
                 <div class="form-group">

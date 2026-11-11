@@ -1,33 +1,52 @@
-//! Carte descriptive d'une bibliothèque média surveillée.
+//! Carte descriptive d'une bibliothèque média surveillée sans masque rigide.
 
+use super::node_access::{LibraryNodeAccess, NodePathConfig};
 use leptos::prelude::*;
 
 #[component]
 pub fn LibraryCard(
     name: &'static str,
-    path: &'static str,
-    pattern: &'static str,
+    media_type: &'static str,
     status: &'static str,
-    flow: &'static str,
+    assigned_flow: &'static str,
+    nodes: Vec<NodePathConfig>,
 ) -> impl IntoView {
     view! {
-        <div class="card" style="display: flex; flex-direction: column; gap: 0.75rem; padding: 1rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <h3 style="margin: 0; font-size: 1.05rem; font-weight: 600;">
-                    {name}
-                </h3>
-                <span class="status-pill success">
-                    {status}
-                </span>
+        <article class="card" style="display: flex; flex-direction: column; gap: 0.85rem; padding: 1.25rem; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap;">
+                <div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                        <h3 style="margin: 0; font-size: 1.125rem; font-weight: 600;">
+                            {name}
+                        </h3>
+                        <span class="status-pill info">
+                            {media_type}
+                        </span>
+                    </div>
+                    <p style="margin: 0; font-size: 0.875rem; color: var(--text-muted);">
+                        "Tous types de médias détectés automatiquement sans contrainte d'extension."
+                    </p>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span class="status-pill success">
+                        <span class="status-dot"></span>
+                        {status}
+                    </span>
+                </div>
             </div>
-            <div style="font-size: 0.875rem; color: var(--text-muted); display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 0.75rem;">
-                <span style="font-weight: 500;">"Chemin :"</span>
-                <code>{path}</code>
-                <span style="font-weight: 500;">"Masque :"</span>
-                <code>{pattern}</code>
-                <span style="font-weight: 500;">"Flux cible :"</span>
-                <span>{flow}</span>
+
+            // Flow assigné à cette bibliothèque
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; background: var(--bg-subtle); padding: 0.5rem 0.75rem; border-radius: var(--radius-sm); font-size: 0.875rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span style="font-weight: 600; color: var(--text-main);">"⚡ Flow assigné :"</span>
+                    <span style="color: var(--primary); font-weight: 500;">{assigned_flow}</span>
+                </div>
+                <span style="font-size: 0.75rem; color: var(--text-dim);">"Déclenché automatiquement à l'ingestion"</span>
             </div>
-        </div>
+
+            // Configuration multi-nœuds des chemins
+            <LibraryNodeAccess nodes=nodes />
+        </article>
     }
 }

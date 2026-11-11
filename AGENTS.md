@@ -26,6 +26,7 @@
 
 - Petits fichiers à responsabilité unique ; scinder avant de nuire à la lisibilité.
 - Noms explicites, aucune constante numérique sans nom.
+- Tester systématiquement toutes les fonctions et routes du code avec des tests unitaires ou d'intégration Rust natifs légers pour éviter toute régression non prévue (décision utilisateur du 12 nov. 2026).
 - Annoncer en deux lignes l'action prévue avant d'écrire du code.
 - Lire seulement la rubrique utile de `docs/developpement.md` pour localiser le
   code, choisir les vérifications et retrouver les pièges. Ne pas charger toute

@@ -110,6 +110,24 @@ pub async fn workers(State(s): State<AppState>, h: HeaderMap) -> AppResult<Json<
             .await?,
     ))
 }
+
+pub async fn delete_worker(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> AppResult<StatusCode> {
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::DELETE)
+        .await?;
+    let affected = sqlx::query("DELETE FROM workers WHERE id = ?1")
+        .bind(id)
+        .execute(&s.pool)
+        .await?
+        .rows_affected();
+    if affected == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
 pub async fn heartbeat(
     State(s): State<AppState>,
     h: HeaderMap,

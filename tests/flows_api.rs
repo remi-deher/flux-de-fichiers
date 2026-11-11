@@ -91,7 +91,7 @@ fn test_condition_evaluation() {
 async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     let app = test_app().await?;
 
-    // 1. Lister les flux par défaut auto-amorcés par la migration
+    // 1. Démarrage en mode Bare Core : aucun flux n'est pré-embarqué par défaut
     let req = Request::builder()
         .uri("/api/v1/flows")
         .header("authorization", "Bearer test-admin-key")
@@ -101,9 +101,31 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
 
     let bytes = to_bytes(resp.into_body(), 16 * 1024).await?;
     let flows_list: Vec<serde_json::Value> = serde_json::from_slice(&bytes)?;
-    assert!(flows_list.len() >= 3, "au moins 3 flux par défaut");
+    assert_eq!(
+        flows_list.len(),
+        0,
+        "moteur nu (Bare Core) : 0 flux par défaut"
+    );
 
-    // 2. Créer un flux personnalisé
+    // 2. Importation d'un flux certifié (simulant l'import depuis le catalogue de plugins)
+    let default_flow = serde_json::json!({
+        "name": "Remuxage Matroska propre",
+        "description": "Pipeline certifié importé depuis flux-de-fichiers-plugins",
+        "file_mask": "*.mkv, *.avi, *.mp4",
+        "is_default": true,
+        "definition": "{\"nodes\":[],\"connections\":[]}"
+    });
+
+    let req = Request::builder()
+        .method("PUT")
+        .uri("/api/v1/flows/flow.default.mkv")
+        .header("authorization", "Bearer test-admin-key")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&default_flow)?))?;
+    let resp = app.clone().oneshot(req).await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // 3. Créer un second flux personnalisé
     let custom_flow = serde_json::json!({
         "name": "Flux Personnalisé Test",
         "description": "Pipeline d'essai",
@@ -121,7 +143,7 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::OK);
 
-    // 3. Lire le flux personnalisé créé
+    // 4. Lire le flux personnalisé créé
     let req = Request::builder()
         .uri("/api/v1/flows/flow.custom.test")
         .header("authorization", "Bearer test-admin-key")
@@ -129,7 +151,7 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::OK);
 
-    // 4. Tentative de suppression du flux par défaut interdit (409 Conflict)
+    // 5. Tentative de suppression du flux par défaut interdit (409 Conflict)
     let req = Request::builder()
         .method("DELETE")
         .uri("/api/v1/flows/flow.default.mkv")
@@ -138,7 +160,7 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::CONFLICT);
 
-    // 5. Suppression du flux personnalisé autorisé (204 No Content)
+    // 6. Suppression du flux personnalisé autorisé (204 No Content)
     let req = Request::builder()
         .method("DELETE")
         .uri("/api/v1/flows/flow.custom.test")

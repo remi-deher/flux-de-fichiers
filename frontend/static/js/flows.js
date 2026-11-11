@@ -1,4 +1,126 @@
   // --- Concepteur et Gestionnaire de Flux (Flows) type Zapier / FileFlows ---
+  let cachedFlows = [];
+
+  async function loadFlows() {
+    const container = el('flows-grid-container');
+    const countAll = el('flows-count-all');
+    const countVideo = el('flows-count-video');
+    const countOther = el('flows-count-other');
+
+    try {
+      const res = await apiFetch('/api/v1/flows');
+      const data = await res.json();
+      cachedFlows = Array.isArray(data) ? data : [];
+
+      if (countAll) countAll.textContent = String(cachedFlows.length);
+      const videoCount = cachedFlows.filter(f => {
+        const name = (f.name || '').toLowerCase();
+        return name.includes('mkv') || name.includes('vidéo') || name.includes('mp4') || name.includes('hevc');
+      }).length;
+      if (countVideo) countVideo.textContent = String(videoCount);
+      if (countOther) countOther.textContent = String(cachedFlows.length - videoCount);
+
+      renderFlowsGrid();
+    } catch {
+      if (container && cachedFlows.length === 0) {
+        renderFlowsGrid();
+      }
+    }
+  }
+
+  function renderFlowsGrid() {
+    const container = el('flows-grid-container');
+    if (!container) return;
+
+    if (cachedFlows.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state-panel" id="flows-empty-state" style="grid-column: 1 / -1; text-align: center; padding: 2.5rem 1rem; border: 1px dashed var(--border-color); border-radius: var(--radius-md); background: var(--bg-card);">
+          <div style="font-size: 2rem; margin-bottom: 0.5rem;" aria-hidden="true">⚡</div>
+          <h3 style="margin: 0 0 0.5rem 0; font-size: 1.125rem; font-weight: 600;">Aucun flux de traitement installé</h3>
+          <p style="margin: 0 auto 1.25rem auto; max-width: 500px; font-size: 0.875rem; color: var(--text-muted);">
+            L'application démarre en moteur nu (Bare Core). Importez des flux certifiés depuis le catalogue de plugins ou concevez un pipeline sur-mesure.
+          </p>
+          <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
+            <button type="button" id="btn-empty-import-flow" class="btn btn-secondary">
+              🔌 Consulter le catalogue de plugins
+            </button>
+            <button type="button" id="btn-empty-create-flow" class="btn btn-primary">
+              + Créer un flux (Assistant)
+            </button>
+          </div>
+        </div>
+      `;
+      const btnImport = el('btn-empty-import-flow');
+      if (btnImport) btnImport.addEventListener('click', () => switchTab('plugins'));
+      const btnCreate = el('btn-empty-create-flow');
+      if (btnCreate) {
+        const wizard = el('flow-wizard-dialog');
+        if (wizard) btnCreate.addEventListener('click', () => wizard.showModal());
+      }
+      return;
+    }
+
+    container.innerHTML = cachedFlows.map(flow => {
+      const safeId = escapeHtml(flow.id);
+      const safeName = escapeHtml(flow.name);
+      const safeDesc = escapeHtml(flow.description || 'Flux de traitement modulaire');
+      const isDefault = flow.is_default;
+      const nameLower = flow.name.toLowerCase();
+      const isVideo = nameLower.includes('mkv') || nameLower.includes('mp4') || nameLower.includes('vidéo') || nameLower.includes('hevc');
+      const flowType = isVideo ? 'video' : 'other';
+
+      let nodes = [];
+      try {
+        const def = typeof flow.definition === 'string' ? JSON.parse(flow.definition) : flow.definition;
+        nodes = def.nodes || [];
+      } catch {}
+
+      const pipelineHtml = nodes.slice(0, 4).map((n, idx) => `
+        <div class="flow-block-step">
+          <span class="step-badge">${idx + 1}</span>
+          <span class="step-name">${escapeHtml(n.name || n.type)}</span>
+        </div>
+      `).join('<span class="flow-arrow" aria-hidden="true">➔</span>');
+
+      return `
+        <article class="flow-card ${isDefault ? 'active-flow' : ''}" data-flow-id="${safeId}" data-flow-type="${flowType}">
+          <div class="flow-card-header">
+            <div>
+              <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                <h3 class="flow-card-title">${safeName}</h3>
+                ${isDefault ? '<span class="status-pill success"><span class="status-dot"></span>Défaut</span>' : ''}
+                <span class="status-pill info">${flowType === 'video' ? '🎬 Vidéo' : '⚙️ Autre'}</span>
+              </div>
+              <p class="flow-card-desc">${safeDesc}</p>
+            </div>
+          </div>
+          <div class="flow-pipeline-container" aria-label="Chaîne des blocs du flux">
+            <div class="flow-pipeline">
+              ${pipelineHtml || '<span style="font-size: 0.8125rem; color: var(--text-dim);">Pipeline vide</span>'}
+            </div>
+          </div>
+          <div class="flow-card-footer">
+            <span class="flow-pattern-tag">${escapeHtml(flow.file_mask || 'Filtre automatique')}</span>
+            <div style="display: flex; gap: 0.5rem;">
+              <button type="button" class="btn btn-primary btn-sm open-canvas-btn" data-flow="${safeId}">
+                Ouvrir l'éditeur visuel (Canvas)
+              </button>
+            </div>
+          </div>
+        </article>
+      `;
+    }).join('');
+
+    container.querySelectorAll('.open-canvas-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const flowId = btn.getAttribute('data-flow');
+        const card = btn.closest('.flow-card');
+        const flowTitle = card ? (card.querySelector('.flow-card-title')?.textContent || flowId) : flowId;
+        openCanvas(flowId, flowTitle);
+      });
+    });
+  }
+
   function setupFlowsPanel() {
     const libraryView = el('flows-library-view');
     const canvasView = el('flows-canvas-view');

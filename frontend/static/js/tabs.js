@@ -1,9 +1,25 @@
 // --- Gestion des onglets accessibles ---
   const TABS = ['dashboard', 'files', 'flows', 'jobs', 'workers', 'plugins', 'settings', 'updates'];
 
+  const TAB_TITLES = {
+    dashboard: 'Piloter & Vue générale',
+    files: 'Bibliothèques & Médias',
+    flows: 'Concepteur de flux (Flows)',
+    jobs: 'Activité & Diagnostics',
+    workers: 'Infrastructure & Nœuds',
+    plugins: 'Plugins & Outils média',
+    settings: 'Paramètres d\'administration',
+    updates: 'Mises à jour & Conteneur',
+  };
+
   function switchTab(tabName) {
     if (!TABS.includes(tabName)) return;
     activeTab = tabName;
+
+    const titleEl = el('current-section-title');
+    if (titleEl && TAB_TITLES[tabName]) {
+      titleEl.textContent = TAB_TITLES[tabName];
+    }
 
     TABS.forEach(name => {
       const btn = el(`tab-btn-${name}`);
@@ -67,6 +83,21 @@
 
     const qUpdates = el('quick-goto-updates-btn');
     if (qUpdates) qUpdates.addEventListener('click', () => switchTab('updates'));
+
+    setupSidebar();
+  }
+
+  function setupSidebar() {
+    const collapseBtn = el('sidebar-collapse-btn');
+    const sidebar = document.querySelector('.application-sidebar');
+    if (collapseBtn && sidebar) {
+      collapseBtn.addEventListener('click', () => {
+        const isCollapsed = sidebar.classList.toggle('is-collapsed');
+        collapseBtn.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+        const label = collapseBtn.querySelector('.collapse-label');
+        if (label) label.textContent = isCollapsed ? 'Déplier' : 'Replier';
+      });
+    }
   }
 
   // --- Gestion du Thème (Clair / Sombre / Système) ---

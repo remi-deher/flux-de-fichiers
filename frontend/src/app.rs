@@ -1,6 +1,9 @@
 //! Racine de l'application Leptos pour le poste de pilotage Flux de Fichiers.
 
-use crate::{components::*, core::AppShell};
+use crate::{
+    components::*,
+    core::{Header, Sidebar},
+};
 use leptos::prelude::*;
 
 #[component]
@@ -9,35 +12,43 @@ pub fn App() -> impl IntoView {
         <a href="#main-content" class="skip-link">
             "Aller au contenu principal"
         </a>
-        <div class="app-container">
-            <AppShell />
-            <div
-                id="live-notice"
-                class="toast-notice"
-                role="status"
-                aria-live="polite"
-            ></div>
-            <main id="main-content">
-                <DashboardPanel />
-                <FilesPanel />
-                <FlowsPanel />
-                <JobsPanel />
-                <WorkersPanel />
-                <PluginsPanel />
-                <SettingsPanel />
-                <UpdatesPanel />
-            </main>
-            <footer style="margin-top: 3rem; text-align: center; font-size: 0.8125rem; color: var(--text-dim); border-top: 1px solid var(--border-color); padding-top: 1.5rem;">
-                <p>
-                    "Flux de Fichiers v0.4 — Poste de pilotage Leptos moderne et responsive."
-                </p>
-                <p style="margin-top: 0.25rem;">
-                    "Recommandations d'accessibilité W3C suivies • Contrastes renforcés (>= 5.9:1) • Navigation clavier complète • Thèmes clair/sombre"
-                </p>
-                <p style="margin-top: 0.25rem;">
-                    "Remuxage MKVToolNix • Mode centralisé autonome ou workers distants • SQLite /config"
-                </p>
-            </footer>
+        <div class="application-shell">
+            <div class="application-navigation-layout">
+                // Barre latérale persistante (Sidebar Rail)
+                <Sidebar />
+
+                // Région d'affichage : En-tête supérieur + Contenu principal
+                <div class="page-transition-region">
+                    <Header />
+
+                    <div
+                        id="live-notice"
+                        class="toast-notice"
+                        role="status"
+                        aria-live="polite"
+                    ></div>
+
+                    <main id="main-content" class="main-content">
+                        <DashboardPanel />
+                        <FilesPanel />
+                        <FlowsPanel />
+                        <JobsPanel />
+                        <WorkersPanel />
+                        <PluginsPanel />
+                        <SettingsPanel />
+                        <UpdatesPanel />
+                    </main>
+
+                    <footer class="shell-footer">
+                        <p>
+                            "Flux de Fichiers v0.6 — Architecture et Shell inspirés d'Encoding Central."
+                        </p>
+                        <p style="margin-top: 0.25rem;">
+                            "100% Rust & Leptos natif • Navigation Rail persistante • Contrastes renforcés WCAG AAA • Moteur Bare Core"
+                        </p>
+                    </footer>
+                </div>
+            </div>
         </div>
     }
 }

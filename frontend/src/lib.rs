@@ -2,7 +2,10 @@
 
 pub mod app;
 pub mod components;
+pub mod core;
+pub mod features;
 pub mod scripts;
+pub mod shared;
 pub mod styles;
 pub mod types;
 

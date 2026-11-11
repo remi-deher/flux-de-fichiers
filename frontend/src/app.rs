@@ -1,6 +1,6 @@
 //! Racine de l'application Leptos pour le poste de pilotage Flux de Fichiers.
 
-use crate::components::*;
+use crate::{components::*, core::AppShell};
 use leptos::prelude::*;
 
 #[component]
@@ -10,7 +10,7 @@ pub fn App() -> impl IntoView {
             "Aller au contenu principal"
         </a>
         <div class="app-container">
-            <Header />
+            <AppShell />
             <div
                 id="live-notice"
                 class="toast-notice"

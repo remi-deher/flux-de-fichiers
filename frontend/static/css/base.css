@@ -439,15 +439,11 @@ body {
   align-items: center;
   gap: 0.5rem;
   margin-left: auto;
+  flex-wrap: wrap;
 }
 
 .subnav-actions:empty {
   display: none;
-}
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
 }
 
 /* --- Adaptations Responsives Mobile (< 768px) --- */
@@ -455,6 +451,30 @@ body {
   html, body {
     overflow-x: hidden;
     max-width: 100vw;
+  }
+
+  .subnav-container {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .subnav-tabs {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .subnav-info {
+    justify-content: flex-start;
+  }
+
+  .subnav-actions {
+    margin-left: 0;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .application-shell {

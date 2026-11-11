@@ -16,18 +16,24 @@ pub struct WorkerConfig {
     pub key: String,
     pub name: String,
     pub work_dir: PathBuf,
+    pub tools_cache_dir: PathBuf,
     pub ca: Option<PathBuf>,
     pub max_bytes: u64,
 }
 impl WorkerConfig {
     pub fn load() -> anyhow::Result<Self> {
+        let work_dir: PathBuf = env::var("WORK_DIR")
+            .unwrap_or_else(|_| "var/work".into())
+            .into();
+        let tools_cache_dir = env::var("TOOLS_CACHE_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| work_dir.join("tools-cache"));
         Ok(Self {
             url: config::coordinator_url(&env::var("COORDINATOR_URL")?)?,
             key: config::secret("WORKER_KEY")?,
             name: env::var("WORKER_NAME").or_else(|_| env::var("HOSTNAME"))?,
-            work_dir: env::var("WORK_DIR")
-                .unwrap_or_else(|_| "var/work".into())
-                .into(),
+            work_dir,
+            tools_cache_dir,
             ca: env::var("CA_CERT").ok().map(Into::into),
             max_bytes: env::var("MAX_FILE_BYTES")
                 .unwrap_or_else(|_| "536870912".into())
@@ -60,6 +66,7 @@ impl Agent {
             .header("x-lease-token", claim.lease_token.to_string())
     }
     async fn heartbeat(&self, claim: &Claim, worker: Uuid) -> anyhow::Result<()> {
+        let probe = crate::telemetry::TelemetryProbe::with_storage_path(&self.config.work_dir);
         loop {
             tokio::time::sleep(Duration::from_secs(20)).await;
             self.request(
@@ -70,6 +77,7 @@ impl Agent {
             .json(&LeaseRequest {
                 worker_id: worker,
                 lease_token: claim.lease_token,
+                telemetry: Some(probe.sample()),
             })
             .send()
             .await?
@@ -109,7 +117,10 @@ impl Agent {
             hash == claim.source_sha256 && bytes as i64 == claim.source_bytes,
             "source_integrity"
         );
-        let warning = media::remux(&input, &output)
+        let cache_mgr = crate::tools_cache::ToolCacheManager::new(&self.config.tools_cache_dir);
+        let mkvmerge_bin =
+            cache_mgr.resolve_executable("tool.mkvtoolnix", "1.0.0", "mkvmerge", "MKVMERGE");
+        let warning = media::remux_with(&mkvmerge_bin, &input, &output)
             .await
             .context("remux_failed")?;
         let (_, output_size) = storage::fingerprint(&output, self.config.max_bytes).await?;
@@ -170,6 +181,29 @@ impl Agent {
         tokio::fs::remove_dir_all(dir).await?;
         Ok(())
     }
+
+    /// Purge les résidus orphelins (anciens répertoires job-* ou fichiers .tmp)
+    /// dans le répertoire de travail local sans toucher aux outils ou à la configuration.
+    async fn purge_orphaned_work_artifacts(&self) {
+        let mut entries = match tokio::fs::read_dir(&self.config.work_dir).await {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let file_name = entry.file_name();
+            let name = file_name.to_string_lossy();
+            if name.starts_with("job-") || name.starts_with(".tmp") || name.ends_with(".tmp") {
+                let path = entry.path();
+                let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
+                tracing::info!(path = %path.display(), "purging orphaned work artifact");
+                if is_dir {
+                    let _ = tokio::fs::remove_dir_all(&path).await;
+                } else {
+                    let _ = tokio::fs::remove_file(&path).await;
+                }
+            }
+        }
+    }
 }
 
 pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
@@ -217,6 +251,8 @@ pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
         tokio::select! { _=tokio::time::sleep(Duration::from_secs(5))=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
     };
     tracing::info!(worker_id=%worker.id, "worker registered");
+    agent.purge_orphaned_work_artifacts().await;
+    let mut was_disconnected = false;
     loop {
         let attempt = async {
             let claim = agent
@@ -234,9 +270,23 @@ pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
         };
         let claim = tokio::select! { result=attempt=>result, _=crate::api::shutdown_signal()=>return Ok(()) };
         match claim {
-            Ok(Some(claim)) => agent.execute(claim, worker.id).await?,
-            Ok(None) => {}
-            Err(_) => tracing::warn!("coordinator unavailable; retrying"),
+            Ok(Some(claim)) => {
+                if was_disconnected {
+                    agent.purge_orphaned_work_artifacts().await;
+                    was_disconnected = false;
+                }
+                agent.execute(claim, worker.id).await?;
+            }
+            Ok(None) => {
+                if was_disconnected {
+                    agent.purge_orphaned_work_artifacts().await;
+                    was_disconnected = false;
+                }
+            }
+            Err(_) => {
+                was_disconnected = true;
+                tracing::warn!("coordinator unavailable; retrying");
+            }
         }
         tokio::select! { _=tokio::time::sleep(Duration::from_secs(1))=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
     }

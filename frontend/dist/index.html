@@ -1,0 +1,3522 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Console de pilotage et supervision de remuxage Flux de Fichiers.">
+  <title>Flux de Fichiers — Pilotage et supervision</title>
+  <style>
+:root {
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* Palette claire : contrastes renforcés (>= 4.5:1 sur texte, >= 3:1 sur composants) */
+  --bg-app: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-subtle: #f1f5f9;
+  --border-color: #94a3b8;
+  --border-focus: #0369a1;
+  --text-main: #0f172a;
+  --text-muted: #334155;
+  --text-dim: #475569;
+
+  --primary: #0369a1;
+  --primary-hover: #075985;
+  --primary-contrast: #ffffff;
+
+  --success-bg: #ecfdf5;
+  --success-border: #047857;
+  --success-text: #064e3b;
+
+  --warning-bg: #fffbeb;
+  --warning-border: #b45309;
+  --warning-text: #78350f;
+
+  --info-bg: #f0f9ff;
+  --info-border: #0284c7;
+  --info-text: #075985;
+
+  --danger-bg: #fef2f2;
+  --danger-border: #b91c1c;
+  --danger-text: #7f1d1d;
+
+  --focus-ring: #0369a1;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-app: #0b0f17;
+    --bg-card: #151d2c;
+    --bg-subtle: #1e293b;
+    --border-color: #64748b;
+    --border-focus: #38bdf8;
+    --text-main: #f8fafc;
+    --text-muted: #e2e8f0;
+    --text-dim: #cbd5e1;
+
+    --primary: #38bdf8;
+    --primary-hover: #7dd3fc;
+    --primary-contrast: #0f172a;
+
+    --success-bg: #064e3b;
+    --success-border: #34d399;
+    --success-text: #ecfdf5;
+
+    --warning-bg: #78350f;
+    --warning-border: #fbbf24;
+    --warning-text: #fffbeb;
+
+    --info-bg: #0c4a6e;
+    --info-border: #38bdf8;
+    --info-text: #f0f9ff;
+
+    --danger-bg: #7f1d1d;
+    --danger-border: #f87171;
+    --danger-text: #fef2f2;
+
+    --focus-ring: #38bdf8;
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg-app: #0b0f17;
+  --bg-card: #151d2c;
+  --bg-subtle: #1e293b;
+  --border-color: #64748b;
+  --border-focus: #38bdf8;
+  --text-main: #f8fafc;
+  --text-muted: #e2e8f0;
+  --text-dim: #cbd5e1;
+
+  --primary: #38bdf8;
+  --primary-hover: #7dd3fc;
+  --primary-contrast: #0f172a;
+
+  --success-bg: #064e3b;
+  --success-border: #34d399;
+  --success-text: #ecfdf5;
+
+  --warning-bg: #78350f;
+  --warning-border: #fbbf24;
+  --warning-text: #fffbeb;
+
+  --info-bg: #0c4a6e;
+  --info-border: #38bdf8;
+  --info-text: #f0f9ff;
+
+  --danger-bg: #7f1d1d;
+  --danger-border: #f87171;
+  --danger-text: #fef2f2;
+
+  --focus-ring: #38bdf8;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+}
+
+:root[data-theme="light"] {
+  --bg-app: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-subtle: #f1f5f9;
+  --border-color: #94a3b8;
+  --border-focus: #0369a1;
+  --text-main: #0f172a;
+  --text-muted: #334155;
+  --text-dim: #475569;
+
+  --primary: #0369a1;
+  --primary-hover: #075985;
+  --primary-contrast: #ffffff;
+
+  --success-bg: #ecfdf5;
+  --success-border: #047857;
+  --success-text: #064e3b;
+
+  --warning-bg: #fffbeb;
+  --warning-border: #b45309;
+  --warning-text: #78350f;
+
+  --info-bg: #f0f9ff;
+  --info-border: #0284c7;
+  --info-text: #075985;
+
+  --danger-bg: #fef2f2;
+  --danger-border: #b91c1c;
+  --danger-text: #7f1d1d;
+
+  --focus-ring: #0369a1;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+}
+
+/* Reset et typographie de base */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* Lien d'évitement accessible */
+.skip-link {
+  position: absolute;
+  top: -999px;
+  left: 1rem;
+  background: var(--primary);
+  color: var(--primary-contrast);
+  padding: 0.75rem 1.25rem;
+  font-weight: 700;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  z-index: 9999;
+}
+
+.skip-link:focus {
+  top: 1rem;
+}
+
+.app-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 3rem 1rem;
+}
+
+/* Header */
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 1.25rem;
+}
+
+.brand-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.brand-badge {
+  display: inline-block;
+  background: var(--primary);
+  color: var(--primary-contrast);
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+h1.app-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
+}
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* Barre de navigation par onglets (Tabs) */
+.tab-navigation {
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tab-list {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  min-height: 44px;
+  min-width: 44px;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.tab-btn:hover {
+  color: var(--text-main);
+}
+
+.tab-btn[aria-selected="true"] {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.tab-btn:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.tab-panel {
+  display: block;
+}
+
+.tab-panel[hidden] {
+  display: none;
+}
+
+/* Badges d'état */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0.35rem 0.75rem;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+}
+
+.status-pill.online,
+.status-pill.succeeded {
+  background: var(--success-bg);
+  border-color: var(--success-border);
+  color: var(--success-text);
+}
+
+.status-pill.offline,
+.status-pill.failed {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+.status-pill.warning,
+.status-pill.queued {
+  background: var(--warning-bg);
+  border-color: var(--warning-border);
+  color: var(--warning-text);
+}
+
+.status-pill.info,
+.status-pill.running {
+  background: var(--info-bg);
+  border-color: var(--info-border);
+  color: var(--info-text);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: currentColor;
+}
+
+/* Grilles et panneaux */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.metric-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.metric-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.35rem;
+}
+
+.metric-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--text-main);
+  font-family: var(--font-mono);
+}
+
+.metric-subtitle {
+  font-size: 0.8125rem;
+  color: var(--text-dim);
+  margin-top: 0.25rem;
+}
+
+.section-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.section-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.section-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.01em;
+}
+
+.section-subtitle {
+  font-size: 0.875rem;
+  color: var(--text-dim);
+  margin-top: 0.25rem;
+}
+
+/* Barres d'outils et recherche */
+.toolbar-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.search-box {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 1;
+  min-width: 240px;
+  max-width: 400px;
+}
+
+.search-input {
+  width: 100%;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  padding: 0.625rem 0.875rem 0.625rem 2.25rem;
+  min-height: 44px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-main);
+}
+
+.search-icon {
+  position: absolute;
+  left: 0.75rem;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+.filter-group {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  min-height: 44px;
+  min-width: 44px;
+  border-radius: 9999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+  color: var(--text-main);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.filter-chip[aria-pressed="true"] {
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border-color: var(--primary);
+}
+
+.filter-chip:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Tableaux de données */
+.table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.875rem;
+}
+
+.data-table th,
+.data-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: middle;
+}
+
+.data-table th {
+  background: var(--bg-subtle);
+  font-weight: 600;
+  color: var(--text-dim);
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.data-table tr:last-child td {
+  border-bottom: none;
+}
+
+.data-table tr:hover td {
+  background-color: var(--bg-subtle);
+}
+
+.empty-state-text {
+  text-align: center;
+  padding: 2.5rem 1rem !important;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* Boutons et formulaires */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0.625rem 1rem;
+  min-height: 44px;
+  min-width: 44px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.btn:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-contrast);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.btn-secondary {
+  background: var(--bg-subtle);
+  border-color: var(--border-color);
+  color: var(--text-main);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--border-color);
+}
+
+.btn-sm {
+  font-size: 0.8125rem;
+  padding: 0.5rem 0.75rem;
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.form-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.form-input,
+.form-select {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  padding: 0.625rem 0.875rem;
+  min-height: 44px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-main);
+}
+
+.form-input:focus,
+.form-select:focus,
+.search-input:focus {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-color: var(--border-focus);
+}
+
+.form-help {
+  font-size: 0.8125rem;
+  color: var(--text-dim);
+}
+
+/* Modale dialog HTML5 */
+dialog.app-dialog {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text-main);
+  padding: 0;
+  max-width: 600px;
+  width: calc(100% - 2rem);
+  box-shadow: var(--shadow-md);
+  margin: auto;
+}
+
+dialog.app-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+}
+
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.dialog-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.dialog-body {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+  border-bottom-left-radius: var(--radius-md);
+  border-bottom-right-radius: var(--radius-md);
+}
+
+/* Grille de détail de tâche */
+.detail-grid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 0.75rem 1rem;
+  font-size: 0.875rem;
+}
+
+.detail-term {
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.detail-val {
+  font-family: var(--font-mono);
+  word-break: break-all;
+  color: var(--text-main);
+}
+
+.code-snippet {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  overflow-x: auto;
+  user-select: all;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Toast Notice */
+.toast-notice {
+  display: none;
+  padding: 0.75rem 1.25rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.toast-notice.visible {
+  display: block;
+}
+
+.toast-notice.info {
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  color: var(--info-text);
+}
+
+.toast-notice.error {
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  color: var(--danger-text);
+}
+
+.toast-notice.success {
+  background: var(--success-bg);
+  border: 1px solid var(--success-border);
+  color: var(--success-text);
+}
+
+/* Cartes fonctionnalités futures */
+.future-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.future-card {
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  background: var(--bg-subtle);
+  opacity: 0.85;
+}
+
+.future-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  border: 1px solid var(--warning-border);
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+}
+
+/* Adaptation petits écrans */
+@media (max-width: 640px) {
+  .app-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .header-status {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .detail-grid {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+  .toolbar-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .search-box {
+    max-width: 100%;
+  }
+}
+
+/* --- Section Plugins, Outils et Contrats --- */
+.tools-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.25rem;
+  margin-top: 1rem;
+}
+
+.tool-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.tool-card:hover {
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-sm);
+}
+
+.tool-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.tool-identity {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.tool-badge-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.tool-card-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.tool-card-id {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.tool-card-desc {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin: 0.875rem 0;
+  line-height: 1.5;
+  flex: 1;
+}
+
+.tool-meta-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-bottom: 1rem;
+}
+
+.meta-tag {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+}
+
+.meta-tag.active-choice {
+  background: var(--info-bg);
+  color: var(--info-text);
+  border-color: var(--info-border);
+  font-weight: 600;
+}
+
+.tool-card-footer {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border-color);
+  padding-top: 0.875rem;
+}
+
+.copy-input-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.workers-info-grid {
+  margin-top: 1.5rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.card-caption {
+  font-size: 0.875rem;
+  color: var(--text-dim);
+  margin-top: 0.25rem;
+}
+
+.code-block-wrapper {
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.875rem 1rem;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* --- Concepteur et Gestionnaire de Flux (Flows) --- */
+.flows-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin-top: 1rem;
+}
+
+.flow-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.flow-card:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.flow-card.active-flow {
+  border-left: 4px solid var(--primary);
+}
+
+.flow-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.flow-card-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.flow-card-desc {
+  font-size: 0.875rem;
+  color: var(--text-dim);
+  margin: 0.35rem 0 0 0;
+  line-height: 1.45;
+}
+
+.flow-pipeline-container {
+  overflow-x: auto;
+  padding: 0.75rem 0;
+}
+
+.flow-pipeline {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-width: max-content;
+}
+
+.flow-block-step {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  min-width: 170px;
+}
+
+.flow-block-step.implicit-step {
+  border-left: 3px solid var(--info-border);
+  background: var(--info-bg);
+}
+
+.step-badge {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--primary);
+  text-transform: uppercase;
+  margin-bottom: 0.2rem;
+}
+
+.step-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.step-type {
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+  margin-top: 0.15rem;
+}
+
+.flow-arrow {
+  color: var(--text-dim);
+  font-weight: bold;
+  font-size: 1rem;
+}
+
+.flow-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  border-top: 1px solid var(--border-color);
+  padding-top: 0.875rem;
+  flex-wrap: wrap;
+}
+
+.flow-pattern-tag {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  background: var(--bg-subtle);
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+}
+
+.flow-editor-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.editor-step-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.editor-step-card.implicit-step {
+  background: var(--info-bg);
+  border-color: var(--info-border);
+}
+
+.step-order {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--primary-contrast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.step-subtext {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-top: 0.15rem;
+}
+
+/* --- Canvas Visuel No-Code (Zapier / FileFlows style) --- */
+.canvas-header-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.875rem 1.25rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  border-bottom: none;
+}
+
+.canvas-workspace-layout {
+  display: flex;
+  height: 620px;
+  border: 1px solid var(--border-color);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-card);
+}
+
+.canvas-blocks-sidebar {
+  width: 260px;
+  background: var(--bg-subtle);
+  border-right: 1px solid var(--border-color);
+  padding: 1rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.sidebar-block-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sidebar-group-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  letter-spacing: 0.05em;
+}
+
+.draggable-block-item {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.draggable-block-item:hover {
+  border-color: var(--primary);
+  background: var(--info-bg);
+}
+
+.draggable-block-item.addable .block-add-plus {
+  margin-left: auto;
+  font-weight: bold;
+  font-size: 1.1rem;
+  color: var(--primary);
+}
+
+.block-drag-icon {
+  font-size: 1.25rem;
+}
+
+.block-drag-info {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.8125rem;
+}
+
+.block-drag-info strong {
+  color: var(--text-main);
+}
+
+.block-drag-info span {
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+}
+
+.sidebar-help-tip {
+  margin-top: auto;
+  padding: 0.625rem;
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-color);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.canvas-board-wrapper {
+  flex: 1;
+  position: relative;
+  background-color: var(--bg-app);
+  background-image: radial-gradient(circle, var(--border-color) 1px, transparent 1px);
+  background-size: 24px 24px;
+  overflow-y: auto;
+  padding: 2.5rem 1.5rem;
+  display: flex;
+  justify-content: center;
+}
+
+.canvas-connections-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.canvas-nodes-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2.25rem;
+  width: 100%;
+  max-width: 440px;
+  position: relative;
+  z-index: 1;
+}
+
+.canvas-node {
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 1rem 1.25rem;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.canvas-node:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-md);
+}
+
+.canvas-node.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
+.canvas-node.implicit-node {
+  border-left: 4px solid var(--info-border);
+}
+
+.node-connector {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--primary);
+  border: 2px solid var(--bg-card);
+  position: absolute;
+  z-index: 2;
+}
+
+.connector-in {
+  top: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.connector-out {
+  bottom: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.node-multi-outputs {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--border-color);
+  position: relative;
+}
+
+.multi-output-port {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  padding-bottom: 6px;
+}
+
+.port-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.port-true .port-label {
+  color: #10b981;
+}
+
+.port-false .port-label {
+  color: #f59e0b;
+}
+
+.port-fallback .port-label {
+  color: #8b5cf6;
+}
+
+.connector-out.out-true {
+  background: #10b981;
+  position: absolute;
+  bottom: -13px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.connector-out.out-false {
+  background: #f59e0b;
+  position: absolute;
+  bottom: -13px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.connector-out.out-fallback {
+  background: #8b5cf6;
+  position: absolute;
+  bottom: -13px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.node-header {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.node-icon {
+  font-size: 1.35rem;
+}
+
+.node-title-box {
+  flex: 1;
+}
+
+.node-kind {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  display: block;
+}
+
+.node-name {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.node-remove-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-sm);
+}
+
+.node-remove-btn:hover {
+  color: var(--danger-text);
+  background: var(--danger-bg);
+}
+
+.node-summary {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-top: 0.5rem;
+  line-height: 1.4;
+  border-top: 1px solid var(--border-color);
+  padding-top: 0.5rem;
+}
+
+.canvas-inspector-sidebar {
+  width: 300px;
+  background: var(--bg-card);
+  border-left: 1px solid var(--border-color);
+  padding: 1.25rem;
+  overflow-y: auto;
+}
+
+.inspector-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.inspector-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+/* Modale de Template Wizard */
+.wizard-templates-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 0.875rem;
+  margin-top: 1rem;
+}
+
+.wizard-template-card {
+  display: flex;
+  gap: 0.875rem;
+  align-items: flex-start;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.wizard-template-card:hover {
+  border-color: var(--primary);
+  background: var(--bg-subtle);
+}
+
+.wizard-template-card.active {
+  border-color: var(--primary);
+  background: var(--info-bg);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.template-icon {
+  font-size: 1.75rem;
+}
+
+.template-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.template-desc {
+  margin: 0.3rem 0 0 0;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+/* --- Simulation conditionnelle & Effets ADR-0008 --- */
+.canvas-simulation-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--bg-card);
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+
+.sim-label {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.sim-btn {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease-in-out;
+}
+
+.sim-btn.active-true {
+  background: #10b981;
+  color: #ffffff;
+  border-color: #059669;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+}
+
+.sim-btn.active-false {
+  background: #f59e0b;
+  color: #ffffff;
+  border-color: #d97706;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+.sim-btn.active-fallback {
+  background: #8b5cf6;
+  color: #ffffff;
+  border-color: #7c3aed;
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.4);
+}
+
+.canvas-node.sim-active {
+  box-shadow: 0 0 0 2px var(--primary), 0 4px 12px rgba(3, 105, 161, 0.25);
+  transform: translateY(-2px);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.canvas-node.sim-active-true {
+  box-shadow: 0 0 0 2px #10b981, 0 4px 12px rgba(16, 185, 129, 0.35);
+  border-color: #10b981;
+}
+
+.canvas-node.sim-active-false {
+  box-shadow: 0 0 0 2px #f59e0b, 0 4px 12px rgba(245, 158, 11, 0.35);
+  border-color: #f59e0b;
+}
+
+.canvas-node.sim-active-fallback {
+  box-shadow: 0 0 0 2px #8b5cf6, 0 4px 12px rgba(139, 92, 246, 0.35);
+  border-color: #8b5cf6;
+}
+
+.canvas-node.sim-dimmed {
+  opacity: 0.35;
+  filter: grayscale(0.7);
+}
+
+/* Badges d'exécution In-Place vs WorkingFile isolé */
+.node-pill.in-place {
+  background: #ecfdf5;
+  border: 1px solid #10b981;
+  color: #065f46;
+}
+
+.node-pill.working-file {
+  background: #eff6ff;
+  border: 1px solid #3b82f6;
+  color: #1e40af;
+}
+
+.flow-block-step.condition-step {
+  border-color: var(--warning-border);
+  background: var(--warning-bg);
+}
+
+.flow-block-step.in-place-step {
+  border-color: #10b981;
+  background: #ecfdf5;
+}
+
+@keyframes path-pulse {
+  0% { stroke-dashoffset: 24; }
+  100% { stroke-dashoffset: 0; }
+}
+
+path.sim-pulse-line {
+  stroke-dasharray: 8 4;
+  animation: path-pulse 1s linear infinite;
+  stroke-width: 3.5;
+}
+
+
+  </style>
+</head>
+<body>
+<a href="#main-content" class="skip-link">Aller au contenu principal</a><div class="app-container"><header role="banner" class="app-header"><div class="brand-wrapper"><span class="brand-badge">MKV</span><div><h1 class="app-title">Flux de Fichiers</h1><p class="section-subtitle">Poste de pilotage et supervision de remuxage</p></div></div><div class="header-status"><div id="health-status-pill" class="status-pill warning" aria-live="polite"><span class="status-dot"></span><span id="health-status-text">Vérification…</span></div><div id="session-status-pill" class="status-pill warning" aria-live="polite"><span class="status-dot"></span><span id="session-status-text">Non authentifié</span></div><button type="button" id="theme-toggle-btn" class="btn btn-secondary btn-sm" aria-label="Basculer le thème clair ou sombre" title="Basculer le thème clair ou sombre"><span id="theme-toggle-icon">🌓</span><span id="theme-toggle-label">Thème</span></button><button type="button" id="refresh-all-btn" class="btn btn-secondary btn-sm" aria-label="Actualiser les données du coordinateur">Actualiser</button></div></header><nav aria-label="Sections du poste de pilotage" class="tab-navigation"><div class="tab-list" role="tablist"><button type="button" role="tab" id="tab-btn-dashboard" class="tab-btn" aria-selected="true" aria-controls="panel-dashboard" tabindex="0">Vue d'ensemble</button><button type="button" role="tab" id="tab-btn-files" class="tab-btn" aria-selected="false" aria-controls="panel-files" tabindex="-1">Fichiers sources</button><button type="button" role="tab" id="tab-btn-flows" class="tab-btn" aria-selected="false" aria-controls="panel-flows" tabindex="-1">Flux de traitement</button><button type="button" role="tab" id="tab-btn-jobs" class="tab-btn" aria-selected="false" aria-controls="panel-jobs" tabindex="-1">Gestionnaire de tâches</button><button type="button" role="tab" id="tab-btn-workers" class="tab-btn" aria-selected="false" aria-controls="panel-workers" tabindex="-1">Nœuds &amp; Serveurs</button><button type="button" role="tab" id="tab-btn-plugins" class="tab-btn" aria-selected="false" aria-controls="panel-plugins" tabindex="-1">Plugins &amp; Outils</button><button type="button" role="tab" id="tab-btn-settings" class="tab-btn" aria-selected="false" aria-controls="panel-settings" tabindex="-1">Paramètres &amp; Session</button></div></nav><div id="live-notice" class="toast-notice" role="status" aria-live="polite"></div><main id="main-content"><div id="panel-dashboard" role="tabpanel" aria-labelledby="tab-btn-dashboard" class="tab-panel"><section class="metrics-grid" aria-label="Indicateurs clés du système"><div class="metric-card"><div class="metric-label">Coordinateur</div><div id="metric-health" class="metric-value">…</div><div class="metric-subtitle">Sonde /health</div></div><div class="metric-card"><div class="metric-label">Mode opérationnel</div><div id="metric-mode" class="metric-value" style="font-size: 1.25rem;">Centralisé</div><div class="metric-subtitle">1 à N serveurs • HA optionnelle</div></div><div class="metric-card"><div class="metric-label">Fichiers prêts</div><div id="metric-files-count" class="metric-value">0</div><div class="metric-subtitle">Dans var/input/ (lecture seule)</div></div><div class="metric-card"><div class="metric-label">Tâches enregistrées</div><div id="metric-jobs-count" class="metric-value">0</div><div class="metric-subtitle">En base de données SQLite (/config)</div></div><div class="metric-card"><div class="metric-label">Agents actifs</div><div id="metric-workers-count" class="metric-value">0</div><div class="metric-subtitle">Enregistrés via l'API</div></div></section><section class="section-panel" aria-labelledby="quick-actions-title"><div class="section-panel-header"><div><h2 id="quick-actions-title" class="section-title">Actions rapides</h2><p class="section-subtitle">Démarrez un traitement, configurez vos flux ou supervisez l'exécution des tâches.</p></div></div><div style="display: flex; gap: 0.75rem; flex-wrap: wrap;"><button type="button" id="quick-goto-files-btn" class="btn btn-primary">Parcourir les fichiers et lancer un traitement</button><button type="button" id="quick-goto-flows-btn" class="btn btn-secondary">Flux de traitement (Flows)</button><button type="button" id="quick-goto-jobs-btn" class="btn btn-secondary">Gestionnaire de tâches</button><button type="button" id="quick-goto-settings-btn" class="btn btn-secondary">Gérer la session / Authentification</button></div></section><section class="section-panel" aria-labelledby="recent-jobs-title"><div class="section-panel-header"><div><h2 id="recent-jobs-title" class="section-title">Dernières tâches traitées</h2><p class="section-subtitle">Aperçu des 3 derniers traitements soumis.</p></div></div><div class="table-wrapper"><table class="data-table" aria-label="Dernières tâches traitées"><thead><tr><th scope="col">ID</th><th scope="col">Source</th><th scope="col">Statut</th><th scope="col">Création</th></tr></thead><tbody id="recent-jobs-table-body"><tr><td colspan="4" class="empty-state-text">Aucune tâche enregistrée pour le moment.</td></tr></tbody></table></div></section><section class="section-panel" aria-labelledby="future-plan-title"><div class="section-panel-header"><div><h2 id="future-plan-title" class="section-title">Fonctionnalités planifiées (hors périmètre actuel)</h2><p class="section-subtitle">Présentation honnête des modules d'extension en cours de conception.</p></div></div><div class="future-grid"><div class="future-card"><span class="future-badge">Planifié</span><h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.35rem;">Éditeur visuel de flux</h3><p style="font-size: 0.8125rem; color: var(--text-dim);">Composition graphique des étapes de traitement sans écriture de script. En attente de spécification de contrat.</p></div><div class="future-card"><span class="future-badge">Planifié</span><h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.35rem;">Connecteurs distants S3 &amp; SMB</h3><p style="font-size: 0.8125rem; color: var(--text-dim);">Acquisition et dépôt direct sur partages réseau distants. Le périmètre actuel opère sur volumes Docker montés.</p></div><div class="future-card"><span class="future-badge">Planifié</span><h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.35rem;">Catalogue d'outils et plugins</h3><p style="font-size: 0.8125rem; color: var(--text-dim);">Dépôt séparé flux-de-fichiers-plugins en cours d'élaboration. Aucun chargeur dynamique n'est encore déployé.</p></div></div></section></div><div id="panel-files" role="tabpanel" aria-labelledby="tab-btn-files" hidden class="tab-panel"><section class="section-panel" aria-labelledby="files-section-title"><div class="section-panel-header"><div><h2 id="files-section-title" class="section-title">Fichiers sources admissibles</h2><p class="section-subtitle">Fichiers MKV détectés dans var/input/ (montage en lecture seule). Les fichiers d'origine ne sont jamais modifiés.</p></div><div id="files-counter-badge" class="status-pill info"><span id="files-counter-text">0 fichier(s)</span></div></div><div class="toolbar-bar"><div class="search-box"><span class="search-icon" aria-hidden="true">🔍</span><input type="search" id="files-search-input" class="search-input" placeholder="Rechercher un fichier source…" aria-label="Filtrer les fichiers sources par nom"></div><div class="form-help">Pour ajouter des vidéos, déposez vos fichiers .mkv dans le dossier var/input/ du serveur.</div></div><div class="table-wrapper"><table class="data-table" aria-label="Liste des fichiers sources disponibles"><thead><tr><th scope="col">Nom du fichier</th><th scope="col">Taille</th><th scope="col" style="text-align: right;">Action</th></tr></thead><tbody id="files-table-body"><tr><td colspan="3" class="empty-state-text">Chargement des fichiers sources…</td></tr></tbody></table></div></section><dialog id="confirm-remux-dialog" class="app-dialog" aria-labelledby="confirm-dialog-title" aria-modal="true"><div class="dialog-header"><h3 id="confirm-dialog-title" class="dialog-title">Confirmer le lancement du traitement</h3><button type="button" id="confirm-dialog-close-x" class="btn btn-secondary btn-sm" aria-label="Fermer la boîte de dialogue">✕</button></div><div class="dialog-body"><p>Vous vous apprêtez à soumettre une tâche de traitement pour le média :</p><div class="code-snippet" id="confirm-dialog-filename">nom-du-fichier.mkv</div><div class="form-group"><label for="confirm-dialog-flow-select" class="form-label">Flux de traitement à exécuter</label><select id="confirm-dialog-flow-select" class="form-select"><option value="flow.default.mkv" selected="selected">Remuxage Matroska propre (défaut)</option><option value="flow.transcode.hevc">Transcodage HEVC / Intel QSV &amp; VA-API</option><option value="flow.remux.mp4">Optimisation Web MP4 (FastStart)</option></select><p class="form-help">Sélectionnez la chaîne de blocs configurée dans l'onglet Flux de traitement.</p></div><div class="form-group"><label for="confirm-dialog-worker-select" class="form-label">Agent ou nœud cible (optionnel)</label><select id="confirm-dialog-worker-select" class="form-select"><option value="">N'importe quel agent disponible (recommandé)</option></select><p class="form-help">Si vous ciblez un agent précis, la tâche lui restera réservée sans bascule automatique.</p></div><div class="status-pill info" style="width: fit-content;">ℹ️ Le fichier d'origine reste intact. Le résultat sera placé dans le volume data.</div></div><div class="dialog-footer"><button type="button" id="confirm-dialog-cancel-btn" class="btn btn-secondary">Annuler</button><button type="button" id="confirm-dialog-submit-btn" class="btn btn-primary">Démarrer le traitement</button></div></dialog></div><div id="panel-flows" role="tabpanel" aria-labelledby="tab-btn-flows" hidden class="tab-panel"><div id="flows-library-view"><section class="section-panel" aria-labelledby="flows-section-title"><div class="section-panel-header"><div><h2 id="flows-section-title" class="section-title">Gestionnaire de flux de traitement (Flows)</h2><p class="section-subtitle">Automatisez vos pipelines multimédias en agençant visuellement les blocs fournis par les outils (MediaInfo, FFmpeg, MKVToolNix, MP4Box).</p></div><button type="button" id="btn-open-flow-wizard" class="btn btn-primary" aria-label="Ouvrir l'assistant de création de flux">+ Nouveau flux (Assistant)</button></div><div class="flows-grid" id="flows-grid-container" aria-label="Liste des flux configurés"><article class="flow-card active-flow" data-flow-id="flow.default.mkv"><div class="flow-card-header"><div><div style="display: flex; align-items: center; gap: 0.5rem;"><h3 class="flow-card-title">Remuxage Matroska propre</h3><span class="status-pill success" title="Flux actif par défaut"><span class="status-dot"></span>Défaut</span></div><p class="flow-card-desc">Inspection préalable des métadonnées, filtrage des langues audio/sous-titres voulues et remuxage sans perte.</p></div></div><div class="flow-pipeline-container" aria-label="Chaîne des blocs du flux"><div class="flow-pipeline"><div class="flow-block-step"><span class="step-badge">1</span><span class="step-name">📄 Fichier source</span><span class="step-type">Détection automatique</span></div><span class="flow-arrow" aria-hidden="true">➔</span><div class="flow-block-step"><span class="step-badge">2</span><span class="step-name">🎬 Remux MKV (MKVToolNix)</span><span class="step-type">Langues: fre, eng • Copie directe</span></div></div></div><div class="flow-card-footer"><span class="flow-pattern-tag">Masque : *.mkv, *.avi, *.mp4</span><div style="display: flex; gap: 0.5rem;"><button type="button" class="btn btn-primary btn-sm open-canvas-btn" data-flow="flow.default.mkv">Ouvrir l'éditeur visuel (Canvas)</button></div></div></article><article class="flow-card" data-flow-id="flow.transcode.hevc"><div class="flow-card-header"><div><div style="display: flex; align-items: center; gap: 0.5rem;"><h3 class="flow-card-title">Transcodage HEVC / Intel QSV &amp; VA-API</h3><span class="status-pill info">Accélération matérielle</span></div><p class="flow-card-desc">Réencodage vidéo haute efficacité HEVC avec paramètres macro-blocs (qualité 6/9, vitesse 3/5) et audio AAC.</p></div></div><div class="flow-pipeline-container" aria-label="Chaîne des blocs du flux"><div class="flow-pipeline"><div class="flow-block-step"><span class="step-badge">1</span><span class="step-name">📄 Fichier source</span><span class="step-type">Détection automatique</span></div><span class="flow-arrow" aria-hidden="true">➔</span><div class="flow-block-step"><span class="step-badge">2</span><span class="step-name">🎞️ Encode Vidéo (FFmpeg)</span><span class="step-type">HEVC • Intel QSV • Q:6 • V:3</span></div><span class="flow-arrow" aria-hidden="true">➔</span><div class="flow-block-step"><span class="step-badge">3</span><span class="step-name">🔊 Encode Audio (FFmpeg)</span><span class="step-type">AAC • 192 kb/s</span></div><span class="flow-arrow" aria-hidden="true">➔</span><div class="flow-block-step"><span class="step-badge">4</span><span class="step-name">🎬 Remux MKV (MKVToolNix)</span><span class="step-type">Assemblage final</span></div></div></div><div class="flow-card-footer"><span class="flow-pattern-tag">Masque : *.mkv, *.mp4, *.ts</span><div style="display: flex; gap: 0.5rem;"><button type="button" class="btn btn-primary btn-sm open-canvas-btn" data-flow="flow.transcode.hevc">Ouvrir l'éditeur visuel (Canvas)</button><button type="button" class="btn btn-secondary btn-sm set-default-flow-btn" data-flow="flow.transcode.hevc">Définir par défaut</button></div></div></article><article class="flow-card" data-flow-id="flow.remux.mp4"><div class="flow-card-header"><div><div style="display: flex; align-items: center; gap: 0.5rem;"><h3 class="flow-card-title">Optimisation Web MP4 (FastStart)</h3><span class="status-pill info">Streaming direct</span></div><p class="flow-card-desc">Convertit le conteneur en MP4 avec optimisation FastStart (moov atom en début de fichier) via MP4Box.</p></div></div><div class="flow-pipeline-container" aria-label="Chaîne des blocs du flux"><div class="flow-pipeline"><div class="flow-block-step"><span class="step-badge">1</span><span class="step-name">📄 Fichier source</span><span class="step-type">Détection automatique</span></div><span class="flow-arrow" aria-hidden="true">➔</span><div class="flow-block-step"><span class="step-badge">2</span><span class="step-name">📦 Remux MP4 (MP4Box)</span><span class="step-type">FastStart: activé • Hint: false</span></div></div></div><div class="flow-card-footer"><span class="flow-pattern-tag">Masque : *.mp4, *.m4v, *.mov</span><div style="display: flex; gap: 0.5rem;"><button type="button" class="btn btn-primary btn-sm open-canvas-btn" data-flow="flow.remux.mp4">Ouvrir l'éditeur visuel (Canvas)</button></div></div></article><article class="flow-card" data-flow-id="flow.smart.adr0008"><div class="flow-card-header"><div><div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;"><h3 class="flow-card-title">Aiguillage conditionnel &amp;amp; In-Place (ADR-0008)</h3><span class="status-pill success">Tri-sorties &amp;amp; Zéro copie</span></div><p class="flow-card-desc">Inspecte automatiquement le média : si déjà HEVC, applique les drapeaux en-têtes directement en place (mkvpropedit) sans copie ; sinon transcode par GPU avec repli CPU garanti.</p></div></div><div class="flow-pipeline-container" aria-label="Chaîne des blocs du flux ADR-0008"><div class="flow-pipeline"><div class="flow-block-step"><span class="step-badge">1</span><span class="step-name">📄 Détection source</span><span class="step-type">MediaInfo implicite</span></div><span class="flow-arrow" aria-hidden="true">➔</span><div class="flow-block-step condition-step"><span class="step-badge" style="background: var(--warning-border);">2</span><span class="step-name">🔀 Si Codec == HEVC ?</span><span class="step-type">Aiguillage 3 sorties</span></div><span class="flow-arrow" aria-hidden="true">➔</span><div class="flow-block-step in-place-step"><span class="step-badge" style="background: #10b981;">✓</span><span class="step-name">⚡ In-Place (mkvpropedit)</span><span class="step-type">En-têtes directes sans /work</span></div><span class="flow-arrow" aria-hidden="true">ou</span><div class="flow-block-step"><span class="step-badge" style="background: #f59e0b;">✗</span><span class="step-name">🎞️ Transcodage GPU</span><span class="step-type">HEVC QSV (Repli: CPU)</span></div></div></div><div class="flow-card-footer"><span class="flow-pattern-tag">Masque : *.mkv, *.mp4, *.m2ts, *.ts</span><div style="display: flex; gap: 0.5rem;"><button type="button" class="btn btn-primary btn-sm open-canvas-btn" data-flow="flow.smart.adr0008">Ouvrir l'éditeur visuel (Canvas)</button></div></div></article></div></section></div><div id="flows-canvas-view" style="display: none;"><div class="canvas-header-bar"><div style="display: flex; align-items: center; gap: 0.75rem;"><button type="button" id="btn-back-to-library" class="btn btn-secondary btn-sm" aria-label="Retourner à la liste des flux">← Retour aux flux</button><h2 id="canvas-flow-title" class="section-title" style="margin: 0; font-size: 1.25rem;">Éditeur visuel : Transcodage HEVC</h2><span class="status-pill success">Mode Édition</span></div><div class="canvas-simulation-bar" role="toolbar" aria-label="Banc de test de simulation conditionnelle"><span class="sim-label">Simuler le routage :</span><button type="button" class="btn btn-secondary btn-sm sim-btn" data-sim="true" title="Condition vérifiée (ex: HEVC) : routage direct In-Place sans copie">✓ Vrai (In-Place)</button><button type="button" class="btn btn-secondary btn-sm sim-btn" data-sim="false" title="Condition non vérifiée : transcodage GPU">✗ Faux (Transcodage)</button><button type="button" class="btn btn-secondary btn-sm sim-btn" data-sim="fallback" title="Échec transcodeur matériel : bascule automatique sur encodeur logiciel">⚡ Repli (CPU)</button><button type="button" class="btn btn-secondary btn-sm sim-btn" data-sim="reset">Réinitialiser</button></div><div style="display: flex; gap: 0.5rem;"><button type="button" id="btn-canvas-save-flow" class="btn btn-primary btn-sm">💾 Enregistrer les modifications</button></div></div><div class="canvas-workspace-layout"><aside class="canvas-blocks-sidebar" aria-label="Bibliothèque de blocs disponibles"><div class="sidebar-block-group"><span class="sidebar-group-title">📁 Entrées &amp; Sorties</span><div class="draggable-block-item" data-block-type="file-input" data-tool="system"><span class="block-drag-icon">📄</span><div class="block-drag-info"><strong>Fichier entrant</strong><span>Surveillance / Déclencheur</span></div></div><div class="draggable-block-item addable" data-block-type="file-output" data-tool="system"><span class="block-drag-icon">💾</span><div class="block-drag-info"><strong>Destination finale</strong><span>Remplacement / Déplacement</span></div><span class="block-add-plus">+</span></div></div><div class="sidebar-block-group"><span class="sidebar-group-title">🔀 Logique &amp; Conditions</span><div class="draggable-block-item addable" data-block-type="condition" data-tool="logic"><span class="block-drag-icon">🔀</span><div class="block-drag-info"><strong>Aiguillage conditionnel</strong><span>Vrai / Faux / Repli matériel</span></div><span class="block-add-plus">+</span></div></div><div class="sidebar-block-group"><span class="sidebar-group-title">🎞️ Traitement Vidéo</span><div class="draggable-block-item addable" data-block-type="video-encode" data-tool="ffmpeg"><span class="block-drag-icon">🎞️</span><div class="block-drag-info"><strong>Réencoder Vidéo</strong><span>FFmpeg (HEVC/QSV/NVENC)</span></div><span class="block-add-plus">+</span></div><div class="draggable-block-item addable" data-block-type="remux-mkv" data-tool="mkvtoolnix"><span class="block-drag-icon">🎬</span><div class="block-drag-info"><strong>Remuxer MKV</strong><span>MKVToolNix (mkvmerge)</span></div><span class="block-add-plus">+</span></div><div class="draggable-block-item addable" data-block-type="mkvpropedit" data-tool="mkvtoolnix"><span class="block-drag-icon">⚡</span><div class="block-drag-info"><strong>Édition En-têtes (In-Place)</strong><span>mkvpropedit (Sans copie disque)</span></div><span class="block-add-plus">+</span></div><div class="draggable-block-item addable" data-block-type="remux-mp4" data-tool="mp4box"><span class="block-drag-icon">📦</span><div class="block-drag-info"><strong>Remuxer MP4</strong><span>MP4Box GPAC (FastStart)</span></div><span class="block-add-plus">+</span></div></div><div class="sidebar-block-group"><span class="sidebar-group-title">🔊 Traitement Audio</span><div class="draggable-block-item addable" data-block-type="audio-encode" data-tool="ffmpeg"><span class="block-drag-icon">🔊</span><div class="block-drag-info"><strong>Réencoder Audio</strong><span>FFmpeg (AAC/Opus/AC3)</span></div><span class="block-add-plus">+</span></div></div><div class="sidebar-block-group"><span class="sidebar-group-title">🔗 Intégrations (*arr)</span><div class="draggable-block-item addable" data-block-type="sonarr" data-tool="sonarr"><span class="block-drag-icon">📡</span><div class="block-drag-info"><strong>Sonarr : Mettre à jour</strong><span>Rescan &amp; Renommage</span></div><span class="block-add-plus">+</span></div><div class="draggable-block-item addable" data-block-type="radarr" data-tool="radarr"><span class="block-drag-icon">🎬</span><div class="block-drag-info"><strong>Radarr : Mettre à jour</strong><span>Rescan &amp; Renommage</span></div><span class="block-add-plus">+</span></div></div><div class="sidebar-help-tip">💡 Cliquez sur un bloc avec « + » pour l'ajouter à la suite de votre chaîne.</div></aside><div class="canvas-board-wrapper" id="canvas-board-area" tabindex="0" role="region" aria-label="Plan de travail graphique du flux"><svg class="canvas-connections-svg" id="canvas-svg-lines" aria-hidden="true"></svg><div class="canvas-nodes-container" id="canvas-nodes-container"><div class="canvas-node selected" id="node-1" data-node-id="node-1" data-block-type="file-input"><div class="node-connector connector-out"></div><div class="node-header"><span class="node-icon">📄</span><div class="node-title-box"><span class="node-kind">Déclencheur entrant</span><h4 class="node-name">Fichier source</h4></div><span class="status-pill success node-pill">Entrée</span></div><div class="node-summary">Détection du média • Métadonnées inspectées automatiquement en sous-main.</div></div><div class="canvas-node" id="node-2" data-node-id="node-2" data-block-type="video-encode"><div class="node-connector connector-in"></div><div class="node-connector connector-out"></div><div class="node-header"><span class="node-icon">🎞️</span><div class="node-title-box"><span class="node-kind">FFmpeg Builder</span><h4 class="node-name">Réencodage Vidéo</h4></div><button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button></div><div class="node-summary" id="node-2-summary">Codec : HEVC • Encodeur : Intel QSV • Qualité : 6 • Vitesse : 3</div></div><div class="canvas-node" id="node-3" data-node-id="node-3" data-block-type="audio-encode"><div class="node-connector connector-in"></div><div class="node-connector connector-out"></div><div class="node-header"><span class="node-icon">🔊</span><div class="node-title-box"><span class="node-kind">FFmpeg Builder</span><h4 class="node-name">Réencodage Audio</h4></div><button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button></div><div class="node-summary" id="node-3-summary">Codec : AAC • Débit : 192 kbps • Canaux : Stéréo</div></div><div class="canvas-node" id="node-4" data-node-id="node-4" data-block-type="remux-mkv"><div class="node-connector connector-in"></div><div class="node-header"><span class="node-icon">🎬</span><div class="node-title-box"><span class="node-kind">MKVToolNix</span><h4 class="node-name">Remuxage Matroska</h4></div><button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button></div><div class="node-summary" id="node-4-summary">Assemblage final MKV • Langues conservées : fre, eng</div></div></div></div><aside class="canvas-inspector-sidebar" id="canvas-inspector" aria-label="Paramètres du bloc sélectionné"><div class="inspector-header"><h3 id="inspector-block-title" class="inspector-title">Paramètres du bloc</h3><span id="inspector-block-tool" class="status-pill info">FFmpeg</span></div><div id="inspector-form-container"><div class="form-group"><label for="node-cfg-codec" class="form-label">Codec vidéo</label><select id="node-cfg-codec" class="form-select"><option value="hevc" selected="selected">HEVC / H.265 (Recommandé)</option><option value="h264">H.264 / AVC</option><option value="av1">AV1</option><option value="copy">Copie directe</option></select></div><div class="form-group"><label for="node-cfg-encoder" class="form-label">Encodeur matériel</label><select id="node-cfg-encoder" class="form-select"><option value="auto" selected="selected">Intel QSV (Automatique)</option><option value="nvenc">Nvidia NVENC</option><option value="vaapi">VA-API (Linux)</option><option value="cpu">Processeur CPU (libx265)</option></select></div><div class="form-group"><label for="node-cfg-quality" class="form-label">Qualité (1-9) : <span id="node-quality-val" style="font-weight: 700; color: var(--primary);">6</span></label><input type="range" id="node-cfg-quality" min="1" max="9" value="6" style="width: 100%; accent-color: var(--primary);"></div><div class="form-group"><label for="node-cfg-speed" class="form-label">Vitesse (1-5) : <span id="node-speed-val" style="font-weight: 700; color: var(--primary);">3</span></label><input type="range" id="node-cfg-speed" min="1" max="5" value="3" style="width: 100%; accent-color: var(--primary);"></div><div class="form-group"><label for="node-cfg-custom" class="form-label">Paramètres personnalisés libres</label><input type="text" id="node-cfg-custom" class="form-input" placeholder="ex: -pix_fmt yuv420p10le"></div></div></aside></div></div><dialog id="flow-wizard-dialog" class="app-dialog" aria-labelledby="flow-wizard-title" aria-modal="true" style="max-width: 820px;"><div class="dialog-header"><h3 id="flow-wizard-title" class="dialog-title">Assistant de configuration : Nouveau flux</h3><button type="button" id="flow-wizard-close-x" class="btn btn-secondary btn-sm" aria-label="Fermer l'assistant">✕</button></div><div class="dialog-body"><p class="section-subtitle" style="margin-top: 0;">Choisissez un modèle prêt à l'emploi. L'assistant pré-configurera et reliera les blocs sur votre plan de travail.</p><div class="wizard-templates-grid"><div class="wizard-template-card active" data-template="smart-hevc"><span class="template-icon">🔀</span><div><h4 class="template-title">Flux Intelligent : Aiguillage HEVC &amp; Repli</h4><p class="template-desc">Saut direct sans réencodage si déjà en HEVC, encodage GPU Intel QSV sinon, avec repli CPU automatique.</p></div></div><div class="wizard-template-card" data-template="hevc"><span class="template-icon">🎬</span><div><h4 class="template-title">Transcodage HEVC Haute Efficacité</h4><p class="template-desc">Réencode en HEVC avec accélération GPU (Intel QSV / VA-API), audio AAC stéréo et remuxage MKV.</p></div></div><div class="wizard-template-card" data-template="mkv-remux"><span class="template-icon">📦</span><div><h4 class="template-title">Remuxage sans perte Matroska</h4><p class="template-desc">Aucun réencodage. Conserve les langues sélectionnées (fre, eng) et nettoie les pistes superflues.</p></div></div><div class="wizard-template-card" data-template="mp4-web"><span class="template-icon">🌐</span><div><h4 class="template-title">Optimisation Streaming Web (MP4 FastStart)</h4><p class="template-desc">Remuxe vers conteneur MP4 avec atome moov en tête de fichier pour streaming immédiat.</p></div></div><div class="wizard-template-card" data-template="blank"><span class="template-icon">⬜</span><div><h4 class="template-title">Flux vierge personnalisé</h4><p class="template-desc">Démarre avec le fichier source pour composer librement vos blocs sur le canvas.</p></div></div></div><div class="wizard-quick-settings" style="margin-top: 1.5rem; padding: 1rem; background: var(--bg-subtle); border-radius: var(--radius-sm); border: 1px solid var(--border-color);"><h4 style="margin: 0 0 0.75rem 0; font-size: 0.9375rem; color: var(--text-main);">Paramètres initiaux du modèle sélectionné</h4><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;"><div class="form-group"><label for="wizard-flow-name" class="form-label">Nom du flux</label><input type="text" id="wizard-flow-name" class="form-input" value="Transcodage HEVC Intel QSV"></div><div class="form-group"><label for="wizard-flow-mask" class="form-label">Masque de fichiers entrants</label><input type="text" id="wizard-flow-mask" class="form-input" value="*.mkv, *.mp4, *.avi"></div></div><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.5rem;"><div class="form-group"><label for="wizard-flow-langs" class="form-label">Langues conservées (audio &amp; sous-titres)</label><input type="text" id="wizard-flow-langs" class="form-input" value="fre, eng"></div><div class="form-group"><label for="wizard-flow-encoder" class="form-label">Encodeur matériel préféré</label><select id="wizard-flow-encoder" class="form-select"><option value="qsv" selected="selected">Intel QSV (Recommandé sur TrueNAS)</option><option value="vaapi">VA-API Linux générique</option><option value="nvenc">Nvidia NVENC</option><option value="cpu">CPU uniquement</option></select></div></div></div></div><div class="dialog-footer" style="display: flex; justify-content: flex-end; gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--border-color); margin-top: 1rem;"><button type="button" id="flow-wizard-cancel-btn" class="btn btn-secondary">Annuler</button><button type="button" id="flow-wizard-generate-btn" class="btn btn-primary">🚀 Générer et ouvrir dans le Canvas</button></div></dialog></div><div id="panel-jobs" role="tabpanel" aria-labelledby="tab-btn-jobs" hidden class="tab-panel"><section class="section-panel" aria-labelledby="jobs-section-title"><div class="section-panel-header"><div><h2 id="jobs-section-title" class="section-title">Gestionnaire de tâches d'exécution</h2><p class="section-subtitle">Supervision temps réel des tâches de traitement et d'exécution des flux (en attente, en cours, succès, échecs) sur l'ensemble des nœuds.</p></div><div id="sse-status-badge" class="status-pill info" title="Mode de rafraîchissement des tâches" aria-live="polite"><span class="status-dot"></span><span id="sse-status-text">Sondage périodique</span></div></div><div class="toolbar-bar"><div class="search-box"><span class="search-icon" aria-hidden="true">🔍</span><input type="search" id="jobs-search-input" class="search-input" placeholder="Rechercher par ID ou nom de fichier…" aria-label="Filtrer les tâches par ID ou nom de fichier"></div><div class="filter-group" role="group" aria-label="Filtrer les tâches par statut"><button type="button" class="filter-chip" data-filter="all" aria-pressed="true">Tous<span id="count-filter-all" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="queued" aria-pressed="false">En attente<span id="count-filter-queued" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="running" aria-pressed="false">En cours<span id="count-filter-running" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="succeeded" aria-pressed="false">Succès<span id="count-filter-succeeded" style="opacity: 0.8;">(0)</span></button><button type="button" class="filter-chip" data-filter="failed" aria-pressed="false">Échecs<span id="count-filter-failed" style="opacity: 0.8;">(0)</span></button></div></div><div class="table-wrapper"><table class="data-table" aria-label="Liste filtrée des tâches d'exécution"><thead><tr><th scope="col">Identifiant</th><th scope="col">Source</th><th scope="col">Statut</th><th scope="col">Création</th><th scope="col" style="text-align: right;">Actions</th></tr></thead><tbody id="jobs-table-body"><tr><td colspan="5" class="empty-state-text">Chargement des tâches…</td></tr></tbody></table></div><div style="margin-top: 1rem; padding: 0.75rem 1rem; background: var(--bg-subtle); border-radius: var(--radius-sm); border-left: 4px solid var(--primary); font-size: 0.8125rem; color: var(--text-dim);"><strong>Téléchargement en flux direct :</strong> Lorsqu'une session web est active, le téléchargement s'effectue en flux continu directement sur disque sans bufferisation mémoire. Pour les médias de plusieurs gigaoctets via jeton Bearer, la commande curl prête à l'emploi est disponible dans le volet Détails.</div></section><dialog id="job-detail-dialog" class="app-dialog" aria-labelledby="job-dialog-title" aria-modal="true"><div class="dialog-header"><h3 id="job-dialog-title" class="dialog-title">Détails de la tâche</h3><button type="button" id="job-dialog-close-x" class="btn btn-secondary btn-sm" aria-label="Fermer la boîte de dialogue">✕</button></div><div class="dialog-body"><div class="detail-grid"><div class="detail-term">ID de la tâche</div><div id="detail-job-id" class="detail-val">—</div><div class="detail-term">Fichier source</div><div id="detail-job-source" class="detail-val">—</div><div class="detail-term">Statut</div><div id="detail-job-status" class="detail-val">—</div><div class="detail-term">Agent assigné</div><div id="detail-job-worker" class="detail-val">—</div><div class="detail-term">Tentatives</div><div id="detail-job-attempts" class="detail-val">—</div><div class="detail-term">Création</div><div id="detail-job-created" class="detail-val">—</div><div class="detail-term">Fichier résultat</div><div id="detail-job-output" class="detail-val">—</div></div><div id="detail-error-box" class="toast-notice error" style="display: none;"><div style="font-weight: 700; margin-bottom: 0.25rem;">Erreur signalée :</div><div id="detail-error-content" class="code-snippet">—</div></div><div id="detail-curl-section" style="margin-top: 0.5rem; display: none;"><label class="form-label">Commande de téléchargement directe (curl) :</label><div id="detail-curl-command" class="code-snippet">curl -H 'Authorization: Bearer &lt;ADMIN_KEY&gt;' http://localhost:3000/api/v1/jobs/.../output -o resultat.mkv</div></div></div><div class="dialog-footer"><button type="button" id="job-dialog-close-btn" class="btn btn-secondary">Fermer</button><button type="button" id="job-dialog-download-btn" class="btn btn-primary" style="display: none;">Télécharger le résultat</button></div></dialog></div><div id="panel-workers" role="tabpanel" aria-labelledby="tab-btn-workers" hidden class="tab-panel"><section class="section-panel" aria-labelledby="workers-section-title"><div class="section-panel-header"><div><h2 id="workers-section-title" class="section-title">Serveurs et agents de traitement</h2><p class="section-subtitle">Agents de calcul enregistrés via l'API. Chaque agent traite les baux sur MKVToolNix sans connexion directe à la base de données.</p></div></div><div class="table-wrapper"><table class="data-table" aria-label="Liste des agents et serveurs de traitement"><thead><tr><th scope="col">Identifiant de l'agent</th><th scope="col">Nom d'hôte / Rôle</th><th scope="col">Dernière activité</th><th scope="col">Statut</th></tr></thead><tbody id="workers-table-body"><tr><td colspan="4" class="empty-state-text">Chargement des serveurs et agents…</td></tr></tbody></table></div><div class="workers-info-grid"><div class="metric-card"><div class="metric-label">Architecture distribuée</div><p class="card-caption">Mode centralisé de 1 à N serveurs. Le coordinateur central gère les métadonnées et distribue les tâches avec des baux de 120 s renouvelés toutes les 20 s.</p></div><div class="metric-card"><div class="metric-label">Haute disponibilité</div><p class="card-caption">La haute disponibilité reste optionnelle et nécessite un cadrage distinct ; aucun seuil de nœuds ne l'active automatiquement.</p></div></div></section><section class="section-panel" aria-labelledby="worker-connect-title" style="margin-top: 1.5rem;"><div class="section-panel-header"><div><h2 id="worker-connect-title" class="section-title">Raccordement d'un agent distant (*arr)</h2><p class="section-subtitle">Configuration auto-amorcée du coordinateur (/config) et commande Docker pour adjoindre un worker distant en HTTP.</p></div></div><div class="detail-grid" style="margin-bottom: 1.5rem;"><div class="detail-term">Répertoire de configuration</div><div class="detail-val"><code>/config</code> (SQLite flux.db, clés 256 bits auto-amorcées)</div><div class="detail-term">Worker local intégré</div><div class="detail-val" id="config-local-worker">Vérification…</div><div class="detail-term">Version du coordinateur</div><div class="detail-val" id="config-version">Vérification…</div><div class="detail-term">Taille max par fichier</div><div class="detail-val" id="config-max-file-bytes">Vérification…</div></div><div class="form-group" style="margin-bottom: 1.5rem;"><label for="worker-key-display" class="form-label">Clé d'authentification worker (WORKER_KEY)</label><div class="copy-input-row"><input type="password" id="worker-key-display" class="form-input" readonly aria-label="Clé secrète d'agent worker" value="" placeholder="Ouvrez une session admin pour révéler la clé" style="flex: 1; font-family: var(--font-mono); font-size: 0.875rem;"><button type="button" id="btn-toggle-worker-key" class="btn btn-secondary" aria-label="Afficher ou masquer la clé worker" disabled>Afficher</button><button type="button" id="btn-copy-worker-key" class="btn btn-primary" aria-label="Copier la clé worker dans le presse-papier" disabled>Copier la clé</button></div><p id="worker-key-hint" class="form-help">🔒 Clé secrète requise par les conteneurs worker pour s'enregistrer et réclamer des baux de remuxage.</p></div><div class="form-group"><label for="docker-worker-cmd" class="form-label">Commande Docker de raccordement immédiat (HTTP)</label><pre class="code-block-wrapper"><code id="docker-worker-cmd">docker run -d --name flux-worker -e COORDINATOR_URL=http://localhost:3000 -e WORKER_KEY=&lt;WORKER_KEY&gt; -v /chemin/data:/data flux-de-fichiers worker</code></pre><div style="margin-top: 0.75rem;"><button type="button" id="btn-copy-worker-cmd" class="btn btn-secondary" aria-label="Copier la commande Docker pour worker dans le presse-papier">Copier la commande</button></div></div></section></div><div id="panel-plugins" role="tabpanel" aria-labelledby="tab-btn-plugins" hidden class="tab-panel"><section class="section-panel" aria-labelledby="tools-catalogue-title"><div class="section-panel-header"><div><h2 id="tools-catalogue-title" class="section-title">Catalogue des outils distribués</h2><p class="section-subtitle">Binaires d'exécution autonomes vérifiés par empreinte SHA-256 stricte et isolés du socle conteneur.</p></div><div class="tools-filter-bar" role="toolbar" aria-label="Filtres du catalogue d'outils"><button type="button" class="filter-chip active" data-tool-filter="all" aria-pressed="true">Tous les outils</button><button type="button" class="filter-chip" data-tool-filter="ready" aria-pressed="false">Prêts (.ready)</button><button type="button" class="filter-chip" data-tool-filter="not_installed" aria-pressed="false">Non installés</button></div></div><div class="tools-grid" id="tools-cards-container" aria-label="Cartes des outils déclarés"><article class="tool-card" data-tool-id="tool.mkvtoolnix" data-cache-status="ready"><div class="tool-card-header"><div class="tool-identity"><span class="tool-badge-icon" aria-hidden="true">🎬</span><div><h3 class="tool-card-title">MKVToolNix (mkvmerge)</h3><span class="tool-card-id">tool.mkvtoolnix • v1.0.0</span></div></div><span class="status-pill success" title="Binaire intègre et prêt"><span class="status-dot"></span>.ready (Prêt)</span></div><p class="tool-card-desc">Outil de remuxage sans réencodage validé. Distribution autonome hors conteneur applicatif. Matroska uniquement.</p><div class="tool-meta-tags"><span class="meta-tag">Capacité : remux</span><span class="meta-tag active-choice">Choix actif : Oui</span><span class="meta-tag">Arch : x86_64, aarch64</span><span class="meta-tag">Mode : 0755</span></div></article><article class="tool-card" data-tool-id="tool.ffmpeg" data-cache-status="not_installed"><div class="tool-card-header"><div class="tool-identity"><span class="tool-badge-icon" aria-hidden="true">🎞️</span><div><h3 class="tool-card-title">FFmpeg (distribué)</h3><span class="tool-card-id">tool.ffmpeg • v7.1.0</span></div></div><span class="status-pill" title="Outil disponible au téléchargement mais non extrait"><span class="status-dot"></span>Non installé</span></div><p class="tool-card-desc">Outil d'analyse multimédia, transcodage et génération de médias synthétiques de tests.</p><div class="tool-meta-tags"><span class="meta-tag">Capacité : analyze / encode</span><span class="meta-tag">Choix actif : Non</span><span class="meta-tag">Arch : x86_64, aarch64</span><span class="meta-tag">Distribution : binaire autonome</span></div></article><article class="tool-card" data-tool-id="tool.mp4box" data-cache-status="not_installed"><div class="tool-card-header"><div class="tool-identity"><span class="tool-badge-icon" aria-hidden="true">📦</span><div><h3 class="tool-card-title">MP4Box (GPAC)</h3><span class="tool-card-id">tool.mp4box • v2.4.0</span></div></div><span class="status-pill" title="Outil disponible au téléchargement mais non extrait"><span class="status-dot"></span>Non installé</span></div><p class="tool-card-desc">Outil de multiplexage et optimisation MP4 (faststart / hint tracks).</p><div class="tool-meta-tags"><span class="meta-tag">Capacité : remux / mp4</span><span class="meta-tag">Choix actif : Non</span><span class="meta-tag">Arch : x86_64, aarch64</span></div></article><article class="tool-card" data-tool-id="tool.mediainfo" data-cache-status="ready"><div class="tool-card-header"><div class="tool-identity"><span class="tool-badge-icon" aria-hidden="true">🔍</span><div><h3 class="tool-card-title">MediaInfo CLI</h3><span class="tool-card-id">tool.mediainfo • v24.06</span></div></div><span class="status-pill success" title="Outil d'inspection intégré nativement dans l'environnement"><span class="status-dot"></span>.ready (Intégrée)</span></div><p class="tool-card-desc">Analyse technique exhaustive et extraction des métadonnées vidéo/audio/sous-titres en tâche de fond.</p><div class="tool-meta-tags"><span class="meta-tag">Capacité : probe</span><span class="meta-tag active-choice">Choix actif : Oui</span><span class="meta-tag">Arch : x86_64, aarch64</span></div></article><article class="tool-card" data-tool-id="tool.internal.telemetry" data-cache-status="ready"><div class="tool-card-header"><div class="tool-identity"><span class="tool-badge-icon" aria-hidden="true">📊</span><div><h3 class="tool-card-title">Sonde de télémétrie système</h3><span class="tool-card-id">tool.internal.telemetry • v0.1.0</span></div></div><span class="status-pill success" title="Sonde intégrée nativement dans le binaire applicatif"><span class="status-dot"></span>.ready (Intégrée)</span></div><p class="tool-card-desc">Mesure périodique CPU, RAM, GPU (/dev/dri) et stockage local. Confinement strict sous UID 10001 (app) sans socket Docker.</p><div class="tool-meta-tags"><span class="meta-tag">Capacité : sonde système</span><span class="meta-tag active-choice">Intégrée : Oui</span><span class="meta-tag">Mode : offline-preseeded</span><span class="meta-tag">Accès : non-root</span></div></article></div></section><section class="section-panel" aria-labelledby="integrations-title"><div class="section-panel-header"><div><h2 id="integrations-title" class="section-title">Intégrations &amp; Automatisation (*arr)</h2><p class="section-subtitle">Connecteurs vers vos gestionnaires multimédias. Les valeurs par défaut configurées ici sont automatiquement héritées par les blocs de vos flux de traitement.</p></div></div><div class="tools-grid"><article class="tool-card" data-plugin-id="plugin.sonarr"><div class="tool-card-header"><div class="tool-identity"><span class="tool-badge-icon" aria-hidden="true">📡</span><div><h3 class="tool-card-title">Sonarr (Séries TV)</h3><span class="tool-card-id">plugin.sonarr • v1.0.0</span></div></div><span class="status-pill info"><span class="status-dot"></span>Actif</span></div><p class="tool-card-desc">Notification post-traitement, actualisation de série (rescan) et déclenchement du renommage automatique de fichiers.</p><div class="tool-meta-tags"><span class="meta-tag">Type : plugin</span><span class="meta-tag">API : v3 REST</span></div><div style="margin-top: 1rem; display: flex; justify-content: flex-end;"><button type="button" class="btn btn-secondary btn-sm open-plugin-config-btn" data-plugin="plugin.sonarr" data-plugin-name="Sonarr">⚙️ Paramètres par défaut</button></div></article><article class="tool-card" data-plugin-id="plugin.radarr"><div class="tool-card-header"><div class="tool-identity"><span class="tool-badge-icon" aria-hidden="true">🎬</span><div><h3 class="tool-card-title">Radarr (Films)</h3><span class="tool-card-id">plugin.radarr • v1.0.0</span></div></div><span class="status-pill info"><span class="status-dot"></span>Actif</span></div><p class="tool-card-desc">Notification post-traitement, mise à jour des caractéristiques techniques de film et renommage automatique de collection.</p><div class="tool-meta-tags"><span class="meta-tag">Type : plugin</span><span class="meta-tag">API : v3 REST</span></div><div style="margin-top: 1rem; display: flex; justify-content: flex-end;"><button type="button" class="btn btn-secondary btn-sm open-plugin-config-btn" data-plugin="plugin.radarr" data-plugin-name="Radarr">⚙️ Paramètres par défaut</button></div></article></div></section><dialog id="plugin-config-dialog" class="app-dialog" aria-labelledby="plugin-config-title" aria-modal="true" style="max-width: 600px;"><div class="dialog-header"><h3 id="plugin-config-title" class="dialog-title">Configuration du plugin</h3><button type="button" id="plugin-config-close-x" class="btn btn-secondary btn-sm" aria-label="Fermer">✕</button></div><div class="dialog-body"><p class="section-subtitle" style="margin-top: 0;">Ces paramètres sont sauvegardés dans votre base centrale SQLite (/config) et sont automatiquement transmis aux blocs correspondants dans les flux.</p><input type="hidden" id="plugin-config-current-id" value=""><div id="plugin-config-fields-container"><div class="form-group"><label for="plugin-cfg-url" class="form-label">URL du serveur</label><input type="url" id="plugin-cfg-url" class="form-input" placeholder="http://192.168.1.50:8989"></div><div class="form-group"><label for="plugin-cfg-apikey" class="form-label">Clé d'API</label><input type="password" id="plugin-cfg-apikey" class="form-input" placeholder="Clé secrète issue de l'application"></div><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;"><div class="form-group"><label for="plugin-cfg-local-path" class="form-label">Chemin local</label><input type="text" id="plugin-cfg-local-path" class="form-input" value="/data"></div><div class="form-group"><label for="plugin-cfg-remote-path" class="form-label">Chemin distant (*arr)</label><input type="text" id="plugin-cfg-remote-path" class="form-input" value="/media"></div></div></div></div><div class="dialog-footer" style="display: flex; justify-content: flex-end; gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--border-color); margin-top: 1rem;"><button type="button" id="plugin-config-cancel-btn" class="btn btn-secondary">Annuler</button><button type="button" id="plugin-config-save-btn" class="btn btn-primary">💾 Enregistrer les valeurs par défaut</button></div></dialog></div><div id="panel-settings" role="tabpanel" aria-labelledby="tab-btn-settings" hidden class="tab-panel"><section class="section-panel" aria-labelledby="session-settings-title"><div class="section-panel-header"><div><h2 id="session-settings-title" class="section-title">Session &amp; Authentification</h2><p class="section-subtitle">Gestion sécurisée de l'accès administrateur. Aucune clé secrète n'est conservée en clair dans sessionStorage ou localStorage.</p></div></div><div class="form-group"><label for="admin-key-input" class="form-label">Clé d'administration (ADMIN_KEY) ou jeton de session</label><div style="display: flex; gap: 0.75rem; flex-wrap: wrap;"><input type="password" id="admin-key-input" class="form-input" placeholder="Clé secrète (ex: issue de var/secrets/admin_key)" autocomplete="off" spellcheck="false" style="flex: 1; min-width: 260px;"><button type="button" id="admin-key-save-btn" class="btn btn-primary">Ouvrir la session</button><button type="button" id="admin-key-logout-btn" class="btn btn-secondary" style="display: none;">Fermer la session</button></div><div id="auth-status-box" style="margin-top: 0.5rem;"><p id="auth-status-text" class="form-help">🔒 Mode mémoire volatile actif : la clé réside uniquement dans la mémoire JavaScript de l'onglet actif. Recharger ou fermer l'onglet efface instantanément la clé.</p></div></div></section><section class="section-panel" aria-labelledby="theme-settings-title"><div class="section-panel-header"><div><h2 id="theme-settings-title" class="section-title">Préférences d'affichage</h2><p class="section-subtitle">Personnalisez l'apparence selon vos conditions de visionnage.</p></div></div><div class="form-group" style="max-width: 320px;"><label for="theme-select" class="form-label">Thème de couleur</label><select id="theme-select" class="form-select"><option value="system">Système (automatique)</option><option value="light">Clair (contrastes renforcés)</option><option value="dark">Sombre (haute lisibilité)</option></select><p class="form-help">Respecte automatiquement le paramètre prefers-color-scheme de votre système d'exploitation.</p></div></section><section class="section-panel" aria-labelledby="diagnostic-settings-title"><div class="section-panel-header"><div><h2 id="diagnostic-settings-title" class="section-title">Diagnostics et points d'accès</h2><p class="section-subtitle">Informations de raccordement réseau et état du coordinateur.</p></div></div><div class="detail-grid"><div class="detail-term">URL de l'interface</div><div class="detail-val">http://localhost:3000</div><div class="detail-term">API REST unifiée</div><div class="detail-val">/api/v1/ (same-origin, port unique HTTP 3000)</div><div class="detail-term">Architecture &amp; Stockage</div><div class="detail-val">Modèle *arr conteneur unique • SQLite /config/flux.db (WAL)</div><div class="detail-term">Worker local intégré</div><div class="detail-val" id="settings-local-worker">—</div><div class="detail-term">Version</div><div class="detail-val" id="settings-version">—</div><div class="detail-term">Contrat d'API</div><div class="detail-val">OpenAPI 3.1 • docs/openapi.yaml</div><div class="detail-term">Moteur de remux</div><div class="detail-val">MKVToolNix (mkvmerge) natif</div></div></section></div></main><footer style="margin-top: 3rem; text-align: center; font-size: 0.8125rem; color: var(--text-dim); border-top: 1px solid var(--border-color); padding-top: 1.5rem;"><p>Flux de Fichiers v0.3 — Poste de pilotage Leptos moderne et responsive.</p><p style="margin-top: 0.25rem;">Recommandations d'accessibilité W3C suivies • Contrastes renforcés (&gt;= 5.9:1) • Navigation clavier complète • Thèmes clair/sombre</p><p style="margin-top: 0.25rem;">Remuxage MKVToolNix • Mode centralisé autonome ou workers distants • SQLite /config</p></footer></div>
+  <script>
+(function() {
+  'use strict';
+
+// Sécurité : la clé d'administration réside UNIQUEMENT en mémoire volatile JavaScript de l'onglet actif.
+  // Aucun stockage en clair dans sessionStorage ni localStorage.
+  let volatileAdminKey = '';
+  let csrfToken = '';
+  let activeTab = 'dashboard';
+  let cachedFiles = [];
+  let cachedJobs = [];
+  let cachedWorkers = [];
+  let activeJobFilter = 'all';
+  let selectedFileForRemux = null;
+  let sessionMode = 'none'; // 'none' | 'memory_key' | 'cookie_session'
+  let manualLogout = false;
+
+  const el = (id) => document.getElementById(id);
+
+  function showNotice(text, type = 'info') {
+    const notice = el('live-notice');
+    if (!notice) return;
+    notice.textContent = text;
+    notice.className = 'toast-notice visible ' + type;
+    setTimeout(() => {
+      if (notice.textContent === text) {
+        notice.className = 'toast-notice';
+      }
+    }, 6000);
+  }
+
+  function formatBytes(bytes) {
+    if (bytes === 0 || !bytes) return '0 o';
+    const k = 1024;
+    const sizes = ['o', 'Kio', 'Mio', 'Gio', 'Tio'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+
+  function formatDate(isoStr) {
+    if (!isoStr) return '—';
+    try {
+      const d = new Date(isoStr);
+      return d.toLocaleString('fr-FR', {
+        dateStyle: 'short',
+        timeStyle: 'medium'
+      });
+    } catch {
+      return isoStr;
+    }
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+
+  // --- Requêtes API authentifiées ---
+  async function apiFetch(endpoint, options = {}) {
+    const method = (options.method || 'GET').toUpperCase();
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    };
+
+    // Protection CSRF pour les méthodes non sûres (contrat #29)
+    if (csrfToken && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      headers['x-csrf-token'] = csrfToken;
+    }
+
+    // Authentification Bearer si clé volatile présente
+    if (volatileAdminKey) {
+      headers['Authorization'] = 'Bearer ' + volatileAdminKey;
+    }
+
+    const res = await fetch(endpoint, {
+      ...options,
+      headers,
+      credentials: 'include'
+    });
+
+    if (res.status === 401) {
+      const hadActiveSession = sessionMode !== 'none';
+      volatileAdminKey = '';
+      sessionMode = 'none';
+      csrfToken = '';
+      updateSessionUI();
+      if (hadActiveSession) {
+        showNotice('Accès non autorisé (401) : clé révoquée ou session invalide. Mémoire purgée.', 'error');
+      }
+      throw new Error('Non autorisé');
+    }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.code || 'Erreur HTTP ' + res.status);
+    }
+    return res;
+  }
+
+  // --- Vérification de santé ---
+  async function checkHealth() {
+    const pill = el('health-status-pill');
+    const label = el('health-status-text');
+    const metricHealth = el('metric-health');
+
+    try {
+      const res = await fetch('/health');
+      if (res.status === 204 || res.ok) {
+        if (pill) {
+          pill.className = 'status-pill online';
+          pill.setAttribute('aria-label', 'Coordinateur joignable');
+        }
+        if (label) label.textContent = 'Coordinateur joignable';
+        if (metricHealth) metricHealth.textContent = 'Joignable';
+        return true;
+      } else {
+        throw new Error('Code HTTP ' + res.status);
+      }
+    } catch (e) {
+      if (pill) {
+        pill.className = 'status-pill offline';
+        pill.setAttribute('aria-label', 'Coordinateur inaccessible');
+      }
+      if (label) label.textContent = 'Inaccessible';
+      if (metricHealth) metricHealth.textContent = 'Inaccessible';
+      return false;
+    }
+  }
+
+
+// --- Gestion de la session et de l'authentification (Contrat #29) ---
+  function updateSessionUI() {
+    const pill = el('session-status-pill');
+    const label = el('session-status-text');
+    const authStatusText = el('auth-status-text');
+    const logoutBtn = el('admin-key-logout-btn');
+    const saveBtn = el('admin-key-save-btn');
+    const input = el('admin-key-input');
+
+    if (sessionMode === 'cookie_session') {
+      if (typeof startJobsSse === 'function') startJobsSse();
+      if (pill) {
+        pill.className = 'status-pill online';
+        pill.setAttribute('aria-label', 'Session web sécurisée active');
+      }
+      if (label) label.textContent = 'Session web active';
+      if (authStatusText) {
+        authStatusText.textContent = '✅ Session web sécurisée active (cookie HttpOnly et protection CSRF). Téléchargement natif en flux direct sans mémoire tampon.';
+      }
+      if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+      if (saveBtn) saveBtn.textContent = 'Changer de clé';
+    } else if (sessionMode === 'memory_key' && volatileAdminKey) {
+      if (typeof stopJobsSse === 'function') stopJobsSse();
+      if (pill) {
+        pill.className = 'status-pill online';
+        pill.setAttribute('aria-label', 'Authentifié via clé en mémoire volatile');
+      }
+      if (label) label.textContent = 'Connecté (Mémoire)';
+      if (authStatusText) {
+        authStatusText.textContent = '🔒 Clé active en mémoire vive volatile de l\'onglet (non persistée sur disque, effacée à la fermeture).';
+      }
+      if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+      if (saveBtn) saveBtn.textContent = 'Mettre à jour la clé';
+    } else {
+      if (typeof stopJobsSse === 'function') stopJobsSse();
+      if (pill) {
+        pill.className = 'status-pill warning';
+        pill.setAttribute('aria-label', 'Session non authentifiée');
+      }
+      if (label) label.textContent = 'Non authentifié';
+      if (authStatusText) {
+        authStatusText.textContent = '🔒 Mode mémoire volatile actif : la clé ne sera stockée ni dans sessionStorage ni dans localStorage.';
+      }
+      if (logoutBtn) logoutBtn.style.display = 'none';
+      if (saveBtn) saveBtn.textContent = 'Ouvrir la session';
+      if (input) input.value = '';
+    }
+  }
+
+  async function checkSession() {
+    // Vérification de la session active via GET /api/v1/auth/session (contrat #29)
+    try {
+      const res = await fetch('/api/v1/auth/session', {
+        method: 'GET',
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (data.csrf_token) {
+          csrfToken = data.csrf_token;
+        }
+        sessionMode = 'cookie_session';
+        updateSessionUI();
+        return;
+      }
+    } catch {}
+
+    // Auto-session style *arr si pas de déconnexion manuelle
+    if (!manualLogout) {
+      try {
+        const res = await fetch('/api/v1/auth/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({})
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          if (data.csrf_token) {
+            csrfToken = data.csrf_token;
+          }
+          sessionMode = 'cookie_session';
+          updateSessionUI();
+          return;
+        }
+      } catch {}
+    }
+
+    if (volatileAdminKey) {
+      sessionMode = 'memory_key';
+    } else {
+      sessionMode = 'none';
+    }
+    updateSessionUI();
+  }
+
+  async function login(key) {
+    manualLogout = false;
+    const cleanKey = (key || '').trim();
+
+    // 1. Tenter d'ouvrir la session web backend officielle (#29)
+    try {
+      const res = await fetch('/api/v1/auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ admin_key: cleanKey })
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (data.csrf_token) {
+          csrfToken = data.csrf_token;
+        }
+        sessionMode = 'cookie_session';
+        volatileAdminKey = ''; // Purge immédiate de la clé en mémoire vive une fois le cookie posé
+        updateSessionUI();
+        showNotice('Session web sécurisée ouverte avec succès (cookie HttpOnly).', 'success');
+        refreshAll();
+        return;
+      }
+    } catch {}
+
+    // 2. Fallback mémoire volatile avec jeton Bearer (si clé fournie)
+    if (cleanKey) {
+      volatileAdminKey = cleanKey;
+      sessionMode = 'memory_key';
+      updateSessionUI();
+      showNotice('Clé mémorisée en mémoire volatile (aucun stockage disque ou sessionStorage).', 'success');
+      refreshAll();
+    } else {
+      showNotice('Impossible d\'ouvrir la session.', 'error');
+    }
+  }
+
+  async function logout() {
+    manualLogout = true;
+    // Révocation de session web côté backend si active
+    if (sessionMode === 'cookie_session') {
+      try {
+        const headers = {};
+        if (csrfToken) {
+          headers['x-csrf-token'] = csrfToken;
+        }
+        await fetch('/api/v1/auth/logout', {
+          method: 'POST',
+          headers,
+          credentials: 'include'
+        });
+      } catch {}
+    }
+
+    volatileAdminKey = '';
+    csrfToken = '';
+    sessionMode = 'none';
+    updateSessionUI();
+    showNotice('Session fermée et mémoire purgée.', 'info');
+    refreshAll();
+  }
+
+
+// --- Gestion des onglets accessibles ---
+  const TABS = ['dashboard', 'files', 'flows', 'jobs', 'workers', 'plugins', 'settings'];
+
+  function switchTab(tabName) {
+    if (!TABS.includes(tabName)) return;
+    activeTab = tabName;
+
+    TABS.forEach(name => {
+      const btn = el(`tab-btn-${name}`);
+      const panel = el(`panel-${name}`);
+      const isSelected = name === tabName;
+
+      if (btn) {
+        btn.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+        btn.setAttribute('tabindex', isSelected ? '0' : '-1');
+      }
+      if (panel) {
+        if (isSelected) {
+          panel.removeAttribute('hidden');
+        } else {
+          panel.setAttribute('hidden', '');
+        }
+      }
+    });
+  }
+
+  function setupTabs() {
+    TABS.forEach((name, index) => {
+      const btn = el(`tab-btn-${name}`);
+      if (!btn) return;
+
+      btn.addEventListener('click', () => switchTab(name));
+
+      btn.addEventListener('keydown', (e) => {
+        let targetIndex = index;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          targetIndex = (index + 1) % TABS.length;
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          targetIndex = (index - 1 + TABS.length) % TABS.length;
+        } else if (e.key === 'Home') {
+          e.preventDefault();
+          targetIndex = 0;
+        } else if (e.key === 'End') {
+          e.preventDefault();
+          targetIndex = TABS.length - 1;
+        } else {
+          return;
+        }
+        const nextBtn = el(`tab-btn-${TABS[targetIndex]}`);
+        if (nextBtn) {
+          nextBtn.focus();
+          switchTab(TABS[targetIndex]);
+        }
+      });
+    });
+
+    const qFiles = el('quick-goto-files-btn');
+    if (qFiles) qFiles.addEventListener('click', () => switchTab('files'));
+
+    const qJobs = el('quick-goto-jobs-btn');
+    if (qJobs) qJobs.addEventListener('click', () => switchTab('jobs'));
+
+    const qSettings = el('quick-goto-settings-btn');
+    if (qSettings) qSettings.addEventListener('click', () => switchTab('settings'));
+  }
+
+  // --- Gestion du Thème (Clair / Sombre / Système) ---
+  function applyTheme(theme) {
+    if (theme === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else if (theme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+    const select = el('theme-select');
+    if (select) select.value = theme;
+    try {
+      localStorage.setItem('flux_theme_pref', theme);
+    } catch {}
+  }
+
+  function setupTheme() {
+    let saved = 'system';
+    try {
+      saved = localStorage.getItem('flux_theme_pref') || 'system';
+    } catch {}
+    applyTheme(saved);
+
+    const select = el('theme-select');
+    if (select) {
+      select.addEventListener('change', (e) => applyTheme(e.target.value));
+    }
+
+    const toggleBtn = el('theme-toggle-btn');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme');
+        if (current === 'dark') {
+          applyTheme('light');
+        } else if (current === 'light') {
+          applyTheme('system');
+        } else {
+          applyTheme('dark');
+        }
+      });
+    }
+  }
+
+
+// --- Fichiers sources ---
+  async function loadFiles() {
+    const tbody = el('files-table-body');
+    const metricCount = el('metric-files-count');
+
+    try {
+      const res = await apiFetch('/api/v1/files');
+      const data = await res.json();
+      cachedFiles = Array.isArray(data) ? data : (data.files || []);
+
+      if (metricCount) metricCount.textContent = String(cachedFiles.length);
+      renderFilesTable();
+    } catch (e) {
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="3" class="empty-state-text" style="color: var(--danger-text);">
+          ${escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session dans l\'onglet Paramètres pour lister les fichiers.' : 'Impossible de récupérer les fichiers sources.')}
+        </td></tr>`;
+      }
+    }
+  }
+
+  function renderFilesTable() {
+    const tbody = el('files-table-body');
+    const countBadge = el('files-counter-text');
+    const searchInput = el('files-search-input');
+    const term = (searchInput ? searchInput.value : '').toLowerCase().trim();
+
+    if (!tbody) return;
+
+    const filtered = cachedFiles.filter(f => !term || f.name.toLowerCase().includes(term));
+
+    if (countBadge) {
+      countBadge.textContent = `${filtered.length} / ${cachedFiles.length} fichier(s)`;
+    }
+
+    if (filtered.length === 0) {
+      const msg = cachedFiles.length === 0
+        ? 'Aucun fichier source .mkv détecté dans var/input/. Déposez des fichiers pour commencer.'
+        : 'Aucun fichier ne correspond à votre recherche.';
+      tbody.innerHTML = `<tr><td colspan="3" class="empty-state-text">${escapeHtml(msg)}</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(file => {
+      const safeName = escapeHtml(file.name);
+      return `
+        <tr>
+          <td>
+            <div style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600;">
+              <span aria-hidden="true" style="color: var(--primary);">🎬</span>
+              <span>${safeName}</span>
+            </div>
+          </td>
+          <td style="font-family: var(--font-mono);">${formatBytes(file.bytes)}</td>
+          <td style="text-align: right;">
+            <button
+              type="button"
+              class="btn btn-primary btn-sm remux-launch-btn"
+              data-filename="${safeName}"
+              aria-label="Lancer le remuxage du fichier ${safeName}"
+            >
+              Lancer le remuxage
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    tbody.querySelectorAll('.remux-launch-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openConfirmRemuxDialog(btn.getAttribute('data-filename'));
+      });
+    });
+  }
+
+  // --- Modale de confirmation de remuxage ---
+  function openConfirmRemuxDialog(filename) {
+    selectedFileForRemux = filename;
+    const dialog = el('confirm-remux-dialog');
+    const filenameEl = el('confirm-dialog-filename');
+    const workerSelect = el('confirm-dialog-worker-select');
+
+    if (!dialog) return;
+
+    if (filenameEl) filenameEl.textContent = filename;
+
+    // Alimenter la sélection des agents
+    if (workerSelect) {
+      workerSelect.innerHTML = '<option value="">N\'importe quel agent disponible (recommandé)</option>';
+      cachedWorkers.forEach(w => {
+        const opt = document.createElement('option');
+        opt.value = w.id;
+        opt.textContent = `${w.name} (${w.id.slice(0, 8)})`;
+        workerSelect.appendChild(opt);
+      });
+    }
+
+    dialog.showModal();
+    const submitBtn = el('confirm-dialog-submit-btn');
+    if (submitBtn) submitBtn.focus();
+  }
+
+  function closeConfirmRemuxDialog() {
+    const dialog = el('confirm-remux-dialog');
+    if (dialog && dialog.open) {
+      dialog.close();
+    }
+    selectedFileForRemux = null;
+  }
+
+  async function submitRemuxJob() {
+    if (!selectedFileForRemux) return;
+    const workerSelect = el('confirm-dialog-worker-select');
+    const targetWorker = workerSelect && workerSelect.value ? workerSelect.value : null;
+
+    closeConfirmRemuxDialog();
+    showNotice(`Soumission du remuxage pour ${selectedFileForRemux}…`, 'info');
+
+    try {
+      const res = await apiFetch('/api/v1/jobs', {
+        method: 'POST',
+        body: JSON.stringify({
+          source_name: selectedFileForRemux,
+          target_worker_id: targetWorker
+        })
+      });
+      const job = await res.json();
+      showNotice(`Tâche créée avec succès (ID: ${job.id.slice(0, 8)}).`, 'success');
+      switchTab('jobs');
+      refreshAll();
+    } catch (e) {
+      showNotice('Échec de la soumission de la tâche : ' + e.message, 'error');
+    }
+  }
+
+
+// --- Tâches de remuxage & Télémétrie SSE ---
+  let jobsEventSource = null;
+  let sseReconnectTimer = null;
+
+  function updateSseBadge(status, label) {
+    const badge = el('sse-status-badge');
+    const text = el('sse-status-text');
+    if (!badge || !text) return;
+    badge.className = `status-pill ${status}`;
+    text.textContent = label;
+  }
+
+  function startJobsSse() {
+    if (jobsEventSource) {
+      jobsEventSource.close();
+      jobsEventSource = null;
+    }
+    if (sseReconnectTimer) {
+      clearTimeout(sseReconnectTimer);
+      sseReconnectTimer = null;
+    }
+
+    if (sessionMode !== 'cookie_session') {
+      updateSseBadge('info', 'Sondage périodique');
+      return;
+    }
+
+    try {
+      jobsEventSource = new EventSource('/api/v1/jobs/events', { withCredentials: true });
+
+      jobsEventSource.onopen = () => {
+        updateSseBadge('success', 'En direct (SSE)');
+      };
+
+      const handleJobEvent = (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          loadJobs();
+
+          // Si la modale de détail est ouverte sur cette tâche, la rafraîchir en direct
+          const dialog = el('job-detail-dialog');
+          const idEl = el('detail-job-id');
+          if (dialog && dialog.open && idEl && idEl.textContent === payload.job_id) {
+            apiFetch(`/api/v1/jobs/${encodeURIComponent(payload.job_id)}`)
+              .then(res => res.json())
+              .then(job => {
+                if (dialog.open) openJobDetailDialog(job.id);
+              })
+              .catch(() => {});
+          }
+
+          if (payload.event_type === 'job_succeeded') {
+            showNotice(`Tâche terminée avec succès (${payload.job_id.slice(0, 8)}…)`, 'success');
+          } else if (payload.event_type === 'job_failed') {
+            showNotice(`Échec sur la tâche ${payload.job_id.slice(0, 8)}… (${payload.error_code || 'erreur'})`, 'warning');
+          }
+        } catch (_) {
+          loadJobs();
+        }
+      };
+
+      jobsEventSource.addEventListener('job_created', handleJobEvent);
+      jobsEventSource.addEventListener('job_claimed', handleJobEvent);
+      jobsEventSource.addEventListener('job_heartbeat', handleJobEvent);
+      jobsEventSource.addEventListener('job_succeeded', handleJobEvent);
+      jobsEventSource.addEventListener('job_failed', handleJobEvent);
+
+      jobsEventSource.addEventListener('job_progress', (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          const job = cachedJobs.find((j) => j.id === payload.job_id);
+          if (job) {
+            job.status = 'running';
+            job.progress = payload.progress;
+            renderJobsTable();
+          }
+
+          const dialog = el('job-detail-dialog');
+          const idEl = el('detail-job-id');
+          if (dialog && dialog.open && idEl && idEl.textContent === payload.job_id) {
+            const statusEl = el('detail-job-status');
+            if (statusEl && payload.progress !== undefined) {
+              statusEl.innerHTML = `<span class="status-pill running"><span class="status-dot"></span>En cours (${payload.progress}%)</span>`;
+            }
+          }
+        } catch (_) {}
+      });
+
+      jobsEventSource.onerror = () => {
+        updateSseBadge('info', 'Reconnexion SSE…');
+        if (jobsEventSource) {
+          jobsEventSource.close();
+          jobsEventSource = null;
+        }
+        sseReconnectTimer = setTimeout(() => {
+          if (sessionMode === 'cookie_session') {
+            startJobsSse();
+          } else {
+            updateSseBadge('info', 'Sondage périodique');
+          }
+        }, 5000);
+      };
+    } catch (_) {
+      updateSseBadge('info', 'Sondage périodique');
+    }
+  }
+
+  function stopJobsSse() {
+    if (jobsEventSource) {
+      jobsEventSource.close();
+      jobsEventSource = null;
+    }
+    if (sseReconnectTimer) {
+      clearTimeout(sseReconnectTimer);
+      sseReconnectTimer = null;
+    }
+    updateSseBadge('info', 'Sondage périodique');
+  }
+
+  async function loadJobs() {
+    const tbody = el('jobs-table-body');
+    const metricJobs = el('metric-jobs-count');
+
+    try {
+      const res = await apiFetch('/api/v1/jobs');
+      const data = await res.json();
+      cachedJobs = Array.isArray(data) ? data : (data.jobs || []);
+
+      if (metricJobs) metricJobs.textContent = String(cachedJobs.length);
+      renderRecentJobs();
+      renderJobsTable();
+    } catch (e) {
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="5" class="empty-state-text" style="color: var(--danger-text);">
+          ${escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session pour afficher la file des tâches.' : 'Impossible de récupérer les tâches.')}
+        </td></tr>`;
+      }
+    }
+  }
+
+  function renderRecentJobs() {
+    const tbody = el('recent-jobs-table-body');
+    if (!tbody) return;
+
+    const recent = cachedJobs.slice(0, 3);
+    if (recent.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="empty-state-text">Aucune tâche enregistrée pour le moment.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = recent.map(j => {
+      const statusClass = j.status === 'succeeded' ? 'succeeded' : (j.status === 'failed' ? 'failed' : (j.status === 'running' ? 'running' : 'queued'));
+      return `
+        <tr>
+          <td style="font-family: var(--font-mono); font-weight: 600;">${escapeHtml(j.id.slice(0, 8))}…</td>
+          <td>${escapeHtml(j.source_name)}</td>
+          <td><span class="status-pill ${statusClass}"><span class="status-dot"></span>${escapeHtml(j.status)}</span></td>
+          <td>${formatDate(j.created_at)}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function updateJobFiltersCount() {
+    const counts = { all: cachedJobs.length, queued: 0, running: 0, succeeded: 0, failed: 0 };
+    cachedJobs.forEach(j => {
+      if (counts[j.status] !== undefined) counts[j.status]++;
+    });
+
+    Object.keys(counts).forEach(k => {
+      const counterEl = el(`count-filter-${k}`);
+      if (counterEl) counterEl.textContent = `(${counts[k]})`;
+    });
+  }
+
+  function renderJobsTable() {
+    const tbody = el('jobs-table-body');
+    const searchInput = el('jobs-search-input');
+    if (!tbody) return;
+
+    updateJobFiltersCount();
+
+    const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    let filtered = cachedJobs;
+
+    if (activeJobFilter !== 'all') {
+      filtered = filtered.filter(j => j.status === activeJobFilter);
+    }
+
+    if (query) {
+      filtered = filtered.filter(j =>
+        j.id.toLowerCase().includes(query) ||
+        j.source_name.toLowerCase().includes(query)
+      );
+    }
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" class="empty-state-text">Aucune tâche ne correspond à ces critères.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(j => {
+      const statusClass = j.status === 'succeeded' ? 'succeeded' : (j.status === 'failed' ? 'failed' : (j.status === 'running' ? 'running' : 'queued'));
+      const statusLabel = j.status === 'running' && j.progress !== undefined ? `En cours (${j.progress}%)` : escapeHtml(j.status);
+      const canDownload = j.status === 'succeeded' && sessionMode === 'cookie_session';
+      const dlBtnHtml = canDownload
+        ? `<button type="button" class="btn btn-secondary btn-sm job-download-btn" data-job-id="${escapeHtml(j.id)}" data-output="${escapeHtml(j.output_name || 'resultat.mkv')}" title="Télécharger le flux MKV directement sans charger la RAM">Télécharger</button>`
+        : '';
+
+      return `
+        <tr>
+          <td style="font-family: var(--font-mono); font-weight: 600;">${escapeHtml(j.id.slice(0, 8))}…</td>
+          <td>${escapeHtml(j.source_name)}</td>
+          <td><span class="status-pill ${statusClass}"><span class="status-dot"></span>${statusLabel}</span></td>
+          <td>${formatDate(j.created_at)}</td>
+          <td>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <button type="button" class="btn btn-secondary btn-sm job-detail-btn" data-job-id="${escapeHtml(j.id)}">Détails</button>
+              ${dlBtnHtml}
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    tbody.querySelectorAll('.job-detail-btn').forEach(b => {
+      b.onclick = () => openJobDetailDialog(b.getAttribute('data-job-id'));
+    });
+
+    tbody.querySelectorAll('.job-download-btn').forEach(b => {
+      b.onclick = () => downloadJobStream(b.getAttribute('data-job-id'), b.getAttribute('data-output'));
+    });
+  }
+
+  // --- Téléchargement en flux direct (sans Blob en mémoire RAM) ---
+  function downloadJobStream(jobId, filename) {
+    if (!jobId) return;
+
+    if (sessionMode !== 'cookie_session') {
+      showNotice('Le téléchargement en flux direct nécessite l\'ouverture d\'une session web par cookie HttpOnly (#29). Ouvrez une session dans l\'onglet Paramètres ou utilisez la commande curl.', 'warning');
+      return;
+    }
+
+    const downloadUrl = `/api/v1/jobs/${encodeURIComponent(jobId)}/output`;
+    showNotice(`Démarrage du téléchargement direct : ${filename}…`, 'info');
+
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.setAttribute('download', filename || `job-${jobId}.mkv`);
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+
+    setTimeout(() => {
+      document.body.removeChild(link);
+    }, 1500);
+  }
+
+  // --- Modale de détails d'une tâche ---
+  function openJobDetailDialog(jobId) {
+    const dialog = el('job-detail-dialog');
+    if (!dialog) return;
+
+    const job = cachedJobs.find(j => j.id === jobId);
+    if (!job) return;
+
+    const idEl = el('detail-job-id');
+    const sourceEl = el('detail-job-source');
+    const statusEl = el('detail-job-status');
+    const workerEl = el('detail-job-worker');
+    const attemptsEl = el('detail-job-attempts');
+    const createdEl = el('detail-job-created');
+    const outputEl = el('detail-job-output');
+    const errorBox = el('detail-error-box');
+    const errorContent = el('detail-error-content');
+    const curlSec = el('detail-curl-section');
+    const curlCmd = el('detail-curl-command');
+    const dlBtn = el('job-dialog-download-btn');
+
+    if (idEl) idEl.textContent = job.id;
+    if (sourceEl) sourceEl.textContent = job.source_name;
+    if (statusEl) {
+      const statusClass = job.status === 'succeeded' ? 'succeeded' : (job.status === 'failed' ? 'failed' : (job.status === 'running' ? 'running' : 'queued'));
+      statusEl.innerHTML = `<span class="status-pill ${statusClass}"><span class="status-dot"></span>${escapeHtml(job.status)}</span>`;
+    }
+    if (workerEl) workerEl.textContent = job.worker_id || job.target_worker_id || 'N\'importe quel agent (ou central autonome)';
+    if (attemptsEl) attemptsEl.textContent = `${job.attempts || 1} tentative(s)`;
+    if (createdEl) createdEl.textContent = formatDate(job.created_at);
+    if (outputEl) outputEl.textContent = job.output_name || 'Non généré';
+
+    if (errorBox && errorContent) {
+      if (job.status === 'failed' || job.error_code) {
+        errorBox.style.display = 'block';
+        errorContent.textContent = job.error_code
+          ? `Code d'erreur: ${job.error_code}`
+          : 'Traitement en échec sans code spécifique.';
+      } else {
+        errorBox.style.display = 'none';
+      }
+    }
+
+    if (curlSec && curlCmd) {
+      const origin = window.location.origin || 'http://localhost:3000';
+      curlCmd.textContent = `curl -H "Authorization: Bearer <ADMIN_KEY>" "${origin}/api/v1/jobs/${encodeURIComponent(job.id)}/output" -o "${job.output_name || 'resultat.mkv'}"`;
+      curlSec.style.display = 'block';
+    }
+
+    if (dlBtn) {
+      if (job.status === 'succeeded' && sessionMode === 'cookie_session') {
+        dlBtn.style.display = 'inline-flex';
+        dlBtn.textContent = 'Télécharger le résultat (flux direct)';
+        dlBtn.onclick = () => {
+          downloadJobStream(job.id, job.output_name || 'resultat.mkv');
+        };
+      } else {
+        dlBtn.style.display = 'none';
+      }
+    }
+
+    dialog.showModal();
+    const closeBtn = el('job-dialog-close-btn');
+    if (closeBtn) closeBtn.focus();
+  }
+
+  function closeJobDetailDialog() {
+    const dialog = el('job-detail-dialog');
+    if (dialog && dialog.open) {
+      dialog.close();
+    }
+  }
+
+
+// --- Serveurs et agents ---
+  async function loadWorkers() {
+    const tbody = el('workers-table-body');
+    const metricWorkers = el('metric-workers-count');
+
+    try {
+      const res = await apiFetch('/api/v1/workers');
+      const data = await res.json();
+      cachedWorkers = Array.isArray(data) ? data : (data.workers || []);
+
+      if (metricWorkers) metricWorkers.textContent = String(cachedWorkers.length);
+      renderWorkersTable();
+    } catch (e) {
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="4" class="empty-state-text" style="color: var(--danger-text);">
+          ${escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session pour afficher les agents enregistrés.' : 'Impossible de récupérer la liste des agents.')}
+        </td></tr>`;
+      }
+    }
+  }
+
+  function renderWorkersTable() {
+    const tbody = el('workers-table-body');
+    if (!tbody) return;
+
+    if (cachedWorkers.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="empty-state-text">
+        Aucun agent distant enregistré. Le coordinateur central traite les tâches en mode autonome (agent intégré).
+      </td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = cachedWorkers.map(w => {
+      const safeId = escapeHtml(w.id);
+      const safeName = escapeHtml(w.name);
+      return `
+        <tr>
+          <td style="font-family: var(--font-mono); font-weight: 600;">${safeId}</td>
+          <td>
+            <div style="font-weight: 600;">${safeName}</div>
+            <div style="font-size: 0.75rem; color: var(--text-dim);">${safeName.startsWith('coordinator') ? 'Coordinateur avec agent intégré' : 'Agent distant HTTP'}</div>
+          </td>
+          <td>${formatDate(w.last_seen)}</td>
+          <td>
+            <span class="status-pill online">
+              <span class="status-dot"></span>
+              Enregistré
+            </span>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // --- Configuration système & raccordement *arr ---
+  let cachedSystemConfig = null;
+
+  async function loadSystemConfig() {
+    const configWorkerKey = el('worker-key-display');
+    const btnToggleWorkerKey = el('btn-toggle-worker-key');
+    const btnCopyWorkerKey = el('btn-copy-worker-key');
+    const configVersion = el('config-version');
+    const configLocalWorker = el('config-local-worker');
+    const configMaxBytes = el('config-max-file-bytes');
+    const settingsVersion = el('settings-version');
+    const settingsLocalWorker = el('settings-local-worker');
+    const dockerCmd = el('docker-worker-cmd');
+
+    try {
+      const res = await apiFetch('/api/v1/config');
+      if (!res.ok) {
+        throw new Error('Non autorisé');
+      }
+      const cfg = await res.json();
+      cachedSystemConfig = cfg;
+
+      if (configVersion) configVersion.textContent = 'v' + cfg.version;
+      if (settingsVersion) settingsVersion.textContent = 'v' + cfg.version;
+      const workerStatusText = cfg.local_worker ? 'Actif (intégré au conteneur)' : 'Désactivé (agents distants)';
+      if (configLocalWorker) configLocalWorker.textContent = workerStatusText;
+      if (settingsLocalWorker) settingsLocalWorker.textContent = workerStatusText;
+      if (configMaxBytes) configMaxBytes.textContent = formatBytes(cfg.max_file_bytes);
+
+      if (configWorkerKey) {
+        configWorkerKey.value = cfg.worker_key || '';
+        configWorkerKey.placeholder = 'Clé prête';
+      }
+      if (btnToggleWorkerKey) btnToggleWorkerKey.disabled = false;
+      if (btnCopyWorkerKey) btnCopyWorkerKey.disabled = false;
+
+      const origin = window.location.origin || 'http://localhost:3000';
+      if (dockerCmd) {
+        const keyVal = cfg.worker_key || '<WORKER_KEY>';
+        dockerCmd.textContent = `docker run -d --name flux-worker -e COORDINATOR_URL=${origin} -e WORKER_KEY=${keyVal} -v /chemin/data:/data flux-de-fichiers worker`;
+      }
+    } catch {
+      cachedSystemConfig = null;
+      if (configWorkerKey) {
+        configWorkerKey.value = '';
+        configWorkerKey.type = 'password';
+        configWorkerKey.placeholder = 'Ouvrez une session admin pour révéler la clé';
+      }
+      if (btnToggleWorkerKey) {
+        btnToggleWorkerKey.disabled = true;
+        btnToggleWorkerKey.textContent = 'Afficher';
+      }
+      if (btnCopyWorkerKey) btnCopyWorkerKey.disabled = true;
+      if (configLocalWorker) configLocalWorker.textContent = '— (session requise)';
+      if (configVersion) configVersion.textContent = '—';
+      if (configMaxBytes) configMaxBytes.textContent = '—';
+      if (settingsLocalWorker) settingsLocalWorker.textContent = '— (session requise)';
+      if (settingsVersion) settingsVersion.textContent = '—';
+
+      const origin = window.location.origin || 'http://localhost:3000';
+      if (dockerCmd) {
+        dockerCmd.textContent = `docker run -d --name flux-worker -e COORDINATOR_URL=${origin} -e WORKER_KEY=<WORKER_KEY> -v /chemin/data:/data flux-de-fichiers worker`;
+      }
+    }
+  }
+
+  function setupWorkerConfigUi() {
+    const btnToggle = el('btn-toggle-worker-key');
+    const inputKey = el('worker-key-display');
+    const btnCopyKey = el('btn-copy-worker-key');
+    const btnCopyCmd = el('btn-copy-worker-cmd');
+    const dockerCmd = el('docker-worker-cmd');
+
+    if (btnToggle && inputKey) {
+      btnToggle.addEventListener('click', () => {
+        if (inputKey.type === 'password') {
+          inputKey.type = 'text';
+          btnToggle.textContent = 'Masquer';
+        } else {
+          inputKey.type = 'password';
+          btnToggle.textContent = 'Afficher';
+        }
+      });
+    }
+
+    if (btnCopyKey && inputKey) {
+      btnCopyKey.addEventListener('click', async () => {
+        if (!inputKey.value) return;
+        try {
+          await navigator.clipboard.writeText(inputKey.value);
+          showNotice('Clé worker copiée dans le presse-papier !', 'success');
+        } catch {
+          inputKey.select();
+          document.execCommand('copy');
+          showNotice('Clé worker copiée !', 'success');
+        }
+      });
+    }
+
+    if (btnCopyCmd && dockerCmd) {
+      btnCopyCmd.addEventListener('click', async () => {
+        const text = dockerCmd.textContent;
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+          showNotice('Commande Docker copiée dans le presse-papier !', 'success');
+        } catch {
+          showNotice('Veuillez copier manuellement la commande.', 'info');
+        }
+      });
+    }
+  }
+
+
+// --- Outils et catalogue dynamiques ---
+  async function loadToolsStatus() {
+    try {
+      const res = await apiFetch('/api/v1/tools');
+      const tools = await res.json();
+      if (!Array.isArray(tools)) return;
+      tools.forEach(tool => {
+        const card = document.querySelector(`.tool-card[data-tool-id="${tool.id}"]`);
+        if (card) {
+          card.setAttribute('data-cache-status', tool.status);
+          const pill = card.querySelector('.status-pill');
+          if (pill) {
+            if (tool.status === 'ready') {
+              pill.className = 'status-pill success';
+              pill.title = 'Marqueur .ready validé et binaire intègre';
+              pill.innerHTML = '<span class="status-dot"></span>.ready (Prêt)';
+            } else if (tool.status === 'locked') {
+              pill.className = 'status-pill warning';
+              pill.title = 'Verrou .lock actif (acquisition en cours)';
+              pill.innerHTML = '<span class="status-dot"></span>.lock (En cours)';
+            } else {
+              pill.className = 'status-pill';
+              pill.title = 'Outil non extrait dans le cache worker';
+              pill.innerHTML = '<span class="status-dot"></span>Non installé';
+            }
+          }
+        }
+      });
+    } catch {}
+  }
+
+  // --- Gestion du catalogue d'outils et filtres ---
+  function setupPluginsPanel() {
+    // Filtrage des cartes d'outils
+    document.querySelectorAll('.filter-chip[data-tool-filter]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-chip[data-tool-filter]').forEach(b => {
+          b.setAttribute('aria-pressed', 'false');
+          b.classList.remove('active');
+        });
+        btn.setAttribute('aria-pressed', 'true');
+        btn.classList.add('active');
+
+        const filter = btn.getAttribute('data-tool-filter') || 'all';
+        document.querySelectorAll('.tool-card').forEach(card => {
+          const status = card.getAttribute('data-cache-status');
+          if (filter === 'all' || status === filter) {
+            card.style.display = 'flex';
+          } else {
+            card.style.display = 'none';
+          }
+        });
+      });
+    });
+
+    // Gestion du dialogue de configuration de plugin
+    document.querySelectorAll('.open-plugin-config-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const pluginId = btn.getAttribute('data-plugin') || '';
+        const pluginName = btn.getAttribute('data-plugin-name') || pluginId;
+        const dialog = el('plugin-config-dialog');
+        const titleEl = el('plugin-config-title');
+        const hiddenId = el('plugin-config-current-id');
+        const urlInput = el('plugin-cfg-url');
+        const keyInput = el('plugin-cfg-apikey');
+        const localInput = el('plugin-cfg-local-path');
+        const remoteInput = el('plugin-cfg-remote-path');
+
+        if (titleEl) titleEl.textContent = `Paramètres par défaut : ${pluginName}`;
+        if (hiddenId) hiddenId.value = pluginId;
+
+        try {
+          const res = await apiFetch(`/api/v1/plugins/${encodeURIComponent(pluginId)}/settings`);
+          if (res && res.settings && Object.keys(res.settings).length > 0) {
+            if (urlInput) urlInput.value = res.settings.url || '';
+            if (keyInput) keyInput.value = res.settings.apiKey || '';
+            if (localInput) localInput.value = res.settings.pathMappingLocal || '/data';
+            if (remoteInput) remoteInput.value = res.settings.pathMappingRemote || (pluginId.includes('sonarr') ? '/tv' : '/movies');
+          } else {
+            if (urlInput) urlInput.value = pluginId.includes('sonarr') ? 'http://192.168.1.50:8989' : 'http://192.168.1.50:7878';
+            if (keyInput) keyInput.value = '';
+            if (localInput) localInput.value = '/data';
+            if (remoteInput) remoteInput.value = pluginId.includes('sonarr') ? '/tv' : '/movies';
+          }
+        } catch {
+          if (urlInput) urlInput.value = pluginId.includes('sonarr') ? 'http://192.168.1.50:8989' : 'http://192.168.1.50:7878';
+          if (keyInput) keyInput.value = '';
+          if (localInput) localInput.value = '/data';
+          if (remoteInput) remoteInput.value = pluginId.includes('sonarr') ? '/tv' : '/movies';
+        }
+
+        if (dialog && typeof dialog.showModal === 'function') {
+          dialog.showModal();
+        }
+      });
+    });
+
+    const saveBtn = el('plugin-config-save-btn');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async () => {
+        const pluginId = (el('plugin-config-current-id') && el('plugin-config-current-id').value) || '';
+        if (!pluginId) return;
+
+        const url = el('plugin-cfg-url') ? el('plugin-cfg-url').value.trim() : '';
+        const apiKey = el('plugin-cfg-apikey') ? el('plugin-cfg-apikey').value.trim() : '';
+        const pathMappingLocal = el('plugin-cfg-local-path') ? el('plugin-cfg-local-path').value.trim() : '/data';
+        const pathMappingRemote = el('plugin-cfg-remote-path') ? el('plugin-cfg-remote-path').value.trim() : '/media';
+
+        try {
+          await apiFetch(`/api/v1/plugins/${encodeURIComponent(pluginId)}/settings`, {
+            method: 'PUT',
+            body: JSON.stringify({ url, apiKey, pathMappingLocal, pathMappingRemote }),
+          });
+          showNotice(`Paramètres par défaut pour ${pluginId} enregistrés ! Transmis aux flux.`, 'success');
+          const dialog = el('plugin-config-dialog');
+          if (dialog && dialog.open) dialog.close();
+        } catch (e) {
+          showNotice(`Erreur de sauvegarde : ${e.message || 'Échec API'}`, 'error');
+        }
+      });
+    }
+
+    const closeX = el('plugin-config-close-x');
+    const cancelBtn = el('plugin-config-cancel-btn');
+    if (closeX) closeX.addEventListener('click', () => { const d = el('plugin-config-dialog'); if (d) d.close(); });
+    if (cancelBtn) cancelBtn.addEventListener('click', () => { const d = el('plugin-config-dialog'); if (d) d.close(); });
+  }
+
+
+  // --- Concepteur et Gestionnaire de Flux (Flows) type Zapier / FileFlows ---
+  function setupFlowsPanel() {
+    const libraryView = el('flows-library-view');
+    const canvasView = el('flows-canvas-view');
+    const backToLibraryBtn = el('btn-back-to-library');
+    const openWizardBtn = el('btn-open-flow-wizard');
+    const wizardDialog = el('flow-wizard-dialog');
+    const cancelWizardBtn = el('wizard-dialog-cancel-btn');
+    const closeWizardX = el('wizard-dialog-close-btn');
+    const generateWizardBtn = el('wizard-generate-flow-btn');
+    const svgLines = el('canvas-svg-lines');
+    const nodesContainer = el('canvas-nodes-container');
+
+    let currentSelectedTemplate = 'smart-hevc';
+    let activeSimulation = null; // null | 'true' | 'false' | 'fallback'
+
+    // 1. Navigation entre Bibliothèque et Canvas
+    function openCanvas(flowId, flowTitle) {
+      if (libraryView) libraryView.style.display = 'none';
+      if (canvasView) canvasView.style.display = 'block';
+      const titleEl = el('canvas-flow-title');
+      if (titleEl) titleEl.textContent = `Éditeur visuel : ${flowTitle}`;
+
+      // Si le flux ouvert est le flux ADR-0008, injecter ses nœuds représentatifs
+      if (flowId === 'flow.smart.adr0008' && nodesContainer) {
+        nodesContainer.innerHTML = `
+          <div class="canvas-node selected" id="node-1" data-node-id="node-1" data-block-type="file-input">
+            <div class="node-connector connector-out"></div>
+            <div class="node-header">
+              <span class="node-icon">📄</span>
+              <div class="node-title-box">
+                <span class="node-kind">Déclencheur entrant</span>
+                <h4 class="node-name">Fichier source</h4>
+              </div>
+              <span class="status-pill success node-pill">Entrée</span>
+            </div>
+            <div class="node-summary">Détection du média • Métadonnées analysées implicitement en tâche de fond (MediaInfo / FFprobe).</div>
+          </div>
+
+          <div class="canvas-node" id="node-2" data-node-id="node-2" data-block-type="condition">
+            <div class="node-connector connector-in"></div>
+            <div class="node-header">
+              <span class="node-icon">🔀</span>
+              <div class="node-title-box">
+                <span class="node-kind">Logique décisionnelle</span>
+                <h4 class="node-name">Condition : Codec == HEVC ?</h4>
+              </div>
+              <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
+            </div>
+            <div class="node-summary" id="node-2-summary">Si Codec == HEVC ➔ Édition In-Place directe • Sinon ➔ Transcodage GPU • Repli ➔ CPU</div>
+            <div class="node-multi-outputs">
+              <div class="multi-output-port port-true" title="Condition vérifiée : saut direct vers en-têtes sans réencodage">
+                <span class="port-label">✓ Vrai (Match)</span>
+                <div class="node-connector connector-out out-true" data-port="true"></div>
+              </div>
+              <div class="multi-output-port port-false" title="Condition non vérifiée : réencodage vidéo nécessaire">
+                <span class="port-label">✗ Faux (Else)</span>
+                <div class="node-connector connector-out out-false" data-port="false"></div>
+              </div>
+              <div class="multi-output-port port-fallback" title="Repli logiciel automatique en cas d'incompatibilité GPU">
+                <span class="port-label">⚡ Repli (CPU)</span>
+                <div class="node-connector connector-out out-fallback" data-port="fallback"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="canvas-node" id="node-3" data-node-id="node-3" data-block-type="mkvpropedit">
+            <div class="node-connector connector-in"></div>
+            <div class="node-connector connector-out"></div>
+            <div class="node-header">
+              <span class="node-icon">⚡</span>
+              <div class="node-title-box">
+                <span class="node-kind">MKVToolNix • In-Place</span>
+                <h4 class="node-name">Édition En-têtes (mkvpropedit)</h4>
+              </div>
+              <span class="status-pill success node-pill in-place">⚡ In-Place</span>
+              <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
+            </div>
+            <div class="node-summary" id="node-3-summary">Zéro copie • Piste audio 'fre' par défaut • Flag 'forced' sur sous-titres complets.</div>
+          </div>
+
+          <div class="canvas-node" id="node-4" data-node-id="node-4" data-block-type="video-encode">
+            <div class="node-connector connector-in"></div>
+            <div class="node-connector connector-out"></div>
+            <div class="node-header">
+              <span class="node-icon">🎞️</span>
+              <div class="node-title-box">
+                <span class="node-kind">FFmpeg Builder</span>
+                <h4 class="node-name">Transcodage Vidéo HEVC</h4>
+              </div>
+              <span class="status-pill info node-pill working-file">📦 WorkingFile</span>
+              <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
+            </div>
+            <div class="node-summary" id="node-4-summary">HEVC • Accélération GPU Intel QSV (Qualité : 6) • Repli CPU libx265 automatique.</div>
+          </div>
+
+          <div class="canvas-node" id="node-5" data-node-id="node-5" data-block-type="file-output">
+            <div class="node-connector connector-in"></div>
+            <div class="node-header">
+              <span class="node-icon">💾</span>
+              <div class="node-title-box">
+                <span class="node-kind">Système Unix</span>
+                <h4 class="node-name">Finalisation & Notification</h4>
+              </div>
+              <span class="status-pill success node-pill">Sortie</span>
+            </div>
+            <div class="node-summary" id="node-5-summary">Remplacement atomique POSIX Unix • Préservation mtime • Notification Sonarr/Radarr.</div>
+          </div>
+        `;
+        rebindAllNodes();
+      }
+
+      resetSimulation();
+      setTimeout(drawCanvasLines, 60);
+    }
+
+    function closeCanvas() {
+      if (canvasView) canvasView.style.display = 'none';
+      if (libraryView) libraryView.style.display = 'block';
+    }
+
+    if (backToLibraryBtn) backToLibraryBtn.addEventListener('click', closeCanvas);
+
+    document.querySelectorAll('.open-canvas-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const card = btn.closest('.flow-card');
+        const title = card ? card.querySelector('.flow-card-title').textContent : 'Flux';
+        const flowId = btn.getAttribute('data-flow') || 'flow';
+        openCanvas(flowId, title);
+      });
+    });
+
+    // 2. Assistant de configuration (Setup Wizard)
+    if (openWizardBtn && wizardDialog) {
+      openWizardBtn.addEventListener('click', () => {
+        if (typeof wizardDialog.showModal === 'function') {
+          wizardDialog.showModal();
+        } else {
+          wizardDialog.setAttribute('open', '');
+        }
+      });
+    }
+
+    function closeWizard() {
+      if (wizardDialog) {
+        if (typeof wizardDialog.close === 'function') {
+          wizardDialog.close();
+        } else {
+          wizardDialog.removeAttribute('open');
+        }
+      }
+    }
+
+    if (closeWizardX) closeWizardX.addEventListener('click', closeWizard);
+    if (cancelWizardBtn) cancelWizardBtn.addEventListener('click', closeWizard);
+
+    // Sélection du modèle dans le wizard
+    document.querySelectorAll('.wizard-template-card').forEach(card => {
+      card.addEventListener('click', () => {
+        document.querySelectorAll('.wizard-template-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+        currentSelectedTemplate = card.getAttribute('data-template') || 'smart-hevc';
+      });
+    });
+
+    if (generateWizardBtn) {
+      generateWizardBtn.addEventListener('click', () => {
+        const nameInput = el('wizard-flow-name');
+        const flowTitle = nameInput && nameInput.value ? nameInput.value.trim() : 'Nouveau flux';
+        closeWizard();
+
+        // Reconstituer les nœuds selon le template choisi
+        if (nodesContainer) {
+          nodesContainer.innerHTML = `
+            <div class="canvas-node selected" id="node-1" data-node-id="node-1" data-block-type="file-input">
+              <div class="node-connector connector-out"></div>
+              <div class="node-header">
+                <span class="node-icon">📄</span>
+                <div class="node-title-box">
+                  <span class="node-kind">Déclencheur entrant</span>
+                  <h4 class="node-name">Fichier source</h4>
+                </div>
+                <span class="status-pill success node-pill">Entrée</span>
+              </div>
+              <div class="node-summary">Détection du média • Métadonnées inspectées automatiquement en sous-main.</div>
+            </div>
+          `;
+
+          if (currentSelectedTemplate === 'smart-hevc') {
+            appendNodeToCanvas('condition', 'Logique de décision', 'Condition : Est déjà HEVC ?', 'Si Codec == HEVC ➔ In-Place mkvpropedit • Sinon ➔ Encodage QSV • Repli ➔ CPU');
+            appendNodeToCanvas('mkvpropedit', 'MKVToolNix', 'Édition En-têtes (In-Place)', 'Zéro copie dans /work • Mise à jour des drapeaux audio/sous-titres');
+            appendNodeToCanvas('video-encode', 'FFmpeg Builder', 'Réencodage Vidéo (GPU)', 'HEVC • Intel QSV • Qualité : 6 • Vitesse : 3');
+            appendNodeToCanvas('file-output', 'Système', 'Destination finale', 'Remplacement sécurisé de l\'original ou dossier de sortie');
+          } else if (currentSelectedTemplate === 'hevc') {
+            appendNodeToCanvas('video-encode', 'FFmpeg Builder', 'Réencodage Vidéo', 'HEVC • Intel QSV • Qualité : 6 • Vitesse : 3');
+            appendNodeToCanvas('audio-encode', 'FFmpeg Builder', 'Réencodage Audio', 'Codec : AAC • 192 kbps • Stéréo');
+            appendNodeToCanvas('remux-mkv', 'MKVToolNix', 'Remuxage Matroska', 'Assemblage final MKV • Langues : fre, eng');
+          } else if (currentSelectedTemplate === 'mkv-remux') {
+            appendNodeToCanvas('remux-mkv', 'MKVToolNix', 'Remuxage Matroska', 'Filtrage langues fre, eng • Copie directe sans transcodage');
+          } else if (currentSelectedTemplate === 'mp4-web') {
+            appendNodeToCanvas('remux-mp4', 'MP4Box GPAC', 'Remuxage MP4', 'FastStart activé • Moov atom en début de fichier');
+          }
+        }
+
+        openCanvas('generated', flowTitle);
+        showNotice(`Flux « ${flowTitle} » généré avec succès ! Prêt dans le Canvas.`, 'success');
+      });
+    }
+
+    // 3. Tracé des connexions SVG entre les connecteurs
+    function drawCanvasLines() {
+      if (!svgLines || !nodesContainer) return;
+      const nodes = Array.from(nodesContainer.querySelectorAll('.canvas-node'));
+      if (nodes.length < 2) {
+        svgLines.innerHTML = '';
+        return;
+      }
+
+      const boardRect = nodesContainer.parentElement.getBoundingClientRect();
+      let pathsHtml = `
+        <defs>
+          <marker id="arrow-blue" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--primary)" />
+          </marker>
+          <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#10b981" />
+          </marker>
+          <marker id="arrow-orange" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#f59e0b" />
+          </marker>
+          <marker id="arrow-purple" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#8b5cf6" />
+          </marker>
+        </defs>
+      `;
+
+      for (let i = 0; i < nodes.length - 1; i++) {
+        const fromNode = nodes[i];
+        const toNode = nodes[i + 1];
+
+        const outConnectors = Array.from(fromNode.querySelectorAll('.connector-out'));
+        const inConn = toNode.querySelector('.connector-in');
+
+        if (outConnectors.length > 0 && inConn) {
+          const rIn = inConn.getBoundingClientRect();
+          const x2 = rIn.left + rIn.width / 2 - boardRect.left + nodesContainer.parentElement.scrollLeft;
+          const y2 = rIn.top + rIn.height / 2 - boardRect.top + nodesContainer.parentElement.scrollTop;
+
+          outConnectors.forEach(outConn => {
+            const rOut = outConn.getBoundingClientRect();
+            const x1 = rOut.left + rOut.width / 2 - boardRect.left + nodesContainer.parentElement.scrollLeft;
+            const y1 = rOut.top + rOut.height / 2 - boardRect.top + nodesContainer.parentElement.scrollTop;
+
+            let strokeColor = 'var(--primary)';
+            let markerId = 'arrow-blue';
+            let isPulse = false;
+
+            if (outConn.classList.contains('out-true')) {
+              strokeColor = '#10b981';
+              markerId = 'arrow-green';
+              if (activeSimulation === 'true') isPulse = true;
+            } else if (outConn.classList.contains('out-false')) {
+              strokeColor = '#f59e0b';
+              markerId = 'arrow-orange';
+              if (activeSimulation === 'false') isPulse = true;
+            } else if (outConn.classList.contains('out-fallback')) {
+              strokeColor = '#8b5cf6';
+              markerId = 'arrow-purple';
+              if (activeSimulation === 'fallback') isPulse = true;
+            }
+
+            const cy1 = y1 + 18;
+            const cy2 = y2 - 18;
+            const pulseClass = isPulse ? ' class="sim-pulse-line"' : '';
+            pathsHtml += `<path d="M ${x1} ${y1} C ${x1} ${cy1}, ${x2} ${cy2}, ${x2} ${y2}" stroke="${strokeColor}" stroke-width="${isPulse ? '3.5' : '2.5'}" fill="none" marker-end="url(#${markerId})"${pulseClass} />`;
+          });
+        }
+      }
+      svgLines.innerHTML = pathsHtml;
+    }
+
+    window.addEventListener('resize', drawCanvasLines);
+
+    // 4. Ajout d'un bloc au canvas
+    function appendNodeToCanvas(blockType, kind, title, summary) {
+      if (!nodesContainer) return;
+      const count = nodesContainer.querySelectorAll('.canvas-node').length + 1;
+      const nodeId = `node-${count}`;
+      const icon = blockType === 'condition' ? '🔀' : blockType === 'mkvpropedit' ? '⚡' : blockType === 'file-output' ? '💾' : blockType === 'sonarr' ? '📡' : blockType === 'radarr' ? '🎬' : blockType.includes('video') ? '🎞️' : blockType.includes('audio') ? '🔊' : blockType.includes('mp4') ? '📦' : '🎬';
+
+      const div = document.createElement('div');
+      div.className = 'canvas-node';
+      div.id = nodeId;
+      div.setAttribute('data-node-id', nodeId);
+      div.setAttribute('data-block-type', blockType);
+
+      if (blockType === 'condition') {
+        div.innerHTML = `
+          <div class="node-connector connector-in"></div>
+          <div class="node-header">
+            <span class="node-icon">🔀</span>
+            <div class="node-title-box">
+              <span class="node-kind">${kind}</span>
+              <h4 class="node-name">${title}</h4>
+            </div>
+            <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
+          </div>
+          <div class="node-summary" id="${nodeId}-summary">${summary}</div>
+          <div class="node-multi-outputs">
+            <div class="multi-output-port port-true" title="Condition vérifiée : saut direct vers en-têtes In-Place">
+              <span class="port-label">✓ Vrai (Match)</span>
+              <div class="node-connector connector-out out-true" data-port="true"></div>
+            </div>
+            <div class="multi-output-port port-false" title="Condition non vérifiée : réencodage nécessaire">
+              <span class="port-label">✗ Faux (Else)</span>
+              <div class="node-connector connector-out out-false" data-port="false"></div>
+            </div>
+            <div class="multi-output-port port-fallback" title="Repli d'urgence (si échec GPU)">
+              <span class="port-label">⚡ Repli (CPU)</span>
+              <div class="node-connector connector-out out-fallback" data-port="fallback"></div>
+            </div>
+          </div>
+        `;
+      } else if (blockType === 'mkvpropedit') {
+        div.innerHTML = `
+          <div class="node-connector connector-in"></div>
+          <div class="node-connector connector-out"></div>
+          <div class="node-header">
+            <span class="node-icon">⚡</span>
+            <div class="node-title-box">
+              <span class="node-kind">${kind}</span>
+              <h4 class="node-name">${title}</h4>
+            </div>
+            <span class="status-pill success node-pill in-place">⚡ In-Place</span>
+            <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
+          </div>
+          <div class="node-summary" id="${nodeId}-summary">${summary}</div>
+        `;
+      } else {
+        const isWorkingFile = blockType.includes('video') || blockType.includes('audio') || blockType.includes('remux');
+        const pillHtml = isWorkingFile ? '<span class="status-pill info node-pill working-file">📦 WorkingFile</span>' : '';
+        div.innerHTML = `
+          <div class="node-connector connector-in"></div>
+          ${blockType === 'file-output' ? '' : '<div class="node-connector connector-out"></div>'}
+          <div class="node-header">
+            <span class="node-icon">${icon}</span>
+            <div class="node-title-box">
+              <span class="node-kind">${kind}</span>
+              <h4 class="node-name">${title}</h4>
+            </div>
+            ${pillHtml}
+            <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
+          </div>
+          <div class="node-summary" id="${nodeId}-summary">${summary}</div>
+        `;
+      }
+
+      nodesContainer.appendChild(div);
+      bindNodeEvents(div);
+      selectNode(div);
+      setTimeout(drawCanvasLines, 30);
+    }
+
+    // 5. Sélection et inspecteur de bloc
+    function selectNode(nodeEl) {
+      if (!nodeEl) return;
+      document.querySelectorAll('.canvas-node').forEach(n => n.classList.remove('selected'));
+      nodeEl.classList.add('selected');
+
+      const blockType = nodeEl.getAttribute('data-block-type') || 'file-input';
+      const nodeName = nodeEl.querySelector('.node-name') ? nodeEl.querySelector('.node-name').textContent : 'Bloc';
+      const nodeKind = nodeEl.querySelector('.node-kind') ? nodeEl.querySelector('.node-kind').textContent : 'Outil';
+
+      const titleEl = el('inspector-block-title');
+      const toolEl = el('inspector-block-tool');
+      const formContainer = el('inspector-form-container');
+
+      if (titleEl) titleEl.textContent = nodeName;
+      if (toolEl) toolEl.textContent = nodeKind.split('•')[0].trim();
+
+      if (formContainer) {
+        if (blockType === 'file-input') {
+          formContainer.innerHTML = `
+            <div class="form-group">
+              <label for="node-cfg-mask" class="form-label">Masque de surveillance</label>
+              <input type="text" id="node-cfg-mask" class="form-input" value="*.mkv, *.mp4, *.avi, *.ts" />
+              <span class="form-help">Filtre les extensions déclenchant ce flux.</span>
+            </div>
+            <div class="status-pill success" style="width: 100%; margin-top: 0.75rem; justify-content: center;">
+              ✓ Métadonnées inspectées automatiquement
+            </div>
+            <p style="font-size: 0.8125rem; color: var(--text-dim); line-height: 1.5; margin-top: 0.5rem;">
+              Conformément à l'ADR 0008, les métadonnées (codecs, résolutions, langues audio et sous-titres) sont injectées automatiquement par MediaInfo et FFprobe dès l'interception du média.
+            </p>
+          `;
+        } else if (blockType === 'condition') {
+          formContainer.innerHTML = `
+            <div class="form-group">
+              <label for="node-cfg-prop" class="form-label">Propriété à tester</label>
+              <select id="node-cfg-prop" class="form-select">
+                <option value="video.codec" selected>Codec Vidéo</option>
+                <option value="video.resolution">Résolution (1080p, 4K...)</option>
+                <option value="audio.language">Langue Audio présente</option>
+                <option value="video.hdr">Profil HDR (HDR10, DV)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="node-cfg-op" class="form-label">Opérateur</label>
+              <select id="node-cfg-op" class="form-select">
+                <option value="eq" selected>Est égal à (==)</option>
+                <option value="neq">Est différent de (!=)</option>
+                <option value="contains">Contient</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="node-cfg-val" class="form-label">Valeur cible</label>
+              <input type="text" id="node-cfg-val" class="form-input" value="HEVC" />
+            </div>
+            <div style="background: var(--bg-subtle); padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); font-size: 0.75rem; line-height: 1.45;">
+              <strong style="color: var(--text-main);">Aiguillage tri-sorties (ADR-0008) :</strong>
+              <ul style="margin: 0.25rem 0 0 1rem; color: var(--text-dim);">
+                <li><span style="color: #10b981; font-weight: 700;">✓ Vrai :</span> Saut immédiat vers In-Place mkvpropedit</li>
+                <li><span style="color: #f59e0b; font-weight: 700;">✗ Faux :</span> Encodage matériel GPU dans /work</li>
+                <li><span style="color: #8b5cf6; font-weight: 700;">⚡ Repli :</span> Bascule automatique CPU libx265</li>
+              </ul>
+            </div>
+          `;
+        } else if (blockType === 'mkvpropedit') {
+          formContainer.innerHTML = `
+            <div class="status-pill success in-place" style="width: 100%; margin-bottom: 0.75rem; justify-content: center;">
+              ⚡ Exécution In-Place (ADR 0008)
+            </div>
+            <p style="font-size: 0.8125rem; color: var(--text-dim); margin-bottom: 0.75rem;">
+              Modifie directement les en-têtes EBML Matroska sur le fichier sans aucune duplication préalable dans /work (gain massif en E/S disque).
+            </p>
+            <div class="form-group">
+              <label for="prop-audio-default" class="form-label">Piste audio par défaut</label>
+              <input type="text" id="prop-audio-default" class="form-input" value="fre" />
+              <span class="form-help">Code langue ISO-639-2 (ex: fre, fra)</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Drapeaux sous-titres</label>
+              <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem;">
+                <input type="checkbox" checked /> Forcer drapeau 'forced' si piste forcée détectée
+              </label>
+            </div>
+          `;
+        } else if (blockType === 'video-encode') {
+          formContainer.innerHTML = `
+            <div class="status-pill info working-file" style="width: 100%; margin-bottom: 0.75rem; justify-content: center;">
+              📦 WorkingFile éphémère (/work)
+            </div>
+            <div class="form-group">
+              <label for="node-cfg-codec" class="form-label">Codec cible</label>
+              <select id="node-cfg-codec" class="form-select">
+                <option value="hevc" selected>HEVC / H.265 (Recommandé)</option>
+                <option value="av1">AV1 (Haute efficacité)</option>
+                <option value="h264">H.264 / AVC (Universel)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="node-cfg-encoder" class="form-label">Encodeur matériel</label>
+              <select id="node-cfg-encoder" class="form-select">
+                <option value="qsv" selected>Intel QuickSync (hevc_qsv)</option>
+                <option value="nvenc">NVIDIA NVENC (hevc_nvenc)</option>
+                <option value="vaapi">Linux VA-API (hevc_vaapi)</option>
+                <option value="cpu">Processeur CPU (libx265)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Qualité cible (1 = Débit bas, 9 = Transparent)</label>
+              <input type="range" min="1" max="9" value="6" class="form-range" />
+            </div>
+          `;
+        } else if (blockType === 'file-output') {
+          formContainer.innerHTML = `
+            <div class="form-group">
+              <label for="node-cfg-dest-mode" class="form-label">Mode de destination</label>
+              <select id="node-cfg-dest-mode" class="form-select">
+                <option value="replace" selected>Remplacer l'original (Atomique POSIX)</option>
+                <option value="folder">Dossier de sortie dédié (/data/output)</option>
+              </select>
+              <span class="form-help">Remplacement atomique Unix garantissant zéro fichier corrompu.</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Intégration média</label>
+              <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem;">
+                <input type="checkbox" checked /> Notifier Sonarr / Radarr du renommage
+              </label>
+            </div>
+          `;
+        } else {
+          formContainer.innerHTML = `
+            <div class="form-group">
+              <label class="form-label">Paramètres généraux du bloc</label>
+              <input type="text" class="form-input" value="Configuration par défaut" />
+            </div>
+          `;
+        }
+      }
+    }
+
+    function bindNodeEvents(nodeEl) {
+      if (!nodeEl) return;
+      nodeEl.addEventListener('click', (e) => {
+        if (!e.target.classList.contains('node-remove-btn')) {
+          selectNode(nodeEl);
+        }
+      });
+
+      const removeBtn = nodeEl.querySelector('.node-remove-btn');
+      if (removeBtn) {
+        removeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          nodeEl.remove();
+          drawCanvasLines();
+          const firstRemaining = nodesContainer.querySelector('.canvas-node');
+          if (firstRemaining) selectNode(firstRemaining);
+        });
+      }
+    }
+
+    function rebindAllNodes() {
+      if (!nodesContainer) return;
+      nodesContainer.querySelectorAll('.canvas-node').forEach(nodeEl => {
+        bindNodeEvents(nodeEl);
+      });
+      const first = nodesContainer.querySelector('.canvas-node');
+      if (first) selectNode(first);
+    }
+
+    rebindAllNodes();
+
+    // 6. Ajout de blocs depuis la barre latérale
+    document.querySelectorAll('.draggable-block-item.addable').forEach(item => {
+      item.addEventListener('click', () => {
+        const blockType = item.getAttribute('data-block-type') || 'remux-mkv';
+        const title = item.querySelector('strong') ? item.querySelector('strong').textContent : 'Nouveau bloc';
+        const kind = item.querySelector('span') ? item.querySelector('span').textContent : 'Outil';
+        const desc = item.querySelector('.block-drag-info span') ? item.querySelector('.block-drag-info span').textContent : '';
+
+        appendNodeToCanvas(blockType, kind, title, desc);
+        showNotice(`Bloc « ${title} » ajouté au flux`, 'info');
+      });
+    });
+
+    // 7. Banc d'essai de simulation interactive ADR 0008
+    function resetSimulation() {
+      activeSimulation = null;
+      document.querySelectorAll('.sim-btn').forEach(b => {
+        b.classList.remove('active-true', 'active-false', 'active-fallback');
+      });
+      if (nodesContainer) {
+        nodesContainer.querySelectorAll('.canvas-node').forEach(n => {
+          n.classList.remove('sim-active', 'sim-active-true', 'sim-active-false', 'sim-active-fallback', 'sim-dimmed');
+        });
+      }
+      drawCanvasLines();
+    }
+
+    document.querySelectorAll('.sim-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const simType = btn.getAttribute('data-sim');
+        if (simType === 'reset') {
+          resetSimulation();
+          showNotice('Simulation réinitialisée', 'info');
+          return;
+        }
+
+        resetSimulation();
+        activeSimulation = simType;
+
+        if (simType === 'true') {
+          btn.classList.add('active-true');
+          const n1 = el('node-1');
+          const n2 = el('node-2');
+          const n3 = el('node-3');
+          const n4 = el('node-4');
+          const n5 = el('node-5');
+
+          if (n1) n1.classList.add('sim-active');
+          if (n2) n2.classList.add('sim-active', 'sim-active-true');
+          if (n3) n3.classList.add('sim-active', 'sim-active-true');
+          if (n4) n4.classList.add('sim-dimmed');
+          if (n5) n5.classList.add('sim-active');
+
+          drawCanvasLines();
+          showNotice('✓ Simulation ADR-0008 : Fichier HEVC détecté. Traitement In-Place direct via mkvpropedit (aucun transfert /work).', 'success');
+        } else if (simType === 'false') {
+          btn.classList.add('active-false');
+          const n1 = el('node-1');
+          const n2 = el('node-2');
+          const n3 = el('node-3');
+          const n4 = el('node-4');
+          const n5 = el('node-5');
+
+          if (n1) n1.classList.add('sim-active');
+          if (n2) n2.classList.add('sim-active', 'sim-active-false');
+          if (n3) n3.classList.add('sim-dimmed');
+          if (n4) n4.classList.add('sim-active', 'sim-active-false');
+          if (n5) n5.classList.add('sim-active');
+
+          drawCanvasLines();
+          showNotice('✗ Simulation ADR-0008 : Fichier non HEVC. Routage vers l\'encodeur matériel GPU dans /work/job-<uuid>/.', 'info');
+        } else if (simType === 'fallback') {
+          btn.classList.add('active-fallback');
+          const n1 = el('node-1');
+          const n2 = el('node-2');
+          const n3 = el('node-3');
+          const n4 = el('node-4');
+          const n5 = el('node-5');
+
+          if (n1) n1.classList.add('sim-active');
+          if (n2) n2.classList.add('sim-active', 'sim-active-fallback');
+          if (n3) n3.classList.add('sim-dimmed');
+          if (n4) {
+            n4.classList.add('sim-active', 'sim-active-fallback');
+            const summary = el('node-4-summary');
+            if (summary) summary.textContent = '⚡ Bascule repli logiciel active : CPU libx265 (Qualité : 6)';
+          }
+          if (n5) n5.classList.add('sim-active');
+
+          drawCanvasLines();
+          showNotice('⚡ Simulation ADR-0008 : Échec transcodeur matériel GPU. Bascule automatique vers l\'encodeur CPU logiciel.', 'warning');
+        }
+      });
+    });
+
+    // Sauvegarde des modifications du flux
+    const saveFlowBtn = el('btn-canvas-save-flow');
+    if (saveFlowBtn) {
+      saveFlowBtn.addEventListener('click', () => {
+        showNotice('Modifications du flux enregistrées dans la configuration SQLite.', 'success');
+      });
+    }
+  }
+
+
+// --- Synchronisation globale ---
+  async function refreshAll() {
+    const refreshBtn = el('refresh-all-btn');
+    if (refreshBtn) {
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = 'Actualisation…';
+    }
+
+    await checkHealth();
+    await checkSession();
+    await Promise.allSettled([
+      loadFiles(),
+      loadJobs(),
+      loadWorkers(),
+      loadSystemConfig(),
+      loadToolsStatus()
+    ]);
+
+    if (refreshBtn) {
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = 'Actualiser';
+    }
+  }
+
+
+  // --- Initialisation des écouteurs d'événements ---
+  function initListeners() {
+    setupTabs();
+    setupTheme();
+
+    const refreshBtn = el('refresh-all-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', refreshAll);
+
+    // Raccourcis d'action du tableau de bord
+    const gotoFilesBtn = el('quick-goto-files-btn');
+    if (gotoFilesBtn) gotoFilesBtn.addEventListener('click', () => switchTab('files'));
+
+    const gotoFlowsBtn = el('quick-goto-flows-btn');
+    if (gotoFlowsBtn) gotoFlowsBtn.addEventListener('click', () => switchTab('flows'));
+
+    const gotoJobsBtn = el('quick-goto-jobs-btn');
+    if (gotoJobsBtn) gotoJobsBtn.addEventListener('click', () => switchTab('jobs'));
+
+    const gotoSettingsBtn = el('quick-goto-settings-btn');
+    if (gotoSettingsBtn) gotoSettingsBtn.addEventListener('click', () => switchTab('settings'));
+
+    // Formulaire de session
+    const saveKeyBtn = el('admin-key-save-btn');
+    const inputKey = el('admin-key-input');
+    if (saveKeyBtn && inputKey) {
+      saveKeyBtn.addEventListener('click', () => login(inputKey.value));
+      inputKey.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') login(inputKey.value);
+      });
+    }
+
+    const logoutBtn = el('admin-key-logout-btn');
+    if (logoutBtn) logoutBtn.addEventListener('click', logout);
+
+    // Recherche de fichiers
+    const filesSearch = el('files-search-input');
+    if (filesSearch) {
+      filesSearch.addEventListener('input', renderFilesTable);
+    }
+
+    // Dialogue confirmation remux
+    const closeDialogX = el('confirm-dialog-close-x');
+    if (closeDialogX) closeDialogX.addEventListener('click', closeConfirmRemuxDialog);
+
+    const cancelDialogBtn = el('confirm-dialog-cancel-btn');
+    if (cancelDialogBtn) cancelDialogBtn.addEventListener('click', closeConfirmRemuxDialog);
+
+    const submitRemuxBtn = el('confirm-dialog-submit-btn');
+    if (submitRemuxBtn) submitRemuxBtn.addEventListener('click', submitRemuxJob);
+
+    // Recherche de tâches
+    const jobsSearch = el('jobs-search-input');
+    if (jobsSearch) {
+      jobsSearch.addEventListener('input', renderJobsTable);
+    }
+
+    // Filtres de statut de tâches
+    document.querySelectorAll('.filter-chip[data-filter]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-chip[data-filter]').forEach(b => b.setAttribute('aria-pressed', 'false'));
+        btn.setAttribute('aria-pressed', 'true');
+        activeJobFilter = btn.getAttribute('data-filter') || 'all';
+        renderJobsTable();
+      });
+    });
+
+    // Configuration du Gestionnaire de Flux
+    setupFlowsPanel();
+
+    // Configuration de la section Plugins et Outils
+    setupPluginsPanel();
+
+    // Configuration de la section Raccordement Worker et Clés
+    setupWorkerConfigUi();
+
+    // Dialogue détails tâche
+    const jobDialogCloseX = el('job-dialog-close-x');
+    if (jobDialogCloseX) jobDialogCloseX.addEventListener('click', closeJobDetailDialog);
+
+    const jobDialogCloseBtn = el('job-dialog-close-btn');
+    if (jobDialogCloseBtn) jobDialogCloseBtn.addEventListener('click', closeJobDetailDialog);
+
+    // Fermeture avec Échap pour les modales
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeConfirmRemuxDialog();
+        closeJobDetailDialog();
+        const wizard = el('flow-wizard-dialog');
+        if (wizard && wizard.open) {
+          wizard.close();
+        }
+      }
+    });
+
+    // Polling régulier de santé toutes les 30 s
+    setInterval(checkHealth, 30000);
+  }
+
+  // Démarrage
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      initListeners();
+      refreshAll();
+    });
+  } else {
+    initListeners();
+    refreshAll();
+  }
+
+})();
+
+  </script>
+</body>
+</html>

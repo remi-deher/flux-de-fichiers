@@ -26,20 +26,33 @@ fn lease(h: &HeaderMap) -> AppResult<LeaseRequest> {
     Ok(LeaseRequest {
         worker_id: uuid("x-worker-id")?,
         lease_token: uuid("x-lease-token")?,
+        telemetry: None,
     })
 }
 
-async fn stream_file(path: &std::path::Path) -> AppResult<Response> {
+async fn stream_file(path: &std::path::Path, attachment_name: Option<&str>) -> AppResult<Response> {
     let file = tokio::fs::File::open(path).await?;
     let size = file.metadata().await?.len();
-    Ok((
+    let mut response = (
         [
             ("content-type", "video/x-matroska".to_owned()),
             ("content-length", size.to_string()),
         ],
         Body::from_stream(ReaderStream::new(file)),
     )
-        .into_response())
+        .into_response();
+    response.headers_mut().insert(
+        axum::http::header::X_CONTENT_TYPE_OPTIONS,
+        axum::http::HeaderValue::from_static("nosniff"),
+    );
+    if let Some(name) = attachment_name {
+        let value = format!("attachment; filename=\"{name}\"");
+        let value = axum::http::HeaderValue::from_str(&value).map_err(|_| AppError::Internal)?;
+        response
+            .headers_mut()
+            .insert(axum::http::header::CONTENT_DISPOSITION, value);
+    }
+    Ok(response)
 }
 
 pub async fn source(
@@ -49,27 +62,37 @@ pub async fn source(
 ) -> AppResult<Response> {
     authorize(&h, &s.config.worker_key)?;
     let job = repository::active(&s.pool, id, &lease(&h)?).await?;
-    stream_file(&storage::input_path(&s.config.input_dir, &job.source_name).await?).await
+    stream_file(
+        &storage::input_path(&s.config.input_dir, &job.source_name).await?,
+        None,
+    )
+    .await
 }
 pub async fn output(
     State(s): State<AppState>,
     h: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> AppResult<Response> {
-    authorize(&h, &s.config.admin_key)?;
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     let name: Option<String> =
-        sqlx::query_scalar("SELECT output_name FROM jobs WHERE id=$1 AND status='succeeded'")
+        sqlx::query_scalar("SELECT output_name FROM jobs WHERE id=?1 AND status='succeeded'")
             .bind(id)
             .fetch_optional(&s.pool)
             .await?
             .flatten();
-    stream_file(
+    let mut response = stream_file(
         &s.config
             .data_dir
             .join("output")
             .join(name.ok_or(AppError::NotFound)?),
+        Some(&format!("job-{id}.mkv")),
     )
-    .await
+    .await?;
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    Ok(response)
 }
 
 pub async fn result(
@@ -131,18 +154,33 @@ async fn receive(
     }
     file.sync_all().await?;
     drop(file);
-    let (hash, size) = storage::fingerprint(staging, s.config.max_file_bytes).await?;
     let source = storage::input_path(&s.config.input_dir, &job.source_name).await?;
-    let (source_hash, _) = storage::fingerprint(&source, s.config.max_file_bytes).await?;
-    if Some(&source_hash) != job.source_sha256.as_ref() {
+    publish_staged(s, id, lease, job, &source, staging, warning).await?;
+    Ok(())
+}
+
+pub(crate) async fn publish_staged(
+    s: &AppState,
+    id: Uuid,
+    lease: &LeaseRequest,
+    job: &Job,
+    source: &std::path::Path,
+    staging: &std::path::Path,
+    warning: bool,
+) -> AppResult<()> {
+    let (hash, size) = storage::fingerprint(staging, s.config.max_file_bytes).await?;
+    let (source_hash, source_size) = storage::fingerprint(source, s.config.max_file_bytes).await?;
+    if Some(&source_hash) != job.source_sha256.as_ref()
+        || job.source_bytes != Some(source_size as i64)
+    {
         return Err(AppError::Conflict);
     }
-    media::validate_remux(&source, staging)
+    media::validate_remux(source, staging)
         .await
         .map_err(|_| AppError::Invalid)?;
-    let mut tx = s.pool.begin().await?;
+    let mut tx = s.pool.begin_with("BEGIN IMMEDIATE").await?;
     // Fence a former lease even if it finishes after another agent has taken over.
-    let active: Option<Uuid> = sqlx::query_scalar("SELECT id FROM jobs WHERE id=$1 AND worker_id=$2 AND lease_token=$3 AND status='running' AND leased_until>now() FOR UPDATE")
+    let active: Option<Uuid> = sqlx::query_scalar("SELECT id FROM jobs WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND status='running' AND leased_until > datetime('now')")
         .bind(id).bind(lease.worker_id).bind(lease.lease_token).fetch_optional(&mut *tx).await?;
     if active.is_none() {
         return Err(AppError::Conflict);
@@ -151,7 +189,7 @@ async fn receive(
     let destination = s.config.data_dir.join("output").join(&name);
     // Hard-link publication is atomic, cannot overwrite, and stays on the data filesystem.
     tokio::fs::hard_link(staging, &destination).await?;
-    let updated = sqlx::query("UPDATE jobs SET status='succeeded',output_name=$2,output_sha256=$3,output_bytes=$4,warning=$5,lease_token=NULL,leased_until=NULL,error_code=NULL,updated_at=now() WHERE id=$1")
+    let updated = sqlx::query("UPDATE jobs SET status='succeeded',output_name=?2,output_sha256=?3,output_bytes=?4,warning=?5,lease_token=NULL,leased_until=NULL,error_code=NULL,updated_at=datetime('now') WHERE id=?1")
         .bind(id).bind(name).bind(hash).bind(size as i64).bind(warning).execute(&mut *tx).await;
     let completed = match updated {
         Ok(_) => tx.commit().await,
@@ -164,5 +202,6 @@ async fn receive(
         return Err(error.into());
     }
     tracing::info!(job_id=%id, worker_id=%lease.worker_id, bytes=size, warning, "remux completed");
+    s.notify_job_event("job_succeeded", id, "succeeded", None);
     Ok(())
 }

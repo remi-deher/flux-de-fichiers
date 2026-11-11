@@ -1,7 +1,10 @@
 use anyhow::Context;
 use serde_json::Value;
 use std::{path::Path, process::Stdio, time::Duration};
-use tokio::{io::AsyncReadExt, process::Command};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncReadExt},
+    process::Command,
+};
 
 const TOOL_TIMEOUT: Duration = Duration::from_secs(3600);
 const MAX_IDENTIFICATION_BYTES: u64 = 8 * 1024 * 1024;
@@ -11,8 +14,12 @@ pub fn executable() -> String {
 }
 
 pub async fn inspect(path: &Path) -> anyhow::Result<Value> {
+    inspect_with(Path::new(&executable()), path).await
+}
+
+pub async fn inspect_with(bin: &Path, path: &Path) -> anyhow::Result<Value> {
     tokio::time::timeout(Duration::from_secs(60), async {
-        let mut child = Command::new(executable())
+        let mut child = Command::new(bin)
             .arg("--output-charset")
             .arg("UTF-8")
             .arg("-J")
@@ -79,8 +86,12 @@ fn track_signature(data: &Value) -> Vec<Value> {
 }
 
 pub async fn validate_remux(source: &Path, output: &Path) -> anyhow::Result<()> {
-    let before = inspect(source).await?;
-    let after = inspect(output).await?;
+    validate_remux_with(Path::new(&executable()), source, output).await
+}
+
+pub async fn validate_remux_with(bin: &Path, source: &Path, output: &Path) -> anyhow::Result<()> {
+    let before = inspect_with(bin, source).await?;
+    let after = inspect_with(bin, output).await?;
     anyhow::ensure!(
         track_signature(&before) == track_signature(&after),
         "track metadata mismatch"
@@ -115,29 +126,71 @@ pub async fn validate_remux(source: &Path, output: &Path) -> anyhow::Result<()> 
 
 /// MKVToolNix: 0 = success, 1 = success with warnings, 2 = error.
 pub async fn remux(source: &Path, output: &Path) -> anyhow::Result<bool> {
-    inspect(source).await?;
-    let status = tokio::time::timeout(
-        TOOL_TIMEOUT,
-        Command::new(executable())
-            .arg("--output-charset")
-            .arg("UTF-8")
-            .arg("--disable-track-statistics-tags")
-            .arg("--output")
-            .arg(output)
-            .arg(source)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .status(),
-    )
+    remux_with(Path::new(&executable()), source, output).await
+}
+
+pub async fn remux_with(bin: &Path, source: &Path, output: &Path) -> anyhow::Result<bool> {
+    remux_with_progress(bin, source, output, |_, _| {}).await
+}
+
+pub async fn remux_with_progress<F>(
+    bin: &Path,
+    source: &Path,
+    output: &Path,
+    mut on_progress: F,
+) -> anyhow::Result<bool>
+where
+    F: FnMut(u32, &str) + Send + 'static,
+{
+    inspect_with(bin, source).await?;
+    let mut child = Command::new(bin)
+        .arg("--output-charset")
+        .arg("UTF-8")
+        .arg("--disable-track-statistics-tags")
+        .arg("--output")
+        .arg(output)
+        .arg(source)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()?;
+
+    let stdout = child.stdout.take().context("missing stdout")?;
+    let mut reader = tokio::io::BufReader::new(stdout).lines();
+
+    let read_progress = async {
+        while let Ok(Some(line)) = reader.next_line().await {
+            if let Some(pct_str) = line.strip_prefix("Progress: ") {
+                let trimmed = pct_str.trim().trim_end_matches('%');
+                if let Ok(pct) = trimmed.parse::<u32>() {
+                    on_progress(pct, &line);
+                }
+            } else if line.contains('%') {
+                on_progress(0, &line);
+            }
+        }
+    };
+
+    let wait_child = async {
+        let status = child.wait().await?;
+        anyhow::Ok(status)
+    };
+
+    let (status, _) = tokio::time::timeout(TOOL_TIMEOUT, async {
+        tokio::try_join!(wait_child, async {
+            read_progress.await;
+            anyhow::Ok(())
+        })
+    })
     .await
     .context("remux timed out")??;
+
     tracing::info!(exit_code = ?status.code(), "mkvmerge finished");
     let warning = match status.code() {
         Some(0) => false,
         Some(1) => true,
         _ => anyhow::bail!("mkvmerge failed"),
     };
-    validate_remux(source, output).await?;
+    validate_remux_with(bin, source, output).await?;
     Ok(warning)
 }

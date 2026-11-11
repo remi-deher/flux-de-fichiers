@@ -19,12 +19,35 @@ pub enum AppError {
     Conflict,
     #[error("payload too large")]
     TooLarge,
+    #[error("checksum mismatch: expected {expected}, actual {actual}")]
+    ChecksumMismatch { expected: String, actual: String },
+    #[error("tool unavailable: {0}")]
+    ToolUnavailable(String),
+    #[error("unsupported archive: {0}")]
+    UnsupportedArchive(String),
+    #[error("invalid manifest: {0}")]
+    InvalidManifest(String),
     #[error("database failure")]
-    Database(#[from] sqlx::Error),
+    Database(sqlx::Error),
     #[error("storage failure")]
     Storage(#[from] std::io::Error),
     #[error("internal failure")]
     Internal,
+}
+
+impl From<sqlx::Error> for AppError {
+    fn from(err: sqlx::Error) -> Self {
+        if let Some(db_err) = err.as_database_error()
+            && let Some(code) = db_err.code()
+        {
+            match code.as_ref() {
+                "2067" | "1555" => return AppError::Conflict,
+                "787" => return AppError::Invalid,
+                _ => {}
+            }
+        }
+        AppError::Database(err)
+    }
 }
 
 impl IntoResponse for AppError {
@@ -35,10 +58,13 @@ impl IntoResponse for AppError {
             Self::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             Self::NotFound => (StatusCode::NOT_FOUND, "not_found"),
             Self::Conflict => (StatusCode::CONFLICT, "lease_expired_or_conflict"),
+            Self::ChecksumMismatch { .. }
+            | Self::ToolUnavailable(_)
+            | Self::UnsupportedArchive(_)
+            | Self::InvalidManifest(_) => (StatusCode::BAD_REQUEST, "invalid_tool_artifact"),
             Self::TooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "file_too_large"),
             Self::Database(_) | Self::Storage(_) | Self::Internal => {
-                // Never log database URLs, SQL errors or filesystem paths supplied by users.
-                tracing::error!(error_kind = %self, "request failed");
+                tracing::error!(error = ?self, "internal failure");
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal_error")
             }
         };

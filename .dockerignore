@@ -8,6 +8,7 @@ var
 .scenario
 .tools
 target
+**/target
 node_modules
 docs
 tests

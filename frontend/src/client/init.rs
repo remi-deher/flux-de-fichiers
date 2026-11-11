@@ -1,3 +1,6 @@
+//! Initialisation de l'interface et synchronisation.
+
+pub const SCRIPT: &str = r###"
 // --- Synchronisation globale ---
   async function refreshAll() {
     const refreshBtn = el('refresh-all-btn');
@@ -132,3 +135,5 @@
     initListeners();
     refreshAll();
   }
+
+"###;

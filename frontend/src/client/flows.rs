@@ -1,3 +1,6 @@
+//! Éditeur visuel de flux et canvas.
+
+pub const SCRIPT: &str = r###"
   // --- Concepteur et Gestionnaire de Flux (Flows) type Zapier / FileFlows ---
   let cachedFlows = [];
 
@@ -841,3 +844,5 @@
       });
     }
   }
+
+"###;

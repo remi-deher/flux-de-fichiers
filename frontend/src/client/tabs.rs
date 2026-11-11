@@ -1,3 +1,6 @@
+//! Gestion des onglets et navigation ARIA.
+
+pub const SCRIPT: &str = r###"
 // --- Gestion des onglets accessibles ---
   const TABS = ['dashboard', 'files', 'flows', 'jobs', 'workers', 'plugins', 'settings', 'updates'];
 
@@ -203,3 +206,5 @@
       });
     }
   }
+
+"###;

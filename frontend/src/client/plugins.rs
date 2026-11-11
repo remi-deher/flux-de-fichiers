@@ -1,3 +1,6 @@
+//! Catalogue de plugins et dépôts.
+
+pub const SCRIPT: &str = r###"
 // --- Outils et catalogue dynamiques ---
   async function loadToolsStatus() {
     try {
@@ -478,3 +481,5 @@
     // Chargement initial des dépôts en arrière-plan
     loadRepositories();
   }
+
+"###;

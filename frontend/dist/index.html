@@ -1380,6 +1380,7 @@ path.sim-pulse-line {
 (function() {
   'use strict';
 
+
 // Sécurité : la clé d'administration réside UNIQUEMENT en mémoire volatile JavaScript de l'onglet actif.
   // Aucun stockage en clair dans sessionStorage ni localStorage.
   let volatileAdminKey = '';
@@ -1511,6 +1512,8 @@ path.sim-pulse-line {
       return false;
     }
   }
+
+
 
 
 // --- Gestion de la session et de l'authentification (Contrat #29) ---
@@ -1671,6 +1674,8 @@ path.sim-pulse-line {
     showNotice('Session fermée et mémoire purgée.', 'info');
     refreshAll();
   }
+
+
 
 
 // --- Gestion des onglets accessibles ---
@@ -1880,6 +1885,8 @@ path.sim-pulse-line {
   }
 
 
+
+
 // --- Fichiers sources ---
   async function loadFiles() {
     const tbody = el('files-table-body');
@@ -2014,6 +2021,8 @@ path.sim-pulse-line {
       showNotice('Échec de la soumission de la tâche : ' + e.message, 'error');
     }
   }
+
+
 
 
 // --- Tâches de remuxage & Télémétrie SSE ---
@@ -2398,6 +2407,8 @@ path.sim-pulse-line {
   document.addEventListener('DOMContentLoaded', setupActivityRoleTabs);
 
 
+
+
 // --- Serveurs et agents ---
   async function loadWorkers() {
     const tbody = el('workers-table-body');
@@ -2606,6 +2617,8 @@ path.sim-pulse-line {
       });
     }
   }
+
+
 
 
 // --- Outils et catalogue dynamiques ---
@@ -3088,6 +3101,8 @@ path.sim-pulse-line {
     // Chargement initial des dépôts en arrière-plan
     loadRepositories();
   }
+
+
 
 
   // --- Concepteur et Gestionnaire de Flux (Flows) type Zapier / FileFlows ---
@@ -3935,6 +3950,8 @@ path.sim-pulse-line {
   }
 
 
+
+
 // --- Synchronisation globale ---
   async function refreshAll() {
     const refreshBtn = el('refresh-all-btn');
@@ -4069,6 +4086,7 @@ path.sim-pulse-line {
     initListeners();
     refreshAll();
   }
+
 
 })();
 

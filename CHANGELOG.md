@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.11.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.10.0...v0.11.0) (2026-11-11)
+
+
+### Features
+
+* **theme:** migrer l'ensemble des styles vers du css-in-rust type et supprimer static/css ([4e81cb4](https://github.com/remi-deher/flux-de-fichiers/commit/4e81cb4cdea8386f0c66a5fa225f60a5df89420f))
+* **theme:** migrer les styles en CSS-in-Rust pur et supprimer static/css ([f0fe7f4](https://github.com/remi-deher/flux-de-fichiers/commit/f0fe7f40cad4a441f2799c300d064c5fb7fb368b))
+* **theme:** transition CSS-in-Rust pur et suppression des fichiers CSS ([019678d](https://github.com/remi-deher/flux-de-fichiers/commit/019678d01de8813223fd28cde8abb45c5db3f1cc))
+
 ## [0.10.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.9.1...v0.10.0) (2026-11-11)
 
 

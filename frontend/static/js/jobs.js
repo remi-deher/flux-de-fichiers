@@ -328,3 +328,39 @@
       dialog.close();
     }
   }
+
+  // --- Gestion des sous-vues Exploiter vs Diagnostiquer ---
+  function setupActivityRoleTabs() {
+    const btnOps = el('tab-role-operations');
+    const btnDiag = el('tab-role-diagnostic');
+    const viewOps = el('activity-view-operations');
+    const viewDiag = el('activity-view-diagnostic');
+
+    if (btnOps && btnDiag && viewOps && viewDiag) {
+      btnOps.addEventListener('click', () => {
+        btnOps.classList.add('active');
+        btnOps.setAttribute('aria-selected', 'true');
+        btnDiag.classList.remove('active');
+        btnDiag.setAttribute('aria-selected', 'false');
+        viewOps.style.display = 'block';
+        viewDiag.style.display = 'none';
+        jobsFilter = 'running';
+        updateFilterChips();
+        renderJobsTable();
+      });
+
+      btnDiag.addEventListener('click', () => {
+        btnDiag.classList.add('active');
+        btnDiag.setAttribute('aria-selected', 'true');
+        btnOps.classList.remove('active');
+        btnOps.setAttribute('aria-selected', 'false');
+        viewOps.style.display = 'block'; // La table des tâches est conservée pour affichage diagnostique
+        viewDiag.style.display = 'block';
+        jobsFilter = 'failed';
+        updateFilterChips();
+        renderJobsTable();
+      });
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', setupActivityRoleTabs);

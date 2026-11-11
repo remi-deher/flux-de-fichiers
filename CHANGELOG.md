@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.8.0...v0.8.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **db:** preservation du checksum sqlx de la migration 0005 et purge bare core via migration 0006 ([1b7286e](https://github.com/remi-deher/flux-de-fichiers/commit/1b7286eb5b58befc2fdffd92b32d0b9c1f4a2e55))
+* **db:** preservation du checksum sqlx de la migration 0005 et purge bare core via migration 0006 ([5438990](https://github.com/remi-deher/flux-de-fichiers/commit/5438990af65edb6550d07507e4f701944427101a))
+* **db:** purge bare core idempotente via migration 0006 ([c064c46](https://github.com/remi-deher/flux-de-fichiers/commit/c064c4612de6ccbaf6157589674dd9b319a111d9))
+
 ## [0.8.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.7.0...v0.8.0) (2026-11-11)
 
 

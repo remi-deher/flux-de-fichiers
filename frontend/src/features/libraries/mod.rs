@@ -24,20 +24,20 @@ pub fn LibrariesPanel() -> impl IntoView {
 
     let subnav_tabs = vec![
         SubNavTabItem {
-            id: "btn-subtab-files-libraries",
-            label: "Dossiers & Nœuds",
-            icon: Some("📁"),
-            target_id: "subtab-files-libraries",
-            is_active: true,
-            badge: Some("1"),
-        },
-        SubNavTabItem {
             id: "btn-subtab-files-browser",
             label: "Explorateur de fichiers",
             icon: Some("🔍"),
             target_id: "subtab-files-browser",
-            is_active: false,
+            is_active: true,
             badge: None,
+        },
+        SubNavTabItem {
+            id: "btn-subtab-files-libraries",
+            label: "Dossiers & Nœuds",
+            icon: Some("📁"),
+            target_id: "subtab-files-libraries",
+            is_active: false,
+            badge: Some("1"),
         },
     ];
 
@@ -67,8 +67,13 @@ pub fn LibrariesPanel() -> impl IntoView {
                 actions=subnav_actions
             />
 
-            // Sous-vue 1 : Dossiers & Accès Nœuds
-            <div id="subtab-files-libraries">
+            // Sous-vue 1 : Explorateur de médias (actif par défaut)
+            <div id="subtab-files-browser">
+                <FileBrowser />
+            </div>
+
+            // Sous-vue 2 : Dossiers & Accès Nœuds
+            <div id="subtab-files-libraries" hidden>
                 <section class="section-panel" aria-labelledby="libraries-section-title">
                     <div class="section-panel-header">
                         <div>
@@ -91,11 +96,6 @@ pub fn LibrariesPanel() -> impl IntoView {
                         />
                     </div>
                 </section>
-            </div>
-
-            // Sous-vue 2 : Explorateur de médias
-            <div id="subtab-files-browser" hidden>
-                <FileBrowser />
             </div>
         </div>
     }

@@ -14,6 +14,10 @@ pub fn JobsPanel() -> impl IntoView {
                             "Supervision temps réel des tâches de traitement et d'exécution des flux (en attente, en cours, succès, échecs) sur l'ensemble des nœuds."
                         </p>
                     </div>
+                    <div id="sse-status-badge" class="status-pill info" title="Mode de rafraîchissement des tâches" aria-live="polite">
+                        <span class="status-dot"></span>
+                        <span id="sse-status-text">"Sondage périodique"</span>
+                    </div>
                 </div>
 
                 <div class="toolbar-bar">

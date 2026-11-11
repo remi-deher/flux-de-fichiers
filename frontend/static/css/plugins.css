@@ -1,0 +1,140 @@
+/* --- Section Plugins, Outils et Contrats --- */
+.tools-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.25rem;
+  margin-top: 1rem;
+}
+
+.tool-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.tool-card:hover {
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-sm);
+}
+
+.tool-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.tool-identity {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.tool-badge-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.tool-card-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.tool-card-id {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.tool-card-desc {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin: 0.875rem 0;
+  line-height: 1.5;
+  flex: 1;
+}
+
+.tool-meta-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-bottom: 1rem;
+}
+
+.meta-tag {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+}
+
+.meta-tag.active-choice {
+  background: var(--info-bg);
+  color: var(--info-text);
+  border-color: var(--info-border);
+  font-weight: 600;
+}
+
+.tool-card-footer {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border-color);
+  padding-top: 0.875rem;
+}
+
+.copy-input-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.workers-info-grid {
+  margin-top: 1.5rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.card-caption {
+  font-size: 0.875rem;
+  color: var(--text-dim);
+  margin-top: 0.25rem;
+}
+
+.code-block-wrapper {
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.875rem 1rem;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  word-break: break-all;
+}

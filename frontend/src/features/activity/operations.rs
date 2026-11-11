@@ -21,10 +21,10 @@ pub fn ActivityOperations() -> impl IntoView {
                     <button
                         type="button"
                         class="filter-chip"
-                        data-filter="running"
+                        data-filter="all"
                         aria-pressed="true"
                     >
-                        "En cours" <span id="count-filter-running" style="opacity: 0.8;">"(0)"</span>
+                        "Tous" <span id="count-filter-all" style="opacity: 0.8;">"(0)"</span>
                     </button>
                     <button
                         type="button"
@@ -37,10 +37,26 @@ pub fn ActivityOperations() -> impl IntoView {
                     <button
                         type="button"
                         class="filter-chip"
-                        data-filter="all"
+                        data-filter="running"
                         aria-pressed="false"
                     >
-                        "Tous les états" <span id="count-filter-all" style="opacity: 0.8;">"(0)"</span>
+                        "En cours" <span id="count-filter-running" style="opacity: 0.8;">"(0)"</span>
+                    </button>
+                    <button
+                        type="button"
+                        class="filter-chip"
+                        data-filter="succeeded"
+                        aria-pressed="false"
+                    >
+                        "Succès" <span id="count-filter-succeeded" style="opacity: 0.8;">"(0)"</span>
+                    </button>
+                    <button
+                        type="button"
+                        class="filter-chip"
+                        data-filter="failed"
+                        aria-pressed="false"
+                    >
+                        "Échecs" <span id="count-filter-failed" style="opacity: 0.8;">"(0)"</span>
                     </button>
                 </div>
             </div>

@@ -164,6 +164,7 @@ jobs:
       - if: needs.changes.outputs.code == 'true'
         name: Exécuter les tests navigateur Playwright
         run: |
+          sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list /etc/apt/sources.list.d/* /etc/apt/apt-mirrors.txt 2>/dev/null || true
           pip install 'playwright==1.55.0'
           playwright install --with-deps chromium
           npm run test:browser

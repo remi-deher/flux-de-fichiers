@@ -1,3 +1,3 @@
-# Attributs Git pour Linguist et métriques de code
-scripts/** linguist-vendored
-frontend/dist/** linguist-detectable=false
+# Règle absolue pour GitHub Linguist : comptabilisation 100% Rust
+* linguist-detectable=false
+*.rs linguist-detectable=true

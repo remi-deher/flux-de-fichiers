@@ -59,7 +59,8 @@ def run_browser_tests():
 
         # 1. Chargement initial
         print("1. Chargement de l'interface d'accueil...", flush=True)
-        page.goto(BASE_URL, wait_until="networkidle")
+        page.goto(BASE_URL, wait_until="domcontentloaded")
+        page.wait_for_selector("#health-status-pill", state="visible")
         title_text = page.title()
         assert "flux de fichiers" in title_text.lower(), f"Titre inattendu: {title_text!r}"
         assert page.locator("#health-status-pill").is_visible(), "Badge de santé introuvable"

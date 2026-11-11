@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.3.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.2.0...v0.3.0) (2026-11-11)
+
+
+### Features
+
+* architecture conteneur unique style *arr ([#47](https://github.com/remi-deher/flux-de-fichiers/issues/47)/[#50](https://github.com/remi-deher/flux-de-fichiers/issues/50)) ([e89de7f](https://github.com/remi-deher/flux-de-fichiers/commit/e89de7fa397c4395f16477c628d9b581022a68ff))
+* architecture conteneur unique style *arr (HTTP 3000, SQLite /config, UI intégrée) ([2f3af7e](https://github.com/remi-deher/flux-de-fichiers/commit/2f3af7e5127943516876e57cd974af4e140078fc))
+* **auth:** auto-session web *arr ([#51](https://github.com/remi-deher/flux-de-fichiers/issues/51)) ([076a045](https://github.com/remi-deher/flux-de-fichiers/commit/076a045513d427113a557aee03eabcb6073c1394))
+* **auth:** ouvrir automatiquement la session web *arr et supprimer le toast 401 initial ([#51](https://github.com/remi-deher/flux-de-fichiers/issues/51)) ([1b1d04f](https://github.com/remi-deher/flux-de-fichiers/commit/1b1d04faad1fa7b9f20e8d894936b324e3bd0a35))
+* cache d'outils, télémétrie et panneau Plugins ([6512dfd](https://github.com/remi-deher/flux-de-fichiers/commit/6512dfd0b3abd34944a61c606225b2fc54843d13))
+* **flows:** adr-0009 blocs d'action découplés, webhooks contextuels et progression sse ([321d5f8](https://github.com/remi-deher/flux-de-fichiers/commit/321d5f8b0e37ded30f8c85d7f6749263059a5346))
+* **frontend/flows:** modularisation, simulation adr-0008, blocs d'action adr-0009 et sse ([84c3e08](https://github.com/remi-deher/flux-de-fichiers/commit/84c3e084bcee8d8f1659824bec59a3d3e70c1ca8))
+* **frontend:** modularisation css/js, simulation tri-sorties adr-0008 et flux sse ([bfeea3d](https://github.com/remi-deher/flux-de-fichiers/commit/bfeea3d506eb324469f2f72340a957901f398f45))
+* **frontend:** premiere interface Leptos et delegation des builds a la CI ([c8b0ec4](https://github.com/remi-deher/flux-de-fichiers/commit/c8b0ec411c7cf619498716aa0cb1aa5e4c12ec50))
+* gestionnaire de flux no-code type zapier, setup wizard et purge de résilience ([cd3d480](https://github.com/remi-deher/flux-de-fichiers/commit/cd3d4809d459c97d6c82823d6eea0b713d746d15))
+* gestionnaire de flux no-code type zapier, setup wizard et purge de résilience ([c8e43fe](https://github.com/remi-deher/flux-de-fichiers/commit/c8e43fef4452a98f2430cddac93ae5dff33fcac4))
+* integrate local processing and modularize core ([64d016c](https://github.com/remi-deher/flux-de-fichiers/commit/64d016c5fa0124ae0c27066be043986a93a55570))
+* outils distribués, télémétrie, panneau Plugins et CI Playwright ([ff42e32](https://github.com/remi-deher/flux-de-fichiers/commit/ff42e32a2648a0b0a5295b239602251f394c8c22))
+* **plugins:** intégration générique de plugins (Sonarr/Radarr) et aiguillage conditionnel tri-sorties (#ADR-0008) ([722e237](https://github.com/remi-deher/flux-de-fichiers/commit/722e2378bd1f78a0091b124c390373c90addc597))
+* **plugins:** intégration générique de plugins (Sonarr/Radarr) et bloc conditionnel tri-sorties (#ADR-0008) ([d0325be](https://github.com/remi-deher/flux-de-fichiers/commit/d0325be49e22fee998aefe21e11d7ea7aff40efa))
+* **plugins:** intégrer le cache d'outils, le catalogue de plugins et l'ADR 0006 ([7eecb9a](https://github.com/remi-deher/flux-de-fichiers/commit/7eecb9af25c856f500f76a671fe6b96fdfec80fc))
+* **plugins:** intégrer le cache d'outils, le catalogue de plugins et l'ADR 0006 ([5a3c5f5](https://github.com/remi-deher/flux-de-fichiers/commit/5a3c5f5680d3fe5c33d7dd6cb848598969883e09))
+* session web et poste de pilotage ([#28](https://github.com/remi-deher/flux-de-fichiers/issues/28)/[#29](https://github.com/remi-deher/flux-de-fichiers/issues/29)) ([a759c61](https://github.com/remi-deher/flux-de-fichiers/commit/a759c6179cdc8a3bf069f723a53dc157b2a3080c))
+* session web sécurisée et poste de pilotage Leptos ([7d5fc1a](https://github.com/remi-deher/flux-de-fichiers/commit/7d5fc1a963497971e117c50a28dd965016f192dc))
+
+
+### Bug Fixes
+
+* **ci:** adapter le test fallback SPA, le healthcheck worker et l'accès SQLite des scénarios ([a2fc9b1](https://github.com/remi-deher/flux-de-fichiers/commit/a2fc9b1bf520db845d0a690dfe68ce5a18daef06))
+* **ci:** aligner Playwright sur le DOM et épingler la dépendance ([c4def00](https://github.com/remi-deher/flux-de-fichiers/commit/c4def0012f82022276471ee3413dd11f2ed99bbd))
+* **ci:** assert le bouton et le flux de téléchargement Playwright ([0bc3440](https://github.com/remi-deher/flux-de-fichiers/commit/0bc3440ee918212f6e6f3e72ceb3d14d6c61a7b2))
+* **ci:** synchroniser Cargo.lock et formater le socle *arr ([70f3f89](https://github.com/remi-deher/flux-de-fichiers/commit/70f3f89099691cfb75b969ce66d3fad9d42ee6b6))
+* **compose:** définir un healthcheck actif sur worker pour compose --wait ([e9b78b7](https://github.com/remi-deher/flux-de-fichiers/commit/e9b78b7db584abc9b010eda073dda0a3df56a8fb))
+* **docker:** copier frontend/static lors du build frontend dans le Dockerfile ([d5a579f](https://github.com/remi-deher/flux-de-fichiers/commit/d5a579fe63459aa6d19647bc0e677986ab36b0c6))
+* **docker:** invalider le stub lib.rs lors du build frontend pour générer index.html complet ([65d13a5](https://github.com/remi-deher/flux-de-fichiers/commit/65d13a5bc3f4ebb3efd914d196277ae80805d7ea))
+* retirer l'emprunt inutile Clippy sur expires_at ([29d7284](https://github.com/remi-deher/flux-de-fichiers/commit/29d72847e7f8bbaa279869d4c178d3e5160c3d04))
+* **test:** adapter playwright au flux sse continu en utilisant domcontentloaded ([4774baf](https://github.com/remi-deher/flux-de-fichiers/commit/4774bafb83747f704a263909ff63ed52e56a025c))
+
 ## [0.2.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.1.0...v0.2.0) (2026-11-08)
 
 

@@ -3,5 +3,5 @@
 pub mod navigation;
 pub mod shell;
 
-pub use navigation::{BusinessRole, Navigation};
-pub use shell::AppShell;
+pub use navigation::{BusinessGroup, BusinessRole, Navigation};
+pub use shell::{AppShell, Header, Sidebar};

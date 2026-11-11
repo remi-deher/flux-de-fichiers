@@ -15,6 +15,28 @@
     let activeSimulation = null; // null | 'true' | 'false' | 'fallback'
     let activeCanvasFlowId = 'flow.default.mkv';
 
+    // Filtrage des flux par type de média (Vidéo, Audio, Image, Système)
+    document.querySelectorAll('.flow-type-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.flow-type-chip').forEach(b => {
+          b.classList.remove('active');
+          b.setAttribute('aria-pressed', 'false');
+        });
+        btn.classList.add('active');
+        btn.setAttribute('aria-pressed', 'true');
+        const filter = btn.getAttribute('data-flow-filter') || 'all';
+
+        document.querySelectorAll('.flow-card[data-flow-type]').forEach(card => {
+          const cardType = card.getAttribute('data-flow-type');
+          if (filter === 'all' || cardType === filter) {
+            card.style.display = '';
+          } else {
+            card.style.display = 'none';
+          }
+        });
+      });
+    });
+
     // 1. Navigation entre Bibliothèque et Canvas
     function openCanvas(flowId, flowTitle) {
       activeCanvasFlowId = flowId;

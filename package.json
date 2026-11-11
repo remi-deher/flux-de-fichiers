@@ -1,9 +1,0 @@
-{
-  "name": "flux-de-fichiers",
-  "private": true,
-  "scripts": {
-    "dev": "python3 scripts/dev.py",
-    "scenarios": "python3 scripts/scenarios.py",
-    "test:browser": "python3 scripts/test_browser.py"
-  }
-}

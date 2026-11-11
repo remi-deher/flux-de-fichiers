@@ -1,9 +1,11 @@
 //! Module d'activité : Rôles Exploiter (traitements en direct) et Diagnostiquer (historique et échecs).
 
 pub mod diagnostic;
+pub mod dialog;
 pub mod operations;
 
 pub use diagnostic::ActivityDiagnostic;
+pub use dialog::JobDetailDialog;
 pub use operations::ActivityOperations;
 
 use crate::core::{SubNav, SubNavTabItem};
@@ -88,6 +90,8 @@ pub fn JobsPanel() -> impl IntoView {
                     <ActivityDiagnostic />
                 </div>
             </section>
+
+            <JobDetailDialog />
         </div>
     }
 }

@@ -13,7 +13,8 @@
       loadJobs(),
       loadWorkers(),
       loadSystemConfig(),
-      loadToolsStatus()
+      loadToolsStatus(),
+      loadFlows()
     ]);
 
     if (refreshBtn) {

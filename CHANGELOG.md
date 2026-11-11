@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.6.0...v0.7.0) (2026-11-11)
+
+
+### Features
+
+* **frontend:** nouveau shell persistant avec navigation rail inspire d'encoding-central ([e4137e7](https://github.com/remi-deher/flux-de-fichiers/commit/e4137e7a057d58ac5e67be148b78a6949da4a277))
+* **frontend:** nouveau shell persistant avec navigation rail inspire d'encoding-central ([3bd4ae3](https://github.com/remi-deher/flux-de-fichiers/commit/3bd4ae37affedc4e47e5ca540364e7647f219005))
+* **frontend:** nouveau shell persistant et navigation rail inspire d'encoding-central ([0fced71](https://github.com/remi-deher/flux-de-fichiers/commit/0fced71871dd4c079676464631d70e872505bd3e))
+
+
+### Bug Fixes
+
+* **frontend:** suppression du debordement horizontal sur affichage mobile ([9512bb8](https://github.com/remi-deher/flux-de-fichiers/commit/9512bb8b11bcfd345b4625e052a79bcff1491469))
+
 ## [0.6.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.5.0...v0.6.0) (2026-11-11)
 
 

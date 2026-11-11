@@ -11,9 +11,8 @@ const IDLE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 
 pub async fn run(state: AppState) {
-    let worker_name = std::env::var("LOCAL_WORKER_NAME")
-        .or_else(|_| std::env::var("HOSTNAME").map(|host| format!("coordinator-{host}")))
-        .unwrap_or_else(|_| "coordinator-local".into());
+    let worker_name =
+        std::env::var("LOCAL_WORKER_NAME").unwrap_or_else(|_| "coordinator-local".into());
     let worker = match repository::register(&state.pool, &worker_name).await {
         Ok(worker) => worker,
         Err(error) => {

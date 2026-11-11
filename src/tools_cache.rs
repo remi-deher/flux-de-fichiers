@@ -64,18 +64,7 @@ pub fn host_arch() -> &'static str {
     std::env::consts::ARCH
 }
 
-/// Verrou garantissant l'exclusion mutuelle lors du téléchargement et de l'extraction.
-pub struct LockGuard {
-    lock_path: PathBuf,
-}
-
-impl Drop for LockGuard {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.lock_path);
-    }
-}
-
-/// Gestionnaire du cache local des outils distribués sur le worker.
+/// Gestionnaire local des outils distribués sur le worker.
 #[derive(Clone, Debug)]
 pub struct ToolCacheManager {
     cache_root: PathBuf,
@@ -102,30 +91,6 @@ impl ToolCacheManager {
     pub fn is_ready(&self, tool_id: &str, tool_version: &str, arch: &str) -> bool {
         let dir = self.tool_dir(tool_id, tool_version, arch);
         dir.join(".ready").is_file()
-    }
-
-    /// Acquiert atomiquement le verrou `.lock` pour éviter les accès concurrents.
-    pub fn acquire_lock(
-        &self,
-        tool_id: &str,
-        tool_version: &str,
-        arch: &str,
-    ) -> AppResult<LockGuard> {
-        let dir = self.tool_dir(tool_id, tool_version, arch);
-        fs::create_dir_all(&dir)?;
-
-        let lock_path = dir.join(".lock");
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock_path)
-        {
-            Ok(_) => Ok(LockGuard { lock_path }),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                Err(AppError::ToolLocked(lock_path.display().to_string()))
-            }
-            Err(e) => Err(AppError::Storage(e)),
-        }
     }
 
     /// Vérifie et retourne le chemin d'un binaire déjà en cache chaud.
@@ -188,6 +153,7 @@ impl ToolCacheManager {
 
     /// Extrait nativement une archive en mémoire (tar.gz), vérifie les empreintes SHA-256,
     /// attribue les permissions 0755 et crée le marqueur `.ready`.
+    /// L'opération utilise un répertoire temporaire et un renommage atomique (zéro verrou .lock).
     pub fn extract_and_install(
         &self,
         tool_id: &str,
@@ -196,17 +162,40 @@ impl ToolCacheManager {
         archive_bytes: &[u8],
     ) -> AppResult<PathBuf> {
         let target_dir = self.tool_dir(tool_id, tool_version, &artifact.arch);
-        let _lock = self.acquire_lock(tool_id, tool_version, &artifact.arch)?;
-
-        let install_result = self.do_extract_and_install(&target_dir, artifact, archive_bytes);
-
-        if install_result.is_err() {
-            // Nettoyage automatique en cas d'erreur
-            let _ = fs::remove_file(target_dir.join(".ready"));
-            let _ = fs::remove_dir_all(target_dir.join("bin"));
+        if target_dir.join(".ready").is_file() {
+            let binary_path = target_dir.join("bin").join(&artifact.binary_relative_path);
+            if binary_path.is_file() {
+                return Ok(binary_path);
+            }
         }
 
-        install_result
+        let parent_dir = target_dir.parent().ok_or(AppError::NotFound)?;
+        fs::create_dir_all(parent_dir)?;
+
+        let tmp_dir = parent_dir.join(format!(
+            ".tmp-{}-{}",
+            artifact.arch,
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&tmp_dir)?;
+
+        match self.do_extract_and_install(&tmp_dir, artifact, archive_bytes) {
+            Ok(_) => {
+                if target_dir.exists() {
+                    let _ = fs::remove_dir_all(&target_dir);
+                }
+                if let Err(e) = fs::rename(&tmp_dir, &target_dir) {
+                    let _ = fs::remove_dir_all(&tmp_dir);
+                    return Err(AppError::Storage(e));
+                }
+                let binary_path = target_dir.join("bin").join(&artifact.binary_relative_path);
+                Ok(binary_path)
+            }
+            Err(e) => {
+                let _ = fs::remove_dir_all(&tmp_dir);
+                Err(e)
+            }
+        }
     }
 
     fn do_extract_and_install(

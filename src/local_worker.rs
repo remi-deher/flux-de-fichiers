@@ -23,6 +23,18 @@ pub async fn run(state: AppState) {
     };
     tracing::info!(worker_id=%worker.id, "local worker registered");
 
+    // Nettoyage préventif des dossiers staging orphelins au démarrage
+    let staging_root = state.config.data_dir.join("staging");
+    if let Ok(mut entries) = tokio::fs::read_dir(&staging_root).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            if entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
+                tracing::info!(path = %path.display(), "purging orphaned local staging directory at startup");
+                let _ = tokio::fs::remove_dir_all(&path).await;
+            }
+        }
+    }
+
     loop {
         let claim = tokio::select! {
             result = repository::claim(&state.pool, worker.id) => result,

@@ -21,8 +21,6 @@ pub enum AppError {
     TooLarge,
     #[error("checksum mismatch: expected {expected}, actual {actual}")]
     ChecksumMismatch { expected: String, actual: String },
-    #[error("tool cache locked: {0}")]
-    ToolLocked(String),
     #[error("tool unavailable: {0}")]
     ToolUnavailable(String),
     #[error("unsupported archive: {0}")]
@@ -60,7 +58,6 @@ impl IntoResponse for AppError {
             Self::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             Self::NotFound => (StatusCode::NOT_FOUND, "not_found"),
             Self::Conflict => (StatusCode::CONFLICT, "lease_expired_or_conflict"),
-            Self::ToolLocked(_) => (StatusCode::CONFLICT, "tool_cache_locked"),
             Self::ChecksumMismatch { .. }
             | Self::ToolUnavailable(_)
             | Self::UnsupportedArchive(_)

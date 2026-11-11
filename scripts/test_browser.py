@@ -76,6 +76,11 @@ def run_browser_tests():
 
         page.keyboard.press("ArrowRight")
         active_tab_id = page.evaluate("document.activeElement.id")
+        assert active_tab_id == "tab-btn-flows", f"Onglet attendu: tab-btn-flows, obtenu: {active_tab_id}"
+        assert page.locator("#panel-flows").is_visible(), "Panneau flux non visible après navigation clavier"
+
+        page.keyboard.press("ArrowRight")
+        active_tab_id = page.evaluate("document.activeElement.id")
         assert active_tab_id == "tab-btn-jobs", f"Onglet attendu: tab-btn-jobs, obtenu: {active_tab_id}"
         assert page.locator("#panel-jobs").is_visible(), "Panneau tâches non visible après navigation clavier"
 

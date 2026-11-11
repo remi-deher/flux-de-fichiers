@@ -9,9 +9,9 @@ pub fn JobsPanel() -> impl IntoView {
             <section class="section-panel" aria-labelledby="jobs-section-title">
                 <div class="section-panel-header">
                     <div>
-                        <h2 id="jobs-section-title" class="section-title">"File des tâches de remuxage"</h2>
+                        <h2 id="jobs-section-title" class="section-title">"Gestionnaire de tâches d'exécution"</h2>
                         <p class="section-subtitle">
-                            "Suivi de l'état (queued, running, succeeded, failed), inspection des détails et téléchargement en flux direct."
+                            "Supervision temps réel des tâches de traitement et d'exécution des flux (en attente, en cours, succès, échecs) sur l'ensemble des nœuds."
                         </p>
                     </div>
                 </div>
@@ -72,7 +72,7 @@ pub fn JobsPanel() -> impl IntoView {
                 </div>
 
                 <div class="table-wrapper">
-                    <table class="data-table" aria-label="Liste filtrée des tâches de remuxage">
+                    <table class="data-table" aria-label="Liste filtrée des tâches d'exécution">
                         <thead>
                             <tr>
                                 <th scope="col">"Identifiant"</th>

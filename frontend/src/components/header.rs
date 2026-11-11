@@ -70,13 +70,24 @@ pub fn Header() -> impl IntoView {
                 <button
                     type="button"
                     role="tab"
+                    id="tab-btn-flows"
+                    class="tab-btn"
+                    aria-selected="false"
+                    aria-controls="panel-flows"
+                    tabindex="-1"
+                >
+                    "Flux de traitement"
+                </button>
+                <button
+                    type="button"
+                    role="tab"
                     id="tab-btn-jobs"
                     class="tab-btn"
                     aria-selected="false"
                     aria-controls="panel-jobs"
                     tabindex="-1"
                 >
-                    "Tâches de remuxage"
+                    "Gestionnaire de tâches"
                 </button>
                 <button
                     type="button"

@@ -134,14 +134,7 @@ pub fn list_tools_status(
             {
                 "ready".to_string()
             } else {
-                let lock_file = cache_mgr
-                    .tool_dir(&entry.id, &entry.version, arch)
-                    .join(".lock");
-                if lock_file.is_file() {
-                    "locked".to_string()
-                } else {
-                    "not_installed".to_string()
-                }
+                "not_installed".to_string()
             };
 
             ToolStatusSummary {

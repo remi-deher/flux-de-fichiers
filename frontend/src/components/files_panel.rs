@@ -55,10 +55,10 @@ pub fn FilesPanel() -> impl IntoView {
                 </div>
             </section>
 
-            // Dialogue modal accessible de confirmation de lancement de remuxage
+            // Dialogue modal accessible de confirmation de lancement d'un traitement
             <dialog id="confirm-remux-dialog" class="app-dialog" aria-labelledby="confirm-dialog-title" aria-modal="true">
                 <div class="dialog-header">
-                    <h3 id="confirm-dialog-title" class="dialog-title">"Confirmer le lancement du remuxage"</h3>
+                    <h3 id="confirm-dialog-title" class="dialog-title">"Confirmer le lancement du traitement"</h3>
                     <button
                         type="button"
                         id="confirm-dialog-close-x"
@@ -70,10 +70,23 @@ pub fn FilesPanel() -> impl IntoView {
                 </div>
                 <div class="dialog-body">
                     <p>
-                        "Vous vous apprêtez à soumettre une tâche de remuxage sans réencodage pour le média :"
+                        "Vous vous apprêtez à soumettre une tâche de traitement pour le média :"
                     </p>
                     <div class="code-snippet" id="confirm-dialog-filename">
                         "nom-du-fichier.mkv"
+                    </div>
+                    <div class="form-group">
+                        <label for="confirm-dialog-flow-select" class="form-label">
+                            "Flux de traitement à exécuter"
+                        </label>
+                        <select id="confirm-dialog-flow-select" class="form-select">
+                            <option value="flow.default.mkv" selected="selected">"Remuxage Matroska propre (défaut)"</option>
+                            <option value="flow.transcode.hevc">"Transcodage HEVC / Intel QSV & VA-API"</option>
+                            <option value="flow.remux.mp4">"Optimisation Web MP4 (FastStart)"</option>
+                        </select>
+                        <p class="form-help">
+                            "Sélectionnez la chaîne de blocs configurée dans l'onglet Flux de traitement."
+                        </p>
                     </div>
                     <div class="form-group">
                         <label for="confirm-dialog-worker-select" class="form-label">
@@ -103,7 +116,7 @@ pub fn FilesPanel() -> impl IntoView {
                         id="confirm-dialog-submit-btn"
                         class="btn btn-primary"
                     >
-                        "Lancer le remuxage"
+                        "Démarrer le traitement"
                     </button>
                 </div>
             </dialog>

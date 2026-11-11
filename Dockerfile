@@ -7,9 +7,8 @@ RUN mkdir src && echo 'pub fn render_full_page() -> String { String::new() }' > 
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked --mount=type=cache,target=/src/frontend/target \
     cargo build --locked --release -j ${CARGO_JOBS}
 COPY frontend/src ./src
-COPY frontend/static ./static
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked --mount=type=cache,target=/src/frontend/target \
-    find src static -type f -exec touch {} + && cargo run --locked --release -j ${CARGO_JOBS} && test -s /src/frontend/dist/index.html
+    find src -type f -exec touch {} + && cargo run --locked --release -j ${CARGO_JOBS} && test -s /src/frontend/dist/index.html
 
 FROM rust:1.99.0-slim-bookworm AS build
 RUN apt-get update && apt-get install -y --no-install-recommends cmake build-essential && rm -rf /var/lib/apt/lists/*

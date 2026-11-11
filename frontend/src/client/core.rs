@@ -1,3 +1,6 @@
+//! Noyau et utilitaires clients.
+
+pub const SCRIPT: &str = r###"
 // Sécurité : la clé d'administration réside UNIQUEMENT en mémoire volatile JavaScript de l'onglet actif.
   // Aucun stockage en clair dans sessionStorage ni localStorage.
   let volatileAdminKey = '';
@@ -129,3 +132,5 @@
       return false;
     }
   }
+
+"###;

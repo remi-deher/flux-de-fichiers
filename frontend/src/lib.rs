@@ -1,6 +1,7 @@
 //! Bibliothèque frontend Leptos pour Flux de Fichiers.
 
 pub mod app;
+pub mod client;
 pub mod components;
 pub mod core;
 pub mod features;
@@ -36,6 +37,6 @@ pub fn render_full_page() -> String {
 </html>"#,
         styles = styles::get_all_styles(),
         body = body_html,
-        scripts = scripts::CLIENT_SCRIPT
+        scripts = client::get_client_script()
     )
 }

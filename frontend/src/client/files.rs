@@ -1,3 +1,6 @@
+//! Exploration des médias et dialogue de remuxage.
+
+pub const SCRIPT: &str = r###"
 // --- Fichiers sources ---
   async function loadFiles() {
     const tbody = el('files-table-body');
@@ -132,3 +135,5 @@
       showNotice('Échec de la soumission de la tâche : ' + e.message, 'error');
     }
   }
+
+"###;

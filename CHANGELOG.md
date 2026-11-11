@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.4.0...v0.4.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **activity:** dedoublement des selecteurs de filtre pour Playwright ([b39dd9c](https://github.com/remi-deher/flux-de-fichiers/commit/b39dd9ca86d11903343a1a3d396ce692d424b695))
+* **ci:** fiabilisation miroir apt pour playwright et compatibilité des filtres de statut ([8135868](https://github.com/remi-deher/flux-de-fichiers/commit/8135868015b6265672e112366442e494b482c7e8))
+
 ## [0.4.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.3.0...v0.4.0) (2026-11-11)
 
 

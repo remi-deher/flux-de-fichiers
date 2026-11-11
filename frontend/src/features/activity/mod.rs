@@ -1,9 +1,11 @@
 //! Module d'activité : Rôles Exploiter (traitements en direct) et Diagnostiquer (historique et échecs).
 
 pub mod diagnostic;
+pub mod dialog;
 pub mod operations;
 
 pub use diagnostic::ActivityDiagnostic;
+pub use dialog::JobDetailDialog;
 pub use operations::ActivityOperations;
 
 use crate::core::{SubNav, SubNavTabItem};
@@ -38,11 +40,15 @@ pub fn JobsPanel() -> impl IntoView {
         },
     ];
 
-    let subnav_actions = view! {
+    let subnav_info = view! {
         <div id="sse-status-badge" class="status-pill info" title="Mode de rafraîchissement des tâches" aria-live="polite">
             <span class="status-dot"></span>
             <span id="sse-status-text">"Sondage périodique"</span>
         </div>
+    }
+    .into_any();
+
+    let subnav_actions = view! {
         <button
             type="button"
             id="jobs-refresh-btn"
@@ -59,6 +65,7 @@ pub fn JobsPanel() -> impl IntoView {
             <SubNav
                 aria_label="Sous-navigation de la section Activité et Traitements"
                 tabs=subnav_tabs
+                info=subnav_info
                 actions=subnav_actions
             />
 
@@ -83,6 +90,8 @@ pub fn JobsPanel() -> impl IntoView {
                     <ActivityDiagnostic />
                 </div>
             </section>
+
+            <JobDetailDialog />
         </div>
     }
 }

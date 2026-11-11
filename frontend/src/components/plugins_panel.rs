@@ -32,6 +32,11 @@ pub fn PluginsPanel() -> impl IntoView {
         },
     ];
 
+    let subnav_info = view! {
+        <span class="subnav-info-badge">"📦 Dépôt officiel actif"</span>
+    }
+    .into_any();
+
     let subnav_actions = view! {
         <button
             type="button"
@@ -63,6 +68,7 @@ pub fn PluginsPanel() -> impl IntoView {
             <SubNav
                 aria_label="Sous-navigation de la section Plugins et Dépôts"
                 tabs=subnav_tabs
+                info=subnav_info
                 actions=subnav_actions
             />
 

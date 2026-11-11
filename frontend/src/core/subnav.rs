@@ -20,11 +20,16 @@ pub struct SubNavTabItem {
 pub fn SubNav(
     aria_label: &'static str,
     tabs: Vec<SubNavTabItem>,
+    #[prop(optional)] info: Option<AnyView>,
     #[prop(optional)] actions: Option<AnyView>,
 ) -> impl IntoView {
     view! {
         <nav class="page-subnav" aria-label=aria_label>
             <div class="subnav-container">
+                <div class="subnav-info">
+                    {info}
+                </div>
+
                 <div class="subnav-tabs" role="tablist">
                     {tabs.into_iter().map(|item| {
                         let active_class = if item.is_active { "subnav-tab active" } else { "subnav-tab" };
@@ -54,11 +59,9 @@ pub fn SubNav(
                     }).collect_view()}
                 </div>
 
-                {actions.map(|acts| view! {
-                    <div class="subnav-actions">
-                        {acts}
-                    </div>
-                })}
+                <div class="subnav-actions">
+                    {actions}
+                </div>
             </div>
         </nav>
     }

@@ -172,15 +172,22 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md) var(--radius-md) 0 0;
   border-bottom: none;
+  box-shadow: var(--shadow-sm);
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .canvas-workspace-layout {
   display: flex;
-  height: 620px;
+  min-height: calc(100vh - 220px);
+  height: calc(100vh - 220px);
+  max-height: 85vh;
   border: 1px solid var(--border-color);
   border-radius: 0 0 var(--radius-md) var(--radius-md);
   overflow: hidden;
   background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
 }
 
 .canvas-blocks-sidebar {

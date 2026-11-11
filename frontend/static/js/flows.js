@@ -162,8 +162,16 @@
     // 1. Navigation entre Bibliothèque et Canvas
     function openCanvas(flowId, flowTitle) {
       activeCanvasFlowId = flowId;
+      const tabCanvas = el('btn-subtab-flows-canvas');
+      if (tabCanvas) {
+        switchSubtab(tabCanvas);
+      }
       if (libraryView) libraryView.style.display = 'none';
       if (canvasView) canvasView.style.display = 'block';
+      const subtabCanvas = el('subtab-flows-canvas');
+      if (subtabCanvas) subtabCanvas.removeAttribute('hidden');
+      const subtabInstalled = el('subtab-flows-installed');
+      if (subtabInstalled) subtabInstalled.setAttribute('hidden', '');
       const titleEl = el('canvas-flow-title');
       if (titleEl) titleEl.textContent = `Éditeur visuel : ${flowTitle}`;
 
@@ -261,8 +269,16 @@
     }
 
     function closeCanvas() {
+      const tabInstalled = el('btn-subtab-flows-installed');
+      if (tabInstalled) {
+        switchSubtab(tabInstalled);
+      }
       if (canvasView) canvasView.style.display = 'none';
       if (libraryView) libraryView.style.display = 'block';
+      const subtabCanvas = el('subtab-flows-canvas');
+      if (subtabCanvas) subtabCanvas.setAttribute('hidden', '');
+      const subtabInstalled = el('subtab-flows-installed');
+      if (subtabInstalled) subtabInstalled.removeAttribute('hidden');
     }
 
     if (backToLibraryBtn) backToLibraryBtn.addEventListener('click', closeCanvas);
@@ -276,16 +292,30 @@
       });
     });
 
+    // Écoute du changement d'onglet via subnav
+    document.addEventListener('flux:subnav-change', (e) => {
+      if (e.detail && e.detail.targetId === 'subtab-flows-canvas') {
+        if (canvasView) canvasView.style.display = 'block';
+        if (libraryView) libraryView.style.display = 'none';
+        setTimeout(drawCanvasLines, 60);
+      } else if (e.detail && e.detail.targetId === 'subtab-flows-installed') {
+        if (canvasView) canvasView.style.display = 'none';
+        if (libraryView) libraryView.style.display = 'block';
+      }
+    });
+
     // 2. Assistant de configuration (Setup Wizard)
-    if (openWizardBtn && wizardDialog) {
-      openWizardBtn.addEventListener('click', () => {
-        if (typeof wizardDialog.showModal === 'function') {
-          wizardDialog.showModal();
-        } else {
-          wizardDialog.setAttribute('open', '');
-        }
-      });
-    }
+    const openWizardSubnavBtn = el('btn-subnav-open-wizard');
+    const triggerWizard = () => {
+      if (!wizardDialog) return;
+      if (typeof wizardDialog.showModal === 'function') {
+        wizardDialog.showModal();
+      } else {
+        wizardDialog.setAttribute('open', '');
+      }
+    };
+    if (openWizardBtn) openWizardBtn.addEventListener('click', triggerWizard);
+    if (openWizardSubnavBtn) openWizardSubnavBtn.addEventListener('click', triggerWizard);
 
     function closeWizard() {
       if (wizardDialog) {

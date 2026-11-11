@@ -119,3 +119,84 @@ pub async fn save_settings(
         "settings": payload,
     })))
 }
+
+/// Liste l'ensemble des dépôts configurés.
+pub async fn list_repositories(
+    State(s): State<AppState>,
+    h: HeaderMap,
+) -> AppResult<Json<Vec<plugins::PluginRepository>>> {
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
+    let repos = crate::repository::list_plugin_repositories(&s.pool).await?;
+    Ok(Json(repos))
+}
+
+/// Ajoute un nouveau dépôt tiers de plugins ou flux.
+pub async fn add_repository(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(payload): Json<plugins::CreateRepositoryRequest>,
+) -> AppResult<Json<plugins::PluginRepository>> {
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::POST).await?;
+    let url = payload.index_url.trim();
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(AppError::InvalidManifest(
+            "L'URL du dépôt doit commencer par http:// ou https://".to_string(),
+        ));
+    }
+    let name = payload.name.trim();
+    if name.is_empty() {
+        return Err(AppError::InvalidManifest(
+            "Le nom du dépôt ne peut pas être vide".to_string(),
+        ));
+    }
+    let id = payload
+        .id
+        .unwrap_or_else(|| format!("repo.{}", uuid::Uuid::new_v4().simple()));
+
+    let repo = crate::repository::add_plugin_repository(&s.pool, &id, name, url).await?;
+    Ok(Json(repo))
+}
+
+/// Active ou désactive une source de dépôt.
+pub async fn toggle_repository(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::PUT).await?;
+    let new_state = crate::repository::toggle_plugin_repository(&s.pool, &id).await?;
+    Ok(Json(serde_json::json!({
+        "id": id,
+        "enabled": new_state,
+    })))
+}
+
+/// Supprime un dépôt tiers (interdit sur le catalogue officiel).
+pub async fn delete_repository(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::DELETE)
+        .await?;
+    crate::repository::delete_plugin_repository(&s.pool, &id).await?;
+    Ok(Json(serde_json::json!({
+        "id": id,
+        "deleted": true,
+    })))
+}
+
+/// Synchronise l'index d'un dépôt donné.
+pub async fn sync_repository(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::POST).await?;
+    crate::repository::touch_plugin_repository_sync(&s.pool, &id).await?;
+    Ok(Json(serde_json::json!({
+        "id": id,
+        "status": "synced",
+        "syncedAt": chrono::Utc::now().to_rfc3339(),
+    })))
+}

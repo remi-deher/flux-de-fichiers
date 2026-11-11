@@ -4,6 +4,28 @@ use crate::tools_cache::{ToolCacheManager, host_arch};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+/// Dépôt distant de distribution de plugins, outils et flux.
+#[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginRepository {
+    pub id: String,
+    pub name: String,
+    pub index_url: String,
+    pub is_official: bool,
+    pub enabled: bool,
+    pub last_synced_at: Option<String>,
+    pub created_at: String,
+}
+
+/// Requête d'enregistrement d'un nouveau dépôt de plugins.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateRepositoryRequest {
+    pub id: Option<String>,
+    pub name: String,
+    pub index_url: String,
+}
+
 /// Fiche d'index dans `catalogue/index.json`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]

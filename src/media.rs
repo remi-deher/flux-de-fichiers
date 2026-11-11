@@ -13,6 +13,48 @@ pub fn executable() -> String {
     std::env::var("MKVMERGE").unwrap_or_else(|_| "mkvmerge".into())
 }
 
+pub fn propedit_executable() -> String {
+    std::env::var("MKVPROPEDIT").unwrap_or_else(|_| "mkvpropedit".into())
+}
+
+/// Édition non destructive en place des en-têtes EBML Matroska (ADR 0008).
+pub async fn propedit_in_place(
+    bin: &Path,
+    target: &Path,
+    default_audio_lang: Option<&str>,
+    force_subtitles: bool,
+) -> anyhow::Result<()> {
+    let mut cmd = Command::new(bin);
+    cmd.arg(target);
+
+    if let Some(lang) = default_audio_lang {
+        cmd.arg("--edit")
+            .arg("track:a1")
+            .arg("--set")
+            .arg(format!("language={lang}"))
+            .arg("--set")
+            .arg("flag-default=1");
+    }
+
+    if force_subtitles {
+        cmd.arg("--edit")
+            .arg("track:s1")
+            .arg("--set")
+            .arg("flag-forced=1");
+    }
+
+    let status = tokio::time::timeout(Duration::from_secs(60), cmd.status())
+        .await
+        .context("mkvpropedit timed out")??;
+
+    anyhow::ensure!(
+        matches!(status.code(), Some(0 | 1)),
+        "mkvpropedit failed with code: {:?}",
+        status.code()
+    );
+    Ok(())
+}
+
 pub async fn inspect(path: &Path) -> anyhow::Result<Value> {
     inspect_with(Path::new(&executable()), path).await
 }

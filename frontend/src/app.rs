@@ -25,10 +25,11 @@ pub fn App() -> impl IntoView {
                 <WorkersPanel />
                 <PluginsPanel />
                 <SettingsPanel />
+                <UpdatesPanel />
             </main>
             <footer style="margin-top: 3rem; text-align: center; font-size: 0.8125rem; color: var(--text-dim); border-top: 1px solid var(--border-color); padding-top: 1.5rem;">
                 <p>
-                    "Flux de Fichiers v0.3 — Poste de pilotage Leptos moderne et responsive."
+                    "Flux de Fichiers v0.4 — Poste de pilotage Leptos moderne et responsive."
                 </p>
                 <p style="margin-top: 0.25rem;">
                     "Recommandations d'accessibilité W3C suivies • Contrastes renforcés (>= 5.9:1) • Navigation clavier complète • Thèmes clair/sombre"

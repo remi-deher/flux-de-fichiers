@@ -1,5 +1,5 @@
 // --- Gestion des onglets accessibles ---
-  const TABS = ['dashboard', 'files', 'flows', 'jobs', 'workers', 'plugins', 'settings'];
+  const TABS = ['dashboard', 'files', 'flows', 'jobs', 'workers', 'plugins', 'settings', 'updates'];
 
   function switchTab(tabName) {
     if (!TABS.includes(tabName)) return;
@@ -64,6 +64,9 @@
 
     const qSettings = el('quick-goto-settings-btn');
     if (qSettings) qSettings.addEventListener('click', () => switchTab('settings'));
+
+    const qUpdates = el('quick-goto-updates-btn');
+    if (qUpdates) qUpdates.addEventListener('click', () => switchTab('updates'));
   }
 
   // --- Gestion du Thème (Clair / Sombre / Système) ---

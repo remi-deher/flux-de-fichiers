@@ -41,6 +41,11 @@ pub fn LibrariesPanel() -> impl IntoView {
         },
     ];
 
+    let subnav_info = view! {
+        <span class="subnav-info-badge">"📁 Volume /input"</span>
+    }
+    .into_any();
+
     let subnav_actions = view! {
         <button
             type="button"
@@ -64,6 +69,7 @@ pub fn LibrariesPanel() -> impl IntoView {
             <SubNav
                 aria_label="Sous-navigation de la section Bibliothèques"
                 tabs=subnav_tabs
+                info=subnav_info
                 actions=subnav_actions
             />
 

@@ -38,11 +38,15 @@ pub fn JobsPanel() -> impl IntoView {
         },
     ];
 
-    let subnav_actions = view! {
+    let subnav_info = view! {
         <div id="sse-status-badge" class="status-pill info" title="Mode de rafraîchissement des tâches" aria-live="polite">
             <span class="status-dot"></span>
             <span id="sse-status-text">"Sondage périodique"</span>
         </div>
+    }
+    .into_any();
+
+    let subnav_actions = view! {
         <button
             type="button"
             id="jobs-refresh-btn"
@@ -59,6 +63,7 @@ pub fn JobsPanel() -> impl IntoView {
             <SubNav
                 aria_label="Sous-navigation de la section Activité et Traitements"
                 tabs=subnav_tabs
+                info=subnav_info
                 actions=subnav_actions
             />
 

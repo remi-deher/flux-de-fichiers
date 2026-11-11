@@ -40,6 +40,11 @@ pub fn FlowsPanel() -> impl IntoView {
         },
     ];
 
+    let subnav_info = view! {
+        <span class="subnav-info-badge">"⚡ Bare Core actif"</span>
+    }
+    .into_any();
+
     let subnav_actions = view! {
         <button
             type="button"
@@ -57,6 +62,7 @@ pub fn FlowsPanel() -> impl IntoView {
             <SubNav
                 aria_label="Sous-navigation de la section Concepteur de flux"
                 tabs=subnav_tabs
+                info=subnav_info
                 actions=subnav_actions
             />
 

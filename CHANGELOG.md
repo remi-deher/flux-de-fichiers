@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.9.0...v0.9.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **ui:** afficher l'explorateur de medias par defaut dans la subnav bibliotheques ([84a087e](https://github.com/remi-deher/flux-de-fichiers/commit/84a087ea7f3d02f0f5c5b1740ffaeffe4a99692f))
+* **ui:** afficher l'explorateur de medias par defaut dans la subnav bibliotheques ([51f7295](https://github.com/remi-deher/flux-de-fichiers/commit/51f72953660471514b72447a629d87d23b4a9fc8))
+
+## [0.9.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.8.1...v0.9.0) (2026-11-11)
+
+
+### Features
+
+* **ui, plugins:** subnavbar sur 4 sections et multi-depots (v0.9.0) ([d06be7f](https://github.com/remi-deher/flux-de-fichiers/commit/d06be7f6414c3a689a857b766b71eb57e832a3d0))
+* **ui, plugins:** subnavbars sur 4 sections et gestion multi-depots ([89f1b38](https://github.com/remi-deher/flux-de-fichiers/commit/89f1b3841e7084ab578de7d25a7e7b5980e75dc1))
+
 ## [0.8.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.8.0...v0.8.1) (2026-11-11)
 
 

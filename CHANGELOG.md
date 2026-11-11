@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.9.1...v0.10.0) (2026-11-11)
+
+
+### Features
+
+* **subnav, multi-repos:** stabiliser la sous-navigation et la gestion multi-depots ([18a34eb](https://github.com/remi-deher/flux-de-fichiers/commit/18a34eb5578338f8ceeb29c23b6f6261a9ccc6ee))
+* **ui:** integrer subnav tripartite, sous-navigation noeuds et workspace flows ([a491bb9](https://github.com/remi-deher/flux-de-fichiers/commit/a491bb9cbc32063362dd09df58f833356e39277c))
+
+
+### Bug Fixes
+
+* **activity:** deplacer job-detail-dialog au niveau racine du panel ([b78b795](https://github.com/remi-deher/flux-de-fichiers/commit/b78b7959b5b73d0eb387a434f5eae081b669864c))
+* **activity:** positionner job-detail-dialog au niveau racine du panel ([4486ce7](https://github.com/remi-deher/flux-de-fichiers/commit/4486ce7dd6cccf1bca38fded9c249541d0d50a64))
+* **ui:** corriger la syntaxe css responsive de subnav-actions ([12488f4](https://github.com/remi-deher/flux-de-fichiers/commit/12488f43cd07515e1326fcecae14a9cda8c53856))
+* **ui:** corriger la syntaxe css responsive de subnav-actions et ajouter les regles mobile ([41ad675](https://github.com/remi-deher/flux-de-fichiers/commit/41ad67598f32a68bb18e3ed121b96dec03ed935b))
+
 ## [0.9.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.9.0...v0.9.1) (2026-11-11)
 
 

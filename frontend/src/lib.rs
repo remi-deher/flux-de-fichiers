@@ -7,6 +7,7 @@ pub mod features;
 pub mod scripts;
 pub mod shared;
 pub mod styles;
+pub mod theme;
 pub mod types;
 
 use leptos::prelude::*;
@@ -33,7 +34,7 @@ pub fn render_full_page() -> String {
   </script>
 </body>
 </html>"#,
-        styles = styles::CSS_STYLES,
+        styles = styles::get_all_styles(),
         body = body_html,
         scripts = scripts::CLIENT_SCRIPT
     )

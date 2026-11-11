@@ -31,6 +31,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/config", get(jobs::system_config))
         .route("/api/v1/files", get(jobs::files))
         .route("/api/v1/plugins", get(plugins::catalog))
+        .route("/api/v1/plugins/{id}/settings", get(plugins::get_settings).put(plugins::save_settings))
         .route("/api/v1/tools", get(plugins::tools))
         .route("/api/v1/tools/{id}/distribution", get(plugins::tool_distribution))
         .route("/api/v1/auth/session", get(session::current).post(session::login))

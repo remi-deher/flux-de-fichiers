@@ -49,10 +49,10 @@ pub fn FlowsPanel() -> impl IntoView {
 
                             <div class="flow-pipeline-container" aria-label="Chaîne des blocs du flux">
                                 <div class="flow-pipeline">
-                                    <div class="flow-block-step implicit-step">
+                                    <div class="flow-block-step">
                                         <span class="step-badge">"1"</span>
-                                        <span class="step-name">"🔍 Inspecter (MediaInfo)"</span>
-                                        <span class="step-type">"Implicite • Toutes métadonnées"</span>
+                                        <span class="step-name">"📄 Fichier source"</span>
+                                        <span class="step-type">"Détection automatique"</span>
                                     </div>
                                     <span class="flow-arrow" aria-hidden="true">"➔"</span>
                                     <div class="flow-block-step">
@@ -93,10 +93,10 @@ pub fn FlowsPanel() -> impl IntoView {
 
                             <div class="flow-pipeline-container" aria-label="Chaîne des blocs du flux">
                                 <div class="flow-pipeline">
-                                    <div class="flow-block-step implicit-step">
+                                    <div class="flow-block-step">
                                         <span class="step-badge">"1"</span>
-                                        <span class="step-name">"🔍 Inspecter (MediaInfo)"</span>
-                                        <span class="step-type">"Implicite"</span>
+                                        <span class="step-name">"📄 Fichier source"</span>
+                                        <span class="step-type">"Détection automatique"</span>
                                     </div>
                                     <span class="flow-arrow" aria-hidden="true">"➔"</span>
                                     <div class="flow-block-step">
@@ -156,10 +156,10 @@ pub fn FlowsPanel() -> impl IntoView {
 
                             <div class="flow-pipeline-container" aria-label="Chaîne des blocs du flux">
                                 <div class="flow-pipeline">
-                                    <div class="flow-block-step implicit-step">
+                                    <div class="flow-block-step">
                                         <span class="step-badge">"1"</span>
-                                        <span class="step-name">"🔍 Inspecter (MediaInfo)"</span>
-                                        <span class="step-type">"Implicite"</span>
+                                        <span class="step-name">"📄 Fichier source"</span>
+                                        <span class="step-type">"Détection automatique"</span>
                                     </div>
                                     <span class="flow-arrow" aria-hidden="true">"➔"</span>
                                     <div class="flow-block-step">
@@ -219,13 +219,33 @@ pub fn FlowsPanel() -> impl IntoView {
                     // Volet latéral gauche : Bibliothèque de blocs disponibles
                     <aside class="canvas-blocks-sidebar" aria-label="Bibliothèque de blocs disponibles">
                         <div class="sidebar-block-group">
-                            <span class="sidebar-group-title">"🔍 Analyse technique"</span>
-                            <div class="draggable-block-item" data-block-type="inspect" data-tool="mediainfo">
-                                <span class="block-drag-icon">"🔍"</span>
+                            <span class="sidebar-group-title">"📁 Entrées & Sorties"</span>
+                            <div class="draggable-block-item" data-block-type="file-input" data-tool="system">
+                                <span class="block-drag-icon">"📄"</span>
                                 <div class="block-drag-info">
-                                    <strong>"Inspecter métadonnées"</strong>
-                                    <span>"MediaInfo CLI • Implicite"</span>
+                                    <strong>"Fichier entrant"</strong>
+                                    <span>"Surveillance / Déclencheur"</span>
                                 </div>
+                            </div>
+                            <div class="draggable-block-item addable" data-block-type="file-output" data-tool="system">
+                                <span class="block-drag-icon">"💾"</span>
+                                <div class="block-drag-info">
+                                    <strong>"Destination finale"</strong>
+                                    <span>"Remplacement / Déplacement"</span>
+                                </div>
+                                <span class="block-add-plus">"+"</span>
+                            </div>
+                        </div>
+
+                        <div class="sidebar-block-group">
+                            <span class="sidebar-group-title">"🔀 Logique & Conditions"</span>
+                            <div class="draggable-block-item addable" data-block-type="condition" data-tool="logic">
+                                <span class="block-drag-icon">"🔀"</span>
+                                <div class="block-drag-info">
+                                    <strong>"Aiguillage conditionnel"</strong>
+                                    <span>"Vrai / Faux / Repli matériel"</span>
+                                </div>
+                                <span class="block-add-plus">"+"</span>
                             </div>
                         </div>
 
@@ -269,6 +289,26 @@ pub fn FlowsPanel() -> impl IntoView {
                             </div>
                         </div>
 
+                        <div class="sidebar-block-group">
+                            <span class="sidebar-group-title">"🔗 Intégrations (*arr)"</span>
+                            <div class="draggable-block-item addable" data-block-type="sonarr" data-tool="sonarr">
+                                <span class="block-drag-icon">"📡"</span>
+                                <div class="block-drag-info">
+                                    <strong>"Sonarr : Mettre à jour"</strong>
+                                    <span>"Rescan & Renommage"</span>
+                                </div>
+                                <span class="block-add-plus">"+"</span>
+                            </div>
+                            <div class="draggable-block-item addable" data-block-type="radarr" data-tool="radarr">
+                                <span class="block-drag-icon">"🎬"</span>
+                                <div class="block-drag-info">
+                                    <strong>"Radarr : Mettre à jour"</strong>
+                                    <span>"Rescan & Renommage"</span>
+                                </div>
+                                <span class="block-add-plus">"+"</span>
+                            </div>
+                        </div>
+
                         <div class="sidebar-help-tip">
                             "💡 Cliquez sur un bloc avec « + » pour l'ajouter à la suite de votre chaîne."
                         </div>
@@ -281,19 +321,19 @@ pub fn FlowsPanel() -> impl IntoView {
                         </svg>
 
                         <div class="canvas-nodes-container" id="canvas-nodes-container">
-                            // Nœud 1 : MediaInfo (Inspecter)
-                            <div class="canvas-node implicit-node selected" id="node-1" data-node-id="node-1" data-block-type="inspect">
+                            // Nœud 1 : Entrée Fichier
+                            <div class="canvas-node selected" id="node-1" data-node-id="node-1" data-block-type="file-input">
                                 <div class="node-connector connector-out"></div>
                                 <div class="node-header">
-                                    <span class="node-icon">"🔍"</span>
+                                    <span class="node-icon">"📄"</span>
                                     <div class="node-title-box">
-                                        <span class="node-kind">"MediaInfo • Début de flux"</span>
-                                        <h4 class="node-name">"Inspecter métadonnées"</h4>
+                                        <span class="node-kind">"Déclencheur entrant"</span>
+                                        <h4 class="node-name">"Fichier source"</h4>
                                     </div>
-                                    <span class="status-pill info node-pill">"Implicite"</span>
+                                    <span class="status-pill success node-pill">"Entrée"</span>
                                 </div>
                                 <div class="node-summary">
-                                    "Extraction exhaustive (vidéo, pistes audio, sous-titres, chapitres)."
+                                    "Détection du média • Métadonnées inspectées automatiquement en sous-main."
                                 </div>
                             </div>
 
@@ -417,7 +457,15 @@ pub fn FlowsPanel() -> impl IntoView {
 
                     // Étape 1 : Cartes de modèles de départ
                     <div class="wizard-templates-grid">
-                        <div class="wizard-template-card active" data-template="hevc">
+                        <div class="wizard-template-card active" data-template="smart-hevc">
+                            <span class="template-icon">"🔀"</span>
+                            <div>
+                                <h4 class="template-title">"Flux Intelligent : Aiguillage HEVC & Repli"</h4>
+                                <p class="template-desc">"Saut direct sans réencodage si déjà en HEVC, encodage GPU Intel QSV sinon, avec repli CPU automatique."</p>
+                            </div>
+                        </div>
+
+                        <div class="wizard-template-card" data-template="hevc">
                             <span class="template-icon">"🎬"</span>
                             <div>
                                 <h4 class="template-title">"Transcodage HEVC Haute Efficacité"</h4>
@@ -445,7 +493,7 @@ pub fn FlowsPanel() -> impl IntoView {
                             <span class="template-icon">"⬜"</span>
                             <div>
                                 <h4 class="template-title">"Flux vierge personnalisé"</h4>
-                                <p class="template-desc">"Démarre avec le bloc d'inspection initial pour composer librement vos blocs sur le canvas."</p>
+                                <p class="template-desc">"Démarre avec le fichier source pour composer librement vos blocs sur le canvas."</p>
                             </div>
                         </div>
                     </div>

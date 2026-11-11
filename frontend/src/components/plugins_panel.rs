@@ -130,7 +130,7 @@ pub fn PluginsPanel() -> impl IntoView {
                     </article>
 
                     // Carte 4 : MediaInfo
-                    <article class="tool-card" data-tool-id="tool.mediainfo" data-cache-status="not_installed">
+                    <article class="tool-card" data-tool-id="tool.mediainfo" data-cache-status="ready">
                         <div class="tool-card-header">
                             <div class="tool-identity">
                                 <span class="tool-badge-icon" aria-hidden="true">"🔍"</span>
@@ -139,17 +139,17 @@ pub fn PluginsPanel() -> impl IntoView {
                                     <span class="tool-card-id">"tool.mediainfo • v24.06"</span>
                                 </div>
                             </div>
-                            <span class="status-pill" title="Outil disponible au téléchargement mais non extrait">
+                            <span class="status-pill success" title="Outil d'inspection intégré nativement dans l'environnement">
                                 <span class="status-dot"></span>
-                                "Non installé"
+                                ".ready (Intégrée)"
                             </span>
                         </div>
                         <p class="tool-card-desc">
-                            "Analyse technique exhaustive et extraction des métadonnées vidéo/audio/sous-titres en début de flux."
+                            "Analyse technique exhaustive et extraction des métadonnées vidéo/audio/sous-titres en tâche de fond."
                         </p>
                         <div class="tool-meta-tags">
-                            <span class="meta-tag">"Capacité : inspect"</span>
-                            <span class="meta-tag">"Choix actif : Oui"</span>
+                            <span class="meta-tag">"Capacité : probe"</span>
+                            <span class="meta-tag active-choice">"Choix actif : Oui"</span>
                             <span class="meta-tag">"Arch : x86_64, aarch64"</span>
                         </div>
                     </article>
@@ -181,6 +181,145 @@ pub fn PluginsPanel() -> impl IntoView {
                     </article>
                 </div>
             </section>
+
+            // Section 3 : Intégrations & Automatisation (*arr)
+            <section class="section-panel" aria-labelledby="integrations-title">
+                <div class="section-panel-header">
+                    <div>
+                        <h2 id="integrations-title" class="section-title">"Intégrations & Automatisation (*arr)"</h2>
+                        <p class="section-subtitle">
+                            "Connecteurs vers vos gestionnaires multimédias. Les valeurs par défaut configurées ici sont automatiquement héritées par les blocs de vos flux de traitement."
+                        </p>
+                    </div>
+                </div>
+
+                <div class="tools-grid">
+                    // Plugin Sonarr
+                    <article class="tool-card" data-plugin-id="plugin.sonarr">
+                        <div class="tool-card-header">
+                            <div class="tool-identity">
+                                <span class="tool-badge-icon" aria-hidden="true">"📡"</span>
+                                <div>
+                                    <h3 class="tool-card-title">"Sonarr (Séries TV)"</h3>
+                                    <span class="tool-card-id">"plugin.sonarr • v1.0.0"</span>
+                                </div>
+                            </div>
+                            <span class="status-pill info">
+                                <span class="status-dot"></span>
+                                "Actif"
+                            </span>
+                        </div>
+                        <p class="tool-card-desc">
+                            "Notification post-traitement, actualisation de série (rescan) et déclenchement du renommage automatique de fichiers."
+                        </p>
+                        <div class="tool-meta-tags">
+                            <span class="meta-tag">"Type : plugin"</span>
+                            <span class="meta-tag">"API : v3 REST"</span>
+                        </div>
+                        <div style="margin-top: 1rem; display: flex; justify-content: flex-end;">
+                            <button
+                                type="button"
+                                class="btn btn-secondary btn-sm open-plugin-config-btn"
+                                data-plugin="plugin.sonarr"
+                                data-plugin-name="Sonarr"
+                            >
+                                "⚙️ Paramètres par défaut"
+                            </button>
+                        </div>
+                    </article>
+
+                    // Plugin Radarr
+                    <article class="tool-card" data-plugin-id="plugin.radarr">
+                        <div class="tool-card-header">
+                            <div class="tool-identity">
+                                <span class="tool-badge-icon" aria-hidden="true">"🎬"</span>
+                                <div>
+                                    <h3 class="tool-card-title">"Radarr (Films)"</h3>
+                                    <span class="tool-card-id">"plugin.radarr • v1.0.0"</span>
+                                </div>
+                            </div>
+                            <span class="status-pill info">
+                                <span class="status-dot"></span>
+                                "Actif"
+                            </span>
+                        </div>
+                        <p class="tool-card-desc">
+                            "Notification post-traitement, mise à jour des caractéristiques techniques de film et renommage automatique de collection."
+                        </p>
+                        <div class="tool-meta-tags">
+                            <span class="meta-tag">"Type : plugin"</span>
+                            <span class="meta-tag">"API : v3 REST"</span>
+                        </div>
+                        <div style="margin-top: 1rem; display: flex; justify-content: flex-end;">
+                            <button
+                                type="button"
+                                class="btn btn-secondary btn-sm open-plugin-config-btn"
+                                data-plugin="plugin.radarr"
+                                data-plugin-name="Radarr"
+                            >
+                                "⚙️ Paramètres par défaut"
+                            </button>
+                        </div>
+                    </article>
+                </div>
+            </section>
+
+            // Dialogue modal générique de configuration de plugin
+            <dialog id="plugin-config-dialog" class="app-dialog" aria-labelledby="plugin-config-title" aria-modal="true" style="max-width: 600px;">
+                <div class="dialog-header">
+                    <h3 id="plugin-config-title" class="dialog-title">"Configuration du plugin"</h3>
+                    <button
+                        type="button"
+                        id="plugin-config-close-x"
+                        class="btn btn-secondary btn-sm"
+                        aria-label="Fermer"
+                    >
+                        "✕"
+                    </button>
+                </div>
+                <div class="dialog-body">
+                    <p class="section-subtitle" style="margin-top: 0;">
+                        "Ces paramètres sont sauvegardés dans votre base centrale SQLite (/config) et sont automatiquement transmis aux blocs correspondants dans les flux."
+                    </p>
+                    <input type="hidden" id="plugin-config-current-id" value="" />
+                    <div id="plugin-config-fields-container">
+                        <div class="form-group">
+                            <label for="plugin-cfg-url" class="form-label">"URL du serveur"</label>
+                            <input type="url" id="plugin-cfg-url" class="form-input" placeholder="http://192.168.1.50:8989" />
+                        </div>
+                        <div class="form-group">
+                            <label for="plugin-cfg-apikey" class="form-label">"Clé d'API"</label>
+                            <input type="password" id="plugin-cfg-apikey" class="form-input" placeholder="Clé secrète issue de l'application" />
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                            <div class="form-group">
+                                <label for="plugin-cfg-local-path" class="form-label">"Chemin local"</label>
+                                <input type="text" id="plugin-cfg-local-path" class="form-input" value="/data" />
+                            </div>
+                            <div class="form-group">
+                                <label for="plugin-cfg-remote-path" class="form-label">"Chemin distant (*arr)"</label>
+                                <input type="text" id="plugin-cfg-remote-path" class="form-input" value="/media" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="dialog-footer" style="display: flex; justify-content: flex-end; gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--border-color); margin-top: 1rem;">
+                    <button
+                        type="button"
+                        id="plugin-config-cancel-btn"
+                        class="btn btn-secondary"
+                    >
+                        "Annuler"
+                    </button>
+                    <button
+                        type="button"
+                        id="plugin-config-save-btn"
+                        class="btn btn-primary"
+                    >
+                        "💾 Enregistrer les valeurs par défaut"
+                    </button>
+                </div>
+            </dialog>
         </div>
     }
 }

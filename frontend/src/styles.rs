@@ -1266,6 +1266,67 @@ dialog.app-dialog::backdrop {
   transform: translateX(-50%);
 }
 
+.node-multi-outputs {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--border-color);
+  position: relative;
+}
+
+.multi-output-port {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  padding-bottom: 6px;
+}
+
+.port-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.port-true .port-label {
+  color: #10b981;
+}
+
+.port-false .port-label {
+  color: #f59e0b;
+}
+
+.port-fallback .port-label {
+  color: #8b5cf6;
+}
+
+.connector-out.out-true {
+  background: #10b981;
+  position: absolute;
+  bottom: -13px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.connector-out.out-false {
+  background: #f59e0b;
+  position: absolute;
+  bottom: -13px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.connector-out.out-fallback {
+  background: #8b5cf6;
+  position: absolute;
+  bottom: -13px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
 .node-header {
   display: flex;
   align-items: center;

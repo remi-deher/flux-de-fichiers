@@ -1,77 +1,68 @@
-/* Reset et typographie de base */
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+//! Styles de base et mise en page du shell applicatif en Rust typé.
 
-body {
-  font-family: var(--font-sans);
-  background-color: var(--bg-app);
-  color: var(--text-main);
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  min-height: 100vh;
-  overflow-x: hidden;
-  max-width: 100%;
-}
-
-/* Lien d'évitement accessible W3C */
+pub const BASE_CSS: &str = r#"
+/* --- Skip Link (Accessibilité Clavier W3C) --- */
 .skip-link {
   position: absolute;
-  top: -999px;
+  top: -100px;
   left: 1rem;
   background: var(--primary);
   color: var(--primary-contrast);
-  padding: 0.75rem 1.25rem;
-  font-weight: 700;
-  text-decoration: none;
+  padding: 0.5rem 1rem;
   border-radius: var(--radius-sm);
   z-index: 9999;
+  text-decoration: none;
+  font-weight: 600;
+  transition: top 0.2s ease;
 }
 
 .skip-link:focus {
   top: 1rem;
 }
 
-/* --- Architecture du Shell d'application (Inspiration Encoding Central) --- */
+/* --- Structure globale du shell (Sidebar Rail + Zone de contenu) --- */
 .application-shell {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   background-color: var(--bg-app);
+  color: var(--text-main);
+  box-sizing: border-box;
 }
 
 .application-navigation-layout {
   display: flex;
+  flex: 1;
   min-height: 100vh;
-  width: 100%;
 }
 
-/* Barre latérale de navigation persistante (Sidebar Rail) */
+/* --- Barre latérale de navigation (Navigation Rail inspirée d'Encoding Central) --- */
 .application-sidebar {
-  width: 250px;
-  flex: 0 0 250px;
-  background-color: var(--sidebar-bg);
-  border-right: 1px solid var(--sidebar-border);
+  width: 240px;
+  background-color: var(--bg-card);
+  border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  transition: width 0.2s ease, flex-basis 0.2s ease;
-  z-index: 30;
+  flex-shrink: 0;
+  transition: width 0.2s ease-in-out;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  z-index: 50;
+  box-sizing: border-box;
 }
 
 .application-sidebar.is-collapsed {
   width: 76px;
-  flex: 0 0 76px;
 }
 
-.application-sidebar.is-collapsed .brand-name,
-.application-sidebar.is-collapsed .brand-version,
-.application-sidebar.is-collapsed .nav-group-label,
+.application-sidebar.is-collapsed .brand-info,
 .application-sidebar.is-collapsed .tab-btn-label,
-.application-sidebar.is-collapsed .collapse-label,
-.application-sidebar.is-collapsed .sidebar-footer-tools {
-  display: none !important;
+.application-sidebar.is-collapsed .nav-group-label,
+.application-sidebar.is-collapsed #theme-toggle-label,
+.application-sidebar.is-collapsed #refresh-all-btn {
+  display: none;
 }
 
 .application-sidebar.is-collapsed .tab-btn {
@@ -79,14 +70,14 @@ body {
   padding: 0.75rem 0.5rem;
 }
 
-.application-sidebar.is-collapsed .collapse-icon {
-  transform: rotate(180deg);
+.application-sidebar.is-collapsed .brand {
+  justify-content: center;
 }
 
-/* En-tête de la barre latérale : Logo et marque */
+/* En-tête de la marque */
 .sidebar-header {
-  padding: 1.25rem 1rem 1rem 1rem;
-  border-bottom: 1px solid var(--sidebar-border);
+  padding: 1.25rem 1rem;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .brand {
@@ -98,116 +89,103 @@ body {
 }
 
 .brand-mark {
-  width: 36px;
-  height: 36px;
-  flex: 0 0 36px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-sm);
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
   background: var(--primary);
   color: var(--primary-contrast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-weight: 800;
-  font-size: 0.875rem;
-  letter-spacing: -0.05em;
+  font-size: 0.8125rem;
+  letter-spacing: 0.5px;
   box-shadow: var(--shadow-sm);
+  flex-shrink: 0;
 }
 
 .brand-info {
   display: flex;
   flex-direction: column;
-  min-width: 0;
+  overflow: hidden;
 }
 
 .brand-name {
-  font-size: 1rem;
   font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--text-main);
+  font-size: 1rem;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .brand-version {
   font-size: 0.75rem;
   color: var(--text-dim);
-  font-family: var(--font-mono);
 }
 
-/* Navigation principale verticale */
+/* Groupes et boutons de navigation */
 .tab-navigation {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 0.75rem 0.5rem;
+  padding: 1rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .tab-list {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  max-width: 100%;
-  box-sizing: border-box;
+  gap: 0.25rem;
 }
 
 .nav-group-label {
-  display: block;
   font-size: 0.6875rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
   color: var(--text-dim);
-  padding: 0.85rem 0.5rem 0.25rem 0.5rem;
+  padding: 0.75rem 0.5rem 0.25rem 0.5rem;
+  user-select: none;
 }
 
 .tab-btn {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  width: 100%;
   padding: 0.625rem 0.75rem;
-  font-family: var(--font-sans);
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--text-muted);
+  border-radius: var(--radius-sm);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 0.875rem;
+  font-weight: 500;
   cursor: pointer;
-  min-height: 40px;
-  min-width: 44px;
-  width: 100%;
   text-align: left;
-  transition: all 0.15s ease;
+  transition: all 0.15s ease-in-out;
 }
 
 .tab-btn:hover {
-  background: var(--bg-subtle);
+  background-color: var(--bg-subtle);
   color: var(--text-main);
 }
 
-.tab-btn[aria-selected="true"] {
-  background: var(--accent-soft);
-  color: var(--primary);
-  border-color: transparent;
-  font-weight: 700;
+.tab-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
 }
 
-.tab-btn:focus-visible {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 2px;
+.tab-btn[aria-selected="true"] {
+  background-color: var(--primary-bg);
+  color: var(--primary);
+  font-weight: 600;
+  border-color: var(--primary);
 }
 
 .tab-role-icon {
-  font-size: 1.1rem;
-  width: 22px;
-  display: inline-flex;
-  justify-content: center;
-  align-items: center;
+  font-size: 1.125rem;
   flex-shrink: 0;
 }
 
 .tab-btn-label {
-  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -215,8 +193,8 @@ body {
 
 /* Pied de la barre latérale */
 .sidebar-footer {
-  padding: 0.75rem;
-  border-top: 1px solid var(--sidebar-border);
+  padding: 0.875rem 0.75rem;
+  border-top: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -225,58 +203,53 @@ body {
 .sidebar-collapse-btn {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 0.5rem;
   width: 100%;
-  padding: 0.4rem 0.5rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-dim);
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-sm);
   background: transparent;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 0.75rem;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: all 0.15s ease-in-out;
 }
 
 .sidebar-collapse-btn:hover {
-  background: var(--bg-subtle);
+  background-color: var(--bg-subtle);
   color: var(--text-main);
 }
 
 .sidebar-footer-tools {
   display: flex;
   gap: 0.5rem;
-  justify-content: space-between;
 }
 
-.sidebar-footer-tools .btn {
+.sidebar-footer-tools button {
   flex: 1;
-  padding: 0.4rem 0.5rem;
-  font-size: 0.75rem;
 }
 
-/* Région droite : En-tête supérieur + Contenu principal */
+/* --- Zone de transition & contenu principal --- */
 .page-transition-region {
   flex: 1;
-  min-width: 0;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   background-color: var(--bg-app);
 }
 
+/* En-tête applicatif supérieur */
 .application-header {
   height: 60px;
-  min-height: 60px;
-  padding: 0 1.5rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid var(--border-color);
   background-color: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.5rem;
   position: sticky;
   top: 0;
-  z-index: 20;
+  z-index: 40;
 }
 
 .header-breadcrumb {
@@ -288,7 +261,6 @@ body {
 
 .breadcrumb-item {
   color: var(--text-dim);
-  font-weight: 500;
 }
 
 .breadcrumb-separator {
@@ -297,7 +269,7 @@ body {
 
 .breadcrumb-title {
   color: var(--text-main);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .header-status {
@@ -306,20 +278,19 @@ body {
   gap: 0.75rem;
 }
 
+/* Zone de contenu principale */
 .main-content {
   flex: 1;
   padding: 1.5rem;
   max-width: 1400px;
   width: 100%;
   margin: 0 auto;
+  box-sizing: border-box;
 }
 
-.tab-panel {
-  display: block;
-}
-
+/* Panneaux d'onglets */
 .tab-panel[hidden] {
-  display: none;
+  display: none !important;
 }
 
 /* Pied de page du shell */
@@ -409,14 +380,14 @@ body {
 }
 
 .subnav-tab:focus-visible {
-  outline: 2px solid var(--primary-color);
+  outline: 2px solid var(--primary);
   outline-offset: 1px;
 }
 
 .subnav-tab.active {
-  color: var(--primary-color);
-  background: var(--primary-bg, rgba(59, 130, 246, 0.1));
-  border-color: var(--primary-color);
+  color: var(--primary);
+  background: var(--primary-bg);
+  border-color: var(--primary);
   font-weight: 600;
 }
 
@@ -495,7 +466,7 @@ body {
     min-width: 0;
     flex: none;
     border-right: none;
-    border-bottom: 1px solid var(--sidebar-border);
+    border-bottom: 1px solid var(--border-color);
     overflow-x: hidden;
   }
 
@@ -545,39 +516,18 @@ body {
   .page-transition-region {
     max-width: 100vw;
     min-width: 0;
-    overflow-x: hidden;
   }
 
   .application-header {
-    padding: 0 0.75rem;
-    height: 52px;
-    min-height: 52px;
+    padding: 0 1rem;
     max-width: 100vw;
-    overflow-x: hidden;
     box-sizing: border-box;
-  }
-
-  .header-breadcrumb {
-    display: none;
-  }
-
-  .header-status {
-    width: 100%;
-    justify-content: flex-end;
-    gap: 0.35rem;
-  }
-
-  .header-status .status-pill {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
-    white-space: nowrap;
   }
 
   .main-content {
-    padding: 1rem 0.75rem 2rem;
+    padding: 1rem;
     max-width: 100vw;
-    min-width: 0;
     box-sizing: border-box;
-    overflow-x: hidden;
   }
 }
+"#;

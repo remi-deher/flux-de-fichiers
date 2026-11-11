@@ -333,6 +333,87 @@ body {
   background-color: var(--bg-card);
 }
 
+/* --- Gabarit partagé de sous-navigation horizontale (ADR 0020) --- */
+.page-subnav {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  margin-bottom: 1.25rem;
+  padding: 0.5rem 0.75rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.subnav-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.subnav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.subnav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  white-space: nowrap;
+}
+
+.subnav-tab:hover {
+  color: var(--text-main);
+  background: var(--bg-subtle);
+}
+
+.subnav-tab:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 1px;
+}
+
+.subnav-tab.active {
+  color: var(--primary-color);
+  background: var(--primary-bg, rgba(59, 130, 246, 0.1));
+  border-color: var(--primary-color);
+  font-weight: 600;
+}
+
+.subnav-tab-icon {
+  font-size: 1rem;
+}
+
+.subnav-tab-badge {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.75rem;
+  border-radius: 9999px;
+  background: var(--bg-subtle);
+  color: var(--text-dim);
+  border: 1px solid var(--border-color);
+}
+
+.subnav-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 /* --- Adaptations Responsives Mobile (< 768px) --- */
 @media (max-width: 768px) {
   html, body {

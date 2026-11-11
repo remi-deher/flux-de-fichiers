@@ -329,37 +329,51 @@
     }
   }
 
-  // --- Gestion des sous-vues Exploiter vs Diagnostiquer ---
+  // --- Gestion des sous-vues File active, Historique et Diagnostic ---
   function setupActivityRoleTabs() {
-    const btnOps = el('tab-role-operations');
-    const btnDiag = el('tab-role-diagnostic');
     const viewOps = el('activity-view-operations');
     const viewDiag = el('activity-view-diagnostic');
+    const subtabActive = el('subtab-jobs-active');
+    const subtabHistory = el('subtab-jobs-history');
+    const subtabDiag = el('subtab-jobs-diagnostic');
 
-    if (btnOps && btnDiag && viewOps && viewDiag) {
-      btnOps.addEventListener('click', () => {
-        btnOps.classList.add('active');
-        btnOps.setAttribute('aria-selected', 'true');
-        btnDiag.classList.remove('active');
-        btnDiag.setAttribute('aria-selected', 'false');
-        viewOps.style.display = 'block';
-        viewDiag.style.display = 'none';
+    document.addEventListener('flux:subnav-change', (e) => {
+      const targetId = e.detail && e.detail.targetId;
+      if (!targetId || !targetId.startsWith('subtab-jobs-')) return;
+
+      if (targetId === 'subtab-jobs-active') {
+        if (viewOps && subtabActive) subtabActive.appendChild(viewOps);
+        if (viewOps) viewOps.style.display = 'block';
+        if (subtabDiag) subtabDiag.setAttribute('hidden', '');
+        if (subtabHistory) subtabHistory.setAttribute('hidden', '');
+        if (subtabActive) subtabActive.removeAttribute('hidden');
         jobsFilter = 'running';
         updateFilterChips();
         renderJobsTable();
-      });
-
-      btnDiag.addEventListener('click', () => {
-        btnDiag.classList.add('active');
-        btnDiag.setAttribute('aria-selected', 'true');
-        btnOps.classList.remove('active');
-        btnOps.setAttribute('aria-selected', 'false');
-        viewOps.style.display = 'block'; // La table des tâches est conservée pour affichage diagnostique
-        viewDiag.style.display = 'block';
+      } else if (targetId === 'subtab-jobs-history') {
+        if (viewOps && subtabHistory) subtabHistory.appendChild(viewOps);
+        if (viewOps) viewOps.style.display = 'block';
+        if (subtabActive) subtabActive.setAttribute('hidden', '');
+        if (subtabDiag) subtabDiag.setAttribute('hidden', '');
+        if (subtabHistory) subtabHistory.removeAttribute('hidden');
+        jobsFilter = 'succeeded';
+        updateFilterChips();
+        renderJobsTable();
+      } else if (targetId === 'subtab-jobs-diagnostic') {
+        if (viewOps && subtabDiag) subtabDiag.appendChild(viewOps);
+        if (viewOps) viewOps.style.display = 'block';
+        if (subtabActive) subtabActive.setAttribute('hidden', '');
+        if (subtabHistory) subtabHistory.setAttribute('hidden', '');
+        if (subtabDiag) subtabDiag.removeAttribute('hidden');
         jobsFilter = 'failed';
         updateFilterChips();
         renderJobsTable();
-      });
+      }
+    });
+
+    const refreshBtn = el('jobs-refresh-btn');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', loadJobs);
     }
   }
 

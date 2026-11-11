@@ -6,12 +6,63 @@ pub mod operations;
 pub use diagnostic::ActivityDiagnostic;
 pub use operations::ActivityOperations;
 
+use crate::core::{SubNav, SubNavTabItem};
 use leptos::prelude::*;
 
 #[component]
 pub fn JobsPanel() -> impl IntoView {
+    let subnav_tabs = vec![
+        SubNavTabItem {
+            id: "btn-subtab-jobs-active",
+            label: "File en direct",
+            icon: Some("⚡"),
+            target_id: "subtab-jobs-active",
+            is_active: true,
+            badge: None,
+        },
+        SubNavTabItem {
+            id: "btn-subtab-jobs-history",
+            label: "Historique",
+            icon: Some("📜"),
+            target_id: "subtab-jobs-history",
+            is_active: false,
+            badge: None,
+        },
+        SubNavTabItem {
+            id: "btn-subtab-jobs-diagnostic",
+            label: "Diagnostic",
+            icon: Some("🔬"),
+            target_id: "subtab-jobs-diagnostic",
+            is_active: false,
+            badge: None,
+        },
+    ];
+
+    let subnav_actions = view! {
+        <div id="sse-status-badge" class="status-pill info" title="Mode de rafraîchissement des tâches" aria-live="polite">
+            <span class="status-dot"></span>
+            <span id="sse-status-text">"Sondage périodique"</span>
+        </div>
+        <button
+            type="button"
+            id="jobs-refresh-btn"
+            class="btn btn-secondary btn-sm"
+            title="Rafraîchir immédiatement les tâches"
+        >
+            "🔄 Actualiser"
+        </button>
+    }
+    .into_any();
+
     view! {
         <div id="panel-jobs" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-jobs" hidden>
+            <SubNav
+                aria_label="Sous-navigation de la section Activité et Traitements"
+                tabs=subnav_tabs
+                actions=subnav_actions
+            />
+
+            // Conteneur principal de l'activité
             <section class="section-panel" aria-labelledby="jobs-section-title">
                 <div class="section-panel-header">
                     <div>
@@ -20,38 +71,17 @@ pub fn JobsPanel() -> impl IntoView {
                             "Suivi temps réel des traitements actifs (Exploiter) et analyse approfondie des exécutions antérieures (Diagnostiquer)."
                         </p>
                     </div>
-                    <div id="sse-status-badge" class="status-pill info" title="Mode de rafraîchissement des tâches" aria-live="polite">
-                        <span class="status-dot"></span>
-                        <span id="sse-status-text">"Sondage périodique"</span>
-                    </div>
                 </div>
 
-                // Sous-navigation par rôle métier (Exploiter vs Diagnostiquer)
-                <div class="activity-role-tabs" role="tablist" aria-label="Rôles de gestion d'activité" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
-                    <button
-                        type="button"
-                        id="tab-role-operations"
-                        class="tab-btn active"
-                        role="tab"
-                        aria-selected="true"
-                        style="padding: 0.4rem 0.85rem; font-size: 0.875rem;"
-                    >
-                        "⚡ Exploiter (File & Direct)"
-                    </button>
-                    <button
-                        type="button"
-                        id="tab-role-diagnostic"
-                        class="tab-btn"
-                        role="tab"
-                        aria-selected="false"
-                        style="padding: 0.4rem 0.85rem; font-size: 0.875rem;"
-                    >
-                        "🔬 Diagnostiquer (Historique & Erreurs)"
-                    </button>
+                <div id="subtab-jobs-active">
+                    <ActivityOperations />
                 </div>
-
-                <ActivityOperations />
-                <ActivityDiagnostic />
+                <div id="subtab-jobs-history" hidden>
+                    // La table des tâches est partagée dynamiquement
+                </div>
+                <div id="subtab-jobs-diagnostic" hidden>
+                    <ActivityDiagnostic />
+                </div>
             </section>
         </div>
     }

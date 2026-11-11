@@ -74,6 +74,10 @@ pub fn router(state: AppState) -> Router {
                 .delete(flows::delete_flow),
         )
         .route("/api/v1/plugins", get(plugins::catalog))
+        .route("/api/v1/plugins/repositories", get(plugins::list_repositories).post(plugins::add_repository))
+        .route("/api/v1/plugins/repositories/{id}/toggle", put(plugins::toggle_repository))
+        .route("/api/v1/plugins/repositories/{id}", axum::routing::delete(plugins::delete_repository))
+        .route("/api/v1/plugins/repositories/{id}/sync", post(plugins::sync_repository))
         .route("/api/v1/plugins/{id}/settings", get(plugins::get_settings).put(plugins::save_settings))
         .route("/api/v1/tools", get(plugins::tools))
         .route("/api/v1/tools/{id}/distribution", get(plugins::tool_distribution))

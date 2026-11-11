@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.4.1...v0.5.0) (2026-11-11)
+
+
+### Features
+
+* **frontend:** restructuration des pages et navigation inspiree d'encoding-central ([701352c](https://github.com/remi-deher/flux-de-fichiers/commit/701352c57d1706d99752d1971a0f453e9d46590d))
+* **frontend:** restructuration des pages et navigation inspiree d'encoding-central ([63feb8e](https://github.com/remi-deher/flux-de-fichiers/commit/63feb8e9e7aaba09aca3b3645a1b754760274a1d))
+
 ## [0.4.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.4.0...v0.4.1) (2026-11-11)
 
 

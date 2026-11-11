@@ -181,6 +181,29 @@ impl Agent {
         tokio::fs::remove_dir_all(dir).await?;
         Ok(())
     }
+
+    /// Purge les résidus orphelins (anciens répertoires job-* ou fichiers .tmp)
+    /// dans le répertoire de travail local sans toucher aux outils ou à la configuration.
+    async fn purge_orphaned_work_artifacts(&self) {
+        let mut entries = match tokio::fs::read_dir(&self.config.work_dir).await {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let file_name = entry.file_name();
+            let name = file_name.to_string_lossy();
+            if name.starts_with("job-") || name.starts_with(".tmp") || name.ends_with(".tmp") {
+                let path = entry.path();
+                let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
+                tracing::info!(path = %path.display(), "purging orphaned work artifact");
+                if is_dir {
+                    let _ = tokio::fs::remove_dir_all(&path).await;
+                } else {
+                    let _ = tokio::fs::remove_file(&path).await;
+                }
+            }
+        }
+    }
 }
 
 pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
@@ -228,6 +251,8 @@ pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
         tokio::select! { _=tokio::time::sleep(Duration::from_secs(5))=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
     };
     tracing::info!(worker_id=%worker.id, "worker registered");
+    agent.purge_orphaned_work_artifacts().await;
+    let mut was_disconnected = false;
     loop {
         let attempt = async {
             let claim = agent
@@ -245,9 +270,23 @@ pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
         };
         let claim = tokio::select! { result=attempt=>result, _=crate::api::shutdown_signal()=>return Ok(()) };
         match claim {
-            Ok(Some(claim)) => agent.execute(claim, worker.id).await?,
-            Ok(None) => {}
-            Err(_) => tracing::warn!("coordinator unavailable; retrying"),
+            Ok(Some(claim)) => {
+                if was_disconnected {
+                    agent.purge_orphaned_work_artifacts().await;
+                    was_disconnected = false;
+                }
+                agent.execute(claim, worker.id).await?;
+            }
+            Ok(None) => {
+                if was_disconnected {
+                    agent.purge_orphaned_work_artifacts().await;
+                    was_disconnected = false;
+                }
+            }
+            Err(_) => {
+                was_disconnected = true;
+                tracing::warn!("coordinator unavailable; retrying");
+            }
         }
         tokio::select! { _=tokio::time::sleep(Duration::from_secs(1))=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
     }

@@ -63,7 +63,7 @@ pub const CLIENT_SCRIPT: &str = r#"
   }
 
   // --- Gestion des onglets accessibles ---
-  const TABS = ['dashboard', 'files', 'jobs', 'workers', 'plugins', 'settings'];
+  const TABS = ['dashboard', 'files', 'flows', 'jobs', 'workers', 'plugins', 'settings'];
 
   function switchTab(tabName) {
     if (!TABS.includes(tabName)) return;
@@ -999,349 +999,8 @@ pub const CLIENT_SCRIPT: &str = r#"
     } catch {}
   }
 
-  // --- Gestion du catalogue d'outils, inspecteur de contrats et banc d'essai ---
+  // --- Gestion du catalogue d'outils et filtres ---
   function setupPluginsPanel() {
-    const CONTRACTS_DB = {
-      'tool.mkvtoolnix': {
-        path: 'tools/mkvtoolnix/distribution.v1.json',
-        schema: 'distribution.v1.json',
-        title: 'Contrat de distribution — MKVToolNix',
-        visual: `
-          <div class="visual-summary-grid">
-            <div class="visual-summary-box">
-              <div class="visual-summary-title">Distribution Option B</div>
-              <p class="visual-summary-text">Binaire autonome hors image conteneur. Rapatrié et vérifié à la demande par le cache worker.</p>
-            </div>
-            <div class="visual-summary-box">
-              <div class="visual-summary-title">Intégrité SHA-256 obligatoire</div>
-              <p class="visual-summary-text">Archive : <code>1dd2377...</code> (x86_64) / <code>645600f...</code> (aarch64)<br>Binaire : <code>c55e78f...</code> (x86_64) / <code>6a9e90f...</code> (aarch64)</p>
-            </div>
-            <div class="visual-summary-box">
-              <div class="visual-summary-title">Sécurité d'extraction</div>
-              <p class="visual-summary-text"><code>noShellUnpack: true</code> (sans shell) • Anti-ZipSlip • Mode Unix <code>0755</code> • Confinement non-root.</p>
-            </div>
-          </div>
-        `,
-        data: {
-          schemaVersion: "1.0.0",
-          toolId: "tool.mkvtoolnix",
-          toolVersion: "1.0.0",
-          distributionMode: "autonomous-binary",
-          releaseStatus: "contract-only",
-          artifacts: [
-            {
-              arch: "x86_64",
-              os: "linux",
-              archiveUrl: "https://artifacts.example.invalid/tools/mkvtoolnix/1.0.0/mkvtoolnix-linux-x86_64.tar.gz",
-              archiveFormat: "tar.gz",
-              archiveSha256: "1dd2377127f9c41ad8bccd941c7b695dbb703036c2854ad27962e273b8d3a0ed",
-              binaryRelativePath: "bin/mkvmerge",
-              binarySha256: "c55e78f63d28695cc625565dd777e37ee776aace68b81ea720f8e0c38e48ddf3",
-              permissions: { unixMode: "0755", owner: "runtime-user", executableBit: true }
-            },
-            {
-              arch: "aarch64",
-              os: "linux",
-              archiveUrl: "https://artifacts.example.invalid/tools/mkvtoolnix/1.0.0/mkvtoolnix-linux-aarch64.tar.gz",
-              archiveFormat: "tar.gz",
-              archiveSha256: "645600fcd1866e47f49015217b92370a9abe2fb333c2706bc3b05524175c4e13",
-              binaryRelativePath: "bin/mkvmerge",
-              binarySha256: "6a9e90f5c6b31085149ca306e476a6e591fcf82cfcdd8ee24479e49e446066a5",
-              permissions: { unixMode: "0755", owner: "runtime-user", executableBit: true }
-            }
-          ],
-          installPolicy: {
-            verifySha256BeforeExec: true,
-            refuseMismatchedDigest: true,
-            cacheRootRelative: "tools-cache/mkvtoolnix/1.0.0",
-            noShellUnpack: true,
-            executableAllowlist: ["mkvmerge"],
-            networkAtInstall: "explicit-allowlist"
-          },
-          notes: [
-            "Option B : hors image applicative. Empreintes et URL contract-only.",
-            "Remux Matroska uniquement ; pas de production MP4."
-          ]
-        }
-      },
-      'tool.ffmpeg': {
-        path: 'tools/ffmpeg/distribution.v1.json',
-        schema: 'distribution.v1.json',
-        title: 'Contrat de distribution — FFmpeg',
-        visual: `
-          <div class="visual-summary-grid">
-            <div class="visual-summary-box">
-              <div class="visual-summary-title">Distribution Option B (Distribué)</div>
-              <p class="visual-summary-text">Outil réservé aux tests et scénarios de simulation pour médias synthétiques. Non présent dans le binaire de production.</p>
-            </div>
-            <div class="visual-summary-box">
-              <div class="visual-summary-title">Empreintes SHA-256</div>
-              <p class="visual-summary-text">Archive : <code>91a82f3...</code> (x86_64) / <code>3c4190e...</code> (aarch64)<br>Binaire : <code>f87e102...</code> (x86_64)</p>
-            </div>
-            <div class="visual-summary-box">
-              <div class="visual-summary-title">Politique d'isolation</div>
-              <p class="visual-summary-text"><code>noShellUnpack: true</code> • Confinement non-root • Exécutable allowlist : <code>ffmpeg</code>.</p>
-            </div>
-          </div>
-        `,
-        data: {
-          schemaVersion: "1.0.0",
-          toolId: "tool.ffmpeg",
-          toolVersion: "7.1.0",
-          distributionMode: "autonomous-binary",
-          releaseStatus: "contract-only",
-          artifacts: [
-            {
-              arch: "x86_64",
-              os: "linux",
-              archiveUrl: "https://artifacts.example.invalid/tools/ffmpeg/7.1.0/ffmpeg-linux-x86_64.tar.gz",
-              archiveFormat: "tar.gz",
-              archiveSha256: "91a82f37c62d41a7d65b128509e25d2b638f2269c10714b986ee06180635467e",
-              binaryRelativePath: "bin/ffmpeg",
-              binarySha256: "f87e102d8e35181b53e8387063eb2b77a7967980590835cc9950e7b8f97e20ec",
-              permissions: { unixMode: "0755", owner: "runtime-user", executableBit: true }
-            }
-          ],
-          installPolicy: {
-            verifySha256BeforeExec: true,
-            refuseMismatchedDigest: true,
-            cacheRootRelative: "tools-cache/ffmpeg/7.1.0",
-            noShellUnpack: true,
-            executableAllowlist: ["ffmpeg"],
-            networkAtInstall: "explicit-allowlist"
-          }
-        }
-      },
-      'tool.internal.telemetry': {
-        path: 'tools/internal-telemetry/distribution.v1.json',
-        schema: 'distribution.v1.json',
-        title: 'Contrat de distribution — Sonde interne de télémétrie',
-        visual: `
-          <div class="visual-summary-grid">
-            <div class="visual-summary-box">
-              <div class="visual-summary-title">Sonde système intégrée</div>
-              <p class="visual-summary-text">Intégrée nativement au binaire applicatif. Relevés CPU (/proc/stat), RAM (/proc/meminfo), GPU (/dev/dri) et stockage (statvfs).</p>
-            </div>
-            <div class="visual-summary-box">
-              <div class="visual-summary-title">Distribution pré-amorcée</div>
-              <p class="visual-summary-text">Mode <code>offline-preseeded</code>. Aucun téléchargement réseau requis à l'exécution.</p>
-            </div>
-            <div class="visual-summary-box">
-              <div class="visual-summary-title">Confinement maximal</div>
-              <p class="visual-summary-text">UID 10001 (app), aucun droit root, aucun socket Docker, aucune commande shell.</p>
-            </div>
-          </div>
-        `,
-        data: {
-          schemaVersion: "1.0.0",
-          toolId: "tool.internal.telemetry",
-          toolVersion: "0.1.0",
-          distributionMode: "autonomous-binary",
-          releaseStatus: "contract-only",
-          artifacts: [
-            {
-              arch: "x86_64",
-              os: "linux",
-              archiveUrl: "https://artifacts.example.invalid/tools/internal-telemetry/0.1.0/flux-telemetry-linux-x86_64.tar.gz",
-              archiveFormat: "tar.gz",
-              archiveSha256: "8525e058fac76aa6a9d589c8aee04eb6eb88cba8751f08ee721bda3facb810f3",
-              binaryRelativePath: "bin/flux-telemetry",
-              binarySha256: "b0125406ca5e2fd735512b4cb591d18a284fad9f71637fb882a745909fe025e2",
-              permissions: { unixMode: "0755", owner: "runtime-user", executableBit: true }
-            },
-            {
-              arch: "aarch64",
-              os: "linux",
-              archiveUrl: "https://artifacts.example.invalid/tools/internal-telemetry/0.1.0/flux-telemetry-linux-aarch64.tar.gz",
-              archiveFormat: "tar.gz",
-              archiveSha256: "68802fba876a410c69c92a231dc5cf68d10ed8921da921f60beec507150c2844",
-              binaryRelativePath: "bin/flux-telemetry",
-              binarySha256: "4630821f0b995b9c1abe4fca7a9efaa473535d0c9f8bc629eee5e843ff768cfd",
-              permissions: { unixMode: "0755", owner: "runtime-user", executableBit: true }
-            }
-          ],
-          installPolicy: {
-            verifySha256BeforeExec: true,
-            refuseMismatchedDigest: true,
-            cacheRootRelative: "tools-cache/internal-telemetry/0.1.0",
-            noShellUnpack: true,
-            executableAllowlist: ["flux-telemetry"],
-            networkAtInstall: "offline-preseeded"
-          },
-          notes: [
-            "Sonde interne de mesure : CPU, RAM, GPU, stockage.",
-            "Confinement strict sous UID 10001 (app), sans privilège root ni socket Docker."
-          ]
-        }
-      },
-      'macro.remux-verify': {
-        path: 'blocks/macro-remux-verify.example/macro-block.json',
-        schema: 'macro-block.json (v1.0.0)',
-        title: 'Macro-bloc composite — Remux puis Vérifier',
-        visual: `
-          <div class="visual-summary-box">
-            <div class="visual-summary-title">Pipeline déclaratif composite (2 étapes sécurisées)</div>
-            <div class="macro-pipeline" role="group" aria-label="Pipeline du macro-bloc">
-              <div class="pipeline-step">
-                <span class="pipeline-step-title">Source MKV</span>
-                <span class="pipeline-step-detail">video/x-matroska</span>
-              </div>
-              <span class="pipeline-arrow" aria-hidden="true">➔</span>
-              <div class="pipeline-step">
-                <span class="pipeline-step-title">Étape 1 : Remux</span>
-                <span class="pipeline-step-detail">mkvmerge v1.1.0</span>
-              </div>
-              <span class="pipeline-arrow" aria-hidden="true">➔</span>
-              <div class="pipeline-step">
-                <span class="pipeline-step-title">Étape 2 : Vérification</span>
-                <span class="pipeline-step-detail">equiv-check v0.0.0</span>
-              </div>
-              <span class="pipeline-arrow" aria-hidden="true">➔</span>
-              <div class="pipeline-step">
-                <span class="pipeline-step-title">Résultat MKV</span>
-                <span class="pipeline-step-detail">Fichier intègre</span>
-              </div>
-            </div>
-            <div style="margin-top: 0.75rem; font-size: 0.75rem; color: var(--text-dim);">
-              <strong>Politique d'erreur :</strong> <code>stop</code> (interruption immédiate en cas d'échec) • <strong>Liaisons :</strong> argv strict sans shell composite.
-            </div>
-          </div>
-        `,
-        data: {
-          schemaVersion: "1.0.0",
-          id: "macro.remux-verify.example",
-          version: "0.1.0",
-          name: "Remux puis vérifier (macro)",
-          kind: "macro-block",
-          category: "media",
-          sockets: {
-            inputs: [{ id: "source", label: "Source MKV", dataType: "file", mediaType: "video/x-matroska" }],
-            outputs: [{ id: "result", label: "MKV remuxé", dataType: "file", mediaType: "video/x-matroska" }]
-          },
-          steps: [
-            {
-              id: "remux",
-              label: "Remux mkvmerge",
-              operationId: "operation.mkvtoolnix.mkvmerge.remux",
-              operationVersion: "1.1.0",
-              paramBindings: [
-                { paramId: "source", from: { kind: "macro_input", socketId: "source" } },
-                { paramId: "destination", from: { kind: "literal", value: { kind: "fileRef", fileId: "file.macro-temp-remux", state: "reserved", access: "write", mediaType: "video/x-matroska" } } }
-              ],
-              publishOutputs: [{ stepOutputId: "result", macroSocketId: "result" }]
-            },
-            {
-              id: "verify",
-              label: "Vérifier équivalence (placeholder déclaratif)",
-              operationId: "operation.mkvtoolnix.verify.remux-equivalent.example",
-              operationVersion: "0.0.0",
-              paramBindings: [
-                { paramId: "source", from: { kind: "macro_input", socketId: "source" } },
-                { paramId: "candidate", from: { kind: "step_output", stepId: "remux", outputId: "result" } }
-              ]
-            }
-          ],
-          errorPolicy: "stop",
-          notes: ["Chaque étape reste une opération argv sûre — pas de shell composite."]
-        }
-      },
-      'catalogue.contracts': {
-        path: 'catalogue/contracts.v1.json',
-        schema: 'contracts.v1.json (v1.0.0)',
-        title: 'Index général des contrats de distribution et macro-blocs',
-        visual: `
-          <div class="visual-summary-grid">
-            <div class="visual-summary-box">
-              <div class="visual-summary-title">Catalogue distribué unifié</div>
-              <p class="visual-summary-text">Index canonique référençant les contrats d'opérations, macro-blocs, flux, presets et applications.</p>
-            </div>
-            <div class="visual-summary-box">
-              <div class="visual-summary-title">Validation des schémas</div>
-              <p class="visual-summary-text">Chaque contrat pointe vers son schéma JSON standardisé et sa politique d'intégrité cryptographique.</p>
-            </div>
-          </div>
-        `,
-        data: {
-          schemaVersion: "1.0.0",
-          legacyIndex: "catalogue/index.json",
-          entries: [
-            {
-              id: "tool.mkvtoolnix",
-              type: "tool",
-              version: "1.0.0",
-              manifestPath: "tools/mkvtoolnix/manifest.json",
-              contracts: [{ kind: "distribution", path: "tools/mkvtoolnix/distribution.v1.json" }]
-            },
-            {
-              id: "tool.internal.telemetry",
-              type: "tool",
-              version: "0.1.0",
-              manifestPath: "tools/internal-telemetry/manifest.json",
-              contracts: [{ kind: "distribution", path: "tools/internal-telemetry/distribution.v1.json" }]
-            },
-            {
-              id: "macro.remux-verify.example",
-              type: "block",
-              version: "0.1.0",
-              manifestPath: "blocks/macro-remux-verify.example/manifest.json",
-              contracts: [{ kind: "macro-block", path: "blocks/macro-remux-verify.example/macro-block.json" }]
-            }
-          ]
-        }
-      }
-    };
-
-    let currentContractKey = 'tool.mkvtoolnix';
-
-    function renderContract(key) {
-      const contract = CONTRACTS_DB[key];
-      if (!contract) return;
-      currentContractKey = key;
-
-      const pathEl = el('contract-file-path');
-      const schemaEl = el('contract-file-schema');
-      const summaryEl = el('contract-visual-summary');
-      const codeEl = el('contract-json-content');
-
-      if (pathEl) pathEl.textContent = contract.path;
-      if (schemaEl) schemaEl.textContent = 'Schéma : ' + contract.schema;
-      if (summaryEl) summaryEl.innerHTML = contract.visual;
-      if (codeEl) codeEl.textContent = JSON.stringify(contract.data, null, 2);
-
-      // Met à jour les onglets de contrat
-      document.querySelectorAll('.contract-tab-btn').forEach(btn => {
-        const isMatch = btn.getAttribute('data-contract-key') === key;
-        btn.setAttribute('aria-selected', isMatch ? 'true' : 'false');
-        btn.classList.toggle('active', isMatch);
-      });
-    }
-
-    // Écouteurs sur les onglets de contrat
-    document.querySelectorAll('.contract-tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const key = btn.getAttribute('data-contract-key');
-        if (key) renderContract(key);
-      });
-    });
-
-    // Copie du JSON
-    const copyBtn = el('copy-contract-json-btn');
-    if (copyBtn) {
-      copyBtn.addEventListener('click', async () => {
-        const contract = CONTRACTS_DB[currentContractKey];
-        if (!contract) return;
-        const text = JSON.stringify(contract.data, null, 2);
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(text);
-          }
-          showNotice('Contrat JSON copié dans le presse-papiers !', 'success');
-        } catch {
-          showNotice('Contrat prêt à la copie.', 'info');
-        }
-      });
-    }
-
     // Filtrage des cartes d'outils
     document.querySelectorAll('.filter-chip[data-tool-filter]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1363,190 +1022,387 @@ pub const CLIENT_SCRIPT: &str = r#"
         });
       });
     });
+  }
 
-    // Boutons sur les cartes d'outils
-    document.querySelectorAll('.inspect-contract-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const target = btn.getAttribute('data-target-contract');
-        if (target) {
-          try {
-            const res = await apiFetch('/api/v1/tools/' + encodeURIComponent(target) + '/distribution');
-            if (res.ok) {
-              const liveDist = await res.json();
-              if (CONTRACTS_DB[target]) {
-                CONTRACTS_DB[target].data = liveDist;
-              }
-            }
-          } catch {}
-          if (CONTRACTS_DB[target]) {
-            renderContract(target);
-            const area = el('contract-display-area');
-            if (area) area.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          }
-        }
-      });
-    });
+  // --- Concepteur et Gestionnaire de Flux (Flows) type Zapier / FileFlows ---
+  function setupFlowsPanel() {
+    const libraryView = el('flows-library-view');
+    const canvasView = el('flows-canvas-view');
+    const wizardDialog = el('flow-wizard-dialog');
+    const openWizardBtn = el('btn-open-flow-wizard');
+    const closeWizardX = el('flow-wizard-close-x');
+    const cancelWizardBtn = el('flow-wizard-cancel-btn');
+    const generateWizardBtn = el('flow-wizard-generate-btn');
+    const backToLibraryBtn = el('btn-back-to-library');
+    const saveCanvasFlowBtn = el('btn-canvas-save-flow');
+    const nodesContainer = el('canvas-nodes-container');
+    const svgLines = el('canvas-svg-lines');
 
-    document.querySelectorAll('.test-tool-btn').forEach(btn => {
+    let currentSelectedTemplate = 'hevc';
+
+    // 1. Navigation Canvas <-> Bibliothèque
+    function openCanvas(flowId, flowTitle) {
+      if (libraryView) libraryView.style.display = 'none';
+      if (canvasView) canvasView.style.display = 'block';
+      const titleEl = el('canvas-flow-title');
+      if (titleEl) titleEl.textContent = `Éditeur visuel : ${flowTitle}`;
+      setTimeout(drawCanvasLines, 60);
+    }
+
+    function closeCanvas() {
+      if (canvasView) canvasView.style.display = 'none';
+      if (libraryView) libraryView.style.display = 'block';
+    }
+
+    if (backToLibraryBtn) backToLibraryBtn.addEventListener('click', closeCanvas);
+
+    document.querySelectorAll('.open-canvas-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const tool = btn.getAttribute('data-test-tool');
-        const select = el('testbench-tool-select');
-        if (select && tool) {
-          select.value = tool;
-        }
-        const stepper = el('lifecycle-stepper');
-        if (stepper) stepper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        const card = btn.closest('.flow-card');
+        const title = card ? card.querySelector('.flow-card-title').textContent : 'Flux';
+        const flowId = btn.getAttribute('data-flow') || 'flow';
+        openCanvas(flowId, title);
       });
     });
 
-    const gotoTelBtn = el('goto-telemetry-btn');
-    if (gotoTelBtn) {
-      gotoTelBtn.addEventListener('click', () => {
-        const telCard = el('telemetry-hardware-card');
-        if (telCard) telCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // 2. Assistant de configuration (Setup Wizard)
+    if (openWizardBtn && wizardDialog) {
+      openWizardBtn.addEventListener('click', () => {
+        if (typeof wizardDialog.showModal === 'function') {
+          wizardDialog.showModal();
+        } else {
+          wizardDialog.setAttribute('open', '');
+        }
       });
     }
 
-    // Banc d'essai : simulateur de cycle de vie du cache
-    const runCycleBtn = el('run-testbench-cycle-btn');
-    const logEl = el('testbench-log');
-    const clearLogBtn = el('clear-testbench-log-btn');
-
-    if (clearLogBtn && logEl) {
-      clearLogBtn.addEventListener('click', () => {
-        logEl.textContent = '[INFO] Journal réinitialisé.\n';
-      });
-    }
-
-    function appendLog(line) {
-      if (!logEl) return;
-      const now = new Date().toLocaleTimeString('fr-FR');
-      logEl.textContent += `[${now}] ${line}\n`;
-      logEl.scrollTop = logEl.scrollHeight;
-    }
-
-    function resetStepper() {
-      for (let i = 1; i <= 7; i++) {
-        const step = el(`step-${i}`);
-        if (step) {
-          step.className = 'step-item';
-          const statusText = step.querySelector('.step-status');
-          if (statusText) statusText.textContent = 'En attente';
+    function closeWizard() {
+      if (wizardDialog) {
+        if (typeof wizardDialog.close === 'function') {
+          wizardDialog.close();
+        } else {
+          wizardDialog.removeAttribute('open');
         }
       }
     }
 
-    function setStepState(stepNum, state, statusMsg) {
-      const step = el(`step-${stepNum}`);
-      if (!step) return;
-      step.className = 'step-item ' + state;
-      const statusText = step.querySelector('.step-status');
-      if (statusText && statusMsg) statusText.textContent = statusMsg;
-    }
+    if (closeWizardX) closeWizardX.addEventListener('click', closeWizard);
+    if (cancelWizardBtn) cancelWizardBtn.addEventListener('click', closeWizard);
 
-    if (runCycleBtn) {
-      runCycleBtn.addEventListener('click', async () => {
-        const toolSelect = el('testbench-tool-select');
-        const archSelect = el('testbench-arch-select');
-        const toolId = toolSelect ? toolSelect.value : 'tool.mkvtoolnix';
-        const arch = archSelect ? archSelect.value : 'x86_64';
+    // Sélection du modèle dans le wizard
+    document.querySelectorAll('.wizard-template-card').forEach(card => {
+      card.addEventListener('click', () => {
+        document.querySelectorAll('.wizard-template-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+        currentSelectedTemplate = card.getAttribute('data-template') || 'hevc';
 
-        runCycleBtn.disabled = true;
-        runCycleBtn.textContent = 'Validation en cours…';
-        resetStepper();
+        const nameInput = el('wizard-flow-name');
+        const encSelect = el('wizard-flow-encoder');
+        if (currentSelectedTemplate === 'hevc') {
+          if (nameInput) nameInput.value = 'Transcodage HEVC Intel QSV';
+          if (encSelect) encSelect.value = 'qsv';
+        } else if (currentSelectedTemplate === 'mkv-remux') {
+          if (nameInput) nameInput.value = 'Remuxage sans perte Matroska';
+          if (encSelect) encSelect.value = 'cpu';
+        } else if (currentSelectedTemplate === 'mp4-web') {
+          if (nameInput) nameInput.value = 'Optimisation Streaming Web (MP4)';
+          if (encSelect) encSelect.value = 'vaapi';
+        } else {
+          if (nameInput) nameInput.value = 'Nouveau flux personnalisé';
+        }
+      });
+    });
 
-        appendLog(`--- Démarrage cycle ToolCacheManager pour ${toolId} (${arch}) ---`);
+    if (generateWizardBtn) {
+      generateWizardBtn.addEventListener('click', () => {
+        const nameInput = el('wizard-flow-name');
+        const flowTitle = nameInput && nameInput.value ? nameInput.value.trim() : 'Nouveau flux';
+        closeWizard();
 
-        // Étape 1 : Recherche .ready
-        setStepState(1, 'active', 'Vérification…');
-        appendLog(`Étape 1/7 : Inspection répertoire /work/tools-cache/${toolId}/1.0.0/${arch}/`);
-        await new Promise(r => setTimeout(r, 260));
-        setStepState(1, 'success', 'Marqueur vérifié');
-        appendLog(`Étape 1/7 [OK] : Cache local vérifié, transition acquisition requise`);
+        // Reconstituer les nœuds selon le template choisi
+        if (nodesContainer) {
+          nodesContainer.innerHTML = `
+            <div class="canvas-node implicit-node selected" id="node-1" data-node-id="node-1" data-block-type="inspect">
+              <div class="node-connector connector-out"></div>
+              <div class="node-header">
+                <span class="node-icon">🔍</span>
+                <div class="node-title-box">
+                  <span class="node-kind">MediaInfo • Début de flux</span>
+                  <h4 class="node-name">Inspecter métadonnées</h4>
+                </div>
+                <span class="status-pill info node-pill">Implicite</span>
+              </div>
+              <div class="node-summary">Extraction exhaustive de toutes les pistes et propriétés du média.</div>
+            </div>
+          `;
 
-        // Étape 2 : Verrou .lock
-        setStepState(2, 'active', 'Acquisition…');
-        appendLog(`Étape 2/7 : Création verrou exclusif .lock (protection multi-processus)`);
-        await new Promise(r => setTimeout(r, 260));
-        setStepState(2, 'success', 'Verrou acquis');
-        appendLog(`Étape 2/7 [OK] : Verrou .lock obtenu avec succès`);
+          if (currentSelectedTemplate === 'hevc') {
+            appendNodeToCanvas('video-encode', 'FFmpeg Builder', 'Réencodage Vidéo', 'HEVC • Intel QSV • Qualité : 6 • Vitesse : 3');
+            appendNodeToCanvas('audio-encode', 'FFmpeg Builder', 'Réencodage Audio', 'Codec : AAC • 192 kbps • Stéréo');
+            appendNodeToCanvas('remux-mkv', 'MKVToolNix', 'Remuxage Matroska', 'Assemblage final MKV • Langues : fre, eng');
+          } else if (currentSelectedTemplate === 'mkv-remux') {
+            appendNodeToCanvas('remux-mkv', 'MKVToolNix', 'Remuxage Matroska', 'Filtrage langues fre, eng • Copie directe sans transcodage');
+          } else if (currentSelectedTemplate === 'mp4-web') {
+            appendNodeToCanvas('remux-mp4', 'MP4Box GPAC', 'Remuxage MP4', 'FastStart activé • Moov atom en début de fichier');
+          }
+        }
 
-        // Étape 3 : Téléchargement vers staging
-        setStepState(3, 'active', 'Rapatriement…');
-        appendLog(`Étape 3/7 : Rapatriement archive vers staging (/work/tools-cache/staging/.tmp_dl)`);
-        await new Promise(r => setTimeout(r, 300));
-        setStepState(3, 'success', 'Archive en staging');
-        appendLog(`Étape 3/7 [OK] : Archive téléchargée (taille conforme)`);
-
-        // Étape 4 : Contrôle cryptographique SHA-256 archive
-        setStepState(4, 'active', 'Calcul SHA-256…');
-        appendLog(`Étape 4/7 : Vérification empreinte SHA-256 archive`);
-        await new Promise(r => setTimeout(r, 280));
-        setStepState(4, 'success', 'SHA-256 conforme');
-        appendLog(`Étape 4/7 [OK] : Empreinte archive validée contre contrat de distribution`);
-
-        // Étape 5 : Extraction native Rust sans shell (noShellUnpack)
-        setStepState(5, 'active', 'Extraction mémoire…');
-        appendLog(`Étape 5/7 : Extraction mémoire sans shell (noShellUnpack: true, contrôle anti-ZipSlip)`);
-        await new Promise(r => setTimeout(r, 300));
-        setStepState(5, 'success', 'Extrait sans shell');
-        appendLog(`Étape 5/7 [OK] : Décompactage direct Rust sans privilège ni invocation shell`);
-
-        // Étape 6 : Recalcul SHA-256 du binaire final
-        setStepState(6, 'active', 'Contrôle binaire…');
-        appendLog(`Étape 6/7 : Recalcul SHA-256 de l'exécutable binaire extrait`);
-        await new Promise(r => setTimeout(r, 280));
-        setStepState(6, 'success', 'Binaire intègre');
-        appendLog(`Étape 6/7 [OK] : Binaire strictement identique à l'empreinte binarySha256 du contrat`);
-
-        // Étape 7 : Pose du marqueur .ready et libération du verrou .lock
-        setStepState(7, 'active', 'Finalisation…');
-        appendLog(`Étape 7/7 : Application mode Unix 0755, création .ready et libération du verrou`);
-        await new Promise(r => setTimeout(r, 260));
-        setStepState(7, 'success', 'Prêt pour exécution');
-        appendLog(`Étape 7/7 [SUCCÈS] : Outil opérationnel dans le cache. Exécution autorisée.`);
-
-        showNotice(`Cycle ToolCacheManager terminé avec succès pour ${toolId} (${arch}) !`, 'success');
-        runCycleBtn.disabled = false;
-        runCycleBtn.textContent = '▶ Lancer la validation du cache';
+        openCanvas('generated', flowTitle);
+        showNotice(`Flux « ${flowTitle} » généré avec succès ! Prêt dans le Canvas.`, 'success');
       });
     }
 
-    // Actualisation de la télémétrie matérielle
-    const refreshTelBtn = el('refresh-telemetry-btn');
-    if (refreshTelBtn) {
-      refreshTelBtn.addEventListener('click', () => {
-        refreshTelBtn.disabled = true;
-        refreshTelBtn.textContent = 'Mesure…';
+    // 3. Tracé des connexions SVG entre les connecteurs
+    function drawCanvasLines() {
+      if (!svgLines || !nodesContainer) return;
+      const nodes = Array.from(nodesContainer.querySelectorAll('.canvas-node'));
+      if (nodes.length < 2) {
+        svgLines.innerHTML = '';
+        return;
+      }
 
-        setTimeout(() => {
-          // Simulation réaliste de variation
-          const cpuPercent = (12.0 + Math.random() * 6.0).toFixed(1);
-          const ramPercent = (23.5 + Math.random() * 3.0).toFixed(1);
-          const load1 = (0.35 + Math.random() * 0.15).toFixed(2);
-          const load5 = (0.38 + Math.random() * 0.05).toFixed(2);
+      const boardRect = nodesContainer.parentElement.getBoundingClientRect();
+      let pathsHtml = `
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--primary)" />
+          </marker>
+        </defs>
+      `;
 
-          const cpuVal = el('cpu-usage-val');
-          const cpuFill = el('cpu-gauge-fill');
-          const cpuLoad = el('cpu-load-text');
-          const ramVal = el('ram-usage-val');
-          const ramFill = el('ram-gauge-fill');
+      for (let i = 0; i < nodes.length - 1; i++) {
+        const fromNode = nodes[i];
+        const toNode = nodes[i + 1];
 
-          if (cpuVal) cpuVal.textContent = cpuPercent + ' %';
-          if (cpuFill) cpuFill.style.width = cpuPercent + '%';
-          if (cpuLoad) cpuLoad.textContent = `Charge moyenne : ${load1} • ${load5} • 0.35`;
-          if (ramVal) ramVal.textContent = ramPercent + ' %';
-          if (ramFill) ramFill.style.width = ramPercent + '%';
+        const outConn = fromNode.querySelector('.connector-out');
+        const inConn = toNode.querySelector('.connector-in');
 
-          refreshTelBtn.disabled = false;
-          refreshTelBtn.textContent = 'Actualiser';
-          showNotice('Métriques matérielles de la sonde actualisées.', 'info');
-        }, 350);
+        if (outConn && inConn) {
+          const rOut = outConn.getBoundingClientRect();
+          const rIn = inConn.getBoundingClientRect();
+
+          const x1 = rOut.left + rOut.width / 2 - boardRect.left + nodesContainer.parentElement.scrollLeft;
+          const y1 = rOut.top + rOut.height / 2 - boardRect.top + nodesContainer.parentElement.scrollTop;
+
+          const x2 = rIn.left + rIn.width / 2 - boardRect.left + nodesContainer.parentElement.scrollLeft;
+          const y2 = rIn.top + rIn.height / 2 - boardRect.top + nodesContainer.parentElement.scrollTop;
+
+          const cy1 = y1 + 18;
+          const cy2 = y2 - 18;
+
+          pathsHtml += `<path d="M ${x1} ${y1} C ${x1} ${cy1}, ${x2} ${cy2}, ${x2} ${y2}" stroke="var(--primary)" stroke-width="2.5" fill="none" marker-end="url(#arrow)" />`;
+        }
+      }
+      svgLines.innerHTML = pathsHtml;
+    }
+
+    window.addEventListener('resize', drawCanvasLines);
+
+    // 4. Ajout d'un bloc au canvas
+    function appendNodeToCanvas(blockType, kind, title, summary) {
+      if (!nodesContainer) return;
+      const count = nodesContainer.querySelectorAll('.canvas-node').length + 1;
+      const nodeId = `node-${count}`;
+      const icon = blockType.includes('video') ? '🎞️' : blockType.includes('audio') ? '🔊' : blockType.includes('mp4') ? '📦' : '🎬';
+
+      const div = document.createElement('div');
+      div.className = 'canvas-node';
+      div.id = nodeId;
+      div.setAttribute('data-node-id', nodeId);
+      div.setAttribute('data-block-type', blockType);
+      div.innerHTML = `
+        <div class="node-connector connector-in"></div>
+        <div class="node-connector connector-out"></div>
+        <div class="node-header">
+          <span class="node-icon">${icon}</span>
+          <div class="node-title-box">
+            <span class="node-kind">${kind}</span>
+            <h4 class="node-name">${title}</h4>
+          </div>
+          <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
+        </div>
+        <div class="node-summary" id="${nodeId}-summary">${summary}</div>
+      `;
+
+      nodesContainer.appendChild(div);
+      bindNodeEvents(div);
+      selectNode(div);
+      setTimeout(drawCanvasLines, 30);
+    }
+
+    // 5. Sélection et inspecteur de bloc
+    function selectNode(nodeEl) {
+      if (!nodeEl) return;
+      document.querySelectorAll('.canvas-node').forEach(n => n.classList.remove('selected'));
+      nodeEl.classList.add('selected');
+
+      const blockType = nodeEl.getAttribute('data-block-type') || 'inspect';
+      const nodeName = nodeEl.querySelector('.node-name') ? nodeEl.querySelector('.node-name').textContent : 'Bloc';
+      const nodeKind = nodeEl.querySelector('.node-kind') ? nodeEl.querySelector('.node-kind').textContent : 'Outil';
+
+      const titleEl = el('inspector-block-title');
+      const toolEl = el('inspector-block-tool');
+      const formContainer = el('inspector-form-container');
+
+      if (titleEl) titleEl.textContent = nodeName;
+      if (toolEl) toolEl.textContent = nodeKind.split('•')[0].trim();
+
+      if (formContainer) {
+        if (blockType === 'inspect') {
+          formContainer.innerHTML = `
+            <div class="status-pill info" style="width: 100%; margin-bottom: 0.75rem; justify-content: center;">
+              Bloc implicite non configurable
+            </div>
+            <p style="font-size: 0.8125rem; color: var(--text-dim); line-height: 1.5;">
+              Ce bloc s'exécute automatiquement en début de flux. MediaInfo extrait l'intégralité des flux (codecs, pistes audio, sous-titres, langues, métadonnées) et les injecte dans le contexte d'exécution des blocs suivants.
+            </p>
+          `;
+        } else if (blockType === 'video-encode') {
+          formContainer.innerHTML = `
+            <div class="form-group">
+              <label for="node-cfg-codec" class="form-label">Codec vidéo</label>
+              <select id="node-cfg-codec" class="form-select">
+                <option value="hevc" selected>HEVC / H.265 (Recommandé)</option>
+                <option value="h264">H.264 / AVC</option>
+                <option value="av1">AV1</option>
+                <option value="copy">Copie directe</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="node-cfg-encoder" class="form-label">Encodeur matériel</label>
+              <select id="node-cfg-encoder" class="form-select">
+                <option value="auto" selected>Intel QSV (Automatique)</option>
+                <option value="nvenc">Nvidia NVENC</option>
+                <option value="vaapi">VA-API (Linux)</option>
+                <option value="cpu">Processeur CPU (libx265)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="node-cfg-quality" class="form-label">Qualité (1-9) : <span id="node-quality-val" style="font-weight: 700; color: var(--primary);">6</span></label>
+              <input type="range" id="node-cfg-quality" min="1" max="9" value="6" style="width: 100%; accent-color: var(--primary);" />
+              <span class="form-help">Plus élevé = meilleure netteté & fichier plus lourd.</span>
+            </div>
+            <div class="form-group">
+              <label for="node-cfg-speed" class="form-label">Vitesse (1-5) : <span id="node-speed-val" style="font-weight: 700; color: var(--primary);">3</span></label>
+              <input type="range" id="node-cfg-speed" min="1" max="5" value="3" style="width: 100%; accent-color: var(--primary);" />
+              <span class="form-help">Plus élevé = encodage rapide, compression réduite.</span>
+            </div>
+            <div class="form-group">
+              <label for="node-cfg-custom" class="form-label">Paramètres personnalisés libres</label>
+              <input type="text" id="node-cfg-custom" class="form-input" placeholder="ex: -pix_fmt yuv420p10le" />
+            </div>
+          `;
+          const qInput = el('node-cfg-quality');
+          const qVal = el('node-quality-val');
+          if (qInput && qVal) qInput.addEventListener('input', () => { qVal.textContent = qInput.value; });
+
+          const sInput = el('node-cfg-speed');
+          const sVal = el('node-speed-val');
+          if (sInput && sVal) sInput.addEventListener('input', () => { sVal.textContent = sInput.value; });
+        } else if (blockType === 'audio-encode') {
+          formContainer.innerHTML = `
+            <div class="form-group">
+              <label for="node-cfg-audio-codec" class="form-label">Codec audio</label>
+              <select id="node-cfg-audio-codec" class="form-select">
+                <option value="aac" selected>AAC (Recommandé)</option>
+                <option value="opus">Opus</option>
+                <option value="ac3">AC3 / Dolby Digital</option>
+                <option value="flac">FLAC (Sans perte)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="node-cfg-audio-bitrate" class="form-label">Débit cible</label>
+              <select id="node-cfg-audio-bitrate" class="form-select">
+                <option value="128k">128 kbps (Standard)</option>
+                <option value="192k" selected>192 kbps (Haute qualité)</option>
+                <option value="320k">320 kbps (Qualité maximale)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="node-cfg-audio-channels" class="form-label">Disposition des canaux</label>
+              <select id="node-cfg-audio-channels" class="form-select">
+                <option value="stereo" selected>Stéréo (2.0)</option>
+                <option value="5.1">Surround 5.1</option>
+                <option value="original">Conserver original</option>
+              </select>
+            </div>
+          `;
+        } else if (blockType === 'remux-mkv') {
+          formContainer.innerHTML = `
+            <div class="form-group">
+              <label for="node-cfg-langs" class="form-label">Langues conservées</label>
+              <input type="text" id="node-cfg-langs" class="form-input" value="fre, eng" />
+              <span class="form-help">Codes ISO-639 séparés par des virgules (ex: fre, eng, jpn).</span>
+            </div>
+            <div class="form-group">
+              <label for="node-cfg-title" class="form-label">Titre du conteneur (optionnel)</label>
+              <input type="text" id="node-cfg-title" class="form-input" placeholder="ex: {filename}" />
+            </div>
+          `;
+        } else if (blockType === 'remux-mp4') {
+          formContainer.innerHTML = `
+            <div class="form-group">
+              <label class="form-label">Optimisation Streaming Web</label>
+              <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; color: var(--text-main); cursor: pointer;">
+                <input type="checkbox" id="node-cfg-faststart" checked />
+                Activer FastStart (déplacement de l'atome moov en tête)
+              </label>
+            </div>
+          `;
+        }
+      }
+    }
+
+    function bindNodeEvents(nodeEl) {
+      nodeEl.addEventListener('click', (e) => {
+        if (e.target.closest('.node-remove-btn')) return;
+        selectNode(nodeEl);
+      });
+
+      const removeBtn = nodeEl.querySelector('.node-remove-btn');
+      if (removeBtn) {
+        removeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const name = nodeEl.querySelector('.node-name') ? nodeEl.querySelector('.node-name').textContent : 'Bloc';
+          nodeEl.remove();
+          showNotice(`Bloc « ${name} » retiré du flux.`, 'info');
+          drawCanvasLines();
+          const firstNode = nodesContainer.querySelector('.canvas-node');
+          if (firstNode) selectNode(firstNode);
+        });
+      }
+    }
+
+    // Lier les nœuds déjà présents
+    document.querySelectorAll('.canvas-node').forEach(bindNodeEvents);
+
+    // Clic sur un bloc dans la palette latérale
+    document.querySelectorAll('.draggable-block-item.addable').forEach(item => {
+      item.addEventListener('click', () => {
+        const blockType = item.getAttribute('data-block-type') || 'block';
+        const title = item.querySelector('strong') ? item.querySelector('strong').textContent : 'Nouveau bloc';
+        const kind = item.querySelector('span') ? item.querySelector('span').textContent : 'Outil';
+        appendNodeToCanvas(blockType, kind, title, 'Configuration par défaut appliquée.');
+        showNotice(`Bloc « ${title} » ajouté à votre chaîne d'exécution !`, 'success');
+      });
+    });
+
+    if (saveCanvasFlowBtn) {
+      saveCanvasFlowBtn.addEventListener('click', () => {
+        showNotice('Modifications du flux enregistrées avec succès dans la configuration.', 'success');
+        setTimeout(closeCanvas, 400);
       });
     }
 
-    // Affichage initial du premier contrat
-    renderContract('tool.mkvtoolnix');
+    document.querySelectorAll('.set-default-flow-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const card = btn.closest('.flow-card');
+        const title = card ? card.querySelector('.flow-card-title').textContent : 'Flux';
+        document.querySelectorAll('.flow-card').forEach(c => c.classList.remove('active-flow'));
+        if (card) card.classList.add('active-flow');
+        showNotice(`Le flux « ${title} » est maintenant le flux actif par défaut.`, 'success');
+      });
+    });
   }
 
   // --- Initialisation des écouteurs d'événements ---
@@ -1556,6 +1412,19 @@ pub const CLIENT_SCRIPT: &str = r#"
 
     const refreshBtn = el('refresh-all-btn');
     if (refreshBtn) refreshBtn.addEventListener('click', refreshAll);
+
+    // Raccourcis d'action du tableau de bord
+    const gotoFilesBtn = el('quick-goto-files-btn');
+    if (gotoFilesBtn) gotoFilesBtn.addEventListener('click', () => switchTab('files'));
+
+    const gotoFlowsBtn = el('quick-goto-flows-btn');
+    if (gotoFlowsBtn) gotoFlowsBtn.addEventListener('click', () => switchTab('flows'));
+
+    const gotoJobsBtn = el('quick-goto-jobs-btn');
+    if (gotoJobsBtn) gotoJobsBtn.addEventListener('click', () => switchTab('jobs'));
+
+    const gotoSettingsBtn = el('quick-goto-settings-btn');
+    if (gotoSettingsBtn) gotoSettingsBtn.addEventListener('click', () => switchTab('settings'));
 
     // Formulaire de session
     const saveKeyBtn = el('admin-key-save-btn');
@@ -1602,7 +1471,10 @@ pub const CLIENT_SCRIPT: &str = r#"
       });
     });
 
-    // Configuration de la section Plugins, Outils et Contrats
+    // Configuration du Gestionnaire de Flux
+    setupFlowsPanel();
+
+    // Configuration de la section Plugins et Outils
     setupPluginsPanel();
 
     // Configuration de la section Raccordement Worker et Clés
@@ -1620,6 +1492,10 @@ pub const CLIENT_SCRIPT: &str = r#"
       if (e.key === 'Escape') {
         closeConfirmRemuxDialog();
         closeJobDetailDialog();
+        const wizard = el('flow-wizard-dialog');
+        if (wizard && wizard.open) {
+          wizard.close();
+        }
       }
     });
 

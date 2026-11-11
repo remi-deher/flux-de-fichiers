@@ -20,6 +20,7 @@ pub fn App() -> impl IntoView {
             <main id="main-content">
                 <DashboardPanel />
                 <FilesPanel />
+                <FlowsPanel />
                 <JobsPanel />
                 <WorkersPanel />
                 <PluginsPanel />

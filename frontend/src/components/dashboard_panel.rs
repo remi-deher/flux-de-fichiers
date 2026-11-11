@@ -38,7 +38,7 @@ pub fn DashboardPanel() -> impl IntoView {
                 <div class="section-panel-header">
                     <div>
                         <h2 id="quick-actions-title" class="section-title">"Actions rapides"</h2>
-                        <p class="section-subtitle">"Démarrez un traitement ou supervisez la chaîne de remuxage."</p>
+                        <p class="section-subtitle">"Démarrez un traitement, configurez vos flux ou supervisez l'exécution des tâches."</p>
                     </div>
                 </div>
                 <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
@@ -47,14 +47,21 @@ pub fn DashboardPanel() -> impl IntoView {
                         id="quick-goto-files-btn"
                         class="btn btn-primary"
                     >
-                        "Parcourir les fichiers et lancer un remuxage"
+                        "Parcourir les fichiers et lancer un traitement"
+                    </button>
+                    <button
+                        type="button"
+                        id="quick-goto-flows-btn"
+                        class="btn btn-secondary"
+                    >
+                        "Flux de traitement (Flows)"
                     </button>
                     <button
                         type="button"
                         id="quick-goto-jobs-btn"
                         class="btn btn-secondary"
                     >
-                        "Consulter la file des tâches"
+                        "Gestionnaire de tâches"
                     </button>
                     <button
                         type="button"

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -e
+
+echo "🔍 Exécution des vérifications pre-commit locales (Rust pur)..."
+
+# 1. Vérification du formatage
+echo "  → Formatage de code (cargo fmt)..."
+cargo fmt --check
+
+# 2. Exécution de tous les tests unitaires et d'intégration
+echo "  → Tests unitaires et d'intégration (cargo test)..."
+cargo test --quiet
+
+# 3. Préparation et intégrité de l'environnement local
+echo "  → Vérification de l'environnement de développement..."
+cargo run --bin dev --quiet -- --prepare-only
+
+echo "✅ Toutes les vérifications locales ont réussi !"

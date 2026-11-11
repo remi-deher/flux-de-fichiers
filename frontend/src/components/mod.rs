@@ -8,6 +8,7 @@ pub mod jobs_panel;
 pub mod metrics_bar;
 pub mod plugins_panel;
 pub mod settings_panel;
+pub mod updates_panel;
 pub mod workers_panel;
 
 pub use dashboard_panel::DashboardPanel;
@@ -18,4 +19,5 @@ pub use jobs_panel::JobsPanel;
 pub use metrics_bar::MetricsBar;
 pub use plugins_panel::PluginsPanel;
 pub use settings_panel::SettingsPanel;
+pub use updates_panel::UpdatesPanel;
 pub use workers_panel::WorkersPanel;

@@ -93,3 +93,24 @@ pub struct Failure {
     pub lease_token: Uuid,
     pub error_code: String,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct FlowRecord {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub file_mask: String,
+    pub is_default: bool,
+    pub definition: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateFlowRequest {
+    pub name: String,
+    pub description: Option<String>,
+    pub file_mask: String,
+    pub is_default: bool,
+    pub definition: String,
+}

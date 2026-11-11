@@ -100,27 +100,50 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
         )
         .await?;
         let cache_mgr = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
-        let mkvmerge_bin =
-            cache_mgr.resolve_executable("tool.mkvtoolnix", "1.0.0", "mkvmerge", "MKVMERGE");
+        let default_flow: Option<crate::domain::FlowRecord> = sqlx::query_as(
+            "SELECT id, name, description, is_default, definition, created_at, updated_at FROM flows WHERE is_default = 1 LIMIT 1",
+        )
+        .fetch_optional(&state.pool)
+        .await
+        .unwrap_or(None);
+
         let state_progress = state.clone();
         let job_id = claim.job_id;
-        let warning = media::remux_with_progress(
-            &mkvmerge_bin,
-            &source_snapshot,
-            &output,
-            move |pct, line| {
-                state_progress.notify_job_progress(job_id, pct, Some(line.to_string()));
-            },
-        )
-        .await
-        .map_err(|error| anyhow::anyhow!("remux_failed: {error}"))?;
+        let progress_cb = std::sync::Arc::new(move |pct: u32, line: &str| {
+            state_progress.notify_job_progress(job_id, pct, Some(line.to_string()));
+        });
+
+        let http_client = reqwest::Client::new();
+        let (final_output, warning) = if let Some(flow) = default_flow {
+            let engine = crate::flows::FlowEngine::new(&cache_mgr, &http_client);
+            let outcome = engine
+                .execute_flow(&flow, job_id, &source_snapshot, &work_dir, progress_cb)
+                .await
+                .map_err(|error| anyhow::anyhow!("flow_execution_failed: {error}"))?;
+            (outcome.working_file, outcome.warning)
+        } else {
+            let mkvmerge_bin =
+                cache_mgr.resolve_executable("tool.mkvtoolnix", "1.0.0", "mkvmerge", "MKVMERGE");
+            let warning = media::remux_with_progress(
+                &mkvmerge_bin,
+                &source_snapshot,
+                &output,
+                move |pct, line| {
+                    progress_cb(pct, line);
+                },
+            )
+            .await
+            .map_err(|error| anyhow::anyhow!("remux_failed: {error}"))?;
+            (output, warning)
+        };
+
         crate::api::transfers::publish_staged(
             state,
             claim.job_id,
             &lease,
             &job,
             &source_snapshot,
-            &output,
+            &final_output,
             warning,
         )
         .await?;
@@ -140,7 +163,9 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
     if let Err(error) = outcome {
         let code = if error.to_string().contains("source_integrity") {
             "source_integrity"
-        } else if error.to_string().contains("remux_failed") {
+        } else if error.to_string().contains("remux_failed")
+            || error.to_string().contains("flow_execution_failed")
+        {
             "remux_failed"
         } else {
             "transfer_failed"

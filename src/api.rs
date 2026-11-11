@@ -1,3 +1,4 @@
+mod flows;
 mod jobs;
 mod plugins;
 mod session;
@@ -65,6 +66,13 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/api/v1/config", get(jobs::system_config))
         .route("/api/v1/files", get(jobs::files))
+        .route("/api/v1/flows", get(flows::list_flows))
+        .route(
+            "/api/v1/flows/{id}",
+            get(flows::get_flow)
+                .put(flows::save_flow)
+                .delete(flows::delete_flow),
+        )
         .route("/api/v1/plugins", get(plugins::catalog))
         .route("/api/v1/plugins/{id}/settings", get(plugins::get_settings).put(plugins::save_settings))
         .route("/api/v1/tools", get(plugins::tools))

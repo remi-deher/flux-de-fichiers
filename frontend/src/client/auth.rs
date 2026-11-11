@@ -1,3 +1,6 @@
+//! Authentification et gestion de session.
+
+pub const SCRIPT: &str = r###"
 // --- Gestion de la session et de l'authentification (Contrat #29) ---
   function updateSessionUI() {
     const pill = el('session-status-pill');
@@ -156,3 +159,5 @@
     showNotice('Session fermée et mémoire purgée.', 'info');
     refreshAll();
   }
+
+"###;

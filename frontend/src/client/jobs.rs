@@ -1,3 +1,6 @@
+//! Supervision des tâches et flux SSE.
+
+pub const SCRIPT: &str = r###"
 // --- Tâches de remuxage & Télémétrie SSE ---
   let jobsEventSource = null;
   let sseReconnectTimer = null;
@@ -378,3 +381,5 @@
   }
 
   document.addEventListener('DOMContentLoaded', setupActivityRoleTabs);
+
+"###;

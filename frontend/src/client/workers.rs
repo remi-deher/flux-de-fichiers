@@ -1,3 +1,6 @@
+//! Gestion des agents et configuration.
+
+pub const SCRIPT: &str = r###"
 // --- Serveurs et agents ---
   async function loadWorkers() {
     const tbody = el('workers-table-body');
@@ -206,3 +209,5 @@
       });
     }
   }
+
+"###;

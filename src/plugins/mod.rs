@@ -17,8 +17,8 @@ mod sync;
 mod vocab;
 
 pub use install::{
-    ensure_tool_installed, install_from_distribution, is_installing, parse_distribution,
-    read_distribution,
+    ensure_job_tools, ensure_tool_installed, install_from_distribution, is_installing,
+    parse_distribution, read_distribution,
 };
 pub use probe::{ProbeContract, file_job_may_start, probe_is_ready, required_probe};
 pub use sources::{
@@ -32,6 +32,10 @@ pub use settings::{
     resolve_settings_fields,
 };
 pub use vocab::{CatalogCapability, CatalogItemType, PluginCategory};
+
+/// Outil de remuxage requis par les jobs, installé dans le cache du nœud depuis les dépôts.
+pub const REMUX_TOOL_ID: &str = "app.mkvtoolnix";
+pub const REMUX_TOOL_VERSION: &str = "1.0.0";
 
 /// Dépôt distant de distribution de plugins, outils et flux.
 #[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow, PartialEq)]
@@ -320,11 +324,8 @@ pub fn list_tools_status(
                 .and_then(|manifest| manifest.description)
                 .unwrap_or_default();
 
-            let is_system_ready = match entry.id.as_str() {
-                "app.internal.telemetry" => true,
-                "app.mkvtoolnix" => Path::new("/usr/bin/mkvmerge").exists(),
-                _ => false,
-            };
+            // La télémétrie est interne au binaire ; tout autre outil vient du cache du nœud.
+            let is_system_ready = entry.id == "app.internal.telemetry";
 
             let status = if is_system_ready || cache_mgr.is_ready(&entry.id, &entry.version, arch) {
                 ToolStatus::Ready

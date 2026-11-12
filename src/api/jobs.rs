@@ -1,4 +1,4 @@
-use super::AppState;
+use super::{AdminAuth, AppState};
 use crate::{
     auth::authorize,
     domain::*,
@@ -16,8 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use uuid::Uuid;
 
-pub async fn files(State(s): State<AppState>, h: HeaderMap) -> AppResult<Json<Vec<MediaFile>>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
+pub async fn files(State(s): State<AppState>, _auth: AdminAuth) -> AppResult<Json<Vec<MediaFile>>> {
     Ok(Json(
         storage::list_inputs(&s.config.input_dir, s.config.max_file_bytes).await?,
     ))
@@ -25,10 +24,9 @@ pub async fn files(State(s): State<AppState>, h: HeaderMap) -> AppResult<Json<Ve
 
 pub async fn create(
     State(s): State<AppState>,
-    h: HeaderMap,
+    _auth: AdminAuth,
     Json(r): Json<NewJob>,
 ) -> AppResult<(StatusCode, Json<Job>)> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::POST).await?;
     let path = storage::input_path(&s.config.input_dir, &r.source_name).await?;
     let (hash, bytes) = storage::fingerprint(&path, s.config.max_file_bytes).await?;
     if let Some(worker) = r.target_worker_id {
@@ -53,10 +51,9 @@ pub struct Page {
 }
 pub async fn list(
     State(s): State<AppState>,
-    h: HeaderMap,
     Query(p): Query<Page>,
+    _auth: AdminAuth,
 ) -> AppResult<Json<Vec<Job>>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     let limit = p.limit.unwrap_or(50);
     if !(1..=200).contains(&limit) {
         return Err(AppError::Invalid);
@@ -67,9 +64,8 @@ pub async fn list(
 
 pub async fn events(
     State(s): State<AppState>,
-    h: HeaderMap,
+    _auth: AdminAuth,
 ) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     let rx = s.events_tx.subscribe();
     let stream = futures_util::stream::unfold(rx, |mut rx| async move {
         loop {
@@ -90,10 +86,9 @@ pub async fn events(
 
 pub async fn get_job(
     State(s): State<AppState>,
-    h: HeaderMap,
     Path(id): Path<Uuid>,
+    _auth: AdminAuth,
 ) -> AppResult<Json<Job>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     Ok(Json(
         sqlx::query_as("SELECT * FROM jobs WHERE id=?1")
             .bind(id)
@@ -102,8 +97,7 @@ pub async fn get_job(
             .ok_or(AppError::NotFound)?,
     ))
 }
-pub async fn workers(State(s): State<AppState>, h: HeaderMap) -> AppResult<Json<Vec<Worker>>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
+pub async fn workers(State(s): State<AppState>, _auth: AdminAuth) -> AppResult<Json<Vec<Worker>>> {
     Ok(Json(
         sqlx::query_as("SELECT * FROM workers ORDER BY name LIMIT 200")
             .fetch_all(&s.pool)
@@ -113,11 +107,9 @@ pub async fn workers(State(s): State<AppState>, h: HeaderMap) -> AppResult<Json<
 
 pub async fn delete_worker(
     State(s): State<AppState>,
-    h: HeaderMap,
     Path(id): Path<Uuid>,
+    _auth: AdminAuth,
 ) -> AppResult<StatusCode> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::DELETE)
-        .await?;
     let affected = sqlx::query("DELETE FROM workers WHERE id = ?1")
         .bind(id)
         .execute(&s.pool)
@@ -174,9 +166,8 @@ pub struct SystemConfigResponse {
 
 pub async fn system_config(
     State(s): State<AppState>,
-    h: HeaderMap,
+    _auth: AdminAuth,
 ) -> AppResult<Json<SystemConfigResponse>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     Ok(Json(SystemConfigResponse {
         worker_key: s.config.worker_key.clone(),
         max_file_bytes: s.config.max_file_bytes,

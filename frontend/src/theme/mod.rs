@@ -13,3 +13,22 @@ pub use flows::FLOWS_CSS;
 pub use plugins::PLUGINS_CSS;
 pub use styles::generate_global_style;
 pub use tokens::{DARK_THEME, LIGHT_THEME, ThemeTokens};
+
+use std::sync::LazyLock;
+
+static ALL_STYLES: LazyLock<String> = LazyLock::new(|| {
+    let mut s = String::with_capacity(32_768);
+    s.push_str(BASE_CSS);
+    s.push('\n');
+    s.push_str(COMPONENTS_CSS);
+    s.push('\n');
+    s.push_str(PLUGINS_CSS);
+    s.push('\n');
+    s.push_str(FLOWS_CSS);
+    s
+});
+
+/// Retourne l'ensemble des styles CSS-in-Rust consolidés du thème.
+pub fn get_all_styles() -> &'static str {
+    &ALL_STYLES
+}

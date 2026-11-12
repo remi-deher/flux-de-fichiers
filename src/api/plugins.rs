@@ -1,6 +1,6 @@
 //! Gestionnaires HTTP pour les plugins, le catalogue et les outils distribués.
 
-use super::AppState;
+use super::{AdminAuth, AppState};
 use crate::{
     error::{AppError, AppResult},
     plugins::{self, CatalogEntry, ToolStatusSummary},
@@ -9,16 +9,14 @@ use crate::{
 use axum::{
     Json,
     extract::{Path, State},
-    http::HeaderMap,
 };
 use serde_json::Value;
 
 /// Liste l'ensemble des composants déclarés dans le catalogue.
 pub async fn catalog(
     State(s): State<AppState>,
-    h: HeaderMap,
+    _auth: AdminAuth,
 ) -> AppResult<Json<Vec<CatalogEntry>>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     let entries = plugins::list_catalog(s.config.plugins_dir.as_deref());
     Ok(Json(entries))
 }
@@ -26,9 +24,8 @@ pub async fn catalog(
 /// Liste l'état d'installation et de cache des outils distribués.
 pub async fn tools(
     State(s): State<AppState>,
-    h: HeaderMap,
+    _auth: AdminAuth,
 ) -> AppResult<Json<Vec<ToolStatusSummary>>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
     let tools = plugins::list_tools_status(s.config.plugins_dir.as_deref(), &cache_mgr);
     Ok(Json(tools))
@@ -37,10 +34,9 @@ pub async fn tools(
 /// Renvoie le contrat déclaratif de distribution d'un outil spécifique.
 pub async fn tool_distribution(
     State(s): State<AppState>,
-    h: HeaderMap,
     Path(id): Path<String>,
+    _auth: AdminAuth,
 ) -> AppResult<Json<Value>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     let tool_name = id.trim_start_matches("tool.");
     if let Some(ref root) = s.config.plugins_dir {
         let dist_path = root
@@ -58,40 +54,32 @@ pub async fn tool_distribution(
     match id.as_str() {
         "tool.mkvtoolnix" => Ok(Json(serde_json::json!({
             "schemaVersion": "1.0.0",
-            "toolId": "tool.mkvtoolnix",
-            "toolVersion": "1.0.0",
-            "distributionMode": "autonomous-binary",
-            "capability": "remux",
-            "currentChoice": true,
-            "notes": ["Option B : binaire autonome hors conteneur applicatif"]
-        }))),
-        "tool.ffmpeg" => Ok(Json(serde_json::json!({
-            "schemaVersion": "1.0.0",
-            "toolId": "tool.ffmpeg",
-            "toolVersion": "1.0.0",
-            "distributionMode": "autonomous-binary",
-            "capability": "analyze",
-            "currentChoice": false
-        }))),
-        "tool.internal.telemetry" => Ok(Json(serde_json::json!({
-            "schemaVersion": "1.0.0",
-            "toolId": "tool.internal.telemetry",
-            "toolVersion": "0.1.0",
-            "distributionMode": "autonomous-binary",
-            "capability": "telemetry",
-            "currentChoice": true
+            "tool": "mkvtoolnix",
+            "name": "MKVToolNix CLI",
+            "description": "Ensemble d'outils officiel pour la manipulation de conteneurs Matroska (mkvmerge, mkvpropedit, mkvextract, mkvinfo).",
+            "platforms": {
+                "linux-x86_64": {
+                    "distributionType": "system",
+                    "package": "mkvtoolnix",
+                    "binary": "mkvmerge"
+                },
+                "linux-aarch64": {
+                    "distributionType": "system",
+                    "package": "mkvtoolnix",
+                    "binary": "mkvmerge"
+                }
+            }
         }))),
         _ => Err(AppError::NotFound),
     }
 }
 
-/// Renvoie la configuration enregistrée pour un plugin donné.
+/// Récupère la configuration (valeurs personnalisées) d'un plugin.
 pub async fn get_settings(
     State(s): State<AppState>,
-    h: HeaderMap,
     Path(id): Path<String>,
+    _auth: AdminAuth,
 ) -> AppResult<Json<Value>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     let saved = crate::repository::get_plugin_settings(&s.pool, &id).await?;
     let settings_val = match saved {
         Some(s) => serde_json::from_str(&s).unwrap_or(serde_json::json!({})),
@@ -106,11 +94,10 @@ pub async fn get_settings(
 /// Enregistre la configuration (valeurs par défaut des blocs) d'un plugin.
 pub async fn save_settings(
     State(s): State<AppState>,
-    h: HeaderMap,
     Path(id): Path<String>,
+    _auth: AdminAuth,
     Json(payload): Json<Value>,
 ) -> AppResult<Json<Value>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::PUT).await?;
     let settings_str = serde_json::to_string(&payload).map_err(|_| AppError::Invalid)?;
     crate::repository::set_plugin_settings(&s.pool, &id, &settings_str).await?;
     Ok(Json(serde_json::json!({
@@ -123,9 +110,8 @@ pub async fn save_settings(
 /// Liste l'ensemble des dépôts configurés.
 pub async fn list_repositories(
     State(s): State<AppState>,
-    h: HeaderMap,
+    _auth: AdminAuth,
 ) -> AppResult<Json<Vec<plugins::PluginRepository>>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     let repos = crate::repository::list_plugin_repositories(&s.pool).await?;
     Ok(Json(repos))
 }
@@ -133,10 +119,9 @@ pub async fn list_repositories(
 /// Ajoute un nouveau dépôt tiers de plugins ou flux.
 pub async fn add_repository(
     State(s): State<AppState>,
-    h: HeaderMap,
+    _auth: AdminAuth,
     Json(payload): Json<plugins::CreateRepositoryRequest>,
 ) -> AppResult<Json<plugins::PluginRepository>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::POST).await?;
     let url = payload.index_url.trim();
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err(AppError::InvalidManifest(
@@ -160,10 +145,9 @@ pub async fn add_repository(
 /// Active ou désactive une source de dépôt.
 pub async fn toggle_repository(
     State(s): State<AppState>,
-    h: HeaderMap,
     Path(id): Path<String>,
+    _auth: AdminAuth,
 ) -> AppResult<Json<Value>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::PUT).await?;
     let new_state = crate::repository::toggle_plugin_repository(&s.pool, &id).await?;
     Ok(Json(serde_json::json!({
         "id": id,
@@ -174,11 +158,9 @@ pub async fn toggle_repository(
 /// Supprime un dépôt tiers (interdit sur le catalogue officiel).
 pub async fn delete_repository(
     State(s): State<AppState>,
-    h: HeaderMap,
     Path(id): Path<String>,
+    _auth: AdminAuth,
 ) -> AppResult<Json<Value>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::DELETE)
-        .await?;
     crate::repository::delete_plugin_repository(&s.pool, &id).await?;
     Ok(Json(serde_json::json!({
         "id": id,
@@ -189,10 +171,9 @@ pub async fn delete_repository(
 /// Synchronise l'index d'un dépôt donné.
 pub async fn sync_repository(
     State(s): State<AppState>,
-    h: HeaderMap,
     Path(id): Path<String>,
+    _auth: AdminAuth,
 ) -> AppResult<Json<Value>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::POST).await?;
     crate::repository::touch_plugin_repository_sync(&s.pool, &id).await?;
     Ok(Json(serde_json::json!({
         "id": id,

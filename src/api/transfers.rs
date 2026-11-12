@@ -70,10 +70,9 @@ pub async fn source(
 }
 pub async fn output(
     State(s): State<AppState>,
-    h: HeaderMap,
     Path(id): Path<Uuid>,
+    _auth: super::AdminAuth,
 ) -> AppResult<Response> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     let name: Option<String> =
         sqlx::query_scalar("SELECT output_name FROM jobs WHERE id=?1 AND status='succeeded'")
             .bind(id)

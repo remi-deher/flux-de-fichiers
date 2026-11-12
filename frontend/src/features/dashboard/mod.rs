@@ -1,6 +1,6 @@
 //! Panneau d'accueil et tableau de bord du poste de pilotage.
 
-use crate::shared::ui::{MetricCard, SectionHeader};
+use crate::shared::ui::{Button, ButtonVariant, Card, MetricCard, SectionHeader};
 use leptos::prelude::*;
 
 #[component]
@@ -41,45 +41,41 @@ pub fn DashboardPanel() -> impl IntoView {
                 />
             </section>
 
-            <section class="section-panel" aria-labelledby="quick-actions-title">
+            <Card aria_labelledby="quick-actions-title">
                 <SectionHeader
                     id="quick-actions-title"
                     title="Actions rapides"
                     subtitle="Démarrez un traitement, configurez vos flux ou supervisez l'exécution des tâches."
                 />
                 <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
-                    <button
-                        type="button"
+                    <Button
                         id="quick-goto-files-btn"
-                        class="btn btn-primary"
+                        variant=ButtonVariant::Primary
                     >
                         "Parcourir les fichiers et lancer un traitement"
-                    </button>
-                    <button
-                        type="button"
+                    </Button>
+                    <Button
                         id="quick-goto-flows-btn"
-                        class="btn btn-secondary"
+                        variant=ButtonVariant::Secondary
                     >
                         "Flux de traitement (Flows)"
-                    </button>
-                    <button
-                        type="button"
+                    </Button>
+                    <Button
                         id="quick-goto-jobs-btn"
-                        class="btn btn-secondary"
+                        variant=ButtonVariant::Secondary
                     >
                         "Gestionnaire de tâches"
-                    </button>
-                    <button
-                        type="button"
+                    </Button>
+                    <Button
                         id="quick-goto-settings-btn"
-                        class="btn btn-secondary"
+                        variant=ButtonVariant::Secondary
                     >
                         "Gérer la session / Authentification"
-                    </button>
+                    </Button>
                 </div>
-            </section>
+            </Card>
 
-            <section class="section-panel" aria-labelledby="recent-jobs-title">
+            <Card aria_labelledby="recent-jobs-title">
                 <SectionHeader
                     id="recent-jobs-title"
                     title="Dernières tâches traitées"
@@ -104,9 +100,9 @@ pub fn DashboardPanel() -> impl IntoView {
                         </tbody>
                     </table>
                 </div>
-            </section>
+            </Card>
 
-            <section class="section-panel" aria-labelledby="future-plan-title">
+            <Card aria_labelledby="future-plan-title">
                 <SectionHeader
                     id="future-plan-title"
                     title="Fonctionnalités planifiées (hors périmètre actuel)"
@@ -135,7 +131,7 @@ pub fn DashboardPanel() -> impl IntoView {
                         </p>
                     </div>
                 </div>
-            </section>
+            </Card>
         </div>
     }
 }

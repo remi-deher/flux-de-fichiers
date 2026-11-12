@@ -13,11 +13,19 @@ use leptos::prelude::*;
 pub fn render_full_page() -> String {
     let body_html = app::App().to_html();
     format!(
-        r#"<!doctype html>
+        r##"<!doctype html>
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f6f8fa" media="(prefers-color-scheme: light)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Flux de Fichiers">
+  <meta name="application-name" content="Flux de Fichiers">
+  <meta name="format-detection" content="telephone=no">
   <meta name="description" content="Console de pilotage et supervision de remuxage Flux de Fichiers.">
   <title>Flux de Fichiers — Pilotage et supervision</title>
   <style>
@@ -30,9 +38,26 @@ pub fn render_full_page() -> String {
 {scripts}
   </script>
 </body>
-</html>"#,
+</html>"##,
         styles = theme::get_all_styles(),
         body = body_html,
         scripts = client::get_client_script()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_render_full_page_contains_modern_standards_metadata() {
+        let html = render_full_page();
+        assert!(html.contains("viewport-fit=cover"));
+        assert!(html.contains("apple-mobile-web-app-capable"));
+        assert!(html.contains("apple-mobile-web-app-status-bar-style"));
+        assert!(html.contains("color-scheme"));
+        assert!(html.contains("theme-color"));
+        assert!(html.contains("format-detection"));
+        assert!(html.contains("lang=\"fr\""));
+    }
 }

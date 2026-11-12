@@ -7,6 +7,7 @@ pub const COMPONENTS_CSS: &str = r#"
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
+  min-height: var(--touch-target-compact);
   padding: 0.5rem 1rem;
   font-size: 0.875rem;
   font-weight: 600;
@@ -17,6 +18,8 @@ pub const COMPONENTS_CSS: &str = r#"
   text-decoration: none;
   line-height: 1.25;
   white-space: nowrap;
+  user-select: none;
+  touch-action: manipulation;
 }
 
 .btn:disabled {

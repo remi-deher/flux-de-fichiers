@@ -2,7 +2,7 @@
 
 use crate::{
     core::{SubNav, SubNavTabItem},
-    shared::ui::SectionHeader,
+    shared::ui::{Button, ButtonVariant, Card, SectionHeader},
 };
 use leptos::prelude::*;
 
@@ -33,14 +33,14 @@ pub fn WorkersPanel() -> impl IntoView {
     .into_any();
 
     let subnav_actions = view! {
-        <button
-            type="button"
+        <Button
             id="btn-refresh-workers"
-            class="btn btn-secondary btn-sm"
-            title="Actualiser l'état des serveurs et agents"
+            variant=ButtonVariant::Secondary
+            class="btn-sm"
+            aria_label="Actualiser l'état des serveurs et agents"
         >
             "🔄 Actualiser"
-        </button>
+        </Button>
     }
     .into_any();
 
@@ -55,7 +55,7 @@ pub fn WorkersPanel() -> impl IntoView {
 
             // --- Sous-vue 1 : Ce nœud local (Coordinateur & raccordement) ---
             <div id="subtab-workers-local">
-                <section class="section-panel" aria-labelledby="worker-connect-title">
+                <Card aria_labelledby="worker-connect-title">
                     <SectionHeader
                         id="worker-connect-title"
                         title="Configuration du nœud local & Raccordement (*arr)"
@@ -94,24 +94,22 @@ pub fn WorkersPanel() -> impl IntoView {
                                 placeholder="Ouvrez une session admin pour révéler la clé"
                                 style="flex: 1; font-family: var(--font-mono); font-size: 0.875rem;"
                             />
-                            <button
-                                type="button"
+                            <Button
                                 id="btn-toggle-worker-key"
-                                class="btn btn-secondary"
-                                aria-label="Afficher ou masquer la clé worker"
-                                disabled
+                                variant=ButtonVariant::Secondary
+                                aria_label="Afficher ou masquer la clé worker"
+                                disabled=true
                             >
                                 "Afficher"
-                            </button>
-                            <button
-                                type="button"
+                            </Button>
+                            <Button
                                 id="btn-copy-worker-key"
-                                class="btn btn-primary"
-                                aria-label="Copier la clé worker dans le presse-papier"
-                                disabled
+                                variant=ButtonVariant::Primary
+                                aria_label="Copier la clé worker dans le presse-papier"
+                                disabled=true
                             >
                                 "Copier la clé"
-                            </button>
+                            </Button>
                         </div>
                         <p id="worker-key-hint" class="form-help">
                             "🔒 Clé secrète requise par les conteneurs worker pour s'enregistrer et réclamer des baux de remuxage."
@@ -124,22 +122,21 @@ pub fn WorkersPanel() -> impl IntoView {
                         </label>
                         <pre class="code-block-wrapper"><code id="docker-worker-cmd">"docker run -d --name flux-worker -e COORDINATOR_URL=http://localhost:3000 -e WORKER_KEY=<WORKER_KEY> -v /chemin/data:/data flux-de-fichiers worker"</code></pre>
                         <div style="margin-top: 0.75rem;">
-                            <button
-                                type="button"
+                            <Button
                                 id="btn-copy-worker-cmd"
-                                class="btn btn-secondary"
-                                aria-label="Copier la commande Docker pour worker dans le presse-papier"
+                                variant=ButtonVariant::Secondary
+                                aria_label="Copier la commande Docker pour worker dans le presse-papier"
                             >
                                 "Copier la commande"
-                            </button>
+                            </Button>
                         </div>
                     </div>
-                </section>
+                </Card>
             </div>
 
             // --- Sous-vue 2 : Nœuds distants (Workers & agents déclarés) ---
             <div id="subtab-workers-cluster" hidden>
-                <section class="section-panel" aria-labelledby="workers-section-title">
+                <Card aria_labelledby="workers-section-title">
                     <SectionHeader
                         id="workers-section-title"
                         title="Serveurs et agents de traitement"
@@ -180,7 +177,7 @@ pub fn WorkersPanel() -> impl IntoView {
                             </p>
                         </div>
                     </div>
-                </section>
+                </Card>
             </div>
         </div>
     }

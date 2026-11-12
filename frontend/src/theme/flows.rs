@@ -125,6 +125,17 @@ pub const FLOWS_CSS: &str = r#"
   z-index: 10;
 }
 
+.canvas-header-bar__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.canvas-header-bar__title {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
 .canvas-workspace-layout {
   display: flex;
   min-height: calc(100vh - 220px);

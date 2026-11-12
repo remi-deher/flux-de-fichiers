@@ -4,22 +4,6 @@ use crate::core::{SubNav, SubNavTabItem};
 use crate::shared::ui::{InspectionPanel, RegistreTable};
 use leptos::prelude::*;
 
-fn plugin_tab(
-    id: &'static str,
-    label: &'static str,
-    target_id: &'static str,
-    is_active: bool,
-) -> SubNavTabItem {
-    SubNavTabItem {
-        id,
-        label,
-        icon: None,
-        target_id,
-        is_active,
-        badge: None,
-    }
-}
-
 fn catalog_pane(
     dom_id: &'static str,
     label: &'static str,
@@ -45,49 +29,49 @@ fn catalog_pane(
 #[component]
 pub fn PluginsPanel() -> impl IntoView {
     let subnav_tabs = vec![
-        plugin_tab(
+        SubNavTabItem::new(
             "btn-subtab-plugins-app",
             "Applications",
             "subtab-plugins-app",
             true,
         ),
-        plugin_tab(
+        SubNavTabItem::new(
             "btn-subtab-plugins-plugin",
             "Plugins",
             "subtab-plugins-plugin",
             false,
         ),
-        plugin_tab(
+        SubNavTabItem::new(
             "btn-subtab-plugins-flow",
             "Flux",
             "subtab-plugins-flow",
             false,
         ),
-        plugin_tab(
+        SubNavTabItem::new(
             "btn-subtab-plugins-block",
             "Blocs",
             "subtab-plugins-block",
             false,
         ),
-        plugin_tab(
+        SubNavTabItem::new(
             "btn-subtab-plugins-pack",
             "Packs",
             "subtab-plugins-pack",
             false,
         ),
-        plugin_tab(
+        SubNavTabItem::new(
             "btn-subtab-plugins-preset",
             "Préréglages",
             "subtab-plugins-preset",
             false,
         ),
-        plugin_tab(
+        SubNavTabItem::new(
             "btn-subtab-plugins-resource",
             "Ressources",
             "subtab-plugins-resource",
             false,
         ),
-        plugin_tab(
+        SubNavTabItem::new(
             "btn-subtab-plugins-repos",
             "Dépôts",
             "subtab-plugins-repos",

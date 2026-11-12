@@ -1,86 +1,80 @@
-//! Module d'activité : Rôles Exploiter (traitements en direct) et Diagnostiquer (historique et échecs).
+//! Module d'activité : un registre des tâches, filtré par les onglets Exploiter, Historique et Diagnostic.
 
-pub mod diagnostic;
-pub mod dialog;
-pub mod operations;
+pub mod registre;
 
-pub use diagnostic::ActivityDiagnostic;
-pub use dialog::JobDetailDialog;
-pub use operations::ActivityOperations;
+pub use registre::{ActivityRegistre, JOBS_REGISTRE_ID};
 
-use crate::{
-    core::{SubNav, SubNavTabItem},
-    shared::ui::{Card, SectionHeader, StatusBadge},
-};
+use crate::core::{SubNav, SubNavTabItem};
+use crate::features::widgets::{WidgetArea, WidgetPlacement};
 use leptos::prelude::*;
 
 #[component]
 pub fn JobsPanel() -> impl IntoView {
     let subnav_tabs = vec![
-        SubNavTabItem {
-            id: "btn-subtab-jobs-active",
-            label: "File en direct",
-            icon: Some("⚡"),
-            target_id: "subtab-jobs-active",
-            is_active: true,
-            badge: None,
-        },
-        SubNavTabItem {
-            id: "btn-subtab-jobs-history",
-            label: "Historique",
-            icon: Some("📜"),
-            target_id: "subtab-jobs-history",
-            is_active: false,
-            badge: None,
-        },
-        SubNavTabItem {
-            id: "btn-subtab-jobs-diagnostic",
-            label: "Diagnostic",
-            icon: Some("🔬"),
-            target_id: "subtab-jobs-diagnostic",
-            is_active: false,
-            badge: None,
-        },
+        SubNavTabItem::new(
+            "btn-subtab-jobs-active",
+            "File en direct",
+            JOBS_REGISTRE_ID,
+            true,
+        )
+        .with_icon("⚡"),
+        SubNavTabItem::new(
+            "btn-subtab-jobs-history",
+            "Historique",
+            JOBS_REGISTRE_ID,
+            false,
+        )
+        .with_icon("📜"),
+        SubNavTabItem::new(
+            "btn-subtab-jobs-diagnostic",
+            "Diagnostic",
+            JOBS_REGISTRE_ID,
+            false,
+        )
+        .with_icon("🔬"),
     ];
-
-    let subnav_info = view! {
-        <StatusBadge
-            id="sse-status-badge"
-            label="Sondage périodique"
-            variant="info"
-            title="Mode de rafraîchissement des tâches".to_string()
-        />
-    }
-    .into_any();
 
     view! {
         <div id=crate::core::panel::JOBS.dom_id class="tab-panel" role="tabpanel" aria-labelledby=crate::core::panel::JOBS.button_id hidden>
             <SubNav
                 aria_label="Sous-navigation de la section Activité et Traitements"
                 tabs=subnav_tabs
-                info=subnav_info
             />
-
-            // Conteneur principal de l'activité
-            <Card aria_labelledby="jobs-section-title">
-                <SectionHeader
-                    id="jobs-section-title"
-                    title="Poste d'activité et supervision"
-                    subtitle="Suivi temps réel des traitements actifs (Exploiter) et analyse approfondie des exécutions antérieures (Diagnostiquer)."
-                />
-
-                <div id="subtab-jobs-active">
-                    <ActivityOperations />
-                </div>
-                <div id="subtab-jobs-history" hidden>
-                    // La table des tâches est partagée dynamiquement
-                </div>
-                <div id="subtab-jobs-diagnostic" hidden>
-                    <ActivityDiagnostic />
-                </div>
-            </Card>
-
-            <JobDetailDialog />
+            <WidgetArea placement=WidgetPlacement::Activity />
+            <ActivityRegistre />
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_jobs_panel_has_three_tabs_sharing_one_registre() {
+        let html = view! { <JobsPanel /> }.to_html();
+        for id in [
+            "btn-subtab-jobs-active",
+            "btn-subtab-jobs-history",
+            "btn-subtab-jobs-diagnostic",
+        ] {
+            assert!(html.contains(&format!("id=\"{id}\"")));
+        }
+        assert_eq!(
+            html.matches(&format!("aria-controls=\"{JOBS_REGISTRE_ID}\""))
+                .count(),
+            3
+        );
+        assert_eq!(
+            html.matches(&format!("id=\"{JOBS_REGISTRE_ID}\"")).count(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_jobs_panel_has_no_card_wrapper() {
+        let html = view! { <JobsPanel /> }.to_html();
+        assert!(!html.contains("section-panel"));
+        assert!(!html.contains("toolbar-bar"));
     }
 }

@@ -39,7 +39,9 @@ pub const SCRIPT: &str = r###"
       const data = await res.json();
       cachedLibraries = Array.isArray(data) ? data : [];
       renderLibrariesTable();
+      markWidgetSource('libraries', true);
     } catch (e) {
+      markWidgetSource('libraries', false);
       if (tbody) {
         const message = e.message === 'Non autorisé'
           ? 'Ouvrez une session pour afficher les bibliothèques.'

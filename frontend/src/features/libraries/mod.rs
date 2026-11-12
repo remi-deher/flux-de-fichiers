@@ -95,12 +95,6 @@ pub fn LibrariesPanel() -> impl IntoView {
             hidden
         >
             <div class="registre" id="library-registre">
-                <div class="registre-toolbar">
-                    <h2 class="section-title">"Bibliothèques déclarées"</h2>
-                    <button type="button" id="library-create-btn" class="btn btn-primary btn-sm">
-                        "Déclarer"
-                    </button>
-                </div>
                 <input type="search" id="libraries-search-input" hidden />
                 <RegistreTable
                     aria_label="Bibliothèques déclarées"

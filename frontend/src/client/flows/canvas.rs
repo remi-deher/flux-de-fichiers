@@ -3,8 +3,7 @@ pub const SCRIPT: &str = r###"
       activeCanvasFlowId = flowId;
       if (libraryView) libraryView.style.display = 'none';
       if (canvasView) canvasView.style.display = 'block';
-      const sectionTitle = el('current-section-title');
-      if (sectionTitle) sectionTitle.textContent = 'Éditeur de flux';
+      syncCapsuleActions('flow-editor');
       const titleEl = el('canvas-flow-title');
       if (titleEl) titleEl.textContent = `Éditeur visuel : ${flowTitle}`;
 
@@ -104,8 +103,7 @@ pub const SCRIPT: &str = r###"
     function closeCanvas() {
       if (canvasView) canvasView.style.display = 'none';
       if (libraryView) libraryView.style.display = 'block';
-      const sectionTitle = el('current-section-title');
-      if (sectionTitle && TAB_TITLES.flows) sectionTitle.textContent = TAB_TITLES.flows;
+      syncCapsuleActions('flows');
     }
 
     if (backToLibraryBtn) backToLibraryBtn.addEventListener('click', closeCanvas);

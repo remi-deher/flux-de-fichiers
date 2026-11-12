@@ -35,15 +35,15 @@ Chaque bloc déclaratif conforme au schéma `block.v1.1.schema.json` doit intég
 
 | Domaine | Identifiant du bloc | Outil sous-jacent | Responsabilité principale |
 | :--- | :--- | :--- | :--- |
-| **Vidéo** | `block.video.encode` | `tool.ffmpeg` | Encodage vidéo multi-codecs avec accélération matérielle et filtres de redimensionnement. |
-| **Vidéo** | `block.video.inspect` | `tool.ffmpeg` / `tool.mkvtoolnix` | Sonde et inspection technique des pistes, résolutions, profils HDR et formats. |
-| **Audio** | `block.audio.encode` | `tool.ffmpeg` | Transcodage multi-formats, normalisation EBU R128 (`loudnorm`) et mixage de canaux. |
-| **Audio** | `block.audio.extract` | `tool.ffmpeg` / `tool.mkvtoolnix` | Démultiplexage et extraction brute ou convertie de flux sonores. |
-| **Sous-titres** | `block.subtitle.manage` | `tool.mkvtoolnix` / `tool.ffmpeg` | Filtrage de langues, extraction, bascule des drapeaux forcé/défaut et exclusion SDH. |
-| **Conteneur** | `block.video.remux-mkv` | `tool.mkvtoolnix` | Remuxage Matroska sans réencodage, conservation sélective de pistes et contrôle d'intégrité. |
-| **Métadonnées** | `block.metadata.editor` | `tool.mkvtoolnix` (`mkvpropedit`) | Modification *in-place* instantanée des titres, étiquettes de pistes et langues sans réécriture du fichier. |
-| **Chapitres** | `block.chapters.manage` | `tool.mkvtoolnix` | Importation, suppression et édition des repères de chapitres Matroska. |
-| **Découpe/Fusion**| `block.media.split-concat` | `tool.mkvtoolnix` / `tool.ffmpeg` | Scission et assemblage de segments média sans perte. |
+| **Vidéo** | `block.video.encode` | `app.ffmpeg` | Encodage vidéo multi-codecs avec accélération matérielle et filtres de redimensionnement. |
+| **Vidéo** | `block.video.inspect` | `app.ffmpeg` / `app.mkvtoolnix` | Sonde et inspection technique des pistes, résolutions, profils HDR et formats. |
+| **Audio** | `block.audio.encode` | `app.ffmpeg` | Transcodage multi-formats, normalisation EBU R128 (`loudnorm`) et mixage de canaux. |
+| **Audio** | `block.audio.extract` | `app.ffmpeg` / `app.mkvtoolnix` | Démultiplexage et extraction brute ou convertie de flux sonores. |
+| **Sous-titres** | `block.subtitle.manage` | `app.mkvtoolnix` / `app.ffmpeg` | Filtrage de langues, extraction, bascule des drapeaux forcé/défaut et exclusion SDH. |
+| **Conteneur** | `block.video.remux-mkv` | `app.mkvtoolnix` | Remuxage Matroska sans réencodage, conservation sélective de pistes et contrôle d'intégrité. |
+| **Métadonnées** | `block.metadata.editor` | `app.mkvtoolnix` (`mkvpropedit`) | Modification *in-place* instantanée des titres, étiquettes de pistes et langues sans réécriture du fichier. |
+| **Chapitres** | `block.chapters.manage` | `app.mkvtoolnix` | Importation, suppression et édition des repères de chapitres Matroska. |
+| **Découpe/Fusion**| `block.media.split-concat` | `app.mkvtoolnix` / `app.ffmpeg` | Scission et assemblage de segments média sans perte. |
 
 ## Conséquences
 

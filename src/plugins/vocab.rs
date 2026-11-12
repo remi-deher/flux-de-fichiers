@@ -13,8 +13,8 @@ use serde_json::Value;
 pub enum CatalogItemType {
     #[serde(rename = "plugin")]
     Plugin,
-    #[serde(rename = "tool")]
-    Tool,
+    #[serde(rename = "app")]
+    App,
     #[serde(rename = "flow")]
     Flow,
     #[serde(rename = "preset")]
@@ -31,8 +31,8 @@ pub enum CatalogItemType {
     ResourceLanguage,
     #[serde(rename = "resource.template")]
     ResourceTemplate,
-    #[serde(rename = "app")]
-    App,
+    #[serde(rename = "pack")]
+    Pack,
     #[serde(rename = "block")]
     Block,
 }
@@ -41,7 +41,7 @@ impl CatalogItemType {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Plugin => "plugin",
-            Self::Tool => "tool",
+            Self::App => "app",
             Self::Flow => "flow",
             Self::Preset => "preset",
             Self::ResourceFont => "resource.font",
@@ -50,7 +50,7 @@ impl CatalogItemType {
             Self::ResourceColor => "resource.color",
             Self::ResourceLanguage => "resource.language",
             Self::ResourceTemplate => "resource.template",
-            Self::App => "app",
+            Self::Pack => "pack",
             Self::Block => "block",
         }
     }
@@ -212,7 +212,7 @@ mod tests {
     fn catalog_types_roundtrip_and_reject_unknown() -> Result<(), serde_json::Error> {
         let kinds = [
             CatalogItemType::Plugin,
-            CatalogItemType::Tool,
+            CatalogItemType::App,
             CatalogItemType::Flow,
             CatalogItemType::Preset,
             CatalogItemType::ResourceFont,
@@ -221,7 +221,7 @@ mod tests {
             CatalogItemType::ResourceColor,
             CatalogItemType::ResourceLanguage,
             CatalogItemType::ResourceTemplate,
-            CatalogItemType::App,
+            CatalogItemType::Pack,
             CatalogItemType::Block,
         ];
         for kind in kinds {

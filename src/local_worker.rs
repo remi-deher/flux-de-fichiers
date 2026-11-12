@@ -64,6 +64,17 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
             return;
         }
     };
+    let catalog = crate::plugins::list_catalog(state.config.plugins_dir.as_deref());
+    let probe = crate::plugins::required_probe(&catalog);
+    let cache = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
+    if !crate::plugins::file_job_may_start(&cache, probe.as_ref()) {
+        report_failure(state, claim.job_id, &lease, JobErrorCode::ProbeUnavailable).await;
+        tracing::warn!(
+            job_id = %claim.job_id,
+            "probe contract is not ready on the local worker"
+        );
+        return;
+    }
     let work_dir = state
         .config
         .data_dir
@@ -117,7 +128,7 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
             (outcome.working_file, outcome.warning)
         } else {
             let mkvmerge_bin =
-                cache_mgr.resolve_executable("tool.mkvtoolnix", "1.0.0", "mkvmerge", "MKVMERGE");
+                cache_mgr.resolve_executable("app.mkvtoolnix", "1.0.0", "mkvmerge", "MKVMERGE");
             let warning = media::remux_with_progress(
                 &mkvmerge_bin,
                 &source_snapshot,
@@ -155,7 +166,9 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
         }
     };
     if let Err(error) = outcome {
-        let code = if error.to_string().contains("source_integrity") {
+        let code = if error.to_string().contains("probe_unavailable") {
+            JobErrorCode::ProbeUnavailable
+        } else if error.to_string().contains("source_integrity") {
             JobErrorCode::SourceIntegrity
         } else if error.to_string().contains("remux_failed")
             || error.to_string().contains("flow_execution_failed")

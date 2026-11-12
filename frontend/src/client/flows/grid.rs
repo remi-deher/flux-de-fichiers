@@ -48,7 +48,7 @@ pub const SCRIPT: &str = r###"
     if (cachedFlows.length === 0) {
       tbody.innerHTML = emptyStateRow(4, 'Aucun flux installé. Importez-en un depuis le catalogue ou créez-en un.', false);
       const fact = el('flows-fact');
-      if (fact) fact.hidden = true;
+      if (fact) closeInspectionDrawer(fact);
       return;
     }
 

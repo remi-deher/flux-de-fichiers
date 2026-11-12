@@ -18,11 +18,7 @@ pub const SCRIPT: &str = r###"
 
   function applyContextualSearch(query) {
     const term = (query || '').toLowerCase().trim();
-    const clearBtn = el('header-search-clear-btn');
     const matchBadge = el('search-match-count');
-    if (clearBtn) {
-      clearBtn.hidden = !term;
-    }
 
     let matchCount = 0;
     let totalCount = 0;
@@ -130,6 +126,7 @@ pub const SCRIPT: &str = r###"
 
   function switchTab(tabName) {
     if (!TABS.includes(tabName)) return;
+    document.querySelectorAll('.inspection-drawer.is-open').forEach(closeInspectionDrawer);
     activeTab = tabName;
 
     const titleEl = el('current-section-title');
@@ -156,6 +153,7 @@ pub const SCRIPT: &str = r###"
     });
 
     updateSearchContext(tabName);
+    syncSearchCapsule(tabName);
 
     // Actualisation silencieuse contextuelle à l'affichage de l'onglet
     if (tabName === 'files') {
@@ -180,6 +178,58 @@ pub const SCRIPT: &str = r###"
     } else if (tabName === 'dashboard') {
       if (typeof updateOverviewStats === 'function') updateOverviewStats();
     }
+  }
+
+  function syncSearchCapsule(tabName) {
+    document.querySelectorAll('[data-capsule-tab]').forEach(node => {
+      node.hidden = node.getAttribute('data-capsule-tab') !== tabName;
+    });
+    document.querySelectorAll('[data-filter-page]').forEach(group => {
+      group.hidden = group.getAttribute('data-filter-page') !== tabName;
+    });
+    const filterBtn = el('search-filter-btn');
+    const hasFilters = Boolean(document.querySelector(`[data-filter-page="${tabName}"]`));
+    if (filterBtn) filterBtn.hidden = !hasFilters;
+    if (!hasFilters) closeFilterSheet();
+    updateFilterCount();
+  }
+
+  function updateFilterCount() {
+    const badge = el('search-filter-count');
+    const button = el('search-filter-btn');
+    const sheet = el('filter-sheet');
+    const pressed = document.querySelector('#filter-sheet .filter-chip[aria-pressed="true"]');
+    const active = pressed && pressed.getAttribute('data-filter') !== 'all';
+    if (badge) {
+      badge.hidden = !active;
+      badge.textContent = active ? '1' : '0';
+    }
+    if (button) {
+      const open = Boolean(sheet && !sheet.hidden);
+      button.classList.toggle('is-active', Boolean(active) || open);
+      button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+  }
+
+  function closeFilterSheet() {
+    const sheet = el('filter-sheet');
+    if (sheet) sheet.hidden = true;
+    document.body.removeAttribute('data-filter-sheet');
+    updateFilterCount();
+  }
+
+  function toggleFilterSheet() {
+    const sheet = el('filter-sheet');
+    if (!sheet || sheet.hidden === false && document.body.hasAttribute('data-filter-sheet')) {
+      closeFilterSheet();
+      return;
+    }
+    if (!sheet) return;
+    const input = el('global-search-input');
+    if (input) input.blur();
+    sheet.hidden = false;
+    document.body.setAttribute('data-filter-sheet', '');
+    updateFilterCount();
   }
 
   function setupTabs() {
@@ -252,6 +302,7 @@ pub const SCRIPT: &str = r###"
     if (!parentNav) return;
     const targetId = tabBtn.getAttribute('data-subtab');
     if (!targetId) return;
+    document.querySelectorAll('.inspection-drawer.is-open').forEach(closeInspectionDrawer);
 
     parentNav.querySelectorAll('.subnav-tab').forEach(b => {
       b.classList.remove('active');

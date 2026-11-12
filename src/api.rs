@@ -237,9 +237,19 @@ async fn claim(
     axum::Json(r): axum::Json<ClaimRequest>,
 ) -> AppResult<axum::Json<Option<Claim>>> {
     authorize(&h, &s.config.worker_key)?;
-    let claim_res = repository::claim(&s.pool, r.worker_id).await?;
-    if let Some(ref c) = claim_res {
-        s.notify_job_event(JobEventType::JobClaimed, c.job_id, JobStatus::Running, None);
+    let mut claim_res = repository::claim(&s.pool, r.worker_id).await?;
+    if let Some(ref mut claim) = claim_res {
+        let catalog = crate::plugins::list_catalog(s.config.plugins_dir.as_deref());
+        if let Some(probe) = crate::plugins::required_probe(&catalog) {
+            claim.probe_tool_id = Some(probe.tool_id);
+            claim.probe_version = Some(probe.version);
+        }
+        s.notify_job_event(
+            JobEventType::JobClaimed,
+            claim.job_id,
+            JobStatus::Running,
+            None,
+        );
     }
     Ok(axum::Json(claim_res))
 }

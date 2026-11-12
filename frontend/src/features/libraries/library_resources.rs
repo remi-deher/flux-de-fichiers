@@ -48,15 +48,15 @@ pub fn LibraryResources() -> impl IntoView {
                     </div>
                     <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; color: var(--text-color); line-height: 1.6;">
                         <li>
-                            <code>"tool.internal.telemetry"</code>
+                            <code>"app.internal.telemetry"</code>
                             " : Sonde système coordinateur"
                         </li>
                         <li>
-                            <code>"tool.mkvtoolnix.mkvmerge"</code>
+                            <code>"app.mkvtoolnix.mkvmerge"</code>
                             " : Moteur de remuxage sans transcodage"
                         </li>
                         <li>
-                            <code>"tool.ffmpeg.mediainfo"</code>
+                            <code>"app.ffmpeg.mediainfo"</code>
                             " : Détection et inspection des métadonnées"
                         </li>
                     </ul>

@@ -40,7 +40,7 @@ Cette architecture est détaillée dans quatre documents complémentaires :
 1. **[ADR 0004 — Moteur Bare Core, distribution d'outils par plugins (Option B) et socle d'exécution](../adr/0004-bare-core-et-outils-distribues.md)** :
    Formalisation de la décision utilisateur, motivation, périmètre et règles fondamentales.
 2. **[Conception technique de la sonde système de télémétrie](sonde-telemetrie-systeme.md)** :
-   Spécification de l'outil interne unique (`tool.internal.telemetry`), relevé des métriques CPU/RAM/GPU/Stockage sans privilèges root et intégration au scheduling du coordinateur.
+   Spécification de l'outil interne unique (`app.internal.telemetry`), relevé des métriques CPU/RAM/GPU/Stockage sans privilèges root et intégration au scheduling du coordinateur.
 3. **[Conception technique du cache worker et validation SHA-256 des outils distribués](cache-worker-outils-distribues.md)** :
    Cycle de vie d'acquisition, extraction native Rust sans shell (`noShellUnpack: true`), vérification cryptographique obligatoire SHA-256 et confinement d'exécution.
 4. **[Conception technique de l'ordonnancement des macro-blocs](ordonnancement-macro-blocs.md)** :

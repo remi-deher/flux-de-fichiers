@@ -24,7 +24,6 @@ pub const SCRIPT: &str = r###"
 
     // Initialisation de la barre de recherche contextuelle globale
     const globalSearchInput = el('global-search-input');
-    const headerSearchClearBtn = el('header-search-clear-btn');
 
     if (globalSearchInput) {
       globalSearchInput.addEventListener('input', (e) => {
@@ -37,16 +36,6 @@ pub const SCRIPT: &str = r###"
           globalSearchInput.value = '';
           applyContextualSearch('');
           globalSearchInput.blur();
-        }
-      });
-    }
-
-    if (headerSearchClearBtn) {
-      headerSearchClearBtn.addEventListener('click', () => {
-        if (globalSearchInput) {
-          globalSearchInput.value = '';
-          applyContextualSearch('');
-          globalSearchInput.focus();
         }
       });
     }
@@ -99,8 +88,6 @@ pub const SCRIPT: &str = r###"
       filesSearch.addEventListener('input', () => {
         if (globalSearchInput && globalSearchInput.value !== filesSearch.value) {
           globalSearchInput.value = filesSearch.value;
-          const clearBtn = el('header-search-clear-btn');
-          if (clearBtn) clearBtn.hidden = !filesSearch.value;
         }
         renderFilesTable();
       });
@@ -135,8 +122,6 @@ pub const SCRIPT: &str = r###"
       jobsSearch.addEventListener('input', () => {
         if (globalSearchInput && globalSearchInput.value !== jobsSearch.value) {
           globalSearchInput.value = jobsSearch.value;
-          const clearBtn = el('header-search-clear-btn');
-          if (clearBtn) clearBtn.hidden = !jobsSearch.value;
         }
         renderJobsTable();
       });
@@ -149,8 +134,28 @@ pub const SCRIPT: &str = r###"
         btn.setAttribute('aria-pressed', 'true');
         activeJobFilter = btn.getAttribute('data-filter') || 'all';
         renderJobsTable();
+        updateFilterCount();
       });
     });
+
+    const filterBtn = el('search-filter-btn');
+    if (filterBtn) filterBtn.addEventListener('click', toggleFilterSheet);
+    const filterClose = el('filter-sheet-close');
+    if (filterClose) filterClose.addEventListener('click', closeFilterSheet);
+    const filterClear = el('filter-sheet-clear');
+    if (filterClear) {
+      filterClear.addEventListener('click', () => {
+        const all = document.querySelector('#filter-sheet .filter-chip[data-filter="all"]');
+        if (all) all.click();
+      });
+    }
+    const searchField = el('global-search-input');
+    if (searchField) {
+      searchField.addEventListener('focusin', () => {
+        if (document.body.hasAttribute('data-filter-sheet')) closeFilterSheet();
+      });
+    }
+    syncSearchCapsule(activeTab);
 
     // Configuration du Gestionnaire de Flux
     setupFlowsPanel();
@@ -168,14 +173,31 @@ pub const SCRIPT: &str = r###"
     const jobDialogCloseBtn = el('job-dialog-close-btn');
     if (jobDialogCloseBtn) jobDialogCloseBtn.addEventListener('click', closeJobDetailDialog);
 
-    // Fermeture avec Échap pour les modales
+    document.addEventListener('click', (event) => {
+      const tab = event.target.closest('.inspection-drawer__tab');
+      if (tab) {
+        const drawer = tab.closest('.inspection-drawer');
+        if (drawer) selectInspectionTab(drawer, tab);
+        return;
+      }
+      const closer = event.target.closest('[data-inspection-close]');
+      if (!closer) return;
+      const drawer = closer.closest('.inspection-drawer');
+      if (drawer) closeInspectionDrawer(drawer);
+    });
+
+    // Fermeture avec Échap pour les modales, puis pour le tiroir d'inspection
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
+        const modalOpen = Boolean(document.querySelector('dialog[open]'));
         closeConfirmRemuxDialog();
         closeJobDetailDialog();
         const wizard = el('flow-wizard-dialog');
         if (wizard && wizard.open) {
           wizard.close();
+        }
+        if (!modalOpen) {
+          document.querySelectorAll('.inspection-drawer.is-open').forEach(closeInspectionDrawer);
         }
       }
     });
@@ -215,8 +237,9 @@ pub const SCRIPT: &str = r###"
       }
 
       // Si le champ de recherche a le focus, on garde la barre visible
+      const sheetOpen = document.body.hasAttribute('data-filter-sheet');
       const isFocused = topbar.contains(document.activeElement);
-      if (isFocused || current < TOP_ZONE_PX || delta < SHOW_DELTA_PX) {
+      if (sheetOpen || isFocused || current < TOP_ZONE_PX || delta < SHOW_DELTA_PX) {
         topbar.classList.remove('is-hidden');
         subnavs.forEach(s => s.classList.remove('is-hidden'));
       } else if (delta > HIDE_DELTA_PX && current > HIDE_AFTER_PX) {

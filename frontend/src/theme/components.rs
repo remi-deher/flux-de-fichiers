@@ -180,11 +180,6 @@ pub const COMPONENTS_CSS: &str = r#"
   border-radius: var(--radius-sm);
 }
 
-.registre-fact[hidden],
-#worker-connect-panel[hidden] {
-  display: none;
-}
-
 .registre-fact-title {
   margin: 0;
   font-weight: 600;
@@ -199,6 +194,136 @@ pub const COMPONENTS_CSS: &str = r#"
 
 .registre-fact-action {
   flex: none;
+}
+
+.inspection-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.inspection-drawer.is-open {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.inspection-drawer__scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+
+.inspection-drawer__panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, max(24rem, 66.666%));
+  background: var(--bg-card);
+  border-left: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
+  transform: translateX(100%);
+  outline: none;
+}
+
+.inspection-drawer.is-open .inspection-drawer__panel {
+  transform: none;
+}
+
+.inspection-drawer__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem 1rem 0.85rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.inspection-drawer__identity {
+  flex: 1;
+  min-width: 0;
+}
+
+.inspection-drawer__eyebrow {
+  margin: 0 0 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.inspection-drawer__header .header-icon-btn {
+  flex: none;
+}
+
+.inspection-drawer__subnav {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.inspection-drawer__tab {
+  flex: 1;
+  appearance: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 0.8rem 0.7rem;
+  text-align: center;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.inspection-drawer__tab.is-active {
+  color: var(--text-main);
+  border-bottom-color: var(--primary);
+}
+
+.inspection-drawer__tab:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.inspection-drawer__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.inspection-drawer__pane {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.inspection-panel__title {
+  margin: 0;
+  font-size: 1.125rem;
+  line-height: 1.3;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.inspection-panel__facts {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.inspection-panel__action {
+  align-self: stretch;
 }
 
 .empty-state-text {

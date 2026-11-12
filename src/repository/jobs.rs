@@ -154,6 +154,8 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
             source_name: j.source_name,
             source_sha256: j.source_sha256.ok_or(AppError::Internal)?,
             source_bytes: j.source_bytes.ok_or(AppError::Internal)?,
+            probe_tool_id: None,
+            probe_version: None,
         })
     })
     .transpose()

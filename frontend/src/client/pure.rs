@@ -177,13 +177,76 @@ pub fn script() -> String {
     return `<tr>${{cells}}</tr>`;
   }}
 
+  function inspectionEyebrow(factId) {{
+    if (factId === 'files-fact') return 'Fichier';
+    if (factId === 'flows-fact') return 'Flux';
+    if (factId === 'repos-fact') return 'Dépôt';
+    const catalog = {{
+      app: 'Application',
+      plugin: 'Plugin',
+      flow: 'Flux publié',
+      block: 'Bloc',
+      pack: 'Pack',
+      preset: 'Préréglage',
+      resource: 'Ressource'
+    }};
+    const view = String(factId || '').replace('catalog-fact-', '');
+    return catalog[view] || 'Dossier';
+  }}
+
+  function selectInspectionTab(drawer, tab) {{
+    if (!drawer || !tab) return;
+    drawer.querySelectorAll('.inspection-drawer__tab').forEach(item => {{
+      const selected = item === tab;
+      item.classList.toggle('is-active', selected);
+      item.setAttribute('aria-selected', selected ? 'true' : 'false');
+      item.tabIndex = selected ? 0 : -1;
+      const pane = document.getElementById(item.getAttribute('aria-controls'));
+      if (pane) pane.hidden = !selected;
+    }});
+  }}
+
+  function closeInspectionDrawer(drawer) {{
+    if (!drawer) return;
+    drawer.classList.remove('is-open');
+    drawer.setAttribute('aria-hidden', 'true');
+    const action = drawer.querySelector('.inspection-panel__action');
+    if (action) action.disabled = true;
+    const first = drawer.querySelector('.inspection-drawer__tab');
+    if (first) selectInspectionTab(drawer, first);
+    const registre = drawer.closest('.registre');
+    if (registre) {{
+      registre.querySelectorAll('tr.is-open').forEach(row => row.classList.remove('is-open'));
+    }}
+  }}
+
   function showRegistreFact(factId, title, facts) {{
     const fact = document.getElementById(factId);
     const titleEl = document.getElementById(factId + '-title');
     const factsEl = document.getElementById(factId + '-facts');
-    if (titleEl) titleEl.textContent = title || '';
-    if (factsEl) factsEl.textContent = (facts || []).filter(Boolean).join(' · ');
-    if (fact) fact.hidden = false;
+    const eyebrowEl = document.getElementById(factId + '-eyebrow');
+    const text = (facts || []).filter(Boolean).join(' · ');
+    if (titleEl) titleEl.textContent = title || 'Sélectionnez une ligne';
+    if (factsEl) factsEl.textContent = text || 'Le détail de la ligne apparaît ici.';
+    if (eyebrowEl) eyebrowEl.textContent = inspectionEyebrow(factId);
+    if (!fact) return;
+    if (fact.classList.contains('inspection-drawer')) {{
+      if (!title) {{
+        closeInspectionDrawer(fact);
+        return;
+      }}
+      fact.classList.add('is-open');
+      fact.setAttribute('aria-hidden', 'false');
+      const action = fact.querySelector('.inspection-panel__action');
+      if (action) action.disabled = false;
+      const first = fact.querySelector('.inspection-drawer__tab');
+      if (first) selectInspectionTab(fact, first);
+      const panel = fact.querySelector('.inspection-drawer__panel');
+      if (panel) panel.focus();
+      return;
+    }}
+    fact.hidden = false;
+    fact.classList.toggle('is-filled', Boolean(title));
   }}
 
   function markRegistreRow(tbody, row) {{
@@ -265,6 +328,8 @@ mod tests {
         assert!(source.contains("function isVideoFlowName"));
         assert!(source.contains("function tableRow"));
         assert!(source.contains("function showRegistreFact"));
+        assert!(source.contains("function closeInspectionDrawer"));
+        assert!(source.contains("function selectInspectionTab"));
         assert!(source.contains("function markRegistreRow"));
     }
 }

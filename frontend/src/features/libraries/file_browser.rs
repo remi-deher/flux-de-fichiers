@@ -1,6 +1,6 @@
 //! Explorateur de médias sources et dialogue de confirmation de traitement.
 
-use crate::shared::ui::{RegistreFact, RegistreTable};
+use crate::shared::ui::{InspectionPanel, RegistreTable};
 use leptos::prelude::*;
 
 #[component]
@@ -14,7 +14,7 @@ pub fn FileBrowser() -> impl IntoView {
                 body_id="files-table-body"
                 empty="Chargement des médias sources…"
             />
-            <RegistreFact id="files-fact" action_id="files-fact-action" action="Lancer un flux" />
+            <InspectionPanel id="files-fact" action="Lancer un flux" />
         </div>
 
         // Dialogue modal accessible de confirmation de lancement d'un traitement

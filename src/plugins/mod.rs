@@ -5,8 +5,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
 
+mod probe;
 mod settings;
 mod vocab;
+
+pub use probe::{ProbeContract, file_job_may_start, probe_is_ready, required_probe};
 
 pub use settings::{
     ResolvedSettingsField, SettingsField, SettingsFieldType, SettingsSchema, resolve_setting_value,
@@ -218,7 +221,7 @@ pub fn list_tools_status(
 
     entries
         .into_iter()
-        .filter(|entry| entry.entry_type == CatalogItemType::Tool)
+        .filter(|entry| entry.entry_type == CatalogItemType::App)
         .map(|entry| {
             let mut description = String::new();
             if let Some(root) = plugins_root
@@ -232,9 +235,8 @@ pub fn list_tools_status(
             }
 
             let is_system_ready = match entry.id.as_str() {
-                "tool.internal.telemetry" => true,
-                "tool.mkvtoolnix" => Path::new("/usr/bin/mkvmerge").exists(),
-                "tool.mediainfo" => Path::new("/usr/bin/mediainfo").exists(),
+                "app.internal.telemetry" => true,
+                "app.mkvtoolnix" => Path::new("/usr/bin/mkvmerge").exists(),
                 _ => false,
             };
 
@@ -263,12 +265,12 @@ pub fn list_tools_status(
 
 fn default_tool_description(tool_id: &str) -> String {
     match tool_id {
-        "tool.mkvtoolnix" => "Outil de remuxage sans réencodage validé. Distribution Option B (binaire autonome hors conteneur applicatif). Matroska uniquement.".into(),
-        "tool.mp4box" => "Outil de référence pour le multiplexage, l'optimisation streaming faststart et la manipulation de conteneurs MP4 sans réencodage (GPAC).".into(),
-        "tool.mediainfo" => "Outil universel d'analyse et d'extraction de métadonnées techniques multimédias (codecs, résolutions, profils HDR10/Dolby Vision, pistes audio et sous-titres).".into(),
-        "tool.ffmpeg" => "Outil d'analyse multimédia et génération de médias synthétiques de tests. Réservé aux tests et scénarios de simulation.".into(),
-        "tool.internal.telemetry" => "Mesure périodique CPU, RAM, GPU (/dev/dri) et stockage local. Confinement strict sous UID 10001 (app) sans socket Docker.".into(),
-        "tool.postgresql" => "Moteur de base de données relationnelle historique (remplacé par SQLite local /config dans l'ADR 0005).".into(),
+        "app.mkvtoolnix" => "Outil de remuxage sans réencodage validé. Distribution Option B (binaire autonome hors conteneur applicatif). Matroska uniquement.".into(),
+        "app.mp4box" => "Outil de référence pour le multiplexage, l'optimisation streaming faststart et la manipulation de conteneurs MP4 sans réencodage (GPAC).".into(),
+        "app.mediainfo" => "Outil universel d'analyse et d'extraction de métadonnées techniques multimédias (codecs, résolutions, profils HDR10/Dolby Vision, pistes audio et sous-titres).".into(),
+        "app.ffmpeg" => "Outil d'analyse multimédia et génération de médias synthétiques de tests. Réservé aux tests et scénarios de simulation.".into(),
+        "app.internal.telemetry" => "Mesure périodique CPU, RAM, GPU (/dev/dri) et stockage local. Confinement strict sous UID 10001 (app) sans socket Docker.".into(),
+        "app.postgresql" => "Moteur de base de données relationnelle historique (remplacé par SQLite local /config dans l'ADR 0005).".into(),
         _ => "Outil modulaire distribué.".into(),
     }
 }
@@ -302,8 +304,8 @@ fn offline_entry(spec: OfflineEntry) -> CatalogEntry {
 fn default_catalog_entries() -> Vec<CatalogEntry> {
     vec![
         offline_entry(OfflineEntry {
-            id: "tool.mkvtoolnix",
-            entry_type: CatalogItemType::Tool,
+            id: "app.mkvtoolnix",
+            entry_type: CatalogItemType::App,
             version: "1.0.0",
             name: "MKVToolNix (mkvmerge)",
             manifest_path: "tools/mkvtoolnix/manifest.json",
@@ -312,8 +314,8 @@ fn default_catalog_entries() -> Vec<CatalogEntry> {
             distribution: Some("autonomous-binary"),
         }),
         offline_entry(OfflineEntry {
-            id: "tool.ffmpeg",
-            entry_type: CatalogItemType::Tool,
+            id: "app.ffmpeg",
+            entry_type: CatalogItemType::App,
             version: "1.0.0",
             name: "FFmpeg (distribué)",
             manifest_path: "tools/ffmpeg/manifest.json",
@@ -322,9 +324,9 @@ fn default_catalog_entries() -> Vec<CatalogEntry> {
             distribution: Some("autonomous-binary"),
         }),
         offline_entry(OfflineEntry {
-            id: "tool.mediainfo",
-            entry_type: CatalogItemType::Tool,
-            version: "24.06",
+            id: "app.mediainfo",
+            entry_type: CatalogItemType::App,
+            version: "1.0.0",
             name: "MediaInfo CLI",
             manifest_path: "tools/mediainfo/manifest.json",
             capability: Some(CatalogCapability::Probe),
@@ -332,8 +334,8 @@ fn default_catalog_entries() -> Vec<CatalogEntry> {
             distribution: Some("autonomous-binary"),
         }),
         offline_entry(OfflineEntry {
-            id: "tool.mp4box",
-            entry_type: CatalogItemType::Tool,
+            id: "app.mp4box",
+            entry_type: CatalogItemType::App,
             version: "2.4.0",
             name: "MP4Box (GPAC)",
             manifest_path: "tools/mp4box/manifest.json",
@@ -342,8 +344,8 @@ fn default_catalog_entries() -> Vec<CatalogEntry> {
             distribution: Some("autonomous-binary"),
         }),
         offline_entry(OfflineEntry {
-            id: "tool.internal.telemetry",
-            entry_type: CatalogItemType::Tool,
+            id: "app.internal.telemetry",
+            entry_type: CatalogItemType::App,
             version: "0.1.0",
             name: "Sonde interne de télémétrie",
             manifest_path: "tools/internal-telemetry/manifest.json",
@@ -394,7 +396,7 @@ mod tests {
     fn unknown_catalog_strings_are_rejected() {
         let bad_type = r#"{"schemaVersion":"1.0.0","entries":[{"id":"x","type":"extension","version":"1.0.0","name":"X","manifestPath":"x.json"}]}"#;
         assert!(serde_json::from_str::<CatalogIndex>(bad_type).is_err());
-        let bad_capability = r#"{"schemaVersion":"1.0.0","entries":[{"id":"x","type":"tool","version":"1.0.0","name":"X","manifestPath":"x.json","capability":"studio"}]}"#;
+        let bad_capability = r#"{"schemaVersion":"1.0.0","entries":[{"id":"x","type":"app","version":"1.0.0","name":"X","manifestPath":"x.json","capability":"studio"}]}"#;
         assert!(serde_json::from_str::<CatalogIndex>(bad_capability).is_err());
     }
 

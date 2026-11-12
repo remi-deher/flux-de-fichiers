@@ -84,9 +84,9 @@ impl fmt::Display for JobEventType {
 
 /// Codes d'erreur persistés dans `jobs.error_code`.
 ///
-/// Seuls `remux_failed`, `source_integrity` et `transfer_failed` peuvent être
-/// déclarés par un worker. `lease_expired` et `missing_source_fingerprint` sont
-/// écrits par le coordinateur.
+/// Seuls `remux_failed`, `source_integrity`, `transfer_failed` et
+/// `probe_unavailable` peuvent être déclarés par un worker. `lease_expired` et
+/// `missing_source_fingerprint` sont écrits par le coordinateur.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(rename_all = "snake_case")]
@@ -94,6 +94,7 @@ pub enum JobErrorCode {
     RemuxFailed,
     SourceIntegrity,
     TransferFailed,
+    ProbeUnavailable,
     LeaseExpired,
     MissingSourceFingerprint,
 }
@@ -104,6 +105,7 @@ impl JobErrorCode {
             Self::RemuxFailed => "remux_failed",
             Self::SourceIntegrity => "source_integrity",
             Self::TransferFailed => "transfer_failed",
+            Self::ProbeUnavailable => "probe_unavailable",
             Self::LeaseExpired => "lease_expired",
             Self::MissingSourceFingerprint => "missing_source_fingerprint",
         }
@@ -112,7 +114,10 @@ impl JobErrorCode {
     pub fn is_worker_reportable(self) -> bool {
         matches!(
             self,
-            Self::RemuxFailed | Self::SourceIntegrity | Self::TransferFailed
+            Self::RemuxFailed
+                | Self::SourceIntegrity
+                | Self::TransferFailed
+                | Self::ProbeUnavailable
         )
     }
 
@@ -121,6 +126,7 @@ impl JobErrorCode {
         match label {
             "source_integrity" => Self::SourceIntegrity,
             "remux_failed" => Self::RemuxFailed,
+            "probe_unavailable" => Self::ProbeUnavailable,
             _ => Self::TransferFailed,
         }
     }
@@ -140,6 +146,7 @@ impl FromStr for JobErrorCode {
             "remux_failed" => Ok(Self::RemuxFailed),
             "source_integrity" => Ok(Self::SourceIntegrity),
             "transfer_failed" => Ok(Self::TransferFailed),
+            "probe_unavailable" => Ok(Self::ProbeUnavailable),
             "lease_expired" => Ok(Self::LeaseExpired),
             "missing_source_fingerprint" => Ok(Self::MissingSourceFingerprint),
             _ => Err(()),
@@ -197,6 +204,12 @@ pub struct Claim {
     pub source_name: String,
     pub source_sha256: String,
     pub source_bytes: i64,
+    /// Sonde exigée par le catalogue au moment du bail. Absente si aucun outil
+    /// `probe` n'est le choix actuel.
+    #[serde(default)]
+    pub probe_tool_id: Option<String>,
+    #[serde(default)]
+    pub probe_version: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -309,6 +322,7 @@ mod tests {
             (JobErrorCode::RemuxFailed, "remux_failed", true),
             (JobErrorCode::SourceIntegrity, "source_integrity", true),
             (JobErrorCode::TransferFailed, "transfer_failed", true),
+            (JobErrorCode::ProbeUnavailable, "probe_unavailable", true),
             (JobErrorCode::LeaseExpired, "lease_expired", false),
             (
                 JobErrorCode::MissingSourceFingerprint,

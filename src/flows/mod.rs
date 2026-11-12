@@ -126,7 +126,7 @@ impl<'a> FlowEngine<'a> {
         let graph: FlowGraph = serde_json::from_str(&flow.definition)?;
         let mkvmerge_bin =
             self.cache_mgr
-                .resolve_executable("tool.mkvtoolnix", "1.0.0", "mkvmerge", "MKVMERGE");
+                .resolve_executable("app.mkvtoolnix", "1.0.0", "mkvmerge", "MKVMERGE");
         let media_info = media::inspect_with(&mkvmerge_bin, source_file).await?;
         let mut current_working_file = source_file.to_path_buf();
         let mut is_in_place = true;
@@ -168,7 +168,7 @@ impl<'a> FlowEngine<'a> {
             tracing::info!(job_id = %job_id, block = %node.kind, "flow step");
             if let Some(edit) = &decision.edit {
                 let propedit_bin = self.cache_mgr.resolve_executable(
-                    "tool.mkvtoolnix",
+                    "app.mkvtoolnix",
                     "1.0.0",
                     "mkvpropedit",
                     "MKVPROPEDIT",

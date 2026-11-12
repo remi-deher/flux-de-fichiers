@@ -25,6 +25,8 @@ pub enum IconName {
     Close,
     ChevronLeft,
     ChevronRight,
+    Filters,
+    Plus,
 }
 
 impl IconName {
@@ -79,6 +81,10 @@ impl IconName {
             }
             Self::ChevronLeft => r#"<path d="m15 18-6-6 6-6"/>"#,
             Self::ChevronRight => r#"<path d="m9 18 6-6-6-6"/>"#,
+            Self::Filters => {
+                r#"<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>"#
+            }
+            Self::Plus => r#"<path d="M5 12h14"/><path d="M12 5v14"/>"#,
         }
     }
 }

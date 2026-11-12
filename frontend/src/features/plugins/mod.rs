@@ -1,7 +1,7 @@
 //! Registre du catalogue : une sous-navigation par nature, plus les dépôts.
 
 use crate::core::{SubNav, SubNavTabItem};
-use crate::shared::ui::{RegistreFact, RegistreTable};
+use crate::shared::ui::{InspectionPanel, RegistreTable};
 use leptos::prelude::*;
 
 fn plugin_tab(
@@ -26,7 +26,7 @@ fn catalog_pane(
     headers: Vec<&'static str>,
     body_id: &'static str,
     fact_id: &'static str,
-    action_id: &'static str,
+    action: &'static str,
     hidden: bool,
 ) -> impl IntoView {
     view! {
@@ -37,7 +37,7 @@ fn catalog_pane(
                 body_id=body_id
                 empty="Chargement du catalogue…"
             />
-            <RegistreFact id=fact_id action_id=action_id action="Ouvrir" />
+            <InspectionPanel id=fact_id action=action />
         </div>
     }
 }
@@ -46,9 +46,9 @@ fn catalog_pane(
 pub fn PluginsPanel() -> impl IntoView {
     let subnav_tabs = vec![
         plugin_tab(
-            "btn-subtab-plugins-tool",
-            "Outils",
-            "subtab-plugins-tool",
+            "btn-subtab-plugins-app",
+            "Applications",
+            "subtab-plugins-app",
             true,
         ),
         plugin_tab(
@@ -70,9 +70,9 @@ pub fn PluginsPanel() -> impl IntoView {
             false,
         ),
         plugin_tab(
-            "btn-subtab-plugins-app",
-            "Applications",
-            "subtab-plugins-app",
+            "btn-subtab-plugins-pack",
+            "Packs",
+            "subtab-plugins-pack",
             false,
         ),
         plugin_tab(
@@ -109,12 +109,12 @@ pub fn PluginsPanel() -> impl IntoView {
             />
 
             {catalog_pane(
-                "subtab-plugins-tool",
-                "Outils du catalogue",
+                "subtab-plugins-app",
+                "Applications du catalogue",
                 vec!["Nom", "Version", "Capacité", "État", "Action"],
-                "catalog-body-tool",
-                "catalog-fact-tool",
-                "catalog-fact-tool-action",
+                "catalog-body-app",
+                "catalog-fact-app",
+                "Installer",
                 false,
             )}
             {catalog_pane(
@@ -123,7 +123,7 @@ pub fn PluginsPanel() -> impl IntoView {
                 vec!["Nom", "Version", "Tags", "Action"],
                 "catalog-body-plugin",
                 "catalog-fact-plugin",
-                "catalog-fact-plugin-action",
+                "Configurer",
                 true,
             )}
             {catalog_pane(
@@ -132,7 +132,7 @@ pub fn PluginsPanel() -> impl IntoView {
                 vec!["Nom", "Version", "Capacité", "Action"],
                 "catalog-body-flow",
                 "catalog-fact-flow",
-                "catalog-fact-flow-action",
+                "Importer",
                 true,
             )}
             {catalog_pane(
@@ -141,16 +141,16 @@ pub fn PluginsPanel() -> impl IntoView {
                 vec!["Nom", "Version", "Catégorie", "Action"],
                 "catalog-body-block",
                 "catalog-fact-block",
-                "catalog-fact-block-action",
+                "Voir le bloc",
                 true,
             )}
             {catalog_pane(
-                "subtab-plugins-app",
-                "Applications du catalogue",
+                "subtab-plugins-pack",
+                "Packs du catalogue",
                 vec!["Nom", "Version", "Type", "Action"],
-                "catalog-body-app",
-                "catalog-fact-app",
-                "catalog-fact-app-action",
+                "catalog-body-pack",
+                "catalog-fact-pack",
+                "Voir le pack",
                 true,
             )}
             {catalog_pane(
@@ -159,7 +159,7 @@ pub fn PluginsPanel() -> impl IntoView {
                 vec!["Nom", "Version", "Type", "Action"],
                 "catalog-body-preset",
                 "catalog-fact-preset",
-                "catalog-fact-preset-action",
+                "Voir le préréglage",
                 true,
             )}
             {catalog_pane(
@@ -168,29 +168,18 @@ pub fn PluginsPanel() -> impl IntoView {
                 vec!["Nom", "Type", "Action"],
                 "catalog-body-resource",
                 "catalog-fact-resource",
-                "catalog-fact-resource-action",
+                "Voir la ressource",
                 true,
             )}
 
             <div id="subtab-plugins-repos" class="registre" hidden>
-                <div class="registre-toolbar">
-                    <h2 class="section-title">"Dépôts"</h2>
-                    <button
-                        type="button"
-                        id="btn-open-add-repo-dialog"
-                        class="btn btn-primary btn-sm"
-                        aria-label="Ajouter un nouveau dépôt de plugins"
-                    >
-                        "Ajouter un dépôt"
-                    </button>
-                </div>
                 <RegistreTable
                     aria_label="Dépôts de plugins"
                     headers=vec!["Dépôt", "URL d'index", "Type", "État", "Dernière synchro", "Action"]
                     body_id="repos-table-body"
                     empty="Chargement des dépôts…"
                 />
-                <RegistreFact id="repos-fact" action_id="repos-fact-action" action="Synchroniser" />
+                <InspectionPanel id="repos-fact" action="Synchroniser" />
             </div>
 
             <dialog id="add-repo-dialog" class="app-dialog dialog-narrow" aria-labelledby="add-repo-title" aria-modal="true">

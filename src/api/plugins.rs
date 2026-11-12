@@ -37,11 +37,11 @@ pub async fn tool_distribution(
     Path(id): Path<String>,
     _auth: AdminAuth,
 ) -> AppResult<Json<Value>> {
-    let tool_name = id.trim_start_matches("tool.");
+    let app_name = id.trim_start_matches("app.");
     if let Some(ref root) = s.config.plugins_dir {
         let dist_path = root
-            .join("tools")
-            .join(tool_name)
+            .join("apps")
+            .join(app_name)
             .join("distribution.v1.json");
         if dist_path.is_file() {
             let content = std::fs::read_to_string(&dist_path)?;
@@ -52,7 +52,7 @@ pub async fn tool_distribution(
     }
     // Repli de secours pour les outils fondamentaux
     match id.as_str() {
-        "tool.mkvtoolnix" => Ok(Json(serde_json::json!({
+        "app.mkvtoolnix" => Ok(Json(serde_json::json!({
             "schemaVersion": "1.0.0",
             "tool": "mkvtoolnix",
             "name": "MKVToolNix CLI",

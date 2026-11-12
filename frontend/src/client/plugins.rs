@@ -3,7 +3,7 @@
 pub const SCRIPT: &str = r###"
 // --- Outils et catalogue dynamiques ---
   let cachedToolStatus = [];
-  const CATALOG_VIEWS = ['tool', 'plugin', 'flow', 'block', 'app', 'preset', 'resource'];
+  const CATALOG_VIEWS = ['app', 'plugin', 'flow', 'block', 'pack', 'preset', 'resource'];
 
   function cssAttr(value) {
     const text = String(value || '');
@@ -24,7 +24,7 @@ pub const SCRIPT: &str = r###"
       if (!Array.isArray(tools)) return;
       cachedToolStatus = tools;
       tools.forEach(tool => {
-        const row = document.querySelector(`#catalog-body-tool tr[data-tool-id="${cssAttr(tool.id)}"]`);
+        const row = document.querySelector(`#catalog-body-app tr[data-app-id="${cssAttr(tool.id)}"]`);
         if (!row) return;
         row.setAttribute('data-cache-status', tool.status || '');
         const cell = row.querySelector('.tool-status');
@@ -170,7 +170,7 @@ pub const SCRIPT: &str = r###"
     const capability = item.capability || '';
     const category = item.category || '';
     const tags = Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').join(', ') : '';
-    if (view === 'tool') return [version, capability, toolStatusOf(item.id)];
+    if (view === 'app') return [version, capability, toolStatusOf(item.id)];
     if (view === 'plugin') return [version, tags];
     if (view === 'flow') return [version, capability, 'Pièce publiée'];
     if (view === 'block') return [version, category];
@@ -181,9 +181,9 @@ pub const SCRIPT: &str = r###"
   function catalogVerb(view, item) {
     if (view === 'plugin') return 'Configurer';
     if (view === 'flow') return 'Importer';
-    if (view === 'tool') return toolStatusOf(item.id) === 'Prêt' ? 'Distribuer' : 'Installer';
+    if (view === 'app') return toolStatusOf(item.id) === 'Prêt' ? 'Distribuer' : 'Installer';
     if (view === 'block') return 'Voir le bloc';
-    if (view === 'app') return "Voir l'application";
+    if (view === 'pack') return 'Voir le pack';
     if (view === 'preset') return 'Voir le préréglage';
     if (view === 'resource') return 'Voir la ressource';
     return 'Ouvrir';
@@ -197,7 +197,7 @@ pub const SCRIPT: &str = r###"
     const type = escapeHtml(String(item.type || ''));
     const tags = Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string') : [];
     const tagText = escapeHtml(tags.join(', ') || '—');
-    if (view === 'tool') {
+    if (view === 'app') {
       return `<td class="text-strong">${name}</td><td>${version}</td><td>${capability}</td><td class="tool-status">${escapeHtml(toolStatusOf(item.id))}</td>`;
     }
     if (view === 'plugin') return `<td class="text-strong">${name}</td><td>${version}</td><td>${tagText}</td>`;
@@ -220,7 +220,7 @@ pub const SCRIPT: &str = r###"
       tbody.innerHTML = rows.map(item => {
         const safeId = escapeHtml(item.id || '');
         const tags = Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').join(' ') : '';
-        const toolAttr = view === 'tool' ? ` data-tool-id="${safeId}"` : '';
+        const toolAttr = view === 'app' ? ` data-app-id="${safeId}"` : '';
         return `<tr class="registre-row" data-catalog-id="${safeId}" data-tags="${escapeHtml(tags)}"${toolAttr}>
           ${catalogCells(view, item)}
           <td class="cell-end"><button type="button" class="btn btn-secondary btn-sm registre-open-btn" data-catalog-id="${safeId}">Ouvrir</button></td>
@@ -240,7 +240,10 @@ pub const SCRIPT: &str = r###"
     showRegistreFact('catalog-fact-' + view, item.name || item.id, catalogFacts(view, item));
     const action = el('catalog-fact-' + view + '-action');
     if (!action) return;
-    action.textContent = catalogVerb(view, item);
+    const verb = catalogVerb(view, item);
+    action.textContent = verb;
+    const verbTab = el('catalog-fact-' + view + '-tab-verb');
+    if (verbTab) verbTab.textContent = verb;
     action.setAttribute('data-catalog-id', item.id || '');
     action.setAttribute('data-catalog-name', item.name || item.id || '');
     action.setAttribute('data-verb', catalogVerb(view, item));
@@ -488,7 +491,7 @@ pub const SCRIPT: &str = r###"
       const targetId = e.detail && e.detail.targetId;
       if (!targetId || targetId.indexOf('subtab-plugins-') !== 0) return;
       if (targetId === 'subtab-plugins-repos') loadRepositories();
-      else if (targetId === 'subtab-plugins-tool') loadToolsStatus();
+      else if (targetId === 'subtab-plugins-app') loadToolsStatus();
       else renderCatalogRegistre();
     });
 

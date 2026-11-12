@@ -13,6 +13,7 @@ pub const SCRIPT: &str = r###"
 
       const activeCount = cachedWorkers.filter(w => (Date.now() - new Date(w.last_seen).getTime()) < 120000).length;
       if (metricWorkers) metricWorkers.textContent = String(activeCount);
+      updateHeaderWorkersCount(true, activeCount);
       renderWorkersTable();
     } catch (e) {
       if (tbody) {

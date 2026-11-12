@@ -96,15 +96,11 @@ pub fn Header() -> impl IntoView {
                 </div>
             </div>
 
-            // Statuts de santé et actions d'en-tête rapides
+            // Actions d'en-tête : statut des workers (central inclus) et actualisation rapide
             <div class="header-actions">
-                <div id="health-status-pill" class="status-pill warning" aria-live="polite" title="Disponibilité de la sonde /health">
+                <div id="header-workers-pill" class="status-pill online" aria-live="polite" title="Nombre de workers actifs (central inclus)">
                     <span class="status-dot"></span>
-                    <span id="health-status-text">"Vérification…"</span>
-                </div>
-                <div id="session-status-pill" class="status-pill warning" aria-live="polite" title="Statut d'authentification de la session">
-                    <Icon name=IconName::Lock size=13 />
-                    <span id="session-status-text">"Non authentifié"</span>
+                    <span id="header-workers-count-text">"1 worker en ligne"</span>
                 </div>
 
                 <button
@@ -115,15 +111,6 @@ pub fn Header() -> impl IntoView {
                     title="Actualiser les données du coordinateur"
                 >
                     <Icon name=IconName::Refresh size=16 />
-                </button>
-                <button
-                    type="button"
-                    id="header-theme-toggle-btn"
-                    class="header-icon-btn"
-                    aria-label="Basculer le thème clair ou sombre"
-                    title="Basculer le thème"
-                >
-                    <Icon name=IconName::Moon size=16 />
                 </button>
             </div>
         </header>

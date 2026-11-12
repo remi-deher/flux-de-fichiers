@@ -282,21 +282,21 @@ pub const BASE_CSS: &str = r#"
   background-color: var(--bg-app);
 }
 
-/* En-tête applicatif supérieur avec Glassmorphism (Backdrop Blur) & Grille symétrique */
+/* En-tête applicatif supérieur avec Glassmorphism & Positionnement fixe stable */
 .application-header {
   min-height: 60px;
+  height: 60px;
   background-color: rgba(22, 27, 34, 0.85);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color);
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 1rem;
-  padding: var(--sat) calc(1.5rem + var(--sar)) 0 calc(1.5rem + var(--sal));
   position: sticky;
   top: 0;
   z-index: 40;
+  display: flex;
+  align-items: center;
+  padding: var(--sat) calc(1.5rem + var(--sar)) 0 calc(1.5rem + var(--sal));
+  box-sizing: border-box;
 }
 
 [data-theme="light"] .application-header {
@@ -304,9 +304,14 @@ pub const BASE_CSS: &str = r#"
 }
 
 .header-breadcrumb {
-  grid-column: 1;
-  justify-self: start;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: calc(50% - 250px);
 }
 
 /* Style des icônes vectorielles Lucide */
@@ -316,12 +321,16 @@ pub const BASE_CSS: &str = r#"
   flex-shrink: 0;
 }
 
-/* Barre de recherche contextuelle du header (strictement centrée) */
+/* Barre de recherche contextuelle du header (strictement centrée en position fixe absolue) */
 .header-search-wrapper {
-  grid-column: 2;
-  justify-self: center;
-  width: min(100%, 460px);
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(100% - 360px, 460px);
+  max-width: 460px;
   margin: 0;
+  z-index: 3;
 }
 
 .header-search-box {
@@ -405,19 +414,17 @@ pub const BASE_CSS: &str = r#"
   user-select: none;
   flex-shrink: 0;
 }
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  color: var(--text-muted);
-}
 
+/* Actions d'en-tête (verrouillées en position fixe à droite) */
 .header-actions {
-  grid-column: 3;
-  justify-self: end;
+  position: absolute;
+  right: calc(1.5rem + var(--sar));
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.65rem;
+  z-index: 2;
 }
 
 .header-icon-btn {
@@ -728,6 +735,26 @@ pub const BASE_CSS: &str = r#"
     padding: 0 1rem;
     max-width: 100vw;
     box-sizing: border-box;
+    position: relative;
+    justify-content: space-between;
+  }
+
+  .header-breadcrumb {
+    display: none;
+  }
+
+  .header-search-wrapper {
+    position: static;
+    transform: none;
+    flex: 1;
+    width: auto;
+    max-width: none;
+    margin-right: 0.5rem;
+  }
+
+  .header-actions {
+    position: static;
+    transform: none;
   }
 
   .main-content {

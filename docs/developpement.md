@@ -33,15 +33,15 @@ Les migrations sont embarquées et appliquées au démarrage du coordinateur.
 - Rust : commandes de référence dans la rubrique « Vérifications Rust » du
   README ; toolchain épinglée dans `rust-toolchain.toml`, dépendances verrouillées.
   Les tests Rust actuels ne nécessitent ni serveur de base externe ni MKVToolNix installé.
-- Chaîne média, baux, transferts ou Docker : `npm run dev`, puis
-  `npm run scenarios` sur le laboratoire local disponible. Utiliser un laboratoire
-  de développement.
-  Ils ne prouvent ni la HA ni le fonctionnement sur plusieurs machines physiques.
+- Chaîne média, baux, transferts ou Docker : tests d'intégration Rust de `tests/`
+  (`cargo test`, exécutés par la CI). Ils ne prouvent ni la HA ni le
+  fonctionnement sur plusieurs machines physiques.
 - CI : vérifier le workflow concerné. Le job `docker-scenarios` de `test.yml`
-  exécute les scénarios sur l'image `pr-<sha12>` sans reconstruire le service.
-  Le rapport `scenario-report` est conservé 14 jours, même après un échec.
-  Sans changement de code ni du laboratoire, les étapes sont sautées et le check
-  reste vert ; cela ne constitue pas une nouvelle exécution des scénarios.
+  démarre l'image `pr-<sha12>` et attend `/health`, sans reconstruire le service.
+  Sur la PR `test → main`, `main-checks.yml` tire l'image `test-<sha12>` à promouvoir
+  et démarre coordinateur et worker avec `compose.yaml`. Sans changement de code,
+  les étapes de `test.yml` sont sautées et le check reste vert ; cela ne constitue
+  pas une nouvelle exécution.
 
 ## Pièges à consulter pour le remuxage
 

@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.12.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.11.0...v0.12.0) (2026-11-12)
+
+
+### Features
+
+* **client:** migrer en Rust pur (zéro JS, zéro CSS) et binaire dev ([bf733bf](https://github.com/remi-deher/flux-de-fichiers/commit/bf733bf96a06c381c339041d5b683fc46e82332c))
+* **client:** migrer la logique client en Rust pur et supprimer static/js ([951c220](https://github.com/remi-deher/flux-de-fichiers/commit/951c2208e2136f83e89445c0d6e504d454b8634b))
+* **client:** migrer la logique client en Rust pur et supprimer static/js ([7f567d4](https://github.com/remi-deher/flux-de-fichiers/commit/7f567d40d224b50c139ec90e67e85967f3513298))
+* **dev:** binaire Rust natif pour l'environnement de développement et configuration Linguist 100% Rust ([4cc8b54](https://github.com/remi-deher/flux-de-fichiers/commit/4cc8b54fccde05b5b6574918882666bf0584fdf6))
+* **test:** éliminer les scripts orphelins et ajouter tests/api_workflows.rs ([d99bbca](https://github.com/remi-deher/flux-de-fichiers/commit/d99bbcad826b549ff5c1ea4709fcffb5f84c871b))
+* **test:** éliminer les scripts orphelins et ajouter tests/api_workflows.rs ([d01607b](https://github.com/remi-deher/flux-de-fichiers/commit/d01607b1aaa31b738957f7f58ccfada5fe85f626))
+* **test:** éliminer les scripts orphelins et ajouter tests/api_workflows.rs ([7d429c2](https://github.com/remi-deher/flux-de-fichiers/commit/7d429c2bf7f087e6cd363b2912124548076d3725))
+
+
+### Bug Fixes
+
+* **clippy:** implementer std::str::FromStr pour JobErrorCode ([9b83a1d](https://github.com/remi-deher/flux-de-fichiers/commit/9b83a1dde59af20b8c8e98daf6ddd9bd3ba87e38))
+* resolution securisee de INPUT_DIR pour conteneur non-root et logs smoke test ([73bec09](https://github.com/remi-deher/flux-de-fichiers/commit/73bec09a80bc34f0ec43692ab6c6f13cd7f44a68))
+* **test:** assurer l'existence de input_dir dans test_app ([b86a0a8](https://github.com/remi-deher/flux-de-fichiers/commit/b86a0a8f42f216a339335d3403ea62384741c0f0))
+
 ## [0.11.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.10.0...v0.11.0) (2026-11-11)
 
 

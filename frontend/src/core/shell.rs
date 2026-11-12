@@ -66,7 +66,7 @@ pub fn Header() -> impl IntoView {
             <div class="header-breadcrumb">
                 <span class="breadcrumb-item">"Central"</span>
                 <span class="breadcrumb-separator" aria-hidden="true">"/"</span>
-                <span class="breadcrumb-title" id="current-section-title">"Poste de pilotage"</span>
+                <span class="breadcrumb-title" id="current-section-title">"Vue d'ensemble"</span>
             </div>
 
             // Barre de recherche contextuelle moderne (Command & Context Filter)

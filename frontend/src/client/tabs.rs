@@ -5,7 +5,7 @@ pub const SCRIPT: &str = r###"
   const TABS = ['dashboard', 'files', 'flows', 'jobs', 'workers', 'plugins', 'settings', 'updates'];
 
   const TAB_TITLES = {
-    dashboard: 'Piloter & Vue générale',
+    dashboard: 'Vue d\'ensemble & Statistiques',
     files: 'Bibliothèques & Médias',
     flows: 'Concepteur de flux (Flows)',
     jobs: 'Activité & Diagnostics',
@@ -17,8 +17,8 @@ pub const SCRIPT: &str = r###"
 
   const SEARCH_CONTEXTS = {
     dashboard: {
-      placeholder: 'Rechercher dans le tableau de bord…',
-      label: 'Filtrer les indicateurs et actions du tableau de bord',
+      placeholder: 'Rechercher dans la vue d\'ensemble…',
+      label: 'Filtrer les indicateurs, statistiques et raccourcis d\'accueil',
     },
     files: {
       placeholder: 'Filtrer les fichiers et bibliothèques…',

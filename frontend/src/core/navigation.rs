@@ -55,8 +55,8 @@ pub fn Navigation() -> impl IntoView {
                     id="tab-btn-dashboard"
                     target_panel="panel-dashboard"
                     icon=IconName::Dashboard
-                    label="Piloter"
-                    title="Groupe Piloter : Vue d'ensemble et état de santé du système"
+                    label="Vue d'ensemble"
+                    title="Groupe Vue d'ensemble : Statistiques et poste d'accueil"
                     is_active=true
                 />
 

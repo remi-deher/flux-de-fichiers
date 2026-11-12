@@ -73,4 +73,15 @@ mod tests {
         assert!(!html.contains("id=\"header-theme-toggle-btn\""));
         assert!(!html.contains("id=\"header-refresh-btn\""));
     }
+
+    #[test]
+    fn test_render_full_page_contains_overview_hub() {
+        let html = render_full_page();
+        assert!(html.contains("Vue d'ensemble"));
+        assert!(html.contains("overview-hero-card"));
+        assert!(html.contains("id=\"metric-storage-volume\""));
+        assert!(html.contains("id=\"metric-success-rate\""));
+        assert!(html.contains("id=\"media-formats-bar\""));
+        assert!(html.contains("updateOverviewStats"));
+    }
 }

@@ -138,6 +138,31 @@ pub async fn ensure_tool_installed(
     install_from_distribution(cache, &distribution, policy).await
 }
 
+/// Installe les outils d'un job : la sonde du catalogue et l'outil de remuxage. Un échec est journalisé :
+/// le job échouera de lui-même s'il manque réellement un outil.
+pub async fn ensure_job_tools(
+    roots: &[PathBuf],
+    cache: &ToolCacheManager,
+    probe: Option<&super::ProbeContract>,
+    policy: &SyncPolicy,
+) {
+    let mut wanted = vec![(
+        super::REMUX_TOOL_ID.to_owned(),
+        super::REMUX_TOOL_VERSION.to_owned(),
+    )];
+    if let Some(contract) = probe {
+        wanted.push((contract.tool_id.clone(), contract.version.clone()));
+    }
+    for (tool_id, version) in wanted {
+        if cache.is_ready(&tool_id, &version, host_arch()) {
+            continue;
+        }
+        if let Err(error) = ensure_tool_installed(roots, cache, &tool_id, &version, policy).await {
+            tracing::warn!(tool = %tool_id, error = %error, "installation de l'outil impossible");
+        }
+    }
+}
+
 /// Chemin du contrat de distribution d'une application dans un dossier de catalogue.
 fn distribution_path(root: &Path, name: &str) -> PathBuf {
     root.join("apps").join(name).join(DISTRIBUTION_FILE_NAME)
@@ -333,6 +358,20 @@ mod tests {
         install_from_distribution(&cache, &contract, &policy).await?;
         assert!(watcher.await?);
         assert!(!is_installing("app.suivi"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_ensure_job_tools_without_any_repository_is_a_harmless_no_op() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let cache = ToolCacheManager::new(dir.path());
+        ensure_job_tools(&[], &cache, None, &SyncPolicy::default()).await;
+        assert!(!cache.is_ready(
+            super::super::REMUX_TOOL_ID,
+            super::super::REMUX_TOOL_VERSION,
+            host_arch()
+        ));
         Ok(())
     }
 }

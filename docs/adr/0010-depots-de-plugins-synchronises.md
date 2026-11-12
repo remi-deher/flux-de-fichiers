@@ -56,6 +56,11 @@ installée dans le cache du nœud (ADR 0004, 0007).
   démarre : le dépôt officiel doit être lisible (public) et publier de **vrais artefacts**
   (URL https, empreintes réelles). Les contrats actuels sont des maquettes
   (`releaseStatus: contract-only`).
-- Le paquet `mkvtoolnix` reste dans l'image tant que ces artefacts n'existent pas.
+- L'image n'embarque plus `mkvtoolnix` ni `mediainfo` : chaque nœud installe `app.mkvtoolnix`
+  (remux) et la sonde du catalogue avant un job (`ensure_job_tools`, et la route worker pour les
+  agents distants). Les artefacts sont construits par `build-tools.yml` du dépôt de plugins
+  (paquets Debian bookworm, bibliothèques hors glibc embarquées, RUNPATH relatif, test dans
+  `debian:bookworm-slim`) ; `binaryRelativePath` est relatif au dossier `bin/` du cache.
+  Un nœud doit donc reposer sur Debian bookworm ou plus récent, et avoir accès à github.com.
 - Le dépôt officiel est lu sur la branche `dev` du dépôt de plugins (migration 0009) tant que
   sa branche `main` n'est pas alignée sur le schéma `app` / `apps/`.

@@ -1,79 +1,79 @@
-//! Générateur de styles CSS-in-Rust typés via `stylist`.
+//! Générateur de styles globaux et design tokens CSS en Rust typé.
 
 use super::tokens::{DARK_THEME, LIGHT_THEME};
-use stylist::Style;
 
-/// Génère la feuille de style globale complète vérifiée par Rust.
-pub fn generate_global_style() -> Result<String, stylist::Error> {
-    let css = format!(
+/// Génère la feuille de style globale contenant les variables de design tokens et les resets racine.
+pub fn generate_global_tokens_css() -> String {
+    format!(
         r#"
-        :root {{
-            --bg-app: {dark_bg_app};
-            --bg-card: {dark_bg_card};
-            --bg-subtle: {dark_bg_subtle};
-            --border-color: {dark_border};
-            --text-main: {dark_text};
-            --text-dim: {dark_text_dim};
-            --text-muted: {dark_text_muted};
-            --primary: {dark_primary};
-            --primary-contrast: {dark_primary_contrast};
-            --primary-bg: {dark_primary_bg};
-            --accent: {dark_accent};
-            --success: {dark_success};
-            --success-bg: {dark_success_bg};
-            --warning: {dark_warning};
-            --warning-bg: {dark_warning_bg};
-            --danger: {dark_danger};
-            --danger-bg: {dark_danger_bg};
-            --info: {dark_info};
-            --info-bg: {dark_info_bg};
-            --radius-sm: {radius_sm};
-            --radius-md: {radius_md};
-            --radius-lg: {radius_lg};
-            --radius-pill: {radius_pill};
-            --shadow-sm: {shadow_sm};
-            --shadow-md: {shadow_md};
-            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-        }}
+:root {{
+  --bg-app: {dark_bg_app};
+  --bg-card: {dark_bg_card};
+  --bg-subtle: {dark_bg_subtle};
+  --border-color: {dark_border};
+  --text-main: {dark_text};
+  --text-dim: {dark_text_dim};
+  --text-muted: {dark_text_muted};
+  --primary: {dark_primary};
+  --primary-contrast: {dark_primary_contrast};
+  --primary-bg: {dark_primary_bg};
+  --accent: {dark_accent};
+  --success: {dark_success};
+  --success-bg: {dark_success_bg};
+  --warning: {dark_warning};
+  --warning-bg: {dark_warning_bg};
+  --danger: {dark_danger};
+  --danger-bg: {dark_danger_bg};
+  --info: {dark_info};
+  --info-bg: {dark_info_bg};
+  --radius-sm: {radius_sm};
+  --radius-md: {radius_md};
+  --radius-lg: {radius_lg};
+  --radius-pill: {radius_pill};
+  --shadow-sm: {shadow_sm};
+  --shadow-md: {shadow_md};
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}}
 
-        [data-theme="light"] {{
-            --bg-app: {light_bg_app};
-            --bg-card: {light_bg_card};
-            --bg-subtle: {light_bg_subtle};
-            --border-color: {light_border};
-            --text-main: {light_text};
-            --text-dim: {light_text_dim};
-            --text-muted: {light_text_muted};
-            --primary: {light_primary};
-            --primary-contrast: {light_primary_contrast};
-            --primary-bg: {light_primary_bg};
-            --accent: {light_accent};
-            --success: {light_success};
-            --success-bg: {light_success_bg};
-            --warning: {light_warning};
-            --warning-bg: {light_warning_bg};
-            --danger: {light_danger};
-            --danger-bg: {light_danger_bg};
-            --info: {light_info};
-            --info-bg: {light_info_bg};
-        }}
+[data-theme="light"] {{
+  --bg-app: {light_bg_app};
+  --bg-card: {light_bg_card};
+  --bg-subtle: {light_bg_subtle};
+  --border-color: {light_border};
+  --text-main: {light_text};
+  --text-dim: {light_text_dim};
+  --text-muted: {light_text_muted};
+  --primary: {light_primary};
+  --primary-contrast: {light_primary_contrast};
+  --primary-bg: {light_primary_bg};
+  --accent: {light_accent};
+  --success: {light_success};
+  --success-bg: {light_success_bg};
+  --warning: {light_warning};
+  --warning-bg: {light_warning_bg};
+  --danger: {light_danger};
+  --danger-bg: {light_danger_bg};
+  --info: {light_info};
+  --info-bg: {light_info_bg};
+}}
 
-        * {{
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }}
+*, *::before, *::after {{
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}}
 
-        html, body {{
-            background-color: var(--bg-app);
-            color: var(--text-main);
-            font-family: var(--font-sans);
-            font-size: 14px;
-            line-height: 1.5;
-            -webkit-font-smoothing: antialiased;
-        }}
-        "#,
+html, body {{
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}}
+"#,
         dark_bg_app = DARK_THEME.bg_app,
         dark_bg_card = DARK_THEME.bg_card,
         dark_bg_subtle = DARK_THEME.bg_subtle,
@@ -118,8 +118,24 @@ pub fn generate_global_style() -> Result<String, stylist::Error> {
         radius_pill = DARK_THEME.radius_pill,
         shadow_sm = DARK_THEME.shadow_sm,
         shadow_md = DARK_THEME.shadow_md,
-    );
+    )
+}
 
-    let style = Style::new(css)?;
-    Ok(style.get_style_str().to_string())
+/// Génère la feuille de style globale complète vérifiée par Rust.
+pub fn generate_global_style() -> Result<String, stylist::Error> {
+    Ok(generate_global_tokens_css())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_global_style_output() {
+        let res = generate_global_tokens_css();
+        assert!(res.contains(":root {"));
+        assert!(res.contains("[data-theme=\"light\"] {"));
+        assert!(res.contains("--bg-app: #0d1117;"));
+        assert!(res.contains("--primary: #58a6ff;"));
+    }
 }

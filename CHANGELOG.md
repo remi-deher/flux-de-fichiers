@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.14.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.13.0...v0.14.0) (2026-11-12)
+
+
+### Features
+
+* **frontend:** fusionner les volets du tiroir des bibliothèques et masquer la sous-navigation d'un volet unique ([faa9202](https://github.com/remi-deher/flux-de-fichiers/commit/faa9202be9703f454ba3aae9e4247d3969d12421))
+* **frontend:** refonte de la vue d'ensemble ([2af0e69](https://github.com/remi-deher/flux-de-fichiers/commit/2af0e696da610f96febfabd1ff048fc57eb212c5))
+* **frontend:** refonte de la vue d'ensemble et token --danger-text ([14f5a9d](https://github.com/remi-deher/flux-de-fichiers/commit/14f5a9d40f98713aa132a5e0c32aad08a61c5b29))
+* **frontend:** tiroir des bibliothèques sans sous-navigation ([05d0bc7](https://github.com/remi-deher/flux-de-fichiers/commit/05d0bc78119e8885444bee205dc48492bc1618d1))
+
+
+### Bug Fixes
+
+* **frontend:** définir le token --danger-text utilisé par les boutons et textes d'erreur ([4ae51ee](https://github.com/remi-deher/flux-de-fichiers/commit/4ae51ee2523a94d1ef03559c15e25cd65c8d9022))
+
 ## [0.13.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.12.0...v0.13.0) (2026-11-12)
 
 

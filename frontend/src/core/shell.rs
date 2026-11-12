@@ -61,31 +61,32 @@ pub fn Sidebar() -> impl IntoView {
 #[component]
 pub fn Header() -> impl IntoView {
     view! {
-        <header class="application-header" role="banner">
-            // Fil d'Ariane épuré
-            <div class="header-breadcrumb">
-                <span class="breadcrumb-item">"Central"</span>
-                <span class="breadcrumb-separator" aria-hidden="true">"/"</span>
-                <span class="breadcrumb-title" id="current-section-title">"Vue d'ensemble"</span>
-            </div>
+        <header class="app-topbar" id="app-topbar" role="banner">
+            <div class="topbar-container">
+                // Contexte de page & Fil d'Ariane
+                <div class="topbar-context">
+                    <span class="breadcrumb-item">"Central"</span>
+                    <span class="breadcrumb-separator" aria-hidden="true">"/"</span>
+                    <span class="breadcrumb-title" id="current-section-title">"Vue d'ensemble"</span>
+                </div>
 
-            // Barre de recherche contextuelle moderne (Command & Context Filter)
-            <div class="header-search-wrapper" role="search">
-                <div class="header-search-box">
+                // Barre de recherche attachée unifiée (style UiSearchField Watchdeck)
+                <div class="topbar-search-box" role="search">
                     <Icon name=IconName::Search size=15 class="search-icon" />
                     <input
                         type="search"
                         id="global-search-input"
-                        class="header-search-input"
+                        class="topbar-search-input"
                         placeholder="Rechercher…"
                         autocomplete="off"
                         spellcheck="false"
                         aria-label="Recherche contextuelle"
                     />
+                    <span id="search-match-count" class="search-match-count" aria-live="polite"></span>
                     <button
                         type="button"
                         id="header-search-clear-btn"
-                        class="header-search-clear-btn"
+                        class="topbar-search-clear"
                         aria-label="Effacer la recherche"
                         title="Effacer la recherche (Échap)"
                         hidden
@@ -94,13 +95,13 @@ pub fn Header() -> impl IntoView {
                     </button>
                     <kbd class="search-kbd" id="search-kbd-hint">"⌘K"</kbd>
                 </div>
-            </div>
 
-            // Actions d'en-tête : statut des workers (central inclus)
-            <div class="header-actions">
-                <div id="header-workers-pill" class="status-pill online" aria-live="polite" title="Nombre de workers actifs (central inclus)">
-                    <span class="status-dot"></span>
-                    <span id="header-workers-count-text">"1 worker en ligne"</span>
+                // Statut opérationnel live (central inclus)
+                <div class="topbar-actions">
+                    <div id="header-workers-pill" class="status-pill online" aria-live="polite" title="Nombre de workers actifs (central inclus)">
+                        <span class="status-dot"></span>
+                        <span id="header-workers-count-text">"1 worker en ligne"</span>
+                    </div>
                 </div>
             </div>
         </header>

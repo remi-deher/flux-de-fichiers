@@ -67,9 +67,13 @@ pub const SCRIPT: &str = r###"
   function applyContextualSearch(query) {
     const term = (query || '').toLowerCase().trim();
     const clearBtn = el('header-search-clear-btn');
+    const matchBadge = el('search-match-count');
     if (clearBtn) {
       clearBtn.hidden = !term;
     }
+
+    let matchCount = 0;
+    let totalCount = 0;
 
     switch (activeTab) {
       case 'files': {
@@ -77,6 +81,8 @@ pub const SCRIPT: &str = r###"
         if (filesSearch && filesSearch.value !== query) {
           filesSearch.value = query;
         }
+        totalCount = cachedFiles.length;
+        matchCount = cachedFiles.filter(f => !term || (f.name || '').toLowerCase().includes(term)).length;
         if (typeof renderFilesTable === 'function') {
           renderFilesTable();
         }
@@ -87,6 +93,8 @@ pub const SCRIPT: &str = r###"
         if (jobsSearch && jobsSearch.value !== query) {
           jobsSearch.value = query;
         }
+        totalCount = cachedJobs.length;
+        matchCount = cachedJobs.filter(j => !term || (j.source_name || '').toLowerCase().includes(term) || (j.id || '').toLowerCase().includes(term)).length;
         if (typeof renderJobsTable === 'function') {
           renderJobsTable();
         }
@@ -94,8 +102,10 @@ pub const SCRIPT: &str = r###"
       }
       case 'dashboard': {
         const metrics = document.querySelectorAll('#panel-dashboard .metric-card');
+        totalCount = metrics.length;
         metrics.forEach(card => {
           const match = !term || card.textContent.toLowerCase().includes(term);
+          if (match) matchCount++;
           card.style.display = match ? '' : 'none';
         });
         const actions = document.querySelectorAll('#panel-dashboard button');
@@ -107,43 +117,63 @@ pub const SCRIPT: &str = r###"
       }
       case 'flows': {
         const flowCards = document.querySelectorAll('#panel-flows .flow-card, #panel-flows .catalog-flow-card, #panel-flows .palette-node-item');
+        totalCount = flowCards.length;
         flowCards.forEach(card => {
           const match = !term || card.textContent.toLowerCase().includes(term);
+          if (match) matchCount++;
           card.style.display = match ? '' : 'none';
         });
         break;
       }
       case 'workers': {
         const rows = document.querySelectorAll('#workers-table-body tr');
+        totalCount = rows.length;
         rows.forEach(tr => {
           const match = !term || tr.textContent.toLowerCase().includes(term);
+          if (match) matchCount++;
           tr.style.display = match ? '' : 'none';
         });
         break;
       }
       case 'plugins': {
         const cards = document.querySelectorAll('#panel-plugins .tool-card, #panel-plugins .plugin-card, #panel-plugins .plugin-store-card, #repos-table-body tr');
+        totalCount = cards.length;
         cards.forEach(card => {
           const match = !term || card.textContent.toLowerCase().includes(term);
+          if (match) matchCount++;
           card.style.display = match ? '' : 'none';
         });
         break;
       }
       case 'settings': {
         const sections = document.querySelectorAll('#panel-settings .section-panel');
+        totalCount = sections.length;
         sections.forEach(sec => {
           const match = !term || sec.textContent.toLowerCase().includes(term);
+          if (match) matchCount++;
           sec.style.display = match ? '' : 'none';
         });
         break;
       }
       case 'updates': {
         const cards = document.querySelectorAll('#panel-updates .card, #panel-updates .section-panel');
+        totalCount = cards.length;
         cards.forEach(card => {
           const match = !term || card.textContent.toLowerCase().includes(term);
+          if (match) matchCount++;
           card.style.display = match ? '' : 'none';
         });
         break;
+      }
+    }
+
+    if (matchBadge) {
+      if (!term || totalCount === 0) {
+        matchBadge.textContent = '';
+      } else if (matchCount === totalCount) {
+        matchBadge.textContent = `${totalCount}`;
+      } else {
+        matchBadge.textContent = `${matchCount} sur ${totalCount}`;
       }
     }
   }

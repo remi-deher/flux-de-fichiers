@@ -218,6 +218,10 @@ pub const SCRIPT: &str = r###"
       loadToolsStatus();
     } else if (tabName === 'flows') {
       loadFlows();
+    } else if (tabName === 'plugins') {
+      if (typeof loadRepositories === 'function') loadRepositories();
+      if (typeof loadStoreCatalog === 'function') loadStoreCatalog();
+      if (typeof syncRepositoriesSilently === 'function') syncRepositoriesSilently();
     } else if (tabName === 'dashboard') {
       if (typeof updateOverviewStats === 'function') updateOverviewStats();
     }

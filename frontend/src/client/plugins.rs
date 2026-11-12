@@ -90,9 +90,6 @@ pub const SCRIPT: &str = r###"
                 <button type="button" class="btn btn-secondary btn-sm repo-toggle-btn" data-repo-id="${safeId}" title="${toggleLabel} ce dépôt">
                   ${toggleLabel}
                 </button>
-                <button type="button" class="btn btn-secondary btn-sm repo-sync-btn" data-repo-id="${safeId}" title="Synchroniser maintenant">
-                  🔄
-                </button>
                 ${deleteBtn}
               </div>
             </td>
@@ -110,21 +107,6 @@ pub const SCRIPT: &str = r###"
             await loadStoreCatalog();
           } catch (e) {
             showNotice(`Erreur : ${e.message}`, 'error');
-          }
-        });
-      });
-
-      tbody.querySelectorAll('.repo-sync-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const id = btn.getAttribute('data-repo-id');
-          try {
-            btn.textContent = '…';
-            await apiFetch(`/api/v1/plugins/repositories/${encodeURIComponent(id)}/sync`, { method: 'POST' });
-            showNotice('Dépôt synchronisé avec succès', 'success');
-            await loadRepositories();
-            await loadStoreCatalog();
-          } catch (e) {
-            showNotice(`Erreur de synchronisation : ${e.message}`, 'error');
           }
         });
       });
@@ -442,29 +424,19 @@ pub const SCRIPT: &str = r###"
       });
     }
 
-    // Bouton de synchronisation de tous les dépôts
-    const syncAllBtn = el('btn-sync-all-repos');
-    if (syncAllBtn) {
-      syncAllBtn.addEventListener('click', async () => {
-        syncAllBtn.disabled = true;
-        syncAllBtn.textContent = 'Synchronisation…';
-        try {
-          for (const repo of cachedRepositories) {
-            try {
-              await apiFetch(`/api/v1/plugins/repositories/${encodeURIComponent(repo.id)}/sync`, { method: 'POST' });
-            } catch {}
-          }
-          showNotice('Tous les dépôts ont été synchronisés !', 'success');
-          await loadRepositories();
-          await loadStoreCatalog();
-        } catch (e) {
-          showNotice(`Erreur : ${e.message}`, 'error');
-        } finally {
-          syncAllBtn.disabled = false;
-          syncAllBtn.textContent = '🔄 Synchroniser';
+    // Synchronisation automatique et silencieuse des dépôts
+    window.syncRepositoriesSilently = async function() {
+      if (!Array.isArray(cachedRepositories) || cachedRepositories.length === 0) return;
+      for (const repo of cachedRepositories) {
+        if (repo.enabled !== false) {
+          try {
+            await apiFetch(`/api/v1/plugins/repositories/${encodeURIComponent(repo.id)}/sync`, { method: 'POST' });
+          } catch {}
         }
-      });
-    }
+      }
+      await loadRepositories();
+      await loadStoreCatalog();
+    };
 
     // Écoute de l'événement de changement d'onglet
     document.addEventListener('flux:subnav-change', (e) => {

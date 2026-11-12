@@ -101,5 +101,7 @@ mod tests {
         assert!(!html.contains("id=\"jobs-refresh-btn\""));
         assert!(!html.contains("id=\"btn-refresh-workers\""));
         assert!(!html.contains("id=\"header-refresh-btn\""));
+        assert!(!html.contains("id=\"btn-sync-all-repos\""));
+        assert!(!html.contains("repo-sync-btn"));
     }
 }

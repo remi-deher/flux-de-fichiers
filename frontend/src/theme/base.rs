@@ -739,10 +739,10 @@ pub const BASE_CSS: &str = r#"
 }
 
 .subnav-container {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  flex-wrap: wrap;
+  width: 100%;
   gap: 0.75rem;
   pointer-events: none;
 }
@@ -751,8 +751,40 @@ pub const BASE_CSS: &str = r#"
   pointer-events: auto;
 }
 
+.subnav-info {
+  display: flex;
+  align-items: center;
+  justify-self: start;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.subnav-info:empty {
+  display: none;
+}
+
+.subnav-info-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(8px);
+}
+
 .app-subnav {
   position: relative;
+  justify-self: center;
+  margin-inline: auto;
   width: fit-content;
   min-width: 0;
   max-width: 100%;
@@ -854,38 +886,10 @@ pub const BASE_CSS: &str = r#"
   border: 0;
 }
 
-.subnav-info {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--text-dim);
-}
-
-.subnav-info:empty {
-  display: none;
-}
-
-.subnav-info-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.25rem 0.65rem;
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-main);
-  white-space: nowrap;
-  box-shadow: var(--shadow-sm);
-  backdrop-filter: blur(8px);
-}
-
 .subnav-actions {
   display: flex;
   align-items: center;
+  justify-self: end;
   gap: 0.5rem;
   margin-left: auto;
   flex-wrap: wrap;

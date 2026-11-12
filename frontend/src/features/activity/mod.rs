@@ -54,7 +54,7 @@ pub fn JobsPanel() -> impl IntoView {
     .into_any();
 
     view! {
-        <div id="panel-jobs" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-jobs" hidden>
+        <div id=crate::core::panel::JOBS.dom_id class="tab-panel" role="tabpanel" aria-labelledby=crate::core::panel::JOBS.button_id hidden>
             <SubNav
                 aria_label="Sous-navigation de la section Activité et Traitements"
                 tabs=subnav_tabs

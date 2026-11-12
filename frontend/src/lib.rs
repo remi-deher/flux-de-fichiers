@@ -104,4 +104,51 @@ mod tests {
         assert!(!html.contains("id=\"btn-sync-all-repos\""));
         assert!(!html.contains("repo-sync-btn"));
     }
+
+    #[test]
+    fn test_catalog_ids_and_pure_functions_reach_the_page() {
+        let html = render_full_page();
+        for panel in crate::core::panels() {
+            assert!(html.contains(&format!("id=\"{}\"", panel.dom_id)));
+            assert!(html.contains(&format!("id=\"{}\"", panel.button_id)));
+            assert!(html.contains(panel.search_placeholder));
+        }
+        assert!(html.contains("function matchesQuery"));
+        assert!(html.contains("function isVideoFlowName"));
+        assert!(html.contains("function emptyStateRow"));
+        assert!(html.contains("function loadFlows"));
+        assert!(html.contains("function openCanvas"));
+        assert!(html.contains("class=\"registre\""));
+        assert!(html.contains("id=\"files-fact-action\""));
+        assert!(html.contains("Lancer un flux"));
+        assert!(html.contains("id=\"flows-fact-action\""));
+        assert!(html.contains(">Éditer<"));
+        assert!(html.contains("id=\"workers-fact-action\""));
+        assert!(html.contains(">Raccorder<"));
+        assert!(html.contains("subtab-plugins-tool"));
+        assert!(html.contains("subtab-plugins-resource"));
+        assert!(html.contains("subtab-plugins-repos"));
+        assert!(html.contains("Retour aux flux"));
+        assert!(html.contains("function showRegistreFact"));
+        assert!(!html.contains("btn-subtab-flows-canvas"));
+        assert!(html.contains("function resetSimulation"));
+    }
+
+    #[test]
+    fn plugin_form_comes_from_the_manifest_schema() {
+        let html = render_full_page();
+        assert!(html.contains("id=\"plugin-config-fields\""));
+        assert!(html.contains("function renderPluginConfigFields"));
+        assert!(html.contains("data-setting-name"));
+        assert!(html.contains("data-tags"));
+        assert!(!html.contains("192.168.1.50"));
+        assert!(!html.contains("plugin-cfg-url"));
+        assert!(!html.contains("plugin-cfg-apikey"));
+        assert!(!html.contains("plugin-cfg-local-path"));
+        assert!(!html.contains("plugin-cfg-remote-path"));
+        assert!(!html.contains("value=\"/data\""));
+        assert!(!html.contains("value=\"/media\""));
+        assert!(!html.contains("'/tv'"));
+        assert!(!html.contains("'/movies'"));
+    }
 }

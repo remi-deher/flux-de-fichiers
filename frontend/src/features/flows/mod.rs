@@ -1,4 +1,4 @@
-//! Module de gestion et conception des flux (Rôle Construire).
+//! Module de gestion et conception des flux.
 
 pub mod canvas;
 pub mod catalog;
@@ -16,66 +16,16 @@ pub use simulation::FlowSimulationBar;
 pub use wizard::FlowWizardDialog;
 pub use workspace::FlowWorkspace;
 
-use crate::core::{SubNav, SubNavTabItem};
 use leptos::prelude::*;
 
 #[component]
 pub fn FlowsPanel() -> impl IntoView {
-    let subnav_tabs = vec![
-        SubNavTabItem {
-            id: "btn-subtab-flows-installed",
-            label: "Mes flux",
-            icon: Some("⚡"),
-            target_id: "subtab-flows-installed",
-            is_active: true,
-            badge: None,
-        },
-        SubNavTabItem {
-            id: "btn-subtab-flows-canvas",
-            label: "Éditeur visuel",
-            icon: Some("🎨"),
-            target_id: "subtab-flows-canvas",
-            is_active: false,
-            badge: None,
-        },
-    ];
-
-    let subnav_info = view! {
-        <span class="subnav-info-badge">"⚡ Bare Core actif"</span>
-    }
-    .into_any();
-
-    let subnav_actions = view! {
-        <button
-            type="button"
-            id="btn-subnav-open-wizard"
-            class="btn btn-primary btn-sm"
-            aria-label="Ouvrir l'assistant de conception de flux"
-        >
-            "🪄 Assistant de création"
-        </button>
-    }
-    .into_any();
-
     view! {
-        <div id="panel-flows" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-flows" hidden>
-            <SubNav
-                aria_label="Sous-navigation de la section Concepteur de flux"
-                tabs=subnav_tabs
-                info=subnav_info
-                actions=subnav_actions
-            />
-
-            // Sous-vue 1 : Mes flux (Catalogue local Bare Core)
-            <div id="subtab-flows-installed">
+        <div id=crate::core::panel::FLOWS.dom_id class="tab-panel" role="tabpanel" aria-labelledby=crate::core::panel::FLOWS.button_id hidden>
+            <div id="flows-library-view">
                 <FlowCatalog />
             </div>
-
-            // Sous-vue 2 : Éditeur visuel (Canvas & Workspace)
-            <div id="subtab-flows-canvas" hidden>
-                <FlowWorkspace />
-            </div>
-
+            <FlowWorkspace />
             <FlowWizardDialog />
         </div>
     }

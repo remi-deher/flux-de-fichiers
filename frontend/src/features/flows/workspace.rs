@@ -18,7 +18,7 @@ pub fn FlowWorkspace() -> impl IntoView {
                         class="btn btn-secondary btn-sm"
                         aria-label="Retourner à la liste des flux"
                     >
-                        "← Retour aux flux"
+                        "Retour aux flux"
                     </button>
                     <h2 id="canvas-flow-title" class="section-title" style="margin: 0; font-size: 1.25rem;">
                         "Éditeur visuel : Transcodage HEVC"

@@ -16,9 +16,7 @@ pub const SCRIPT: &str = r###"
       if (typeof updateOverviewStats === 'function') updateOverviewStats();
     } catch (e) {
       if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="3" class="empty-state-text" style="color: var(--danger-text);">
-          ${escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session dans l\'onglet Paramètres pour lister les fichiers.' : 'Impossible de récupérer les fichiers sources.')}
-        </td></tr>`;
+        tbody.innerHTML = emptyStateRow(3, escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session dans l\'onglet Paramètres pour lister les fichiers.' : 'Impossible de récupérer les fichiers sources.'), true);
       }
     }
   }
@@ -27,11 +25,8 @@ pub const SCRIPT: &str = r###"
     const tbody = el('files-table-body');
     const countBadge = el('files-counter-text');
     const searchInput = el('files-search-input');
-    const term = (searchInput ? searchInput.value : '').toLowerCase().trim();
-
     if (!tbody) return;
-
-    const filtered = cachedFiles.filter(f => !term || f.name.toLowerCase().includes(term));
+    const filtered = cachedFiles.filter(f => matchesQuery([f.name], searchInput ? searchInput.value : ''));
 
     if (countBadge) {
       countBadge.textContent = `${filtered.length} / ${cachedFiles.length} fichier(s)`;
@@ -41,38 +36,30 @@ pub const SCRIPT: &str = r###"
       const msg = cachedFiles.length === 0
         ? 'Aucun fichier source .mkv détecté dans var/input/. Déposez des fichiers pour commencer.'
         : 'Aucun fichier ne correspond à votre recherche.';
-      tbody.innerHTML = `<tr><td colspan="3" class="empty-state-text">${escapeHtml(msg)}</td></tr>`;
+      tbody.innerHTML = emptyStateRow(3, escapeHtml(msg), false);
       return;
     }
 
     tbody.innerHTML = filtered.map(file => {
       const safeName = escapeHtml(file.name);
-      return `
-        <tr>
-          <td>
-            <div style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600;">
-              <span aria-hidden="true" style="color: var(--primary);">🎬</span>
-              <span>${safeName}</span>
-            </div>
-          </td>
-          <td style="font-family: var(--font-mono);">${formatBytes(file.bytes)}</td>
-          <td style="text-align: right;">
-            <button
-              type="button"
-              class="btn btn-primary btn-sm remux-launch-btn"
-              data-filename="${safeName}"
-              aria-label="Lancer le remuxage du fichier ${safeName}"
-            >
-              Lancer le remuxage
+      return `<tr class="registre-row" data-filename="${safeName}">
+          <td class="text-strong">${safeName}</td>
+          <td class="text-mono">${formatBytes(file.bytes)}</td>
+          <td class="cell-end">
+            <button type="button" class="btn btn-secondary btn-sm registre-open-btn" data-filename="${safeName}">
+              Ouvrir
             </button>
           </td>
-        </tr>
-      `;
+      </tr>`;
     }).join('');
 
-    tbody.querySelectorAll('.remux-launch-btn').forEach(btn => {
+    tbody.querySelectorAll('.registre-open-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        openConfirmRemuxDialog(btn.getAttribute('data-filename'));
+        const name = btn.getAttribute('data-filename');
+        const file = cachedFiles.find(item => item.name === name);
+        markRegistreRow(tbody, btn.closest('tr'));
+        showRegistreFact('files-fact', name, [file ? formatBytes(file.bytes) : '', 'Bibliothèque principale']);
+        selectedFileForRemux = name;
       });
     });
   }

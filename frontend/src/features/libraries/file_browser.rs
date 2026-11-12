@@ -1,60 +1,21 @@
 //! Explorateur de médias sources et dialogue de confirmation de traitement.
 
+use crate::shared::ui::{RegistreFact, RegistreTable};
 use leptos::prelude::*;
 
 #[component]
 pub fn FileBrowser() -> impl IntoView {
     view! {
-        <section class="section-panel" aria-labelledby="files-section-title">
-            <div class="section-panel-header">
-                <div>
-                    <h2 id="files-section-title" class="section-title">
-                        "Médias sources admissibles"
-                    </h2>
-                    <p class="section-subtitle">
-                        "Fichiers détectés dans les volumes surveillés (montage en lecture seule). Les fichiers d'origine ne sont jamais modifiés."
-                    </p>
-                </div>
-                <div id="files-counter-badge" class="status-pill info">
-                    <span id="files-counter-text">"0 fichier(s)"</span>
-                </div>
-            </div>
-
-            <div class="toolbar-bar">
-                <div class="search-box">
-                    <span class="search-icon" aria-hidden="true">"🔍"</span>
-                    <input
-                        type="search"
-                        id="files-search-input"
-                        class="search-input"
-                        placeholder="Rechercher un média source…"
-                        aria-label="Filtrer les médias sources par nom"
-                    />
-                </div>
-                <div class="form-help">
-                    "Déposez vos médias dans les dossiers de bibliothèques surveillés. Tous formats admissibles automatiquement."
-                </div>
-            </div>
-
-            <div class="table-wrapper">
-                <table class="data-table" aria-label="Liste des fichiers sources disponibles">
-                    <thead>
-                        <tr>
-                            <th scope="col">"Nom du média"</th>
-                            <th scope="col">"Taille"</th>
-                            <th scope="col" style="text-align: right;">"Action"</th>
-                        </tr>
-                    </thead>
-                    <tbody id="files-table-body">
-                        <tr>
-                            <td colspan="3" class="empty-state-text">
-                                "Chargement des médias sources…"
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
+        <div class="registre" id="library-registre">
+            <input type="search" id="files-search-input" hidden />
+            <RegistreTable
+                aria_label="Fichiers de la bibliothèque"
+                headers=vec!["Fichier", "Taille", "Action"]
+                body_id="files-table-body"
+                empty="Chargement des médias sources…"
+            />
+            <RegistreFact id="files-fact" action_id="files-fact-action" action="Lancer un flux" />
+        </div>
 
         // Dialogue modal accessible de confirmation de lancement d'un traitement
         <dialog id="confirm-remux-dialog" class="app-dialog" aria-labelledby="confirm-dialog-title" aria-modal="true">

@@ -80,14 +80,18 @@ pub async fn get_settings(
     Path(id): Path<String>,
     _auth: AdminAuth,
 ) -> AppResult<Json<Value>> {
-    let saved = crate::repository::get_plugin_settings(&s.pool, &id).await?;
-    let settings_val = match saved {
-        Some(s) => serde_json::from_str(&s).unwrap_or(serde_json::json!({})),
+    let saved_raw = crate::repository::get_plugin_settings(&s.pool, &id).await?;
+    let saved = match saved_raw.as_deref() {
+        Some(raw) => serde_json::from_str(raw).unwrap_or_else(|_| serde_json::json!({})),
         None => serde_json::json!({}),
     };
+    // `fields[].value` propose le défaut du manifeste si la clé n'est pas sauvée.
+    // `settings` reste l'objet enregistré, sans y réécrire ces défauts.
+    let fields = plugins::resolved_plugin_fields(s.config.plugins_dir.as_deref(), &id, &saved);
     Ok(Json(serde_json::json!({
         "pluginId": id,
-        "settings": settings_val,
+        "settings": saved,
+        "fields": fields,
     })))
 }
 

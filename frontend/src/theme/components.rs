@@ -142,8 +142,63 @@ pub const COMPONENTS_CSS: &str = r#"
   border-bottom: none;
 }
 
-.data-table tr:hover td {
+.data-table tr:hover td,
+.data-table tr.is-open td {
   background-color: var(--bg-subtle);
+}
+
+.registre {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.registre > .table-wrapper {
+  margin-top: 0;
+}
+
+.registre-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.registre-toolbar .section-title {
+  margin: 0;
+}
+
+.registre-fact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.registre-fact[hidden],
+#worker-connect-panel[hidden] {
+  display: none;
+}
+
+.registre-fact-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.registre-fact-facts {
+  margin: 0.15rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-dim);
+}
+
+.registre-fact-action {
+  flex: none;
 }
 
 .empty-state-text {
@@ -352,6 +407,52 @@ dialog.app-dialog::backdrop {
   justify-content: flex-end;
   gap: 0.75rem;
 }
+
+.dialog-footer-ruled {
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+  margin-top: 1rem;
+}
+
+.text-danger { color: var(--danger-text); }
+.text-strong { font-weight: 600; color: var(--text-main); }
+.text-dim { color: var(--text-dim); }
+.text-primary { color: var(--primary); }
+.text-mono { font-family: var(--font-mono); }
+.text-mono-strong { font-family: var(--font-mono); font-weight: 600; }
+.text-sm { font-size: 0.8125rem; }
+.text-xs { font-size: 0.75rem; color: var(--text-dim); }
+.cell-end { text-align: right; }
+.inline-actions { display: inline-flex; gap: 0.4rem; }
+.cluster { display: flex; align-items: center; gap: 0.5rem; }
+.cluster-wrap { flex-wrap: wrap; }
+.cluster-end { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1rem; }
+.cluster-spread { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.cluster-center { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+.truncate {
+  font-size: 0.8125rem;
+  font-family: var(--font-mono);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.empty-state-panel {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 2.5rem 1rem;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+.empty-state-icon { font-size: 2rem; margin-bottom: 0.5rem; display: block; }
+.empty-state-title { margin: 0 0 0.5rem 0; font-size: 1.125rem; font-weight: 600; color: var(--text-main); }
+.empty-state-message { margin: 0 auto 1.25rem auto; max-width: 500px; font-size: 0.875rem; color: var(--text-muted); }
+dialog.app-dialog.dialog-narrow { max-width: 540px; }
+.form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.btn-danger-quiet { color: var(--danger-text); padding: 0.2rem 0.5rem; font-size: 0.75rem; margin-left: 0.5rem; }
+.is-filtered-out { display: none !important; }
+.no-margin-top { margin-top: 0; }
 
 /* --- Toasts & Notifications flottantes --- */
 .toast-notice {

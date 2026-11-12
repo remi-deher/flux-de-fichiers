@@ -6,7 +6,7 @@ use leptos::prelude::*;
 #[component]
 pub fn DashboardPanel() -> impl IntoView {
     view! {
-        <div id="panel-dashboard" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-dashboard">
+        <div id=crate::core::panel::DASHBOARD.dom_id class="tab-panel" role="tabpanel" aria-labelledby=crate::core::panel::DASHBOARD.button_id>
             // Bannière de synthèse d'accueil (Hero Overview Card)
             <div class="overview-hero-card">
                 <div class="hero-content">

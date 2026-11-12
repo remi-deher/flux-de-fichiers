@@ -2,54 +2,6 @@
 
 pub const SCRIPT: &str = r###"
 // --- Gestion des onglets accessibles ---
-  const TABS = ['dashboard', 'files', 'flows', 'jobs', 'workers', 'plugins', 'settings', 'updates'];
-
-  const TAB_TITLES = {
-    dashboard: 'Vue d\'ensemble & Statistiques',
-    files: 'Bibliothèques & Médias',
-    flows: 'Concepteur de flux (Flows)',
-    jobs: 'Activité & Diagnostics',
-    workers: 'Infrastructure & Nœuds',
-    plugins: 'Plugins & Outils média',
-    settings: 'Paramètres d\'administration',
-    updates: 'Mises à jour & Conteneur',
-  };
-
-  const SEARCH_CONTEXTS = {
-    dashboard: {
-      placeholder: 'Rechercher dans la vue d\'ensemble…',
-      label: 'Filtrer les indicateurs, statistiques et raccourcis d\'accueil',
-    },
-    files: {
-      placeholder: 'Filtrer les fichiers et bibliothèques…',
-      label: 'Filtrer les fichiers médias et dossiers sources',
-    },
-    flows: {
-      placeholder: 'Filtrer les flux et modèles…',
-      label: 'Rechercher parmi les modèles de flux et étapes',
-    },
-    jobs: {
-      placeholder: 'Filtrer les tâches et logs…',
-      label: 'Filtrer les tâches enregistrées et diagnostics',
-    },
-    workers: {
-      placeholder: 'Filtrer les nœuds et agents…',
-      label: 'Filtrer les serveurs et ressources distribuées',
-    },
-    plugins: {
-      placeholder: 'Filtrer les outils et extensions…',
-      label: 'Rechercher un outil MKVToolNix ou dépôt de plugins',
-    },
-    settings: {
-      placeholder: 'Filtrer les paramètres système…',
-      label: 'Rechercher une section ou clé de configuration',
-    },
-    updates: {
-      placeholder: 'Filtrer les notes de mise à jour…',
-      label: 'Rechercher dans l\'historique des versions',
-    },
-  };
-
   function updateSearchContext(tabName) {
     const input = el('global-search-input');
     if (!input) return;
@@ -82,7 +34,7 @@ pub const SCRIPT: &str = r###"
           filesSearch.value = query;
         }
         totalCount = cachedFiles.length;
-        matchCount = cachedFiles.filter(f => !term || (f.name || '').toLowerCase().includes(term)).length;
+        matchCount = cachedFiles.filter(f => matchesQuery([f.name], query)).length;
         if (typeof renderFilesTable === 'function') {
           renderFilesTable();
         }
@@ -94,7 +46,7 @@ pub const SCRIPT: &str = r###"
           jobsSearch.value = query;
         }
         totalCount = cachedJobs.length;
-        matchCount = cachedJobs.filter(j => !term || (j.source_name || '').toLowerCase().includes(term) || (j.id || '').toLowerCase().includes(term)).length;
+        matchCount = cachedJobs.filter(j => matchesQuery([j.source_name, j.id], query)).length;
         if (typeof renderJobsTable === 'function') {
           renderJobsTable();
         }
@@ -104,24 +56,21 @@ pub const SCRIPT: &str = r###"
         const metrics = document.querySelectorAll('#panel-dashboard .metric-card');
         totalCount = metrics.length;
         metrics.forEach(card => {
-          const match = !term || card.textContent.toLowerCase().includes(term);
+          const match = textMatches(card, query);
           if (match) matchCount++;
-          card.style.display = match ? '' : 'none';
+          setFiltered(card, match);
         });
         const actions = document.querySelectorAll('#panel-dashboard button');
-        actions.forEach(btn => {
-          const match = !term || btn.textContent.toLowerCase().includes(term);
-          btn.style.display = match ? '' : 'none';
-        });
+        actions.forEach(btn => setFiltered(btn, textMatches(btn, query)));
         break;
       }
       case 'flows': {
-        const flowCards = document.querySelectorAll('#panel-flows .flow-card, #panel-flows .catalog-flow-card, #panel-flows .palette-node-item');
-        totalCount = flowCards.length;
-        flowCards.forEach(card => {
-          const match = !term || card.textContent.toLowerCase().includes(term);
+        const flowRows = document.querySelectorAll('#flows-table-body tr[data-flow-id], #panel-flows .palette-node-item');
+        totalCount = flowRows.length;
+        flowRows.forEach(row => {
+          const match = textMatches(row, query);
           if (match) matchCount++;
-          card.style.display = match ? '' : 'none';
+          setFiltered(row, match);
         });
         break;
       }
@@ -129,19 +78,20 @@ pub const SCRIPT: &str = r###"
         const rows = document.querySelectorAll('#workers-table-body tr');
         totalCount = rows.length;
         rows.forEach(tr => {
-          const match = !term || tr.textContent.toLowerCase().includes(term);
+          const match = textMatches(tr, query);
           if (match) matchCount++;
-          tr.style.display = match ? '' : 'none';
+          setFiltered(tr, match);
         });
         break;
       }
       case 'plugins': {
-        const cards = document.querySelectorAll('#panel-plugins .tool-card, #panel-plugins .plugin-card, #panel-plugins .plugin-store-card, #repos-table-body tr');
-        totalCount = cards.length;
-        cards.forEach(card => {
-          const match = !term || card.textContent.toLowerCase().includes(term);
+        const rows = document.querySelectorAll('#panel-plugins .registre-row');
+        totalCount = rows.length;
+        rows.forEach(row => {
+          const tags = row.getAttribute('data-tags') || '';
+          const match = textMatches(row, query) || matchesQuery([tags], query);
           if (match) matchCount++;
-          card.style.display = match ? '' : 'none';
+          setFiltered(row, match);
         });
         break;
       }
@@ -149,9 +99,9 @@ pub const SCRIPT: &str = r###"
         const sections = document.querySelectorAll('#panel-settings .section-panel');
         totalCount = sections.length;
         sections.forEach(sec => {
-          const match = !term || sec.textContent.toLowerCase().includes(term);
+          const match = textMatches(sec, query);
           if (match) matchCount++;
-          sec.style.display = match ? '' : 'none';
+          setFiltered(sec, match);
         });
         break;
       }
@@ -159,9 +109,9 @@ pub const SCRIPT: &str = r###"
         const cards = document.querySelectorAll('#panel-updates .card, #panel-updates .section-panel');
         totalCount = cards.length;
         cards.forEach(card => {
-          const match = !term || card.textContent.toLowerCase().includes(term);
+          const match = textMatches(card, query);
           if (match) matchCount++;
-          card.style.display = match ? '' : 'none';
+          setFiltered(card, match);
         });
         break;
       }
@@ -218,6 +168,11 @@ pub const SCRIPT: &str = r###"
       loadToolsStatus();
     } else if (tabName === 'flows') {
       loadFlows();
+      const canvas = el('flows-canvas-view');
+      const titleEl = el('current-section-title');
+      if (canvas && canvas.style.display === 'block' && titleEl) {
+        titleEl.textContent = 'Éditeur de flux';
+      }
     } else if (tabName === 'plugins') {
       if (typeof loadRepositories === 'function') loadRepositories();
       if (typeof loadStoreCatalog === 'function') loadStoreCatalog();

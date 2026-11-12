@@ -116,6 +116,19 @@ pub const SCRIPT: &str = r###"
     const submitRemuxBtn = el('confirm-dialog-submit-btn');
     if (submitRemuxBtn) submitRemuxBtn.addEventListener('click', submitRemuxJob);
 
+    const launchFlowBtn = el('files-fact-action');
+    if (launchFlowBtn) {
+      launchFlowBtn.addEventListener('click', () => {
+        const title = el('files-fact-title');
+        const name = title ? title.textContent : '';
+        if (!name || name === 'Sélectionnez une ligne') {
+          showNotice('Ouvrez un fichier avant de lancer un flux.', 'info');
+          return;
+        }
+        openConfirmRemuxDialog(name);
+      });
+    }
+
     // Recherche de tâches (synchronisation bidirectionnelle)
     const jobsSearch = el('jobs-search-input');
     if (jobsSearch) {

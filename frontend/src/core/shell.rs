@@ -1,6 +1,7 @@
 //! Shell principal de l'application : Marque, navigation latérale et en-tête supérieur moderne.
 
 use super::navigation::Navigation;
+use super::panel::active_panel;
 use crate::shared::ui::{Icon, IconName};
 use leptos::prelude::*;
 
@@ -57,7 +58,7 @@ pub fn Header() -> impl IntoView {
                 <div class="topbar-context">
                     <span class="breadcrumb-item">"Central"</span>
                     <span class="breadcrumb-separator" aria-hidden="true">"/"</span>
-                    <span class="breadcrumb-title" id="current-section-title">"Vue d'ensemble"</span>
+                    <span class="breadcrumb-title" id="current-section-title">{active_panel().label}</span>
                 </div>
 
                 // Barre de recherche attachée unifiée (style UiSearchField Watchdeck)

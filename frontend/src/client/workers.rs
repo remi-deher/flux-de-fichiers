@@ -13,12 +13,14 @@ pub const SCRIPT: &str = r###"
 
       const activeCount = cachedWorkers.filter(w => (Date.now() - new Date(w.last_seen).getTime()) < 120000).length;
       if (metricWorkers) metricWorkers.textContent = String(activeCount);
+      updateHeaderWorkersCount(true, activeCount);
       renderWorkersTable();
+      if (typeof renderLibrariesTable === 'function') renderLibrariesTable();
+      if (typeof renderLibraryNodes === 'function') renderLibraryNodes();
+      if (typeof renderLibraryWorkerSelect === 'function') renderLibraryWorkerSelect();
     } catch (e) {
       if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="4" class="empty-state-text" style="color: var(--danger-text);">
-          ${escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session pour afficher les agents enregistrés.' : 'Impossible de récupérer la liste des agents.')}
-        </td></tr>`;
+        tbody.innerHTML = emptyStateRow(5, escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session pour afficher les agents enregistrés.' : 'Impossible de récupérer la liste des agents.'), true);
       }
     }
   }
@@ -28,9 +30,14 @@ pub const SCRIPT: &str = r###"
     if (!tbody) return;
 
     if (cachedWorkers.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="4" class="empty-state-text">
-        Aucun agent distant enregistré. Le coordinateur central traite les tâches en mode autonome (agent intégré).
-      </td></tr>`;
+      tbody.innerHTML = `<tr class="registre-row" data-worker-id="local">
+          <td class="text-strong">Coordinateur local</td>
+          <td>Coordinateur</td>
+          <td>—</td>
+          <td>${renderStatusPill('Intégré', 'info')}</td>
+          <td class="cell-end"><button type="button" class="btn btn-secondary btn-sm registre-open-btn" data-worker-id="local">Ouvrir</button></td>
+      </tr>`;
+      bindWorkerRows(tbody);
       return;
     }
 
@@ -42,26 +49,42 @@ pub const SCRIPT: &str = r###"
       const isOnline = (now - lastSeenMs) < 120000;
       const statusHtml = renderStatusPill(isOnline ? 'En ligne' : 'Hors ligne', isOnline ? 'online' : 'offline', { pulse: isOnline });
       const isLocal = safeName.startsWith('coordinator');
+      const role = isLocal ? 'Coordinateur' : 'Agent';
       const deleteAction = !isOnline
-        ? `<button type="button" class="btn btn-secondary btn-sm delete-worker-btn" data-worker-id="${safeId}" style="color: var(--danger-text); padding: 0.2rem 0.5rem; font-size: 0.75rem; margin-left: 0.5rem;" title="Supprimer cet agent hors ligne">Supprimer</button>`
+        ? `<button type="button" class="btn btn-secondary btn-sm delete-worker-btn btn-danger-quiet" data-worker-id="${safeId}" title="Supprimer cet agent hors ligne">Supprimer</button>`
         : '';
-      return `
-        <tr>
-          <td style="font-family: var(--font-mono); font-weight: 600;">${safeId}</td>
-          <td>
-            <div style="font-weight: 600;">${safeName}</div>
-            <div style="font-size: 0.75rem; color: var(--text-dim);">${isLocal ? 'Agent local intégré' : 'Agent distant HTTP'}</div>
-          </td>
+      return `<tr class="registre-row" data-worker-id="${safeId}">
+          <td class="text-strong">${safeName}</td>
+          <td>${role}</td>
           <td>${formatDate(w.last_seen)}</td>
-          <td>
-            <div style="display: flex; align-items: center; justify-content: space-between;">
-              ${statusHtml}
+          <td>${statusHtml}</td>
+          <td class="cell-end">
+            <div class="inline-actions">
+              <button type="button" class="btn btn-secondary btn-sm registre-open-btn" data-worker-id="${safeId}">Ouvrir</button>
               ${deleteAction}
             </div>
           </td>
-        </tr>
-      `;
+      </tr>`;
     }).join('');
+    bindWorkerRows(tbody);
+  }
+
+  function bindWorkerRows(tbody) {
+    tbody.querySelectorAll('.registre-open-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-worker-id');
+        const worker = cachedWorkers.find(item => item.id === id);
+        const row = btn.closest('tr');
+        markRegistreRow(tbody, row);
+        if (!worker) {
+          showRegistreFact('workers-fact', 'Coordinateur local', ['Coordinateur', 'Agent intégré']);
+          return;
+        }
+        const isOnline = (Date.now() - new Date(worker.last_seen).getTime()) < 120000;
+        const role = String(worker.name || '').startsWith('coordinator') ? 'Coordinateur' : 'Agent';
+        showRegistreFact('workers-fact', worker.name || worker.id, [role, isOnline ? 'En ligne' : 'Hors ligne', formatDate(worker.last_seen)]);
+      });
+    });
 
     tbody.querySelectorAll('.delete-worker-btn').forEach(btn => {
       btn.addEventListener('click', async (e) => {
@@ -179,6 +202,17 @@ pub const SCRIPT: &str = r###"
       });
     }
 
+    const raccorderBtn = el('workers-fact-action');
+    if (raccorderBtn) {
+      raccorderBtn.addEventListener('click', () => {
+        const panel = el('worker-connect-panel');
+        if (panel) {
+          panel.hidden = false;
+          panel.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    }
+
     if (btnCopyCmd && dockerCmd) {
       btnCopyCmd.addEventListener('click', async () => {
         const text = dockerCmd.textContent;
@@ -188,21 +222,6 @@ pub const SCRIPT: &str = r###"
           showNotice('Commande Docker copiée dans le presse-papier !', 'success');
         } catch {
           showNotice('Veuillez copier manuellement la commande.', 'info');
-        }
-      });
-    }
-
-    const btnRefresh = el('btn-refresh-workers');
-    if (btnRefresh) {
-      btnRefresh.addEventListener('click', async () => {
-        btnRefresh.disabled = true;
-        try {
-          await Promise.all([loadWorkers(), loadSystemConfig()]);
-          showNotice('État des serveurs et configuration actualisés.', 'info');
-        } catch {
-          showNotice('Erreur lors du rafraîchissement des serveurs.', 'error');
-        } finally {
-          btnRefresh.disabled = false;
         }
       });
     }

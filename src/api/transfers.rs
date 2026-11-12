@@ -73,17 +73,11 @@ pub async fn output(
     Path(id): Path<Uuid>,
     _auth: super::AdminAuth,
 ) -> AppResult<Response> {
-    let name: Option<String> =
-        sqlx::query_scalar("SELECT output_name FROM jobs WHERE id=?1 AND status='succeeded'")
-            .bind(id)
-            .fetch_optional(&s.pool)
-            .await?
-            .flatten();
+    let name = repository::succeeded_output_name(&s.pool, id)
+        .await?
+        .ok_or(AppError::NotFound)?;
     let mut response = stream_file(
-        &s.config
-            .data_dir
-            .join("output")
-            .join(name.ok_or(AppError::NotFound)?),
+        &s.config.data_dir.join("output").join(name),
         Some(&format!("job-{id}.mkv")),
     )
     .await?;
@@ -177,28 +171,29 @@ pub(crate) async fn publish_staged(
     media::validate_remux(source, staging)
         .await
         .map_err(|_| AppError::Invalid)?;
-    let mut tx = s.pool.begin_with("BEGIN IMMEDIATE").await?;
-    // Fence a former lease even if it finishes after another agent has taken over.
-    let active: Option<Uuid> = sqlx::query_scalar("SELECT id FROM jobs WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND status='running' AND leased_until > datetime('now')")
-        .bind(id).bind(lease.worker_id).bind(lease.lease_token).fetch_optional(&mut *tx).await?;
-    if active.is_none() {
-        return Err(AppError::Conflict);
-    }
     let name = format!("{id}-{}.mkv", lease.lease_token);
     let destination = s.config.data_dir.join("output").join(&name);
-    // Hard-link publication is atomic, cannot overwrite, and stays on the data filesystem.
-    tokio::fs::hard_link(staging, &destination).await?;
-    let updated = sqlx::query("UPDATE jobs SET status='succeeded',output_name=?2,output_sha256=?3,output_bytes=?4,warning=?5,lease_token=NULL,leased_until=NULL,error_code=NULL,updated_at=datetime('now') WHERE id=?1")
-        .bind(id).bind(name).bind(hash).bind(size as i64).bind(warning).execute(&mut *tx).await;
-    let completed = match updated {
-        Ok(_) => tx.commit().await,
-        Err(e) => Err(e),
-    };
-    if let Err(error) = completed {
-        // Commit outcome can be uncertain after a network failure. Keep the immutable file;
-        // the database alone decides whether it is downloadable. Never remove a committed result.
-        tracing::error!(job_id=%id, "result publication database failure");
-        return Err(error.into());
+    if let Err(error) = repository::publish_succeeded(
+        &s.pool,
+        id,
+        lease,
+        repository::PublishedOutput {
+            name: &name,
+            sha256: &hash,
+            bytes: size as i64,
+            warning,
+        },
+        async {
+            tokio::fs::hard_link(staging, &destination).await?;
+            Ok(())
+        },
+    )
+    .await
+    {
+        if matches!(error, AppError::Database(_)) {
+            tracing::error!(job_id=%id, "result publication database failure");
+        }
+        return Err(error);
     }
     tracing::info!(job_id=%id, worker_id=%lease.worker_id, bytes=size, warning, "remux completed");
     s.notify_job_event(JobEventType::JobSucceeded, id, JobStatus::Succeeded, None);

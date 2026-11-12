@@ -13,11 +13,19 @@ use leptos::prelude::*;
 pub fn render_full_page() -> String {
     let body_html = app::App().to_html();
     format!(
-        r#"<!doctype html>
+        r##"<!doctype html>
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f6f8fa" media="(prefers-color-scheme: light)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Flux de Fichiers">
+  <meta name="application-name" content="Flux de Fichiers">
+  <meta name="format-detection" content="telephone=no">
   <meta name="description" content="Console de pilotage et supervision de remuxage Flux de Fichiers.">
   <title>Flux de Fichiers — Pilotage et supervision</title>
   <style>
@@ -30,9 +38,141 @@ pub fn render_full_page() -> String {
 {scripts}
   </script>
 </body>
-</html>"#,
+</html>"##,
         styles = theme::get_all_styles(),
         body = body_html,
         scripts = client::get_client_script()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_render_full_page_contains_modern_standards_metadata() {
+        let html = render_full_page();
+        assert!(html.contains("viewport-fit=cover"));
+        assert!(html.contains("apple-mobile-web-app-capable"));
+        assert!(html.contains("apple-mobile-web-app-status-bar-style"));
+        assert!(html.contains("color-scheme"));
+        assert!(html.contains("theme-color"));
+        assert!(html.contains("format-detection"));
+        assert!(html.contains("lang=\"fr\""));
+    }
+
+    #[test]
+    fn test_render_full_page_contains_contextual_search_bar() {
+        let html = render_full_page();
+        assert!(html.contains("role=\"search\""));
+        assert!(html.contains("id=\"app-topbar\""));
+        assert!(html.contains("id=\"global-search-input\""));
+        assert!(html.contains("id=\"search-match-count\""));
+        assert!(!html.contains("id=\"header-search-clear-btn\""));
+        assert!(!html.contains("search-kbd"));
+        assert!(html.contains("search-capsule__tools"));
+        assert!(html.contains("id=\"search-capsule\""));
+        assert!(html.contains("id=\"search-filter-btn\""));
+        assert!(html.contains("id=\"filter-sheet\""));
+        assert!(html.contains("data-capsule-tab=\"flows\""));
+        assert!(html.contains("data-filter-page=\"jobs\""));
+        assert!(html.contains("function toggleFilterSheet"));
+        assert!(html.contains("applyContextualSearch"));
+        assert!(html.contains("setupChromeAutoHide"));
+        assert!(html.contains("id=\"header-workers-pill\""));
+        assert!(!html.contains("id=\"header-theme-toggle-btn\""));
+        assert!(!html.contains("id=\"header-refresh-btn\""));
+    }
+
+    #[test]
+    fn test_render_full_page_contains_overview_hub() {
+        let html = render_full_page();
+        assert!(html.contains("Vue d'ensemble"));
+        assert!(html.contains("overview-hero-card"));
+        assert!(html.contains("id=\"metric-storage-volume\""));
+        assert!(html.contains("id=\"metric-success-rate\""));
+        assert!(html.contains("id=\"media-formats-bar\""));
+        assert!(html.contains("updateOverviewStats"));
+    }
+
+    #[test]
+    fn test_render_full_page_subnav_and_no_refresh_buttons() {
+        let html = render_full_page();
+        assert!(html.contains("class=\"app-subnav\""));
+        assert!(html.contains("app-subnav__scroller"));
+        assert!(html.contains("app-subnav__item"));
+        assert!(html.contains("app-subnav-toolbar"));
+
+        assert!(!html.contains("id=\"refresh-all-btn\""));
+        assert!(!html.contains("id=\"files-refresh-btn\""));
+        assert!(!html.contains("id=\"jobs-refresh-btn\""));
+        assert!(!html.contains("id=\"btn-refresh-workers\""));
+        assert!(!html.contains("id=\"header-refresh-btn\""));
+        assert!(!html.contains("id=\"btn-sync-all-repos\""));
+        assert!(!html.contains("repo-sync-btn"));
+    }
+
+    #[test]
+    fn test_catalog_ids_and_pure_functions_reach_the_page() {
+        let html = render_full_page();
+        for panel in crate::core::panels() {
+            assert!(html.contains(&format!("id=\"{}\"", panel.dom_id)));
+            assert!(html.contains(&format!("id=\"{}\"", panel.button_id)));
+            assert!(html.contains(panel.search_placeholder));
+        }
+        assert!(html.contains("function matchesQuery"));
+        assert!(html.contains("function isVideoFlowName"));
+        assert!(html.contains("function emptyStateRow"));
+        assert!(html.contains("function loadFlows"));
+        assert!(html.contains("function openCanvas"));
+        assert!(html.contains("class=\"registre\""));
+        assert!(html.contains("class=\"inspection-drawer\""));
+        assert!(html.contains("class=\"inspection-drawer__header\""));
+        assert!(html.contains("class=\"inspection-drawer__subnav\""));
+        assert!(html.contains(">Aperçu<"));
+        assert!(html.contains("data-inspection-close"));
+        assert!(!html.contains("class=\"registre-split\""));
+        assert!(html.contains("id=\"libraries-table-body\""));
+        assert!(html.contains("id=\"libraries-fact-pane-overview\""));
+        assert!(html.contains("id=\"libraries-fact-pane-nodes\""));
+        assert!(html.contains("id=\"libraries-fact-pane-flow\""));
+        assert!(html.contains("id=\"library-name-input\""));
+        assert!(html.contains("id=\"library-flow-select\""));
+        assert!(html.contains("function loadLibraries"));
+        assert!(html.contains("function saveLibrary"));
+        assert!(!html.contains("id=\"files-table-body\""));
+        assert!(!html.contains("id=\"confirm-remux-dialog\""));
+        assert!(!html.contains("btn-subtab-files-browser"));
+        assert!(!html.contains("Volume /input"));
+        assert!(html.contains("id=\"flows-fact-action\""));
+        assert!(html.contains(">Éditer<"));
+        assert!(html.contains("id=\"workers-fact-action\""));
+        assert!(html.contains(">Raccorder<"));
+        assert!(html.contains("subtab-plugins-app"));
+        assert!(html.contains("subtab-plugins-pack"));
+        assert!(html.contains("subtab-plugins-resource"));
+        assert!(html.contains("subtab-plugins-repos"));
+        assert!(html.contains("Retour aux flux"));
+        assert!(html.contains("function showRegistreFact"));
+        assert!(!html.contains("btn-subtab-flows-canvas"));
+        assert!(html.contains("function resetSimulation"));
+    }
+
+    #[test]
+    fn plugin_form_comes_from_the_manifest_schema() {
+        let html = render_full_page();
+        assert!(html.contains("id=\"plugin-config-fields\""));
+        assert!(html.contains("function renderPluginConfigFields"));
+        assert!(html.contains("data-setting-name"));
+        assert!(html.contains("data-tags"));
+        assert!(!html.contains("192.168.1.50"));
+        assert!(!html.contains("plugin-cfg-url"));
+        assert!(!html.contains("plugin-cfg-apikey"));
+        assert!(!html.contains("plugin-cfg-local-path"));
+        assert!(!html.contains("plugin-cfg-remote-path"));
+        assert!(!html.contains("value=\"/data\""));
+        assert!(!html.contains("value=\"/media\""));
+        assert!(!html.contains("'/tv'"));
+        assert!(!html.contains("'/movies'"));
+    }
 }

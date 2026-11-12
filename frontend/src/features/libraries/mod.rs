@@ -1,107 +1,128 @@
-//! Gestion des bibliothèques de médias, des accès par nœud et des ressources associées.
+//! Registre des bibliothèques déclarées. Le tiroir porte le nom, les nœuds et le flux.
 
-pub mod file_browser;
-pub mod library_card;
-pub mod library_resources;
-pub mod node_access;
-
-use crate::core::{SubNav, SubNavTabItem};
-use file_browser::FileBrowser;
+use crate::shared::ui::{InspectionPane, RegistreTable, inspection_drawer};
 use leptos::prelude::*;
-use library_card::LibraryCard;
-use node_access::NodePathConfig;
+
+fn library_panes() -> Vec<InspectionPane> {
+    vec![
+        InspectionPane {
+            suffix: "overview",
+            label: "Aperçu",
+            body: view! {
+                <div class="form-group">
+                    <label for="library-name-input" class="form-label">"Nom"</label>
+                    <input
+                        type="text"
+                        id="library-name-input"
+                        class="form-input"
+                        maxlength="80"
+                        autocomplete="off"
+                    />
+                </div>
+                <p id="libraries-fact-facts" class="inspection-panel__facts">
+                    "Le détail de la bibliothèque apparaît ici."
+                </p>
+            }
+            .into_any(),
+        },
+        InspectionPane {
+            suffix: "nodes",
+            label: "Nœuds",
+            body: view! {
+                <div id="library-nodes-list" class="library-node-list"></div>
+                <div class="form-group">
+                    <label for="library-node-worker" class="form-label">"Nœud"</label>
+                    <select id="library-node-worker" class="form-select"></select>
+                </div>
+                <div class="form-group">
+                    <label for="library-node-path" class="form-label">"Chemin sur ce nœud"</label>
+                    <input
+                        type="text"
+                        id="library-node-path"
+                        class="form-input"
+                        placeholder="/mnt/medias"
+                        autocomplete="off"
+                    />
+                    <p class="form-help">"Chemin absolu tel que ce nœud le voit."</p>
+                </div>
+                <div class="form-group">
+                    <label for="library-node-access" class="form-label">"Accès"</label>
+                    <select id="library-node-access" class="form-select">
+                        <option value="read_write">"Lecture / Écriture"</option>
+                        <option value="read">"Lecture seule"</option>
+                    </select>
+                </div>
+                <button type="button" id="library-node-add-btn" class="btn btn-secondary btn-sm">
+                    "Ajouter le nœud"
+                </button>
+            }
+            .into_any(),
+        },
+        InspectionPane {
+            suffix: "flow",
+            label: "Flux",
+            body: view! {
+                <div class="form-group">
+                    <label for="library-flow-select" class="form-label">"Flux accroché"</label>
+                    <select id="library-flow-select" class="form-select"></select>
+                    <p class="form-help">"Un seul flux est accroché à la bibliothèque."</p>
+                </div>
+            }
+            .into_any(),
+        },
+    ]
+}
+
+fn library_header_actions() -> AnyView {
+    view! {
+        <div class="inspection-drawer__actions">
+            <button
+                type="button"
+                id="libraries-save-btn"
+                class="btn btn-primary btn-sm inspection-panel__action"
+                disabled
+            >
+                "Enregistrer"
+            </button>
+            <button
+                type="button"
+                id="libraries-delete-btn"
+                class="btn btn-danger btn-sm inspection-panel__action"
+                hidden
+                disabled
+            >
+                "Supprimer"
+            </button>
+        </div>
+    }
+    .into_any()
+}
 
 #[component]
 pub fn LibrariesPanel() -> impl IntoView {
-    let main_library_nodes = vec![NodePathConfig {
-        node_id: "node-coordinator",
-        node_name: "Coordinateur local",
-        local_path: "/input",
-        access_mode: "Point de montage conteneur (/input)",
-        is_online: true,
-        is_writable: false,
-    }];
-
-    let subnav_tabs = vec![
-        SubNavTabItem {
-            id: "btn-subtab-files-browser",
-            label: "Explorateur de fichiers",
-            icon: Some("🔍"),
-            target_id: "subtab-files-browser",
-            is_active: true,
-            badge: None,
-        },
-        SubNavTabItem {
-            id: "btn-subtab-files-libraries",
-            label: "Dossiers & Nœuds",
-            icon: Some("📁"),
-            target_id: "subtab-files-libraries",
-            is_active: false,
-            badge: Some("1"),
-        },
-    ];
-
-    let subnav_info = view! {
-        <span class="subnav-info-badge">"📁 Volume /input"</span>
-    }
-    .into_any();
-
-    let subnav_actions = view! {
-        <button
-            type="button"
-            id="files-refresh-btn"
-            class="btn btn-secondary btn-sm"
-            title="Actualiser la liste des fichiers et dossiers"
-        >
-            "🔄 Actualiser"
-        </button>
-    }
-    .into_any();
-
     view! {
         <div
-            id="panel-files"
+            id=crate::core::panel::FILES.dom_id
             class="tab-panel"
             role="tabpanel"
-            aria-labelledby="tab-btn-files"
+            aria-labelledby=crate::core::panel::FILES.button_id
             hidden
         >
-            <SubNav
-                aria_label="Sous-navigation de la section Bibliothèques"
-                tabs=subnav_tabs
-                info=subnav_info
-                actions=subnav_actions
-            />
-
-            // Sous-vue 1 : Explorateur de médias (actif par défaut)
-            <div id="subtab-files-browser">
-                <FileBrowser />
-            </div>
-
-            // Sous-vue 2 : Dossiers & Accès Nœuds
-            <div id="subtab-files-libraries" hidden>
-                <section class="section-panel" aria-labelledby="libraries-section-title">
-                    <div class="section-panel-header">
-                        <div>
-                            <h2 id="libraries-section-title" class="section-title">
-                                "Bibliothèque d'ingestion des médias (/input)"
-                            </h2>
-                            <p class="section-subtitle">
-                                "Surveillance du dossier source, intégrité lecture seule et déclenchement des pipelines de remuxage sans altération de l'original."
-                            </p>
-                        </div>
-                    </div>
-
-                    <div style="margin-bottom: 1.5rem;">
-                        <LibraryCard
-                            name="Bibliothèque principale d'ingestion"
-                            media_type="🎬 Médias Vidéo & Matroska"
-                            status="Surveillance active"
-                            assigned_flow="Remuxage Matroska propre"
-                            nodes=main_library_nodes
-                        />
-                    </div>
-                </section>
+            <div class="registre" id="library-registre">
+                <div class="registre-toolbar">
+                    <h2 class="section-title">"Bibliothèques déclarées"</h2>
+                    <button type="button" id="library-create-btn" class="btn btn-primary btn-sm">
+                        "Déclarer"
+                    </button>
+                </div>
+                <input type="search" id="libraries-search-input" hidden />
+                <RegistreTable
+                    aria_label="Bibliothèques déclarées"
+                    headers=vec!["Bibliothèque", "Flux", "Nœuds", "État", "Action"]
+                    body_id="libraries-table-body"
+                    empty="Chargement des bibliothèques…"
+                />
+                {inspection_drawer("libraries-fact", library_panes(), Some(library_header_actions()))}
             </div>
         </div>
     }

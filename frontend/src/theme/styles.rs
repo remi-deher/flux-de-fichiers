@@ -1,79 +1,161 @@
-//! Générateur de styles CSS-in-Rust typés via `stylist`.
+//! Générateur de styles globaux et design tokens CSS en Rust typé.
 
 use super::tokens::{DARK_THEME, LIGHT_THEME};
-use stylist::Style;
 
-/// Génère la feuille de style globale complète vérifiée par Rust.
-pub fn generate_global_style() -> Result<String, stylist::Error> {
-    let css = format!(
+/// Génère la feuille de style globale contenant les variables de design tokens et les resets racine.
+pub fn generate_global_tokens_css() -> String {
+    format!(
         r#"
-        :root {{
-            --bg-app: {dark_bg_app};
-            --bg-card: {dark_bg_card};
-            --bg-subtle: {dark_bg_subtle};
-            --border-color: {dark_border};
-            --text-main: {dark_text};
-            --text-dim: {dark_text_dim};
-            --text-muted: {dark_text_muted};
-            --primary: {dark_primary};
-            --primary-contrast: {dark_primary_contrast};
-            --primary-bg: {dark_primary_bg};
-            --accent: {dark_accent};
-            --success: {dark_success};
-            --success-bg: {dark_success_bg};
-            --warning: {dark_warning};
-            --warning-bg: {dark_warning_bg};
-            --danger: {dark_danger};
-            --danger-bg: {dark_danger_bg};
-            --info: {dark_info};
-            --info-bg: {dark_info_bg};
-            --radius-sm: {radius_sm};
-            --radius-md: {radius_md};
-            --radius-lg: {radius_lg};
-            --radius-pill: {radius_pill};
-            --shadow-sm: {shadow_sm};
-            --shadow-md: {shadow_md};
-            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-        }}
+:root {{
+  /* --- Safe Area Insets (Apple HIG & WebKit) --- */
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
 
-        [data-theme="light"] {{
-            --bg-app: {light_bg_app};
-            --bg-card: {light_bg_card};
-            --bg-subtle: {light_bg_subtle};
-            --border-color: {light_border};
-            --text-main: {light_text};
-            --text-dim: {light_text_dim};
-            --text-muted: {light_text_muted};
-            --primary: {light_primary};
-            --primary-contrast: {light_primary_contrast};
-            --primary-bg: {light_primary_bg};
-            --accent: {light_accent};
-            --success: {light_success};
-            --success-bg: {light_success_bg};
-            --warning: {light_warning};
-            --warning-bg: {light_warning_bg};
-            --danger: {light_danger};
-            --danger-bg: {light_danger_bg};
-            --info: {light_info};
-            --info-bg: {light_info_bg};
-        }}
+  /* --- Cibles tactiles minimales (Google M3 48px & Apple HIG 44px) --- */
+  --touch-target-min: 48px;
+  --touch-target-compact: 44px;
 
-        * {{
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }}
+  /* --- Surfaces & Couleurs Thème Sombre --- */
+  --bg-app: {dark_bg_app};
+  --bg-card: {dark_bg_card};
+  --bg-subtle: {dark_bg_subtle};
+  --border-color: {dark_border};
+  --text-main: {dark_text};
+  --text-dim: {dark_text_dim};
+  --text-muted: {dark_text_muted};
+  --primary: {dark_primary};
+  --primary-contrast: {dark_primary_contrast};
+  --primary-bg: {dark_primary_bg};
+  --accent: {dark_accent};
+  --success: {dark_success};
+  --success-bg: {dark_success_bg};
+  --warning: {dark_warning};
+  --warning-bg: {dark_warning_bg};
+  --danger: {dark_danger};
+  --danger-bg: {dark_danger_bg};
+  --info: {dark_info};
+  --info-bg: {dark_info_bg};
+  --radius-sm: {radius_sm};
+  --radius-md: {radius_md};
+  --radius-lg: {radius_lg};
+  --radius-pill: {radius_pill};
+  --shadow-sm: {shadow_sm};
+  --shadow-md: {shadow_md};
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}}
 
-        html, body {{
-            background-color: var(--bg-app);
-            color: var(--text-main);
-            font-family: var(--font-sans);
-            font-size: 14px;
-            line-height: 1.5;
-            -webkit-font-smoothing: antialiased;
-        }}
-        "#,
+@media (prefers-color-scheme: light) {{
+  :root:not([data-theme="dark"]) {{
+    --bg-app: {light_bg_app};
+    --bg-card: {light_bg_card};
+    --bg-subtle: {light_bg_subtle};
+    --border-color: {light_border};
+    --text-main: {light_text};
+    --text-dim: {light_text_dim};
+    --text-muted: {light_text_muted};
+    --primary: {light_primary};
+    --primary-contrast: {light_primary_contrast};
+    --primary-bg: {light_primary_bg};
+    --accent: {light_accent};
+    --success: {light_success};
+    --success-bg: {light_success_bg};
+    --warning: {light_warning};
+    --warning-bg: {light_warning_bg};
+    --danger: {light_danger};
+    --danger-bg: {light_danger_bg};
+    --info: {light_info};
+    --info-bg: {light_info_bg};
+  }}
+}}
+
+[data-theme="light"] {{
+  --bg-app: {light_bg_app};
+  --bg-card: {light_bg_card};
+  --bg-subtle: {light_bg_subtle};
+  --border-color: {light_border};
+  --text-main: {light_text};
+  --text-dim: {light_text_dim};
+  --text-muted: {light_text_muted};
+  --primary: {light_primary};
+  --primary-contrast: {light_primary_contrast};
+  --primary-bg: {light_primary_bg};
+  --accent: {light_accent};
+  --success: {light_success};
+  --success-bg: {light_success_bg};
+  --warning: {light_warning};
+  --warning-bg: {light_warning_bg};
+  --danger: {light_danger};
+  --danger-bg: {light_danger_bg};
+  --info: {light_info};
+  --info-bg: {light_info_bg};
+}}
+
+[data-theme="dark"] {{
+  --bg-app: {dark_bg_app};
+  --bg-card: {dark_bg_card};
+  --bg-subtle: {dark_bg_subtle};
+  --border-color: {dark_border};
+  --text-main: {dark_text};
+  --text-dim: {dark_text_dim};
+  --text-muted: {dark_text_muted};
+  --primary: {dark_primary};
+  --primary-contrast: {dark_primary_contrast};
+  --primary-bg: {dark_primary_bg};
+  --accent: {dark_accent};
+  --success: {dark_success};
+  --success-bg: {dark_success_bg};
+  --warning: {dark_warning};
+  --warning-bg: {dark_warning_bg};
+  --danger: {dark_danger};
+  --danger-bg: {dark_danger_bg};
+  --info: {dark_info};
+  --info-bg: {dark_info_bg};
+}}
+
+
+*, *::before, *::after {{
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}}
+
+html, body {{
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+  text-rendering: optimizeLegibility;
+}}
+
+/* --- Rendu tactile mobile & suppression des reflets parasites (Apple/Google) --- */
+button, a, select, input {{
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}}
+
+/* --- Focus Ring Accessible W3C (WCAG AAA) --- */
+:focus-visible {{
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}}
+
+/* --- Respect des préférences de réduction de mouvement (Apple HIG & Google M3) --- */
+@media (prefers-reduced-motion: reduce) {{
+  *, *::before, *::after {{
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }}
+}}
+"#,
         dark_bg_app = DARK_THEME.bg_app,
         dark_bg_card = DARK_THEME.bg_card,
         dark_bg_subtle = DARK_THEME.bg_subtle,
@@ -118,8 +200,28 @@ pub fn generate_global_style() -> Result<String, stylist::Error> {
         radius_pill = DARK_THEME.radius_pill,
         shadow_sm = DARK_THEME.shadow_sm,
         shadow_md = DARK_THEME.shadow_md,
-    );
+    )
+}
 
-    let style = Style::new(css)?;
-    Ok(style.get_style_str().to_string())
+/// Génère la feuille de style globale complète vérifiée par Rust.
+pub fn generate_global_style() -> Result<String, stylist::Error> {
+    Ok(generate_global_tokens_css())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_global_style_output() {
+        let res = generate_global_tokens_css();
+        assert!(res.contains(":root {"));
+        assert!(res.contains("[data-theme=\"light\"] {"));
+        assert!(res.contains("--sat: env(safe-area-inset-top"));
+        assert!(res.contains("--touch-target-min: 48px;"));
+        assert!(res.contains(":focus-visible {"));
+        assert!(res.contains("@media (prefers-reduced-motion: reduce)"));
+        assert!(res.contains("--bg-app: #0d1117;"));
+        assert!(res.contains("--primary: #58a6ff;"));
+    }
 }

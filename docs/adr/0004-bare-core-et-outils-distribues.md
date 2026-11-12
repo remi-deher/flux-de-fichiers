@@ -23,7 +23,7 @@ L'utilisateur a acté le choix de l'**Option B : Moteur Bare Core et distributio
 L'application `flux-de-fichiers` (coordinateur central et agents workers) est un **moteur nu (Bare Core)** :
 - Aucun outil tiers de traitement média (`mkvtoolnix`, `ffmpeg`, etc.) n'est embarqué en dur dans l'image Docker applicative de production.
 - Le runtime applicatif se concentre strictement sur ses responsabilités fondamentales : API REST/TLS, persistance et baux PostgreSQL, orchestration distribuée, gestion des transferts de flux, contrôle d'intégrité cryptographique et interface de pilotage Leptos.
-- Le seul outil interne intégré au binaire est la **sonde système de télémétrie matérielle** (`tool.internal.telemetry`).
+- Le seul outil interne intégré au binaire est la **sonde système de télémétrie matérielle** (`app.internal.telemetry`).
 
 ### 2. Outil interne unique : la sonde système de télémétrie
 
@@ -75,4 +75,4 @@ Pour les flux de traitement nécessitant une suite d'opérations (par exemple in
 ### Contraintes et mesures associées
 - **Amorçage du cache** : le premier lancement d'un traitement sur un worker neuf implique le téléchargement de l'outil si celui-ci n'est pas pré-amorcé. En environnement réseau restreint, le mode hors-ligne (`offline-preseeded`) permet de provisionner le cache à l'avance.
 - **Robustesse de l'extraction** : le décompactage direct par le runtime doit se prémunir rigoureusement contre les attaques de type traversée de répertoires (*Zip Slip*), ce qui est garanti par la validation stricte des chemins relatifs sans `..`.
-- **Compatibilité ascendante** : les flux existants basés sur `mkvmerge` sont traduits de manière transparente vers le contrat d'outil distribué `tool.mkvtoolnix@88.0.0`.
+- **Compatibilité ascendante** : les flux existants basés sur `mkvmerge` sont traduits de manière transparente vers le contrat d'outil distribué `app.mkvtoolnix@88.0.0`.

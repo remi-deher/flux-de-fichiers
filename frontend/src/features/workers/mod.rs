@@ -1,186 +1,99 @@
-//! Panneau de supervision des serveurs et agents de remuxage.
+//! Registre des nœuds. Une seule nature, donc pas de sous-navigation.
 
-use crate::{
-    core::{SubNav, SubNavTabItem},
-    shared::ui::SectionHeader,
-};
+use crate::shared::ui::{Button, ButtonVariant, Card, RegistreFact, RegistreTable, SectionHeader};
 use leptos::prelude::*;
 
 #[component]
 pub fn WorkersPanel() -> impl IntoView {
-    let subnav_tabs = vec![
-        SubNavTabItem {
-            id: "btn-subtab-workers-local",
-            label: "Ce nœud (Local)",
-            icon: Some("🖥️"),
-            target_id: "subtab-workers-local",
-            is_active: true,
-            badge: None,
-        },
-        SubNavTabItem {
-            id: "btn-subtab-workers-cluster",
-            label: "Nœuds distants (Workers)",
-            icon: Some("👥"),
-            target_id: "subtab-workers-cluster",
-            is_active: false,
-            badge: None,
-        },
-    ];
-
-    let subnav_info = view! {
-        <span class="subnav-info-badge">"🖥️ Nœud coordinateur"</span>
-    }
-    .into_any();
-
-    let subnav_actions = view! {
-        <button
-            type="button"
-            id="btn-refresh-workers"
-            class="btn btn-secondary btn-sm"
-            title="Actualiser l'état des serveurs et agents"
-        >
-            "🔄 Actualiser"
-        </button>
-    }
-    .into_any();
-
     view! {
-        <div id="panel-workers" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-workers" hidden>
-            <SubNav
-                aria_label="Sous-navigation de la section Infrastructure et Nœuds"
-                tabs=subnav_tabs
-                info=subnav_info
-                actions=subnav_actions
-            />
+        <div id=crate::core::panel::WORKERS.dom_id class="tab-panel" role="tabpanel" aria-labelledby=crate::core::panel::WORKERS.button_id hidden>
+            <div class="registre">
+                <RegistreTable
+                    aria_label="Nœuds qui exécutent"
+                    headers=vec!["Nœud", "Rôle", "Présence", "État", "Action"]
+                    body_id="workers-table-body"
+                    empty="Chargement des nœuds…"
+                />
+                <RegistreFact id="workers-fact" action_id="workers-fact-action" action="Raccorder" />
+                <div id="worker-connect-panel" hidden>
+                    <Card aria_labelledby="worker-connect-title">
+                        <SectionHeader
+                            id="worker-connect-title"
+                            title="Raccordement du nœud"
+                            subtitle="Clé d'agent et commande pour adjoindre un worker distant en HTTP."
+                        />
 
-            // --- Sous-vue 1 : Ce nœud local (Coordinateur & raccordement) ---
-            <div id="subtab-workers-local">
-                <section class="section-panel" aria-labelledby="worker-connect-title">
-                    <SectionHeader
-                        id="worker-connect-title"
-                        title="Configuration du nœud local & Raccordement (*arr)"
-                        subtitle="Configuration auto-amorcée du coordinateur (/config) et commande Docker pour adjoindre un worker distant en HTTP."
-                    />
+                        <div class="detail-grid" style="margin-bottom: 1.5rem;">
+                            <div class="detail-term">"Rôle de l'instance"</div>
+                            <div class="detail-val"><code>"Coordinateur central"</code>" (seule autorité)"</div>
 
-                    <div class="detail-grid" style="margin-bottom: 1.5rem;">
-                        <div class="detail-term">"Rôle de l'instance"</div>
-                        <div class="detail-val"><code>"Coordinateur central"</code>" (seule autorité)"</div>
+                            <div class="detail-term">"Répertoire de configuration"</div>
+                            <div class="detail-val"><code>"/config"</code>" (SQLite flux.db, clés 256 bits auto-amorcées)"</div>
 
-                        <div class="detail-term">"Répertoire de configuration"</div>
-                        <div class="detail-val"><code>"/config"</code>" (SQLite flux.db, clés 256 bits auto-amorcées)"</div>
+                            <div class="detail-term">"Worker local intégré"</div>
+                            <div class="detail-val" id="config-local-worker">"Vérification…"</div>
 
-                        <div class="detail-term">"Worker local intégré"</div>
-                        <div class="detail-val" id="config-local-worker">"Vérification…"</div>
+                            <div class="detail-term">"Version du coordinateur"</div>
+                            <div class="detail-val" id="config-version">"Vérification…"</div>
 
-                        <div class="detail-term">"Version du coordinateur"</div>
-                        <div class="detail-val" id="config-version">"Vérification…"</div>
-
-                        <div class="detail-term">"Taille max par fichier"</div>
-                        <div class="detail-val" id="config-max-file-bytes">"Vérification…"</div>
-                    </div>
-
-                    <div class="form-group" style="margin-bottom: 1.5rem;">
-                        <label for="worker-key-display" class="form-label">
-                            "Clé d'authentification worker (WORKER_KEY)"
-                        </label>
-                        <div class="copy-input-row">
-                            <input
-                                type="password"
-                                id="worker-key-display"
-                                class="form-input"
-                                readonly
-                                aria-label="Clé secrète d'agent worker"
-                                value=""
-                                placeholder="Ouvrez une session admin pour révéler la clé"
-                                style="flex: 1; font-family: var(--font-mono); font-size: 0.875rem;"
-                            />
-                            <button
-                                type="button"
-                                id="btn-toggle-worker-key"
-                                class="btn btn-secondary"
-                                aria-label="Afficher ou masquer la clé worker"
-                                disabled
-                            >
-                                "Afficher"
-                            </button>
-                            <button
-                                type="button"
-                                id="btn-copy-worker-key"
-                                class="btn btn-primary"
-                                aria-label="Copier la clé worker dans le presse-papier"
-                                disabled
-                            >
-                                "Copier la clé"
-                            </button>
+                            <div class="detail-term">"Taille max par fichier"</div>
+                            <div class="detail-val" id="config-max-file-bytes">"Vérification…"</div>
                         </div>
-                        <p id="worker-key-hint" class="form-help">
-                            "🔒 Clé secrète requise par les conteneurs worker pour s'enregistrer et réclamer des baux de remuxage."
-                        </p>
-                    </div>
 
-                    <div class="form-group">
-                        <label for="docker-worker-cmd" class="form-label">
-                            "Commande Docker de raccordement immédiat (HTTP)"
-                        </label>
-                        <pre class="code-block-wrapper"><code id="docker-worker-cmd">"docker run -d --name flux-worker -e COORDINATOR_URL=http://localhost:3000 -e WORKER_KEY=<WORKER_KEY> -v /chemin/data:/data flux-de-fichiers worker"</code></pre>
-                        <div style="margin-top: 0.75rem;">
-                            <button
-                                type="button"
-                                id="btn-copy-worker-cmd"
-                                class="btn btn-secondary"
-                                aria-label="Copier la commande Docker pour worker dans le presse-papier"
-                            >
-                                "Copier la commande"
-                            </button>
-                        </div>
-                    </div>
-                </section>
-            </div>
-
-            // --- Sous-vue 2 : Nœuds distants (Workers & agents déclarés) ---
-            <div id="subtab-workers-cluster" hidden>
-                <section class="section-panel" aria-labelledby="workers-section-title">
-                    <SectionHeader
-                        id="workers-section-title"
-                        title="Serveurs et agents de traitement"
-                        subtitle="Agents de calcul enregistrés via l'API. Chaque agent traite les baux sur MKVToolNix sans connexion directe à la base de données."
-                    />
-
-                    <div class="table-wrapper">
-                        <table class="data-table" aria-label="Liste des agents et serveurs de traitement">
-                            <thead>
-                                <tr>
-                                    <th scope="col">"Identifiant de l'agent"</th>
-                                    <th scope="col">"Nom d'hôte / Rôle"</th>
-                                    <th scope="col">"Dernière activité"</th>
-                                    <th scope="col">"Statut"</th>
-                                </tr>
-                            </thead>
-                            <tbody id="workers-table-body">
-                                <tr>
-                                    <td colspan="4" class="empty-state-text">
-                                        "Chargement des serveurs et agents…"
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div class="workers-info-grid">
-                        <div class="metric-card">
-                            <div class="metric-label">"Architecture distribuée"</div>
-                            <p class="card-caption">
-                                "Mode centralisé de 1 à N serveurs. Le coordinateur central gère les métadonnées et distribue les tâches avec des baux de 120 s renouvelés toutes les 20 s."
+                        <div class="form-group" style="margin-bottom: 1.5rem;">
+                            <label for="worker-key-display" class="form-label">
+                                "Clé d'authentification worker (WORKER_KEY)"
+                            </label>
+                            <div class="copy-input-row">
+                                <input
+                                    type="password"
+                                    id="worker-key-display"
+                                    class="form-input"
+                                    readonly
+                                    aria-label="Clé secrète d'agent worker"
+                                    value=""
+                                    placeholder="Ouvrez une session admin pour révéler la clé"
+                                    style="flex: 1; font-family: var(--font-mono); font-size: 0.875rem;"
+                                />
+                                <Button
+                                    id="btn-toggle-worker-key"
+                                    variant=ButtonVariant::Secondary
+                                    aria_label="Afficher ou masquer la clé worker"
+                                    disabled=true
+                                >
+                                    "Afficher"
+                                </Button>
+                                <Button
+                                    id="btn-copy-worker-key"
+                                    variant=ButtonVariant::Primary
+                                    aria_label="Copier la clé worker dans le presse-papier"
+                                    disabled=true
+                                >
+                                    "Copier la clé"
+                                </Button>
+                            </div>
+                            <p id="worker-key-hint" class="form-help">
+                                "Clé secrète requise par les conteneurs worker pour s'enregistrer et réclamer des baux."
                             </p>
                         </div>
-                        <div class="metric-card">
-                            <div class="metric-label">"Haute disponibilité"</div>
-                            <p class="card-caption">
-                                "La haute disponibilité reste optionnelle et nécessite un cadrage distinct ; aucun seuil de nœuds ne l'active automatiquement."
-                            </p>
+
+                        <div class="form-group">
+                            <label for="docker-worker-cmd" class="form-label">
+                                "Commande Docker de raccordement immédiat (HTTP)"
+                            </label>
+                            <pre class="code-block-wrapper"><code id="docker-worker-cmd">"docker run -d --name flux-worker -e COORDINATOR_URL=http://localhost:3000 -e WORKER_KEY=<WORKER_KEY> -v /chemin/data:/data flux-de-fichiers worker"</code></pre>
+                            <div style="margin-top: 0.75rem;">
+                                <Button
+                                    id="btn-copy-worker-cmd"
+                                    variant=ButtonVariant::Secondary
+                                    aria_label="Copier la commande Docker pour worker dans le presse-papier"
+                                >
+                                    "Copier la commande"
+                                </Button>
+                            </div>
                         </div>
-                    </div>
-                </section>
+                    </Card>
+                </div>
             </div>
         </div>
     }

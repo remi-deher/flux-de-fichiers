@@ -53,6 +53,76 @@ paths:
                     name: {type: string}
                     bytes: {type: integer, minimum: 1}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/libraries:
+    get:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: Lister les bibliothèques déclarées, triées par nom
+      responses:
+        '200':
+          description: Chaque bibliothèque porte au plus un flux et un chemin par nœud
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Library'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: Déclarer une bibliothèque
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LibraryWrite'}
+      responses:
+        '201':
+          description: Bibliothèque créée
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Library'}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/libraries/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: Lire une bibliothèque
+      responses:
+        '200':
+          description: Bibliothèque
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Library'}
+        default: {$ref: '#/components/responses/Error'}
+    put:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: Remplacer le nom, le flux et les chemins de nœuds
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LibraryWrite'}
+      responses:
+        '200':
+          description: Bibliothèque mise à jour
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Library'}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+    delete:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: Supprimer une bibliothèque et ses chemins de nœuds
+      responses:
+        '204': {description: Supprimée}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/jobs:
     get:
       security: [{AdminKey: []}, {WebSession: []}]
@@ -403,6 +473,34 @@ components:
         id: {type: string, format: uuid}
         name: {type: string}
         last_seen: {type: string, format: date-time}
+    LibraryNode:
+      type: object
+      required: [worker_id, local_path, access]
+      properties:
+        worker_id: {type: string, format: uuid}
+        local_path: {type: string, minLength: 1, maxLength: 512}
+        access: {type: string, enum: [read, read_write]}
+    LibraryWrite:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        flow_id: {type: [string, 'null']}
+        nodes:
+          type: array
+          items: {$ref: '#/components/schemas/LibraryNode'}
+    Library:
+      type: object
+      required: [id, name, flow_id, nodes, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        flow_id: {type: [string, 'null']}
+        nodes:
+          type: array
+          items: {$ref: '#/components/schemas/LibraryNode'}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
     Claim:
       type: object
       required: [job_id, lease_token, source_name, source_sha256, source_bytes]

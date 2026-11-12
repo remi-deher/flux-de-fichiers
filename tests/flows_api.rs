@@ -171,3 +171,54 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn webhook_block_honors_fail_on_error() -> anyhow::Result<()> {
+    use flux_de_fichiers::flows::{self, WebhookBlockConfig};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    tokio::spawn(async move {
+        if let Ok((mut socket, _)) = listener.accept().await {
+            let mut buf = [0u8; 1024];
+            let _ = socket.read(&mut buf).await;
+            let _ = socket
+                .write_all(b"HTTP/1.1 500 Nope\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                .await;
+        }
+    });
+    let ctx = flows::FlowContext::new(
+        uuid::Uuid::nil(),
+        "film.mkv".into(),
+        "film.mkv".into(),
+        serde_json::json!({}),
+    );
+    let client = reqwest::Client::new();
+    let mut config = WebhookBlockConfig {
+        url: format!("http://{addr}/hook"),
+        method: "POST".into(),
+        custom_headers: std::collections::HashMap::new(),
+        fail_on_error: true,
+    };
+    assert!(
+        flows::execute_webhook_block(&config, &ctx, &client)
+            .await
+            .is_err()
+    );
+
+    config.fail_on_error = false;
+    config.url = "http://127.0.0.1:9/hook".into();
+    assert!(
+        flows::execute_webhook_block(&config, &ctx, &client)
+            .await
+            .is_ok()
+    );
+    config.fail_on_error = true;
+    assert!(
+        flows::execute_webhook_block(&config, &ctx, &client)
+            .await
+            .is_err()
+    );
+    Ok(())
+}

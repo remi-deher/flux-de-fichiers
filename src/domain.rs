@@ -1,36 +1,51 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 use uuid::Uuid;
 
 pub const LEASE_SECONDS: i64 = 120;
 pub const MAX_ATTEMPTS: i32 = 3;
 
-/// Statut d'avancement d'un traitement de remuxage.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Statuts persistés par `jobs.status` (CHECK SQL : queued, running, succeeded, failed).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
+#[sqlx(rename_all = "snake_case")]
 pub enum JobStatus {
-    Pending,
+    Queued,
     Running,
     Succeeded,
     Failed,
-    Canceled,
 }
 
 impl JobStatus {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
-            Self::Pending => "pending",
+            Self::Queued => "queued",
             Self::Running => "running",
             Self::Succeeded => "succeeded",
             Self::Failed => "failed",
-            Self::Canceled => "canceled",
         }
     }
 }
 
-impl std::fmt::Display for JobStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
+impl fmt::Display for JobStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for JobStatus {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "queued" => Ok(Self::Queued),
+            "running" => Ok(Self::Running),
+            "succeeded" => Ok(Self::Succeeded),
+            "failed" => Ok(Self::Failed),
+            _ => Err(()),
+        }
     }
 }
 
@@ -48,7 +63,7 @@ pub enum JobEventType {
 }
 
 impl JobEventType {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::JobCreated => "job_created",
             Self::JobClaimed => "job_claimed",
@@ -61,26 +76,69 @@ impl JobEventType {
     }
 }
 
-/// Codes d'erreur stricts autorisés lors de l'échec d'un bail de traitement.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+impl fmt::Display for JobEventType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Codes d'erreur persistés dans `jobs.error_code`.
+///
+/// Seuls `remux_failed`, `source_integrity`, `transfer_failed` et
+/// `probe_unavailable` peuvent être déclarés par un worker. `lease_expired` et
+/// `missing_source_fingerprint` sont écrits par le coordinateur.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
+#[sqlx(rename_all = "snake_case")]
 pub enum JobErrorCode {
     RemuxFailed,
     SourceIntegrity,
     TransferFailed,
+    ProbeUnavailable,
+    LeaseExpired,
+    MissingSourceFingerprint,
 }
 
 impl JobErrorCode {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::RemuxFailed => "remux_failed",
             Self::SourceIntegrity => "source_integrity",
             Self::TransferFailed => "transfer_failed",
+            Self::ProbeUnavailable => "probe_unavailable",
+            Self::LeaseExpired => "lease_expired",
+            Self::MissingSourceFingerprint => "missing_source_fingerprint",
+        }
+    }
+
+    pub fn is_worker_reportable(self) -> bool {
+        matches!(
+            self,
+            Self::RemuxFailed
+                | Self::SourceIntegrity
+                | Self::TransferFailed
+                | Self::ProbeUnavailable
+        )
+    }
+
+    /// Traduit un libellé interne de traitement en code déclarable par un worker.
+    pub fn from_worker_label(label: &str) -> Self {
+        match label {
+            "source_integrity" => Self::SourceIntegrity,
+            "remux_failed" => Self::RemuxFailed,
+            "probe_unavailable" => Self::ProbeUnavailable,
+            _ => Self::TransferFailed,
         }
     }
 }
 
-impl std::str::FromStr for JobErrorCode {
+impl fmt::Display for JobErrorCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for JobErrorCode {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -88,6 +146,9 @@ impl std::str::FromStr for JobErrorCode {
             "remux_failed" => Ok(Self::RemuxFailed),
             "source_integrity" => Ok(Self::SourceIntegrity),
             "transfer_failed" => Ok(Self::TransferFailed),
+            "probe_unavailable" => Ok(Self::ProbeUnavailable),
+            "lease_expired" => Ok(Self::LeaseExpired),
+            "missing_source_fingerprint" => Ok(Self::MissingSourceFingerprint),
             _ => Err(()),
         }
     }
@@ -111,29 +172,29 @@ pub struct Job {
     pub warning: bool,
     pub target_worker_id: Option<Uuid>,
     pub worker_id: Option<Uuid>,
-    pub status: String,
+    pub status: JobStatus,
     pub attempts: i32,
     #[serde(skip_serializing)]
     pub lease_token: Option<Uuid>,
     pub leased_until: Option<DateTime<Utc>>,
     pub output_name: Option<String>,
-    pub error_code: Option<String>,
+    pub error_code: Option<JobErrorCode>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JobEvent {
-    pub event_type: String,
+    pub event_type: JobEventType,
     pub job_id: Uuid,
-    pub status: String,
+    pub status: JobStatus,
     pub timestamp: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error_code: Option<String>,
+    pub error_code: Option<JobErrorCode>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -143,6 +204,12 @@ pub struct Claim {
     pub source_name: String,
     pub source_sha256: String,
     pub source_bytes: i64,
+    /// Sonde exigée par le catalogue au moment du bail. Absente si aucun outil
+    /// `probe` n'est le choix actuel.
+    #[serde(default)]
+    pub probe_tool_id: Option<String>,
+    #[serde(default)]
+    pub probe_version: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -201,4 +268,146 @@ pub struct UpdateFlowRequest {
     pub file_mask: String,
     pub is_default: bool,
     pub definition: String,
+}
+
+pub const LIBRARY_NAME_MAX: usize = 80;
+pub const LIBRARY_PATH_MAX: usize = 512;
+
+/// Accès d'un nœud au dossier de la bibliothèque.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(rename_all = "snake_case")]
+pub enum LibraryAccess {
+    Read,
+    ReadWrite,
+}
+
+/// Chemin local d'une bibliothèque sur un nœud.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LibraryNode {
+    pub worker_id: Uuid,
+    pub local_path: String,
+    pub access: LibraryAccess,
+}
+
+/// Bibliothèque déclarée : un nom, un flux, des nœuds.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Library {
+    pub id: Uuid,
+    pub name: String,
+    pub flow_id: Option<String>,
+    pub nodes: Vec<LibraryNode>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Création ou remplacement d'une bibliothèque.
+#[derive(Debug, Deserialize)]
+pub struct LibraryWrite {
+    pub name: String,
+    #[serde(default)]
+    pub flow_id: Option<String>,
+    #[serde(default)]
+    pub nodes: Vec<LibraryNode>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn job_status_matches_check_constraint() -> Result<(), serde_json::Error> {
+        let cases = [
+            (JobStatus::Queued, "queued"),
+            (JobStatus::Running, "running"),
+            (JobStatus::Succeeded, "succeeded"),
+            (JobStatus::Failed, "failed"),
+        ];
+        for (status, label) in cases {
+            assert_eq!(status.as_str(), label);
+            assert_eq!(status.to_string(), label);
+            assert_eq!(label.parse::<JobStatus>(), Ok(status));
+            let json = serde_json::to_string(&status)?;
+            assert_eq!(json, format!("\"{label}\""));
+            assert_eq!(serde_json::from_str::<JobStatus>(&json)?, status);
+        }
+        assert!("pending".parse::<JobStatus>().is_err());
+        assert!("canceled".parse::<JobStatus>().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn job_event_type_wire_labels() -> Result<(), serde_json::Error> {
+        let cases = [
+            (JobEventType::JobCreated, "job_created"),
+            (JobEventType::JobClaimed, "job_claimed"),
+            (JobEventType::JobHeartbeat, "job_heartbeat"),
+            (JobEventType::JobProgress, "job_progress"),
+            (JobEventType::JobSucceeded, "job_succeeded"),
+            (JobEventType::JobFailed, "job_failed"),
+            (JobEventType::JobCanceled, "job_canceled"),
+        ];
+        for (event_type, label) in cases {
+            assert_eq!(event_type.as_str(), label);
+            assert_eq!(
+                serde_json::from_str::<JobEventType>(&serde_json::to_string(&event_type)?)?,
+                event_type
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn job_error_code_roundtrip_and_worker_policy() -> Result<(), serde_json::Error> {
+        let cases = [
+            (JobErrorCode::RemuxFailed, "remux_failed", true),
+            (JobErrorCode::SourceIntegrity, "source_integrity", true),
+            (JobErrorCode::TransferFailed, "transfer_failed", true),
+            (JobErrorCode::ProbeUnavailable, "probe_unavailable", true),
+            (JobErrorCode::LeaseExpired, "lease_expired", false),
+            (
+                JobErrorCode::MissingSourceFingerprint,
+                "missing_source_fingerprint",
+                false,
+            ),
+        ];
+        for (code, label, reportable) in cases {
+            assert_eq!(code.as_str(), label);
+            assert_eq!(code.to_string(), label);
+            assert_eq!(label.parse::<JobErrorCode>(), Ok(code));
+            assert_eq!(code.is_worker_reportable(), reportable);
+            assert_eq!(
+                serde_json::from_str::<JobErrorCode>(&serde_json::to_string(&code)?)?,
+                code
+            );
+        }
+        assert!("nope".parse::<JobErrorCode>().is_err());
+        assert_eq!(
+            JobErrorCode::from_worker_label("source_integrity"),
+            JobErrorCode::SourceIntegrity
+        );
+        assert_eq!(
+            JobErrorCode::from_worker_label("remux_failed"),
+            JobErrorCode::RemuxFailed
+        );
+        assert_eq!(
+            JobErrorCode::from_worker_label("anything-else"),
+            JobErrorCode::TransferFailed
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn library_access_serializes_snake_case() -> Result<(), serde_json::Error> {
+        assert_eq!(serde_json::to_string(&LibraryAccess::Read)?, "\"read\"");
+        assert_eq!(
+            serde_json::to_string(&LibraryAccess::ReadWrite)?,
+            "\"read_write\""
+        );
+        assert_eq!(
+            serde_json::from_str::<LibraryAccess>("\"read_write\"")?,
+            LibraryAccess::ReadWrite
+        );
+        Ok(())
+    }
 }

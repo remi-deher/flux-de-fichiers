@@ -3,27 +3,17 @@
 pub const SCRIPT: &str = r###"
 // --- Synchronisation globale ---
   async function refreshAll() {
-    const refreshBtn = el('refresh-all-btn');
-    if (refreshBtn) {
-      refreshBtn.disabled = true;
-      refreshBtn.textContent = 'Actualisation…';
-    }
-
     await checkHealth();
     await checkSession();
     await Promise.allSettled([
       loadFiles(),
+      loadLibraries(),
       loadJobs(),
       loadWorkers(),
       loadSystemConfig(),
       loadToolsStatus(),
       loadFlows()
     ]);
-
-    if (refreshBtn) {
-      refreshBtn.disabled = false;
-      refreshBtn.textContent = 'Actualiser';
-    }
   }
 
 
@@ -31,9 +21,41 @@ pub const SCRIPT: &str = r###"
   function initListeners() {
     setupTabs();
     setupTheme();
+    updateSearchContext(activeTab);
 
-    const refreshBtn = el('refresh-all-btn');
-    if (refreshBtn) refreshBtn.addEventListener('click', refreshAll);
+    // Initialisation de la barre de recherche contextuelle globale
+    const globalSearchInput = el('global-search-input');
+
+    if (globalSearchInput) {
+      globalSearchInput.addEventListener('input', (e) => {
+        applyContextualSearch(e.target.value);
+      });
+
+      globalSearchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          globalSearchInput.value = '';
+          applyContextualSearch('');
+          globalSearchInput.blur();
+        }
+      });
+    }
+
+    // Raccourci global clavier Cmd+K / Ctrl+K : réveille la barre et focus direct sur la recherche
+    window.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        const topbar = el('app-topbar');
+        if (topbar) topbar.classList.remove('is-hidden');
+        document.querySelectorAll('.page-subnav').forEach(s => s.classList.remove('is-hidden'));
+        if (globalSearchInput) {
+          globalSearchInput.focus();
+          globalSearchInput.select();
+        }
+      }
+    });
+
+    setupChromeAutoHide();
 
     // Raccourcis d'action du tableau de bord
     const gotoFilesBtn = el('quick-goto-files-btn');
@@ -61,26 +83,17 @@ pub const SCRIPT: &str = r###"
     const logoutBtn = el('admin-key-logout-btn');
     if (logoutBtn) logoutBtn.addEventListener('click', logout);
 
-    // Recherche de fichiers
-    const filesSearch = el('files-search-input');
-    if (filesSearch) {
-      filesSearch.addEventListener('input', renderFilesTable);
-    }
+    if (typeof setupLibraries === 'function') setupLibraries();
 
-    // Dialogue confirmation remux
-    const closeDialogX = el('confirm-dialog-close-x');
-    if (closeDialogX) closeDialogX.addEventListener('click', closeConfirmRemuxDialog);
-
-    const cancelDialogBtn = el('confirm-dialog-cancel-btn');
-    if (cancelDialogBtn) cancelDialogBtn.addEventListener('click', closeConfirmRemuxDialog);
-
-    const submitRemuxBtn = el('confirm-dialog-submit-btn');
-    if (submitRemuxBtn) submitRemuxBtn.addEventListener('click', submitRemuxJob);
-
-    // Recherche de tâches
+    // Recherche de tâches (synchronisation bidirectionnelle)
     const jobsSearch = el('jobs-search-input');
     if (jobsSearch) {
-      jobsSearch.addEventListener('input', renderJobsTable);
+      jobsSearch.addEventListener('input', () => {
+        if (globalSearchInput && globalSearchInput.value !== jobsSearch.value) {
+          globalSearchInput.value = jobsSearch.value;
+        }
+        renderJobsTable();
+      });
     }
 
     // Filtres de statut de tâches
@@ -90,8 +103,28 @@ pub const SCRIPT: &str = r###"
         btn.setAttribute('aria-pressed', 'true');
         activeJobFilter = btn.getAttribute('data-filter') || 'all';
         renderJobsTable();
+        updateFilterCount();
       });
     });
+
+    const filterBtn = el('search-filter-btn');
+    if (filterBtn) filterBtn.addEventListener('click', toggleFilterSheet);
+    const filterClose = el('filter-sheet-close');
+    if (filterClose) filterClose.addEventListener('click', closeFilterSheet);
+    const filterClear = el('filter-sheet-clear');
+    if (filterClear) {
+      filterClear.addEventListener('click', () => {
+        const all = document.querySelector('#filter-sheet .filter-chip[data-filter="all"]');
+        if (all) all.click();
+      });
+    }
+    const searchField = el('global-search-input');
+    if (searchField) {
+      searchField.addEventListener('focusin', () => {
+        if (document.body.hasAttribute('data-filter-sheet')) closeFilterSheet();
+      });
+    }
+    syncSearchCapsule(activeTab);
 
     // Configuration du Gestionnaire de Flux
     setupFlowsPanel();
@@ -109,20 +142,82 @@ pub const SCRIPT: &str = r###"
     const jobDialogCloseBtn = el('job-dialog-close-btn');
     if (jobDialogCloseBtn) jobDialogCloseBtn.addEventListener('click', closeJobDetailDialog);
 
-    // Fermeture avec Échap pour les modales
+    document.addEventListener('click', (event) => {
+      const tab = event.target.closest('.inspection-drawer__tab');
+      if (tab) {
+        const drawer = tab.closest('.inspection-drawer');
+        if (drawer) selectInspectionTab(drawer, tab);
+        return;
+      }
+      const closer = event.target.closest('[data-inspection-close]');
+      if (!closer) return;
+      const drawer = closer.closest('.inspection-drawer');
+      if (drawer) closeInspectionDrawer(drawer);
+    });
+
+    // Fermeture avec Échap pour les modales, puis pour le tiroir d'inspection
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
+        const modalOpen = Boolean(document.querySelector('dialog[open]'));
         closeConfirmRemuxDialog();
         closeJobDetailDialog();
         const wizard = el('flow-wizard-dialog');
         if (wizard && wizard.open) {
           wizard.close();
         }
+        if (!modalOpen) {
+          document.querySelectorAll('.inspection-drawer.is-open').forEach(closeInspectionDrawer);
+        }
       }
     });
 
-    // Polling régulier de santé toutes les 30 s
-    setInterval(checkHealth, 30000);
+    // Synchronisation d'arrière-plan périodique (sonde de santé et relais si déconnexion SSE)
+    setInterval(() => {
+      checkHealth();
+      if (!jobsEventSource || jobsEventSource.readyState !== 1) {
+        loadJobs();
+        loadWorkers();
+      }
+    }, 15000);
+  }
+
+  // --- Auto-masquage au défilement inspiré de Watchdeck (useChromeAutoHide) ---
+  function setupChromeAutoHide() {
+    const topbar = el('app-topbar');
+    if (!topbar) return;
+
+    const TOP_ZONE_PX = 24;
+    const HIDE_AFTER_PX = 96;
+    const HIDE_DELTA_PX = 7;
+    const SHOW_DELTA_PX = -5;
+
+    let lastScrollY = window.scrollY || 0;
+
+    window.addEventListener('scroll', () => {
+      const current = Math.max(0, window.scrollY);
+      const delta = current - lastScrollY;
+      const subnavs = document.querySelectorAll('.page-subnav');
+
+      // Élévation : renforce l'ombre dès qu'on défile
+      if (current >= TOP_ZONE_PX) {
+        topbar.classList.add('is-elevated');
+      } else {
+        topbar.classList.remove('is-elevated');
+      }
+
+      // Si le champ de recherche a le focus, on garde la barre visible
+      const sheetOpen = document.body.hasAttribute('data-filter-sheet');
+      const isFocused = topbar.contains(document.activeElement);
+      if (sheetOpen || isFocused || current < TOP_ZONE_PX || delta < SHOW_DELTA_PX) {
+        topbar.classList.remove('is-hidden');
+        subnavs.forEach(s => s.classList.remove('is-hidden'));
+      } else if (delta > HIDE_DELTA_PX && current > HIDE_AFTER_PX) {
+        topbar.classList.add('is-hidden');
+        subnavs.forEach(s => s.classList.add('is-hidden'));
+      }
+
+      lastScrollY = current;
+    }, { passive: true });
   }
 
   // Démarrage

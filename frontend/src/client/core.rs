@@ -10,7 +10,6 @@ pub const SCRIPT: &str = r###"
   let cachedJobs = [];
   let cachedWorkers = [];
   let activeJobFilter = 'all';
-  let selectedFileForRemux = null;
   let sessionMode = 'none'; // 'none' | 'memory_key' | 'cookie_session'
   let manualLogout = false;
 
@@ -28,14 +27,6 @@ pub const SCRIPT: &str = r###"
     }, 6000);
   }
 
-  function formatBytes(bytes) {
-    if (bytes === 0 || !bytes) return '0 o';
-    const k = 1024;
-    const sizes = ['o', 'Kio', 'Mio', 'Gio', 'Tio'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  }
-
   function formatDate(isoStr) {
     if (!isoStr) return '—';
     try {
@@ -49,32 +40,12 @@ pub const SCRIPT: &str = r###"
     }
   }
 
-  function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
   function renderStatusPill(label, variant = 'info', options = {}) {
     const dot = options.noDot ? '' : `<span class="status-dot${options.pulse ? ' pulse' : ''}"></span>`;
     const extraClass = options.extraClass ? ' ' + options.extraClass : '';
     const titleAttr = options.title ? ` title="${escapeHtml(options.title)}"` : '';
     return `<span class="status-pill ${variant}${extraClass}"${titleAttr}>${dot}${label}</span>`;
   }
-
-  function jobStatusClass(status) {
-    switch (status) {
-      case 'succeeded': return 'succeeded';
-      case 'failed': return 'failed';
-      case 'running': return 'running';
-      default: return 'queued';
-    }
-  }
-
 
   // --- Requêtes API authentifiées ---
   async function apiFetch(endpoint, options = {}) {
@@ -119,31 +90,102 @@ pub const SCRIPT: &str = r###"
     return res;
   }
 
+  // --- Suivi du nombre de workers en ligne (central inclus) ---
+  let isCoordinatorOnline = false;
+  let remoteActiveWorkersCount = 0;
+
+  function updateHeaderWorkersCount(isOnline, remoteCount) {
+    if (typeof isOnline === 'boolean') isCoordinatorOnline = isOnline;
+    if (typeof remoteCount === 'number') remoteActiveWorkersCount = remoteCount;
+
+    const pill = el('header-workers-pill');
+    const label = el('header-workers-count-text');
+    if (!pill || !label) return;
+
+    if (!isCoordinatorOnline) {
+      pill.className = 'status-pill offline';
+      pill.setAttribute('aria-label', 'Coordinateur et workers hors ligne');
+      pill.setAttribute('title', 'Le coordinateur central est inaccessible');
+      label.textContent = 'Hors ligne';
+      return;
+    }
+
+    const total = 1 + remoteActiveWorkersCount;
+    pill.className = 'status-pill online';
+    const text = total === 1 ? '1 worker en ligne' : `${total} workers en ligne`;
+    pill.setAttribute('aria-label', `${text} (coordinateur central inclus)`);
+    pill.setAttribute('title', `${text} (1 coordinateur central autonome + ${remoteActiveWorkersCount} distant(s))`);
+    label.textContent = text;
+  }
+
+  // --- Calcul des statistiques pour le Hub d'accueil (Vue d'ensemble) ---
+  function updateOverviewStats() {
+    // 1. Calcul du volume total des fichiers gérés
+    const totalBytes = cachedFiles.reduce((acc, f) => acc + (f.size || 0), 0);
+    const metricStorage = el('metric-storage-volume');
+    if (metricStorage) metricStorage.textContent = formatBytes(totalBytes);
+
+    // 2. Calcul du taux de succès des tâches
+    const finished = cachedJobs.filter(j => j.status === 'succeeded' || j.status === 'failed');
+    const succeeded = cachedJobs.filter(j => j.status === 'succeeded').length;
+    const rate = finished.length > 0 ? Math.round((succeeded / finished.length) * 100) : 100;
+    const metricSuccess = el('metric-success-rate');
+    if (metricSuccess) metricSuccess.textContent = `${rate}%`;
+
+    // 3. Distribution des formats de conteneurs médias
+    const totalFiles = cachedFiles.length;
+    const totalLabel = el('media-formats-total-label');
+    if (totalLabel) {
+      totalLabel.textContent = `${totalFiles} fichier${totalFiles > 1 ? 's' : ''}`;
+    }
+
+    const bar = el('media-formats-bar');
+    const legend = el('media-formats-legend');
+    if (totalFiles > 0 && bar && legend) {
+      let mkvCount = 0;
+      let mp4Count = 0;
+      let otherCount = 0;
+
+      cachedFiles.forEach(f => {
+        const name = (f.name || '').toLowerCase();
+        if (name.endsWith('.mkv')) mkvCount++;
+        else if (name.endsWith('.mp4') || name.endsWith('.m4v')) mp4Count++;
+        else otherCount++;
+      });
+
+      const mkvPct = Math.round((mkvCount / totalFiles) * 100);
+      const mp4Pct = Math.round((mp4Count / totalFiles) * 100);
+      const otherPct = Math.max(0, 100 - mkvPct - mp4Pct);
+
+      bar.innerHTML = `
+        <div class="segment-fill mkv" style="width: ${mkvPct}%;" title="MKV: ${mkvCount} (${mkvPct}%)"></div>
+        <div class="segment-fill mp4" style="width: ${mp4Pct}%;" title="MP4: ${mp4Count} (${mp4Pct}%)"></div>
+        <div class="segment-fill other" style="width: ${otherPct}%;" title="Autres: ${otherCount} (${otherPct}%)"></div>
+      `;
+
+      legend.innerHTML = `
+        <span class="legend-item"><span class="legend-dot mkv"></span>MKV: ${mkvPct}% (${mkvCount})</span>
+        <span class="legend-item"><span class="legend-dot mp4"></span>MP4: ${mp4Pct}% (${mp4Count})</span>
+        <span class="legend-item"><span class="legend-dot other"></span>Autres: ${otherPct}% (${otherCount})</span>
+      `;
+    }
+  }
+
   // --- Vérification de santé ---
   async function checkHealth() {
-    const pill = el('health-status-pill');
-    const label = el('health-status-text');
     const metricHealth = el('metric-health');
 
     try {
       const res = await fetch('/health');
       if (res.status === 204 || res.ok) {
-        if (pill) {
-          pill.className = 'status-pill online';
-          pill.setAttribute('aria-label', 'Coordinateur joignable');
-        }
-        if (label) label.textContent = 'Coordinateur joignable';
+        updateHeaderWorkersCount(true);
         if (metricHealth) metricHealth.textContent = 'Joignable';
         return true;
       } else {
         throw new Error('Code HTTP ' + res.status);
       }
     } catch (e) {
-      if (pill) {
-        pill.className = 'status-pill offline';
-        pill.setAttribute('aria-label', 'Coordinateur inaccessible');
-      }
-      if (label) label.textContent = 'Inaccessible';
+      updateHeaderWorkersCount(false, 0);
       if (metricHealth) metricHealth.textContent = 'Inaccessible';
       return false;
     }

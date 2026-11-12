@@ -44,6 +44,7 @@ async fn protected_routes_reject_missing_keys_before_accessing_resources() -> an
         "/api/v1/jobs/events",
         "/api/v1/flows",
         "/api/v1/files",
+        "/api/v1/libraries",
         "/api/v1/plugins",
         "/api/v1/tools",
         "/api/v1/config",

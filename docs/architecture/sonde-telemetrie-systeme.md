@@ -4,7 +4,7 @@ Date : 9 novembre 2026. Statut : spécification d'architecture technique (ADR 00
 
 ## 1. Objectifs et rôle architectural
 
-La **sonde système de télémétrie** (`tool.internal.telemetry`) est l'unique outil interne intégré nativement dans le binaire applicatif `flux-de-fichiers` (coordinateur central et agents workers).
+La **sonde système de télémétrie** (`app.internal.telemetry`) est l'unique outil interne intégré nativement dans le binaire applicatif `flux-de-fichiers` (coordinateur central et agents workers).
 
 Ses responsabilités sont les suivantes :
 1. **Mesure matérielle locale** : relever périodiquement et sans impact de performance l'état des ressources matérielles du nœud : processeur (CPU), mémoire vive (RAM), accélérateurs graphiques et de transcodage (GPU / DRM / NVENC / QuickSync) et stockage local (`DATA_DIR`, `WORK_DIR`, `CACHE_DIR`).

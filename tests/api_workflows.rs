@@ -7,7 +7,7 @@ use axum::{
 use flux_de_fichiers::{
     api::{AppState, router},
     config::Config,
-    domain::{Claim, Failure, Job, LeaseRequest, Worker},
+    domain::{Claim, Failure, Job, JobErrorCode, JobStatus, LeaseRequest, Worker},
     storage,
 };
 use sqlx::sqlite::SqlitePoolOptions;
@@ -73,7 +73,7 @@ async fn test_job_and_worker_workflow() -> anyhow::Result<()> {
     let bytes = to_bytes(resp.into_body(), 16 * 1024).await?;
     let job: Job = serde_json::from_slice(&bytes)?;
     assert_eq!(job.source_name, "film.mkv");
-    assert_eq!(job.status, "queued");
+    assert_eq!(job.status, JobStatus::Queued);
 
     // 2. Enregistrement d'un worker
     let register_payload = serde_json::json!({
@@ -155,8 +155,8 @@ async fn test_job_and_worker_workflow() -> anyhow::Result<()> {
     assert_eq!(resp.status(), StatusCode::OK);
     let bytes = to_bytes(resp.into_body(), 16 * 1024).await?;
     let updated_job: Job = serde_json::from_slice(&bytes)?;
-    assert_eq!(updated_job.status, "failed");
-    assert_eq!(updated_job.error_code.as_deref(), Some("source_integrity"));
+    assert_eq!(updated_job.status, JobStatus::Failed);
+    assert_eq!(updated_job.error_code, Some(JobErrorCode::SourceIntegrity));
 
     Ok(())
 }
@@ -255,5 +255,72 @@ async fn test_storage_list_inputs_behavior() -> anyhow::Result<()> {
     assert_eq!(inputs[0].name, "film_vacances.mkv");
     assert_eq!(inputs[0].bytes, 1024);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn json_routes_reject_oversized_bodies_and_transfers_do_not() -> anyhow::Result<()> {
+    use flux_de_fichiers::api::{
+        JSON_API_TIMEOUT, JSON_BODY_LIMIT, TRANSFER_TIMEOUT, is_long_running_route,
+    };
+
+    assert!(TRANSFER_TIMEOUT > JSON_API_TIMEOUT);
+    assert_eq!(JSON_BODY_LIMIT, 16 * 1024);
+    assert!(is_long_running_route("/api/v1/jobs/events"));
+    assert!(is_long_running_route(
+        "/api/v1/jobs/11111111-1111-1111-1111-111111111111/result"
+    ));
+    assert!(is_long_running_route(
+        "/api/v1/jobs/11111111-1111-1111-1111-111111111111/source"
+    ));
+    assert!(is_long_running_route(
+        "/api/v1/jobs/11111111-1111-1111-1111-111111111111/output"
+    ));
+    assert!(!is_long_running_route("/health"));
+    assert!(!is_long_running_route("/api/v1/jobs"));
+    assert!(!is_long_running_route(
+        "/api/v1/jobs/not-a-transfer/failure"
+    ));
+
+    let (app, _dir) = test_app().await?;
+    let oversized = "x".repeat(JSON_BODY_LIMIT + 1);
+    let req = Request::builder()
+        .uri("/api/v1/workers")
+        .method("POST")
+        .header("content-type", "application/json")
+        .header("authorization", "Bearer test-worker-key")
+        .body(Body::from(oversized))?;
+    let resp = app.clone().oneshot(req).await?;
+    assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+    let req = Request::builder()
+        .uri("/api/v1/jobs/11111111-1111-1111-1111-111111111111/result")
+        .method("PUT")
+        .body(Body::from("x".repeat(JSON_BODY_LIMIT + 1)))?;
+    let resp = app.oneshot(req).await?;
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn failure_rejects_unknown_and_internal_error_codes() -> anyhow::Result<()> {
+    let (app, _dir) = test_app().await?;
+    for code in ["nope", "lease_expired", "missing_source_fingerprint"] {
+        let req = Request::builder()
+            .uri("/api/v1/jobs/11111111-1111-1111-1111-111111111111/failure")
+            .method("POST")
+            .header("authorization", "Bearer test-worker-key")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::json!({
+                    "worker_id": "22222222-2222-2222-2222-222222222222",
+                    "lease_token": "33333333-3333-3333-3333-333333333333",
+                    "error_code": code
+                })
+                .to_string(),
+            ))?;
+        let resp = app.clone().oneshot(req).await?;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{code}");
+    }
     Ok(())
 }

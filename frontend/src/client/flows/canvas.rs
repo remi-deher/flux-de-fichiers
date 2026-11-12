@@ -1,180 +1,10 @@
-//! Éditeur visuel de flux et canvas.
-
 pub const SCRIPT: &str = r###"
-  // --- Concepteur et Gestionnaire de Flux (Flows) type Zapier / FileFlows ---
-  let cachedFlows = [];
-
-  async function loadFlows() {
-    const container = el('flows-grid-container');
-    const countAll = el('flows-count-all');
-    const countVideo = el('flows-count-video');
-    const countOther = el('flows-count-other');
-
-    try {
-      const res = await apiFetch('/api/v1/flows');
-      const data = await res.json();
-      cachedFlows = Array.isArray(data) ? data : [];
-
-      if (countAll) countAll.textContent = String(cachedFlows.length);
-      const videoCount = cachedFlows.filter(f => {
-        const name = (f.name || '').toLowerCase();
-        return name.includes('mkv') || name.includes('vidéo') || name.includes('mp4') || name.includes('hevc');
-      }).length;
-      if (countVideo) countVideo.textContent = String(videoCount);
-      if (countOther) countOther.textContent = String(cachedFlows.length - videoCount);
-
-      renderFlowsGrid();
-    } catch {
-      if (container && cachedFlows.length === 0) {
-        renderFlowsGrid();
-      }
-    }
-  }
-
-  function renderFlowsGrid() {
-    const container = el('flows-grid-container');
-    if (!container) return;
-
-    if (cachedFlows.length === 0) {
-      container.innerHTML = `
-        <div class="empty-state-panel" id="flows-empty-state" style="grid-column: 1 / -1; text-align: center; padding: 2.5rem 1rem; border: 1px dashed var(--border-color); border-radius: var(--radius-md); background: var(--bg-card);">
-          <div style="font-size: 2rem; margin-bottom: 0.5rem;" aria-hidden="true">⚡</div>
-          <h3 style="margin: 0 0 0.5rem 0; font-size: 1.125rem; font-weight: 600;">Aucun flux de traitement installé</h3>
-          <p style="margin: 0 auto 1.25rem auto; max-width: 500px; font-size: 0.875rem; color: var(--text-muted);">
-            L'application démarre en moteur nu (Bare Core). Importez des flux certifiés depuis le catalogue de plugins ou concevez un pipeline sur-mesure.
-          </p>
-          <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
-            <button type="button" id="btn-empty-import-flow" class="btn btn-secondary">
-              🔌 Consulter le catalogue de plugins
-            </button>
-            <button type="button" id="btn-empty-create-flow" class="btn btn-primary">
-              + Créer un flux (Assistant)
-            </button>
-          </div>
-        </div>
-      `;
-      const btnImport = el('btn-empty-import-flow');
-      if (btnImport) btnImport.addEventListener('click', () => switchTab('plugins'));
-      const btnCreate = el('btn-empty-create-flow');
-      if (btnCreate) {
-        const wizard = el('flow-wizard-dialog');
-        if (wizard) btnCreate.addEventListener('click', () => wizard.showModal());
-      }
-      return;
-    }
-
-    container.innerHTML = cachedFlows.map(flow => {
-      const safeId = escapeHtml(flow.id);
-      const safeName = escapeHtml(flow.name);
-      const safeDesc = escapeHtml(flow.description || 'Flux de traitement modulaire');
-      const isDefault = flow.is_default;
-      const nameLower = flow.name.toLowerCase();
-      const isVideo = nameLower.includes('mkv') || nameLower.includes('mp4') || nameLower.includes('vidéo') || nameLower.includes('hevc');
-      const flowType = isVideo ? 'video' : 'other';
-
-      let nodes = [];
-      try {
-        const def = typeof flow.definition === 'string' ? JSON.parse(flow.definition) : flow.definition;
-        nodes = def.nodes || [];
-      } catch {}
-
-      const pipelineHtml = nodes.slice(0, 4).map((n, idx) => `
-        <div class="flow-block-step">
-          <span class="step-badge">${idx + 1}</span>
-          <span class="step-name">${escapeHtml(n.name || n.type)}</span>
-        </div>
-      `).join('<span class="flow-arrow" aria-hidden="true">➔</span>');
-
-      return `
-        <article class="flow-card ${isDefault ? 'active-flow' : ''}" data-flow-id="${safeId}" data-flow-type="${flowType}">
-          <div class="flow-card-header">
-            <div>
-              <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-                <h3 class="flow-card-title">${safeName}</h3>
-                ${isDefault ? '<span class="status-pill success"><span class="status-dot"></span>Défaut</span>' : ''}
-                <span class="status-pill info">${flowType === 'video' ? '🎬 Vidéo' : '⚙️ Autre'}</span>
-              </div>
-              <p class="flow-card-desc">${safeDesc}</p>
-            </div>
-          </div>
-          <div class="flow-pipeline-container" aria-label="Chaîne des blocs du flux">
-            <div class="flow-pipeline">
-              ${pipelineHtml || '<span style="font-size: 0.8125rem; color: var(--text-dim);">Pipeline vide</span>'}
-            </div>
-          </div>
-          <div class="flow-card-footer">
-            <span class="flow-pattern-tag">${escapeHtml(flow.file_mask || 'Filtre automatique')}</span>
-            <div style="display: flex; gap: 0.5rem;">
-              <button type="button" class="btn btn-primary btn-sm open-canvas-btn" data-flow="${safeId}">
-                Ouvrir l'éditeur visuel (Canvas)
-              </button>
-            </div>
-          </div>
-        </article>
-      `;
-    }).join('');
-
-    container.querySelectorAll('.open-canvas-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const flowId = btn.getAttribute('data-flow');
-        const card = btn.closest('.flow-card');
-        const flowTitle = card ? (card.querySelector('.flow-card-title')?.textContent || flowId) : flowId;
-        openCanvas(flowId, flowTitle);
-      });
-    });
-  }
-
-  function setupFlowsPanel() {
-    const libraryView = el('flows-library-view');
-    const canvasView = el('flows-canvas-view');
-    const backToLibraryBtn = el('btn-back-to-library');
-    const openWizardBtn = el('btn-open-flow-wizard');
-    const wizardDialog = el('flow-wizard-dialog');
-    const cancelWizardBtn = el('wizard-dialog-cancel-btn');
-    const closeWizardX = el('wizard-dialog-close-btn');
-    const generateWizardBtn = el('wizard-generate-flow-btn');
-    const svgLines = el('canvas-svg-lines');
-    const nodesContainer = el('canvas-nodes-container');
-
-    let currentSelectedTemplate = 'smart-hevc';
-    let activeSimulation = null; // null | 'true' | 'false' | 'fallback'
-    let activeCanvasFlowId = 'flow.default.mkv';
-
-    // Filtrage des flux par type de média (Vidéo, Audio, Image, Système)
-    document.querySelectorAll('.flow-type-chip').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.flow-type-chip').forEach(b => {
-          b.classList.remove('active');
-          b.setAttribute('aria-pressed', 'false');
-        });
-        btn.classList.add('active');
-        btn.setAttribute('aria-pressed', 'true');
-        const filter = btn.getAttribute('data-flow-filter') || 'all';
-
-        document.querySelectorAll('.flow-card[data-flow-type]').forEach(card => {
-          const cardType = card.getAttribute('data-flow-type');
-          if (filter === 'all' || cardType === filter) {
-            card.style.display = '';
-          } else {
-            card.style.display = 'none';
-          }
-        });
-      });
-    });
-
-    // 1. Navigation entre Bibliothèque et Canvas
     function openCanvas(flowId, flowTitle) {
       activeCanvasFlowId = flowId;
-      const tabCanvas = el('btn-subtab-flows-canvas');
-      if (tabCanvas) {
-        switchSubtab(tabCanvas);
-      }
       if (libraryView) libraryView.style.display = 'none';
       if (canvasView) canvasView.style.display = 'block';
-      const subtabCanvas = el('subtab-flows-canvas');
-      if (subtabCanvas) subtabCanvas.removeAttribute('hidden');
-      const subtabInstalled = el('subtab-flows-installed');
-      if (subtabInstalled) subtabInstalled.setAttribute('hidden', '');
+      const sectionTitle = el('current-section-title');
+      if (sectionTitle) sectionTitle.textContent = 'Éditeur de flux';
       const titleEl = el('canvas-flow-title');
       if (titleEl) titleEl.textContent = `Éditeur visuel : ${flowTitle}`;
 
@@ -272,28 +102,26 @@ pub const SCRIPT: &str = r###"
     }
 
     function closeCanvas() {
-      const tabInstalled = el('btn-subtab-flows-installed');
-      if (tabInstalled) {
-        switchSubtab(tabInstalled);
-      }
       if (canvasView) canvasView.style.display = 'none';
       if (libraryView) libraryView.style.display = 'block';
-      const subtabCanvas = el('subtab-flows-canvas');
-      if (subtabCanvas) subtabCanvas.setAttribute('hidden', '');
-      const subtabInstalled = el('subtab-flows-installed');
-      if (subtabInstalled) subtabInstalled.removeAttribute('hidden');
+      const sectionTitle = el('current-section-title');
+      if (sectionTitle && TAB_TITLES.flows) sectionTitle.textContent = TAB_TITLES.flows;
     }
 
     if (backToLibraryBtn) backToLibraryBtn.addEventListener('click', closeCanvas);
 
-    document.querySelectorAll('.open-canvas-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const card = btn.closest('.flow-card');
-        const title = card ? card.querySelector('.flow-card-title').textContent : 'Flux';
-        const flowId = btn.getAttribute('data-flow') || 'flow';
+    const editFlowBtn = el('flows-fact-action');
+    if (editFlowBtn) {
+      editFlowBtn.addEventListener('click', () => {
+        const flowId = editFlowBtn.getAttribute('data-flow');
+        const title = editFlowBtn.getAttribute('data-flow-title') || 'Flux';
+        if (!flowId) {
+          showNotice('Ouvrez un flux avant de l\'éditer.', 'info');
+          return;
+        }
         openCanvas(flowId, title);
       });
-    });
+    }
 
     // Écoute du changement d'onglet via subnav
     document.addEventListener('flux:subnav-change', (e) => {
@@ -724,125 +552,4 @@ pub const SCRIPT: &str = r###"
     });
 
     // 7. Banc d'essai de simulation interactive ADR 0008
-    function resetSimulation() {
-      activeSimulation = null;
-      document.querySelectorAll('.sim-btn').forEach(b => {
-        b.classList.remove('active-true', 'active-false', 'active-fallback');
-      });
-      if (nodesContainer) {
-        nodesContainer.querySelectorAll('.canvas-node').forEach(n => {
-          n.classList.remove('sim-active', 'sim-active-true', 'sim-active-false', 'sim-active-fallback', 'sim-dimmed');
-        });
-      }
-      drawCanvasLines();
-    }
-
-    document.querySelectorAll('.sim-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const simType = btn.getAttribute('data-sim');
-        if (simType === 'reset') {
-          resetSimulation();
-          showNotice('Simulation réinitialisée', 'info');
-          return;
-        }
-
-        resetSimulation();
-        activeSimulation = simType;
-
-        if (simType === 'true') {
-          btn.classList.add('active-true');
-          const n1 = el('node-1');
-          const n2 = el('node-2');
-          const n3 = el('node-3');
-          const n4 = el('node-4');
-          const n5 = el('node-5');
-
-          if (n1) n1.classList.add('sim-active');
-          if (n2) n2.classList.add('sim-active', 'sim-active-true');
-          if (n3) n3.classList.add('sim-active', 'sim-active-true');
-          if (n4) n4.classList.add('sim-dimmed');
-          if (n5) n5.classList.add('sim-active');
-
-          drawCanvasLines();
-          showNotice('✓ Simulation ADR-0008 : Fichier HEVC détecté. Traitement In-Place direct via mkvpropedit (aucun transfert /work).', 'success');
-        } else if (simType === 'false') {
-          btn.classList.add('active-false');
-          const n1 = el('node-1');
-          const n2 = el('node-2');
-          const n3 = el('node-3');
-          const n4 = el('node-4');
-          const n5 = el('node-5');
-
-          if (n1) n1.classList.add('sim-active');
-          if (n2) n2.classList.add('sim-active', 'sim-active-false');
-          if (n3) n3.classList.add('sim-dimmed');
-          if (n4) n4.classList.add('sim-active', 'sim-active-false');
-          if (n5) n5.classList.add('sim-active');
-
-          drawCanvasLines();
-          showNotice('✗ Simulation ADR-0008 : Fichier non HEVC. Routage vers l\'encodeur matériel GPU dans /work/job-<uuid>/.', 'info');
-        } else if (simType === 'fallback') {
-          btn.classList.add('active-fallback');
-          const n1 = el('node-1');
-          const n2 = el('node-2');
-          const n3 = el('node-3');
-          const n4 = el('node-4');
-          const n5 = el('node-5');
-
-          if (n1) n1.classList.add('sim-active');
-          if (n2) n2.classList.add('sim-active', 'sim-active-fallback');
-          if (n3) n3.classList.add('sim-dimmed');
-          if (n4) {
-            n4.classList.add('sim-active', 'sim-active-fallback');
-            const summary = el('node-4-summary');
-            if (summary) summary.textContent = '⚡ Bascule repli logiciel active : CPU libx265 (Qualité : 6)';
-          }
-          if (n5) n5.classList.add('sim-active');
-
-          drawCanvasLines();
-          showNotice('⚡ Simulation ADR-0008 : Échec transcodeur matériel GPU. Bascule automatique vers l\'encodeur CPU logiciel.', 'warning');
-        }
-      });
-    });
-
-    // Sauvegarde des modifications du flux en base SQLite
-    const saveFlowBtn = el('btn-canvas-save-flow');
-    if (saveFlowBtn) {
-      saveFlowBtn.addEventListener('click', async () => {
-        const titleEl = el('canvas-flow-title');
-        const title = titleEl ? titleEl.textContent.replace('Éditeur visuel :', '').trim() : 'Flux';
-        const flowId = activeCanvasFlowId || 'flow.custom';
-
-        const nodes = Array.from(nodesContainer.querySelectorAll('.canvas-node')).map(n => ({
-          id: n.getAttribute('data-node-id') || n.id,
-          type: n.getAttribute('data-block-type') || 'unknown',
-          name: n.querySelector('.node-name') ? n.querySelector('.node-name').textContent : 'Bloc',
-        }));
-
-        const definition = JSON.stringify({ nodes, connections: [] });
-
-        try {
-          const res = await apiFetch(`/api/v1/flows/${encodeURIComponent(flowId)}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: title,
-              description: 'Flux configuré depuis le plan de travail visuel.',
-              file_mask: '*.mkv, *.mp4',
-              is_default: flowId === 'flow.default.mkv',
-              definition,
-            }),
-          });
-          if (res.ok) {
-            showNotice(`Flux « ${title} » enregistré avec succès en base SQLite.`, 'success');
-          } else {
-            showNotice('Erreur lors de l\'enregistrement du flux.', 'error');
-          }
-        } catch (_) {
-          showNotice(`Flux « ${title} » mis à jour en mémoire active.`, 'info');
-        }
-      });
-    }
-  }
-
 "###;

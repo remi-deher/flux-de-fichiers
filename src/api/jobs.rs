@@ -138,7 +138,7 @@ pub async fn failure(
     Json(r): Json<Failure>,
 ) -> AppResult<StatusCode> {
     authorize(&h, &s.config.worker_key)?;
-    let error_code = JobErrorCode::from_str(&r.error_code).ok_or(AppError::Invalid)?;
+    let error_code: JobErrorCode = r.error_code.parse().map_err(|_| AppError::Invalid)?;
     repository::fail(
         &s.pool,
         id,

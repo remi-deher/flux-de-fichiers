@@ -78,13 +78,17 @@ impl JobErrorCode {
             Self::TransferFailed => "transfer_failed",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl std::str::FromStr for JobErrorCode {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "remux_failed" => Some(Self::RemuxFailed),
-            "source_integrity" => Some(Self::SourceIntegrity),
-            "transfer_failed" => Some(Self::TransferFailed),
-            _ => None,
+            "remux_failed" => Ok(Self::RemuxFailed),
+            "source_integrity" => Ok(Self::SourceIntegrity),
+            "transfer_failed" => Ok(Self::TransferFailed),
+            _ => Err(()),
         }
     }
 }

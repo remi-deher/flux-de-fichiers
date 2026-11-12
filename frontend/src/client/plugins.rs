@@ -57,13 +57,13 @@ pub const SCRIPT: &str = r###"
         const isEnabled = !!repo.enabled;
         const lastSync = repo.lastSyncedAt ? escapeHtml(repo.lastSyncedAt.replace('T', ' ').slice(0, 19)) : 'Jamais';
 
-        const officialBadge = isOfficial
-          ? `<span class="status-pill info" title="Source certifiée par le projet"><span class="status-dot"></span>Officiel</span>`
-          : `<span class="status-pill" title="Source externe tierce"><span class="status-dot"></span>Tiers</span>`;
+        const officialBadge = renderStatusPill(isOfficial ? 'Officiel' : 'Tiers', isOfficial ? 'info' : 'default', {
+          title: isOfficial ? 'Source certifiée par le projet' : 'Source externe tierce'
+        });
 
-        const statusBadge = isEnabled
-          ? `<span class="status-pill success"><span class="status-dot"></span>Actif</span>`
-          : `<span class="status-pill offline"><span class="status-dot"></span>Inactif</span>`;
+        const statusBadge = renderStatusPill(isEnabled ? 'Actif' : 'Inactif', isEnabled ? 'success' : 'offline', {
+          pulse: isEnabled
+        });
 
         const deleteBtn = isOfficial
           ? `<button type="button" class="btn btn-secondary btn-sm" disabled title="Le dépôt officiel ne peut pas être supprimé">🔒</button>`

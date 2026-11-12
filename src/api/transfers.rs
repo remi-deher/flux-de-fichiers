@@ -1,7 +1,7 @@
 use super::AppState;
 use crate::{
     auth::authorize,
-    domain::{Job, LeaseRequest},
+    domain::{Job, JobEventType, JobStatus, LeaseRequest},
     error::{AppError, AppResult},
     media, repository, storage,
 };
@@ -201,6 +201,6 @@ pub(crate) async fn publish_staged(
         return Err(error.into());
     }
     tracing::info!(job_id=%id, worker_id=%lease.worker_id, bytes=size, warning, "remux completed");
-    s.notify_job_event("job_succeeded", id, "succeeded", None);
+    s.notify_job_event(JobEventType::JobSucceeded, id, JobStatus::Succeeded, None);
     Ok(())
 }

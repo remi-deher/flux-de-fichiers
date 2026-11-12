@@ -59,6 +59,22 @@ pub const SCRIPT: &str = r###"
       .replace(/'/g, '&#39;');
   }
 
+  function renderStatusPill(label, variant = 'info', options = {}) {
+    const dot = options.noDot ? '' : `<span class="status-dot${options.pulse ? ' pulse' : ''}"></span>`;
+    const extraClass = options.extraClass ? ' ' + options.extraClass : '';
+    const titleAttr = options.title ? ` title="${escapeHtml(options.title)}"` : '';
+    return `<span class="status-pill ${variant}${extraClass}"${titleAttr}>${dot}${label}</span>`;
+  }
+
+  function jobStatusClass(status) {
+    switch (status) {
+      case 'succeeded': return 'succeeded';
+      case 'failed': return 'failed';
+      case 'running': return 'running';
+      default: return 'queued';
+    }
+  }
+
 
   // --- Requêtes API authentifiées ---
   async function apiFetch(endpoint, options = {}) {

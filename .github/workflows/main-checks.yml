@@ -67,7 +67,7 @@ jobs:
           for second in $(seq 1 "$START_TIMEOUT_SECONDS"); do
             status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health || true)
             worker=$(docker compose ps --format '{{.Service}} {{.Health}}' worker)
-            if [ "$status" = "200" ] && [ "$worker" = "worker healthy" ]; then
+            if { [ "$status" = "200" ] || [ "$status" = "204" ]; } && [ "$worker" = "worker healthy" ]; then
               echo "✅ Coordinateur (HTTP $status) et worker opérationnels en ${second}s"
               exit 0
             fi

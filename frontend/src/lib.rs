@@ -71,5 +71,6 @@ mod tests {
         assert!(html.contains("applyContextualSearch"));
         assert!(html.contains("id=\"header-workers-pill\""));
         assert!(!html.contains("id=\"header-theme-toggle-btn\""));
+        assert!(!html.contains("id=\"header-refresh-btn\""));
     }
 }

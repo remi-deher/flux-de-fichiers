@@ -96,22 +96,12 @@ pub fn Header() -> impl IntoView {
                 </div>
             </div>
 
-            // Actions d'en-tête : statut des workers (central inclus) et actualisation rapide
+            // Actions d'en-tête : statut des workers (central inclus)
             <div class="header-actions">
                 <div id="header-workers-pill" class="status-pill online" aria-live="polite" title="Nombre de workers actifs (central inclus)">
                     <span class="status-dot"></span>
                     <span id="header-workers-count-text">"1 worker en ligne"</span>
                 </div>
-
-                <button
-                    type="button"
-                    id="header-refresh-btn"
-                    class="header-icon-btn"
-                    aria-label="Actualiser les données"
-                    title="Actualiser les données du coordinateur"
-                >
-                    <Icon name=IconName::Refresh size=16 />
-                </button>
             </div>
         </header>
     }

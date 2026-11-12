@@ -1,13 +1,19 @@
 //! Moteur d'exécution des flux et blocs d'action composables (ADR 0008, ADR 0009).
 
+mod arr;
 mod block;
 mod condition;
+mod header_secrets;
 mod route;
 mod tool;
 mod webhook;
 
+pub use arr::{ArrAction, ArrBlock, ArrConnection, ArrContext, ArrService, execute_arr_block};
 pub use block::{FlowBlockKind, StepDecision, decide_step};
 pub use condition::{ConditionConfig, evaluate_condition};
+pub use header_secrets::{
+    decrypt_headers, has_webhook_headers, mask_definition, migrate_flow_secrets, seal_definition,
+};
 pub use route::next_connection;
 pub use tool::{InPlaceEdit, in_place_edit};
 pub use webhook::{WebhookBlockConfig, execute_webhook_block, webhook_method};
@@ -101,6 +107,10 @@ pub struct FlowExecutionOutcome {
 pub struct FlowEngine<'a> {
     pub cache_mgr: &'a ToolCacheManager,
     pub http_client: &'a reqwest::Client,
+    /// Dossier de configuration qui porte la clé de chiffrement des en-têtes de webhook.
+    pub secrets_dir: Option<&'a Path>,
+    /// Réglages des plugins Sonarr et Radarr, pour les blocs d'intégration.
+    pub arr: Option<&'a ArrContext>,
 }
 
 pub type FlowProgressCallback = std::sync::Arc<dyn Fn(u32, &str) + Send + Sync>;
@@ -110,7 +120,21 @@ impl<'a> FlowEngine<'a> {
         Self {
             cache_mgr,
             http_client,
+            secrets_dir: None,
+            arr: None,
         }
+    }
+
+    /// Donne aux blocs Sonarr et Radarr les réglages de leurs plugins.
+    pub fn with_arr(mut self, arr: &'a ArrContext) -> Self {
+        self.arr = Some(arr);
+        self
+    }
+
+    /// Autorise le déchiffrement des en-têtes de webhook avec la clé de ce dossier de configuration.
+    pub fn with_secrets_dir(mut self, secrets_dir: &'a Path) -> Self {
+        self.secrets_dir = Some(secrets_dir);
+        self
     }
 
     /// Exécute un flux complet sur un fichier source donné.
@@ -199,7 +223,26 @@ impl<'a> FlowEngine<'a> {
                 tracing::info!(job_id = %job_id, "remux step executed into staging working file");
             }
             if let Some(webhook_cfg) = &decision.notify {
-                execute_webhook_block(webhook_cfg, &step_ctx, self.http_client).await?;
+                let mut webhook_cfg = webhook_cfg.clone();
+                if let Some(dir) = self.secrets_dir {
+                    decrypt_headers(&crate::secrets::SecretBox::open(dir)?, &mut webhook_cfg)?;
+                }
+                execute_webhook_block(&webhook_cfg, &step_ctx, self.http_client).await?;
+            }
+            if let Some(block) = &decision.integration {
+                let outcome = match self.arr {
+                    Some(arr) => {
+                        arr.run(block, &step_ctx.source_name, self.http_client)
+                            .await
+                    }
+                    None => Err(anyhow::anyhow!("réglages des plugins indisponibles")),
+                };
+                if let Err(error) = outcome {
+                    if block.fail_on_error {
+                        return Err(error);
+                    }
+                    tracing::warn!(job_id = %job_id, service = ?block.service, error = %error, "bloc d'intégration en échec, flux poursuivi");
+                }
             }
             if decision.stop {
                 tracing::info!(job_id = %job_id, "reached final file-output node, terminating pipeline");

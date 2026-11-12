@@ -316,6 +316,19 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     if state.config.local_worker {
         tokio::spawn(crate::local_worker::run(state.clone()));
     }
+    match crate::secrets::SecretBox::open(&state.config.config_dir) {
+        Ok(secrets) => match crate::flows::migrate_flow_secrets(&state.pool, &secrets).await {
+            Ok(0) => {}
+            Ok(count) => tracing::info!(
+                count,
+                "en-têtes de webhook chiffrés dans les flux existants"
+            ),
+            Err(error) => {
+                tracing::warn!(error = %error, "migration des en-têtes de webhook impossible")
+            }
+        },
+        Err(error) => tracing::warn!(error = %error, "clé de chiffrement indisponible"),
+    }
     tokio::spawn(plugin_sync_loop(state.clone()));
     let app = router(state);
     tracing::info!(%addr, "coordinator started");

@@ -63,6 +63,11 @@ async fn test_repositories_lifecycle_and_official_protection() -> anyhow::Result
     assert_eq!(initial_repos.len(), 1);
     assert_eq!(initial_repos[0].id, "repo.official");
     assert!(initial_repos[0].is_official);
+    assert!(
+        initial_repos[0]
+            .index_url
+            .ends_with("/dev/catalogue/index.json")
+    );
     assert!(initial_repos[0].enabled);
 
     // 2. Ajouter un dépôt tiers avec validation d'URL

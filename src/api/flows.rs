@@ -17,7 +17,11 @@ pub async fn list_flows(
     State(s): State<AppState>,
     _auth: AdminAuth,
 ) -> AppResult<Json<Vec<crate::domain::FlowRecord>>> {
-    Ok(Json(repository::list_flows(&s.pool).await?))
+    let mut flows = repository::list_flows(&s.pool).await?;
+    for flow in &mut flows {
+        flow.definition = crate::flows::mask_definition(&flow.definition);
+    }
+    Ok(Json(flows))
 }
 
 /// Récupère la définition détaillée d'un flux spécifique.
@@ -26,7 +30,9 @@ pub async fn get_flow(
     Path(id): Path<String>,
     _auth: AdminAuth,
 ) -> AppResult<Json<crate::domain::FlowRecord>> {
-    Ok(Json(repository::get_flow(&s.pool, &id).await?))
+    let mut flow = repository::get_flow(&s.pool, &id).await?;
+    flow.definition = crate::flows::mask_definition(&flow.definition);
+    Ok(Json(flow))
 }
 
 /// Enregistre ou met à jour la définition d'un flux.
@@ -39,7 +45,18 @@ pub async fn save_flow(
     if payload.name.trim().is_empty() {
         return Err(AppError::Invalid);
     }
-    let flow = repository::save_flow(&s.pool, &id, &payload).await?;
+    let mut payload = payload;
+    if crate::flows::has_webhook_headers(&payload.definition) {
+        let existing = repository::get_flow(&s.pool, &id)
+            .await
+            .ok()
+            .map(|flow| flow.definition);
+        let secrets = crate::secrets::SecretBox::open(&s.config.config_dir)?;
+        payload.definition =
+            crate::flows::seal_definition(&secrets, &payload.definition, existing.as_deref())?;
+    }
+    let mut flow = repository::save_flow(&s.pool, &id, &payload).await?;
+    flow.definition = crate::flows::mask_definition(&flow.definition);
     Ok((StatusCode::OK, Json(flow)))
 }
 

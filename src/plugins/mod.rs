@@ -17,7 +17,8 @@ mod sync;
 mod vocab;
 
 pub use install::{
-    ensure_tool_installed, install_from_distribution, parse_distribution, read_distribution,
+    ensure_tool_installed, install_from_distribution, is_installing, parse_distribution,
+    read_distribution,
 };
 pub use probe::{ProbeContract, file_job_may_start, probe_is_ready, required_probe};
 pub use sources::{
@@ -133,6 +134,16 @@ pub struct ManifestToolDetails {
     pub current_choice: Option<bool>,
 }
 
+/// État d'un outil dans le cache de ce nœud.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolStatus {
+    Ready,
+    /// Téléchargement ou extraction en cours.
+    Installing,
+    NotInstalled,
+}
+
 /// Résumé de l'état d'un outil pour l'API et l'interface utilisateur.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -140,7 +151,7 @@ pub struct ToolStatusSummary {
     pub id: String,
     pub name: String,
     pub version: String,
-    pub status: String,
+    pub status: ToolStatus,
     pub capability: CatalogCapability,
     pub current_choice: bool,
     pub arch: String,
@@ -316,9 +327,11 @@ pub fn list_tools_status(
             };
 
             let status = if is_system_ready || cache_mgr.is_ready(&entry.id, &entry.version, arch) {
-                "ready".to_string()
+                ToolStatus::Ready
+            } else if is_installing(&entry.id) {
+                ToolStatus::Installing
             } else {
-                "not_installed".to_string()
+                ToolStatus::NotInstalled
             };
 
             ToolStatusSummary {
@@ -506,6 +519,21 @@ mod tests {
             assert!(fresh.get("url").is_none());
             assert!(saved.get("pathMappingRemote").is_none());
         }
+        Ok(())
+    }
+
+    #[test]
+    fn tool_status_serializes_to_the_names_the_interface_expects() -> Result<(), serde_json::Error>
+    {
+        assert_eq!(serde_json::to_string(&ToolStatus::Ready)?, "\"ready\"");
+        assert_eq!(
+            serde_json::to_string(&ToolStatus::Installing)?,
+            "\"installing\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ToolStatus::NotInstalled)?,
+            "\"not_installed\""
+        );
         Ok(())
     }
 }

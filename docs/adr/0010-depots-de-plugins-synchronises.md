@@ -34,6 +34,22 @@ installée dans le cache du nœud (ADR 0004, 0007).
    0600). L'API ne les renvoie jamais (`isSet`) ; un champ laissé vide conserve la valeur.
    Un ancien enregistrement en clair est chiffré à sa première lecture.
 
+7. **En-têtes de webhook** : les valeurs de `config.custom_headers` d'un bloc `webhook` sont
+   chiffrées dans la définition du flux (même clé, même format que les secrets de plugins).
+   L'API renvoie les noms d'en-têtes avec une valeur vide ; une valeur laissée vide conserve
+   celle du même bloc ; le moteur déchiffre juste avant l'appel HTTP. Les flux existants sont
+   migrés au démarrage.
+8. **Blocs Sonarr et Radarr** : types de nœud `sonarr-rescan`, `sonarr-rename`, `radarr-rescan`,
+   `radarr-rename`. Ils utilisent les réglages du plugin (URL, clé d'API déchiffrée,
+   correspondance de chemins). Le fichier visé est le média source (`INPUT_DIR/<source>`),
+   traduit du chemin local vers le chemin distant ; la série ou le film est celui dont le
+   dossier contient ce chemin (le plus précis l'emporte). Rescan : `RescanSeries` /
+   `RescanMovie`. Renommage : aperçu `GET /api/v3/rename`, puis `RenameFiles` sur les fichiers
+   proposés. `config.fail_on_error` (faux par défaut) fait échouer la tâche ; sinon l'échec est
+   journalisé. Les appels n'ont été testés que contre des serveurs simulés.
+9. **Statut d'outil** : `ready`, `installing` (téléchargement ou extraction en cours sur ce
+   nœud) ou `not_installed`.
+
 ## Conséquences
 
 - Tant qu'aucun dépôt n'est synchronisé, le catalogue est vide et aucun job sur fichier ne
@@ -41,5 +57,5 @@ installée dans le cache du nœud (ADR 0004, 0007).
   (URL https, empreintes réelles). Les contrats actuels sont des maquettes
   (`releaseStatus: contract-only`).
 - Le paquet `mkvtoolnix` reste dans l'image tant que ces artefacts n'existent pas.
-- Limite connue : les en-têtes `customHeaders` des blocs webhook, stockés dans la définition
-  d'un flux, ne sont pas chiffrés.
+- Le dépôt officiel est lu sur la branche `dev` du dépôt de plugins (migration 0009) tant que
+  sa branche `main` n'est pas alignée sur le schéma `app` / `apps/`.

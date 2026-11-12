@@ -10,6 +10,38 @@ use std::path::{Path, PathBuf};
 
 const DISTRIBUTION_FILE_NAME: &str = "distribution.v1.json";
 
+/// Outils dont l'installation est en cours sur ce nœud (en file d'attente ou en téléchargement).
+static INSTALLING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// L'outil est-il en cours d'installation sur ce nœud ?
+pub fn is_installing(tool_id: &str) -> bool {
+    INSTALLING
+        .lock()
+        .is_ok_and(|installing| installing.iter().any(|id| id == tool_id))
+}
+
+/// Marque un outil « en cours » le temps de l'installation, même en cas d'échec ou d'annulation.
+struct InstallingGuard(String);
+
+impl InstallingGuard {
+    fn start(tool_id: &str) -> Self {
+        if let Ok(mut installing) = INSTALLING.lock()
+            && !installing.iter().any(|id| id == tool_id)
+        {
+            installing.push(tool_id.to_owned());
+        }
+        Self(tool_id.to_owned())
+    }
+}
+
+impl Drop for InstallingGuard {
+    fn drop(&mut self) {
+        if let Ok(mut installing) = INSTALLING.lock() {
+            installing.retain(|id| id != &self.0);
+        }
+    }
+}
+
 /// Une seule installation à la fois : deux téléchargements du même outil seraient inutiles.
 static INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -55,6 +87,7 @@ pub async fn install_from_distribution(
             host_arch()
         ))
     })?;
+    let _installing = InstallingGuard::start(&distribution.tool_id);
     let _guard = INSTALL_LOCK.lock().await;
     let binary = cache
         .tool_dir(
@@ -262,6 +295,44 @@ mod tests {
         let parsed = parse_distribution(raw)?;
         assert_eq!(parsed.tool_id, "app.mediainfo");
         assert_eq!(parsed.artifacts[0].binary_relative_path, "bin/mediainfo");
+        Ok(())
+    }
+
+    #[test]
+    fn test_installing_guard_marks_the_tool_until_it_is_dropped() {
+        assert!(!is_installing("app.garde"));
+        {
+            let _first = InstallingGuard::start("app.garde");
+            let _again = InstallingGuard::start("app.garde");
+            assert!(is_installing("app.garde"));
+        }
+        assert!(!is_installing("app.garde"));
+    }
+
+    #[tokio::test]
+    async fn test_a_running_install_is_reported_as_installing_then_ready() -> anyhow::Result<()> {
+        let archive = archive_with("demo", b"#!/bin/sh\nexit 0\n")?;
+        let address = serve_archive(archive.clone()).await?;
+        let dir = tempfile::tempdir()?;
+        let cache = ToolCacheManager::new(dir.path());
+        let policy = SyncPolicy {
+            allow_private_hosts: true,
+        };
+        let mut contract = distribution(address, hex(&archive));
+        contract.tool_id = "app.suivi".into();
+
+        let watcher = tokio::spawn(async {
+            for _ in 0..200 {
+                if is_installing("app.suivi") {
+                    return true;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+            false
+        });
+        install_from_distribution(&cache, &contract, &policy).await?;
+        assert!(watcher.await?);
+        assert!(!is_installing("app.suivi"));
         Ok(())
     }
 }

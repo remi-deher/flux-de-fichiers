@@ -134,7 +134,15 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
 
         let http_client = reqwest::Client::new();
         let (final_output, warning) = if let Some(flow) = default_flow {
-            let engine = crate::flows::FlowEngine::new(&cache_mgr, &http_client);
+            let arr = crate::flows::ArrContext::load(
+                &state.pool,
+                &state.config.config_dir,
+                &state.config.input_dir,
+            )
+            .await;
+            let engine = crate::flows::FlowEngine::new(&cache_mgr, &http_client)
+                .with_secrets_dir(&state.config.config_dir)
+                .with_arr(&arr);
             let outcome = engine
                 .execute_flow(&flow, job_id, &source_snapshot, &work_dir, progress_cb)
                 .await

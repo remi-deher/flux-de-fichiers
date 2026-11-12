@@ -17,6 +17,22 @@ pub const SCRIPT: &str = r###"
     return CATALOG_VIEWS.indexOf(value) >= 0 ? value : '';
   }
 
+  // Statut d'un outil dont l'installation est en cours (valeur de `ToolStatus::Installing`).
+  const TOOL_STATUS_INSTALLING = 'installing';
+  const TOOLS_STATUS_POLL_MS = 2000;
+  let toolsStatusTimer = null;
+
+  // Tant qu'une installation est en cours, l'état est relu à intervalle court.
+  function scheduleToolsStatusRefresh(tools) {
+    if (toolsStatusTimer) clearTimeout(toolsStatusTimer);
+    toolsStatusTimer = tools.some(tool => tool.status === TOOL_STATUS_INSTALLING)
+      ? setTimeout(() => {
+          toolsStatusTimer = null;
+          loadToolsStatus();
+        }, TOOLS_STATUS_POLL_MS)
+      : null;
+  }
+
   async function loadToolsStatus() {
     try {
       const res = await apiFetch('/api/v1/tools');
@@ -30,10 +46,11 @@ pub const SCRIPT: &str = r###"
         const cell = row.querySelector('.tool-status');
         if (!cell) return;
         if (tool.status === 'ready') cell.textContent = 'Prêt';
-        else if (tool.status === 'locked') cell.textContent = 'En cours';
+        else if (tool.status === TOOL_STATUS_INSTALLING) cell.textContent = 'En cours';
         else cell.textContent = 'Absent';
       });
       markWidgetSource('tools', true);
+      scheduleToolsStatusRefresh(tools);
     } catch {
       markWidgetSource('tools', false);
     }
@@ -43,7 +60,7 @@ pub const SCRIPT: &str = r###"
     const known = cachedToolStatus.find(tool => tool.id === id);
     if (!known) return '—';
     if (known.status === 'ready') return 'Prêt';
-    if (known.status === 'locked') return 'En cours';
+    if (known.status === TOOL_STATUS_INSTALLING) return 'En cours';
     return 'Absent';
   }
 

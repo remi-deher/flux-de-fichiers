@@ -127,6 +127,8 @@ mod tests {
         assert!(html.contains("id=\"widget-workers-tools\""));
         assert!(html.contains("function renderWidgets"));
         assert!(html.contains("function installTool"));
+        assert!(html.contains("function scheduleToolsStatusRefresh"));
+        assert!(!html.contains("'locked'"));
         assert!(html.contains("field.isSet"));
         assert!(html.contains("function markWidgetSource"));
         assert!(html.contains("[data-goto]"));

@@ -15,6 +15,9 @@ pub const SCRIPT: &str = r###"
       if (metricWorkers) metricWorkers.textContent = String(activeCount);
       updateHeaderWorkersCount(true, activeCount);
       renderWorkersTable();
+      if (typeof renderLibrariesTable === 'function') renderLibrariesTable();
+      if (typeof renderLibraryNodes === 'function') renderLibraryNodes();
+      if (typeof renderLibraryWorkerSelect === 'function') renderLibraryWorkerSelect();
     } catch (e) {
       if (tbody) {
         tbody.innerHTML = emptyStateRow(5, escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session pour afficher les agents enregistrés.' : 'Impossible de récupérer la liste des agents.'), true);

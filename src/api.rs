@@ -1,6 +1,7 @@
 pub mod auth;
 mod flows;
 mod jobs;
+mod libraries;
 mod plugins;
 mod session;
 pub(crate) mod transfers;
@@ -90,6 +91,16 @@ fn json_routes() -> Router<AppState> {
         .route("/health", get(health))
         .route("/api/v1/config", get(jobs::system_config))
         .route("/api/v1/files", get(jobs::files))
+        .route(
+            "/api/v1/libraries",
+            get(libraries::list).post(libraries::create),
+        )
+        .route(
+            "/api/v1/libraries/{id}",
+            get(libraries::get)
+                .put(libraries::update)
+                .delete(libraries::delete),
+        )
         .route("/api/v1/flows", get(flows::list_flows))
         .route(
             "/api/v1/flows/{id}",

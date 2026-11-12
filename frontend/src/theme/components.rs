@@ -169,6 +169,35 @@ pub const COMPONENTS_CSS: &str = r#"
   margin: 0;
 }
 
+.inspection-drawer__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex: none;
+}
+
+.library-node-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.library-node-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.library-node-path {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--text-dim);
+}
+
 .registre-fact {
   display: flex;
   align-items: center;
@@ -425,7 +454,8 @@ pub const COMPONENTS_CSS: &str = r#"
   margin-top: 0.35rem;
 }
 
-.form-input {
+.form-input,
+.form-select {
   width: 100%;
   padding: 0.6rem 0.75rem;
   border-radius: var(--radius-sm);
@@ -437,7 +467,8 @@ pub const COMPONENTS_CSS: &str = r#"
   box-sizing: border-box;
 }
 
-.form-input:focus {
+.form-input:focus,
+.form-select:focus {
   outline: none;
   border-color: var(--primary);
   background-color: var(--bg-card);

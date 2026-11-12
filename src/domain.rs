@@ -270,6 +270,47 @@ pub struct UpdateFlowRequest {
     pub definition: String,
 }
 
+pub const LIBRARY_NAME_MAX: usize = 80;
+pub const LIBRARY_PATH_MAX: usize = 512;
+
+/// Accès d'un nœud au dossier de la bibliothèque.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(rename_all = "snake_case")]
+pub enum LibraryAccess {
+    Read,
+    ReadWrite,
+}
+
+/// Chemin local d'une bibliothèque sur un nœud.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LibraryNode {
+    pub worker_id: Uuid,
+    pub local_path: String,
+    pub access: LibraryAccess,
+}
+
+/// Bibliothèque déclarée : un nom, un flux, des nœuds.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Library {
+    pub id: Uuid,
+    pub name: String,
+    pub flow_id: Option<String>,
+    pub nodes: Vec<LibraryNode>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Création ou remplacement d'une bibliothèque.
+#[derive(Debug, Deserialize)]
+pub struct LibraryWrite {
+    pub name: String,
+    #[serde(default)]
+    pub flow_id: Option<String>,
+    #[serde(default)]
+    pub nodes: Vec<LibraryNode>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -352,6 +393,20 @@ mod tests {
         assert_eq!(
             JobErrorCode::from_worker_label("anything-else"),
             JobErrorCode::TransferFailed
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn library_access_serializes_snake_case() -> Result<(), serde_json::Error> {
+        assert_eq!(serde_json::to_string(&LibraryAccess::Read)?, "\"read\"");
+        assert_eq!(
+            serde_json::to_string(&LibraryAccess::ReadWrite)?,
+            "\"read_write\""
+        );
+        assert_eq!(
+            serde_json::from_str::<LibraryAccess>("\"read_write\"")?,
+            LibraryAccess::ReadWrite
         );
         Ok(())
     }

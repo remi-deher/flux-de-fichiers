@@ -9,6 +9,8 @@ pub const SCRIPT: &str = r###"
       const data = await res.json();
       cachedFlows = Array.isArray(data) ? data : [];
       renderFlowsGrid();
+      if (typeof renderLibrariesTable === 'function') renderLibrariesTable();
+      if (typeof renderLibraryFlowSelect === 'function') renderLibraryFlowSelect();
     } catch {
       if (tbody && cachedFlows.length === 0) renderFlowsGrid();
     }

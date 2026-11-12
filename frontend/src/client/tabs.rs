@@ -25,14 +25,18 @@ pub const SCRIPT: &str = r###"
 
     switch (activeTab) {
       case 'files': {
-        const filesSearch = el('files-search-input');
-        if (filesSearch && filesSearch.value !== query) {
-          filesSearch.value = query;
+        const librariesSearch = el('libraries-search-input');
+        if (librariesSearch && librariesSearch.value !== query) {
+          librariesSearch.value = query;
         }
-        totalCount = cachedFiles.length;
-        matchCount = cachedFiles.filter(f => matchesQuery([f.name], query)).length;
-        if (typeof renderFilesTable === 'function') {
-          renderFilesTable();
+        totalCount = cachedLibraries.length;
+        matchCount = cachedLibraries.filter(library => matchesQuery([
+          library.name,
+          library.flow_id || '',
+          ...(Array.isArray(library.nodes) ? library.nodes.map(node => node.local_path) : [])
+        ], query)).length;
+        if (typeof renderLibrariesTable === 'function') {
+          renderLibrariesTable();
         }
         break;
       }
@@ -157,7 +161,7 @@ pub const SCRIPT: &str = r###"
 
     // Actualisation silencieuse contextuelle à l'affichage de l'onglet
     if (tabName === 'files') {
-      loadFiles();
+      loadLibraries();
     } else if (tabName === 'jobs') {
       loadJobs();
     } else if (tabName === 'workers') {

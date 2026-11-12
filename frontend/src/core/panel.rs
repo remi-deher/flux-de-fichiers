@@ -41,8 +41,8 @@ pub const FILES: Panel = Panel {
     label: "Bibliothèques",
     nav_title: "Groupe Médias : Bibliothèques surveillées et fichiers sources",
     section_title: "Bibliothèques",
-    search_placeholder: "Filtrer les fichiers et bibliothèques…",
-    search_label: "Filtrer les fichiers médias et dossiers sources",
+    search_placeholder: "Filtrer les bibliothèques…",
+    search_label: "Filtrer les bibliothèques déclarées",
     icon: IconName::Libraries,
     active: false,
 };

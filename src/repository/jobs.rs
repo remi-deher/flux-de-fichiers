@@ -41,14 +41,20 @@ pub async fn list_workers(pool: &SqlitePool) -> AppResult<Vec<Worker>> {
 }
 
 pub async fn delete_worker(pool: &SqlitePool, id: Uuid) -> AppResult<()> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    sqlx::query("DELETE FROM library_nodes WHERE worker_id=?1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     let affected = sqlx::query("DELETE FROM workers WHERE id=?1")
         .bind(id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
     if affected == 0 {
         return Err(AppError::NotFound);
     }
+    tx.commit().await?;
     Ok(())
 }
 

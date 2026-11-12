@@ -178,7 +178,7 @@ pub fn script() -> String {
   }}
 
   function inspectionEyebrow(factId) {{
-    if (factId === 'files-fact') return 'Fichier';
+    if (factId === 'libraries-fact') return 'Bibliothèque';
     if (factId === 'flows-fact') return 'Flux';
     if (factId === 'repos-fact') return 'Dépôt';
     const catalog = {{
@@ -210,8 +210,9 @@ pub fn script() -> String {
     if (!drawer) return;
     drawer.classList.remove('is-open');
     drawer.setAttribute('aria-hidden', 'true');
-    const action = drawer.querySelector('.inspection-panel__action');
-    if (action) action.disabled = true;
+    drawer.querySelectorAll('.inspection-panel__action').forEach(action => {{
+      action.disabled = true;
+    }});
     const first = drawer.querySelector('.inspection-drawer__tab');
     if (first) selectInspectionTab(drawer, first);
     const registre = drawer.closest('.registre');
@@ -237,8 +238,9 @@ pub fn script() -> String {
       }}
       fact.classList.add('is-open');
       fact.setAttribute('aria-hidden', 'false');
-      const action = fact.querySelector('.inspection-panel__action');
-      if (action) action.disabled = false;
+      fact.querySelectorAll('.inspection-panel__action').forEach(action => {{
+        action.disabled = false;
+      }});
       const first = fact.querySelector('.inspection-drawer__tab');
       if (first) selectInspectionTab(fact, first);
       const panel = fact.querySelector('.inspection-drawer__panel');

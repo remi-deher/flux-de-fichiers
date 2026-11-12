@@ -10,7 +10,6 @@ pub const SCRIPT: &str = r###"
   let cachedJobs = [];
   let cachedWorkers = [];
   let activeJobFilter = 'all';
-  let selectedFileForRemux = null;
   let sessionMode = 'none'; // 'none' | 'memory_key' | 'cookie_session'
   let manualLogout = false;
 

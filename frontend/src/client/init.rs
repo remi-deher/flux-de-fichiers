@@ -7,6 +7,7 @@ pub const SCRIPT: &str = r###"
     await checkSession();
     await Promise.allSettled([
       loadFiles(),
+      loadLibraries(),
       loadJobs(),
       loadWorkers(),
       loadSystemConfig(),
@@ -82,39 +83,7 @@ pub const SCRIPT: &str = r###"
     const logoutBtn = el('admin-key-logout-btn');
     if (logoutBtn) logoutBtn.addEventListener('click', logout);
 
-    // Recherche de fichiers (synchronisation bidirectionnelle)
-    const filesSearch = el('files-search-input');
-    if (filesSearch) {
-      filesSearch.addEventListener('input', () => {
-        if (globalSearchInput && globalSearchInput.value !== filesSearch.value) {
-          globalSearchInput.value = filesSearch.value;
-        }
-        renderFilesTable();
-      });
-    }
-
-    // Dialogue confirmation remux
-    const closeDialogX = el('confirm-dialog-close-x');
-    if (closeDialogX) closeDialogX.addEventListener('click', closeConfirmRemuxDialog);
-
-    const cancelDialogBtn = el('confirm-dialog-cancel-btn');
-    if (cancelDialogBtn) cancelDialogBtn.addEventListener('click', closeConfirmRemuxDialog);
-
-    const submitRemuxBtn = el('confirm-dialog-submit-btn');
-    if (submitRemuxBtn) submitRemuxBtn.addEventListener('click', submitRemuxJob);
-
-    const launchFlowBtn = el('files-fact-action');
-    if (launchFlowBtn) {
-      launchFlowBtn.addEventListener('click', () => {
-        const title = el('files-fact-title');
-        const name = title ? title.textContent : '';
-        if (!name || name === 'Sélectionnez une ligne') {
-          showNotice('Ouvrez un fichier avant de lancer un flux.', 'info');
-          return;
-        }
-        openConfirmRemuxDialog(name);
-      });
-    }
+    if (typeof setupLibraries === 'function') setupLibraries();
 
     // Recherche de tâches (synchronisation bidirectionnelle)
     const jobsSearch = el('jobs-search-input');

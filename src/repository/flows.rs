@@ -65,17 +65,25 @@ pub async fn save_flow(
 }
 
 pub async fn delete_flow(pool: &SqlitePool, id: &str) -> AppResult<()> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let is_default: Option<bool> = sqlx::query_scalar("SELECT is_default FROM flows WHERE id=?1")
         .bind(id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await?;
     match is_default {
         Some(true) => Err(AppError::Conflict),
         Some(false) => {
+            sqlx::query(
+                "UPDATE libraries SET flow_id=NULL, updated_at=datetime('now') WHERE flow_id=?1",
+            )
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
             sqlx::query("DELETE FROM flows WHERE id=?1")
                 .bind(id)
-                .execute(pool)
+                .execute(&mut *tx)
                 .await?;
+            tx.commit().await?;
             Ok(())
         }
         None => Err(AppError::NotFound),

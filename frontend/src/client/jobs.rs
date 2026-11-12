@@ -384,11 +384,6 @@ pub const SCRIPT: &str = r###"
         renderJobsTable();
       }
     });
-
-    const refreshBtn = el('jobs-refresh-btn');
-    if (refreshBtn) {
-      refreshBtn.addEventListener('click', loadJobs);
-    }
   }
 
   document.addEventListener('DOMContentLoaded', setupActivityRoleTabs);

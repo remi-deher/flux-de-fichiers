@@ -46,18 +46,6 @@ pub fn LibrariesPanel() -> impl IntoView {
     }
     .into_any();
 
-    let subnav_actions = view! {
-        <button
-            type="button"
-            id="files-refresh-btn"
-            class="btn btn-secondary btn-sm"
-            title="Actualiser la liste des fichiers et dossiers"
-        >
-            "🔄 Actualiser"
-        </button>
-    }
-    .into_any();
-
     view! {
         <div
             id="panel-files"
@@ -70,7 +58,6 @@ pub fn LibrariesPanel() -> impl IntoView {
                 aria_label="Sous-navigation de la section Bibliothèques"
                 tabs=subnav_tabs
                 info=subnav_info
-                actions=subnav_actions
             />
 
             // Sous-vue 1 : Explorateur de médias (actif par défaut)

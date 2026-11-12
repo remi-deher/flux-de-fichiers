@@ -46,14 +46,6 @@ pub fn PluginsPanel() -> impl IntoView {
         >
             "+ Ajouter un dépôt"
         </button>
-        <button
-            type="button"
-            id="btn-sync-all-repos"
-            class="btn btn-secondary btn-sm"
-            aria-label="Synchroniser l'ensemble des catalogues"
-        >
-            "🔄 Synchroniser"
-        </button>
     }
     .into_any();
 

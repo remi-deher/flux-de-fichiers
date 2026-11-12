@@ -64,7 +64,6 @@ pub const BASE_CSS: &str = r#"
 .application-sidebar.is-collapsed .tab-btn-label,
 .application-sidebar.is-collapsed .nav-group-label,
 .application-sidebar.is-collapsed #theme-toggle-label,
-.application-sidebar.is-collapsed #refresh-all-btn,
 .application-sidebar.is-collapsed .collapse-label {
   display: none;
 }
@@ -723,25 +722,39 @@ pub const BASE_CSS: &str = r#"
 
 /* --- Gabarit partagé de sous-navigation horizontale (ADR 0020) --- */
 .page-subnav {
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+  position: sticky;
+  top: max(60px, calc(var(--sat, 0px) + 54px));
+  z-index: 15;
+  display: block;
   margin-bottom: 1.25rem;
-  padding: 0.5rem 0.75rem;
-  box-shadow: var(--shadow-sm);
+  background: transparent;
+  pointer-events: none;
+  transition: opacity 0.2s cubic-bezier(0.2, 0, 0, 1), transform 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.page-subnav.is-hidden:not(:focus-within) {
+  opacity: 0;
+  transform: translateY(calc(-100% - 20px));
+  pointer-events: none;
 }
 
 .subnav-container {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  flex-wrap: wrap;
+  width: 100%;
   gap: 0.75rem;
+  pointer-events: none;
+}
+
+.subnav-container > * {
+  pointer-events: auto;
 }
 
 .subnav-info {
   display: flex;
   align-items: center;
+  justify-self: start;
   gap: 0.5rem;
   font-size: 0.8125rem;
   font-weight: 500;
@@ -758,73 +771,125 @@ pub const BASE_CSS: &str = r#"
   gap: 0.35rem;
   padding: 0.25rem 0.65rem;
   border-radius: var(--radius-sm);
-  background: var(--bg-subtle);
+  background: var(--bg-card);
   border: 1px solid var(--border-color);
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-main);
   white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(8px);
 }
 
-.subnav-tabs {
+.app-subnav {
+  position: relative;
+  justify-self: center;
+  margin-inline: auto;
+  width: fit-content;
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--bg-card);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.app-subnav:hover {
+  border-color: color-mix(in srgb, var(--primary) 30%, var(--border-color));
+}
+
+.app-subnav__scroller {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
   overflow-x: auto;
-  scrollbar-width: thin;
-  -webkit-overflow-scrolling: touch;
+  border: 0;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+  overscroll-behavior-x: contain;
+  -webkit-mask-image: linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
+  mask-image: linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
 }
 
+.app-subnav__scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.app-subnav__item,
 .subnav-tab {
+  position: relative;
   display: inline-flex;
+  flex: none;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.45rem 0.85rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--text-dim);
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: calc(var(--radius-lg, 12px) - 3px);
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all 0.15s ease-in-out;
+  color: var(--text-dim);
+  font-size: 0.84rem;
+  font-weight: 600;
   white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  scroll-snap-align: start;
+  transition: color 0.15s ease, background-color 0.15s ease;
 }
 
+.app-subnav__item:hover,
 .subnav-tab:hover {
   color: var(--text-main);
   background: var(--bg-subtle);
 }
 
+.app-subnav__item:focus-visible,
 .subnav-tab:focus-visible {
   outline: 2px solid var(--primary);
-  outline-offset: 1px;
+  outline-offset: -2px;
 }
 
+.app-subnav__item.active,
+.app-subnav__item[aria-selected="true"],
 .subnav-tab.active {
   color: var(--primary);
-  background: var(--primary-bg);
-  border-color: var(--primary);
-  font-weight: 600;
+  background: color-mix(in srgb, var(--primary) 14%, var(--bg-card));
+  font-weight: 700;
 }
 
+.app-subnav__icon,
 .subnav-tab-icon {
-  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.95rem;
 }
 
+.app-subnav__badge,
 .subnav-tab-badge {
-  display: inline-block;
-  padding: 0.1rem 0.4rem;
-  font-size: 0.75rem;
+  display: inline-grid;
+  place-items: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 6px;
   border-radius: 9999px;
-  background: var(--bg-subtle);
-  color: var(--text-dim);
-  border: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--primary) 15%, transparent);
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: 0;
 }
 
 .subnav-actions {
   display: flex;
   align-items: center;
+  justify-self: end;
   gap: 0.5rem;
   margin-left: auto;
   flex-wrap: wrap;
@@ -847,11 +912,17 @@ pub const BASE_CSS: &str = r#"
     gap: 0.5rem;
   }
 
+  .app-subnav {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .app-subnav__scroller,
   .subnav-tabs {
     width: 100%;
     max-width: 100%;
     overflow-x: auto;
-    scrollbar-width: thin;
+    scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
   }
 

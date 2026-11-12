@@ -192,21 +192,6 @@ pub const SCRIPT: &str = r###"
         }
       });
     }
-
-    const btnRefresh = el('btn-refresh-workers');
-    if (btnRefresh) {
-      btnRefresh.addEventListener('click', async () => {
-        btnRefresh.disabled = true;
-        try {
-          await Promise.all([loadWorkers(), loadSystemConfig()]);
-          showNotice('État des serveurs et configuration actualisés.', 'info');
-        } catch {
-          showNotice('Erreur lors du rafraîchissement des serveurs.', 'error');
-        } finally {
-          btnRefresh.disabled = false;
-        }
-      });
-    }
   }
 
 "###;

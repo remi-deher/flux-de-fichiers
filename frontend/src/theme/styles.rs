@@ -41,6 +41,7 @@ pub fn generate_global_tokens_css() -> String {
   --warning-bg: {dark_warning_bg};
   --danger: {dark_danger};
   --danger-bg: {dark_danger_bg};
+  --danger-text: {dark_danger_text};
   --info: {dark_info};
   --info-bg: {dark_info_bg};
   --radius-sm: {radius_sm};
@@ -72,6 +73,7 @@ pub fn generate_global_tokens_css() -> String {
     --warning-bg: {light_warning_bg};
     --danger: {light_danger};
     --danger-bg: {light_danger_bg};
+    --danger-text: {light_danger_text};
     --info: {light_info};
     --info-bg: {light_info_bg};
   }}
@@ -95,6 +97,7 @@ pub fn generate_global_tokens_css() -> String {
   --warning-bg: {light_warning_bg};
   --danger: {light_danger};
   --danger-bg: {light_danger_bg};
+  --danger-text: {light_danger_text};
   --info: {light_info};
   --info-bg: {light_info_bg};
 }}
@@ -117,6 +120,7 @@ pub fn generate_global_tokens_css() -> String {
   --warning-bg: {dark_warning_bg};
   --danger: {dark_danger};
   --danger-bg: {dark_danger_bg};
+  --danger-text: {dark_danger_text};
   --info: {dark_info};
   --info-bg: {dark_info_bg};
 }}
@@ -179,6 +183,7 @@ button, a, select, input {{
         dark_warning_bg = DARK_THEME.warning_bg,
         dark_danger = DARK_THEME.danger,
         dark_danger_bg = DARK_THEME.danger_bg,
+        dark_danger_text = DARK_THEME.danger_text,
         dark_info = DARK_THEME.info,
         dark_info_bg = DARK_THEME.info_bg,
         light_bg_app = LIGHT_THEME.bg_app,
@@ -198,6 +203,7 @@ button, a, select, input {{
         light_warning_bg = LIGHT_THEME.warning_bg,
         light_danger = LIGHT_THEME.danger,
         light_danger_bg = LIGHT_THEME.danger_bg,
+        light_danger_text = LIGHT_THEME.danger_text,
         light_info = LIGHT_THEME.info,
         light_info_bg = LIGHT_THEME.info_bg,
         radius_sm = DARK_THEME.radius_sm,
@@ -230,5 +236,7 @@ mod tests {
         assert!(res.contains("@media (prefers-reduced-motion: reduce)"));
         assert!(res.contains("--bg-app: #0d1117;"));
         assert!(res.contains("--primary: #58a6ff;"));
+        assert!(res.contains("--danger-text: #ff7b72;"));
+        assert!(res.contains("--danger-text: #a40e26;"));
     }
 }

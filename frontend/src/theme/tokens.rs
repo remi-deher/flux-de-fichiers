@@ -25,6 +25,7 @@ pub struct ThemeTokens {
     pub warning_bg: &'static str,
     pub danger: &'static str,
     pub danger_bg: &'static str,
+    pub danger_text: &'static str,
     pub info: &'static str,
     pub info_bg: &'static str,
 
@@ -60,6 +61,7 @@ pub const DARK_THEME: ThemeTokens = ThemeTokens {
     warning_bg: "rgba(187, 128, 9, 0.15)",
     danger: "#f85149",
     danger_bg: "rgba(248, 81, 73, 0.15)",
+    danger_text: "#ff7b72",
     info: "#58a6ff",
     info_bg: "rgba(56, 139, 253, 0.15)",
 
@@ -93,6 +95,7 @@ pub const LIGHT_THEME: ThemeTokens = ThemeTokens {
     warning_bg: "rgba(154, 103, 0, 0.1)",
     danger: "#cf222e",
     danger_bg: "rgba(207, 34, 46, 0.1)",
+    danger_text: "#a40e26",
     info: "#0969da",
     info_bg: "rgba(9, 105, 218, 0.1)",
 

@@ -90,6 +90,20 @@ impl Agent {
         worker: Uuid,
         dir: &std::path::Path,
     ) -> anyhow::Result<()> {
+        let cache_mgr = crate::tools_cache::ToolCacheManager::new(&self.config.tools_cache_dir);
+        let probe = match (
+            claim.probe_tool_id.as_deref(),
+            claim.probe_version.as_deref(),
+        ) {
+            (Some(tool_id), Some(version)) => Some(crate::plugins::ProbeContract {
+                tool_id: tool_id.to_owned(),
+                version: version.to_owned(),
+            }),
+            _ => None,
+        };
+        if !crate::plugins::file_job_may_start(&cache_mgr, probe.as_ref()) {
+            anyhow::bail!("probe_unavailable");
+        }
         let input = dir.join("source.mkv");
         let output = dir.join("output.mkv");
         let response = self
@@ -117,9 +131,8 @@ impl Agent {
             hash == claim.source_sha256 && bytes as i64 == claim.source_bytes,
             "source_integrity"
         );
-        let cache_mgr = crate::tools_cache::ToolCacheManager::new(&self.config.tools_cache_dir);
         let mkvmerge_bin =
-            cache_mgr.resolve_executable("tool.mkvtoolnix", "1.0.0", "mkvmerge", "MKVMERGE");
+            cache_mgr.resolve_executable("app.mkvtoolnix", "1.0.0", "mkvmerge", "MKVMERGE");
         let warning = media::remux_with(&mkvmerge_bin, &input, &output)
             .await
             .context("remux_failed")?;
@@ -156,6 +169,8 @@ impl Agent {
                 "source_integrity"
             } else if error.to_string() == "remux_failed" {
                 "remux_failed"
+            } else if error.to_string() == "probe_unavailable" {
+                "probe_unavailable"
             } else {
                 "transfer_failed"
             };

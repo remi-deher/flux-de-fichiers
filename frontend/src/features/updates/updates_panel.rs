@@ -8,10 +8,10 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn UpdatesPanel() -> impl IntoView {
     view! {
         <div
-            id="panel-updates"
+            id=crate::core::panel::UPDATES.dom_id
             class="tab-panel"
             role="tabpanel"
-            aria-labelledby="tab-btn-updates"
+            aria-labelledby=crate::core::panel::UPDATES.button_id
             hidden
         >
             <section class="section-panel" aria-labelledby="updates-status-title">

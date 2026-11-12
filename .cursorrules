@@ -1,0 +1,68 @@
+# Flux de Fichiers - Cursor Rules
+
+Tu travailles sur le projet **Flux de Fichiers**. Voici les règles fondamentales et le cycle de développement/test à respecter scrupuleusement.
+
+---
+
+## 1. Stack Technique & Philosophie
+
+- **Langage & Stack** : 100 % Rust pur (Axum, Tokio, SQLx/SQLite local, Leptos SSR).
+- **Intégrité Linguist** : Aucun fichier externe `.js`, `.css`, ou `.scss`. Le balisage HTML (Leptos SSR), les feuilles de styles (`frontend/src/theme/`) et les scripts légers du navigateur (`frontend/src/client/`) sont hébergés dans des modules Rust sous forme de constantes typées.
+- **Zéro Boilerplate & Factorisation Continue** : Ne jamais dupliquer de code, de HTML ou de règles CSS. Remplacer les chaînes magiques par des `enum` typés avec Serde.
+- **Design Tokens** : Consommer exclusivement les variables CSS / Design Tokens du thème (`--primary`, `--bg-card`, `--border-color`, etc.).
+
+---
+
+## 2. Règle d'or avant de coder
+
+- **Annonce préalable obligatoire** : Annoncer systématiquement en DEUX lignes maximum l'action exacte prévue avant d'écrire ou de modifier du code.
+
+---
+
+## 3. Cycle de Test & Validation Local (Machine hôte légère)
+
+- **Machine hôte peu puissante** : Ne JAMAIS exécuter de builds Docker lourds ni de suites complètes de tests Docker/E2E en local. Les builds Docker et validations lourdes sont réservés à la CI distante GitHub Actions.
+- **Tests unitaires rapides** :
+  ```bash
+  cargo test -p flux-frontend
+  ```
+- **Formatage impératif** (le hook pre-commit bloque si non formaté) :
+  ```bash
+  cargo fmt
+  ```
+- **Régénération du frontend statique** :
+  ```bash
+  cargo run -p flux-frontend
+  # Génère automatiquement frontend/dist/index.html
+  ```
+
+---
+
+## 4. Déploiement Direct en Test sur TrueNAS
+
+Pour tester en conditions réelles sans attendre la CI :
+```bash
+SSH_AUTH_SOCK=$HOME/.1password/agent.sock scp -o BatchMode=yes frontend/dist/index.html truenas_admin@192.168.1.50:/tmp/index.html && \
+SSH_AUTH_SOCK=$HOME/.1password/agent.sock ssh -o BatchMode=yes truenas_admin@192.168.1.50 "sudo cp /tmp/index.html /mnt/DATA/flux-de-fichiers-test/essai25/frontend/index.html && sudo chmod 644 /mnt/DATA/flux-de-fichiers-test/essai25/frontend/index.html && sudo rm -f /tmp/index.html"
+```
+Vérification par `curl` sur l'instance :
+```bash
+curl -s http://192.168.1.50:18480/
+```
+
+---
+
+## 5. Flux Git & Qualité (ADR 0002)
+
+- Travailler exclusivement sur la branche `dev`.
+- Commit & Push :
+  ```bash
+  git add frontend/
+  git commit -m "feat(frontend): ..."
+  git push origin dev
+  ```
+- Ouverture de PR vers `test` avec auto-merge :
+  ```bash
+  gh pr create --base test --head dev --title "..." --body "..." && gh pr merge <PR_NUM> --merge --auto
+  ```
+- **Fusions par merge commit uniquement** (jamais de rebase ni de squash).

@@ -34,21 +34,21 @@ Le contrat d'un macro-bloc (conforme au schéma `macro-block.v1.schema.json` dé
 │   └── audio_language : String                                    │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │ Étape 1 : inspect (tool.mkvtoolnix@88.0.0)                 │  │
+│  │ Étape 1 : inspect (app.mkvtoolnix@88.0.0)                 │  │
 │  │  Argv: ["--output-charset", "UTF-8", "-J", "$source_file"]│  │
 │  │  Sorties: inspection_json                                  │  │
 │  └─────────────────────────────┬──────────────────────────────┘  │
 │                                │ succès                          │
 │                                ▼                                 │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │ Étape 2 : remux (tool.mkvtoolnix@88.0.0)                   │  │
+│  │ Étape 2 : remux (app.mkvtoolnix@88.0.0)                   │  │
 │  │  Argv: ["-o", "$scratch/out.mkv", "$source_file", ...]     │  │
 │  │  Sorties: remuxed_file                                     │  │
 │  └─────────────────────────────┬──────────────────────────────┘  │
 │                                │ succès                          │
 │                                ▼                                 │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │ Étape 3 : verify_hash (tool.internal.telemetry ou hash)    │  │
+│  │ Étape 3 : verify_hash (app.internal.telemetry ou hash)    │  │
 │  │  Sorties: final_sha256, final_bytes                        │  │
 │  └─────────────────────────────┬──────────────────────────────┘  │
 │                                │ succès                          │
@@ -66,7 +66,7 @@ Le contrat d'un macro-bloc (conforme au schéma `macro-block.v1.schema.json` dé
 Chaque étape définit :
 - `id` : identifiant unique de l'étape au sein du macro-bloc (ex: `step-inspect`, `step-remux`).
 - `operation` : référence vers l'opération d'outil requise (ex: `operation.mkvmerge.inspect@1.0.0`).
-- `toolRequirement` : l'identifiant et la version de l'outil autonome correspondant (ex: `tool.mkvtoolnix@88.0.0`).
+- `toolRequirement` : l'identifiant et la version de l'outil autonome correspondant (ex: `app.mkvtoolnix@88.0.0`).
 - `bindings` : association explicite entre les arguments attendus par l'opération et les valeurs disponibles (soit issues des `inputs` globaux du macro-bloc, soit issues des sorties des étapes antérieures).
 
 ---

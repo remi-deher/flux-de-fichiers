@@ -2,54 +2,6 @@
 
 pub const SCRIPT: &str = r###"
 // --- Gestion des onglets accessibles ---
-  const TABS = ['dashboard', 'files', 'flows', 'jobs', 'workers', 'plugins', 'settings', 'updates'];
-
-  const TAB_TITLES = {
-    dashboard: 'Vue d\'ensemble & Statistiques',
-    files: 'Bibliothèques & Médias',
-    flows: 'Concepteur de flux (Flows)',
-    jobs: 'Activité & Diagnostics',
-    workers: 'Infrastructure & Nœuds',
-    plugins: 'Plugins & Outils média',
-    settings: 'Paramètres d\'administration',
-    updates: 'Mises à jour & Conteneur',
-  };
-
-  const SEARCH_CONTEXTS = {
-    dashboard: {
-      placeholder: 'Rechercher dans la vue d\'ensemble…',
-      label: 'Filtrer les indicateurs, statistiques et raccourcis d\'accueil',
-    },
-    files: {
-      placeholder: 'Filtrer les fichiers et bibliothèques…',
-      label: 'Filtrer les fichiers médias et dossiers sources',
-    },
-    flows: {
-      placeholder: 'Filtrer les flux et modèles…',
-      label: 'Rechercher parmi les modèles de flux et étapes',
-    },
-    jobs: {
-      placeholder: 'Filtrer les tâches et logs…',
-      label: 'Filtrer les tâches enregistrées et diagnostics',
-    },
-    workers: {
-      placeholder: 'Filtrer les nœuds et agents…',
-      label: 'Filtrer les serveurs et ressources distribuées',
-    },
-    plugins: {
-      placeholder: 'Filtrer les outils et extensions…',
-      label: 'Rechercher un outil MKVToolNix ou dépôt de plugins',
-    },
-    settings: {
-      placeholder: 'Filtrer les paramètres système…',
-      label: 'Rechercher une section ou clé de configuration',
-    },
-    updates: {
-      placeholder: 'Filtrer les notes de mise à jour…',
-      label: 'Rechercher dans l\'historique des versions',
-    },
-  };
-
   function updateSearchContext(tabName) {
     const input = el('global-search-input');
     if (!input) return;
@@ -66,25 +18,25 @@ pub const SCRIPT: &str = r###"
 
   function applyContextualSearch(query) {
     const term = (query || '').toLowerCase().trim();
-    const clearBtn = el('header-search-clear-btn');
     const matchBadge = el('search-match-count');
-    if (clearBtn) {
-      clearBtn.hidden = !term;
-    }
 
     let matchCount = 0;
     let totalCount = 0;
 
     switch (activeTab) {
       case 'files': {
-        const filesSearch = el('files-search-input');
-        if (filesSearch && filesSearch.value !== query) {
-          filesSearch.value = query;
+        const librariesSearch = el('libraries-search-input');
+        if (librariesSearch && librariesSearch.value !== query) {
+          librariesSearch.value = query;
         }
-        totalCount = cachedFiles.length;
-        matchCount = cachedFiles.filter(f => !term || (f.name || '').toLowerCase().includes(term)).length;
-        if (typeof renderFilesTable === 'function') {
-          renderFilesTable();
+        totalCount = cachedLibraries.length;
+        matchCount = cachedLibraries.filter(library => matchesQuery([
+          library.name,
+          library.flow_id || '',
+          ...(Array.isArray(library.nodes) ? library.nodes.map(node => node.local_path) : [])
+        ], query)).length;
+        if (typeof renderLibrariesTable === 'function') {
+          renderLibrariesTable();
         }
         break;
       }
@@ -94,7 +46,7 @@ pub const SCRIPT: &str = r###"
           jobsSearch.value = query;
         }
         totalCount = cachedJobs.length;
-        matchCount = cachedJobs.filter(j => !term || (j.source_name || '').toLowerCase().includes(term) || (j.id || '').toLowerCase().includes(term)).length;
+        matchCount = cachedJobs.filter(j => matchesQuery([j.source_name, j.id], query)).length;
         if (typeof renderJobsTable === 'function') {
           renderJobsTable();
         }
@@ -104,24 +56,21 @@ pub const SCRIPT: &str = r###"
         const metrics = document.querySelectorAll('#panel-dashboard .metric-card');
         totalCount = metrics.length;
         metrics.forEach(card => {
-          const match = !term || card.textContent.toLowerCase().includes(term);
+          const match = textMatches(card, query);
           if (match) matchCount++;
-          card.style.display = match ? '' : 'none';
+          setFiltered(card, match);
         });
         const actions = document.querySelectorAll('#panel-dashboard button');
-        actions.forEach(btn => {
-          const match = !term || btn.textContent.toLowerCase().includes(term);
-          btn.style.display = match ? '' : 'none';
-        });
+        actions.forEach(btn => setFiltered(btn, textMatches(btn, query)));
         break;
       }
       case 'flows': {
-        const flowCards = document.querySelectorAll('#panel-flows .flow-card, #panel-flows .catalog-flow-card, #panel-flows .palette-node-item');
-        totalCount = flowCards.length;
-        flowCards.forEach(card => {
-          const match = !term || card.textContent.toLowerCase().includes(term);
+        const flowRows = document.querySelectorAll('#flows-table-body tr[data-flow-id], #panel-flows .palette-node-item');
+        totalCount = flowRows.length;
+        flowRows.forEach(row => {
+          const match = textMatches(row, query);
           if (match) matchCount++;
-          card.style.display = match ? '' : 'none';
+          setFiltered(row, match);
         });
         break;
       }
@@ -129,19 +78,20 @@ pub const SCRIPT: &str = r###"
         const rows = document.querySelectorAll('#workers-table-body tr');
         totalCount = rows.length;
         rows.forEach(tr => {
-          const match = !term || tr.textContent.toLowerCase().includes(term);
+          const match = textMatches(tr, query);
           if (match) matchCount++;
-          tr.style.display = match ? '' : 'none';
+          setFiltered(tr, match);
         });
         break;
       }
       case 'plugins': {
-        const cards = document.querySelectorAll('#panel-plugins .tool-card, #panel-plugins .plugin-card, #panel-plugins .plugin-store-card, #repos-table-body tr');
-        totalCount = cards.length;
-        cards.forEach(card => {
-          const match = !term || card.textContent.toLowerCase().includes(term);
+        const rows = document.querySelectorAll('#panel-plugins .registre-row');
+        totalCount = rows.length;
+        rows.forEach(row => {
+          const tags = row.getAttribute('data-tags') || '';
+          const match = textMatches(row, query) || matchesQuery([tags], query);
           if (match) matchCount++;
-          card.style.display = match ? '' : 'none';
+          setFiltered(row, match);
         });
         break;
       }
@@ -149,9 +99,9 @@ pub const SCRIPT: &str = r###"
         const sections = document.querySelectorAll('#panel-settings .section-panel');
         totalCount = sections.length;
         sections.forEach(sec => {
-          const match = !term || sec.textContent.toLowerCase().includes(term);
+          const match = textMatches(sec, query);
           if (match) matchCount++;
-          sec.style.display = match ? '' : 'none';
+          setFiltered(sec, match);
         });
         break;
       }
@@ -159,9 +109,9 @@ pub const SCRIPT: &str = r###"
         const cards = document.querySelectorAll('#panel-updates .card, #panel-updates .section-panel');
         totalCount = cards.length;
         cards.forEach(card => {
-          const match = !term || card.textContent.toLowerCase().includes(term);
+          const match = textMatches(card, query);
           if (match) matchCount++;
-          card.style.display = match ? '' : 'none';
+          setFiltered(card, match);
         });
         break;
       }
@@ -180,6 +130,7 @@ pub const SCRIPT: &str = r###"
 
   function switchTab(tabName) {
     if (!TABS.includes(tabName)) return;
+    document.querySelectorAll('.inspection-drawer.is-open').forEach(closeInspectionDrawer);
     activeTab = tabName;
 
     const titleEl = el('current-section-title');
@@ -206,10 +157,11 @@ pub const SCRIPT: &str = r###"
     });
 
     updateSearchContext(tabName);
+    syncSearchCapsule(tabName);
 
     // Actualisation silencieuse contextuelle à l'affichage de l'onglet
     if (tabName === 'files') {
-      loadFiles();
+      loadLibraries();
     } else if (tabName === 'jobs') {
       loadJobs();
     } else if (tabName === 'workers') {
@@ -218,6 +170,11 @@ pub const SCRIPT: &str = r###"
       loadToolsStatus();
     } else if (tabName === 'flows') {
       loadFlows();
+      const canvas = el('flows-canvas-view');
+      const titleEl = el('current-section-title');
+      if (canvas && canvas.style.display === 'block' && titleEl) {
+        titleEl.textContent = 'Éditeur de flux';
+      }
     } else if (tabName === 'plugins') {
       if (typeof loadRepositories === 'function') loadRepositories();
       if (typeof loadStoreCatalog === 'function') loadStoreCatalog();
@@ -225,6 +182,58 @@ pub const SCRIPT: &str = r###"
     } else if (tabName === 'dashboard') {
       if (typeof updateOverviewStats === 'function') updateOverviewStats();
     }
+  }
+
+  function syncSearchCapsule(tabName) {
+    document.querySelectorAll('[data-capsule-tab]').forEach(node => {
+      node.hidden = node.getAttribute('data-capsule-tab') !== tabName;
+    });
+    document.querySelectorAll('[data-filter-page]').forEach(group => {
+      group.hidden = group.getAttribute('data-filter-page') !== tabName;
+    });
+    const filterBtn = el('search-filter-btn');
+    const hasFilters = Boolean(document.querySelector(`[data-filter-page="${tabName}"]`));
+    if (filterBtn) filterBtn.hidden = !hasFilters;
+    if (!hasFilters) closeFilterSheet();
+    updateFilterCount();
+  }
+
+  function updateFilterCount() {
+    const badge = el('search-filter-count');
+    const button = el('search-filter-btn');
+    const sheet = el('filter-sheet');
+    const pressed = document.querySelector('#filter-sheet .filter-chip[aria-pressed="true"]');
+    const active = pressed && pressed.getAttribute('data-filter') !== 'all';
+    if (badge) {
+      badge.hidden = !active;
+      badge.textContent = active ? '1' : '0';
+    }
+    if (button) {
+      const open = Boolean(sheet && !sheet.hidden);
+      button.classList.toggle('is-active', Boolean(active) || open);
+      button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+  }
+
+  function closeFilterSheet() {
+    const sheet = el('filter-sheet');
+    if (sheet) sheet.hidden = true;
+    document.body.removeAttribute('data-filter-sheet');
+    updateFilterCount();
+  }
+
+  function toggleFilterSheet() {
+    const sheet = el('filter-sheet');
+    if (!sheet || sheet.hidden === false && document.body.hasAttribute('data-filter-sheet')) {
+      closeFilterSheet();
+      return;
+    }
+    if (!sheet) return;
+    const input = el('global-search-input');
+    if (input) input.blur();
+    sheet.hidden = false;
+    document.body.setAttribute('data-filter-sheet', '');
+    updateFilterCount();
   }
 
   function setupTabs() {
@@ -297,6 +306,7 @@ pub const SCRIPT: &str = r###"
     if (!parentNav) return;
     const targetId = tabBtn.getAttribute('data-subtab');
     if (!targetId) return;
+    document.querySelectorAll('.inspection-drawer.is-open').forEach(closeInspectionDrawer);
 
     parentNav.querySelectorAll('.subnav-tab').forEach(b => {
       b.classList.remove('active');

@@ -1,6 +1,6 @@
 use crate::{
     api::{self, AppState},
-    domain::LeaseRequest,
+    domain::{JobErrorCode, LeaseRequest},
     media, repository, storage,
 };
 use std::time::Duration;
@@ -64,20 +64,31 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
             return;
         }
     };
+    let catalog = crate::plugins::list_catalog(state.config.plugins_dir.as_deref());
+    let probe = crate::plugins::required_probe(&catalog);
+    let cache = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
+    if !crate::plugins::file_job_may_start(&cache, probe.as_ref()) {
+        report_failure(state, claim.job_id, &lease, JobErrorCode::ProbeUnavailable).await;
+        tracing::warn!(
+            job_id = %claim.job_id,
+            "probe contract is not ready on the local worker"
+        );
+        return;
+    }
     let work_dir = state
         .config
         .data_dir
         .join("staging")
         .join(format!("{}-{}", claim.job_id, claim.lease_token));
     if let Err(error) = tokio::fs::create_dir(&work_dir).await {
-        report_failure(state, claim.job_id, &lease, "transfer_failed").await;
+        report_failure(state, claim.job_id, &lease, JobErrorCode::TransferFailed).await;
         tracing::warn!(job_id=%claim.job_id, error=%error, "local work directory creation failed");
         return;
     }
     let source = match storage::input_path(&state.config.input_dir, &claim.source_name).await {
         Ok(path) => path,
         Err(_) => {
-            report_failure(state, claim.job_id, &lease, "source_integrity").await;
+            report_failure(state, claim.job_id, &lease, JobErrorCode::SourceIntegrity).await;
             cleanup(&work_dir).await;
             return;
         }
@@ -99,12 +110,7 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
         )
         .await?;
         let cache_mgr = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
-        let default_flow: Option<crate::domain::FlowRecord> = sqlx::query_as(
-            "SELECT id, name, description, is_default, definition, created_at, updated_at FROM flows WHERE is_default = 1 LIMIT 1",
-        )
-        .fetch_optional(&state.pool)
-        .await
-        .unwrap_or(None);
+        let default_flow = repository::default_flow(&state.pool).await?;
 
         let state_progress = state.clone();
         let job_id = claim.job_id;
@@ -122,7 +128,7 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
             (outcome.working_file, outcome.warning)
         } else {
             let mkvmerge_bin =
-                cache_mgr.resolve_executable("tool.mkvtoolnix", "1.0.0", "mkvmerge", "MKVMERGE");
+                cache_mgr.resolve_executable("app.mkvtoolnix", "1.0.0", "mkvmerge", "MKVMERGE");
             let warning = media::remux_with_progress(
                 &mkvmerge_bin,
                 &source_snapshot,
@@ -160,17 +166,19 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
         }
     };
     if let Err(error) = outcome {
-        let code = if error.to_string().contains("source_integrity") {
-            "source_integrity"
+        let code = if error.to_string().contains("probe_unavailable") {
+            JobErrorCode::ProbeUnavailable
+        } else if error.to_string().contains("source_integrity") {
+            JobErrorCode::SourceIntegrity
         } else if error.to_string().contains("remux_failed")
             || error.to_string().contains("flow_execution_failed")
         {
-            "remux_failed"
+            JobErrorCode::RemuxFailed
         } else {
-            "transfer_failed"
+            JobErrorCode::TransferFailed
         };
         report_failure(state, claim.job_id, &lease, code).await;
-        tracing::warn!(job_id=%claim.job_id, error_code=code, "local processing failed");
+        tracing::warn!(job_id=%claim.job_id, error_code=%code, "local processing failed");
     }
     cleanup(&work_dir).await;
 }
@@ -212,7 +220,7 @@ async fn copy_verified_source(
     Ok(())
 }
 
-async fn report_failure(state: &AppState, job: Uuid, lease: &LeaseRequest, code: &str) {
+async fn report_failure(state: &AppState, job: Uuid, lease: &LeaseRequest, code: JobErrorCode) {
     if let Err(error) = repository::fail(&state.pool, job, lease, code).await {
         tracing::warn!(job_id=%job, error=%error, "local failure report rejected");
     }

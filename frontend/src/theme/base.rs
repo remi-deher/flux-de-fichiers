@@ -354,30 +354,50 @@ pub const BASE_CSS: &str = r#"
   flex-shrink: 0;
 }
 
-/* Capsule de recherche attachée (Style UiSearchField Watchdeck) */
-.topbar-search-box {
+/* Capsule de recherche : saisie, actions de la page, bouton Filtres.
+   La feuille est un enfant du champ : elle en sort par le bas, à la même largeur. */
+.topbar-search-anchor {
+  position: relative;
   flex: 1;
-  max-width: 520px;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.35rem 0.65rem;
-  background-color: var(--bg-subtle);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--text-dim);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  box-sizing: border-box;
+  min-width: 0;
+  max-width: 640px;
 }
 
-.topbar-search-box:focus-within {
+.topbar-search {
+  display: flex;
+  align-items: stretch;
+  min-height: 40px;
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-dim);
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.topbar-search:focus-within,
+body[data-filter-sheet] .topbar-search {
   border-color: var(--primary);
   background-color: var(--bg-card);
   box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.15);
   color: var(--text-main);
 }
 
-.topbar-search-box .search-icon {
+body[data-filter-sheet] .topbar-search {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.search-capsule__query {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0 0.65rem;
+}
+
+.topbar-search .search-icon {
   flex-shrink: 0;
   color: var(--text-muted);
 }
@@ -439,19 +459,110 @@ pub const BASE_CSS: &str = r#"
   color: var(--text-main);
 }
 
-.search-kbd {
+.search-capsule__tools {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: none;
+  padding: 0 0.35rem 0 0.15rem;
+}
+
+.search-capsule__tools:not(:has(.search-capsule__action:not([hidden]), .search-capsule__filter:not([hidden]))) {
+  display: none;
+}
+
+.search-capsule__actions {
+  display: contents;
+}
+
+.search-capsule__action,
+.search-capsule__filter {
   display: inline-flex;
   align-items: center;
-  padding: 0.1rem 0.35rem;
-  background-color: var(--bg-card);
+  gap: 0.35rem;
+  height: 28px;
+  padding: 0 0.65rem;
   border: 1px solid var(--border-color);
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  font-size: 0.6875rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 0.75rem;
   font-weight: 600;
-  color: var(--text-muted);
-  user-select: none;
-  flex-shrink: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.search-capsule__action:hover,
+.search-capsule__filter:hover,
+.search-capsule__filter.is-active {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, var(--bg-card));
+  color: var(--primary);
+}
+
+.search-capsule__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--bg-card);
+  font-size: 0.6875rem;
+}
+
+.filter-sheet {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  padding: 0.75rem;
+  background: var(--bg-card);
+  border: 1px solid var(--primary);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.filter-sheet__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.filter-sheet__title {
+  font-weight: 700;
+  color: var(--text-main);
+  margin-right: auto;
+}
+
+.filter-sheet__text-btn {
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.filter-sheet__label {
+  margin: 0 0 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.filter-sheet .filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
 /* Actions et statuts de la TopBar */
@@ -704,8 +815,8 @@ pub const BASE_CSS: &str = r#"
   font-size: 0.75rem;
 }
 
-/* Panneaux d'onglets */
-.tab-panel[hidden] {
+/* L'attribut hidden doit masquer l'élément même si un composant fixe display. */
+[hidden] {
   display: none !important;
 }
 
@@ -739,11 +850,13 @@ pub const BASE_CSS: &str = r#"
 }
 
 .subnav-container {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  display: flex;
+  justify-content: center;
   align-items: center;
+  position: relative;
   width: 100%;
-  gap: 0.75rem;
+  min-width: 0;
+  min-height: 40px;
   pointer-events: none;
 }
 
@@ -752,16 +865,20 @@ pub const BASE_CSS: &str = r#"
 }
 
 .subnav-info {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
-  justify-self: start;
   gap: 0.5rem;
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--text-dim);
 }
 
-.subnav-info:empty {
+.subnav-info:empty,
+.subnav-actions:empty {
   display: none;
 }
 
@@ -783,9 +900,8 @@ pub const BASE_CSS: &str = r#"
 
 .app-subnav {
   position: relative;
-  justify-self: center;
-  margin-inline: auto;
-  width: fit-content;
+  box-sizing: border-box;
+  width: max-content;
   min-width: 0;
   max-width: 100%;
   padding: 3px;
@@ -805,16 +921,14 @@ pub const BASE_CSS: &str = r#"
   display: flex;
   align-items: center;
   gap: 3px;
+  width: max-content;
   min-width: 0;
   max-width: 100%;
   padding: 0;
   overflow-x: auto;
   border: 0;
   scrollbar-width: none;
-  scroll-snap-type: x proximity;
   overscroll-behavior-x: contain;
-  -webkit-mask-image: linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
-  mask-image: linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
 }
 
 .app-subnav__scroller::-webkit-scrollbar {
@@ -887,16 +1001,14 @@ pub const BASE_CSS: &str = r#"
 }
 
 .subnav-actions {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
-  justify-self: end;
   gap: 0.5rem;
-  margin-left: auto;
   flex-wrap: wrap;
-}
-
-.subnav-actions:empty {
-  display: none;
 }
 
 /* --- Adaptations Responsives Mobile (< 768px) --- */
@@ -907,23 +1019,14 @@ pub const BASE_CSS: &str = r#"
   }
 
   .subnav-container {
-    flex-direction: column;
-    align-items: stretch;
     gap: 0.5rem;
   }
 
-  .app-subnav {
-    width: 100%;
-    max-width: 100%;
-  }
-
+  .app-subnav,
   .app-subnav__scroller,
   .subnav-tabs {
-    width: 100%;
+    width: max-content;
     max-width: 100%;
-    overflow-x: auto;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
   }
 
   .subnav-info {
@@ -931,8 +1034,6 @@ pub const BASE_CSS: &str = r#"
   }
 
   .subnav-actions {
-    margin-left: 0;
-    justify-content: flex-start;
     flex-wrap: wrap;
   }
 
@@ -1018,7 +1119,7 @@ pub const BASE_CSS: &str = r#"
     display: none;
   }
 
-  .topbar-search-box {
+  .topbar-search-anchor {
     max-width: none;
   }
 

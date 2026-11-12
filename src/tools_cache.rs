@@ -407,13 +407,13 @@ mod tests {
             }),
         };
 
-        assert!(!manager.is_ready("tool.mkvtoolnix", "88.0.0", "x86_64"));
+        assert!(!manager.is_ready("app.mkvtoolnix", "88.0.0", "x86_64"));
 
         let installed_path =
-            manager.extract_and_install("tool.mkvtoolnix", "88.0.0", &artifact, &archive_bytes)?;
+            manager.extract_and_install("app.mkvtoolnix", "88.0.0", &artifact, &archive_bytes)?;
 
         assert!(installed_path.is_file());
-        assert!(manager.is_ready("tool.mkvtoolnix", "88.0.0", "x86_64"));
+        assert!(manager.is_ready("app.mkvtoolnix", "88.0.0", "x86_64"));
 
         // Vérification des permissions 0755
         let metadata = fs::metadata(&installed_path)?;
@@ -421,7 +421,7 @@ mod tests {
 
         // Vérification cache chaud
         let cached_path = manager.verify_cached_binary(
-            "tool.mkvtoolnix",
+            "app.mkvtoolnix",
             "88.0.0",
             "x86_64",
             "mkvmerge",

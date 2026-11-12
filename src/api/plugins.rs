@@ -37,11 +37,11 @@ pub async fn tool_distribution(
     Path(id): Path<String>,
     _auth: AdminAuth,
 ) -> AppResult<Json<Value>> {
-    let tool_name = id.trim_start_matches("tool.");
+    let app_name = id.trim_start_matches("app.");
     if let Some(ref root) = s.config.plugins_dir {
         let dist_path = root
-            .join("tools")
-            .join(tool_name)
+            .join("apps")
+            .join(app_name)
             .join("distribution.v1.json");
         if dist_path.is_file() {
             let content = std::fs::read_to_string(&dist_path)?;
@@ -52,7 +52,7 @@ pub async fn tool_distribution(
     }
     // Repli de secours pour les outils fondamentaux
     match id.as_str() {
-        "tool.mkvtoolnix" => Ok(Json(serde_json::json!({
+        "app.mkvtoolnix" => Ok(Json(serde_json::json!({
             "schemaVersion": "1.0.0",
             "tool": "mkvtoolnix",
             "name": "MKVToolNix CLI",
@@ -80,14 +80,18 @@ pub async fn get_settings(
     Path(id): Path<String>,
     _auth: AdminAuth,
 ) -> AppResult<Json<Value>> {
-    let saved = crate::repository::get_plugin_settings(&s.pool, &id).await?;
-    let settings_val = match saved {
-        Some(s) => serde_json::from_str(&s).unwrap_or(serde_json::json!({})),
+    let saved_raw = crate::repository::get_plugin_settings(&s.pool, &id).await?;
+    let saved = match saved_raw.as_deref() {
+        Some(raw) => serde_json::from_str(raw).unwrap_or_else(|_| serde_json::json!({})),
         None => serde_json::json!({}),
     };
+    // `fields[].value` propose le défaut du manifeste si la clé n'est pas sauvée.
+    // `settings` reste l'objet enregistré, sans y réécrire ces défauts.
+    let fields = plugins::resolved_plugin_fields(s.config.plugins_dir.as_deref(), &id, &saved);
     Ok(Json(serde_json::json!({
         "pluginId": id,
-        "settings": settings_val,
+        "settings": saved,
+        "fields": fields,
     })))
 }
 

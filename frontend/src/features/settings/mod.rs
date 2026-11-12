@@ -15,10 +15,10 @@ use storage::SettingsStorage;
 pub fn SettingsPanel() -> impl IntoView {
     view! {
         <div
-            id="panel-settings"
+            id=crate::core::panel::SETTINGS.dom_id
             class="tab-panel"
             role="tabpanel"
-            aria-labelledby="tab-btn-settings"
+            aria-labelledby=crate::core::panel::SETTINGS.button_id
             hidden
         >
             <SettingsAccess />

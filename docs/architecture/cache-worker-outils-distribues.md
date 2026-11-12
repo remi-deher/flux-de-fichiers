@@ -26,7 +26,7 @@ Le cache réside sous une racine configurable (variable d'environnement `TOOLS_C
 
 ```text
 /work/tools-cache/
-├── tool.mkvtoolnix/
+├── app.mkvtoolnix/
 │   └── 88.0.0/
 │       └── x86_64/
 │           ├── .manifest.json        # Copie locale du contrat de distribution
@@ -35,7 +35,7 @@ Le cache réside sous une racine configurable (variable d'environnement `TOOLS_C
 │           ├── .sha256               # Somme SHA-256 du binaire vérifié
 │           └── bin/
 │               └── mkvmerge          # Exécutable binaire final (mode 0755)
-├── tool.ffmpeg/
+├── app.ffmpeg/
 │   └── 7.1.0/
 │       └── x86_64/
 │           ├── .manifest.json

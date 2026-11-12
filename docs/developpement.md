@@ -22,7 +22,8 @@ Un seul crate et un seul binaire, deux modes : coordinateur ou agent. Les façad
 `security` rendent les responsabilités visibles ; voir
 [`architecture/deux-depots.md`](architecture/deux-depots.md) pour les frontières
 entre socle et dépôt plugins. Seul le
-coordinateur accède à PostgreSQL ; les agents échangent avec lui par HTTPS.
+coordinateur accède à SQLite (`/config/flux.db`) ; les agents échangent avec lui par HTTP
+(TLS éventuel via le reverse proxy externe).
 Les migrations sont embarquées et appliquées au démarrage du coordinateur.
 
 ## Vérifier selon le changement
@@ -31,10 +32,10 @@ Les migrations sont embarquées et appliquées au démarrage du coordinateur.
   build Rust ni de démarrage Docker nécessaire.
 - Rust : commandes de référence dans la rubrique « Vérifications Rust » du
   README ; toolchain épinglée dans `rust-toolchain.toml`, dépendances verrouillées.
-  Les tests Rust actuels ne nécessitent ni PostgreSQL actif ni MKVToolNix installé.
+  Les tests Rust actuels ne nécessitent ni serveur de base externe ni MKVToolNix installé.
 - Chaîne média, baux, transferts ou Docker : `npm run dev`, puis
-  `npm run scenarios` sur le laboratoire local disponible. Les scénarios suspendent
-  des agents et redémarrent PostgreSQL : utiliser un laboratoire de développement.
+  `npm run scenarios` sur le laboratoire local disponible. Utiliser un laboratoire
+  de développement.
   Ils ne prouvent ni la HA ni le fonctionnement sur plusieurs machines physiques.
 - CI : vérifier le workflow concerné. Le job `docker-scenarios` de `test.yml`
   exécute les scénarios sur l'image `pr-<sha12>` sans reconstruire le service.

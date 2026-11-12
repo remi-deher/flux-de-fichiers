@@ -68,8 +68,15 @@ mod tests {
         assert!(html.contains("id=\"app-topbar\""));
         assert!(html.contains("id=\"global-search-input\""));
         assert!(html.contains("id=\"search-match-count\""));
-        assert!(html.contains("id=\"header-search-clear-btn\""));
-        assert!(html.contains("search-kbd"));
+        assert!(!html.contains("id=\"header-search-clear-btn\""));
+        assert!(!html.contains("search-kbd"));
+        assert!(html.contains("search-capsule__tools"));
+        assert!(html.contains("id=\"search-capsule\""));
+        assert!(html.contains("id=\"search-filter-btn\""));
+        assert!(html.contains("id=\"filter-sheet\""));
+        assert!(html.contains("data-capsule-tab=\"flows\""));
+        assert!(html.contains("data-filter-page=\"jobs\""));
+        assert!(html.contains("function toggleFilterSheet"));
         assert!(html.contains("applyContextualSearch"));
         assert!(html.contains("setupChromeAutoHide"));
         assert!(html.contains("id=\"header-workers-pill\""));
@@ -103,5 +110,69 @@ mod tests {
         assert!(!html.contains("id=\"header-refresh-btn\""));
         assert!(!html.contains("id=\"btn-sync-all-repos\""));
         assert!(!html.contains("repo-sync-btn"));
+    }
+
+    #[test]
+    fn test_catalog_ids_and_pure_functions_reach_the_page() {
+        let html = render_full_page();
+        for panel in crate::core::panels() {
+            assert!(html.contains(&format!("id=\"{}\"", panel.dom_id)));
+            assert!(html.contains(&format!("id=\"{}\"", panel.button_id)));
+            assert!(html.contains(panel.search_placeholder));
+        }
+        assert!(html.contains("function matchesQuery"));
+        assert!(html.contains("function isVideoFlowName"));
+        assert!(html.contains("function emptyStateRow"));
+        assert!(html.contains("function loadFlows"));
+        assert!(html.contains("function openCanvas"));
+        assert!(html.contains("class=\"registre\""));
+        assert!(html.contains("class=\"inspection-drawer\""));
+        assert!(html.contains("class=\"inspection-drawer__header\""));
+        assert!(html.contains("class=\"inspection-drawer__subnav\""));
+        assert!(html.contains(">Aperçu<"));
+        assert!(html.contains("data-inspection-close"));
+        assert!(!html.contains("class=\"registre-split\""));
+        assert!(html.contains("id=\"libraries-table-body\""));
+        assert!(html.contains("id=\"libraries-fact-pane-overview\""));
+        assert!(html.contains("id=\"libraries-fact-pane-nodes\""));
+        assert!(html.contains("id=\"libraries-fact-pane-flow\""));
+        assert!(html.contains("id=\"library-name-input\""));
+        assert!(html.contains("id=\"library-flow-select\""));
+        assert!(html.contains("function loadLibraries"));
+        assert!(html.contains("function saveLibrary"));
+        assert!(!html.contains("id=\"files-table-body\""));
+        assert!(!html.contains("id=\"confirm-remux-dialog\""));
+        assert!(!html.contains("btn-subtab-files-browser"));
+        assert!(!html.contains("Volume /input"));
+        assert!(html.contains("id=\"flows-fact-action\""));
+        assert!(html.contains(">Éditer<"));
+        assert!(html.contains("id=\"workers-fact-action\""));
+        assert!(html.contains(">Raccorder<"));
+        assert!(html.contains("subtab-plugins-app"));
+        assert!(html.contains("subtab-plugins-pack"));
+        assert!(html.contains("subtab-plugins-resource"));
+        assert!(html.contains("subtab-plugins-repos"));
+        assert!(html.contains("Retour aux flux"));
+        assert!(html.contains("function showRegistreFact"));
+        assert!(!html.contains("btn-subtab-flows-canvas"));
+        assert!(html.contains("function resetSimulation"));
+    }
+
+    #[test]
+    fn plugin_form_comes_from_the_manifest_schema() {
+        let html = render_full_page();
+        assert!(html.contains("id=\"plugin-config-fields\""));
+        assert!(html.contains("function renderPluginConfigFields"));
+        assert!(html.contains("data-setting-name"));
+        assert!(html.contains("data-tags"));
+        assert!(!html.contains("192.168.1.50"));
+        assert!(!html.contains("plugin-cfg-url"));
+        assert!(!html.contains("plugin-cfg-apikey"));
+        assert!(!html.contains("plugin-cfg-local-path"));
+        assert!(!html.contains("plugin-cfg-remote-path"));
+        assert!(!html.contains("value=\"/data\""));
+        assert!(!html.contains("value=\"/media\""));
+        assert!(!html.contains("'/tv'"));
+        assert!(!html.contains("'/movies'"));
     }
 }

@@ -143,9 +143,7 @@ pub const SCRIPT: &str = r###"
       if (typeof updateOverviewStats === 'function') updateOverviewStats();
     } catch (e) {
       if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="5" class="empty-state-text" style="color: var(--danger-text);">
-          ${escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session pour afficher la file des tâches.' : 'Impossible de récupérer les tâches.')}
-        </td></tr>`;
+        tbody.innerHTML = emptyStateRow(5, escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session pour afficher la file des tâches.' : 'Impossible de récupérer les tâches.'), true);
       }
     }
   }
@@ -156,21 +154,19 @@ pub const SCRIPT: &str = r###"
 
     const recent = cachedJobs.slice(0, 3);
     if (recent.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="4" class="empty-state-text">Aucune tâche enregistrée pour le moment.</td></tr>`;
+      tbody.innerHTML = emptyStateRow(4, 'Aucune tâche enregistrée pour le moment.', false);
       return;
     }
 
     tbody.innerHTML = recent.map(j => {
       const statusClass = jobStatusClass(j.status);
       const isRunning = j.status === 'running';
-      return `
-        <tr>
-          <td style="font-family: var(--font-mono); font-weight: 600;">${escapeHtml(j.id.slice(0, 8))}…</td>
+      return tableRow(`
+          <td class="text-mono-strong">${escapeHtml(j.id.slice(0, 8))}…</td>
           <td>${escapeHtml(j.source_name)}</td>
           <td>${renderStatusPill(escapeHtml(j.status), statusClass, { pulse: isRunning })}</td>
           <td>${formatDate(j.created_at)}</td>
-        </tr>
-      `;
+      `);
     }).join('');
   }
 
@@ -201,14 +197,11 @@ pub const SCRIPT: &str = r###"
     }
 
     if (query) {
-      filtered = filtered.filter(j =>
-        j.id.toLowerCase().includes(query) ||
-        j.source_name.toLowerCase().includes(query)
-      );
+      filtered = filtered.filter(j => matchesQuery([j.id, j.source_name], query));
     }
 
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="5" class="empty-state-text">Aucune tâche ne correspond à ces critères.</td></tr>`;
+      tbody.innerHTML = emptyStateRow(5, 'Aucune tâche ne correspond à ces critères.', false);
       return;
     }
 
@@ -221,20 +214,18 @@ pub const SCRIPT: &str = r###"
         ? `<button type="button" class="btn btn-secondary btn-sm job-download-btn" data-job-id="${escapeHtml(j.id)}" data-output="${escapeHtml(j.output_name || 'resultat.mkv')}" title="Télécharger le flux MKV directement sans charger la RAM">Télécharger</button>`
         : '';
 
-      return `
-        <tr>
-          <td style="font-family: var(--font-mono); font-weight: 600;">${escapeHtml(j.id.slice(0, 8))}…</td>
+      return tableRow(`
+          <td class="text-mono-strong">${escapeHtml(j.id.slice(0, 8))}…</td>
           <td>${escapeHtml(j.source_name)}</td>
           <td>${renderStatusPill(statusLabel, statusClass, { pulse: isRunning })}</td>
           <td>${formatDate(j.created_at)}</td>
           <td>
-            <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <div class="cluster">
               <button type="button" class="btn btn-secondary btn-sm job-detail-btn" data-job-id="${escapeHtml(j.id)}">Détails</button>
               ${dlBtnHtml}
             </div>
           </td>
-        </tr>
-      `;
+      `);
     }).join('');
 
     tbody.querySelectorAll('.job-detail-btn').forEach(b => {

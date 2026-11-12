@@ -42,7 +42,7 @@ impl From<sqlx::Error> for AppError {
         {
             match code.as_ref() {
                 "2067" | "1555" => return AppError::Conflict,
-                "787" => return AppError::Invalid,
+                "275" | "787" => return AppError::Invalid,
                 _ => {}
             }
         }

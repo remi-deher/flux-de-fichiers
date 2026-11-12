@@ -29,18 +29,20 @@ pub async fn create(
 ) -> AppResult<(StatusCode, Json<Job>)> {
     let path = storage::input_path(&s.config.input_dir, &r.source_name).await?;
     let (hash, bytes) = storage::fingerprint(&path, s.config.max_file_bytes).await?;
-    if let Some(worker) = r.target_worker_id {
-        let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM workers WHERE id=?1)")
-            .bind(worker)
-            .fetch_one(&s.pool)
-            .await?;
-        if !exists {
-            return Err(AppError::Invalid);
-        }
+    if let Some(worker) = r.target_worker_id
+        && !repository::worker_exists(&s.pool, worker).await?
+    {
+        return Err(AppError::Invalid);
     }
-    let job: Job = sqlx::query_as("INSERT INTO jobs(id,source_name,target_worker_id,source_sha256,source_bytes) VALUES(?1,?2,?3,?4,?5) RETURNING *")
-        .bind(Uuid::new_v4()).bind(r.source_name).bind(r.target_worker_id).bind(hash).bind(bytes as i64).fetch_one(&s.pool).await?;
-    s.notify_job_event(JobEventType::JobCreated, job.id, JobStatus::Pending, None);
+    let job = repository::insert_job(
+        &s.pool,
+        &r.source_name,
+        r.target_worker_id,
+        &hash,
+        bytes as i64,
+    )
+    .await?;
+    s.notify_job_event(JobEventType::JobCreated, job.id, JobStatus::Queued, None);
     Ok((StatusCode::CREATED, Json(job)))
 }
 
@@ -58,8 +60,7 @@ pub async fn list(
     if !(1..=200).contains(&limit) {
         return Err(AppError::Invalid);
     }
-    Ok(Json(sqlx::query_as("SELECT * FROM jobs WHERE (?1 IS NULL OR (created_at,id) < (SELECT created_at,id FROM jobs WHERE id=?1)) ORDER BY created_at DESC,id DESC LIMIT ?2")
-        .bind(p.before).bind(limit).fetch_all(&s.pool).await?))
+    Ok(Json(repository::list_jobs(&s.pool, p.before, limit).await?))
 }
 
 pub async fn events(
@@ -72,7 +73,7 @@ pub async fn events(
             match rx.recv().await {
                 Ok(event) => {
                     let data = serde_json::to_string(&event).unwrap_or_default();
-                    let sse_event = Event::default().event(&event.event_type).data(data);
+                    let sse_event = Event::default().event(event.event_type.as_str()).data(data);
                     return Some((Ok(sse_event), rx));
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
@@ -89,20 +90,10 @@ pub async fn get_job(
     Path(id): Path<Uuid>,
     _auth: AdminAuth,
 ) -> AppResult<Json<Job>> {
-    Ok(Json(
-        sqlx::query_as("SELECT * FROM jobs WHERE id=?1")
-            .bind(id)
-            .fetch_optional(&s.pool)
-            .await?
-            .ok_or(AppError::NotFound)?,
-    ))
+    Ok(Json(repository::get_job(&s.pool, id).await?))
 }
 pub async fn workers(State(s): State<AppState>, _auth: AdminAuth) -> AppResult<Json<Vec<Worker>>> {
-    Ok(Json(
-        sqlx::query_as("SELECT * FROM workers ORDER BY name LIMIT 200")
-            .fetch_all(&s.pool)
-            .await?,
-    ))
+    Ok(Json(repository::list_workers(&s.pool).await?))
 }
 
 pub async fn delete_worker(
@@ -110,14 +101,7 @@ pub async fn delete_worker(
     Path(id): Path<Uuid>,
     _auth: AdminAuth,
 ) -> AppResult<StatusCode> {
-    let affected = sqlx::query("DELETE FROM workers WHERE id = ?1")
-        .bind(id)
-        .execute(&s.pool)
-        .await?
-        .rows_affected();
-    if affected == 0 {
-        return Err(AppError::NotFound);
-    }
+    repository::delete_worker(&s.pool, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 pub async fn heartbeat(
@@ -139,6 +123,9 @@ pub async fn failure(
 ) -> AppResult<StatusCode> {
     authorize(&h, &s.config.worker_key)?;
     let error_code: JobErrorCode = r.error_code.parse().map_err(|_| AppError::Invalid)?;
+    if !error_code.is_worker_reportable() {
+        return Err(AppError::Invalid);
+    }
     repository::fail(
         &s.pool,
         id,
@@ -147,14 +134,14 @@ pub async fn failure(
             lease_token: r.lease_token,
             telemetry: None,
         },
-        error_code.as_str(),
+        error_code,
     )
     .await?;
     s.notify_job_event(
         JobEventType::JobFailed,
         id,
         JobStatus::Failed,
-        Some(error_code.as_str().to_string()),
+        Some(error_code),
     );
     Ok(StatusCode::NO_CONTENT)
 }

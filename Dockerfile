@@ -35,11 +35,11 @@ ARG VCS_REF=local
 LABEL org.opencontainers.image.title="Flux de Fichiers" org.opencontainers.image.version=$APP_VERSION org.opencontainers.image.revision=$VCS_REF
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates mkvtoolnix curl mediainfo && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 app \
-    && mkdir -p /config /data /work /logs /usr/share/flux-de-fichiers/frontend \
+    && mkdir -p /config /data/input /data/output /data/staging /work /logs /usr/share/flux-de-fichiers/frontend \
     && chown -R app:app /config /data /work /logs /usr/share/flux-de-fichiers/frontend
 COPY --from=build /usr/local/bin/flux-de-fichiers /usr/local/bin/flux-de-fichiers
 COPY --from=build /src/frontend/dist/ /usr/share/flux-de-fichiers/frontend/
-ENV CONFIG_DIR=/config DATA_DIR=/data WORK_DIR=/work LOG_DIR=/logs STATIC_DIR=/usr/share/flux-de-fichiers/frontend
+ENV CONFIG_DIR=/config DATA_DIR=/data INPUT_DIR=/data/input WORK_DIR=/work LOG_DIR=/logs STATIC_DIR=/usr/share/flux-de-fichiers/frontend
 VOLUME ["/config", "/data", "/work", "/logs"]
 USER 10001
 EXPOSE 3000

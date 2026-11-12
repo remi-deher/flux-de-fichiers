@@ -1,7 +1,8 @@
-//! Gabarit partagé de sous-navigation horizontale (inspiré de l'ADR 0020).
+//! Gabarit partagé de sous-navigation horizontale inspiré de Watchdeck (`AppSubnav`).
 //!
-//! Fournit une barre d'onglets de second niveau accessible (WAI-ARIA `tablist` / `tab`)
-//! avec support optionnel d'actions contextuelles à droite.
+//! Fournit une barre d'outils collante (`page-subnav`) accueillant une capsule d'onglets
+//! accessible (`app-subnav`, WAI-ARIA `tablist` / `tab`), des informations de contexte
+//! et d'éventuelles actions spécifiques.
 
 use leptos::prelude::*;
 
@@ -24,39 +25,45 @@ pub fn SubNav(
     #[prop(optional)] actions: Option<AnyView>,
 ) -> impl IntoView {
     view! {
-        <nav class="page-subnav" aria-label=aria_label>
-            <div class="subnav-container">
+        <nav class="page-subnav app-subnav-toolbar" aria-label=aria_label>
+            <div class="subnav-container app-subnav-container">
                 <div class="subnav-info">
                     {info}
                 </div>
 
-                <div class="subnav-tabs" role="tablist">
-                    {tabs.into_iter().map(|item| {
-                        let active_class = if item.is_active { "subnav-tab active" } else { "subnav-tab" };
-                        let aria_selected = if item.is_active { "true" } else { "false" };
-                        let tab_index = if item.is_active { "0" } else { "-1" };
+                <div class="app-subnav">
+                    <div class="app-subnav__scroller subnav-tabs" role="tablist">
+                        {tabs.into_iter().map(|item| {
+                            let active_class = if item.is_active {
+                                "app-subnav__item subnav-tab active"
+                            } else {
+                                "app-subnav__item subnav-tab"
+                            };
+                            let aria_selected = if item.is_active { "true" } else { "false" };
+                            let tab_index = if item.is_active { "0" } else { "-1" };
 
-                        view! {
-                            <button
-                                type="button"
-                                role="tab"
-                                id=item.id
-                                class=active_class
-                                aria-selected=aria_selected
-                                aria-controls=item.target_id
-                                tabindex=tab_index
-                                data-subtab=item.target_id
-                            >
-                                {item.icon.map(|ic| view! {
-                                    <span class="subnav-tab-icon" aria-hidden="true">{ic}</span>
-                                })}
-                                <span class="subnav-tab-label">{item.label}</span>
-                                {item.badge.map(|bg| view! {
-                                    <span class="subnav-tab-badge">{bg}</span>
-                                })}
-                            </button>
-                        }
-                    }).collect_view()}
+                            view! {
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    id=item.id
+                                    class=active_class
+                                    aria-selected=aria_selected
+                                    aria-controls=item.target_id
+                                    tabindex=tab_index
+                                    data-subtab=item.target_id
+                                >
+                                    {item.icon.map(|ic| view! {
+                                        <span class="app-subnav__icon subnav-tab-icon" aria-hidden="true">{ic}</span>
+                                    })}
+                                    <span class="app-subnav__label subnav-tab-label">{item.label}</span>
+                                    {item.badge.map(|bg| view! {
+                                        <small class="app-subnav__badge subnav-tab-badge">{bg}</small>
+                                    })}
+                                </button>
+                            }
+                        }).collect_view()}
+                    </div>
                 </div>
 
                 <div class="subnav-actions">

@@ -3,11 +3,6 @@
 pub const SCRIPT: &str = r###"
 // --- Synchronisation globale ---
   async function refreshAll() {
-    const refreshBtn = el('refresh-all-btn');
-    if (refreshBtn) {
-      refreshBtn.disabled = true;
-    }
-
     await checkHealth();
     await checkSession();
     await Promise.allSettled([
@@ -18,10 +13,6 @@ pub const SCRIPT: &str = r###"
       loadToolsStatus(),
       loadFlows()
     ]);
-
-    if (refreshBtn) {
-      refreshBtn.disabled = false;
-    }
   }
 
 
@@ -30,9 +21,6 @@ pub const SCRIPT: &str = r###"
     setupTabs();
     setupTheme();
     updateSearchContext(activeTab);
-
-    const refreshBtn = el('refresh-all-btn');
-    if (refreshBtn) refreshBtn.addEventListener('click', refreshAll);
 
     // Initialisation de la barre de recherche contextuelle globale
     const globalSearchInput = el('global-search-input');
@@ -69,6 +57,7 @@ pub const SCRIPT: &str = r###"
         e.preventDefault();
         const topbar = el('app-topbar');
         if (topbar) topbar.classList.remove('is-hidden');
+        document.querySelectorAll('.page-subnav').forEach(s => s.classList.remove('is-hidden'));
         if (globalSearchInput) {
           globalSearchInput.focus();
           globalSearchInput.select();
@@ -203,6 +192,7 @@ pub const SCRIPT: &str = r###"
     window.addEventListener('scroll', () => {
       const current = Math.max(0, window.scrollY);
       const delta = current - lastScrollY;
+      const subnavs = document.querySelectorAll('.page-subnav');
 
       // Élévation : renforce l'ombre dès qu'on défile
       if (current >= TOP_ZONE_PX) {
@@ -215,8 +205,10 @@ pub const SCRIPT: &str = r###"
       const isFocused = topbar.contains(document.activeElement);
       if (isFocused || current < TOP_ZONE_PX || delta < SHOW_DELTA_PX) {
         topbar.classList.remove('is-hidden');
+        subnavs.forEach(s => s.classList.remove('is-hidden'));
       } else if (delta > HIDE_DELTA_PX && current > HIDE_AFTER_PX) {
         topbar.classList.add('is-hidden');
+        subnavs.forEach(s => s.classList.add('is-hidden'));
       }
 
       lastScrollY = current;

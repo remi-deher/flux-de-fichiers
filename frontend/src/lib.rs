@@ -87,4 +87,19 @@ mod tests {
         assert!(html.contains("id=\"media-formats-bar\""));
         assert!(html.contains("updateOverviewStats"));
     }
+
+    #[test]
+    fn test_render_full_page_subnav_and_no_refresh_buttons() {
+        let html = render_full_page();
+        assert!(html.contains("class=\"app-subnav\""));
+        assert!(html.contains("app-subnav__scroller"));
+        assert!(html.contains("app-subnav__item"));
+        assert!(html.contains("app-subnav-toolbar"));
+
+        assert!(!html.contains("id=\"refresh-all-btn\""));
+        assert!(!html.contains("id=\"files-refresh-btn\""));
+        assert!(!html.contains("id=\"jobs-refresh-btn\""));
+        assert!(!html.contains("id=\"btn-refresh-workers\""));
+        assert!(!html.contains("id=\"header-refresh-btn\""));
+    }
 }

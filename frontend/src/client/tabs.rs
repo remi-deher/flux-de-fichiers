@@ -206,6 +206,21 @@ pub const SCRIPT: &str = r###"
     });
 
     updateSearchContext(tabName);
+
+    // Actualisation silencieuse contextuelle à l'affichage de l'onglet
+    if (tabName === 'files') {
+      loadFiles();
+    } else if (tabName === 'jobs') {
+      loadJobs();
+    } else if (tabName === 'workers') {
+      loadWorkers();
+      loadSystemConfig();
+      loadToolsStatus();
+    } else if (tabName === 'flows') {
+      loadFlows();
+    } else if (tabName === 'dashboard') {
+      if (typeof updateOverviewStats === 'function') updateOverviewStats();
+    }
   }
 
   function setupTabs() {

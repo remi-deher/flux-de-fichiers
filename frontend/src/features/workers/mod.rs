@@ -32,25 +32,12 @@ pub fn WorkersPanel() -> impl IntoView {
     }
     .into_any();
 
-    let subnav_actions = view! {
-        <Button
-            id="btn-refresh-workers"
-            variant=ButtonVariant::Secondary
-            class="btn-sm"
-            aria_label="Actualiser l'état des serveurs et agents"
-        >
-            "🔄 Actualiser"
-        </Button>
-    }
-    .into_any();
-
     view! {
         <div id="panel-workers" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-workers" hidden>
             <SubNav
                 aria_label="Sous-navigation de la section Infrastructure et Nœuds"
                 tabs=subnav_tabs
                 info=subnav_info
-                actions=subnav_actions
             />
 
             // --- Sous-vue 1 : Ce nœud local (Coordinateur & raccordement) ---

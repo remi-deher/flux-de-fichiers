@@ -42,16 +42,6 @@ pub fn Sidebar() -> impl IntoView {
                         <Icon name=IconName::Moon size=15 class="theme-toggle-icon" />
                         <span id="theme-toggle-label">"Thème"</span>
                     </button>
-                    <button
-                        type="button"
-                        id="refresh-all-btn"
-                        class="btn btn-secondary btn-sm"
-                        aria-label="Actualiser les données du coordinateur"
-                        title="Actualiser les données du coordinateur"
-                    >
-                        <Icon name=IconName::Refresh size=15 />
-                        <span>"Actualiser"</span>
-                    </button>
                 </div>
             </div>
         </aside>

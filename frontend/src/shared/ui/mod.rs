@@ -17,7 +17,7 @@ pub use detail_drawer::DetailDrawer;
 pub use empty_state::EmptyState;
 pub use icon::{Icon, IconName};
 pub use inspection::{InspectionPane, InspectionPanel, inspection_drawer};
-pub use metric_card::MetricCard;
+pub use metric_card::{MetricCard, MetricTone};
 pub use registre::{RegistreFact, RegistreTable};
 pub use section_header::SectionHeader;
 pub use status_badge::StatusBadge;

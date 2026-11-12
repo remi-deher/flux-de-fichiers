@@ -17,6 +17,12 @@ pub fn generate_global_tokens_css() -> String {
   --touch-target-min: 48px;
   --touch-target-compact: 44px;
 
+  /* --- Échelle d'espacement (mise en page aérée) --- */
+  --space-1: 0.5rem;
+  --space-2: 1rem;
+  --space-3: 1.5rem;
+  --space-4: 2rem;
+
   /* --- Surfaces & Couleurs Thème Sombre --- */
   --bg-app: {dark_bg_app};
   --bg-card: {dark_bg_card};
@@ -219,6 +225,7 @@ mod tests {
         assert!(res.contains("[data-theme=\"light\"] {"));
         assert!(res.contains("--sat: env(safe-area-inset-top"));
         assert!(res.contains("--touch-target-min: 48px;"));
+        assert!(res.contains("--space-3: 1.5rem;"));
         assert!(res.contains(":focus-visible {"));
         assert!(res.contains("@media (prefers-reduced-motion: reduce)"));
         assert!(res.contains("--bg-app: #0d1117;"));

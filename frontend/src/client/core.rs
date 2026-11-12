@@ -128,9 +128,14 @@ pub const SCRIPT: &str = r###"
     // 2. Calcul du taux de succès des tâches
     const finished = cachedJobs.filter(j => j.status === 'succeeded' || j.status === 'failed');
     const succeeded = cachedJobs.filter(j => j.status === 'succeeded').length;
-    const rate = finished.length > 0 ? Math.round((succeeded / finished.length) * 100) : 100;
     const metricSuccess = el('metric-success-rate');
-    if (metricSuccess) metricSuccess.textContent = `${rate}%`;
+    if (metricSuccess) {
+      const hasFinished = finished.length > 0;
+      const rate = hasFinished ? Math.round((succeeded / finished.length) * 100) : null;
+      metricSuccess.textContent = hasFinished ? `${rate}%` : '—';
+      const card = metricSuccess.closest('.metric-card');
+      if (card) card.dataset.tone = successRateTone(rate);
+    }
 
     // 3. Distribution des formats de conteneurs médias
     const totalFiles = cachedFiles.length;
@@ -171,6 +176,25 @@ pub const SCRIPT: &str = r###"
     }
   }
 
+  // --- Ton de la tuile « Taux de réussite » selon le pourcentage de tâches réussies ---
+  const SUCCESS_RATE_GOOD_MIN = 90;
+  const SUCCESS_RATE_WARNING_MIN = 60;
+
+  function successRateTone(rate) {
+    if (rate === null) return 'neutral';
+    if (rate >= SUCCESS_RATE_GOOD_MIN) return 'success';
+    if (rate >= SUCCESS_RATE_WARNING_MIN) return 'warning';
+    return 'danger';
+  }
+
+  // --- Bandeau d'état de la vue d'ensemble ---
+  function setHeroStatus(reachable) {
+    const badge = el('hero-status-badge');
+    const text = el('hero-status-text');
+    if (badge) badge.dataset.tone = reachable ? 'success' : 'danger';
+    if (text) text.textContent = reachable ? 'Coordinateur joignable' : 'Coordinateur inaccessible';
+  }
+
   // --- Vérification de santé ---
   async function checkHealth() {
     const metricHealth = el('metric-health');
@@ -179,6 +203,7 @@ pub const SCRIPT: &str = r###"
       const res = await fetch('/health');
       if (res.status === 204 || res.ok) {
         updateHeaderWorkersCount(true);
+        setHeroStatus(true);
         if (metricHealth) metricHealth.textContent = 'Joignable';
         return true;
       } else {
@@ -186,6 +211,7 @@ pub const SCRIPT: &str = r###"
       }
     } catch (e) {
       updateHeaderWorkersCount(false, 0);
+      setHeroStatus(false);
       if (metricHealth) metricHealth.textContent = 'Inaccessible';
       return false;
     }

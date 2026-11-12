@@ -42,15 +42,6 @@ pub fn App() -> impl IntoView {
                         <SettingsPanel />
                         <UpdatesPanel />
                     </main>
-
-                    <footer class="shell-footer">
-                        <p>
-                            "Flux de Fichiers v0.6 — Architecture et Shell inspirés d'Encoding Central."
-                        </p>
-                        <p style="margin-top: 0.25rem;">
-                            "100% Rust & Leptos natif • Navigation Rail persistante • Contrastes renforcés WCAG AAA • Moteur Bare Core"
-                        </p>
-                    </footer>
                 </div>
             </div>
         </div>

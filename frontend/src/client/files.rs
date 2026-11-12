@@ -13,6 +13,7 @@ pub const SCRIPT: &str = r###"
 
       if (metricCount) metricCount.textContent = String(cachedFiles.length);
       renderFilesTable();
+      if (typeof updateOverviewStats === 'function') updateOverviewStats();
     } catch (e) {
       if (tbody) {
         tbody.innerHTML = `<tr><td colspan="3" class="empty-state-text" style="color: var(--danger-text);">

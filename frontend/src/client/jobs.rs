@@ -140,6 +140,7 @@ pub const SCRIPT: &str = r###"
       if (metricJobs) metricJobs.textContent = String(cachedJobs.length);
       renderRecentJobs();
       renderJobsTable();
+      if (typeof updateOverviewStats === 'function') updateOverviewStats();
     } catch (e) {
       if (tbody) {
         tbody.innerHTML = `<tr><td colspan="5" class="empty-state-text" style="color: var(--danger-text);">

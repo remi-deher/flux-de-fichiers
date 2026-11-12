@@ -147,6 +147,59 @@ pub const SCRIPT: &str = r###"
     label.textContent = text;
   }
 
+  // --- Calcul des statistiques pour le Hub d'accueil (Vue d'ensemble) ---
+  function updateOverviewStats() {
+    // 1. Calcul du volume total des fichiers gérés
+    const totalBytes = cachedFiles.reduce((acc, f) => acc + (f.size || 0), 0);
+    const metricStorage = el('metric-storage-volume');
+    if (metricStorage) metricStorage.textContent = formatBytes(totalBytes);
+
+    // 2. Calcul du taux de succès des tâches
+    const finished = cachedJobs.filter(j => j.status === 'succeeded' || j.status === 'failed');
+    const succeeded = cachedJobs.filter(j => j.status === 'succeeded').length;
+    const rate = finished.length > 0 ? Math.round((succeeded / finished.length) * 100) : 100;
+    const metricSuccess = el('metric-success-rate');
+    if (metricSuccess) metricSuccess.textContent = `${rate}%`;
+
+    // 3. Distribution des formats de conteneurs médias
+    const totalFiles = cachedFiles.length;
+    const totalLabel = el('media-formats-total-label');
+    if (totalLabel) {
+      totalLabel.textContent = `${totalFiles} fichier${totalFiles > 1 ? 's' : ''}`;
+    }
+
+    const bar = el('media-formats-bar');
+    const legend = el('media-formats-legend');
+    if (totalFiles > 0 && bar && legend) {
+      let mkvCount = 0;
+      let mp4Count = 0;
+      let otherCount = 0;
+
+      cachedFiles.forEach(f => {
+        const name = (f.name || '').toLowerCase();
+        if (name.endsWith('.mkv')) mkvCount++;
+        else if (name.endsWith('.mp4') || name.endsWith('.m4v')) mp4Count++;
+        else otherCount++;
+      });
+
+      const mkvPct = Math.round((mkvCount / totalFiles) * 100);
+      const mp4Pct = Math.round((mp4Count / totalFiles) * 100);
+      const otherPct = Math.max(0, 100 - mkvPct - mp4Pct);
+
+      bar.innerHTML = `
+        <div class="segment-fill mkv" style="width: ${mkvPct}%;" title="MKV: ${mkvCount} (${mkvPct}%)"></div>
+        <div class="segment-fill mp4" style="width: ${mp4Pct}%;" title="MP4: ${mp4Count} (${mp4Pct}%)"></div>
+        <div class="segment-fill other" style="width: ${otherPct}%;" title="Autres: ${otherCount} (${otherPct}%)"></div>
+      `;
+
+      legend.innerHTML = `
+        <span class="legend-item"><span class="legend-dot mkv"></span>MKV: ${mkvPct}% (${mkvCount})</span>
+        <span class="legend-item"><span class="legend-dot mp4"></span>MP4: ${mp4Pct}% (${mp4Count})</span>
+        <span class="legend-item"><span class="legend-dot other"></span>Autres: ${otherPct}% (${otherCount})</span>
+      `;
+    }
+  }
+
   // --- Vérification de santé ---
   async function checkHealth() {
     const metricHealth = el('metric-health');

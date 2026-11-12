@@ -63,16 +63,20 @@ pub const SCRIPT: &str = r###"
       });
     }
 
-    // Raccourci global clavier Cmd+K / Ctrl+K : focus direct sur la barre de recherche
+    // Raccourci global clavier Cmd+K / Ctrl+K : réveille la barre et focus direct sur la recherche
     window.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
+        const topbar = el('app-topbar');
+        if (topbar) topbar.classList.remove('is-hidden');
         if (globalSearchInput) {
           globalSearchInput.focus();
           globalSearchInput.select();
         }
       }
     });
+
+    setupChromeAutoHide();
 
     // Raccourcis d'action du tableau de bord
     const gotoFilesBtn = el('quick-goto-files-btn');
@@ -182,6 +186,41 @@ pub const SCRIPT: &str = r###"
         loadWorkers();
       }
     }, 15000);
+  }
+
+  // --- Auto-masquage au défilement inspiré de Watchdeck (useChromeAutoHide) ---
+  function setupChromeAutoHide() {
+    const topbar = el('app-topbar');
+    if (!topbar) return;
+
+    const TOP_ZONE_PX = 24;
+    const HIDE_AFTER_PX = 96;
+    const HIDE_DELTA_PX = 7;
+    const SHOW_DELTA_PX = -5;
+
+    let lastScrollY = window.scrollY || 0;
+
+    window.addEventListener('scroll', () => {
+      const current = Math.max(0, window.scrollY);
+      const delta = current - lastScrollY;
+
+      // Élévation : renforce l'ombre dès qu'on défile
+      if (current >= TOP_ZONE_PX) {
+        topbar.classList.add('is-elevated');
+      } else {
+        topbar.classList.remove('is-elevated');
+      }
+
+      // Si le champ de recherche a le focus, on garde la barre visible
+      const isFocused = topbar.contains(document.activeElement);
+      if (isFocused || current < TOP_ZONE_PX || delta < SHOW_DELTA_PX) {
+        topbar.classList.remove('is-hidden');
+      } else if (delta > HIDE_DELTA_PX && current > HIDE_AFTER_PX) {
+        topbar.classList.add('is-hidden');
+      }
+
+      lastScrollY = current;
+    }, { passive: true });
   }
 
   // Démarrage

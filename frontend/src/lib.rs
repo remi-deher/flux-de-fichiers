@@ -65,10 +65,13 @@ mod tests {
     fn test_render_full_page_contains_contextual_search_bar() {
         let html = render_full_page();
         assert!(html.contains("role=\"search\""));
+        assert!(html.contains("id=\"app-topbar\""));
         assert!(html.contains("id=\"global-search-input\""));
+        assert!(html.contains("id=\"search-match-count\""));
         assert!(html.contains("id=\"header-search-clear-btn\""));
         assert!(html.contains("search-kbd"));
         assert!(html.contains("applyContextualSearch"));
+        assert!(html.contains("setupChromeAutoHide"));
         assert!(html.contains("id=\"header-workers-pill\""));
         assert!(!html.contains("id=\"header-theme-toggle-btn\""));
         assert!(!html.contains("id=\"header-refresh-btn\""));

@@ -282,36 +282,70 @@ pub const BASE_CSS: &str = r#"
   background-color: var(--bg-app);
 }
 
-/* En-tête applicatif supérieur avec Glassmorphism & Positionnement fixe stable */
-.application-header {
-  min-height: 60px;
-  height: 60px;
-  background-color: rgba(22, 27, 34, 0.85);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--border-color);
+/* --- Barre de commande & navigation flottante unifiée (Style Watchdeck TopBar) --- */
+.app-topbar {
   position: sticky;
-  top: 0;
+  top: max(8px, var(--sat));
   z-index: 40;
-  display: flex;
-  align-items: center;
-  padding: var(--sat) calc(1.5rem + var(--sar)) 0 calc(1.5rem + var(--sal));
+  margin: 0.65rem 1.5rem 1rem 1.5rem;
+  background-color: rgba(22, 27, 34, 0.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.2s ease,
+              border-color 0.2s ease;
   box-sizing: border-box;
 }
 
-[data-theme="light"] .application-header {
-  background-color: rgba(255, 255, 255, 0.85);
+[data-theme="light"] .app-topbar {
+  background-color: rgba(255, 255, 255, 0.90);
 }
 
-.header-breadcrumb {
+/* Élévation quand la page est défilée */
+.app-topbar.is-elevated {
+  border-color: rgba(88, 166, 255, 0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+/* Auto-masquage intelligent au défilement (disparaît vers le haut) */
+.app-topbar.is-hidden:not(:focus-within) {
+  opacity: 0;
+  transform: translateY(calc(-100% - 20px));
+  pointer-events: none;
+}
+
+.topbar-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.45rem 0.85rem;
+  min-height: 48px;
+  box-sizing: border-box;
+}
+
+/* Contexte de page & Fil d'Ariane */
+.topbar-context {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  min-width: 0;
+  font-size: 0.875rem;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: calc(50% - 250px);
+  flex-shrink: 0;
+}
+
+.breadcrumb-item,
+.breadcrumb-separator {
+  color: var(--text-dim);
+}
+
+.breadcrumb-title {
+  color: var(--text-main);
+  font-weight: 600;
 }
 
 /* Style des icônes vectorielles Lucide */
@@ -321,20 +355,10 @@ pub const BASE_CSS: &str = r#"
   flex-shrink: 0;
 }
 
-/* Barre de recherche contextuelle du header (strictement centrée en position fixe absolue) */
-.header-search-wrapper {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: min(100% - 360px, 460px);
-  max-width: 460px;
-  margin: 0;
-  z-index: 3;
-}
-
-.header-search-box {
-  width: 100%;
+/* Capsule de recherche attachée (Style UiSearchField Watchdeck) */
+.topbar-search-box {
+  flex: 1;
+  max-width: 520px;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -347,19 +371,19 @@ pub const BASE_CSS: &str = r#"
   box-sizing: border-box;
 }
 
-.header-search-box:focus-within {
+.topbar-search-box:focus-within {
   border-color: var(--primary);
   background-color: var(--bg-card);
   box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.15);
   color: var(--text-main);
 }
 
-.header-search-box .search-icon {
+.topbar-search-box .search-icon {
   flex-shrink: 0;
   color: var(--text-muted);
 }
 
-.header-search-input {
+.topbar-search-input {
   flex: 1;
   min-width: 0;
   background: transparent;
@@ -371,19 +395,35 @@ pub const BASE_CSS: &str = r#"
   padding: 0.1rem 0;
 }
 
-.header-search-input::placeholder {
+.topbar-search-input::placeholder {
   color: var(--text-muted);
   font-style: italic;
   transition: color 0.15s ease-in-out;
 }
 
-.header-search-input::-webkit-search-cancel-button,
-.header-search-input::-webkit-search-decoration {
+.topbar-search-input::-webkit-search-cancel-button,
+.topbar-search-input::-webkit-search-decoration {
   -webkit-appearance: none;
   appearance: none;
 }
 
-.header-search-clear-btn {
+/* Compteur de correspondances réactif (ex: 3 sur 12) */
+.search-match-count {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 12px;
+  background-color: rgba(88, 166, 255, 0.15);
+  color: var(--primary);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.search-match-count:empty {
+  display: none;
+}
+
+.topbar-search-clear {
   background: transparent;
   border: none;
   padding: 0.1rem;
@@ -396,7 +436,7 @@ pub const BASE_CSS: &str = r#"
   transition: color 0.15s ease-in-out;
 }
 
-.header-search-clear-btn:hover {
+.topbar-search-clear:hover {
   color: var(--text-main);
 }
 
@@ -415,16 +455,12 @@ pub const BASE_CSS: &str = r#"
   flex-shrink: 0;
 }
 
-/* Actions d'en-tête (verrouillées en position fixe à droite) */
-.header-actions {
-  position: absolute;
-  right: calc(1.5rem + var(--sar));
-  top: 50%;
-  transform: translateY(-50%);
+/* Actions et statuts de la TopBar */
+.topbar-actions {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  z-index: 2;
+  flex-shrink: 0;
 }
 
 .header-icon-btn {
@@ -899,30 +935,20 @@ pub const BASE_CSS: &str = r#"
     min-width: 0;
   }
 
-  .application-header {
-    padding: 0 1rem;
-    max-width: 100vw;
-    box-sizing: border-box;
-    position: relative;
-    justify-content: space-between;
+  .app-topbar {
+    margin: 0.5rem 0.75rem;
   }
 
-  .header-breadcrumb {
+  .topbar-container {
+    padding: 0.35rem 0.5rem;
+  }
+
+  .topbar-context {
     display: none;
   }
 
-  .header-search-wrapper {
-    position: static;
-    transform: none;
-    flex: 1;
-    width: auto;
+  .topbar-search-box {
     max-width: none;
-    margin-right: 0.5rem;
-  }
-
-  .header-actions {
-    position: static;
-    transform: none;
   }
 
   .main-content {

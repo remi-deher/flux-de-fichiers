@@ -35,12 +35,12 @@ impl AppState {
         event_type: JobEventType,
         job_id: uuid::Uuid,
         status: JobStatus,
-        error_code: Option<String>,
+        error_code: Option<JobErrorCode>,
     ) {
         let event = JobEvent {
-            event_type: event_type.as_str().to_string(),
+            event_type,
             job_id,
-            status: status.as_str().to_string(),
+            status,
             timestamp: chrono::Utc::now(),
             progress: None,
             message: None,
@@ -51,9 +51,9 @@ impl AppState {
 
     pub fn notify_job_progress(&self, job_id: uuid::Uuid, progress: u32, message: Option<String>) {
         let event = JobEvent {
-            event_type: "job_progress".to_string(),
+            event_type: JobEventType::JobProgress,
             job_id,
-            status: "running".to_string(),
+            status: JobStatus::Running,
             timestamp: chrono::Utc::now(),
             progress: Some(progress),
             message,
@@ -63,7 +63,29 @@ impl AppState {
     }
 }
 
-pub fn router(state: AppState) -> Router {
+/// Budget des routes JSON, y compris l'empreinte SHA-256 de `POST /api/v1/jobs`.
+pub const JSON_API_TIMEOUT: Duration = Duration::from_secs(60);
+/// Budget des transferts de fichiers et du flux SSE, déjà borné dans `receive`.
+pub const TRANSFER_TIMEOUT: Duration = Duration::from_secs(3600);
+pub const JSON_BODY_LIMIT: usize = 16 * 1024;
+
+/// Routes dont la réponse peut durer bien au-delà d'un appel JSON.
+pub fn is_long_running_route(path: &str) -> bool {
+    if path == "/api/v1/jobs/events" {
+        return true;
+    }
+    let Some(rest) = path.strip_prefix("/api/v1/jobs/") else {
+        return false;
+    };
+    let mut parts = rest.split('/');
+    let id = parts.next();
+    let action = parts.next();
+    id.is_some_and(|segment| !segment.is_empty())
+        && matches!(action, Some("source" | "output" | "result"))
+        && parts.next().is_none()
+}
+
+fn json_routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(health))
         .route("/api/v1/config", get(jobs::system_config))
@@ -76,28 +98,69 @@ pub fn router(state: AppState) -> Router {
                 .delete(flows::delete_flow),
         )
         .route("/api/v1/plugins", get(plugins::catalog))
-        .route("/api/v1/plugins/repositories", get(plugins::list_repositories).post(plugins::add_repository))
-        .route("/api/v1/plugins/repositories/{id}/toggle", put(plugins::toggle_repository))
-        .route("/api/v1/plugins/repositories/{id}", axum::routing::delete(plugins::delete_repository))
-        .route("/api/v1/plugins/repositories/{id}/sync", post(plugins::sync_repository))
-        .route("/api/v1/plugins/{id}/settings", get(plugins::get_settings).put(plugins::save_settings))
+        .route(
+            "/api/v1/plugins/repositories",
+            get(plugins::list_repositories).post(plugins::add_repository),
+        )
+        .route(
+            "/api/v1/plugins/repositories/{id}/toggle",
+            put(plugins::toggle_repository),
+        )
+        .route(
+            "/api/v1/plugins/repositories/{id}",
+            axum::routing::delete(plugins::delete_repository),
+        )
+        .route(
+            "/api/v1/plugins/repositories/{id}/sync",
+            post(plugins::sync_repository),
+        )
+        .route(
+            "/api/v1/plugins/{id}/settings",
+            get(plugins::get_settings).put(plugins::save_settings),
+        )
         .route("/api/v1/tools", get(plugins::tools))
-        .route("/api/v1/tools/{id}/distribution", get(plugins::tool_distribution))
-        .route("/api/v1/auth/session", get(session::current).post(session::login))
+        .route(
+            "/api/v1/tools/{id}/distribution",
+            get(plugins::tool_distribution),
+        )
+        .route(
+            "/api/v1/auth/session",
+            get(session::current).post(session::login),
+        )
         .route("/api/v1/auth/logout", post(session::logout))
         .route("/api/v1/jobs", get(jobs::list).post(jobs::create))
-        .route("/api/v1/jobs/events", get(jobs::events))
         .route("/api/v1/jobs/{id}", get(jobs::get_job))
-        .route("/api/v1/jobs/{id}/output", get(transfers::output))
         .route("/api/v1/workers", get(jobs::workers).post(register))
-        .route("/api/v1/workers/{id}", axum::routing::delete(jobs::delete_worker))
+        .route(
+            "/api/v1/workers/{id}",
+            axum::routing::delete(jobs::delete_worker),
+        )
         .route("/api/v1/claims", post(claim))
         .route("/api/v1/jobs/{id}/heartbeat", post(jobs::heartbeat))
         .route("/api/v1/jobs/{id}/failure", post(jobs::failure))
+        .layer(axum::extract::DefaultBodyLimit::max(JSON_BODY_LIMIT))
+        .layer(tower_http::timeout::TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            JSON_API_TIMEOUT,
+        ))
+}
+
+fn transfer_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/jobs/events", get(jobs::events))
+        .route("/api/v1/jobs/{id}/output", get(transfers::output))
         .route("/api/v1/jobs/{id}/source", get(transfers::source))
         .route("/api/v1/jobs/{id}/result", put(transfers::result))
+        .layer(tower_http::timeout::TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            TRANSFER_TIMEOUT,
+        ))
+}
+
+pub fn router(state: AppState) -> Router {
+    json_routes()
+        .merge(transfer_routes())
         .fallback(spa_fallback)
-        .layer(tower_http::timeout::TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(3600)))
         .layer(axum::middleware::map_response(|response: axum::response::Response| async move {
             let status = response.status();
             if status.is_client_error() && !response.headers().get("content-type").is_some_and(|v| v == "application/json") {
@@ -106,7 +169,6 @@ pub fn router(state: AppState) -> Router {
             }
             response
         }))
-        .layer(axum::extract::DefaultBodyLimit::max(16 * 1024))
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
             // Do not log query strings: lease credentials belong in headers only.
@@ -149,7 +211,7 @@ async fn spa_fallback(
 }
 
 async fn health(State(s): State<AppState>) -> AppResult<StatusCode> {
-    sqlx::query("SELECT 1").execute(&s.pool).await?;
+    repository::ping(&s.pool).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn register(

@@ -134,8 +134,9 @@ mod tests {
         assert!(!html.contains("class=\"registre-split\""));
         assert!(html.contains("id=\"libraries-table-body\""));
         assert!(html.contains("id=\"libraries-fact-pane-overview\""));
-        assert!(html.contains("id=\"libraries-fact-pane-nodes\""));
-        assert!(html.contains("id=\"libraries-fact-pane-flow\""));
+        assert!(!html.contains("id=\"libraries-fact-tab-nodes\""));
+        assert!(!html.contains("id=\"libraries-fact-pane-nodes\""));
+        assert!(!html.contains("id=\"libraries-fact-pane-flow\""));
         assert!(html.contains("id=\"library-name-input\""));
         assert!(html.contains("id=\"library-flow-select\""));
         assert!(html.contains("function loadLibraries"));

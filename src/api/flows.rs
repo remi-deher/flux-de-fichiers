@@ -1,6 +1,6 @@
 //! Gestionnaires HTTP pour l'API REST des flux de traitement (Flows).
 
-use super::AppState;
+use super::{AdminAuth, AppState};
 use crate::{
     domain::{FlowRecord, UpdateFlowRequest},
     error::{AppError, AppResult},
@@ -8,15 +8,14 @@ use crate::{
 use axum::{
     Json,
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
 };
 
 /// Liste l'ensemble des flux configurés en base de données.
 pub async fn list_flows(
     State(s): State<AppState>,
-    h: HeaderMap,
+    _auth: AdminAuth,
 ) -> AppResult<Json<Vec<FlowRecord>>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     let flows =
         sqlx::query_as::<_, FlowRecord>("SELECT * FROM flows ORDER BY is_default DESC, name ASC")
             .fetch_all(&s.pool)
@@ -27,10 +26,9 @@ pub async fn list_flows(
 /// Récupère la définition détaillée d'un flux spécifique.
 pub async fn get_flow(
     State(s): State<AppState>,
-    h: HeaderMap,
     Path(id): Path<String>,
+    _auth: AdminAuth,
 ) -> AppResult<Json<FlowRecord>> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::GET).await?;
     let flow = sqlx::query_as::<_, FlowRecord>("SELECT * FROM flows WHERE id = ?1")
         .bind(id)
         .fetch_optional(&s.pool)
@@ -42,12 +40,10 @@ pub async fn get_flow(
 /// Enregistre ou met à jour la définition d'un flux.
 pub async fn save_flow(
     State(s): State<AppState>,
-    h: HeaderMap,
     Path(id): Path<String>,
+    _auth: AdminAuth,
     Json(payload): Json<UpdateFlowRequest>,
 ) -> AppResult<(StatusCode, Json<FlowRecord>)> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::PUT).await?;
-
     if payload.name.trim().is_empty() {
         return Err(AppError::Invalid);
     }
@@ -89,12 +85,9 @@ pub async fn save_flow(
 /// Supprime un flux personnalisé (interdit sur le flux actif par défaut).
 pub async fn delete_flow(
     State(s): State<AppState>,
-    h: HeaderMap,
     Path(id): Path<String>,
+    _auth: AdminAuth,
 ) -> AppResult<StatusCode> {
-    crate::web_session::authorize_admin(&s.pool, &s.config, &h, &axum::http::Method::DELETE)
-        .await?;
-
     let is_default: Option<bool> = sqlx::query_scalar("SELECT is_default FROM flows WHERE id = ?1")
         .bind(&id)
         .fetch_optional(&s.pool)

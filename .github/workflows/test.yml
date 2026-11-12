@@ -151,7 +151,11 @@ jobs:
             sleep 1
           done
           
-          curl -fsS http://localhost:3000/health
+          if ! curl -fsS http://localhost:3000/health; then
+            echo "❌ Échec de la sonde /health. Logs du conteneur smoke :"
+            docker logs smoke
+            exit 1
+          fi
           echo "✅ Smoke test réussi avec succès !"
           docker rm -f smoke
 

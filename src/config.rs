@@ -211,8 +211,16 @@ impl Config {
             database_url,
             data_dir: data_dir.clone(),
             input_dir: env::var("INPUT_DIR")
-                .unwrap_or_else(|_| "var/input".into())
-                .into(),
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| {
+                    if Path::new("/input").is_dir() {
+                        PathBuf::from("/input")
+                    } else if data_dir.is_absolute() {
+                        data_dir.join("input")
+                    } else {
+                        PathBuf::from("var/input")
+                    }
+                }),
             config_dir,
             tools_cache_dir: env::var("TOOLS_CACHE_DIR")
                 .map(PathBuf::from)

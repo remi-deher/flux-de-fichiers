@@ -1,6 +1,10 @@
 //! Entrée du processus et sélection de son rôle au démarrage.
 
-use crate::{config::Config, coordinator, workers};
+use crate::{
+    api,
+    config::Config,
+    worker::{self, WorkerConfig},
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Role {
@@ -19,7 +23,7 @@ pub async fn run(argument: Option<&str>) -> anyhow::Result<()> {
         _ => anyhow::bail!("Usage: flux-de-fichiers [coordinator|worker|--version]"),
     };
     match role {
-        Role::Worker => workers::run_remote().await,
-        Role::Coordinator => coordinator::run(Config::load()?).await,
+        Role::Worker => worker::run(WorkerConfig::load()?).await,
+        Role::Coordinator => api::serve(Config::load()?).await,
     }
 }

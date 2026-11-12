@@ -1,8 +1,12 @@
 //! Racine de l'application Leptos pour le poste de pilotage Flux de Fichiers.
 
 use crate::{
-    components::*,
     core::{Header, Sidebar},
+    features::{
+        activity::JobsPanel, dashboard::DashboardPanel, flows::FlowsPanel,
+        libraries::LibrariesPanel, plugins::PluginsPanel, settings::SettingsPanel,
+        updates::UpdatesPanel, workers::WorkersPanel,
+    },
 };
 use leptos::prelude::*;
 
@@ -30,7 +34,7 @@ pub fn App() -> impl IntoView {
 
                     <main id="main-content" class="main-content">
                         <DashboardPanel />
-                        <FilesPanel />
+                        <LibrariesPanel />
                         <FlowsPanel />
                         <JobsPanel />
                         <WorkersPanel />

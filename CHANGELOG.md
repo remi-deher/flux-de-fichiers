@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.13.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.12.0...v0.13.0) (2026-11-12)
+
+
+### Features
+
+* **backend:** aligner les jobs sur le schéma et séparer les budgets HTTP ([f313853](https://github.com/remi-deher/flux-de-fichiers/commit/f313853a92e66d4ca735e51c316f3d778353cf14))
+* bibliothèques déclarées et poste de pilotage à jour ([92e7237](https://github.com/remi-deher/flux-de-fichiers/commit/92e7237289b03171abfbeaf6084872ad87200cb8))
+* déclarer les bibliothèques avec un flux et un chemin par nœud ([8002081](https://github.com/remi-deher/flux-de-fichiers/commit/80020817edca82ea62d9b646023b44a488617e20))
+* drawer d'inspection, sonde catalogue et identifiants app/pack ([3161528](https://github.com/remi-deher/flux-de-fichiers/commit/3161528881c714fec4829912916e4df9c9e561ef))
+* **frontend:** appliquer les standards modernes Google et Apple (PWA, Safe Areas, Touch Targets, Micro-Kit UI) ([691390a](https://github.com/remi-deher/flux-de-fichiers/commit/691390a48fa9ae5a1535218b56d385e0fb51d8c2))
+* **frontend:** barre de recherche contextuelle dynamique réactive à la page active ([f80a029](https://github.com/remi-deher/flux-de-fichiers/commit/f80a029cfb559d110fe983128f4aac199894de13))
+* **frontend:** capsule AppSubnav (Watchdeck) et passage intégral en SSE ([c6882ae](https://github.com/remi-deher/flux-de-fichiers/commit/c6882ae6126ebf8c7d818927cc6e9594de10388b))
+* **frontend:** centrage parfait de la capsule AppSubnav et suppression de tous les boutons de synchronisation manuelle ([c38c376](https://github.com/remi-deher/flux-de-fichiers/commit/c38c376c655717b92a067b5c847da1656923325e))
+* **frontend:** centrer la barre de recherche via grille CSS et transformer le bouton déplier en icône ([c2404ca](https://github.com/remi-deher/flux-de-fichiers/commit/c2404cad5d3230814dd35ed2cdd4284e6c0c5c66))
+* **frontend:** header modernisé avec glassmorphism, recherche Ctrl+K et icônes Lucide ([9ec98bd](https://github.com/remi-deher/flux-de-fichiers/commit/9ec98bdcb0fc771530c93ae508735ffa46fd64b8))
+* **frontend:** header modernisé avec glassmorphism, recherche Ctrl+K et icônes Lucide ([9d38434](https://github.com/remi-deher/flux-de-fichiers/commit/9d384349b42094483e327f016810d24dd42b8376))
+* **frontend:** intégration de la capsule AppSubnav (Watchdeck) et suppression des boutons actualiser au profit du SSE ([90ba68e](https://github.com/remi-deher/flux-de-fichiers/commit/90ba68e15937f49d548cae140385a1c305047282))
+* **frontend:** position fixe absolue de la recherche, actions ancrées à droite et statut des workers en ligne ([8a65333](https://github.com/remi-deher/flux-de-fichiers/commit/8a653338a9614fc2838bfe5fb5e8552121018acb))
+* **frontend:** refonte de la page d'accueil en Hub 'Vue d'ensemble' avec statistiques réactives ([9f51a56](https://github.com/remi-deher/flux-de-fichiers/commit/9f51a569867f137eecb2be56eb97092f686c742d))
+* **frontend:** refonte du hub d'accueil en Vue d'ensemble avec statistiques réactives ([1c14538](https://github.com/remi-deher/flux-de-fichiers/commit/1c1453872beb786748db8ef045064ed582aad9b2))
+* **frontend:** standards Google/Apple et Micro-Kit UI ([58fcb2b](https://github.com/remi-deher/flux-de-fichiers/commit/58fcb2bbd764dc1a07fa683980989fc769e85eb4))
+* **frontend:** suppression du bouton actualiser et réactivité temps réel SSE universelle ([86e6235](https://github.com/remi-deher/flux-de-fichiers/commit/86e623552343899c933e79d7b34a96fe81e31ba6))
+* **frontend:** supprimer le bouton actualiser du header et généraliser le temps réel SSE ([e520dd1](https://github.com/remi-deher/flux-de-fichiers/commit/e520dd1ffe443b6c80d689b63dce2f6ff838b4d5))
+* **frontend:** TopCommandBar flottante et auto-hide au scroll (Watchdeck) ([a9f0a81](https://github.com/remi-deher/flux-de-fichiers/commit/a9f0a811c2450b7851581035861f19ddeb8ec415))
+* **frontend:** TopCommandBar flottante unifiée avec auto-hide au scroll et compteur de recherche inspirés de Watchdeck ([1888fed](https://github.com/remi-deher/flux-de-fichiers/commit/1888fed692d394c6f0e613cc52b9bb696b8a2454))
+* **frontend:** un registre commun pour bibliothèques, flux, nœuds et catalogue ([deb8193](https://github.com/remi-deher/flux-de-fichiers/commit/deb8193c72f4cb5239b553f265f5683fa42e4b78))
+* **frontend:** verrouiller la position fixe du header, centrer la recherche et afficher les workers actifs ([1580cbb](https://github.com/remi-deher/flux-de-fichiers/commit/1580cbb2df5a2113ecf5a5f59af664495bfb9f1c))
+
+
+### Bug Fixes
+
+* **frontend:** integrer les design tokens :root et resets W3C ([7fd3aa2](https://github.com/remi-deher/flux-de-fichiers/commit/7fd3aa2f1cd06abcc490b065f08f74b146b0d656))
+* **frontend:** integrer les design tokens :root et resets W3C dans les styles consolides ([be02a8b](https://github.com/remi-deher/flux-de-fichiers/commit/be02a8bf062f59f35f153a4355524b660aea85a9))
+
 ## [0.12.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.11.0...v0.12.0) (2026-11-12)
 
 

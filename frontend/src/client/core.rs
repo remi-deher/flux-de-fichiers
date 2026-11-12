@@ -119,31 +119,49 @@ pub const SCRIPT: &str = r###"
     return res;
   }
 
+  // --- Suivi du nombre de workers en ligne (central inclus) ---
+  let isCoordinatorOnline = false;
+  let remoteActiveWorkersCount = 0;
+
+  function updateHeaderWorkersCount(isOnline, remoteCount) {
+    if (typeof isOnline === 'boolean') isCoordinatorOnline = isOnline;
+    if (typeof remoteCount === 'number') remoteActiveWorkersCount = remoteCount;
+
+    const pill = el('header-workers-pill');
+    const label = el('header-workers-count-text');
+    if (!pill || !label) return;
+
+    if (!isCoordinatorOnline) {
+      pill.className = 'status-pill offline';
+      pill.setAttribute('aria-label', 'Coordinateur et workers hors ligne');
+      pill.setAttribute('title', 'Le coordinateur central est inaccessible');
+      label.textContent = 'Hors ligne';
+      return;
+    }
+
+    const total = 1 + remoteActiveWorkersCount;
+    pill.className = 'status-pill online';
+    const text = total === 1 ? '1 worker en ligne' : `${total} workers en ligne`;
+    pill.setAttribute('aria-label', `${text} (coordinateur central inclus)`);
+    pill.setAttribute('title', `${text} (1 coordinateur central autonome + ${remoteActiveWorkersCount} distant(s))`);
+    label.textContent = text;
+  }
+
   // --- Vérification de santé ---
   async function checkHealth() {
-    const pill = el('health-status-pill');
-    const label = el('health-status-text');
     const metricHealth = el('metric-health');
 
     try {
       const res = await fetch('/health');
       if (res.status === 204 || res.ok) {
-        if (pill) {
-          pill.className = 'status-pill online';
-          pill.setAttribute('aria-label', 'Coordinateur joignable');
-        }
-        if (label) label.textContent = 'Coordinateur joignable';
+        updateHeaderWorkersCount(true);
         if (metricHealth) metricHealth.textContent = 'Joignable';
         return true;
       } else {
         throw new Error('Code HTTP ' + res.status);
       }
     } catch (e) {
-      if (pill) {
-        pill.className = 'status-pill offline';
-        pill.setAttribute('aria-label', 'Coordinateur inaccessible');
-      }
-      if (label) label.textContent = 'Inaccessible';
+      updateHeaderWorkersCount(false, 0);
       if (metricHealth) metricHealth.textContent = 'Inaccessible';
       return false;
     }

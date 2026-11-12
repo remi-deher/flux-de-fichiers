@@ -344,9 +344,6 @@ pub const SCRIPT: &str = r###"
     const toggleBtn = el('theme-toggle-btn');
     if (toggleBtn) toggleBtn.addEventListener('click', toggleThemeCycle);
 
-    const headerToggleBtn = el('header-theme-toggle-btn');
-    if (headerToggleBtn) headerToggleBtn.addEventListener('click', toggleThemeCycle);
-
 
     if (window.matchMedia) {
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {

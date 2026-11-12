@@ -4,12 +4,8 @@ pub const SCRIPT: &str = r###"
 // --- Synchronisation globale ---
   async function refreshAll() {
     const refreshBtn = el('refresh-all-btn');
-    const headerRefreshBtn = el('header-refresh-btn');
     if (refreshBtn) {
       refreshBtn.disabled = true;
-    }
-    if (headerRefreshBtn) {
-      headerRefreshBtn.classList.add('is-spinning');
     }
 
     await checkHealth();
@@ -26,9 +22,6 @@ pub const SCRIPT: &str = r###"
     if (refreshBtn) {
       refreshBtn.disabled = false;
     }
-    if (headerRefreshBtn) {
-      headerRefreshBtn.classList.remove('is-spinning');
-    }
   }
 
 
@@ -40,9 +33,6 @@ pub const SCRIPT: &str = r###"
 
     const refreshBtn = el('refresh-all-btn');
     if (refreshBtn) refreshBtn.addEventListener('click', refreshAll);
-
-    const headerRefreshBtn = el('header-refresh-btn');
-    if (headerRefreshBtn) headerRefreshBtn.addEventListener('click', refreshAll);
 
     // Initialisation de la barre de recherche contextuelle globale
     const globalSearchInput = el('global-search-input');
@@ -184,8 +174,14 @@ pub const SCRIPT: &str = r###"
       }
     });
 
-    // Polling régulier de santé toutes les 30 s
-    setInterval(checkHealth, 30000);
+    // Synchronisation d'arrière-plan périodique (sonde de santé et relais si déconnexion SSE)
+    setInterval(() => {
+      checkHealth();
+      if (!jobsEventSource || jobsEventSource.readyState !== 1) {
+        loadJobs();
+        loadWorkers();
+      }
+    }, 15000);
   }
 
   // Démarrage

@@ -40,6 +40,19 @@ pub const SCRIPT: &str = r###"
           const payload = JSON.parse(e.data);
           loadJobs();
 
+          // Un worker a réclamé une tâche ou émis un heartbeat : actualiser les agents
+          if (payload.event_type === 'job_claimed' || payload.event_type === 'job_heartbeat') {
+            loadWorkers();
+          }
+
+          // Fin d'un traitement : actualiser immédiatement les fichiers pour afficher le résultat
+          if (payload.event_type === 'job_succeeded') {
+            loadFiles();
+            showNotice(`Tâche terminée avec succès (${payload.job_id.slice(0, 8)}…)`, 'success');
+          } else if (payload.event_type === 'job_failed') {
+            showNotice(`Échec sur la tâche ${payload.job_id.slice(0, 8)}… (${payload.error_code || 'erreur'})`, 'warning');
+          }
+
           // Si la modale de détail est ouverte sur cette tâche, la rafraîchir en direct
           const dialog = el('job-detail-dialog');
           const idEl = el('detail-job-id');
@@ -51,12 +64,6 @@ pub const SCRIPT: &str = r###"
               })
               .catch(() => {});
           }
-
-          if (payload.event_type === 'job_succeeded') {
-            showNotice(`Tâche terminée avec succès (${payload.job_id.slice(0, 8)}…)`, 'success');
-          } else if (payload.event_type === 'job_failed') {
-            showNotice(`Échec sur la tâche ${payload.job_id.slice(0, 8)}… (${payload.error_code || 'erreur'})`, 'warning');
-          }
         } catch (_) {
           loadJobs();
         }
@@ -67,6 +74,7 @@ pub const SCRIPT: &str = r###"
       jobsEventSource.addEventListener('job_heartbeat', handleJobEvent);
       jobsEventSource.addEventListener('job_succeeded', handleJobEvent);
       jobsEventSource.addEventListener('job_failed', handleJobEvent);
+      jobsEventSource.addEventListener('job_canceled', handleJobEvent);
 
       jobsEventSource.addEventListener('job_progress', (e) => {
         try {

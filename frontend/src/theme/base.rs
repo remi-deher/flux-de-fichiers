@@ -51,6 +51,9 @@ pub const BASE_CSS: &str = r#"
   overflow-y: auto;
   z-index: 50;
   box-sizing: border-box;
+  padding-top: var(--sat);
+  padding-bottom: var(--sab);
+  padding-left: var(--sal);
 }
 
 .application-sidebar.is-collapsed {
@@ -151,6 +154,7 @@ pub const BASE_CSS: &str = r#"
   align-items: center;
   gap: 0.75rem;
   width: 100%;
+  min-height: var(--touch-target-compact);
   padding: 0.625rem 0.75rem;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -160,6 +164,8 @@ pub const BASE_CSS: &str = r#"
   font-weight: 500;
   cursor: pointer;
   text-align: left;
+  user-select: none;
+  touch-action: manipulation;
   transition: all 0.15s ease-in-out;
 }
 
@@ -240,13 +246,13 @@ pub const BASE_CSS: &str = r#"
 
 /* En-tête applicatif supérieur */
 .application-header {
-  height: 60px;
+  min-height: 60px;
   background-color: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 1.5rem;
+  padding: var(--sat) calc(1.5rem + var(--sar)) 0 calc(1.5rem + var(--sal));
   position: sticky;
   top: 0;
   z-index: 40;

@@ -205,6 +205,17 @@ pub const SCRIPT: &str = r###"
         }
       });
     }
+
+    if (window.matchMedia) {
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+        try {
+          if (!localStorage.getItem('flux_theme_pref') || localStorage.getItem('flux_theme_pref') === 'system') {
+            applyTheme('system');
+          }
+        } catch {}
+      });
+    }
   }
+
 
 "###;

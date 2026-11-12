@@ -10,7 +10,7 @@ pub use operations::ActivityOperations;
 
 use crate::{
     core::{SubNav, SubNavTabItem},
-    shared::ui::{SectionHeader, StatusBadge},
+    shared::ui::{Button, ButtonVariant, Card, SectionHeader, StatusBadge},
 };
 use leptos::prelude::*;
 
@@ -54,14 +54,14 @@ pub fn JobsPanel() -> impl IntoView {
     .into_any();
 
     let subnav_actions = view! {
-        <button
-            type="button"
+        <Button
             id="jobs-refresh-btn"
-            class="btn btn-secondary btn-sm"
-            title="Rafraîchir immédiatement les tâches"
+            variant=ButtonVariant::Secondary
+            class="btn-sm"
+            aria_label="Rafraîchir immédiatement les tâches"
         >
             "🔄 Actualiser"
-        </button>
+        </Button>
     }
     .into_any();
 
@@ -75,7 +75,7 @@ pub fn JobsPanel() -> impl IntoView {
             />
 
             // Conteneur principal de l'activité
-            <section class="section-panel" aria-labelledby="jobs-section-title">
+            <Card aria_labelledby="jobs-section-title">
                 <SectionHeader
                     id="jobs-section-title"
                     title="Poste d'activité et supervision"
@@ -91,7 +91,7 @@ pub fn JobsPanel() -> impl IntoView {
                 <div id="subtab-jobs-diagnostic" hidden>
                     <ActivityDiagnostic />
                 </div>
-            </section>
+            </Card>
 
             <JobDetailDialog />
         </div>

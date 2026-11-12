@@ -4,9 +4,12 @@ pub const SCRIPT: &str = r###"
 // --- Synchronisation globale ---
   async function refreshAll() {
     const refreshBtn = el('refresh-all-btn');
+    const headerRefreshBtn = el('header-refresh-btn');
     if (refreshBtn) {
       refreshBtn.disabled = true;
-      refreshBtn.textContent = 'Actualisation…';
+    }
+    if (headerRefreshBtn) {
+      headerRefreshBtn.classList.add('is-spinning');
     }
 
     await checkHealth();
@@ -22,7 +25,9 @@ pub const SCRIPT: &str = r###"
 
     if (refreshBtn) {
       refreshBtn.disabled = false;
-      refreshBtn.textContent = 'Actualiser';
+    }
+    if (headerRefreshBtn) {
+      headerRefreshBtn.classList.remove('is-spinning');
     }
   }
 
@@ -34,6 +39,20 @@ pub const SCRIPT: &str = r###"
 
     const refreshBtn = el('refresh-all-btn');
     if (refreshBtn) refreshBtn.addEventListener('click', refreshAll);
+
+    const headerRefreshBtn = el('header-refresh-btn');
+    if (headerRefreshBtn) headerRefreshBtn.addEventListener('click', refreshAll);
+
+    const searchTrigger = el('header-search-trigger');
+    if (searchTrigger) searchTrigger.addEventListener('click', () => switchTab('files'));
+
+    // Raccourci global clavier Cmd+K / Ctrl+K
+    window.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        switchTab('files');
+      }
+    });
 
     // Raccourcis d'action du tableau de bord
     const gotoFilesBtn = el('quick-goto-files-btn');

@@ -192,19 +192,23 @@ pub const SCRIPT: &str = r###"
       select.addEventListener('change', (e) => applyTheme(e.target.value));
     }
 
-    const toggleBtn = el('theme-toggle-btn');
-    if (toggleBtn) {
-      toggleBtn.addEventListener('click', () => {
-        const current = document.documentElement.getAttribute('data-theme');
-        if (current === 'dark') {
-          applyTheme('light');
-        } else if (current === 'light') {
-          applyTheme('system');
-        } else {
-          applyTheme('dark');
-        }
-      });
+    function toggleThemeCycle() {
+      const current = document.documentElement.getAttribute('data-theme');
+      if (current === 'dark') {
+        applyTheme('light');
+      } else if (current === 'light') {
+        applyTheme('system');
+      } else {
+        applyTheme('dark');
+      }
     }
+
+    const toggleBtn = el('theme-toggle-btn');
+    if (toggleBtn) toggleBtn.addEventListener('click', toggleThemeCycle);
+
+    const headerToggleBtn = el('header-theme-toggle-btn');
+    if (headerToggleBtn) headerToggleBtn.addEventListener('click', toggleThemeCycle);
+
 
     if (window.matchMedia) {
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {

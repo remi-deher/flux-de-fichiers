@@ -244,19 +244,125 @@ pub const BASE_CSS: &str = r#"
   background-color: var(--bg-app);
 }
 
-/* En-tête applicatif supérieur */
+/* En-tête applicatif supérieur avec Glassmorphism (Backdrop Blur) */
 .application-header {
   min-height: 60px;
-  background-color: var(--bg-card);
+  background-color: rgba(22, 27, 34, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 1rem;
   padding: var(--sat) calc(1.5rem + var(--sar)) 0 calc(1.5rem + var(--sal));
   position: sticky;
   top: 0;
   z-index: 40;
 }
+
+[data-theme="light"] .application-header {
+  background-color: rgba(255, 255, 255, 0.85);
+}
+
+/* Style des icônes vectorielles Lucide */
+.lucide-icon {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+/* Barre de recherche rapide du header (Command Palette) */
+.header-search-wrapper {
+  flex: 1;
+  max-width: 420px;
+  margin: 0 0.5rem;
+}
+
+.header-search-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.85rem;
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.header-search-btn:hover {
+  border-color: var(--primary);
+  color: var(--text-main);
+  background-color: var(--bg-card);
+}
+
+.search-placeholder {
+  flex: 1;
+  text-align: left;
+}
+
+.search-kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.4rem;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.header-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.header-icon-btn:hover {
+  background-color: var(--bg-subtle);
+  color: var(--text-main);
+  border-color: var(--border-color);
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.is-spinning svg,
+.is-spinning .lucide-icon {
+  animation: spin 0.8s linear infinite;
+}
+
+
 
 .header-breadcrumb {
   display: flex;

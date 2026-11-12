@@ -5,14 +5,6 @@ pub const SCRIPT: &str = r###"
   let jobsEventSource = null;
   let sseReconnectTimer = null;
 
-  function updateSseBadge(status, label) {
-    const badge = el('sse-status-badge');
-    const text = el('sse-status-text');
-    if (!badge || !text) return;
-    badge.className = `status-pill ${status}`;
-    text.textContent = label;
-  }
-
   function startJobsSse() {
     if (jobsEventSource) {
       jobsEventSource.close();
@@ -23,17 +15,10 @@ pub const SCRIPT: &str = r###"
       sseReconnectTimer = null;
     }
 
-    if (sessionMode !== 'cookie_session') {
-      updateSseBadge('info', 'Sondage périodique');
-      return;
-    }
+    if (sessionMode !== 'cookie_session') return;
 
     try {
       jobsEventSource = new EventSource('/api/v1/jobs/events', { withCredentials: true });
-
-      jobsEventSource.onopen = () => {
-        updateSseBadge('success', 'En direct (SSE)');
-      };
 
       const handleJobEvent = (e) => {
         try {
@@ -53,14 +38,12 @@ pub const SCRIPT: &str = r###"
             showNotice(`Échec sur la tâche ${payload.job_id.slice(0, 8)}… (${payload.error_code || 'erreur'})`, 'warning');
           }
 
-          // Si la modale de détail est ouverte sur cette tâche, la rafraîchir en direct
-          const dialog = el('job-detail-dialog');
-          const idEl = el('detail-job-id');
-          if (dialog && dialog.open && idEl && idEl.textContent === payload.job_id) {
+          // Si le tiroir est ouvert sur cette tâche, le rafraîchir en direct
+          if (isJobDrawerOpenFor(payload.job_id)) {
             apiFetch(`/api/v1/jobs/${encodeURIComponent(payload.job_id)}`)
               .then(res => res.json())
               .then(job => {
-                if (dialog.open) openJobDetailDialog(job.id);
+                if (isJobDrawerOpenFor(job.id)) fillJobDrawer(job);
               })
               .catch(() => {});
           }
@@ -84,11 +67,10 @@ pub const SCRIPT: &str = r###"
             job.status = 'running';
             job.progress = payload.progress;
             renderJobsTable();
+            renderWidgets();
           }
 
-          const dialog = el('job-detail-dialog');
-          const idEl = el('detail-job-id');
-          if (dialog && dialog.open && idEl && idEl.textContent === payload.job_id) {
+          if (isJobDrawerOpenFor(payload.job_id)) {
             const statusEl = el('detail-job-status');
             if (statusEl && payload.progress !== undefined) {
               statusEl.innerHTML = renderStatusPill(`En cours (${payload.progress}%)`, 'running', { pulse: true });
@@ -98,22 +80,15 @@ pub const SCRIPT: &str = r###"
       });
 
       jobsEventSource.onerror = () => {
-        updateSseBadge('info', 'Reconnexion SSE…');
         if (jobsEventSource) {
           jobsEventSource.close();
           jobsEventSource = null;
         }
         sseReconnectTimer = setTimeout(() => {
-          if (sessionMode === 'cookie_session') {
-            startJobsSse();
-          } else {
-            updateSseBadge('info', 'Sondage périodique');
-          }
+          if (sessionMode === 'cookie_session') startJobsSse();
         }, 5000);
       };
-    } catch (_) {
-      updateSseBadge('info', 'Sondage périodique');
-    }
+    } catch (_) {}
   }
 
   function stopJobsSse() {
@@ -125,7 +100,6 @@ pub const SCRIPT: &str = r###"
       clearTimeout(sseReconnectTimer);
       sseReconnectTimer = null;
     }
-    updateSseBadge('info', 'Sondage périodique');
   }
 
   async function loadJobs() {
@@ -141,7 +115,9 @@ pub const SCRIPT: &str = r###"
       renderRecentJobs();
       renderJobsTable();
       if (typeof updateOverviewStats === 'function') updateOverviewStats();
+      markWidgetSource('jobs', true);
     } catch (e) {
+      markWidgetSource('jobs', false);
       if (tbody) {
         tbody.innerHTML = emptyStateRow(5, escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session pour afficher la file des tâches.' : 'Impossible de récupérer les tâches.'), true);
       }
@@ -209,31 +185,29 @@ pub const SCRIPT: &str = r###"
       const statusClass = jobStatusClass(j.status);
       const isRunning = j.status === 'running';
       const statusLabel = isRunning && j.progress !== undefined ? `En cours (${j.progress}%)` : escapeHtml(j.status);
-      const canDownload = j.status === 'succeeded' && sessionMode === 'cookie_session';
-      const dlBtnHtml = canDownload
-        ? `<button type="button" class="btn btn-secondary btn-sm job-download-btn" data-job-id="${escapeHtml(j.id)}" data-output="${escapeHtml(j.output_name || 'resultat.mkv')}" title="Télécharger le flux MKV directement sans charger la RAM">Télécharger</button>`
-        : '';
 
-      return tableRow(`
+      return `<tr data-job-id="${escapeHtml(j.id)}">
           <td class="text-mono-strong">${escapeHtml(j.id.slice(0, 8))}…</td>
           <td>${escapeHtml(j.source_name)}</td>
           <td>${renderStatusPill(statusLabel, statusClass, { pulse: isRunning })}</td>
           <td>${formatDate(j.created_at)}</td>
-          <td>
-            <div class="cluster">
-              <button type="button" class="btn btn-secondary btn-sm job-detail-btn" data-job-id="${escapeHtml(j.id)}">Détails</button>
-              ${dlBtnHtml}
-            </div>
+          <td class="cell-end">
+            <button type="button" class="btn btn-secondary btn-sm registre-open-btn" data-job-id="${escapeHtml(j.id)}">Ouvrir</button>
           </td>
-      `);
+      </tr>`;
     }).join('');
 
-    tbody.querySelectorAll('.job-detail-btn').forEach(b => {
-      b.onclick = () => openJobDetailDialog(b.getAttribute('data-job-id'));
-    });
+    const openId = openJobDrawerId();
+    const openRow = openId ? tbody.querySelector(`tr[data-job-id="${openId}"]`) : null;
+    if (openRow) openRow.classList.add('is-open');
 
-    tbody.querySelectorAll('.job-download-btn').forEach(b => {
-      b.onclick = () => downloadJobStream(b.getAttribute('data-job-id'), b.getAttribute('data-output'));
+    tbody.querySelectorAll('.registre-open-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const job = cachedJobs.find(j => j.id === btn.getAttribute('data-job-id'));
+        if (!job) return;
+        markRegistreRow(tbody, btn.closest('tr'));
+        openJob(job);
+      });
     });
   }
 
@@ -261,119 +235,85 @@ pub const SCRIPT: &str = r###"
     }, 1500);
   }
 
-  // --- Modale de détails d'une tâche ---
-  function openJobDetailDialog(jobId) {
-    const dialog = el('job-detail-dialog');
-    if (!dialog) return;
-
-    const job = cachedJobs.find(j => j.id === jobId);
-    if (!job) return;
-
+  // --- Tiroir de détails d'une tâche ---
+  function openJobDrawerId() {
+    const drawer = el('jobs-fact');
     const idEl = el('detail-job-id');
-    const sourceEl = el('detail-job-source');
+    return drawer && drawer.classList.contains('is-open') && idEl ? idEl.textContent : '';
+  }
+
+  function isJobDrawerOpenFor(jobId) {
+    return Boolean(jobId) && openJobDrawerId() === jobId;
+  }
+
+  function openJob(job) {
+    const status = job.status === 'running' && job.progress !== undefined
+      ? `En cours (${job.progress}%)`
+      : job.status;
+    showRegistreFact('jobs-fact', job.source_name, [status, formatDate(job.created_at)]);
+    fillJobDrawer(job);
+  }
+
+  function fillJobDrawer(job) {
+    const setText = (id, text) => {
+      const node = el(id);
+      if (node) node.textContent = text;
+    };
+    setText('detail-job-id', job.id);
+    setText('detail-job-source', job.source_name);
+    setText('detail-job-worker', job.worker_id || job.target_worker_id || 'N\'importe quel agent (ou central autonome)');
+    setText('detail-job-attempts', `${job.attempts || 1} tentative(s)`);
+    setText('detail-job-created', formatDate(job.created_at));
+    setText('detail-job-output', job.output_name || 'Non généré');
+
     const statusEl = el('detail-job-status');
-    const workerEl = el('detail-job-worker');
-    const attemptsEl = el('detail-job-attempts');
-    const createdEl = el('detail-job-created');
-    const outputEl = el('detail-job-output');
-    const errorBox = el('detail-error-box');
-    const errorContent = el('detail-error-content');
-    const curlSec = el('detail-curl-section');
-    const curlCmd = el('detail-curl-command');
-    const dlBtn = el('job-dialog-download-btn');
-
-    if (idEl) idEl.textContent = job.id;
-    if (sourceEl) sourceEl.textContent = job.source_name;
     if (statusEl) {
-      const statusClass = jobStatusClass(job.status);
-      statusEl.innerHTML = renderStatusPill(escapeHtml(job.status), statusClass, { pulse: job.status === 'running' });
-    }
-    if (workerEl) workerEl.textContent = job.worker_id || job.target_worker_id || 'N\'importe quel agent (ou central autonome)';
-    if (attemptsEl) attemptsEl.textContent = `${job.attempts || 1} tentative(s)`;
-    if (createdEl) createdEl.textContent = formatDate(job.created_at);
-    if (outputEl) outputEl.textContent = job.output_name || 'Non généré';
-
-    if (errorBox && errorContent) {
-      if (job.status === 'failed' || job.error_code) {
-        errorBox.style.display = 'block';
-        errorContent.textContent = job.error_code
-          ? `Code d'erreur: ${job.error_code}`
-          : 'Traitement en échec sans code spécifique.';
-      } else {
-        errorBox.style.display = 'none';
-      }
+      statusEl.innerHTML = renderStatusPill(escapeHtml(job.status), jobStatusClass(job.status), { pulse: job.status === 'running' });
     }
 
-    if (curlSec && curlCmd) {
-      const origin = window.location.origin || 'http://localhost:3000';
-      curlCmd.textContent = `curl -H "Authorization: Bearer <ADMIN_KEY>" "${origin}/api/v1/jobs/${encodeURIComponent(job.id)}/output" -o "${job.output_name || 'resultat.mkv'}"`;
-      curlSec.style.display = 'block';
+    const errorBox = el('detail-error-box');
+    if (errorBox) {
+      errorBox.hidden = !(job.status === 'failed' || job.error_code);
+      setText('detail-error-content', job.error_code
+        ? `Code d'erreur: ${job.error_code}`
+        : 'Traitement en échec sans code spécifique.');
     }
 
+    const origin = window.location.origin || 'http://localhost:3000';
+    setText('detail-curl-command', `curl -H "Authorization: Bearer <ADMIN_KEY>" "${origin}/api/v1/jobs/${encodeURIComponent(job.id)}/output" -o "${job.output_name || 'resultat.mkv'}"`);
+
+    const dlBtn = el('jobs-fact-download-btn');
     if (dlBtn) {
-      if (job.status === 'succeeded' && sessionMode === 'cookie_session') {
-        dlBtn.style.display = 'inline-flex';
-        dlBtn.textContent = 'Télécharger le résultat (flux direct)';
-        dlBtn.onclick = () => {
-          downloadJobStream(job.id, job.output_name || 'resultat.mkv');
-        };
-      } else {
-        dlBtn.style.display = 'none';
-      }
-    }
-
-    dialog.showModal();
-    const closeBtn = el('job-dialog-close-btn');
-    if (closeBtn) closeBtn.focus();
-  }
-
-  function closeJobDetailDialog() {
-    const dialog = el('job-detail-dialog');
-    if (dialog && dialog.open) {
-      dialog.close();
+      const canDownload = job.status === 'succeeded' && sessionMode === 'cookie_session';
+      dlBtn.hidden = !canDownload;
+      dlBtn.onclick = canDownload
+        ? () => downloadJobStream(job.id, job.output_name || 'resultat.mkv')
+        : null;
     }
   }
 
-  // --- Gestion des sous-vues File active, Historique et Diagnostic ---
+  // --- Filtre de statut commun : onglets d'Activité et feuille de filtres ---
+  function setJobFilter(filter) {
+    activeJobFilter = filter;
+    document.querySelectorAll('.filter-chip[data-filter]').forEach(chip => {
+      chip.setAttribute('aria-pressed', chip.getAttribute('data-filter') === filter ? 'true' : 'false');
+    });
+    renderJobsTable();
+    updateFilterCount();
+  }
+
+  // Chaque onglet d'Activité applique un filtre de statut au même registre.
+  const JOBS_VIEW_FILTERS = {
+    'btn-subtab-jobs-active': 'running',
+    'btn-subtab-jobs-history': 'succeeded',
+    'btn-subtab-jobs-diagnostic': 'failed'
+  };
+
   function setupActivityRoleTabs() {
-    const viewOps = el('activity-view-operations');
-    const viewDiag = el('activity-view-diagnostic');
-    const subtabActive = el('subtab-jobs-active');
-    const subtabHistory = el('subtab-jobs-history');
-    const subtabDiag = el('subtab-jobs-diagnostic');
-
     document.addEventListener('flux:subnav-change', (e) => {
-      const targetId = e.detail && e.detail.targetId;
-      if (!targetId || !targetId.startsWith('subtab-jobs-')) return;
-
-      if (targetId === 'subtab-jobs-active') {
-        if (viewOps && subtabActive) subtabActive.appendChild(viewOps);
-        if (viewOps) viewOps.style.display = 'block';
-        if (subtabDiag) subtabDiag.setAttribute('hidden', '');
-        if (subtabHistory) subtabHistory.setAttribute('hidden', '');
-        if (subtabActive) subtabActive.removeAttribute('hidden');
-        jobsFilter = 'running';
-        updateFilterChips();
-        renderJobsTable();
-      } else if (targetId === 'subtab-jobs-history') {
-        if (viewOps && subtabHistory) subtabHistory.appendChild(viewOps);
-        if (viewOps) viewOps.style.display = 'block';
-        if (subtabActive) subtabActive.setAttribute('hidden', '');
-        if (subtabDiag) subtabDiag.setAttribute('hidden', '');
-        if (subtabHistory) subtabHistory.removeAttribute('hidden');
-        jobsFilter = 'succeeded';
-        updateFilterChips();
-        renderJobsTable();
-      } else if (targetId === 'subtab-jobs-diagnostic') {
-        if (viewOps && subtabDiag) subtabDiag.appendChild(viewOps);
-        if (viewOps) viewOps.style.display = 'block';
-        if (subtabActive) subtabActive.setAttribute('hidden', '');
-        if (subtabHistory) subtabHistory.setAttribute('hidden', '');
-        if (subtabDiag) subtabDiag.removeAttribute('hidden');
-        jobsFilter = 'failed';
-        updateFilterChips();
-        renderJobsTable();
-      }
+      const tabBtn = e.detail && e.detail.tabBtn;
+      const filter = tabBtn ? JOBS_VIEW_FILTERS[tabBtn.id] : null;
+      if (filter) setJobFilter(filter);
     });
   }
 

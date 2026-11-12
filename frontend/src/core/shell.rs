@@ -1,7 +1,7 @@
 //! Shell principal de l'application : Marque, navigation latérale et en-tête supérieur moderne.
 
+use super::capsule::CapsuleActions;
 use super::navigation::Navigation;
-use super::panel::active_panel;
 use crate::shared::ui::{Icon, IconName};
 use leptos::prelude::*;
 
@@ -54,13 +54,6 @@ pub fn Header() -> impl IntoView {
     view! {
         <header class="app-topbar" id="app-topbar" role="banner">
             <div class="topbar-container">
-                // Contexte de page & Fil d'Ariane
-                <div class="topbar-context">
-                    <span class="breadcrumb-item">"Central"</span>
-                    <span class="breadcrumb-separator" aria-hidden="true">"/"</span>
-                    <span class="breadcrumb-title" id="current-section-title">{active_panel().label}</span>
-                </div>
-
                 // Capsule unique : recherche, actions de la page, puis filtres.
                 // La feuille sort du champ, comme la BarSheet de Watchdeck.
                 <div class="topbar-search-anchor" id="search-anchor">
@@ -80,29 +73,7 @@ pub fn Header() -> impl IntoView {
                             <span id="search-match-count" class="search-match-count" aria-live="polite"></span>
                         </div>
                         <div class="search-capsule__tools">
-                            <div class="search-capsule__actions" id="search-capsule-actions">
-                                <button
-                                    type="button"
-                                    id="btn-open-flow-wizard"
-                                    class="search-capsule__action"
-                                    data-capsule-tab="flows"
-                                    hidden
-                                >
-                                    <Icon name=IconName::Plus size=14 />
-                                    "Nouveau flux"
-                                </button>
-                                <button
-                                    type="button"
-                                    id="btn-open-add-repo-dialog"
-                                    class="search-capsule__action"
-                                    data-capsule-tab="plugins"
-                                    aria-label="Ajouter un nouveau dépôt de plugins"
-                                    hidden
-                                >
-                                    <Icon name=IconName::Plus size=14 />
-                                    "Ajouter un dépôt"
-                                </button>
-                            </div>
+                            <CapsuleActions />
                             <button
                                 type="button"
                                 id="search-filter-btn"

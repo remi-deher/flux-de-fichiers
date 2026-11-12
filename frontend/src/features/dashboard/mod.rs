@@ -1,7 +1,8 @@
 //! Panneau d'accueil et Hub de statistiques : Vue d'ensemble du système.
 
+use crate::features::widgets::{WidgetArea, WidgetPlacement};
 use crate::shared::ui::{
-    Button, ButtonVariant, Card, IconName, MetricCard, MetricTone, SectionHeader,
+    Button, ButtonVariant, Card, IconName, MetricCard, MetricTone, RegistreTable, SectionHeader,
 };
 use leptos::prelude::*;
 
@@ -103,25 +104,12 @@ fn RecentJobsCard() -> impl IntoView {
                 subtitle="Dernières exécutions, synchronisées en direct."
                 actions=all_jobs_action
             />
-            <div class="table-wrapper">
-                <table class="data-table" aria-label="Dernières tâches traitées">
-                    <thead>
-                        <tr>
-                            <th scope="col">"ID"</th>
-                            <th scope="col">"Source"</th>
-                            <th scope="col">"Statut"</th>
-                            <th scope="col">"Création"</th>
-                        </tr>
-                    </thead>
-                    <tbody id="recent-jobs-table-body">
-                        <tr>
-                            <td colspan="4" class="empty-state-text">
-                                "Aucune tâche enregistrée pour le moment."
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+            <RegistreTable
+                aria_label="Dernières tâches traitées"
+                headers=vec!["ID", "Source", "Statut", "Création"]
+                body_id="recent-jobs-table-body"
+                empty="Aucune tâche enregistrée pour le moment."
+            />
         </Card>
     }
 }
@@ -164,6 +152,7 @@ pub fn DashboardPanel() -> impl IntoView {
         <div id=crate::core::panel::DASHBOARD.dom_id class="tab-panel" role="tabpanel" aria-labelledby=crate::core::panel::DASHBOARD.button_id>
             <OverviewHero />
             <OverviewMetrics />
+            <WidgetArea placement=WidgetPlacement::Dashboard />
             <div class="overview-grid-2col">
                 <RecentJobsCard />
                 <MediaInsightsCard />

@@ -318,33 +318,14 @@ pub const BASE_CSS: &str = r#"
 }
 
 .topbar-container {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 1rem;
   padding: 0.45rem 0.85rem;
   min-height: 48px;
   box-sizing: border-box;
-}
-
-/* Contexte de page & Fil d'Ariane */
-.topbar-context {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.875rem;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.breadcrumb-item,
-.breadcrumb-separator {
-  color: var(--text-dim);
-}
-
-.breadcrumb-title {
-  color: var(--text-main);
-  font-weight: 600;
 }
 
 /* Style des icônes vectorielles Lucide */
@@ -358,9 +339,10 @@ pub const BASE_CSS: &str = r#"
    La feuille est un enfant du champ : elle en sort par le bas, à la même largeur. */
 .topbar-search-anchor {
   position: relative;
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
-  max-width: 640px;
+  max-width: 720px;
+  margin-inline: auto;
 }
 
 .topbar-search {
@@ -501,6 +483,17 @@ body[data-filter-sheet] .topbar-search {
   color: var(--primary);
 }
 
+.search-capsule__action--primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-contrast);
+}
+
+.search-capsule__action--primary:hover {
+  background: color-mix(in srgb, var(--primary) 85%, var(--text-main));
+  color: var(--primary-contrast);
+}
+
 .search-capsule__count {
   display: inline-grid;
   place-items: center;
@@ -565,12 +558,15 @@ body[data-filter-sheet] .topbar-search {
   gap: 0.4rem;
 }
 
-/* Actions et statuts de la TopBar */
+/* Actions et statuts de la TopBar : ils flottent à droite pour que la capsule reste au centre. */
 .topbar-actions {
+  position: absolute;
+  right: 0.85rem;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  flex-shrink: 0;
 }
 
 .header-icon-btn {
@@ -611,25 +607,9 @@ body[data-filter-sheet] .topbar-search {
 
 
 
-.header-breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.875rem;
-}
 
-.breadcrumb-item {
-  color: var(--text-dim);
-}
 
-.breadcrumb-separator {
-  color: var(--text-dim);
-}
 
-.breadcrumb-title {
-  color: var(--text-main);
-  font-weight: 600;
-}
 
 .header-status {
   display: flex;
@@ -886,39 +866,11 @@ body[data-filter-sheet] .topbar-search {
   pointer-events: auto;
 }
 
-.subnav-info {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--text-dim);
-}
 
-.subnav-info:empty,
 .subnav-actions:empty {
   display: none;
 }
 
-.subnav-info-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.25rem 0.65rem;
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-main);
-  white-space: nowrap;
-  box-shadow: var(--shadow-sm);
-  backdrop-filter: blur(8px);
-}
 
 .app-subnav {
   position: relative;
@@ -1007,20 +959,6 @@ body[data-filter-sheet] .topbar-search {
   font-size: 0.95rem;
 }
 
-.app-subnav__badge,
-.subnav-tab-badge {
-  display: inline-grid;
-  place-items: center;
-  min-width: 19px;
-  height: 19px;
-  padding: 0 6px;
-  border-radius: 9999px;
-  background: color-mix(in srgb, var(--primary) 15%, transparent);
-  color: var(--primary);
-  font-size: 0.72rem;
-  font-weight: 700;
-  border: 0;
-}
 
 .subnav-actions {
   position: absolute;
@@ -1051,9 +989,6 @@ body[data-filter-sheet] .topbar-search {
     max-width: 100%;
   }
 
-  .subnav-info {
-    justify-content: flex-start;
-  }
 
   .subnav-actions {
     flex-wrap: wrap;
@@ -1137,7 +1072,7 @@ body[data-filter-sheet] .topbar-search {
     padding: 0.35rem 0.5rem;
   }
 
-  .topbar-context {
+  .topbar-actions {
     display: none;
   }
 

@@ -1,8 +1,7 @@
 //! Gabarit partagé de sous-navigation horizontale inspiré de Watchdeck (`AppSubnav`).
 //!
 //! Fournit une barre d'outils collante (`page-subnav`) accueillant une capsule d'onglets
-//! accessible (`app-subnav`, WAI-ARIA `tablist` / `tab`), des informations de contexte
-//! et d'éventuelles actions spécifiques.
+//! accessible (`app-subnav`, WAI-ARIA `tablist` / `tab`) et d'éventuelles actions spécifiques.
 
 use leptos::prelude::*;
 
@@ -14,23 +13,40 @@ pub struct SubNavTabItem {
     pub icon: Option<&'static str>,
     pub target_id: &'static str,
     pub is_active: bool,
-    pub badge: Option<&'static str>,
+}
+
+impl SubNavTabItem {
+    /// Onglet sans icône ; `target_id` est l'élément qu'il pilote (`aria-controls`).
+    pub const fn new(
+        id: &'static str,
+        label: &'static str,
+        target_id: &'static str,
+        is_active: bool,
+    ) -> Self {
+        Self {
+            id,
+            label,
+            icon: None,
+            target_id,
+            is_active,
+        }
+    }
+
+    pub const fn with_icon(mut self, icon: &'static str) -> Self {
+        self.icon = Some(icon);
+        self
+    }
 }
 
 #[component]
 pub fn SubNav(
     aria_label: &'static str,
     tabs: Vec<SubNavTabItem>,
-    #[prop(optional)] info: Option<AnyView>,
     #[prop(optional)] actions: Option<AnyView>,
 ) -> impl IntoView {
     view! {
         <nav class="page-subnav app-subnav-toolbar" aria-label=aria_label>
             <div class="subnav-container app-subnav-container">
-                <div class="subnav-info">
-                    {info}
-                </div>
-
                 <div class="app-subnav">
                     <div class="app-subnav__scroller subnav-tabs" role="tablist">
                         {tabs.into_iter().map(|item| {
@@ -57,9 +73,6 @@ pub fn SubNav(
                                         <span class="app-subnav__icon subnav-tab-icon" aria-hidden="true">{ic}</span>
                                     })}
                                     <span class="app-subnav__label subnav-tab-label">{item.label}</span>
-                                    {item.badge.map(|bg| view! {
-                                        <small class="app-subnav__badge subnav-tab-badge">{bg}</small>
-                                    })}
                                 </button>
                             }
                         }).collect_view()}
@@ -71,5 +84,36 @@ pub fn SubNav(
                 </div>
             </div>
         </nav>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tab(id: &'static str, is_active: bool) -> SubNavTabItem {
+        SubNavTabItem::new(id, "Onglet", "cible", is_active)
+    }
+
+    #[test]
+    fn test_tab_constructor_sets_icon_only_on_request() {
+        let plain = tab("a", true);
+        assert_eq!(plain.icon, None);
+        assert_eq!(plain.with_icon("⚡").icon, Some("⚡"));
+    }
+
+    #[test]
+    fn test_subnav_renders_tabs_without_status_badges_or_info() {
+        let html = view! {
+            <SubNav aria_label="Test" tabs=vec![tab("a", true), tab("b", false)] />
+        }
+        .to_html();
+        assert!(html.contains("role=\"tablist\""));
+        assert!(html.contains("aria-label=\"Test\""));
+        assert!(html.contains("aria-selected=\"true\""));
+        assert!(html.contains("aria-selected=\"false\""));
+        assert!(!html.contains("subnav-info"));
+        assert!(!html.contains("badge"));
+        assert!(!html.contains("status-pill"));
     }
 }

@@ -21,7 +21,7 @@ pub const SCRIPT: &str = r###"
     try {
       const res = await apiFetch('/api/v1/tools');
       const tools = await res.json();
-      if (!Array.isArray(tools)) return;
+      if (!Array.isArray(tools)) throw new Error('Réponse inattendue');
       cachedToolStatus = tools;
       tools.forEach(tool => {
         const row = document.querySelector(`#catalog-body-app tr[data-app-id="${cssAttr(tool.id)}"]`);
@@ -33,7 +33,10 @@ pub const SCRIPT: &str = r###"
         else if (tool.status === 'locked') cell.textContent = 'En cours';
         else cell.textContent = 'Absent';
       });
-    } catch {}
+      markWidgetSource('tools', true);
+    } catch {
+      markWidgetSource('tools', false);
+    }
   }
 
   function toolStatusOf(id) {

@@ -6,6 +6,7 @@ pub mod flows;
 pub mod plugins;
 pub mod styles;
 pub mod tokens;
+pub mod widgets;
 
 pub use base::BASE_CSS;
 pub use components::COMPONENTS_CSS;
@@ -13,6 +14,7 @@ pub use flows::FLOWS_CSS;
 pub use plugins::PLUGINS_CSS;
 pub use styles::{generate_global_style, generate_global_tokens_css};
 pub use tokens::{DARK_THEME, LIGHT_THEME, ThemeTokens};
+pub use widgets::WIDGETS_CSS;
 
 use std::sync::LazyLock;
 
@@ -27,6 +29,8 @@ static ALL_STYLES: LazyLock<String> = LazyLock::new(|| {
     s.push_str(PLUGINS_CSS);
     s.push('\n');
     s.push_str(FLOWS_CSS);
+    s.push('\n');
+    s.push_str(WIDGETS_CSS);
     s
 });
 
@@ -46,5 +50,7 @@ mod tests {
         assert!(styles.contains("--bg-app: #0d1117;"));
         assert!(styles.contains(".application-shell {"));
         assert!(styles.contains(".status-pill {"));
+        assert!(styles.contains(".widget-grid {"));
+        assert!(styles.contains(".widget[data-state=\"loading\"]"));
     }
 }

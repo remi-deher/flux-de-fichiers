@@ -9,7 +9,6 @@ pub struct Panel {
     pub dom_id: &'static str,
     pub label: &'static str,
     pub nav_title: &'static str,
-    pub section_title: &'static str,
     pub search_placeholder: &'static str,
     pub search_label: &'static str,
     pub icon: IconName,
@@ -27,7 +26,6 @@ pub const DASHBOARD: Panel = Panel {
     dom_id: "panel-dashboard",
     label: "Vue d'ensemble",
     nav_title: "Groupe Vue d'ensemble : Statistiques et poste d'accueil",
-    section_title: "Vue d'ensemble & Statistiques",
     search_placeholder: "Rechercher dans la vue d'ensemble…",
     search_label: "Filtrer les indicateurs, statistiques et raccourcis d'accueil",
     icon: IconName::Dashboard,
@@ -40,7 +38,6 @@ pub const FILES: Panel = Panel {
     dom_id: "panel-files",
     label: "Bibliothèques",
     nav_title: "Groupe Médias : Bibliothèques surveillées et fichiers sources",
-    section_title: "Bibliothèques",
     search_placeholder: "Filtrer les bibliothèques…",
     search_label: "Filtrer les bibliothèques déclarées",
     icon: IconName::Libraries,
@@ -53,7 +50,6 @@ pub const FLOWS: Panel = Panel {
     dom_id: "panel-flows",
     label: "Flows",
     nav_title: "Groupe Traitements : Espace de conception des pipelines de traitement",
-    section_title: "Flows",
     search_placeholder: "Filtrer les flux…",
     search_label: "Rechercher parmi les flux que vous exécutez",
     icon: IconName::Flows,
@@ -66,7 +62,6 @@ pub const JOBS: Panel = Panel {
     dom_id: "panel-jobs",
     label: "Activité",
     nav_title: "Groupe Traitements : Suivi en direct et analyse des exécutions",
-    section_title: "Activité & Diagnostics",
     search_placeholder: "Filtrer les tâches et logs…",
     search_label: "Filtrer les tâches enregistrées et diagnostics",
     icon: IconName::Activity,
@@ -79,7 +74,6 @@ pub const WORKERS: Panel = Panel {
     dom_id: "panel-workers",
     label: "Nœuds",
     nav_title: "Groupe Infrastructure : État des agents de traitement et workers",
-    section_title: "Nœuds",
     search_placeholder: "Filtrer les nœuds et agents…",
     search_label: "Filtrer les serveurs et ressources distribuées",
     icon: IconName::Workers,
@@ -92,7 +86,6 @@ pub const PLUGINS: Panel = Panel {
     dom_id: "panel-plugins",
     label: "Plugins",
     nav_title: "Groupe Infrastructure : Outils média MKVToolNix, FFmpeg et extensions",
-    section_title: "Plugins",
     search_placeholder: "Filtrer le catalogue…",
     search_label: "Rechercher une pièce du catalogue ou un dépôt",
     icon: IconName::Plugins,
@@ -105,7 +98,6 @@ pub const SETTINGS: Panel = Panel {
     dom_id: "panel-settings",
     label: "Paramètres",
     nav_title: "Groupe Administration : Réglages du central, jetons et sécurité",
-    section_title: "Paramètres d'administration",
     search_placeholder: "Filtrer les paramètres système…",
     search_label: "Rechercher une section ou clé de configuration",
     icon: IconName::Settings,
@@ -118,7 +110,6 @@ pub const UPDATES: Panel = Panel {
     dom_id: "panel-updates",
     label: "Mises à jour",
     nav_title: "Groupe Administration : Suivi des versions, conteneur et changelog",
-    section_title: "Mises à jour & Conteneur",
     search_placeholder: "Filtrer les notes de mise à jour…",
     search_label: "Rechercher dans l'historique des versions",
     icon: IconName::Updates,
@@ -156,17 +147,9 @@ pub fn active_panel() -> &'static Panel {
     panels().find(|panel| panel.active).unwrap_or(&DASHBOARD)
 }
 
-/// Objets JavaScript `TABS`, `TAB_TITLES` et `SEARCH_CONTEXTS` émis depuis le catalogue.
+/// Objets JavaScript `TABS` et `SEARCH_CONTEXTS` émis depuis le catalogue.
 pub fn catalog_script() -> String {
     let slugs: Vec<&str> = panels().map(|panel| panel.slug).collect();
-    let titles: serde_json::Map<String, serde_json::Value> = panels()
-        .map(|panel| {
-            (
-                panel.slug.to_owned(),
-                serde_json::Value::String(panel.section_title.to_owned()),
-            )
-        })
-        .collect();
     let contexts: serde_json::Map<String, serde_json::Value> = panels()
         .map(|panel| {
             (
@@ -179,11 +162,8 @@ pub fn catalog_script() -> String {
         })
         .collect();
     let tabs = serde_json::to_string(&slugs).unwrap_or_else(|_| "[]".to_owned());
-    let titles = serde_json::to_string(&titles).unwrap_or_else(|_| "{}".to_owned());
     let contexts = serde_json::to_string(&contexts).unwrap_or_else(|_| "{}".to_owned());
-    format!(
-        "  const TABS = {tabs};\n  const TAB_TITLES = {titles};\n  const SEARCH_CONTEXTS = {contexts};\n"
-    )
+    format!("  const TABS = {tabs};\n  const SEARCH_CONTEXTS = {contexts};\n")
 }
 
 #[cfg(test)]
@@ -218,7 +198,6 @@ mod tests {
         )?;
         assert_eq!(tabs.len(), 8);
         for panel in panels() {
-            assert!(script.contains(panel.section_title));
             assert!(script.contains(panel.search_placeholder));
             assert!(tabs.iter().any(|slug| slug == panel.slug));
         }

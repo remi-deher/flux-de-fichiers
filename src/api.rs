@@ -1,9 +1,11 @@
+pub mod auth;
 mod flows;
 mod jobs;
 mod plugins;
 mod session;
 pub(crate) mod transfers;
 use crate::{auth::authorize, config::Config, domain::*, error::AppResult, repository};
+pub use auth::AdminAuth;
 use axum::{
     Router,
     extract::State,
@@ -212,7 +214,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         events_tx,
     };
     if state.config.local_worker {
-        tokio::spawn(crate::workers::run_local(state.clone()));
+        tokio::spawn(crate::local_worker::run(state.clone()));
     }
     let app = router(state);
     tracing::info!(%addr, "coordinator started");

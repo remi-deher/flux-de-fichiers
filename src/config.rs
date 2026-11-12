@@ -110,6 +110,11 @@ pub fn coordinator_url(raw: &str) -> anyhow::Result<reqwest::Url> {
 }
 
 impl Config {
+    /// Dossier qui reçoit une copie locale de chaque dépôt de plugins synchronisé.
+    pub fn plugin_repos_dir(&self) -> PathBuf {
+        self.config_dir.join("plugins")
+    }
+
     pub fn load() -> anyhow::Result<Self> {
         let config_dir = resolve_config_dir();
         std::fs::create_dir_all(&config_dir)?;

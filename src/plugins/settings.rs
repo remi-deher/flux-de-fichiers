@@ -48,6 +48,9 @@ pub struct ResolvedSettingsField {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub value: String,
+    /// Secret : une valeur est enregistrée (elle n'est jamais renvoyée).
+    #[serde(rename = "isSet")]
+    pub is_set: bool,
 }
 
 /// Valeur affichée : clé sauvée (même vide), sinon défaut du manifeste, sinon vide.
@@ -80,6 +83,7 @@ pub fn resolve_settings_fields(
             required: field.required,
             description: field.description.clone(),
             value: resolve_setting_value(saved_map, field),
+            is_set: false,
         })
         .collect()
 }

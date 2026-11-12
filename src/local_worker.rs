@@ -64,9 +64,23 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
             return;
         }
     };
-    let catalog = crate::plugins::list_catalog(state.config.plugins_dir.as_deref());
+    let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
+    let catalog = crate::plugins::list_catalog(&roots);
     let probe = crate::plugins::required_probe(&catalog);
     let cache = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
+    if let Some(contract) = probe.as_ref()
+        && !crate::plugins::probe_is_ready(&cache, contract)
+        && let Err(error) = crate::plugins::ensure_tool_installed(
+            &roots,
+            &cache,
+            &contract.tool_id,
+            &contract.version,
+            &crate::plugins::SyncPolicy::from_env(),
+        )
+        .await
+    {
+        tracing::warn!(tool = %contract.tool_id, error = %error, "installation de la sonde impossible");
+    }
     if !crate::plugins::file_job_may_start(&cache, probe.as_ref()) {
         report_failure(state, claim.job_id, &lease, JobErrorCode::ProbeUnavailable).await;
         tracing::warn!(
@@ -120,7 +134,15 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
 
         let http_client = reqwest::Client::new();
         let (final_output, warning) = if let Some(flow) = default_flow {
-            let engine = crate::flows::FlowEngine::new(&cache_mgr, &http_client);
+            let arr = crate::flows::ArrContext::load(
+                &state.pool,
+                &state.config.config_dir,
+                &state.config.input_dir,
+            )
+            .await;
+            let engine = crate::flows::FlowEngine::new(&cache_mgr, &http_client)
+                .with_secrets_dir(&state.config.config_dir)
+                .with_arr(&arr);
             let outcome = engine
                 .execute_flow(&flow, job_id, &source_snapshot, &work_dir, progress_cb)
                 .await

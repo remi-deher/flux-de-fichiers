@@ -233,6 +233,16 @@ impl ToolCacheManager {
             let mut entry = entry_result?;
             let entry_path = entry.path()?.to_path_buf();
 
+            // Seuls les fichiers réguliers et les dossiers sont extraits : un lien symbolique
+            // pourrait rediriger une écriture suivante hors du cache.
+            let entry_type = entry.header().entry_type();
+            if !(entry_type.is_file() || entry_type.is_dir()) {
+                return Err(AppError::InvalidManifest(format!(
+                    "unsupported entry type in archive: {}",
+                    entry_path.display()
+                )));
+            }
+
             // Protection stricte contre la traversée de répertoires (Zip Slip)
             if !Self::is_safe_relative_path(&entry_path) {
                 return Err(AppError::InvalidManifest(format!(
@@ -453,6 +463,39 @@ mod tests {
         let result = manager.extract_and_install("test.tool", "1.0.0", &artifact, &archive_bytes);
 
         assert!(matches!(result, Err(AppError::ChecksumMismatch { .. })));
+        assert!(!manager.is_ready("test.tool", "1.0.0", "x86_64"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_reject_archive_with_symlink_entry() -> Result<(), Box<dyn std::error::Error>> {
+        let tmp = tempdir()?;
+        let manager = ToolCacheManager::new(tmp.path());
+
+        let mut builder = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Symlink);
+        header.set_size(0);
+        header.set_cksum();
+        builder.append_link(&mut header, "lien", "/etc")?;
+        let tar_bytes = builder.into_inner()?;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        std::io::Write::write_all(&mut encoder, &tar_bytes)?;
+        let archive_bytes = encoder.finish()?;
+
+        let artifact = ToolArtifact {
+            arch: "x86_64".into(),
+            archive_url: "https://example.local/lien.tar.gz".into(),
+            archive_format: "tar.gz".into(),
+            archive_sha256: ToolCacheManager::compute_sha256(&archive_bytes),
+            binary_relative_path: "lien".into(),
+            binary_sha256: None,
+            permissions: None,
+        };
+
+        let result = manager.extract_and_install("test.tool", "1.0.0", &artifact, &archive_bytes);
+
+        assert!(matches!(result, Err(AppError::InvalidManifest(_))));
         assert!(!manager.is_ready("test.tool", "1.0.0", "x86_64"));
         Ok(())
     }

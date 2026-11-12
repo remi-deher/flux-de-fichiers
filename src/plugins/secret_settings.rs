@@ -1,0 +1,244 @@
+//! Réglages de plugins : les champs secrets sont chiffrés au repos et ne quittent jamais le serveur en clair.
+
+use super::settings::{SettingsField, SettingsFieldType};
+use crate::{
+    error::{AppError, AppResult},
+    secrets::{SecretBox, is_encrypted},
+};
+use serde_json::{Map, Value};
+use std::collections::HashSet;
+
+/// Indices de nom qui désignent un secret même sans schéma (plugin inconnu, ancien enregistrement).
+const SECRET_NAME_HINTS: [&str; 4] = ["key", "token", "secret", "password"];
+/// Taille maximale des réglages enregistrés pour un plugin.
+const MAX_SETTINGS_BYTES: usize = 64 * 1024;
+const MAX_SETTINGS_KEYS: usize = 64;
+
+/// Champs secrets : ceux que le schéma déclare, plus tout nom évocateur parmi les clés connues.
+pub fn secret_names<'a>(
+    fields: &[SettingsField],
+    keys: impl Iterator<Item = &'a String>,
+) -> HashSet<String> {
+    let mut names: HashSet<String> = fields
+        .iter()
+        .filter(|field| field.field_type == SettingsFieldType::Secret)
+        .map(|field| field.name.clone())
+        .collect();
+    names.extend(keys.filter(|key| looks_secret(key)).cloned());
+    names
+}
+
+fn looks_secret(name: &str) -> bool {
+    let lowered = name.to_lowercase();
+    SECRET_NAME_HINTS.iter().any(|hint| lowered.contains(hint))
+}
+
+fn as_object(value: &Value) -> Map<String, Value> {
+    value.as_object().cloned().unwrap_or_default()
+}
+
+/// Prépare l'enregistrement : chiffre les secrets saisis, conserve ceux déjà enregistrés si le champ est laissé vide.
+pub fn seal(
+    secrets: &SecretBox,
+    incoming: &Value,
+    existing: &Value,
+    secret_names: &HashSet<String>,
+) -> AppResult<Value> {
+    let incoming = incoming.as_object().ok_or(AppError::Invalid)?;
+    if incoming.len() > MAX_SETTINGS_KEYS
+        || serde_json::to_string(incoming)
+            .map_err(|_| AppError::Invalid)?
+            .len()
+            > MAX_SETTINGS_BYTES
+    {
+        return Err(AppError::TooLarge);
+    }
+    let existing = as_object(existing);
+    let mut sealed = Map::new();
+    for (name, value) in incoming {
+        if !secret_names.contains(name) {
+            sealed.insert(name.clone(), value.clone());
+            continue;
+        }
+        match value.as_str() {
+            Some(text) if !text.is_empty() => {
+                sealed.insert(name.clone(), Value::String(secrets.encrypt(text)?));
+            }
+            _ => {
+                if let Some(previous) = existing.get(name) {
+                    sealed.insert(name.clone(), previous.clone());
+                }
+            }
+        }
+    }
+    for name in secret_names {
+        if !sealed.contains_key(name)
+            && let Some(previous) = existing.get(name)
+        {
+            sealed.insert(name.clone(), previous.clone());
+        }
+    }
+    Ok(Value::Object(sealed))
+}
+
+/// Chiffre les secrets encore en clair d'un ancien enregistrement ; `None` si rien à migrer.
+pub fn migrate_plaintext(
+    secrets: &SecretBox,
+    stored: &Value,
+    secret_names: &HashSet<String>,
+) -> AppResult<Option<Value>> {
+    let mut object = as_object(stored);
+    let mut changed = false;
+    for name in secret_names {
+        if let Some(Value::String(text)) = object.get(name)
+            && !text.is_empty()
+            && !is_encrypted(text)
+        {
+            let encrypted = secrets.encrypt(text)?;
+            object.insert(name.clone(), Value::String(encrypted));
+            changed = true;
+        }
+    }
+    Ok(changed.then_some(Value::Object(object)))
+}
+
+/// Réglages sans les secrets, et noms des secrets qui ont une valeur enregistrée.
+pub fn mask(stored: &Value, secret_names: &HashSet<String>) -> (Value, HashSet<String>) {
+    let mut public = as_object(stored);
+    let mut set = HashSet::new();
+    for name in secret_names {
+        if let Some(value) = public.remove(name)
+            && value.as_str().is_some_and(|text| !text.is_empty())
+        {
+            set.insert(name.clone());
+        }
+    }
+    (Value::Object(public), set)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn secret_field(name: &str) -> SettingsField {
+        SettingsField {
+            name: name.to_owned(),
+            label: name.to_owned(),
+            field_type: SettingsFieldType::Secret,
+            default_value: None,
+            required: true,
+            description: None,
+        }
+    }
+
+    fn names(fields: &[SettingsField], keys: &[&str]) -> HashSet<String> {
+        let keys: Vec<String> = keys.iter().map(|key| (*key).to_owned()).collect();
+        secret_names(fields, keys.iter())
+    }
+
+    #[test]
+    fn test_secret_names_combine_schema_and_name_hints() {
+        let found = names(
+            &[secret_field("custom")],
+            &["url", "apiKey", "authToken", "pathMapping"],
+        );
+        assert!(found.contains("custom"));
+        assert!(found.contains("apiKey"));
+        assert!(found.contains("authToken"));
+        assert!(!found.contains("url"));
+        assert!(!found.contains("pathMapping"));
+    }
+
+    #[test]
+    fn test_seal_encrypts_new_secrets_and_keeps_existing_ones_when_left_empty() -> AppResult<()> {
+        let dir = tempfile::tempdir()?;
+        let secrets = SecretBox::open(dir.path())?;
+        let secret = names(&[], &["apiKey"]);
+
+        let first = seal(
+            &secrets,
+            &json!({"url": "http://s", "apiKey": "clef"}),
+            &json!({}),
+            &secret,
+        )?;
+        let stored = first["apiKey"].as_str().unwrap_or_default().to_owned();
+        assert!(is_encrypted(&stored));
+        assert_eq!(first["url"], "http://s");
+        assert_eq!(secrets.decrypt(&stored)?, "clef");
+
+        let kept = seal(
+            &secrets,
+            &json!({"url": "http://t", "apiKey": ""}),
+            &first,
+            &secret,
+        )?;
+        assert_eq!(kept["apiKey"], stored);
+        assert_eq!(kept["url"], "http://t");
+
+        let omitted = seal(&secrets, &json!({"url": "http://u"}), &first, &secret)?;
+        assert_eq!(omitted["apiKey"], stored);
+
+        let replaced = seal(&secrets, &json!({"apiKey": "nouvelle"}), &first, &secret)?;
+        assert_eq!(
+            secrets.decrypt(replaced["apiKey"].as_str().unwrap_or_default())?,
+            "nouvelle"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_seal_refuses_non_objects_and_oversized_payloads() -> AppResult<()> {
+        let dir = tempfile::tempdir()?;
+        let secrets = SecretBox::open(dir.path())?;
+        let none = HashSet::new();
+        assert!(matches!(
+            seal(&secrets, &json!([1]), &json!({}), &none),
+            Err(AppError::Invalid)
+        ));
+        let big = json!({"note": "x".repeat(MAX_SETTINGS_BYTES + 1)});
+        assert!(matches!(
+            seal(&secrets, &big, &json!({}), &none),
+            Err(AppError::TooLarge)
+        ));
+        let many: Map<String, Value> = (0..=MAX_SETTINGS_KEYS)
+            .map(|index| (format!("k{index}"), Value::Bool(true)))
+            .collect();
+        assert!(matches!(
+            seal(&secrets, &Value::Object(many), &json!({}), &none),
+            Err(AppError::TooLarge)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn test_migrate_plaintext_encrypts_only_clear_secrets() -> AppResult<()> {
+        let dir = tempfile::tempdir()?;
+        let secrets = SecretBox::open(dir.path())?;
+        let secret = names(&[], &["apiKey"]);
+        let migrated = migrate_plaintext(
+            &secrets,
+            &json!({"apiKey": "clair", "url": "http://s"}),
+            &secret,
+        )?
+        .ok_or(AppError::Internal)?;
+        assert!(is_encrypted(
+            migrated["apiKey"].as_str().unwrap_or_default()
+        ));
+        assert_eq!(migrated["url"], "http://s");
+        assert!(migrate_plaintext(&secrets, &migrated, &secret)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_mask_removes_secrets_and_reports_which_are_set() {
+        let secret = names(&[], &["apiKey", "token"]);
+        let (public, set) = mask(
+            &json!({"url": "http://s", "apiKey": "enc:v1:aa", "token": ""}),
+            &secret,
+        );
+        assert_eq!(public, json!({"url": "http://s"}));
+        assert!(set.contains("apiKey"));
+        assert!(!set.contains("token"));
+    }
+}

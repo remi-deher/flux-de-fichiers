@@ -209,6 +209,127 @@ paths:
               schema: {type: string, format: binary}
         '404': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/plugins:
+    get:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: Catalogue lu dans les dépôts de plugins synchronisés (vide tant qu'aucun dépôt n'est synchronisé)
+      responses:
+        '200':
+          description: Fiches du catalogue ; une fiche inconnue du coordinateur est ignorée
+          content:
+            application/json:
+              schema: {type: array, items: {type: object}}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/plugins/repositories:
+    get:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: Lister les dépôts de plugins
+      responses:
+        '200': {description: Dépôts, officiel en premier}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: Ajouter un dépôt ; l'URL d'index doit être http(s) et finir par /catalogue/index.json
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, indexUrl]
+              properties:
+                id: {type: string, maxLength: 64, pattern: '^[A-Za-z0-9_][A-Za-z0-9_.-]*$', description: Nom du dossier local du dépôt}
+                name: {type: string, minLength: 1}
+                indexUrl: {type: string, format: uri}
+      responses:
+        '200': {description: Dépôt ajouté}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/plugins/repositories/{id}:
+    delete:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: Supprimer un dépôt tiers (le dépôt officiel est protégé)
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Dépôt supprimé}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/plugins/repositories/{id}/toggle:
+    put:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: Activer ou désactiver un dépôt
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Nouvel état}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/plugins/repositories/{id}/sync:
+    post:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: >-
+        Synchroniser un dépôt : copie atomique de l'index, des manifestes et des contrats de
+        distribution dans /config/plugins/{id}. Sans redirection, adresses privées refusées
+        (sauf PLUGIN_ALLOW_PRIVATE_HOSTS=1), taille et nombre de fichiers bornés.
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Bilan (entrées, fichiers, fiches ignorées)}
+        '502': {description: Dépôt injoignable ou refusé, l'ancienne copie est conservée}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/plugins/{id}/settings:
+    get:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: Champs de réglages d'un plugin ; un secret n'est jamais renvoyé, seulement isSet
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Champs résolus et réglages publics}
+        default: {$ref: '#/components/responses/Error'}
+    put:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: >-
+        Enregistrer les réglages d'un plugin du catalogue. Les secrets saisis sont chiffrés
+        (ChaCha20-Poly1305, clé /config/secret_key) ; un secret laissé vide est conservé.
+        Maximum 64 clés et 64 Kio.
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Réglages enregistrés, secrets exclus de la réponse}
+        '413': {description: Réglages trop volumineux}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/tools:
+    get:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: État des outils du catalogue dans le cache du coordinateur (ready ou not_installed)
+      responses:
+        '200': {description: Outils}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/tools/{id}/distribution:
+    get:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: Contrat de distribution d'un outil, lu dans le dépôt synchronisé
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Contrat distribution.v1}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/tools/{id}/install:
+    post:
+      security: [{AdminKey: []}, {WebSession: []}]
+      summary: >-
+        Installer un outil du catalogue dans le cache du coordinateur : téléchargement https,
+        redirections revérifiées, SHA-256 de l'archive et du binaire contrôlés avant exécution.
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Outil prêt}
+        '502': {description: Archive injoignable}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/worker/tools/{id}/distribution:
+    get:
+      security: [{WorkerKey: []}]
+      summary: Contrat de distribution d'un outil pour un worker, qui l'installe dans son propre cache
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Contrat distribution.v1}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/auth/session:
     get:
       security: [{WebSession: []}]

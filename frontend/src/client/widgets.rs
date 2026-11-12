@@ -80,7 +80,7 @@ pub const SCRIPT: &str = r###"
       .filter(library => libraryReadiness(library) !== 'Prête')
       .forEach(library => items.push({ tone: 'warning', label: `À configurer : ${library.name}`, goto: 'files' }));
     cachedToolStatus
-      .filter(tool => tool.status !== 'ready' && tool.status !== 'locked')
+      .filter(tool => tool.status !== 'ready' && tool.status !== TOOL_STATUS_INSTALLING)
       .forEach(tool => items.push({ tone: 'warning', label: `Outil absent : ${tool.id}`, goto: 'plugins' }));
     return items.length ? widgetList(items) : null;
   }
@@ -141,7 +141,7 @@ pub const SCRIPT: &str = r###"
   function renderWidgetTools() {
     if (cachedToolStatus.length === 0) return null;
     return widgetList(cachedToolStatus.map(tool => {
-      const tone = tool.status === 'ready' ? 'success' : (tool.status === 'locked' ? 'warning' : 'danger');
+      const tone = tool.status === 'ready' ? 'success' : (tool.status === TOOL_STATUS_INSTALLING ? 'warning' : 'danger');
       return { tone, label: tool.id, meta: toolStatusOf(tool.id), goto: 'plugins' };
     }));
   }

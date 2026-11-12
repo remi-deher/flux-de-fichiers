@@ -107,4 +107,54 @@ mod tests {
         assert_eq!(webhook_method("post"), reqwest::Method::POST);
         assert_eq!(webhook_method("delete"), reqwest::Method::POST);
     }
+
+    async fn serve_status(code: u16) -> anyhow::Result<std::net::SocketAddr> {
+        use axum::{Router, http::StatusCode, routing::post};
+        let status = StatusCode::from_u16(code)?;
+        let router = Router::new().route("/hook", post(move || async move { status }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        Ok(address)
+    }
+
+    fn config(address: std::net::SocketAddr, fail_on_error: bool) -> WebhookBlockConfig {
+        WebhookBlockConfig {
+            url: format!("http://{address}/hook"),
+            method: "POST".into(),
+            custom_headers: HashMap::new(),
+            fail_on_error,
+        }
+    }
+
+    fn context() -> FlowContext {
+        FlowContext::new(
+            uuid::Uuid::nil(),
+            "film.mkv".into(),
+            std::path::PathBuf::from("film.mkv"),
+            serde_json::json!({}),
+        )
+    }
+
+    #[tokio::test]
+    async fn webhook_failure_is_reported_only_when_fail_on_error_is_set() -> anyhow::Result<()> {
+        let address = serve_status(500).await?;
+        let client = reqwest::Client::new();
+        assert!(
+            execute_webhook_block(&config(address, true), &context(), &client)
+                .await
+                .is_err()
+        );
+        execute_webhook_block(&config(address, false), &context(), &client).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn webhook_success_is_not_an_error() -> anyhow::Result<()> {
+        let address = serve_status(204).await?;
+        execute_webhook_block(&config(address, true), &context(), &reqwest::Client::new()).await?;
+        Ok(())
+    }
 }

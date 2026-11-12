@@ -84,6 +84,38 @@ impl Agent {
             .error_for_status()?;
         }
     }
+    /// Demande au coordinateur le contrat de distribution de la sonde, puis l'installe dans le cache local.
+    async fn install_probe(
+        &self,
+        cache: &crate::tools_cache::ToolCacheManager,
+        contract: &crate::plugins::ProbeContract,
+    ) -> anyhow::Result<()> {
+        let raw = self
+            .request(
+                reqwest::Method::GET,
+                &format!("/api/v1/worker/tools/{}/distribution", contract.tool_id),
+            )
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+        let distribution = crate::plugins::parse_distribution(&raw)?;
+        anyhow::ensure!(
+            distribution.tool_id == contract.tool_id
+                && distribution.tool_version == contract.version,
+            "le contrat ne correspond pas à la sonde attendue"
+        );
+        crate::plugins::install_from_distribution(
+            cache,
+            &distribution,
+            &crate::plugins::SyncPolicy::from_env(),
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn process(
         &self,
         claim: &Claim,
@@ -101,6 +133,12 @@ impl Agent {
             }),
             _ => None,
         };
+        if let Some(contract) = probe.as_ref()
+            && !crate::plugins::probe_is_ready(&cache_mgr, contract)
+            && let Err(error) = self.install_probe(&cache_mgr, contract).await
+        {
+            tracing::warn!(tool = %contract.tool_id, error = %error, "installation de la sonde impossible");
+        }
         if !crate::plugins::file_job_may_start(&cache_mgr, probe.as_ref()) {
             anyhow::bail!("probe_unavailable");
         }

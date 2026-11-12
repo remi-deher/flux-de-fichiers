@@ -291,7 +291,7 @@ pub const SCRIPT: &str = r###"
       if (!nodesContainer) return;
       const count = nodesContainer.querySelectorAll('.canvas-node').length + 1;
       const nodeId = `node-${count}`;
-      const icon = blockType === 'condition' ? '🔀' : blockType === 'mkvpropedit' ? '⚡' : blockType === 'file-output' ? '💾' : blockType === 'sonarr' ? '📡' : blockType === 'radarr' ? '🎬' : blockType.includes('video') ? '🎞️' : blockType.includes('audio') ? '🔊' : blockType.includes('mp4') ? '📦' : '🎬';
+      const icon = blockType === 'condition' ? '🔀' : blockType === 'mkvpropedit' ? '⚡' : blockType === 'file-output' ? '💾' : blockType.startsWith('sonarr') ? '📡' : blockType.startsWith('radarr') ? '🎬' : blockType.includes('video') ? '🎞️' : blockType.includes('audio') ? '🔊' : blockType.includes('mp4') ? '📦' : '🎬';
 
       const div = document.createElement('div');
       div.className = 'canvas-node';

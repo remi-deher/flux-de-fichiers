@@ -25,6 +25,11 @@
 ## Travail
 
 - Petits fichiers à responsabilité unique ; scinder avant de nuire à la lisibilité.
+- Zéro Boilerplate & Factorisation continue (décision utilisateur du 12 nov. 2026) :
+  interdiction stricte de dupliquer du code, du balisage HTML ou des styles. Dès qu'un
+  pattern se répète, le factoriser en composant réutilisable, fonction générique ou helper.
+  Remplacer les chaînes magiques par des enums typés avec Serde. Les composants UI doivent
+  être composables, atomiques, et consommer exclusivement les Design Tokens du thème.
 - Noms explicites, aucune constante numérique sans nom.
 - Tester systématiquement toutes les fonctions et routes du code avec des tests unitaires ou d'intégration Rust natifs légers pour éviter toute régression non prévue (décision utilisateur du 12 nov. 2026).
 - Annoncer en deux lignes l'action prévue avant d'écrire du code.

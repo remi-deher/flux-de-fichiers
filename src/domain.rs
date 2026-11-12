@@ -5,6 +5,94 @@ use uuid::Uuid;
 pub const LEASE_SECONDS: i64 = 120;
 pub const MAX_ATTEMPTS: i32 = 3;
 
+/// Statut d'avancement d'un traitement de remuxage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobStatus {
+    Pending,
+    Running,
+    Succeeded,
+    Failed,
+    Canceled,
+}
+
+impl JobStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Canceled => "canceled",
+        }
+    }
+}
+
+impl std::fmt::Display for JobStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Nature d'un événement notifié sur le flux SSE.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobEventType {
+    JobCreated,
+    JobClaimed,
+    JobHeartbeat,
+    JobProgress,
+    JobSucceeded,
+    JobFailed,
+    JobCanceled,
+}
+
+impl JobEventType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::JobCreated => "job_created",
+            Self::JobClaimed => "job_claimed",
+            Self::JobHeartbeat => "job_heartbeat",
+            Self::JobProgress => "job_progress",
+            Self::JobSucceeded => "job_succeeded",
+            Self::JobFailed => "job_failed",
+            Self::JobCanceled => "job_canceled",
+        }
+    }
+}
+
+/// Codes d'erreur stricts autorisés lors de l'échec d'un bail de traitement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobErrorCode {
+    RemuxFailed,
+    SourceIntegrity,
+    TransferFailed,
+}
+
+impl JobErrorCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RemuxFailed => "remux_failed",
+            Self::SourceIntegrity => "source_integrity",
+            Self::TransferFailed => "transfer_failed",
+        }
+    }
+}
+
+impl std::str::FromStr for JobErrorCode {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "remux_failed" => Ok(Self::RemuxFailed),
+            "source_integrity" => Ok(Self::SourceIntegrity),
+            "transfer_failed" => Ok(Self::TransferFailed),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Worker {
     pub id: Uuid,

@@ -83,7 +83,7 @@ pub const SCRIPT: &str = r###"
           if (dialog && dialog.open && idEl && idEl.textContent === payload.job_id) {
             const statusEl = el('detail-job-status');
             if (statusEl && payload.progress !== undefined) {
-              statusEl.innerHTML = `<span class="status-pill running"><span class="status-dot"></span>En cours (${payload.progress}%)</span>`;
+              statusEl.innerHTML = renderStatusPill(`En cours (${payload.progress}%)`, 'running', { pulse: true });
             }
           }
         } catch (_) {}
@@ -152,12 +152,13 @@ pub const SCRIPT: &str = r###"
     }
 
     tbody.innerHTML = recent.map(j => {
-      const statusClass = j.status === 'succeeded' ? 'succeeded' : (j.status === 'failed' ? 'failed' : (j.status === 'running' ? 'running' : 'queued'));
+      const statusClass = jobStatusClass(j.status);
+      const isRunning = j.status === 'running';
       return `
         <tr>
           <td style="font-family: var(--font-mono); font-weight: 600;">${escapeHtml(j.id.slice(0, 8))}…</td>
           <td>${escapeHtml(j.source_name)}</td>
-          <td><span class="status-pill ${statusClass}"><span class="status-dot"></span>${escapeHtml(j.status)}</span></td>
+          <td>${renderStatusPill(escapeHtml(j.status), statusClass, { pulse: isRunning })}</td>
           <td>${formatDate(j.created_at)}</td>
         </tr>
       `;
@@ -203,8 +204,9 @@ pub const SCRIPT: &str = r###"
     }
 
     tbody.innerHTML = filtered.map(j => {
-      const statusClass = j.status === 'succeeded' ? 'succeeded' : (j.status === 'failed' ? 'failed' : (j.status === 'running' ? 'running' : 'queued'));
-      const statusLabel = j.status === 'running' && j.progress !== undefined ? `En cours (${j.progress}%)` : escapeHtml(j.status);
+      const statusClass = jobStatusClass(j.status);
+      const isRunning = j.status === 'running';
+      const statusLabel = isRunning && j.progress !== undefined ? `En cours (${j.progress}%)` : escapeHtml(j.status);
       const canDownload = j.status === 'succeeded' && sessionMode === 'cookie_session';
       const dlBtnHtml = canDownload
         ? `<button type="button" class="btn btn-secondary btn-sm job-download-btn" data-job-id="${escapeHtml(j.id)}" data-output="${escapeHtml(j.output_name || 'resultat.mkv')}" title="Télécharger le flux MKV directement sans charger la RAM">Télécharger</button>`
@@ -214,7 +216,7 @@ pub const SCRIPT: &str = r###"
         <tr>
           <td style="font-family: var(--font-mono); font-weight: 600;">${escapeHtml(j.id.slice(0, 8))}…</td>
           <td>${escapeHtml(j.source_name)}</td>
-          <td><span class="status-pill ${statusClass}"><span class="status-dot"></span>${statusLabel}</span></td>
+          <td>${renderStatusPill(statusLabel, statusClass, { pulse: isRunning })}</td>
           <td>${formatDate(j.created_at)}</td>
           <td>
             <div style="display: flex; gap: 0.5rem; align-items: center;">
@@ -283,8 +285,8 @@ pub const SCRIPT: &str = r###"
     if (idEl) idEl.textContent = job.id;
     if (sourceEl) sourceEl.textContent = job.source_name;
     if (statusEl) {
-      const statusClass = job.status === 'succeeded' ? 'succeeded' : (job.status === 'failed' ? 'failed' : (job.status === 'running' ? 'running' : 'queued'));
-      statusEl.innerHTML = `<span class="status-pill ${statusClass}"><span class="status-dot"></span>${escapeHtml(job.status)}</span>`;
+      const statusClass = jobStatusClass(job.status);
+      statusEl.innerHTML = renderStatusPill(escapeHtml(job.status), statusClass, { pulse: job.status === 'running' });
     }
     if (workerEl) workerEl.textContent = job.worker_id || job.target_worker_id || 'N\'importe quel agent (ou central autonome)';
     if (attemptsEl) attemptsEl.textContent = `${job.attempts || 1} tentative(s)`;

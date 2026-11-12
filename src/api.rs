@@ -32,15 +32,15 @@ pub struct AppState {
 impl AppState {
     pub fn notify_job_event(
         &self,
-        event_type: &str,
+        event_type: JobEventType,
         job_id: uuid::Uuid,
-        status: &str,
+        status: JobStatus,
         error_code: Option<String>,
     ) {
         let event = JobEvent {
-            event_type: event_type.to_string(),
+            event_type: event_type.as_str().to_string(),
             job_id,
-            status: status.to_string(),
+            status: status.as_str().to_string(),
             timestamp: chrono::Utc::now(),
             progress: None,
             message: None,
@@ -177,7 +177,7 @@ async fn claim(
     authorize(&h, &s.config.worker_key)?;
     let claim_res = repository::claim(&s.pool, r.worker_id).await?;
     if let Some(ref c) = claim_res {
-        s.notify_job_event("job_claimed", c.job_id, "running", None);
+        s.notify_job_event(JobEventType::JobClaimed, c.job_id, JobStatus::Running, None);
     }
     Ok(axum::Json(claim_res))
 }

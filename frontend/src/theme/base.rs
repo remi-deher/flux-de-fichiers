@@ -64,7 +64,8 @@ pub const BASE_CSS: &str = r#"
 .application-sidebar.is-collapsed .tab-btn-label,
 .application-sidebar.is-collapsed .nav-group-label,
 .application-sidebar.is-collapsed #theme-toggle-label,
-.application-sidebar.is-collapsed #refresh-all-btn {
+.application-sidebar.is-collapsed #refresh-all-btn,
+.application-sidebar.is-collapsed .collapse-label {
   display: none;
 }
 
@@ -75,6 +76,37 @@ pub const BASE_CSS: &str = r#"
 
 .application-sidebar.is-collapsed .brand {
   justify-content: center;
+}
+
+.application-sidebar.is-collapsed .sidebar-footer {
+  padding: 0.75rem 0.5rem;
+  align-items: center;
+}
+
+.application-sidebar.is-collapsed .sidebar-collapse-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  margin: 0 auto;
+  border-radius: var(--radius-sm);
+  justify-content: center;
+}
+
+.application-sidebar.is-collapsed .sidebar-collapse-btn .collapse-icon {
+  transform: rotate(180deg);
+}
+
+.application-sidebar.is-collapsed .sidebar-footer-tools {
+  width: 100%;
+  justify-content: center;
+}
+
+.application-sidebar.is-collapsed #theme-toggle-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+  min-width: 40px;
 }
 
 /* En-tête de la marque */
@@ -209,21 +241,27 @@ pub const BASE_CSS: &str = r#"
 .sidebar-collapse-btn {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
   width: 100%;
-  padding: 0.4rem 0.6rem;
+  padding: 0.45rem 0.6rem;
   border-radius: var(--radius-sm);
   background: transparent;
   border: 1px solid var(--border-color);
   color: var(--text-dim);
   font-size: 0.75rem;
   cursor: pointer;
-  transition: all 0.15s ease-in-out;
+  transition: all 0.2s ease-in-out;
 }
 
 .sidebar-collapse-btn:hover {
   background-color: var(--bg-subtle);
   color: var(--text-main);
+  border-color: var(--primary);
+}
+
+.collapse-icon {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .sidebar-footer-tools {
@@ -244,16 +282,16 @@ pub const BASE_CSS: &str = r#"
   background-color: var(--bg-app);
 }
 
-/* En-tête applicatif supérieur avec Glassmorphism (Backdrop Blur) */
+/* En-tête applicatif supérieur avec Glassmorphism (Backdrop Blur) & Grille symétrique */
 .application-header {
   min-height: 60px;
   background-color: rgba(22, 27, 34, 0.85);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color);
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   gap: 1rem;
   padding: var(--sat) calc(1.5rem + var(--sar)) 0 calc(1.5rem + var(--sal));
   position: sticky;
@@ -265,6 +303,12 @@ pub const BASE_CSS: &str = r#"
   background-color: rgba(255, 255, 255, 0.85);
 }
 
+.header-breadcrumb {
+  grid-column: 1;
+  justify-self: start;
+  min-width: 0;
+}
+
 /* Style des icônes vectorielles Lucide */
 .lucide-icon {
   display: inline-block;
@@ -272,11 +316,12 @@ pub const BASE_CSS: &str = r#"
   flex-shrink: 0;
 }
 
-/* Barre de recherche rapide du header (Command Palette) */
+/* Barre de recherche rapide du header (Command Palette, strictement centrée) */
 .header-search-wrapper {
-  flex: 1;
-  max-width: 420px;
-  margin: 0 0.5rem;
+  grid-column: 2;
+  justify-self: center;
+  width: min(100%, 420px);
+  margin: 0;
 }
 
 .header-search-btn {
@@ -321,6 +366,8 @@ pub const BASE_CSS: &str = r#"
 }
 
 .header-actions {
+  grid-column: 3;
+  justify-self: end;
   display: flex;
   align-items: center;
   gap: 0.6rem;

@@ -98,6 +98,9 @@ pub const SCRIPT: &str = r###"
       collapseBtn.addEventListener('click', () => {
         const isCollapsed = sidebar.classList.toggle('is-collapsed');
         collapseBtn.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+        const tooltip = isCollapsed ? 'Déplier la navigation' : 'Replier la navigation';
+        collapseBtn.setAttribute('title', tooltip);
+        collapseBtn.setAttribute('aria-label', tooltip);
         const label = collapseBtn.querySelector('.collapse-label');
         if (label) label.textContent = isCollapsed ? 'Déplier' : 'Replier';
       });

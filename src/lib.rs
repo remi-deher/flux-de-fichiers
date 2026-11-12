@@ -9,6 +9,7 @@ pub mod media;
 pub mod node;
 pub mod plugins;
 pub mod repository;
+pub mod secrets;
 pub mod storage;
 pub mod telemetry;
 pub mod tools_cache;

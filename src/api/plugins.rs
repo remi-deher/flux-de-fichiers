@@ -4,6 +4,7 @@ use super::{AdminAuth, AppState};
 use crate::{
     error::{AppError, AppResult},
     plugins::{self, CatalogEntry, ToolStatusSummary},
+    secrets::SecretBox,
     tools_cache::ToolCacheManager,
 };
 use axum::{
@@ -17,8 +18,8 @@ pub async fn catalog(
     State(s): State<AppState>,
     _auth: AdminAuth,
 ) -> AppResult<Json<Vec<CatalogEntry>>> {
-    let entries = plugins::list_catalog(s.config.plugins_dir.as_deref());
-    Ok(Json(entries))
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    Ok(Json(plugins::list_catalog(&roots)))
 }
 
 /// Liste l'état d'installation et de cache des outils distribués.
@@ -27,87 +28,139 @@ pub async fn tools(
     _auth: AdminAuth,
 ) -> AppResult<Json<Vec<ToolStatusSummary>>> {
     let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
-    let tools = plugins::list_tools_status(s.config.plugins_dir.as_deref(), &cache_mgr);
-    Ok(Json(tools))
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    Ok(Json(plugins::list_tools_status(&roots, &cache_mgr)))
 }
 
-/// Renvoie le contrat déclaratif de distribution d'un outil spécifique.
+/// Renvoie le contrat déclaratif de distribution d'un outil, lu dans les dépôts synchronisés.
 pub async fn tool_distribution(
     State(s): State<AppState>,
     Path(id): Path<String>,
     _auth: AdminAuth,
 ) -> AppResult<Json<Value>> {
-    let app_name = id.trim_start_matches("app.");
-    if let Some(ref root) = s.config.plugins_dir {
-        let dist_path = root
-            .join("apps")
-            .join(app_name)
-            .join("distribution.v1.json");
-        if dist_path.is_file() {
-            let content = std::fs::read_to_string(&dist_path)?;
-            let val: Value = serde_json::from_str(&content)
-                .map_err(|e| AppError::InvalidManifest(e.to_string()))?;
-            return Ok(Json(val));
-        }
-    }
-    // Repli de secours pour les outils fondamentaux
-    match id.as_str() {
-        "app.mkvtoolnix" => Ok(Json(serde_json::json!({
-            "schemaVersion": "1.0.0",
-            "tool": "mkvtoolnix",
-            "name": "MKVToolNix CLI",
-            "description": "Ensemble d'outils officiel pour la manipulation de conteneurs Matroska (mkvmerge, mkvpropedit, mkvextract, mkvinfo).",
-            "platforms": {
-                "linux-x86_64": {
-                    "distributionType": "system",
-                    "package": "mkvtoolnix",
-                    "binary": "mkvmerge"
-                },
-                "linux-aarch64": {
-                    "distributionType": "system",
-                    "package": "mkvtoolnix",
-                    "binary": "mkvmerge"
-                }
-            }
-        }))),
-        _ => Err(AppError::NotFound),
-    }
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    Ok(Json(plugins::read_distribution(&roots, &id)?))
 }
 
-/// Récupère la configuration (valeurs personnalisées) d'un plugin.
+/// Même contrat, pour un worker distant : il l'installe lui-même dans son cache.
+pub async fn worker_tool_distribution(
+    State(s): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    crate::auth::authorize(&headers, &s.config.worker_key)?;
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    Ok(Json(plugins::read_distribution(&roots, &id)?))
+}
+
+/// Installe un outil du catalogue dans le cache du coordinateur (nœud intégré).
+pub async fn install_tool(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    _auth: AdminAuth,
+) -> AppResult<Json<Value>> {
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let entry = plugins::list_catalog(&roots)
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .ok_or(AppError::NotFound)?;
+    let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
+    plugins::ensure_tool_installed(
+        &roots,
+        &cache_mgr,
+        &entry.id,
+        &entry.version,
+        &plugins::SyncPolicy::from_env(),
+    )
+    .await?;
+    Ok(Json(serde_json::json!({
+        "id": entry.id,
+        "version": entry.version,
+        "status": "ready",
+    })))
+}
+
+fn parse_saved(raw: Option<&str>) -> Value {
+    raw.and_then(|text| serde_json::from_str(text).ok())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+fn keys_of(value: &Value) -> Vec<String> {
+    value
+        .as_object()
+        .map(|object| object.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// Récupère la configuration d'un plugin ; les secrets ne sont jamais renvoyés (seulement `isSet`).
 pub async fn get_settings(
     State(s): State<AppState>,
     Path(id): Path<String>,
     _auth: AdminAuth,
 ) -> AppResult<Json<Value>> {
-    let saved_raw = crate::repository::get_plugin_settings(&s.pool, &id).await?;
-    let saved = match saved_raw.as_deref() {
-        Some(raw) => serde_json::from_str(raw).unwrap_or_else(|_| serde_json::json!({})),
-        None => serde_json::json!({}),
-    };
+    let secrets = SecretBox::open(&s.config.config_dir)?;
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let schema_fields = plugins::settings_fields(&roots, &id);
+    let mut saved = parse_saved(
+        crate::repository::get_plugin_settings(&s.pool, &id)
+            .await?
+            .as_deref(),
+    );
+    let names = plugins::secret_names(&schema_fields, keys_of(&saved).iter());
+    // Anciens enregistrements en clair : chiffrés à la première lecture.
+    if let Some(migrated) = plugins::migrate_plaintext(&secrets, &saved, &names)? {
+        let migrated_str = serde_json::to_string(&migrated).map_err(|_| AppError::Invalid)?;
+        crate::repository::set_plugin_settings(&s.pool, &id, &migrated_str).await?;
+        saved = migrated;
+    }
+    let (public, set) = plugins::mask(&saved, &names);
     // `fields[].value` propose le défaut du manifeste si la clé n'est pas sauvée.
-    // `settings` reste l'objet enregistré, sans y réécrire ces défauts.
-    let fields = plugins::resolved_plugin_fields(s.config.plugins_dir.as_deref(), &id, &saved);
+    // `settings` reste l'objet enregistré, sans les secrets ni les défauts réécrits.
+    let mut fields = plugins::resolve_settings_fields(&public, &schema_fields);
+    for field in &mut fields {
+        if field.field_type == plugins::SettingsFieldType::Secret {
+            field.is_set = set.contains(&field.name);
+            field.value.clear();
+        }
+    }
     Ok(Json(serde_json::json!({
         "pluginId": id,
-        "settings": saved,
+        "settings": public,
         "fields": fields,
     })))
 }
 
-/// Enregistre la configuration (valeurs par défaut des blocs) d'un plugin.
+/// Enregistre la configuration d'un plugin du catalogue ; les secrets saisis sont chiffrés, les secrets laissés vides sont conservés.
 pub async fn save_settings(
     State(s): State<AppState>,
     Path(id): Path<String>,
     _auth: AdminAuth,
     Json(payload): Json<Value>,
 ) -> AppResult<Json<Value>> {
-    let settings_str = serde_json::to_string(&payload).map_err(|_| AppError::Invalid)?;
-    crate::repository::set_plugin_settings(&s.pool, &id, &settings_str).await?;
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    if !plugins::is_valid_repository_id(&id) || !plugins::plugin_exists(&roots, &id) {
+        return Err(AppError::NotFound);
+    }
+    let secrets = SecretBox::open(&s.config.config_dir)?;
+    let schema_fields = plugins::settings_fields(&roots, &id);
+    let existing = parse_saved(
+        crate::repository::get_plugin_settings(&s.pool, &id)
+            .await?
+            .as_deref(),
+    );
+    let keys: Vec<String> = keys_of(&existing)
+        .into_iter()
+        .chain(keys_of(&payload))
+        .collect();
+    let names = plugins::secret_names(&schema_fields, keys.iter());
+    let sealed = plugins::seal(&secrets, &payload, &existing, &names)?;
+    let sealed_str = serde_json::to_string(&sealed).map_err(|_| AppError::Invalid)?;
+    crate::repository::set_plugin_settings(&s.pool, &id, &sealed_str).await?;
+    let (public, _) = plugins::mask(&sealed, &names);
     Ok(Json(serde_json::json!({
         "pluginId": id,
         "status": "saved",
-        "settings": payload,
+        "settings": public,
     })))
 }
 
@@ -127,11 +180,8 @@ pub async fn add_repository(
     Json(payload): Json<plugins::CreateRepositoryRequest>,
 ) -> AppResult<Json<plugins::PluginRepository>> {
     let url = payload.index_url.trim();
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err(AppError::InvalidManifest(
-            "L'URL du dépôt doit commencer par http:// ou https://".to_string(),
-        ));
-    }
+    plugins::validate_index_url(url)
+        .map_err(|error| AppError::InvalidManifest(error.to_string()))?;
     let name = payload.name.trim();
     if name.is_empty() {
         return Err(AppError::InvalidManifest(
@@ -141,6 +191,12 @@ pub async fn add_repository(
     let id = payload
         .id
         .unwrap_or_else(|| format!("repo.{}", uuid::Uuid::new_v4().simple()));
+    if !plugins::is_valid_repository_id(&id) {
+        return Err(AppError::InvalidManifest(
+            "L'identifiant du dépôt ne peut contenir que lettres, chiffres, « . », « - » et « _ »."
+                .to_string(),
+        ));
+    }
 
     let repo = crate::repository::add_plugin_repository(&s.pool, &id, name, url).await?;
     Ok(Json(repo))
@@ -172,16 +228,25 @@ pub async fn delete_repository(
     })))
 }
 
-/// Synchronise l'index d'un dépôt donné.
+/// Synchronise un dépôt : copie atomique de son index, de ses manifestes et de ses contrats de distribution.
 pub async fn sync_repository(
     State(s): State<AppState>,
     Path(id): Path<String>,
     _auth: AdminAuth,
 ) -> AppResult<Json<Value>> {
+    let repo = crate::repository::get_plugin_repository(&s.pool, &id).await?;
+    let report = plugins::sync_repository(
+        &repo,
+        &s.config.plugin_repos_dir(),
+        &plugins::SyncPolicy::from_env(),
+    )
+    .await
+    .map_err(|error| AppError::RepositoryUnavailable(error.to_string()))?;
     crate::repository::touch_plugin_repository_sync(&s.pool, &id).await?;
     Ok(Json(serde_json::json!({
         "id": id,
         "status": "synced",
         "syncedAt": chrono::Utc::now().to_rfc3339(),
+        "report": report,
     })))
 }

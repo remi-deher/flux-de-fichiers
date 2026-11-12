@@ -126,6 +126,8 @@ mod tests {
         assert!(html.contains("id=\"widget-activity-running\""));
         assert!(html.contains("id=\"widget-workers-tools\""));
         assert!(html.contains("function renderWidgets"));
+        assert!(html.contains("function installTool"));
+        assert!(html.contains("field.isSet"));
         assert!(html.contains("function markWidgetSource"));
         assert!(html.contains("[data-goto]"));
         assert!(html.contains(".widget-grid {"));

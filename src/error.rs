@@ -27,6 +27,8 @@ pub enum AppError {
     UnsupportedArchive(String),
     #[error("invalid manifest: {0}")]
     InvalidManifest(String),
+    #[error("repository unavailable: {0}")]
+    RepositoryUnavailable(String),
     #[error("database failure")]
     Database(sqlx::Error),
     #[error("storage failure")]
@@ -62,6 +64,7 @@ impl IntoResponse for AppError {
             | Self::ToolUnavailable(_)
             | Self::UnsupportedArchive(_)
             | Self::InvalidManifest(_) => (StatusCode::BAD_REQUEST, "invalid_tool_artifact"),
+            Self::RepositoryUnavailable(_) => (StatusCode::BAD_GATEWAY, "repository_unavailable"),
             Self::TooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "file_too_large"),
             Self::Database(_) | Self::Storage(_) | Self::Internal => {
                 tracing::error!(error = ?self, "internal failure");

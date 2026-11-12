@@ -199,7 +199,7 @@ impl<'a> FlowEngine<'a> {
                 tracing::info!(job_id = %job_id, "remux step executed into staging working file");
             }
             if let Some(webhook_cfg) = &decision.notify {
-                let _ = execute_webhook_block(webhook_cfg, &step_ctx, self.http_client).await;
+                execute_webhook_block(webhook_cfg, &step_ctx, self.http_client).await?;
             }
             if decision.stop {
                 tracing::info!(job_id = %job_id, "reached final file-output node, terminating pipeline");

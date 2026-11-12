@@ -40,6 +40,17 @@ pub async fn list_plugin_repositories(pool: &SqlitePool) -> AppResult<Vec<Plugin
     Ok(repos)
 }
 
+pub async fn get_plugin_repository(pool: &SqlitePool, id: &str) -> AppResult<PluginRepository> {
+    sqlx::query_as::<_, PluginRepository>(
+        "SELECT id, name, index_url, is_official, enabled, last_synced_at, created_at \
+         FROM plugin_repositories WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)
+}
+
 pub async fn add_plugin_repository(
     pool: &SqlitePool,
     id: &str,

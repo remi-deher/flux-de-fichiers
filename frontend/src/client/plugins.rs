@@ -300,6 +300,26 @@ pub const SCRIPT: &str = r###"
     }
   }
 
+  const SECRET_KEPT_PLACEHOLDER = 'Défini — laisser vide pour conserver';
+
+  // Installe un outil du catalogue dans le cache du coordinateur, puis rafraîchit son état.
+  async function installTool(toolId, name, button) {
+    const previous = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Installation…';
+    try {
+      await apiFetch(`/api/v1/tools/${encodeURIComponent(toolId)}/install`, { method: 'POST' });
+      showNotice(`${name} installé.`, 'success');
+      await loadToolsStatus();
+      renderCatalogRegistre();
+    } catch (e) {
+      showNotice(`Installation impossible : ${e.message || 'échec'}`, 'error');
+    } finally {
+      button.disabled = false;
+      button.textContent = previous;
+    }
+  }
+
   function settingInputType(fieldType) {
     if (fieldType === 'secret') return 'password';
     if (fieldType === 'url') return 'url';
@@ -327,9 +347,11 @@ pub const SCRIPT: &str = r###"
         ? `<p class="form-help">${escapeHtml(String(field.description))}</p>`
         : '';
       const label = String(field.label || name) + (field.required ? ' *' : '');
+      // Un secret n'est jamais renvoyé : s'il est enregistré, le champ vide le conserve.
+      const placeholder = field.isSet ? SECRET_KEPT_PLACEHOLDER : '';
       return `<div class="form-group">
         <label class="form-label" for="${escapeHtml(inputId)}">${escapeHtml(label)}</label>
-        <input class="form-input" type="${settingInputType(field.type)}" id="${escapeHtml(inputId)}" data-setting-name="${escapeHtml(name)}" value="${escapeHtml(value)}" autocomplete="off" />
+        <input class="form-input" type="${settingInputType(field.type)}" id="${escapeHtml(inputId)}" data-setting-name="${escapeHtml(name)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="off" />
         ${help}
       </div>`;
     }).join('');
@@ -355,8 +377,12 @@ pub const SCRIPT: &str = r###"
           await importCatalogFlow(id, action);
           return;
         }
-        if (verb === 'Distribuer' || verb === 'Installer') {
-          showNotice(`${verb} : ${name}. Le cache du nœud porte le binaire.`, 'info');
+        if (verb === 'Installer') {
+          await installTool(id, name, action);
+          return;
+        }
+        if (verb === 'Distribuer') {
+          showNotice(`${name} est prêt : chaque nœud l'installe depuis le contrat du dépôt.`, 'info');
           return;
         }
         const fact = el('catalog-fact-' + view);
@@ -477,13 +503,21 @@ pub const SCRIPT: &str = r###"
       });
     }
 
+    // Un dépôt en échec n'est signalé qu'une fois par session, pour ne pas bruiter chaque ouverture de l'onglet.
+    const syncFailuresNoticed = new Set();
+
     window.syncRepositoriesSilently = async function() {
       if (!Array.isArray(cachedRepositories) || cachedRepositories.length === 0) return;
       for (const repo of cachedRepositories) {
         if (repo.enabled !== false) {
           try {
             await apiFetch(`/api/v1/plugins/repositories/${encodeURIComponent(repo.id)}/sync`, { method: 'POST' });
-          } catch {}
+          } catch {
+            if (!syncFailuresNoticed.has(repo.id)) {
+              syncFailuresNoticed.add(repo.id);
+              showNotice(`Synchronisation impossible : ${repo.name || repo.id}.`, 'warning');
+            }
+          }
         }
       }
       await loadRepositories();

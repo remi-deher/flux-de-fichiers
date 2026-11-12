@@ -22,6 +22,7 @@ pub enum IconName {
     Shield,
     Check,
     Alert,
+    Close,
     ChevronLeft,
     ChevronRight,
 }
@@ -72,6 +73,9 @@ impl IconName {
             Self::Check => r#"<polyline points="20 6 9 17 4 12"/>"#,
             Self::Alert => {
                 r#"<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>"#
+            }
+            Self::Close => {
+                r#"<line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/>"#
             }
             Self::ChevronLeft => r#"<path d="m15 18-6-6 6-6"/>"#,
             Self::ChevronRight => r#"<path d="m9 18 6-6-6-6"/>"#,

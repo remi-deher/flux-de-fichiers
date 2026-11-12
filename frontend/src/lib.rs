@@ -60,4 +60,14 @@ mod tests {
         assert!(html.contains("format-detection"));
         assert!(html.contains("lang=\"fr\""));
     }
+
+    #[test]
+    fn test_render_full_page_contains_contextual_search_bar() {
+        let html = render_full_page();
+        assert!(html.contains("role=\"search\""));
+        assert!(html.contains("id=\"global-search-input\""));
+        assert!(html.contains("id=\"header-search-clear-btn\""));
+        assert!(html.contains("search-kbd"));
+        assert!(html.contains("applyContextualSearch"));
+    }
 }

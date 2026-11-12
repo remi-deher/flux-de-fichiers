@@ -15,6 +15,139 @@ pub const SCRIPT: &str = r###"
     updates: 'Mises à jour & Conteneur',
   };
 
+  const SEARCH_CONTEXTS = {
+    dashboard: {
+      placeholder: 'Rechercher dans le tableau de bord…',
+      label: 'Filtrer les indicateurs et actions du tableau de bord',
+    },
+    files: {
+      placeholder: 'Filtrer les fichiers et bibliothèques…',
+      label: 'Filtrer les fichiers médias et dossiers sources',
+    },
+    flows: {
+      placeholder: 'Filtrer les flux et modèles…',
+      label: 'Rechercher parmi les modèles de flux et étapes',
+    },
+    jobs: {
+      placeholder: 'Filtrer les tâches et logs…',
+      label: 'Filtrer les tâches enregistrées et diagnostics',
+    },
+    workers: {
+      placeholder: 'Filtrer les nœuds et agents…',
+      label: 'Filtrer les serveurs et ressources distribuées',
+    },
+    plugins: {
+      placeholder: 'Filtrer les outils et extensions…',
+      label: 'Rechercher un outil MKVToolNix ou dépôt de plugins',
+    },
+    settings: {
+      placeholder: 'Filtrer les paramètres système…',
+      label: 'Rechercher une section ou clé de configuration',
+    },
+    updates: {
+      placeholder: 'Filtrer les notes de mise à jour…',
+      label: 'Rechercher dans l\'historique des versions',
+    },
+  };
+
+  function updateSearchContext(tabName) {
+    const input = el('global-search-input');
+    if (!input) return;
+    const ctx = SEARCH_CONTEXTS[tabName] || {
+      placeholder: 'Rechercher…',
+      label: 'Recherche contextuelle',
+    };
+    input.placeholder = ctx.placeholder;
+    input.setAttribute('aria-label', ctx.label);
+
+    // Réapplique immédiatement le filtrage sur la nouvelle vue active
+    applyContextualSearch(input.value);
+  }
+
+  function applyContextualSearch(query) {
+    const term = (query || '').toLowerCase().trim();
+    const clearBtn = el('header-search-clear-btn');
+    if (clearBtn) {
+      clearBtn.hidden = !term;
+    }
+
+    switch (activeTab) {
+      case 'files': {
+        const filesSearch = el('files-search-input');
+        if (filesSearch && filesSearch.value !== query) {
+          filesSearch.value = query;
+        }
+        if (typeof renderFilesTable === 'function') {
+          renderFilesTable();
+        }
+        break;
+      }
+      case 'jobs': {
+        const jobsSearch = el('jobs-search-input');
+        if (jobsSearch && jobsSearch.value !== query) {
+          jobsSearch.value = query;
+        }
+        if (typeof renderJobsTable === 'function') {
+          renderJobsTable();
+        }
+        break;
+      }
+      case 'dashboard': {
+        const metrics = document.querySelectorAll('#panel-dashboard .metric-card');
+        metrics.forEach(card => {
+          const match = !term || card.textContent.toLowerCase().includes(term);
+          card.style.display = match ? '' : 'none';
+        });
+        const actions = document.querySelectorAll('#panel-dashboard button');
+        actions.forEach(btn => {
+          const match = !term || btn.textContent.toLowerCase().includes(term);
+          btn.style.display = match ? '' : 'none';
+        });
+        break;
+      }
+      case 'flows': {
+        const flowCards = document.querySelectorAll('#panel-flows .flow-card, #panel-flows .catalog-flow-card, #panel-flows .palette-node-item');
+        flowCards.forEach(card => {
+          const match = !term || card.textContent.toLowerCase().includes(term);
+          card.style.display = match ? '' : 'none';
+        });
+        break;
+      }
+      case 'workers': {
+        const rows = document.querySelectorAll('#workers-table-body tr');
+        rows.forEach(tr => {
+          const match = !term || tr.textContent.toLowerCase().includes(term);
+          tr.style.display = match ? '' : 'none';
+        });
+        break;
+      }
+      case 'plugins': {
+        const cards = document.querySelectorAll('#panel-plugins .tool-card, #panel-plugins .plugin-card, #panel-plugins .plugin-store-card, #repos-table-body tr');
+        cards.forEach(card => {
+          const match = !term || card.textContent.toLowerCase().includes(term);
+          card.style.display = match ? '' : 'none';
+        });
+        break;
+      }
+      case 'settings': {
+        const sections = document.querySelectorAll('#panel-settings .section-panel');
+        sections.forEach(sec => {
+          const match = !term || sec.textContent.toLowerCase().includes(term);
+          sec.style.display = match ? '' : 'none';
+        });
+        break;
+      }
+      case 'updates': {
+        const cards = document.querySelectorAll('#panel-updates .card, #panel-updates .section-panel');
+        cards.forEach(card => {
+          const match = !term || card.textContent.toLowerCase().includes(term);
+          card.style.display = match ? '' : 'none';
+        });
+        break;
+      }
+    }
+  }
+
   function switchTab(tabName) {
     if (!TABS.includes(tabName)) return;
     activeTab = tabName;
@@ -41,6 +174,8 @@ pub const SCRIPT: &str = r###"
         }
       }
     });
+
+    updateSearchContext(tabName);
   }
 
   function setupTabs() {

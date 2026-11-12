@@ -69,18 +69,31 @@ pub fn Header() -> impl IntoView {
                 <span class="breadcrumb-title" id="current-section-title">"Poste de pilotage"</span>
             </div>
 
-            // Barre de recherche rapide (Palette de commande moderne)
-            <div class="header-search-wrapper">
-                <button
-                    type="button"
-                    class="header-search-btn"
-                    id="header-search-trigger"
-                    title="Rechercher un média ou filtrer les tâches (Ctrl + K)"
-                >
+            // Barre de recherche contextuelle moderne (Command & Context Filter)
+            <div class="header-search-wrapper" role="search">
+                <div class="header-search-box">
                     <Icon name=IconName::Search size=15 class="search-icon" />
-                    <span class="search-placeholder">"Rechercher un média, une tâche… "</span>
-                    <kbd class="search-kbd">"⌘K"</kbd>
-                </button>
+                    <input
+                        type="search"
+                        id="global-search-input"
+                        class="header-search-input"
+                        placeholder="Rechercher…"
+                        autocomplete="off"
+                        spellcheck="false"
+                        aria-label="Recherche contextuelle"
+                    />
+                    <button
+                        type="button"
+                        id="header-search-clear-btn"
+                        class="header-search-clear-btn"
+                        aria-label="Effacer la recherche"
+                        title="Effacer la recherche (Échap)"
+                        hidden
+                    >
+                        <Icon name=IconName::Close size=14 />
+                    </button>
+                    <kbd class="search-kbd" id="search-kbd-hint">"⌘K"</kbd>
+                </div>
             </div>
 
             // Statuts de santé et actions d'en-tête rapides

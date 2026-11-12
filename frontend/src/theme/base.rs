@@ -316,48 +316,95 @@ pub const BASE_CSS: &str = r#"
   flex-shrink: 0;
 }
 
-/* Barre de recherche rapide du header (Command Palette, strictement centrée) */
+/* Barre de recherche contextuelle du header (strictement centrée) */
 .header-search-wrapper {
   grid-column: 2;
   justify-self: center;
-  width: min(100%, 420px);
+  width: min(100%, 460px);
   margin: 0;
 }
 
-.header-search-btn {
+.header-search-box {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.45rem 0.85rem;
+  gap: 0.5rem;
+  padding: 0.35rem 0.65rem;
   background-color: var(--bg-subtle);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   color: var(--text-dim);
-  font-size: 0.8125rem;
-  cursor: pointer;
-  transition: all 0.15s ease-in-out;
-  user-select: none;
-  touch-action: manipulation;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
 }
 
-.header-search-btn:hover {
+.header-search-box:focus-within {
   border-color: var(--primary);
-  color: var(--text-main);
   background-color: var(--bg-card);
+  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.15);
+  color: var(--text-main);
 }
 
-.search-placeholder {
+.header-search-box .search-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.header-search-input {
   flex: 1;
-  text-align: left;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-main);
+  font-size: 0.8125rem;
+  font-family: inherit;
+  padding: 0.1rem 0;
+}
+
+.header-search-input::placeholder {
+  color: var(--text-muted);
+  font-style: italic;
+  transition: color 0.15s ease-in-out;
+}
+
+.header-search-input::-webkit-search-cancel-button,
+.header-search-input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.header-search-clear-btn {
+  background: transparent;
+  border: none;
+  padding: 0.1rem;
+  cursor: pointer;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease-in-out;
+}
+
+.header-search-clear-btn:hover {
+  color: var(--text-main);
 }
 
 .search-kbd {
   display: inline-flex;
   align-items: center;
-  padding: 0.1rem 0.4rem;
+  padding: 0.1rem 0.35rem;
   background-color: var(--bg-card);
   border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  user-select: none;
+  flex-shrink: 0;
+}
   border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 0.6875rem;

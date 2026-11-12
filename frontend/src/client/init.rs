@@ -36,6 +36,7 @@ pub const SCRIPT: &str = r###"
   function initListeners() {
     setupTabs();
     setupTheme();
+    updateSearchContext(activeTab);
 
     const refreshBtn = el('refresh-all-btn');
     if (refreshBtn) refreshBtn.addEventListener('click', refreshAll);
@@ -43,14 +44,43 @@ pub const SCRIPT: &str = r###"
     const headerRefreshBtn = el('header-refresh-btn');
     if (headerRefreshBtn) headerRefreshBtn.addEventListener('click', refreshAll);
 
-    const searchTrigger = el('header-search-trigger');
-    if (searchTrigger) searchTrigger.addEventListener('click', () => switchTab('files'));
+    // Initialisation de la barre de recherche contextuelle globale
+    const globalSearchInput = el('global-search-input');
+    const headerSearchClearBtn = el('header-search-clear-btn');
 
-    // Raccourci global clavier Cmd+K / Ctrl+K
+    if (globalSearchInput) {
+      globalSearchInput.addEventListener('input', (e) => {
+        applyContextualSearch(e.target.value);
+      });
+
+      globalSearchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          globalSearchInput.value = '';
+          applyContextualSearch('');
+          globalSearchInput.blur();
+        }
+      });
+    }
+
+    if (headerSearchClearBtn) {
+      headerSearchClearBtn.addEventListener('click', () => {
+        if (globalSearchInput) {
+          globalSearchInput.value = '';
+          applyContextualSearch('');
+          globalSearchInput.focus();
+        }
+      });
+    }
+
+    // Raccourci global clavier Cmd+K / Ctrl+K : focus direct sur la barre de recherche
     window.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
-        switchTab('files');
+        if (globalSearchInput) {
+          globalSearchInput.focus();
+          globalSearchInput.select();
+        }
       }
     });
 
@@ -80,10 +110,17 @@ pub const SCRIPT: &str = r###"
     const logoutBtn = el('admin-key-logout-btn');
     if (logoutBtn) logoutBtn.addEventListener('click', logout);
 
-    // Recherche de fichiers
+    // Recherche de fichiers (synchronisation bidirectionnelle)
     const filesSearch = el('files-search-input');
     if (filesSearch) {
-      filesSearch.addEventListener('input', renderFilesTable);
+      filesSearch.addEventListener('input', () => {
+        if (globalSearchInput && globalSearchInput.value !== filesSearch.value) {
+          globalSearchInput.value = filesSearch.value;
+          const clearBtn = el('header-search-clear-btn');
+          if (clearBtn) clearBtn.hidden = !filesSearch.value;
+        }
+        renderFilesTable();
+      });
     }
 
     // Dialogue confirmation remux
@@ -96,10 +133,17 @@ pub const SCRIPT: &str = r###"
     const submitRemuxBtn = el('confirm-dialog-submit-btn');
     if (submitRemuxBtn) submitRemuxBtn.addEventListener('click', submitRemuxJob);
 
-    // Recherche de tâches
+    // Recherche de tâches (synchronisation bidirectionnelle)
     const jobsSearch = el('jobs-search-input');
     if (jobsSearch) {
-      jobsSearch.addEventListener('input', renderJobsTable);
+      jobsSearch.addEventListener('input', () => {
+        if (globalSearchInput && globalSearchInput.value !== jobsSearch.value) {
+          globalSearchInput.value = jobsSearch.value;
+          const clearBtn = el('header-search-clear-btn');
+          if (clearBtn) clearBtn.hidden = !jobsSearch.value;
+        }
+        renderJobsTable();
+      });
     }
 
     // Filtres de statut de tâches

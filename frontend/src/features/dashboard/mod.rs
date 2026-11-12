@@ -1,5 +1,6 @@
 //! Panneau d'accueil et tableau de bord du poste de pilotage.
 
+use crate::shared::ui::{MetricCard, SectionHeader};
 use leptos::prelude::*;
 
 #[component]
@@ -7,40 +8,45 @@ pub fn DashboardPanel() -> impl IntoView {
     view! {
         <div id="panel-dashboard" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-dashboard">
             <section class="metrics-grid" aria-label="Indicateurs clés du système">
-                <div class="metric-card">
-                    <div class="metric-label">"Coordinateur"</div>
-                    <div id="metric-health" class="metric-value">"…"</div>
-                    <div class="metric-subtitle">"Sonde /health"</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-label">"Mode opérationnel"</div>
-                    <div id="metric-mode" class="metric-value" style="font-size: 1.25rem;">"Centralisé"</div>
-                    <div class="metric-subtitle">"1 à N serveurs • HA optionnelle"</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-label">"Fichiers prêts"</div>
-                    <div id="metric-files-count" class="metric-value">"0"</div>
-                    <div class="metric-subtitle">"Dans var/input/ (lecture seule)"</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-label">"Tâches enregistrées"</div>
-                    <div id="metric-jobs-count" class="metric-value">"0"</div>
-                    <div class="metric-subtitle">"En base de données SQLite (/config)"</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-label">"Agents actifs"</div>
-                    <div id="metric-workers-count" class="metric-value">"0"</div>
-                    <div class="metric-subtitle">"Enregistrés via l'API"</div>
-                </div>
+                <MetricCard
+                    label="Coordinateur"
+                    value="…"
+                    id="metric-health"
+                    subtitle="Sonde /health"
+                />
+                <MetricCard
+                    label="Mode opérationnel"
+                    value="Centralisé"
+                    id="metric-mode"
+                    subtitle="1 à N serveurs • HA optionnelle"
+                    value_style="font-size: 1.25rem;"
+                />
+                <MetricCard
+                    label="Fichiers prêts"
+                    value="0"
+                    id="metric-files-count"
+                    subtitle="Dans var/input/ (lecture seule)"
+                />
+                <MetricCard
+                    label="Tâches enregistrées"
+                    value="0"
+                    id="metric-jobs-count"
+                    subtitle="En base de données SQLite (/config)"
+                />
+                <MetricCard
+                    label="Agents actifs"
+                    value="0"
+                    id="metric-workers-count"
+                    subtitle="Enregistrés via l'API"
+                />
             </section>
 
             <section class="section-panel" aria-labelledby="quick-actions-title">
-                <div class="section-panel-header">
-                    <div>
-                        <h2 id="quick-actions-title" class="section-title">"Actions rapides"</h2>
-                        <p class="section-subtitle">"Démarrez un traitement, configurez vos flux ou supervisez l'exécution des tâches."</p>
-                    </div>
-                </div>
+                <SectionHeader
+                    id="quick-actions-title"
+                    title="Actions rapides"
+                    subtitle="Démarrez un traitement, configurez vos flux ou supervisez l'exécution des tâches."
+                />
                 <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
                     <button
                         type="button"
@@ -74,12 +80,11 @@ pub fn DashboardPanel() -> impl IntoView {
             </section>
 
             <section class="section-panel" aria-labelledby="recent-jobs-title">
-                <div class="section-panel-header">
-                    <div>
-                        <h2 id="recent-jobs-title" class="section-title">"Dernières tâches traitées"</h2>
-                        <p class="section-subtitle">"Aperçu des 3 derniers traitements soumis."</p>
-                    </div>
-                </div>
+                <SectionHeader
+                    id="recent-jobs-title"
+                    title="Dernières tâches traitées"
+                    subtitle="Aperçu des 3 derniers traitements soumis."
+                />
                 <div class="table-wrapper">
                     <table class="data-table" aria-label="Dernières tâches traitées">
                         <thead>
@@ -102,14 +107,11 @@ pub fn DashboardPanel() -> impl IntoView {
             </section>
 
             <section class="section-panel" aria-labelledby="future-plan-title">
-                <div class="section-panel-header">
-                    <div>
-                        <h2 id="future-plan-title" class="section-title">"Fonctionnalités planifiées (hors périmètre actuel)"</h2>
-                        <p class="section-subtitle">
-                            "Présentation honnête des modules d'extension en cours de conception."
-                        </p>
-                    </div>
-                </div>
+                <SectionHeader
+                    id="future-plan-title"
+                    title="Fonctionnalités planifiées (hors périmètre actuel)"
+                    subtitle="Présentation honnête des modules d'extension en cours de conception."
+                />
                 <div class="future-grid">
                     <div class="future-card">
                         <span class="future-badge">"Planifié"</span>

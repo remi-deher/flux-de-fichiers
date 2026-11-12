@@ -1,6 +1,9 @@
 //! Panneau de supervision des serveurs et agents de remuxage.
 
-use crate::core::{SubNav, SubNavTabItem};
+use crate::{
+    core::{SubNav, SubNavTabItem},
+    shared::ui::SectionHeader,
+};
 use leptos::prelude::*;
 
 #[component]
@@ -53,14 +56,11 @@ pub fn WorkersPanel() -> impl IntoView {
             // --- Sous-vue 1 : Ce nœud local (Coordinateur & raccordement) ---
             <div id="subtab-workers-local">
                 <section class="section-panel" aria-labelledby="worker-connect-title">
-                    <div class="section-panel-header">
-                        <div>
-                            <h2 id="worker-connect-title" class="section-title">"Configuration du nœud local & Raccordement (*arr)"</h2>
-                            <p class="section-subtitle">
-                                "Configuration auto-amorcée du coordinateur (/config) et commande Docker pour adjoindre un worker distant en HTTP."
-                            </p>
-                        </div>
-                    </div>
+                    <SectionHeader
+                        id="worker-connect-title"
+                        title="Configuration du nœud local & Raccordement (*arr)"
+                        subtitle="Configuration auto-amorcée du coordinateur (/config) et commande Docker pour adjoindre un worker distant en HTTP."
+                    />
 
                     <div class="detail-grid" style="margin-bottom: 1.5rem;">
                         <div class="detail-term">"Rôle de l'instance"</div>
@@ -140,14 +140,11 @@ pub fn WorkersPanel() -> impl IntoView {
             // --- Sous-vue 2 : Nœuds distants (Workers & agents déclarés) ---
             <div id="subtab-workers-cluster" hidden>
                 <section class="section-panel" aria-labelledby="workers-section-title">
-                    <div class="section-panel-header">
-                        <div>
-                            <h2 id="workers-section-title" class="section-title">"Serveurs et agents de traitement"</h2>
-                            <p class="section-subtitle">
-                                "Agents de calcul enregistrés via l'API. Chaque agent traite les baux sur MKVToolNix sans connexion directe à la base de données."
-                            </p>
-                        </div>
-                    </div>
+                    <SectionHeader
+                        id="workers-section-title"
+                        title="Serveurs et agents de traitement"
+                        subtitle="Agents de calcul enregistrés via l'API. Chaque agent traite les baux sur MKVToolNix sans connexion directe à la base de données."
+                    />
 
                     <div class="table-wrapper">
                         <table class="data-table" aria-label="Liste des agents et serveurs de traitement">

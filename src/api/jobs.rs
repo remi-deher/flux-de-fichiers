@@ -40,7 +40,7 @@ pub async fn create(
     }
     let job: Job = sqlx::query_as("INSERT INTO jobs(id,source_name,target_worker_id,source_sha256,source_bytes) VALUES(?1,?2,?3,?4,?5) RETURNING *")
         .bind(Uuid::new_v4()).bind(r.source_name).bind(r.target_worker_id).bind(hash).bind(bytes as i64).fetch_one(&s.pool).await?;
-    s.notify_job_event("job_created", job.id, &job.status, None);
+    s.notify_job_event(JobEventType::JobCreated, job.id, JobStatus::Pending, None);
     Ok((StatusCode::CREATED, Json(job)))
 }
 
@@ -128,7 +128,7 @@ pub async fn heartbeat(
 ) -> AppResult<StatusCode> {
     authorize(&h, &s.config.worker_key)?;
     repository::heartbeat(&s.pool, id, &r).await?;
-    s.notify_job_event("job_heartbeat", id, "running", None);
+    s.notify_job_event(JobEventType::JobHeartbeat, id, JobStatus::Running, None);
     Ok(StatusCode::NO_CONTENT)
 }
 pub async fn failure(
@@ -138,9 +138,7 @@ pub async fn failure(
     Json(r): Json<Failure>,
 ) -> AppResult<StatusCode> {
     authorize(&h, &s.config.worker_key)?;
-    if !["remux_failed", "source_integrity", "transfer_failed"].contains(&r.error_code.as_str()) {
-        return Err(AppError::Invalid);
-    }
+    let error_code = JobErrorCode::from_str(&r.error_code).ok_or(AppError::Invalid)?;
     repository::fail(
         &s.pool,
         id,
@@ -149,10 +147,15 @@ pub async fn failure(
             lease_token: r.lease_token,
             telemetry: None,
         },
-        &r.error_code,
+        error_code.as_str(),
     )
     .await?;
-    s.notify_job_event("job_failed", id, "failed", Some(r.error_code));
+    s.notify_job_event(
+        JobEventType::JobFailed,
+        id,
+        JobStatus::Failed,
+        Some(error_code.as_str().to_string()),
+    );
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -1,4 +1,4 @@
-//! Composant MetricCard : Tuile de métrique héroïque avec indicateur de tendance et valeur tabulaire.
+//! Composant MetricCard : Tuile de métrique consolidée et réutilisable.
 
 use leptos::prelude::*;
 
@@ -6,24 +6,16 @@ use leptos::prelude::*;
 pub fn MetricCard(
     #[prop(into)] label: String,
     #[prop(into)] value: String,
-    #[prop(into, optional)] hint: Option<String>,
-    #[prop(into, optional)] icon: Option<String>,
-    #[prop(into, optional)] status_class: Option<String>,
+    #[prop(into, optional)] id: Option<&'static str>,
+    #[prop(into, optional)] subtitle: Option<String>,
+    #[prop(into, optional)] value_style: Option<&'static str>,
 ) -> impl IntoView {
-    let cls = status_class.unwrap_or_else(|| "default".to_string());
     view! {
-        <div class=format!("metric-tile {}", cls)>
-            <div class="metric-tile-header">
-                {icon.map(|ic| view! {
-                    <span class="metric-icon" aria-hidden="true">{ic}</span>
-                })}
-                <span class="metric-label">{label}</span>
-            </div>
-            <div class="metric-value-display">
-                <span class="metric-number">{value}</span>
-            </div>
-            {hint.map(|h| view! {
-                <span class="metric-hint">{h}</span>
+        <div class="metric-card">
+            <div class="metric-label">{label}</div>
+            <div id=id class="metric-value" style=value_style>{value}</div>
+            {subtitle.map(|sub| view! {
+                <div class="metric-subtitle">{sub}</div>
             })}
         </div>
     }

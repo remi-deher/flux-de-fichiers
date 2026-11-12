@@ -8,7 +8,10 @@ pub use diagnostic::ActivityDiagnostic;
 pub use dialog::JobDetailDialog;
 pub use operations::ActivityOperations;
 
-use crate::core::{SubNav, SubNavTabItem};
+use crate::{
+    core::{SubNav, SubNavTabItem},
+    shared::ui::{SectionHeader, StatusBadge},
+};
 use leptos::prelude::*;
 
 #[component]
@@ -41,10 +44,12 @@ pub fn JobsPanel() -> impl IntoView {
     ];
 
     let subnav_info = view! {
-        <div id="sse-status-badge" class="status-pill info" title="Mode de rafraîchissement des tâches" aria-live="polite">
-            <span class="status-dot"></span>
-            <span id="sse-status-text">"Sondage périodique"</span>
-        </div>
+        <StatusBadge
+            id="sse-status-badge"
+            label="Sondage périodique"
+            variant="info"
+            title="Mode de rafraîchissement des tâches".to_string()
+        />
     }
     .into_any();
 
@@ -71,14 +76,11 @@ pub fn JobsPanel() -> impl IntoView {
 
             // Conteneur principal de l'activité
             <section class="section-panel" aria-labelledby="jobs-section-title">
-                <div class="section-panel-header">
-                    <div>
-                        <h2 id="jobs-section-title" class="section-title">"Poste d'activité et supervision"</h2>
-                        <p class="section-subtitle">
-                            "Suivi temps réel des traitements actifs (Exploiter) et analyse approfondie des exécutions antérieures (Diagnostiquer)."
-                        </p>
-                    </div>
-                </div>
+                <SectionHeader
+                    id="jobs-section-title"
+                    title="Poste d'activité et supervision"
+                    subtitle="Suivi temps réel des traitements actifs (Exploiter) et analyse approfondie des exécutions antérieures (Diagnostiquer)."
+                />
 
                 <div id="subtab-jobs-active">
                     <ActivityOperations />

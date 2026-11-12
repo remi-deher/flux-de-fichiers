@@ -40,9 +40,7 @@ pub const SCRIPT: &str = r###"
       const safeName = escapeHtml(w.name);
       const lastSeenMs = new Date(w.last_seen).getTime();
       const isOnline = (now - lastSeenMs) < 120000;
-      const statusHtml = isOnline
-        ? `<span class="status-pill online"><span class="status-dot"></span>En ligne</span>`
-        : `<span class="status-pill offline"><span class="status-dot"></span>Hors ligne</span>`;
+      const statusHtml = renderStatusPill(isOnline ? 'En ligne' : 'Hors ligne', isOnline ? 'online' : 'offline', { pulse: isOnline });
       const isLocal = safeName.startsWith('coordinator');
       const deleteAction = !isOnline
         ? `<button type="button" class="btn btn-secondary btn-sm delete-worker-btn" data-worker-id="${safeId}" style="color: var(--danger-text); padding: 0.2rem 0.5rem; font-size: 0.75rem; margin-left: 0.5rem;" title="Supprimer cet agent hors ligne">Supprimer</button>`

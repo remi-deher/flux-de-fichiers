@@ -694,7 +694,7 @@ dependencies = [
 
 [[package]]
 name = "flux-de-fichiers"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -724,7 +724,7 @@ dependencies = [
 
 [[package]]
 name = "flux-frontend"
-version = "0.1.0"
+version = "0.12.0"
 dependencies = [
  "leptos",
  "serde",

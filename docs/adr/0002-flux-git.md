@@ -7,7 +7,8 @@ dev  ──●──●──●──   push direct, aucune CI : sauvegarde rap
         \
 test ────●──────   PR dev→test : fmt, clippy, tests, build → fusion auto
           \        → Docker Hub :test et :test-<sha>
-main ──────●────   PR test→main → release-please → tag vX.Y.Z
+main ──────●────   PR test→main : main-checks (image test-<sha> présente, démarre)
+                   → release-please → tag vX.Y.Z
                    → l'image test-<sha> est promue en :X.Y.Z, :X.Y, :latest
 ```
 
@@ -15,11 +16,18 @@ main ──────●────   PR test→main → release-please → t
 
 - `dev` reçoit des push directs, sans CI. Ni suppression ni force-push.
 - `test` n'accepte que les PR depuis `dev` (job `source-is-dev`). Si
-  `fmt-clippy-tests`, `docker-build` et `docker-scenarios` sont verts, le workflow fusionne la PR
+  `fmt-clippy-tests` (fmt, clippy, `cargo test`), `docker-build` et `docker-scenarios`
+  (l'image démarre et répond sur `/health`) sont verts, le workflow fusionne la PR
   lui-même (merge commit) et publie l'image `:test` et `:test-<sha12>`.
 - `main` n'accepte que les PR depuis `test` ou la PR de release de
   release-please. La release est construite une seule fois puis promue : aucun
   recompilage, la release échoue si l'image `test-<sha>` est absente.
+  Sur la PR `test → main`, `main-checks` / `image-test-ready` le vérifie en
+  avance : il tire `test-<sha12>`, contrôle que sa révision est bien livrée
+  par `test`, puis démarre le coordinateur et le worker (`compose.yaml`) et
+  attend `/health`. `:latest` n'est publié qu'au merge de la release. Ajouter
+  `image-test-ready` aux vérifications requises de la protection de `main`
+  (réglage GitHub, hors dépôt).
 - Toutes les fusions se font en merge commit. Un squash ou un rebase ferait
   diverger les branches longues et créerait de faux conflits à chaque PR.
 - Après une release, main est fusionnée dans dev (version et CHANGELOG).

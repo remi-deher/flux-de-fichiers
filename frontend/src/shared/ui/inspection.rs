@@ -1,4 +1,4 @@
-//! Tiroir d'inspection commun : en-tête, sous-navigation, puis le dossier de la ligne.
+//! Tiroir d'inspection commun : en-tête, sous-navigation (dès deux volets), puis le dossier de la ligne.
 
 use super::icon::{Icon, IconName};
 use leptos::prelude::*;
@@ -19,6 +19,7 @@ pub fn inspection_drawer(
     let title_id = format!("{id}-title");
     let eyebrow_id = format!("{id}-eyebrow");
     let labelled_by = title_id.clone();
+    let has_subnav = panes.len() > 1;
     let mut tabs = Vec::with_capacity(panes.len());
     let mut sections = Vec::with_capacity(panes.len());
     for (index, pane) in panes.into_iter().enumerate() {
@@ -109,9 +110,11 @@ pub fn inspection_drawer(
                         <Icon name=IconName::Close size=18 />
                     </button>
                 </header>
-                <div class="inspection-drawer__subnav" role="tablist" aria-label="Sections du dossier">
-                    {tabs}
-                </div>
+                {has_subnav.then(|| view! {
+                    <div class="inspection-drawer__subnav" role="tablist" aria-label="Sections du dossier">
+                        {tabs}
+                    </div>
+                })}
                 <div class="inspection-drawer__body">
                     {sections}
                 </div>
@@ -155,4 +158,31 @@ fn default_inspection_panes(id: &'static str, action: &'static str) -> Vec<Inspe
 #[component]
 pub fn InspectionPanel(id: &'static str, action: &'static str) -> impl IntoView {
     inspection_drawer(id, default_inspection_panes(id, action), None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use leptos::tachys::view::RenderHtml;
+
+    fn pane(suffix: &'static str) -> InspectionPane {
+        InspectionPane {
+            suffix,
+            label: "Volet",
+            body: view! { <p>"corps"</p> }.into_any(),
+        }
+    }
+
+    #[test]
+    fn single_pane_drawer_has_no_subnav() {
+        let html = inspection_drawer("solo", vec![pane("one")], None).to_html();
+        assert!(!html.contains("inspection-drawer__subnav"));
+        assert!(html.contains("id=\"solo-pane-one\""));
+    }
+
+    #[test]
+    fn multi_pane_drawer_keeps_subnav() {
+        let html = inspection_drawer("duo", vec![pane("one"), pane("two")], None).to_html();
+        assert!(html.contains("inspection-drawer__subnav"));
+    }
 }

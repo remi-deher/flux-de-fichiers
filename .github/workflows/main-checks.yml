@@ -1,0 +1,81 @@
+# PR test → main : vérifie, sans rien recompiler, que l'image test-<sha> que la
+# release va promouvoir existe, démarre (coordinateur + worker) et correspond
+# au commit de test livré. La publication de :latest reste au merge de la
+# release (release.yml). Les tests Rust ont déjà tourné sur la PR dev → test.
+name: main-checks
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: main-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: flux-de-fichiers
+  LOCAL_IMAGE_TAG: ci
+  # Durée maximale d'attente du démarrage des conteneurs, en secondes.
+  START_TIMEOUT_SECONDS: 90
+
+jobs:
+  # Nom stable : destiné aux checks requis de la protection de main.
+  image-test:
+    name: image-test-ready
+    # La PR de release-please ne livre pas de nouveau code : rien à vérifier.
+    if: github.event.pull_request.head.ref == 'test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Tirer l'image test-<sha12> qui sera promue
+        env:
+          REPO: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          image="$REPO:test-${HEAD_SHA:0:12}"
+          docker pull "$image" \
+            || { echo "::error::Image $image introuvable : la release ne pourrait pas la promouvoir."; exit 1; }
+          docker tag "$image" "$IMAGE_NAME:$LOCAL_IMAGE_TAG"
+      - name: Vérifier que l'image correspond au commit livré
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          revision=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE_NAME:$LOCAL_IMAGE_TAG")
+          echo "Révision de l'image : $revision"
+          # L'image est construite sur la tête de la PR dev → test : son commit doit être ancêtre de test.
+          git merge-base --is-ancestor "$revision" "$HEAD_SHA" \
+            || { echo "::error::L'image ne correspond pas au commit livré ($revision)."; exit 1; }
+      - name: Démarrer le coordinateur et le worker
+        run: |
+          mkdir -p var/config var/input
+          chmod 777 var/config var/input
+          IMAGE_TAG="$LOCAL_IMAGE_TAG" docker compose up -d --no-build coordinator worker
+      - name: Sonde /health et santé du worker
+        run: |
+          for second in $(seq 1 "$START_TIMEOUT_SECONDS"); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health || true)
+            worker=$(docker compose ps --format '{{.Service}} {{.Health}}' worker)
+            if [ "$status" = "200" ] && [ "$worker" = "worker healthy" ]; then
+              echo "✅ Coordinateur (HTTP $status) et worker opérationnels en ${second}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Démarrage incomplet : /health=$status, $worker"
+          docker compose logs --no-color
+          exit 1
+      - if: always()
+        name: Arrêter le laboratoire
+        run: docker compose down --volumes

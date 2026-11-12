@@ -93,6 +93,10 @@ mod tests {
         assert!(html.contains("id=\"metric-success-rate\""));
         assert!(html.contains("id=\"media-formats-bar\""));
         assert!(html.contains("updateOverviewStats"));
+        assert!(html.contains("function successRateTone"));
+        assert!(html.contains("function setHeroStatus"));
+        assert!(html.contains("id=\"hero-status-badge\""));
+        assert!(!html.contains("id=\"quick-goto-settings-btn\""));
     }
 
     #[test]

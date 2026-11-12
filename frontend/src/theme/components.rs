@@ -363,11 +363,43 @@ pub const COMPONENTS_CSS: &str = r#"
 
 /* --- Cartes de métriques et panneaux d'information --- */
 .metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
   background-color: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 1.25rem;
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
   box-shadow: var(--shadow-sm);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--text-muted);
+}
+
+.metric-card[data-tone="success"] { --tone: var(--success); --tone-bg: var(--success-bg); }
+.metric-card[data-tone="warning"] { --tone: var(--warning); --tone-bg: var(--warning-bg); }
+.metric-card[data-tone="danger"] { --tone: var(--danger); --tone-bg: var(--danger-bg); }
+
+.metric-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.metric-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--radius-sm);
+  background-color: var(--tone-bg, var(--primary-bg));
+  color: var(--tone, var(--primary));
 }
 
 .metric-label {
@@ -377,14 +409,20 @@ pub const COMPONENTS_CSS: &str = r#"
 }
 
 .metric-value {
-  font-size: 1.75rem;
+  font-size: 2rem;
   font-weight: 700;
+  line-height: 1.1;
   color: var(--text-main);
-  margin: 0.25rem 0;
   font-family: var(--font-mono);
 }
 
-.metric-subtext {
+.metric-card[data-tone="success"] .metric-value,
+.metric-card[data-tone="warning"] .metric-value,
+.metric-card[data-tone="danger"] .metric-value {
+  color: var(--tone);
+}
+
+.metric-subtitle {
   font-size: 0.75rem;
   color: var(--text-muted);
 }
@@ -420,6 +458,10 @@ pub const COMPONENTS_CSS: &str = r#"
   align-items: flex-start;
   margin-bottom: 1.25rem;
   gap: 1rem;
+}
+
+.section-panel-header__actions {
+  flex: none;
 }
 
 .section-title {

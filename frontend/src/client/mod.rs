@@ -10,6 +10,7 @@ pub mod libraries;
 pub mod plugins;
 pub mod pure;
 pub mod tabs;
+pub mod widgets;
 pub mod workers;
 
 use std::sync::LazyLock;
@@ -36,6 +37,8 @@ static CLIENT_SCRIPT: LazyLock<String> = LazyLock::new(|| {
     script.push_str(libraries::SCRIPT);
     script.push_str("\n\n");
     script.push_str(plugins::SCRIPT);
+    script.push_str("\n\n");
+    script.push_str(widgets::SCRIPT);
     script.push_str("\n\n");
     script.push_str(&flows::script());
     script.push_str("\n\n");

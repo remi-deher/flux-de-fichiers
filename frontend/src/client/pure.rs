@@ -181,6 +181,8 @@ pub fn script() -> String {
     if (factId === 'libraries-fact') return 'Bibliothèque';
     if (factId === 'flows-fact') return 'Flux';
     if (factId === 'repos-fact') return 'Dépôt';
+    if (factId === 'jobs-fact') return 'Tâche';
+    if (factId === 'workers-fact') return 'Nœud';
     const catalog = {{
       app: 'Application',
       plugin: 'Plugin',

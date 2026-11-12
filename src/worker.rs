@@ -84,6 +84,38 @@ impl Agent {
             .error_for_status()?;
         }
     }
+    /// Demande au coordinateur le contrat de distribution d'un outil, puis l'installe dans le cache local.
+    async fn install_tool(
+        &self,
+        cache: &crate::tools_cache::ToolCacheManager,
+        tool_id: &str,
+        version: &str,
+    ) -> anyhow::Result<()> {
+        let raw = self
+            .request(
+                reqwest::Method::GET,
+                &format!("/api/v1/worker/tools/{tool_id}/distribution"),
+            )
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+        let distribution = crate::plugins::parse_distribution(&raw)?;
+        anyhow::ensure!(
+            distribution.tool_id == tool_id && distribution.tool_version == version,
+            "le contrat ne correspond pas à l'outil attendu"
+        );
+        crate::plugins::install_from_distribution(
+            cache,
+            &distribution,
+            &crate::plugins::SyncPolicy::from_env(),
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn process(
         &self,
         claim: &Claim,
@@ -101,6 +133,21 @@ impl Agent {
             }),
             _ => None,
         };
+        let mut wanted = vec![(
+            crate::plugins::REMUX_TOOL_ID.to_owned(),
+            crate::plugins::REMUX_TOOL_VERSION.to_owned(),
+        )];
+        if let Some(contract) = probe.as_ref() {
+            wanted.push((contract.tool_id.clone(), contract.version.clone()));
+        }
+        for (tool_id, version) in wanted {
+            if cache_mgr.is_ready(&tool_id, &version, crate::tools_cache::host_arch()) {
+                continue;
+            }
+            if let Err(error) = self.install_tool(&cache_mgr, &tool_id, &version).await {
+                tracing::warn!(tool = %tool_id, error = %error, "installation de l'outil impossible");
+            }
+        }
         if !crate::plugins::file_job_may_start(&cache_mgr, probe.as_ref()) {
             anyhow::bail!("probe_unavailable");
         }
@@ -131,8 +178,12 @@ impl Agent {
             hash == claim.source_sha256 && bytes as i64 == claim.source_bytes,
             "source_integrity"
         );
-        let mkvmerge_bin =
-            cache_mgr.resolve_executable("app.mkvtoolnix", "1.0.0", "mkvmerge", "MKVMERGE");
+        let mkvmerge_bin = cache_mgr.resolve_executable(
+            crate::plugins::REMUX_TOOL_ID,
+            crate::plugins::REMUX_TOOL_VERSION,
+            "mkvmerge",
+            "MKVMERGE",
+        );
         let warning = media::remux_with(&mkvmerge_bin, &input, &output)
             .await
             .context("remux_failed")?;

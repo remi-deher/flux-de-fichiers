@@ -157,18 +157,6 @@ pub const COMPONENTS_CSS: &str = r#"
   margin-top: 0;
 }
 
-.registre-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.registre-toolbar .section-title {
-  margin: 0;
-}
-
 .inspection-drawer__actions {
   display: flex;
   gap: 0.5rem;
@@ -198,31 +186,10 @@ pub const COMPONENTS_CSS: &str = r#"
   color: var(--text-dim);
 }
 
-.registre-fact {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.75rem 1rem;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-}
-
-.registre-fact-title {
-  margin: 0;
-  font-weight: 600;
-  color: var(--text-main);
-}
-
-.registre-fact-facts {
-  margin: 0.15rem 0 0;
-  font-size: 0.8125rem;
-  color: var(--text-dim);
-}
-
-.registre-fact-action {
-  flex: none;
+.form-input--key {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
 }
 
 .inspection-drawer {

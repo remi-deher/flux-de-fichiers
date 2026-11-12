@@ -98,13 +98,7 @@ pub const SCRIPT: &str = r###"
 
     // Filtres de statut de tâches
     document.querySelectorAll('.filter-chip[data-filter]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.filter-chip[data-filter]').forEach(b => b.setAttribute('aria-pressed', 'false'));
-        btn.setAttribute('aria-pressed', 'true');
-        activeJobFilter = btn.getAttribute('data-filter') || 'all';
-        renderJobsTable();
-        updateFilterCount();
-      });
+      btn.addEventListener('click', () => setJobFilter(btn.getAttribute('data-filter') || 'all'));
     });
 
     const filterBtn = el('search-filter-btn');
@@ -135,13 +129,6 @@ pub const SCRIPT: &str = r###"
     // Configuration de la section Raccordement Worker et Clés
     setupWorkerConfigUi();
 
-    // Dialogue détails tâche
-    const jobDialogCloseX = el('job-dialog-close-x');
-    if (jobDialogCloseX) jobDialogCloseX.addEventListener('click', closeJobDetailDialog);
-
-    const jobDialogCloseBtn = el('job-dialog-close-btn');
-    if (jobDialogCloseBtn) jobDialogCloseBtn.addEventListener('click', closeJobDetailDialog);
-
     document.addEventListener('click', (event) => {
       const tab = event.target.closest('.inspection-drawer__tab');
       if (tab) {
@@ -160,7 +147,6 @@ pub const SCRIPT: &str = r###"
       if (e.key === 'Escape') {
         const modalOpen = Boolean(document.querySelector('dialog[open]'));
         closeConfirmRemuxDialog();
-        closeJobDetailDialog();
         const wizard = el('flow-wizard-dialog');
         if (wizard && wizard.open) {
           wizard.close();

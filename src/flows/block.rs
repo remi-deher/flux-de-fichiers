@@ -1,4 +1,5 @@
 use super::{
+    arr::{ArrAction, ArrBlock, ArrService},
     condition::{ConditionConfig, evaluate_condition},
     tool::{InPlaceEdit, in_place_edit},
     webhook::WebhookBlockConfig,
@@ -15,6 +16,10 @@ pub enum FlowBlockKind {
     RemuxMkv,
     VideoEncode,
     Webhook,
+    SonarrRescan,
+    SonarrRename,
+    RadarrRescan,
+    RadarrRename,
     FileOutput,
     Other(String),
 }
@@ -28,6 +33,10 @@ impl FlowBlockKind {
             "remux-mkv" => Self::RemuxMkv,
             "video-encode" => Self::VideoEncode,
             "webhook" => Self::Webhook,
+            "sonarr-rescan" => Self::SonarrRescan,
+            "sonarr-rename" => Self::SonarrRename,
+            "radarr-rescan" => Self::RadarrRescan,
+            "radarr-rename" => Self::RadarrRename,
             "file-output" => Self::FileOutput,
             other => Self::Other(other.to_owned()),
         }
@@ -41,6 +50,10 @@ impl FlowBlockKind {
             Self::RemuxMkv => "remux-mkv",
             Self::VideoEncode => "video-encode",
             Self::Webhook => "webhook",
+            Self::SonarrRescan => "sonarr-rescan",
+            Self::SonarrRename => "sonarr-rename",
+            Self::RadarrRescan => "radarr-rescan",
+            Self::RadarrRename => "radarr-rename",
             Self::FileOutput => "file-output",
             Self::Other(value) => value,
         }
@@ -73,6 +86,7 @@ pub struct StepDecision {
     pub transform: bool,
     pub edit: Option<InPlaceEdit>,
     pub notify: Option<WebhookBlockConfig>,
+    pub integration: Option<ArrBlock>,
 }
 
 impl StepDecision {
@@ -83,6 +97,7 @@ impl StepDecision {
             transform: false,
             edit: None,
             notify: None,
+            integration: None,
         }
     }
 
@@ -114,12 +129,32 @@ impl StepDecision {
         }
     }
 
+    fn integrate(block: ArrBlock) -> Self {
+        Self {
+            integration: Some(block),
+            ..Self::pass()
+        }
+    }
+
     fn notify(config: WebhookBlockConfig) -> Self {
         Self {
             notify: Some(config),
             ..Self::pass()
         }
     }
+}
+
+/// Bloc d'intégration : la politique d'échec vient de `config.fail_on_error` (faux par défaut).
+fn arr_step(service: ArrService, action: ArrAction, config: &serde_json::Value) -> StepDecision {
+    let fail_on_error = config
+        .get("fail_on_error")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    StepDecision::integrate(ArrBlock {
+        service,
+        action,
+        fail_on_error,
+    })
 }
 
 pub fn decide_step(
@@ -143,6 +178,10 @@ pub fn decide_step(
         }
         FlowBlockKind::Mkvpropedit => StepDecision::edit(in_place_edit(config)),
         FlowBlockKind::RemuxMkv | FlowBlockKind::VideoEncode => StepDecision::transform(),
+        FlowBlockKind::SonarrRescan => arr_step(ArrService::Sonarr, ArrAction::Rescan, config),
+        FlowBlockKind::SonarrRename => arr_step(ArrService::Sonarr, ArrAction::Rename, config),
+        FlowBlockKind::RadarrRescan => arr_step(ArrService::Radarr, ArrAction::Rescan, config),
+        FlowBlockKind::RadarrRename => arr_step(ArrService::Radarr, ArrAction::Rename, config),
         FlowBlockKind::Webhook => {
             match serde_json::from_value::<WebhookBlockConfig>(config.clone()) {
                 Ok(webhook) => StepDecision::notify(webhook),
@@ -165,6 +204,10 @@ mod tests {
             "remux-mkv",
             "video-encode",
             "webhook",
+            "sonarr-rescan",
+            "sonarr-rename",
+            "radarr-rescan",
+            "radarr-rename",
             "file-output",
             "remux-mp4",
         ] {
@@ -242,5 +285,56 @@ mod tests {
             .notify
             .is_none()
         );
+    }
+
+    #[test]
+    fn arr_blocks_decide_an_integration_with_their_failure_policy() {
+        let media = serde_json::json!({});
+        let cases = [
+            (
+                FlowBlockKind::SonarrRescan,
+                ArrService::Sonarr,
+                ArrAction::Rescan,
+            ),
+            (
+                FlowBlockKind::SonarrRename,
+                ArrService::Sonarr,
+                ArrAction::Rename,
+            ),
+            (
+                FlowBlockKind::RadarrRescan,
+                ArrService::Radarr,
+                ArrAction::Rescan,
+            ),
+            (
+                FlowBlockKind::RadarrRename,
+                ArrService::Radarr,
+                ArrAction::Rename,
+            ),
+        ];
+        for (kind, service, action) in cases {
+            let lenient = decide_step(&kind, &serde_json::json!({}), &media);
+            assert_eq!(
+                lenient.integration,
+                Some(ArrBlock {
+                    service,
+                    action,
+                    fail_on_error: false
+                })
+            );
+            assert!(!lenient.stop && lenient.notify.is_none());
+
+            let strict = decide_step(&kind, &serde_json::json!({"fail_on_error": true}), &media);
+            assert_eq!(
+                strict.integration,
+                Some(ArrBlock {
+                    service,
+                    action,
+                    fail_on_error: true
+                })
+            );
+        }
+        let other = decide_step(&FlowBlockKind::FileOutput, &serde_json::json!({}), &media);
+        assert!(other.integration.is_none());
     }
 }

@@ -18,7 +18,9 @@ pub const SCRIPT: &str = r###"
       if (typeof renderLibrariesTable === 'function') renderLibrariesTable();
       if (typeof renderLibraryNodes === 'function') renderLibraryNodes();
       if (typeof renderLibraryWorkerSelect === 'function') renderLibraryWorkerSelect();
+      markWidgetSource('workers', true);
     } catch (e) {
+      markWidgetSource('workers', false);
       if (tbody) {
         tbody.innerHTML = emptyStateRow(5, escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session pour afficher les agents enregistrés.' : 'Impossible de récupérer la liste des agents.'), true);
       }
@@ -202,14 +204,15 @@ pub const SCRIPT: &str = r###"
       });
     }
 
-    const raccorderBtn = el('workers-fact-action');
-    if (raccorderBtn) {
-      raccorderBtn.addEventListener('click', () => {
-        const panel = el('worker-connect-panel');
-        if (panel) {
-          panel.hidden = false;
-          panel.scrollIntoView({ block: 'nearest' });
-        }
+    // L'action de capsule ouvre le tiroir directement sur le volet de raccordement.
+    const connectBtn = el('btn-workers-connect');
+    if (connectBtn) {
+      connectBtn.addEventListener('click', () => {
+        const drawer = el('workers-fact');
+        markRegistreRow(el('workers-table-body'), null);
+        showRegistreFact('workers-fact', 'Raccorder un nœud', []);
+        const connectTab = el('workers-fact-tab-connect');
+        if (drawer && connectTab) selectInspectionTab(drawer, connectTab);
       });
     }
 

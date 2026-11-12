@@ -222,3 +222,129 @@ async fn webhook_block_honors_fail_on_error() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+async fn secrets_app() -> anyhow::Result<(axum::Router, sqlx::SqlitePool, tempfile::TempDir)> {
+    let config_dir = tempfile::tempdir()?;
+    let config = Config {
+        bind: "127.0.0.1:3000".parse()?,
+        database_url: "sqlite::memory:".into(),
+        data_dir: "var".into(),
+        input_dir: "var/input".into(),
+        config_dir: config_dir.path().to_path_buf(),
+        tools_cache_dir: "var/tools-cache".into(),
+        plugins_dir: None,
+        static_dir: "frontend/dist".into(),
+        admin_key: "test-admin-key".into(),
+        worker_key: "test-worker-key".into(),
+        max_file_bytes: 1024,
+        local_worker: false,
+        web_origin: None,
+        web_session_ttl_seconds: 28_800,
+        tls: None,
+    };
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&config.database_url)
+        .await?;
+    sqlx::migrate!().run(&pool).await?;
+    let (events_tx, _) = tokio::sync::broadcast::channel(128);
+    let app = router(AppState {
+        pool: pool.clone(),
+        config: Arc::new(config),
+        events_tx,
+    });
+    Ok((app, pool, config_dir))
+}
+
+fn webhook_definition(header_value: &str) -> String {
+    serde_json::json!({
+        "nodes": [
+            {"id": "n1", "type": "file-input", "name": "Entrée"},
+            {"id": "n2", "type": "webhook", "name": "Notifier", "config": {
+                "url": "https://hook.example/x",
+                "custom_headers": {"Authorization": header_value}
+            }}
+        ],
+        "connections": [{"from": "n1", "to": "n2"}]
+    })
+    .to_string()
+}
+
+async fn save_webhook_flow(
+    app: &axum::Router,
+    header_value: &str,
+) -> anyhow::Result<serde_json::Value> {
+    let body = serde_json::json!({
+        "name": "Flux webhook",
+        "description": null,
+        "file_mask": "*.mkv",
+        "is_default": false,
+        "definition": webhook_definition(header_value),
+    });
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/flows/flow.webhook")
+                .header("authorization", "Bearer test-admin-key")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&body)?))?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), 16 * 1024).await?;
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+async fn stored_definition(pool: &sqlx::SqlitePool) -> anyhow::Result<String> {
+    Ok(
+        sqlx::query_scalar("SELECT definition FROM flows WHERE id = 'flow.webhook'")
+            .fetch_one(pool)
+            .await?,
+    )
+}
+
+#[tokio::test]
+async fn test_webhook_headers_are_encrypted_at_rest_and_masked_by_the_api() -> anyhow::Result<()> {
+    let (app, pool, _dir) = secrets_app().await?;
+    let saved = save_webhook_flow(&app, "Bearer SECRET-HEADER").await?;
+    let returned = saved["definition"].as_str().unwrap_or_default();
+    assert!(!returned.contains("SECRET-HEADER"));
+    assert!(returned.contains("Authorization"));
+
+    let raw = stored_definition(&pool).await?;
+    assert!(!raw.contains("SECRET-HEADER"));
+    assert!(raw.contains("enc:v1:"));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/flows/flow.webhook")
+                .header("authorization", "Bearer test-admin-key")
+                .body(Body::empty())?,
+        )
+        .await?;
+    let bytes = to_bytes(response.into_body(), 16 * 1024).await?;
+    assert!(!String::from_utf8_lossy(&bytes).contains("SECRET-HEADER"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_resaving_a_masked_flow_keeps_the_stored_header() -> anyhow::Result<()> {
+    let (app, pool, dir) = secrets_app().await?;
+    save_webhook_flow(&app, "Bearer SECRET-HEADER").await?;
+    let first = stored_definition(&pool).await?;
+
+    save_webhook_flow(&app, "").await?;
+    assert_eq!(stored_definition(&pool).await?, first);
+
+    let secrets = flux_de_fichiers::secrets::SecretBox::open(dir.path())?;
+    let stored: serde_json::Value = serde_json::from_str(&first)?;
+    let encrypted = stored["nodes"][1]["config"]["custom_headers"]["Authorization"]
+        .as_str()
+        .unwrap_or_default();
+    assert_eq!(secrets.decrypt(encrypted)?, "Bearer SECRET-HEADER");
+    Ok(())
+}

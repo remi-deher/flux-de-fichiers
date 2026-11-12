@@ -133,11 +133,6 @@ pub const SCRIPT: &str = r###"
     document.querySelectorAll('.inspection-drawer.is-open').forEach(closeInspectionDrawer);
     activeTab = tabName;
 
-    const titleEl = el('current-section-title');
-    if (titleEl && TAB_TITLES[tabName]) {
-      titleEl.textContent = TAB_TITLES[tabName];
-    }
-
     TABS.forEach(name => {
       const btn = el(`tab-btn-${name}`);
       const panel = el(`panel-${name}`);
@@ -171,10 +166,7 @@ pub const SCRIPT: &str = r###"
     } else if (tabName === 'flows') {
       loadFlows();
       const canvas = el('flows-canvas-view');
-      const titleEl = el('current-section-title');
-      if (canvas && canvas.style.display === 'block' && titleEl) {
-        titleEl.textContent = 'Éditeur de flux';
-      }
+      if (canvas && canvas.style.display === 'block') syncCapsuleActions('flow-editor');
     } else if (tabName === 'plugins') {
       if (typeof loadRepositories === 'function') loadRepositories();
       if (typeof loadStoreCatalog === 'function') loadStoreCatalog();
@@ -184,10 +176,15 @@ pub const SCRIPT: &str = r###"
     }
   }
 
-  function syncSearchCapsule(tabName) {
+  // Affiche les actions de la capsule qui déclarent ce contexte (page ou état de page).
+  function syncCapsuleActions(context) {
     document.querySelectorAll('[data-capsule-tab]').forEach(node => {
-      node.hidden = node.getAttribute('data-capsule-tab') !== tabName;
+      node.hidden = node.getAttribute('data-capsule-tab') !== context;
     });
+  }
+
+  function syncSearchCapsule(tabName) {
+    syncCapsuleActions(tabName);
     document.querySelectorAll('[data-filter-page]').forEach(group => {
       group.hidden = group.getAttribute('data-filter-page') !== tabName;
     });

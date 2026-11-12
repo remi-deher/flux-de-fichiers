@@ -3,19 +3,39 @@
 use crate::tools_cache::{ToolCacheManager, host_arch};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::Path;
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
+mod install;
 mod probe;
+mod secret_settings;
 mod settings;
+mod sources;
+mod sync;
 mod vocab;
 
+pub use install::{
+    ensure_job_tools, ensure_tool_installed, install_from_distribution, is_installing,
+    parse_distribution, read_distribution,
+};
 pub use probe::{ProbeContract, file_job_may_start, probe_is_ready, required_probe};
+pub use sources::{
+    catalog_roots, is_valid_repository_id, repository_dir, sync_enabled_repositories,
+};
+pub use sync::{SyncError, SyncPolicy, SyncReport, sync_repository, validate_index_url};
 
+pub use secret_settings::{mask, migrate_plaintext, seal, secret_names};
 pub use settings::{
     ResolvedSettingsField, SettingsField, SettingsFieldType, SettingsSchema, resolve_setting_value,
     resolve_settings_fields,
 };
 pub use vocab::{CatalogCapability, CatalogItemType, PluginCategory};
+
+/// Outil de remuxage requis par les jobs, installé dans le cache du nœud depuis les dépôts.
+pub const REMUX_TOOL_ID: &str = "app.mkvtoolnix";
+pub const REMUX_TOOL_VERSION: &str = "1.0.0";
 
 /// Dépôt distant de distribution de plugins, outils et flux.
 #[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow, PartialEq)]
@@ -118,6 +138,16 @@ pub struct ManifestToolDetails {
     pub current_choice: Option<bool>,
 }
 
+/// État d'un outil dans le cache de ce nœud.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolStatus {
+    Ready,
+    /// Téléchargement ou extraction en cours.
+    Installing,
+    NotInstalled,
+}
+
 /// Résumé de l'état d'un outil pour l'API et l'interface utilisateur.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -125,7 +155,7 @@ pub struct ToolStatusSummary {
     pub id: String,
     pub name: String,
     pub version: String,
-    pub status: String,
+    pub status: ToolStatus,
     pub capability: CatalogCapability,
     pub current_choice: bool,
     pub arch: String,
@@ -133,12 +163,62 @@ pub struct ToolStatusSummary {
     pub description: String,
 }
 
-/// Charge l'index du catalogue depuis le répertoire racine des plugins.
+/// Index lu entrée par entrée : une fiche inconnue est ignorée sans invalider les autres.
+pub struct ParsedIndex {
+    pub index: CatalogIndex,
+    /// Fiches ignorées, avec la raison.
+    pub skipped: Vec<String>,
+}
+
+/// Lit un `catalogue/index.json` en tolérant les fiches que ce coordinateur ne comprend pas.
+pub fn parse_index_tolerant(content: &str) -> anyhow::Result<ParsedIndex> {
+    let value: Value = serde_json::from_str(content)?;
+    let schema_version = value
+        .get("schemaVersion")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("schemaVersion manquant"))?
+        .to_owned();
+    let generated_for = value
+        .get("generatedFor")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let raw_entries = value
+        .get("entries")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("entries manquant"))?;
+    let mut entries = Vec::with_capacity(raw_entries.len());
+    let mut skipped = Vec::new();
+    for (position, raw) in raw_entries.iter().enumerate() {
+        match serde_json::from_value::<CatalogEntry>(raw.clone()) {
+            Ok(entry) => entries.push(entry),
+            Err(error) => {
+                let label = raw
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map_or_else(|| format!("#{position}"), str::to_owned);
+                skipped.push(format!("{label} : {error}"));
+            }
+        }
+    }
+    Ok(ParsedIndex {
+        index: CatalogIndex {
+            schema_version,
+            generated_for,
+            entries,
+        },
+        skipped,
+    })
+}
+
+/// Charge l'index du catalogue depuis un dossier de dépôt ; les fiches inconnues sont journalisées.
 pub fn load_catalog(plugins_root: &Path) -> anyhow::Result<CatalogIndex> {
     let index_path = plugins_root.join("catalogue").join("index.json");
     let content = std::fs::read_to_string(&index_path)?;
-    let index: CatalogIndex = serde_json::from_str(&content)?;
-    Ok(index)
+    let parsed = parse_index_tolerant(&content)?;
+    for reason in &parsed.skipped {
+        tracing::warn!(root = %plugins_root.display(), reason = %reason, "fiche de catalogue ignorée");
+    }
+    Ok(parsed.index)
 }
 
 /// Charge un manifeste spécifique depuis le répertoire racine des plugins.
@@ -149,24 +229,34 @@ pub fn load_manifest(plugins_root: &Path, manifest_path: &str) -> anyhow::Result
     Ok(manifest)
 }
 
-/// Liste l'ensemble des entrées du catalogue avec repli par défaut si non trouvé sur disque.
+/// Entrées du catalogue avec le dossier qui les porte ; le premier dossier gagne sur un identifiant en double.
 ///
 /// La catégorie et les tags viennent du document pointé par l'index. Une catégorie
 /// inconnue est déjà normalisée en `other` et n'est pas sérialisée (pas de pastille).
-pub fn list_catalog(plugins_root: Option<&Path>) -> Vec<CatalogEntry> {
-    if let Some(root) = plugins_root
-        && let Ok(catalog) = load_catalog(root)
-    {
-        return catalog
-            .entries
-            .into_iter()
-            .map(|mut entry| {
-                apply_document_labels(root, &mut entry);
-                entry
-            })
-            .collect();
+pub fn catalog_with_roots(roots: &[PathBuf]) -> Vec<(PathBuf, CatalogEntry)> {
+    let mut seen = HashSet::new();
+    let mut listed = Vec::new();
+    for root in roots {
+        let Ok(catalog) = load_catalog(root) else {
+            continue;
+        };
+        for mut entry in catalog.entries {
+            if !seen.insert(entry.id.clone()) {
+                continue;
+            }
+            apply_document_labels(root, &mut entry);
+            listed.push((root.clone(), entry));
+        }
     }
-    default_catalog_entries()
+    listed
+}
+
+/// Liste l'ensemble des entrées des dossiers de catalogue ; vide tant qu'aucun dépôt n'est synchronisé.
+pub fn list_catalog(roots: &[PathBuf]) -> Vec<CatalogEntry> {
+    catalog_with_roots(roots)
+        .into_iter()
+        .map(|(_, entry)| entry)
+        .collect()
 }
 
 fn apply_document_labels(root: &Path, entry: &mut CatalogEntry) {
@@ -189,61 +279,60 @@ fn apply_document_labels(root: &Path, entry: &mut CatalogEntry) {
 ///
 /// Ne lit la base pour rien d'autre et n'écrit aucun défaut.
 pub fn resolved_plugin_fields(
-    plugins_root: Option<&Path>,
+    roots: &[PathBuf],
     plugin_id: &str,
     saved: &Value,
 ) -> Vec<ResolvedSettingsField> {
-    let Some(root) = plugins_root else {
+    resolve_settings_fields(saved, &settings_fields(roots, plugin_id))
+}
+
+/// Champs déclarés par le schéma de réglages d'un plugin du catalogue ; vide si le plugin est inconnu.
+pub fn settings_fields(roots: &[PathBuf], plugin_id: &str) -> Vec<SettingsField> {
+    let Some((root, entry)) = catalog_with_roots(roots)
+        .into_iter()
+        .find(|(_, entry)| entry.id == plugin_id)
+    else {
         return Vec::new();
     };
-    let Ok(catalog) = load_catalog(root) else {
-        return Vec::new();
-    };
-    let Some(entry) = catalog.entries.iter().find(|entry| entry.id == plugin_id) else {
-        return Vec::new();
-    };
-    let Ok(manifest) = load_manifest(root, &entry.manifest_path) else {
-        return Vec::new();
-    };
-    let Some(schema) = manifest.settings_schema else {
-        return Vec::new();
-    };
-    resolve_settings_fields(saved, &schema.fields)
+    load_manifest(&root, &entry.manifest_path)
+        .ok()
+        .and_then(|manifest| manifest.settings_schema)
+        .map(|schema| schema.fields)
+        .unwrap_or_default()
+}
+
+/// Le plugin existe-t-il dans le catalogue ?
+pub fn plugin_exists(roots: &[PathBuf], plugin_id: &str) -> bool {
+    catalog_with_roots(roots)
+        .iter()
+        .any(|(_, entry)| entry.id == plugin_id)
 }
 
 /// Calcule l'état dynamique de chaque outil déclaré par rapport au cache local du nœud.
 pub fn list_tools_status(
-    plugins_root: Option<&Path>,
+    roots: &[PathBuf],
     cache_mgr: &ToolCacheManager,
 ) -> Vec<ToolStatusSummary> {
     let arch = host_arch();
-    let entries = list_catalog(plugins_root);
 
-    entries
+    catalog_with_roots(roots)
         .into_iter()
-        .filter(|entry| entry.entry_type == CatalogItemType::App)
-        .map(|entry| {
-            let mut description = String::new();
-            if let Some(root) = plugins_root
-                && let Ok(manifest) = load_manifest(root, &entry.manifest_path)
-                && let Some(text) = manifest.description
-            {
-                description = text;
-            }
-            if description.is_empty() {
-                description = default_tool_description(&entry.id);
-            }
+        .filter(|(_, entry)| entry.entry_type == CatalogItemType::App)
+        .map(|(root, entry)| {
+            let description = load_manifest(&root, &entry.manifest_path)
+                .ok()
+                .and_then(|manifest| manifest.description)
+                .unwrap_or_default();
 
-            let is_system_ready = match entry.id.as_str() {
-                "app.internal.telemetry" => true,
-                "app.mkvtoolnix" => Path::new("/usr/bin/mkvmerge").exists(),
-                _ => false,
-            };
+            // La télémétrie est interne au binaire ; tout autre outil vient du cache du nœud.
+            let is_system_ready = entry.id == "app.internal.telemetry";
 
             let status = if is_system_ready || cache_mgr.is_ready(&entry.id, &entry.version, arch) {
-                "ready".to_string()
+                ToolStatus::Ready
+            } else if is_installing(&entry.id) {
+                ToolStatus::Installing
             } else {
-                "not_installed".to_string()
+                ToolStatus::NotInstalled
             };
 
             ToolStatusSummary {
@@ -263,129 +352,6 @@ pub fn list_tools_status(
         .collect()
 }
 
-fn default_tool_description(tool_id: &str) -> String {
-    match tool_id {
-        "app.mkvtoolnix" => "Outil de remuxage sans réencodage validé. Distribution Option B (binaire autonome hors conteneur applicatif). Matroska uniquement.".into(),
-        "app.mp4box" => "Outil de référence pour le multiplexage, l'optimisation streaming faststart et la manipulation de conteneurs MP4 sans réencodage (GPAC).".into(),
-        "app.mediainfo" => "Outil universel d'analyse et d'extraction de métadonnées techniques multimédias (codecs, résolutions, profils HDR10/Dolby Vision, pistes audio et sous-titres).".into(),
-        "app.ffmpeg" => "Outil d'analyse multimédia et génération de médias synthétiques de tests. Réservé aux tests et scénarios de simulation.".into(),
-        "app.internal.telemetry" => "Mesure périodique CPU, RAM, GPU (/dev/dri) et stockage local. Confinement strict sous UID 10001 (app) sans socket Docker.".into(),
-        "app.postgresql" => "Moteur de base de données relationnelle historique (remplacé par SQLite local /config dans l'ADR 0005).".into(),
-        _ => "Outil modulaire distribué.".into(),
-    }
-}
-
-struct OfflineEntry {
-    id: &'static str,
-    entry_type: CatalogItemType,
-    version: &'static str,
-    name: &'static str,
-    manifest_path: &'static str,
-    capability: Option<CatalogCapability>,
-    current_choice: Option<bool>,
-    distribution: Option<&'static str>,
-}
-
-fn offline_entry(spec: OfflineEntry) -> CatalogEntry {
-    CatalogEntry {
-        id: spec.id.to_owned(),
-        entry_type: spec.entry_type,
-        version: spec.version.to_owned(),
-        name: spec.name.to_owned(),
-        manifest_path: spec.manifest_path.to_owned(),
-        capability: spec.capability,
-        current_choice: spec.current_choice,
-        distribution: spec.distribution.map(str::to_owned),
-        category: None,
-        tags: Vec::new(),
-    }
-}
-
-fn default_catalog_entries() -> Vec<CatalogEntry> {
-    vec![
-        offline_entry(OfflineEntry {
-            id: "app.mkvtoolnix",
-            entry_type: CatalogItemType::App,
-            version: "1.0.0",
-            name: "MKVToolNix (mkvmerge)",
-            manifest_path: "tools/mkvtoolnix/manifest.json",
-            capability: Some(CatalogCapability::Remux),
-            current_choice: Some(true),
-            distribution: Some("autonomous-binary"),
-        }),
-        offline_entry(OfflineEntry {
-            id: "app.ffmpeg",
-            entry_type: CatalogItemType::App,
-            version: "1.0.0",
-            name: "FFmpeg (distribué)",
-            manifest_path: "tools/ffmpeg/manifest.json",
-            capability: Some(CatalogCapability::Analyze),
-            current_choice: Some(false),
-            distribution: Some("autonomous-binary"),
-        }),
-        offline_entry(OfflineEntry {
-            id: "app.mediainfo",
-            entry_type: CatalogItemType::App,
-            version: "1.0.0",
-            name: "MediaInfo CLI",
-            manifest_path: "tools/mediainfo/manifest.json",
-            capability: Some(CatalogCapability::Probe),
-            current_choice: Some(true),
-            distribution: Some("autonomous-binary"),
-        }),
-        offline_entry(OfflineEntry {
-            id: "app.mp4box",
-            entry_type: CatalogItemType::App,
-            version: "2.4.0",
-            name: "MP4Box (GPAC)",
-            manifest_path: "tools/mp4box/manifest.json",
-            capability: Some(CatalogCapability::Remux),
-            current_choice: Some(false),
-            distribution: Some("autonomous-binary"),
-        }),
-        offline_entry(OfflineEntry {
-            id: "app.internal.telemetry",
-            entry_type: CatalogItemType::App,
-            version: "0.1.0",
-            name: "Sonde interne de télémétrie",
-            manifest_path: "tools/internal-telemetry/manifest.json",
-            capability: Some(CatalogCapability::Other),
-            current_choice: Some(true),
-            distribution: Some("autonomous-binary"),
-        }),
-        offline_entry(OfflineEntry {
-            id: "plugin.sonarr",
-            entry_type: CatalogItemType::Plugin,
-            version: "1.0.0",
-            name: "Sonarr Integration",
-            manifest_path: "plugins/sonarr/manifest.json",
-            capability: Some(CatalogCapability::Integration),
-            current_choice: Some(true),
-            distribution: None,
-        }),
-        offline_entry(OfflineEntry {
-            id: "plugin.radarr",
-            entry_type: CatalogItemType::Plugin,
-            version: "1.0.0",
-            name: "Radarr Integration",
-            manifest_path: "plugins/radarr/manifest.json",
-            capability: Some(CatalogCapability::Integration),
-            current_choice: Some(true),
-            distribution: None,
-        }),
-        offline_entry(OfflineEntry {
-            id: "macro.remux-verify.example",
-            entry_type: CatalogItemType::Block,
-            version: "0.1.0",
-            name: "Macro remux + vérifier (exemple)",
-            manifest_path: "blocks/macro-remux-verify.example/manifest.json",
-            capability: None,
-            current_choice: None,
-            distribution: None,
-        }),
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,16 +368,18 @@ mod tests {
 
     #[test]
     fn other_category_is_kept_in_memory_and_omitted_from_json() -> Result<(), serde_json::Error> {
-        let entry = offline_entry(OfflineEntry {
-            id: "plugin.demo",
+        let entry = CatalogEntry {
+            id: "plugin.demo".to_owned(),
             entry_type: CatalogItemType::Plugin,
-            version: "1.0.0",
-            name: "Démo",
-            manifest_path: "plugins/demo.json",
+            version: "1.0.0".to_owned(),
+            name: "Démo".to_owned(),
+            manifest_path: "plugins/demo.json".to_owned(),
             capability: None,
             current_choice: None,
             distribution: None,
-        });
+            category: None,
+            tags: Vec::new(),
+        };
         let mut hidden = entry.clone();
         hidden.category = Some(PluginCategory::Other);
         hidden.tags = vec!["arr".into(), "tv".into()];
@@ -468,7 +436,7 @@ mod tests {
             }"#,
         )?;
 
-        let entries = list_catalog(Some(&root));
+        let entries = list_catalog(std::slice::from_ref(&root));
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].category, Some(PluginCategory::Other));
         assert!(!PluginCategory::Other.shows_badge());
@@ -477,14 +445,14 @@ mod tests {
         assert!(listed.get("category").is_none());
 
         let saved = json!({"url": ""});
-        let fields = resolved_plugin_fields(Some(&root), "plugin.demo", &saved);
+        let fields = resolved_plugin_fields(std::slice::from_ref(&root), "plugin.demo", &saved);
         assert_eq!(fields[0].name, "url");
         assert_eq!(fields[0].value, "");
         assert_eq!(fields[1].name, "apiKey");
         assert_eq!(fields[1].value, "");
 
         let fresh = json!({});
-        let proposed = resolved_plugin_fields(Some(&root), "plugin.demo", &fresh);
+        let proposed = resolved_plugin_fields(std::slice::from_ref(&root), "plugin.demo", &fresh);
         assert_eq!(proposed[0].value, "http://example.test");
         assert_eq!(fresh, json!({}));
 
@@ -552,6 +520,21 @@ mod tests {
             assert!(fresh.get("url").is_none());
             assert!(saved.get("pathMappingRemote").is_none());
         }
+        Ok(())
+    }
+
+    #[test]
+    fn tool_status_serializes_to_the_names_the_interface_expects() -> Result<(), serde_json::Error>
+    {
+        assert_eq!(serde_json::to_string(&ToolStatus::Ready)?, "\"ready\"");
+        assert_eq!(
+            serde_json::to_string(&ToolStatus::Installing)?,
+            "\"installing\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ToolStatus::NotInstalled)?,
+            "\"not_installed\""
+        );
         Ok(())
     }
 }

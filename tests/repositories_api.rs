@@ -63,6 +63,11 @@ async fn test_repositories_lifecycle_and_official_protection() -> anyhow::Result
     assert_eq!(initial_repos.len(), 1);
     assert_eq!(initial_repos[0].id, "repo.official");
     assert!(initial_repos[0].is_official);
+    assert!(
+        initial_repos[0]
+            .index_url
+            .ends_with("/dev/catalogue/index.json")
+    );
     assert!(initial_repos[0].enabled);
 
     // 2. Ajouter un dépôt tiers avec validation d'URL
@@ -78,6 +83,31 @@ async fn test_repositories_lifecycle_and_official_protection() -> anyhow::Result
     let invalid_res = app.clone().oneshot(invalid_req).await?;
     assert_eq!(invalid_res.status(), StatusCode::BAD_REQUEST);
 
+    let wrong_suffix_req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/plugins/repositories")
+        .header("authorization", format!("Bearer {TEST_ADMIN_KEY}"))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&serde_json::json!({
+            "name": "Mauvais suffixe",
+            "indexUrl": "https://example.com/custom/index.json"
+        }))?))?;
+    let wrong_suffix_res = app.clone().oneshot(wrong_suffix_req).await?;
+    assert_eq!(wrong_suffix_res.status(), StatusCode::BAD_REQUEST);
+
+    let unsafe_id_req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/plugins/repositories")
+        .header("authorization", format!("Bearer {TEST_ADMIN_KEY}"))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&serde_json::json!({
+            "id": "../evil",
+            "name": "Identifiant dangereux",
+            "indexUrl": "https://example.com/custom/catalogue/index.json"
+        }))?))?;
+    let unsafe_id_res = app.clone().oneshot(unsafe_id_req).await?;
+    assert_eq!(unsafe_id_res.status(), StatusCode::BAD_REQUEST);
+
     let valid_req = Request::builder()
         .method("POST")
         .uri("/api/v1/plugins/repositories")
@@ -86,7 +116,7 @@ async fn test_repositories_lifecycle_and_official_protection() -> anyhow::Result
         .body(Body::from(serde_json::to_vec(&serde_json::json!({
             "id": "repo.custom.test",
             "name": "Dépôt Communautaire Test",
-            "indexUrl": "https://example.com/custom/index.json"
+            "indexUrl": "http://127.0.0.1:9/custom/catalogue/index.json"
         }))?))?;
     let valid_res = app.clone().oneshot(valid_req).await?;
     assert_eq!(valid_res.status(), StatusCode::OK);
@@ -111,7 +141,8 @@ async fn test_repositories_lifecycle_and_official_protection() -> anyhow::Result
         .header("authorization", format!("Bearer {TEST_ADMIN_KEY}"))
         .body(Body::empty())?;
     let sync_res = app.clone().oneshot(sync_req).await?;
-    assert_eq!(sync_res.status(), StatusCode::OK);
+    // Adresse privée : refusée par défaut, sans aucun accès réseau.
+    assert_eq!(sync_res.status(), StatusCode::BAD_GATEWAY);
 
     // 5. Protéger le dépôt officiel contre la suppression
     let del_official_req = Request::builder()

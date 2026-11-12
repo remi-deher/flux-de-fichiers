@@ -7,4 +7,5 @@ pub mod libraries;
 pub mod plugins;
 pub mod settings;
 pub mod updates;
+pub mod widgets;
 pub mod workers;

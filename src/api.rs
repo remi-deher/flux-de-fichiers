@@ -134,6 +134,11 @@ fn json_routes() -> Router<AppState> {
             "/api/v1/tools/{id}/distribution",
             get(plugins::tool_distribution),
         )
+        .route("/api/v1/tools/{id}/install", post(plugins::install_tool))
+        .route(
+            "/api/v1/worker/tools/{id}/distribution",
+            get(plugins::worker_tool_distribution),
+        )
         .route(
             "/api/v1/auth/session",
             get(session::current).post(session::login),
@@ -250,7 +255,8 @@ async fn claim(
     authorize(&h, &s.config.worker_key)?;
     let mut claim_res = repository::claim(&s.pool, r.worker_id).await?;
     if let Some(ref mut claim) = claim_res {
-        let catalog = crate::plugins::list_catalog(s.config.plugins_dir.as_deref());
+        let roots = crate::plugins::catalog_roots(&s.pool, &s.config).await;
+        let catalog = crate::plugins::list_catalog(&roots);
         if let Some(probe) = crate::plugins::required_probe(&catalog) {
             claim.probe_tool_id = Some(probe.tool_id);
             claim.probe_version = Some(probe.version);
@@ -263,6 +269,17 @@ async fn claim(
         );
     }
     Ok(axum::Json(claim_res))
+}
+
+/// Intervalle entre deux synchronisations automatiques des dépôts de plugins.
+const PLUGIN_SYNC_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// Synchronise les dépôts de plugins au démarrage, puis à intervalle régulier.
+async fn plugin_sync_loop(state: AppState) {
+    loop {
+        crate::plugins::sync_enabled_repositories(&state.pool, &state.config).await;
+        tokio::time::sleep(PLUGIN_SYNC_INTERVAL).await;
+    }
 }
 
 pub async fn serve(config: Config) -> anyhow::Result<()> {
@@ -299,6 +316,20 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     if state.config.local_worker {
         tokio::spawn(crate::local_worker::run(state.clone()));
     }
+    match crate::secrets::SecretBox::open(&state.config.config_dir) {
+        Ok(secrets) => match crate::flows::migrate_flow_secrets(&state.pool, &secrets).await {
+            Ok(0) => {}
+            Ok(count) => tracing::info!(
+                count,
+                "en-têtes de webhook chiffrés dans les flux existants"
+            ),
+            Err(error) => {
+                tracing::warn!(error = %error, "migration des en-têtes de webhook impossible")
+            }
+        },
+        Err(error) => tracing::warn!(error = %error, "clé de chiffrement indisponible"),
+    }
+    tokio::spawn(plugin_sync_loop(state.clone()));
     let app = router(state);
     tracing::info!(%addr, "coordinator started");
     if let Some((cert, key)) = tls {

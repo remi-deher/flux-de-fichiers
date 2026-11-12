@@ -10,6 +10,7 @@ pub use jobs::{
 };
 pub use libraries::{delete_library, get_library, insert_library, list_libraries, update_library};
 pub use plugins::{
-    add_plugin_repository, delete_plugin_repository, get_plugin_settings, list_plugin_repositories,
-    set_plugin_settings, toggle_plugin_repository, touch_plugin_repository_sync,
+    add_plugin_repository, delete_plugin_repository, get_plugin_repository, get_plugin_settings,
+    list_plugin_repositories, set_plugin_settings, toggle_plugin_repository,
+    touch_plugin_repository_sync,
 };

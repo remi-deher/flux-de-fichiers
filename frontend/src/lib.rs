@@ -75,6 +75,19 @@ mod tests {
         assert!(html.contains("id=\"search-filter-btn\""));
         assert!(html.contains("id=\"filter-sheet\""));
         assert!(html.contains("data-capsule-tab=\"flows\""));
+        assert!(html.contains("data-capsule-tab=\"files\""));
+        assert!(html.contains("data-capsule-tab=\"flow-editor\""));
+        assert!(html.contains("id=\"btn-canvas-save-flow\""));
+        assert!(html.contains("function syncCapsuleActions"));
+        assert!(html.contains(&format!(
+            "syncCapsuleActions('{}')",
+            crate::core::CapsuleContext::FlowEditor.as_attr()
+        )));
+        assert!(!html.contains("topbar-context"));
+        assert!(!html.contains("breadcrumb"));
+        assert!(!html.contains("current-section-title"));
+        assert!(!html.contains("TAB_TITLES"));
+        assert!(!html.contains("registre-toolbar"));
         assert!(html.contains("data-filter-page=\"jobs\""));
         assert!(html.contains("function toggleFilterSheet"));
         assert!(html.contains("applyContextualSearch"));
@@ -97,6 +110,43 @@ mod tests {
         assert!(html.contains("function setHeroStatus"));
         assert!(html.contains("id=\"hero-status-badge\""));
         assert!(!html.contains("id=\"quick-goto-settings-btn\""));
+    }
+
+    #[test]
+    fn test_widgets_reach_the_page_with_their_client_renderers() {
+        let html = render_full_page();
+        for def in crate::features::widgets::WIDGETS {
+            assert!(
+                html.contains(&format!("data-widget=\"{}\"", def.kind.as_attr())),
+                "widget absent : {}",
+                def.kind.as_attr()
+            );
+        }
+        assert!(html.contains("id=\"widget-dashboard-attention\""));
+        assert!(html.contains("id=\"widget-activity-running\""));
+        assert!(html.contains("id=\"widget-workers-tools\""));
+        assert!(html.contains("function renderWidgets"));
+        assert!(html.contains("function installTool"));
+        assert!(html.contains("function scheduleToolsStatusRefresh"));
+        assert!(!html.contains("'locked'"));
+        assert!(html.contains("field.isSet"));
+        assert!(html.contains("function markWidgetSource"));
+        assert!(html.contains("[data-goto]"));
+        assert!(html.contains(".widget-grid {"));
+    }
+
+    #[test]
+    fn test_activity_uses_the_common_registre_and_drawer() {
+        let html = render_full_page();
+        assert!(html.contains("id=\"jobs-fact\""));
+        assert!(html.contains("id=\"jobs-registre\""));
+        assert!(!html.contains("job-detail-dialog"));
+        assert!(!html.contains("activity-view-diagnostic"));
+        assert!(html.contains("function setJobFilter"));
+        assert!(html.contains("function openJob"));
+        assert!(html.contains("function fillJobDrawer"));
+        assert!(html.contains("JOBS_VIEW_FILTERS"));
+        assert!(html.contains("if (factId === 'jobs-fact') return 'Tâche';"));
     }
 
     #[test]
@@ -151,8 +201,10 @@ mod tests {
         assert!(!html.contains("Volume /input"));
         assert!(html.contains("id=\"flows-fact-action\""));
         assert!(html.contains(">Éditer<"));
-        assert!(html.contains("id=\"workers-fact-action\""));
-        assert!(html.contains(">Raccorder<"));
+        assert!(html.contains("id=\"btn-workers-connect\""));
+        assert!(html.contains("id=\"workers-fact-tab-connect\""));
+        assert!(!html.contains("registre-fact"));
+        assert!(html.contains("Raccorder un nœud"));
         assert!(html.contains("subtab-plugins-app"));
         assert!(html.contains("subtab-plugins-pack"));
         assert!(html.contains("subtab-plugins-resource"));

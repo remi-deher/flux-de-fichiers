@@ -3,8 +3,7 @@ pub const SCRIPT: &str = r###"
       activeCanvasFlowId = flowId;
       if (libraryView) libraryView.style.display = 'none';
       if (canvasView) canvasView.style.display = 'block';
-      const sectionTitle = el('current-section-title');
-      if (sectionTitle) sectionTitle.textContent = 'Éditeur de flux';
+      syncCapsuleActions('flow-editor');
       const titleEl = el('canvas-flow-title');
       if (titleEl) titleEl.textContent = `Éditeur visuel : ${flowTitle}`;
 
@@ -104,8 +103,7 @@ pub const SCRIPT: &str = r###"
     function closeCanvas() {
       if (canvasView) canvasView.style.display = 'none';
       if (libraryView) libraryView.style.display = 'block';
-      const sectionTitle = el('current-section-title');
-      if (sectionTitle && TAB_TITLES.flows) sectionTitle.textContent = TAB_TITLES.flows;
+      syncCapsuleActions('flows');
     }
 
     if (backToLibraryBtn) backToLibraryBtn.addEventListener('click', closeCanvas);
@@ -293,7 +291,7 @@ pub const SCRIPT: &str = r###"
       if (!nodesContainer) return;
       const count = nodesContainer.querySelectorAll('.canvas-node').length + 1;
       const nodeId = `node-${count}`;
-      const icon = blockType === 'condition' ? '🔀' : blockType === 'mkvpropedit' ? '⚡' : blockType === 'file-output' ? '💾' : blockType === 'sonarr' ? '📡' : blockType === 'radarr' ? '🎬' : blockType.includes('video') ? '🎞️' : blockType.includes('audio') ? '🔊' : blockType.includes('mp4') ? '📦' : '🎬';
+      const icon = blockType === 'condition' ? '🔀' : blockType === 'mkvpropedit' ? '⚡' : blockType === 'file-output' ? '💾' : blockType.startsWith('sonarr') ? '📡' : blockType.startsWith('radarr') ? '🎬' : blockType.includes('video') ? '🎞️' : blockType.includes('audio') ? '🔊' : blockType.includes('mp4') ? '📦' : '🎬';
 
       const div = document.createElement('div');
       div.className = 'canvas-node';

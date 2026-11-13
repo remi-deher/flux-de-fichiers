@@ -25,6 +25,52 @@ pub const SCRIPT: &str = r###"
     }, 6000);
   }
 
+  const COPY_FEEDBACK_MS = 2000;
+  const COPIED_LABEL = 'Copié ✓';
+
+  // Copie dans le presse-papier. `navigator.clipboard` n'existe qu'en contexte sécurisé (HTTPS ou localhost) :
+  // en HTTP simple, on passe par une zone de texte temporaire et `execCommand('copy')`.
+  async function copyToClipboard(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {}
+    }
+    const proxy = document.createElement('textarea');
+    proxy.value = text;
+    proxy.setAttribute('readonly', '');
+    proxy.className = 'clipboard-proxy';
+    document.body.appendChild(proxy);
+    proxy.select();
+    let copied = false;
+    try {
+      copied = document.execCommand('copy');
+    } catch {}
+    proxy.remove();
+    return copied;
+  }
+
+  // Copie `text` et le montre : le bouton passe en « Copié ✓ » un instant, puis retrouve son libellé.
+  async function copyWithFeedback(button, text, successMessage) {
+    if (!(await copyToClipboard(text))) {
+      showNotice('Copie impossible : sélectionnez le texte et copiez-le à la main.', 'error');
+      return false;
+    }
+    showNotice(successMessage, 'success');
+    if (button) {
+      if (button.dataset.label === undefined) button.dataset.label = button.textContent;
+      button.textContent = COPIED_LABEL;
+      button.dataset.copied = 'true';
+      clearTimeout(button.copiedTimer);
+      button.copiedTimer = setTimeout(() => {
+        button.textContent = button.dataset.label;
+        delete button.dataset.copied;
+      }, COPY_FEEDBACK_MS);
+    }
+    return true;
+  }
+
   function formatDate(isoStr) {
     if (!isoStr) return '—';
     try {

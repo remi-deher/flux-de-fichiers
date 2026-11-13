@@ -167,6 +167,18 @@ mod tests {
     }
 
     #[test]
+    fn test_every_copy_button_goes_through_the_one_clipboard_helper() {
+        let html = render_full_page();
+        // Un seul appel direct à l'API du navigateur : le reste passe par le repli HTTP et le retour visuel.
+        assert_eq!(html.matches("navigator.clipboard.writeText").count(), 1);
+        assert!(html.contains("document.execCommand('copy')"));
+        assert!(html.contains("copyWithFeedback(el('api-key-copy-btn')"));
+        assert!(html.contains("copyWithFeedback(btnCopyCmd"));
+        assert!(html.contains(".btn[data-copied=\"true\"]"));
+        assert!(html.contains(".clipboard-proxy"));
+    }
+
+    #[test]
     fn test_catalog_ids_and_pure_functions_reach_the_page() {
         let html = render_full_page();
         for panel in crate::core::panels() {
@@ -183,6 +195,8 @@ mod tests {
         assert!(html.contains("function submitWorkerSetup"));
         assert!(html.contains("function setupAuthGate"));
         assert!(html.contains("function loadNodeOverview"));
+        assert!(html.contains("function copyToClipboard"));
+        assert!(html.contains("function copyWithFeedback"));
         assert!(html.contains("function applyAccess"));
         assert!(html.contains("function loadApiKeys"));
         assert!(!html.contains("volatileAdminKey"));

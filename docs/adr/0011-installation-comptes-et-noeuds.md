@@ -102,11 +102,9 @@ centrale dans le bandeau.
 
 **Reste à faire :**
 - Phase 4, vérification : l'interface d'un worker dans un navigateur (les tests Rust et la CI sont verts).
-- Déploiement : pousser `dev → test → main` (ADR 0002), approuver les runs `action_required`,
-  remettre l'installation de test à zéro (supprimer `/config` après sauvegarde ; confirmer avant de
-  toucher `/data`), recréer le compte par l'assistant, créer les clés worker dans Réglages, mettre à
-  jour les workers (`WORKER_KEY_FILE` = clé d'API de rôle worker), redéployer l'app TrueNAS
-  `flux-essai` et copier `frontend/dist/index.html` dans le volume.
+- Déploiement : voir `docs/deploiement-essai-0011.md`. Centrale `flux-essai` mise à jour et remise à zéro le
+  13 nov. 2026 (étapes A à F) ; restent l'installation par l'assistant, la clé et la mise à jour du worker
+  (`flux-essai-worker`, encore en 0.12.0 et arrêté), puis les vérifications. Promotion `test → main` non faite.
 - Mot de passe oublié : fait en ligne de commande, `flux-de-fichiers reset-password <identifiant>` dans le
   conteneur (mot de passe généré, affiché une fois, sessions du compte fermées ; `src/account_admin.rs`).
 - Rotation de la clé de chiffrement : faite, `flux-de-fichiers rotate-secret` dans le conteneur

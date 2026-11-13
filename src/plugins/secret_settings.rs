@@ -112,6 +112,37 @@ pub fn migrate_plaintext(
     Ok(changed.then_some(Value::Object(object)))
 }
 
+/// Re-chiffre avec la nouvelle clé les secrets d'un enregistrement de réglages ; `None` s'il n'y en a pas.
+/// Renvoie les réglages réécrits et le nombre de valeurs changées.
+pub fn rotate_settings(
+    old: &SecretBox,
+    new: &SecretBox,
+    plugin_id: &str,
+    stored: &str,
+) -> AppResult<Option<(String, usize)>> {
+    let Ok(mut value) = serde_json::from_str::<Value>(stored) else {
+        return Ok(None);
+    };
+    let Some(object) = value.as_object_mut() else {
+        return Ok(None);
+    };
+    let mut rotated = 0;
+    for (name, field) in object.iter_mut() {
+        let Some(text) = field.as_str().filter(|text| is_encrypted(text)) else {
+            continue;
+        };
+        let aad = plugin_secret_aad(plugin_id, name);
+        let plaintext = old.decrypt(text, &aad)?;
+        *field = Value::String(new.encrypt(&plaintext, &aad)?);
+        rotated += 1;
+    }
+    if rotated == 0 {
+        return Ok(None);
+    }
+    let rewritten = serde_json::to_string(&value).map_err(|_| AppError::Invalid)?;
+    Ok(Some((rewritten, rotated)))
+}
+
 /// Réglages sans les secrets, et noms des secrets qui ont une valeur enregistrée.
 pub fn mask(stored: &Value, secret_names: &HashSet<String>) -> (Value, HashSet<String>) {
     let mut public = as_object(stored);

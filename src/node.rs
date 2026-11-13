@@ -7,7 +7,7 @@
 use crate::{
     account_admin, api, config,
     config::Config,
-    node_settings,
+    node_settings, secret_rotation, secrets,
     worker::{self, WorkerConfig},
 };
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -51,7 +51,7 @@ fn parse_role(argument: Option<&str>) -> anyhow::Result<Option<Role>> {
         Some("coordinator") => Ok(Some(Role::Coordinator)),
         None => Ok(None),
         _ => anyhow::bail!(
-            "Usage: flux-de-fichiers [coordinator|worker|reset-password <identifiant>|--version]"
+            "Usage: flux-de-fichiers [coordinator|worker|reset-password <identifiant>|rotate-secret|--version]"
         ),
     }
 }
@@ -83,10 +83,39 @@ async fn reset_password(username: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Fait tourner la clé de chiffrement locale et rechiffre tous les secrets, après sauvegarde.
+async fn rotate_secret() -> anyhow::Result<()> {
+    anyhow::ensure!(
+        std::env::var(secrets::KEY_FILE_ENV).is_err(),
+        "{} est défini : la clé appartient à l'orchestrateur, remplacez ce fichier vous-même",
+        secrets::KEY_FILE_ENV
+    );
+    let config = Config::load()?;
+    let pool = api::connect_database(&config).await?;
+    let outcome = secret_rotation::rotate_local_key(&pool, &config.config_dir)
+        .await
+        .map_err(|error| anyhow::anyhow!("rotation impossible, rien n'a changé : {error}"))?;
+    println!(
+        "Clé {} remplacée par {} : {} valeur(s) de plugins et {} en-tête(s) de webhook rechiffrés.",
+        outcome.old_key_id,
+        outcome.new_key_id,
+        outcome.report.plugin_values,
+        outcome.report.flow_values
+    );
+    println!(
+        "Sauvegarde (ancienne clé et base) : {}",
+        outcome.backup_dir.display()
+    );
+    Ok(())
+}
+
 pub async fn run(argument: Option<&str>, operand: Option<&str>) -> anyhow::Result<()> {
     if argument == Some("--version") {
         println!("{}", env!("CARGO_PKG_VERSION"));
         return Ok(());
+    }
+    if argument == Some("rotate-secret") {
+        return rotate_secret().await;
     }
     if argument == Some("reset-password") {
         return reset_password(operand).await;

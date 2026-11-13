@@ -4,7 +4,7 @@ pub const SCRIPT: &str = r###"
 // --- Accès : installation, connexion, session et droits ---
   let currentUser = null;
 
-  const ROLE_LABELS = { admin: 'Administrateur', worker: 'Worker' };
+  const ROLE_LABELS = { admin: 'Administrateur', worker: 'Worker', viewer: 'Lecteur' };
   const AUTH_ERROR_MESSAGES = {
     unauthenticated: 'Identifiant ou mot de passe incorrect.',
     too_many_attempts: 'Trop d\'essais : réessayez dans quelques minutes.',
@@ -96,6 +96,7 @@ pub const SCRIPT: &str = r###"
     if (firstAllowed && !isTabAllowed(activeTab, me)) switchTab(firstAllowed);
     renderAccount(me);
     if (me.nodeKind === 'worker') prepareWorkerDashboard(me);
+    restrictSettingsToOwnAccount(me);
     // Le flux d'événements des tâches n'existe que sur la centrale.
     if (me.nodeKind === 'central' && typeof startJobsSse === 'function') startJobsSse();
   }

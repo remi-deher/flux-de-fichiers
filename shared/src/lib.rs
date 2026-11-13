@@ -93,6 +93,8 @@ pub enum Role {
     Admin,
     /// Clé d'un nœud : protocole d'agent seulement.
     Worker,
+    /// Consulte l'application sans rien modifier : tous les droits « voir », aucune administration.
+    Viewer,
 }
 
 impl Role {
@@ -100,6 +102,7 @@ impl Role {
         match self {
             Self::Admin => "admin",
             Self::Worker => "worker",
+            Self::Viewer => "viewer",
         }
     }
 
@@ -107,8 +110,16 @@ impl Role {
         match value {
             "admin" => Some(Self::Admin),
             "worker" => Some(Self::Worker),
+            "viewer" => Some(Self::Viewer),
             _ => None,
         }
+    }
+
+    /// Rôles qu'un compte humain peut porter (un worker est réservé aux clés d'API).
+    pub const ACCOUNT_ROLES: [Self; 2] = [Self::Admin, Self::Viewer];
+
+    pub fn is_account_role(self) -> bool {
+        Self::ACCOUNT_ROLES.contains(&self)
     }
 
     /// Droits accordés par ce rôle.
@@ -123,6 +134,15 @@ impl Role {
         match self {
             Self::Admin => !matches!(permission, Permission::NodeAgent),
             Self::Worker => matches!(permission, Permission::NodeAgent),
+            Self::Viewer => matches!(
+                permission,
+                Permission::ViewOverview
+                    | Permission::ViewJobs
+                    | Permission::ViewNodes
+                    | Permission::ViewLibraries
+                    | Permission::ViewFlows
+                    | Permission::ViewPlugins
+            ),
         }
     }
 }
@@ -147,7 +167,7 @@ mod tests {
             let serialized = serde_json::to_string(&permission).unwrap_or_default();
             assert_eq!(serialized, format!("\"{}\"", permission.as_str()));
         }
-        for role in [Role::Admin, Role::Worker] {
+        for role in [Role::Admin, Role::Worker, Role::Viewer] {
             assert_eq!(
                 serde_json::to_string(&role).unwrap_or_default(),
                 format!("\"{}\"", role.as_str())
@@ -175,6 +195,18 @@ mod tests {
     fn test_worker_key_is_limited_to_the_agent_protocol() {
         assert_eq!(Role::Worker.permissions(), vec![Permission::NodeAgent]);
         assert!(!Role::Worker.allows(Permission::ViewJobs));
+    }
+
+    #[test]
+    fn test_viewer_can_only_look() {
+        let viewer = Role::Viewer.permissions();
+        assert!(!viewer.is_empty());
+        for permission in Permission::ALL {
+            let is_view = permission.as_str().starts_with("view_");
+            assert_eq!(viewer.contains(&permission), is_view, "{permission:?}");
+        }
+        assert!(Role::Viewer.is_account_role() && Role::Admin.is_account_role());
+        assert!(!Role::Worker.is_account_role());
     }
 
     #[test]

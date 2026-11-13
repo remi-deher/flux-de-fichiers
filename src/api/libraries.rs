@@ -1,6 +1,6 @@
 //! Gestionnaires HTTP des bibliothèques déclarées.
 
-use super::{AdminAuth, AppState};
+use super::{AdminAuth, AppState, ViewLibrariesAuth};
 use crate::{
     domain::{Library, LibraryWrite},
     error::AppResult,
@@ -13,7 +13,10 @@ use axum::{
 };
 use uuid::Uuid;
 
-pub async fn list(State(s): State<AppState>, _auth: AdminAuth) -> AppResult<Json<Vec<Library>>> {
+pub async fn list(
+    State(s): State<AppState>,
+    _auth: ViewLibrariesAuth,
+) -> AppResult<Json<Vec<Library>>> {
     Ok(Json(repository::list_libraries(&s.pool).await?))
 }
 
@@ -29,7 +32,7 @@ pub async fn create(
 pub async fn get(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
-    _auth: AdminAuth,
+    _auth: ViewLibrariesAuth,
 ) -> AppResult<Json<Library>> {
     Ok(Json(repository::get_library(&s.pool, id).await?))
 }

@@ -1,6 +1,6 @@
 //! Gestionnaires HTTP pour les plugins, le catalogue et les outils distribués.
 
-use super::{AdminAuth, AppState};
+use super::{AdminAuth, AppState, ViewPluginsAuth};
 use crate::{
     error::{AppError, AppResult},
     plugins::{self, CatalogEntry, ToolStatusSummary},
@@ -16,7 +16,7 @@ use serde_json::Value;
 /// Liste l'ensemble des composants déclarés dans le catalogue.
 pub async fn catalog(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ViewPluginsAuth,
 ) -> AppResult<Json<Vec<CatalogEntry>>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     Ok(Json(plugins::list_catalog(&roots)))
@@ -25,7 +25,7 @@ pub async fn catalog(
 /// Liste l'état d'installation et de cache des outils distribués.
 pub async fn tools(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ViewPluginsAuth,
 ) -> AppResult<Json<Vec<ToolStatusSummary>>> {
     let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
@@ -167,7 +167,7 @@ pub async fn save_settings(
 /// Liste l'ensemble des dépôts configurés.
 pub async fn list_repositories(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ViewPluginsAuth,
 ) -> AppResult<Json<Vec<plugins::PluginRepository>>> {
     let repos = crate::repository::list_plugin_repositories(&s.pool).await?;
     Ok(Json(repos))

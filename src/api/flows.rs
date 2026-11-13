@@ -1,6 +1,6 @@
 //! Gestionnaires HTTP pour l'API REST des flux de traitement (Flows).
 
-use super::{AdminAuth, AppState};
+use super::{AdminAuth, AppState, ViewFlowsAuth};
 use crate::{
     domain::UpdateFlowRequest,
     error::{AppError, AppResult},
@@ -15,7 +15,7 @@ use axum::{
 /// Liste l'ensemble des flux configurés en base de données.
 pub async fn list_flows(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ViewFlowsAuth,
 ) -> AppResult<Json<Vec<crate::domain::FlowRecord>>> {
     let mut flows = repository::list_flows(&s.pool).await?;
     for flow in &mut flows {
@@ -28,7 +28,7 @@ pub async fn list_flows(
 pub async fn get_flow(
     State(s): State<AppState>,
     Path(id): Path<String>,
-    _auth: AdminAuth,
+    _auth: ViewFlowsAuth,
 ) -> AppResult<Json<crate::domain::FlowRecord>> {
     let mut flow = repository::get_flow(&s.pool, &id).await?;
     flow.definition = crate::flows::mask_definition(&flow.definition);

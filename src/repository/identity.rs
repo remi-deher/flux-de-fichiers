@@ -13,7 +13,7 @@ use uuid::Uuid;
 pub const INSTANCE_NAME_KEY: &str = "instance_name";
 
 /// Un compte humain. Le haché du mot de passe n'en fait jamais partie.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Account {
     pub id: String,
     pub username: String,
@@ -53,6 +53,93 @@ struct AccountCopyRow {
     role: String,
     disabled: bool,
     version: i64,
+}
+
+impl AccountRow {
+    fn into_account(self) -> AppResult<Account> {
+        self.into_parts().map(|(account, _)| account)
+    }
+}
+
+/// Comptes humains, par identifiant, sans leur haché.
+pub async fn list_accounts(pool: &SqlitePool) -> AppResult<Vec<Account>> {
+    sqlx::query_as::<_, AccountRow>(
+        "SELECT id, username, password_hash, role, disabled FROM accounts ORDER BY username",
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(AccountRow::into_account)
+    .collect()
+}
+
+/// Crée un compte ; un identifiant déjà pris donne `Conflict`.
+pub async fn create_account(
+    pool: &SqlitePool,
+    username: &str,
+    password_hash: &str,
+    role: Role,
+) -> AppResult<Account> {
+    let id = Uuid::new_v4().to_string();
+    sqlx::query("INSERT INTO accounts(id, username, password_hash, role) VALUES (?1, ?2, ?3, ?4)")
+        .bind(&id)
+        .bind(username)
+        .bind(password_hash)
+        .bind(role.as_str())
+        .execute(pool)
+        .await?;
+    Ok(Account {
+        id,
+        username: username.to_owned(),
+        role,
+        disabled: false,
+    })
+}
+
+/// Change le rôle et/ou l'état d'un compte, sans jamais laisser la centrale sans administrateur actif.
+/// La version du compte augmente et ses sessions sont fermées : les droits changent tout de suite.
+pub async fn update_account(
+    pool: &SqlitePool,
+    id: &str,
+    role: Option<Role>,
+    disabled: Option<bool>,
+) -> AppResult<Account> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let row = sqlx::query_as::<_, AccountRow>(
+        "SELECT id, username, password_hash, role, disabled FROM accounts WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    let mut account = row.into_account()?;
+    account.role = role.unwrap_or(account.role);
+    account.disabled = disabled.unwrap_or(account.disabled);
+    let active_admins: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM accounts WHERE role = 'admin' AND disabled = 0 AND id != ?1",
+    )
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let stays_active_admin = account.role == Role::Admin && !account.disabled;
+    if active_admins == 0 && !stays_active_admin {
+        return Err(AppError::Conflict);
+    }
+    sqlx::query(
+        "UPDATE accounts SET role = ?1, disabled = ?2, version = version + 1, \
+         updated_at = datetime('now') WHERE id = ?3",
+    )
+    .bind(account.role.as_str())
+    .bind(account.disabled)
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM sessions WHERE account_id = ?1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(account)
 }
 
 /// Tous les comptes avec leur haché et leur version, pour la copie vers les workers.

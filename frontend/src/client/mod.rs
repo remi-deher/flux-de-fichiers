@@ -1,5 +1,6 @@
 //! Module de logique cliente du poste de pilotage Flux de Fichiers en Rust pur.
 
+pub mod accounts;
 pub mod auth;
 pub mod core;
 pub mod files;
@@ -37,6 +38,8 @@ static CLIENT_SCRIPT: LazyLock<String> = LazyLock::new(|| {
     script.push_str(workers::SCRIPT);
     script.push_str("\n\n");
     script.push_str(keys::SCRIPT);
+    script.push_str("\n\n");
+    script.push_str(accounts::SCRIPT);
     script.push_str("\n\n");
     script.push_str(libraries::SCRIPT);
     script.push_str("\n\n");

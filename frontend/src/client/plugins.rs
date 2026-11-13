@@ -548,8 +548,6 @@ pub const SCRIPT: &str = r###"
       else if (targetId === 'subtab-plugins-app') loadToolsStatus();
       else renderCatalogRegistre();
     });
-
-    loadRepositories();
   }
 
 "###;

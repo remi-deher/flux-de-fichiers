@@ -1,4 +1,5 @@
 pub mod api;
+pub mod api_keys;
 pub mod auth;
 pub mod config;
 pub mod domain;
@@ -7,6 +8,7 @@ pub mod flows;
 pub mod local_worker;
 pub mod media;
 pub mod node;
+pub mod password;
 pub mod plugins;
 pub mod repository;
 pub mod secrets;

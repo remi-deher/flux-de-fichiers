@@ -24,13 +24,10 @@ fn remote_coordinator_requires_no_embedded_credentials() {
 }
 
 #[test]
-fn admin_and_worker_roles_are_distinct() -> anyhow::Result<()> {
-    use axum::http::HeaderMap;
-    use flux_de_fichiers::auth::authorize;
-    let mut headers = HeaderMap::new();
-    assert!(authorize(&headers, "admin").is_err());
-    headers.insert("authorization", "Bearer worker".parse()?);
-    assert!(authorize(&headers, "admin").is_err());
-    assert!(authorize(&headers, "worker").is_ok());
-    Ok(())
+fn admin_and_worker_roles_are_distinct() {
+    use flux_shared::{Permission, Role};
+    assert!(Role::Admin.allows(Permission::ManageApiKeys));
+    assert!(!Role::Admin.allows(Permission::NodeAgent));
+    assert!(Role::Worker.allows(Permission::NodeAgent));
+    assert!(!Role::Worker.allows(Permission::ManageApiKeys));
 }

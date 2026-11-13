@@ -1,5 +1,7 @@
 //! Tests d'intégration des workflows métier en Rust pur : Jobs, Workers, Tools et Storage.
 
+mod common;
+
 use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
@@ -29,8 +31,6 @@ async fn test_app() -> anyhow::Result<(axum::Router, tempfile::TempDir)> {
         tools_cache_dir: temp_dir.path().join("tools-cache"),
         plugins_dir: None,
         static_dir: "frontend/dist".into(),
-        admin_key: "test-admin-key".into(),
-        worker_key: "test-worker-key".into(),
         max_file_bytes: 10_000_000,
         local_worker: false,
         web_origin: None,
@@ -44,6 +44,7 @@ async fn test_app() -> anyhow::Result<(axum::Router, tempfile::TempDir)> {
         .connect(&config.database_url)
         .await?;
     sqlx::migrate!().run(&pool).await?;
+    common::install_keys(&pool).await?;
     let (events_tx, _) = tokio::sync::broadcast::channel(128);
     let app = router(AppState {
         pool,
@@ -64,7 +65,10 @@ async fn test_job_and_worker_workflow() -> anyhow::Result<()> {
     let req = Request::builder()
         .uri("/api/v1/jobs")
         .method("POST")
-        .header("Authorization", "Bearer test-admin-key")
+        .header(
+            "Authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .header("Content-Type", "application/json")
         .body(Body::from(new_job_payload.to_string()))?;
 
@@ -82,7 +86,10 @@ async fn test_job_and_worker_workflow() -> anyhow::Result<()> {
     let req = Request::builder()
         .uri("/api/v1/workers")
         .method("POST")
-        .header("Authorization", "Bearer test-worker-key")
+        .header(
+            "Authorization",
+            "Bearer fdf_b0000001_fedcba9876543210fedcba9876543210fedcba9876543210",
+        )
         .header("Content-Type", "application/json")
         .body(Body::from(register_payload.to_string()))?;
 
@@ -99,7 +106,10 @@ async fn test_job_and_worker_workflow() -> anyhow::Result<()> {
     let req = Request::builder()
         .uri("/api/v1/claims")
         .method("POST")
-        .header("Authorization", "Bearer test-worker-key")
+        .header(
+            "Authorization",
+            "Bearer fdf_b0000001_fedcba9876543210fedcba9876543210fedcba9876543210",
+        )
         .header("Content-Type", "application/json")
         .body(Body::from(claim_payload.to_string()))?;
 
@@ -121,7 +131,10 @@ async fn test_job_and_worker_workflow() -> anyhow::Result<()> {
     let req = Request::builder()
         .uri(format!("/api/v1/jobs/{}/heartbeat", job.id))
         .method("POST")
-        .header("Authorization", "Bearer test-worker-key")
+        .header(
+            "Authorization",
+            "Bearer fdf_b0000001_fedcba9876543210fedcba9876543210fedcba9876543210",
+        )
         .header("Content-Type", "application/json")
         .body(Body::from(serde_json::to_string(&heartbeat_payload)?))?;
 
@@ -137,7 +150,10 @@ async fn test_job_and_worker_workflow() -> anyhow::Result<()> {
     let req = Request::builder()
         .uri(format!("/api/v1/jobs/{}/failure", job.id))
         .method("POST")
-        .header("Authorization", "Bearer test-worker-key")
+        .header(
+            "Authorization",
+            "Bearer fdf_b0000001_fedcba9876543210fedcba9876543210fedcba9876543210",
+        )
         .header("Content-Type", "application/json")
         .body(Body::from(serde_json::to_string(&failure_payload)?))?;
 
@@ -148,7 +164,10 @@ async fn test_job_and_worker_workflow() -> anyhow::Result<()> {
     let req = Request::builder()
         .uri(format!("/api/v1/jobs/{}", job.id))
         .method("GET")
-        .header("Authorization", "Bearer test-admin-key")
+        .header(
+            "Authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .body(Body::empty())?;
 
     let resp = app.oneshot(req).await?;
@@ -170,7 +189,10 @@ async fn test_workers_crud_lifecycle() -> anyhow::Result<()> {
     let req = Request::builder()
         .uri("/api/v1/workers")
         .method("POST")
-        .header("Authorization", "Bearer test-worker-key")
+        .header(
+            "Authorization",
+            "Bearer fdf_b0000001_fedcba9876543210fedcba9876543210fedcba9876543210",
+        )
         .header("Content-Type", "application/json")
         .body(Body::from(register_payload.to_string()))?;
 
@@ -183,7 +205,10 @@ async fn test_workers_crud_lifecycle() -> anyhow::Result<()> {
     let req = Request::builder()
         .uri("/api/v1/workers")
         .method("GET")
-        .header("Authorization", "Bearer test-admin-key")
+        .header(
+            "Authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .body(Body::empty())?;
 
     let resp = app.clone().oneshot(req).await?;
@@ -196,7 +221,10 @@ async fn test_workers_crud_lifecycle() -> anyhow::Result<()> {
     let req = Request::builder()
         .uri(format!("/api/v1/workers/{}", worker.id))
         .method("DELETE")
-        .header("Authorization", "Bearer test-admin-key")
+        .header(
+            "Authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .body(Body::empty())?;
 
     let resp = app.clone().oneshot(req).await?;
@@ -206,7 +234,10 @@ async fn test_workers_crud_lifecycle() -> anyhow::Result<()> {
     let req = Request::builder()
         .uri(format!("/api/v1/workers/{}", worker.id))
         .method("DELETE")
-        .header("Authorization", "Bearer test-admin-key")
+        .header(
+            "Authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .body(Body::empty())?;
 
     let resp = app.oneshot(req).await?;
@@ -222,7 +253,10 @@ async fn test_tools_listing_endpoint() -> anyhow::Result<()> {
     let req = Request::builder()
         .uri("/api/v1/tools")
         .method("GET")
-        .header("Authorization", "Bearer test-admin-key")
+        .header(
+            "Authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .body(Body::empty())?;
 
     let resp = app.oneshot(req).await?;
@@ -288,7 +322,10 @@ async fn json_routes_reject_oversized_bodies_and_transfers_do_not() -> anyhow::R
         .uri("/api/v1/workers")
         .method("POST")
         .header("content-type", "application/json")
-        .header("authorization", "Bearer test-worker-key")
+        .header(
+            "authorization",
+            "Bearer fdf_b0000001_fedcba9876543210fedcba9876543210fedcba9876543210",
+        )
         .body(Body::from(oversized))?;
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
@@ -309,7 +346,10 @@ async fn failure_rejects_unknown_and_internal_error_codes() -> anyhow::Result<()
         let req = Request::builder()
             .uri("/api/v1/jobs/11111111-1111-1111-1111-111111111111/failure")
             .method("POST")
-            .header("authorization", "Bearer test-worker-key")
+            .header(
+                "authorization",
+                "Bearer fdf_b0000001_fedcba9876543210fedcba9876543210fedcba9876543210",
+            )
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::json!({

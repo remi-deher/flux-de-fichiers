@@ -5,14 +5,15 @@ info:
   description: >-
     Coordinateur centralisé, workers MKVToolNix et frontend Leptos.
     Les noms de fichiers sont des noms MKV simples présents dans INPUT_DIR.
-    Les clés administrateur et agent sont distinctes. Le bail est un secret
+    Les humains ouvrent une session par compte (identifiant et mot de passe) ; les
+    machines utilisent des clés d'API nommées et révocables (ADR 0011). Le bail est un secret
     temporaire transmis dans le corps des renouvellements ou dans un en-tête,
     jamais dans une URL. L'API accepte les clés Bearer et, pour le navigateur,
     une session cookie avec CSRF/origine. Tous les échanges distants nécessitent HTTPS.
 servers:
   - url: https://localhost:3443
 security:
-  - AdminKey: []
+  - ApiKey: []
 paths:
   /:
     get:
@@ -37,7 +38,7 @@ paths:
         '500': {$ref: '#/components/responses/Error'}
   /api/v1/files:
     get:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Lister les entrées MKV admissibles, triées par nom, maximum 500
       responses:
         '200':
@@ -55,7 +56,7 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /api/v1/libraries:
     get:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Lister les bibliothèques déclarées, triées par nom
       responses:
         '200':
@@ -67,7 +68,7 @@ paths:
                 items: {$ref: '#/components/schemas/Library'}
         default: {$ref: '#/components/responses/Error'}
     post:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Déclarer une bibliothèque
       requestBody:
         required: true
@@ -90,7 +91,7 @@ paths:
         required: true
         schema: {type: string, format: uuid}
     get:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Lire une bibliothèque
       responses:
         '200':
@@ -100,7 +101,7 @@ paths:
               schema: {$ref: '#/components/schemas/Library'}
         default: {$ref: '#/components/responses/Error'}
     put:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Remplacer le nom, le flux et les chemins de nœuds
       requestBody:
         required: true
@@ -118,14 +119,14 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
     delete:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Supprimer une bibliothèque et ses chemins de nœuds
       responses:
         '204': {description: Supprimée}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/jobs:
     get:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Lister les tâches par ordre de création décroissant
       parameters:
         - in: query
@@ -145,7 +146,7 @@ paths:
                 items: {$ref: '#/components/schemas/Job'}
         default: {$ref: '#/components/responses/Error'}
     post:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Créer une tâche et figer l'empreinte de la source
       parameters:
         - {$ref: '#/components/parameters/CsrfHeader'}
@@ -177,7 +178,7 @@ paths:
   /api/v1/jobs/{id}:
     parameters: [{$ref: '#/components/parameters/JobId'}]
     get:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Consulter l'état d'une tâche sans exposer son jeton de bail
       responses:
         '200':
@@ -189,7 +190,7 @@ paths:
   /api/v1/jobs/{id}/output:
     parameters: [{$ref: '#/components/parameters/JobId'}]
     get:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Télécharger le résultat d'une tâche réussie
       responses:
         '200':
@@ -211,7 +212,7 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins:
     get:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Catalogue lu dans les dépôts de plugins synchronisés (vide tant qu'aucun dépôt n'est synchronisé)
       responses:
         '200':
@@ -222,13 +223,13 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins/repositories:
     get:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Lister les dépôts de plugins
       responses:
         '200': {description: Dépôts, officiel en premier}
         default: {$ref: '#/components/responses/Error'}
     post:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Ajouter un dépôt ; l'URL d'index doit être http(s) et finir par /catalogue/index.json
       requestBody:
         required: true
@@ -246,7 +247,7 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins/repositories/{id}:
     delete:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Supprimer un dépôt tiers (le dépôt officiel est protégé)
       parameters: [{in: path, name: id, required: true, schema: {type: string}}]
       responses:
@@ -254,7 +255,7 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins/repositories/{id}/toggle:
     put:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Activer ou désactiver un dépôt
       parameters: [{in: path, name: id, required: true, schema: {type: string}}]
       responses:
@@ -262,7 +263,7 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins/repositories/{id}/sync:
     post:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: >-
         Synchroniser un dépôt : copie atomique de l'index, des manifestes et des contrats de
         distribution dans /config/plugins/{id}. Sans redirection, adresses privées refusées
@@ -274,17 +275,17 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins/{id}/settings:
     get:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Champs de réglages d'un plugin ; un secret n'est jamais renvoyé, seulement isSet
       parameters: [{in: path, name: id, required: true, schema: {type: string}}]
       responses:
         '200': {description: Champs résolus et réglages publics}
         default: {$ref: '#/components/responses/Error'}
     put:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: >-
         Enregistrer les réglages d'un plugin du catalogue. Les secrets saisis sont chiffrés
-        (ChaCha20-Poly1305, clé /config/secret_key) ; un secret laissé vide est conservé.
+        (ChaCha20-Poly1305, clé générée dans /config, liée au plugin et au champ) ; un secret laissé vide est conservé.
         Maximum 64 clés et 64 Kio.
       parameters: [{in: path, name: id, required: true, schema: {type: string}}]
       requestBody:
@@ -298,14 +299,14 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /api/v1/tools:
     get:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: État des outils du catalogue dans le cache du coordinateur (ready ou not_installed)
       responses:
         '200': {description: Outils}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/tools/{id}/distribution:
     get:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Contrat de distribution d'un outil, lu dans le dépôt synchronisé
       parameters: [{in: path, name: id, required: true, schema: {type: string}}]
       responses:
@@ -313,7 +314,7 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /api/v1/tools/{id}/install:
     post:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: >-
         Installer un outil du catalogue dans le cache du coordinateur : téléchargement https,
         redirections revérifiées, SHA-256 de l'archive et du binaire contrôlés avant exécution.
@@ -324,7 +325,7 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /api/v1/worker/tools/{id}/distribution:
     get:
-      security: [{WorkerKey: []}]
+      security: [{ApiKey: []}]
       summary: Contrat de distribution d'un outil pour un worker, qui l'installe dans son propre cache
       parameters: [{in: path, name: id, required: true, schema: {type: string}}]
       responses:
@@ -341,41 +342,158 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/WebSession'}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/setup/status:
+    get:
+      security: []
+      summary: Indiquer si la centrale attend son installation
+      responses:
+        '200':
+          description: État d'installation et nom de la centrale une fois installée
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [needsSetup]
+                properties:
+                  needsSetup: {type: boolean}
+                  instanceName: {type: [string, 'null']}
+  /api/v1/setup/central:
     post:
       security: []
-      summary: Ouvrir une session web avec la clé administrateur
+      summary: Installer la centrale (usage unique) et ouvrir la session de l'administrateur
       description: >-
-        Origin doit correspondre exactement à WEB_ORIGIN. La clé est transmise
-        dans un corps JSON, jamais dans une URL. Le serveur pose un cookie de
-        session HttpOnly, SameSite=Strict, Secure lorsque WEB_ORIGIN est HTTPS,
-        et un cookie CSRF lisible par le frontend. Durée par défaut 8 h.
-      parameters:
-        - in: header
-          name: Origin
-          required: true
-          description: Doit correspondre exactement à WEB_ORIGIN.
-          schema: {type: string, format: uri}
+        Crée le compte administrateur (mot de passe haché en Argon2id), enregistre le nom
+        de la centrale et génère le secret de chiffrement. Refusé en 409 `already_configured`
+        dès qu'un compte existe. Origin exact requis ; la session est posée comme à la connexion.
+      parameters: [{$ref: '#/components/parameters/OriginHeader'}]
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [admin_key]
+              required: [name, username, password]
               properties:
-                admin_key: {type: string, writeOnly: true}
+                name: {type: string}
+                username: {type: string, minLength: 3, maxLength: 40}
+                password: {type: string, minLength: 8, writeOnly: true}
       responses:
         '200':
-          description: Session créée ; les deux cookies sont posés et la réponse n'est pas mise en cache
-          headers:
-            Set-Cookie:
-              description: flux_session (HttpOnly) et flux_csrf (lisible par le client), Path=/, SameSite=Strict
-              schema: {type: string}
+          description: Installation faite et session ouverte
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WebSession'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/auth/login:
+    post:
+      security: []
+      summary: Ouvrir une session web avec un compte
+      description: >-
+        Origin exact requis. Le serveur pose un cookie de session HttpOnly, SameSite=Strict
+        (Secure si WEB_ORIGIN est HTTPS) et un cookie CSRF lisible par le frontend. Les échecs
+        répétés sont limités : 429 `too_many_attempts`.
+      parameters: [{$ref: '#/components/parameters/OriginHeader'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: {type: string}
+                password: {type: string, writeOnly: true}
+      responses:
+        '200':
+          description: Session créée ; réponse non mise en cache
           content:
             application/json:
               schema: {$ref: '#/components/schemas/WebSession'}
         '401': {$ref: '#/components/responses/Error'}
-        '403': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/me:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Identité, rôle, droits et type de nœud de l'appelant
+      description: L'interface n'affiche que ce que ces droits permettent ; chaque route les revérifie.
+      responses:
+        '200':
+          description: Profil courant
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kind: {type: string, enum: [account, apiKey]}
+                  name: {type: string}
+                  role: {type: string, enum: [admin, worker]}
+                  permissions: {type: array, items: {type: string}}
+                  nodeKind: {type: string, enum: [central, worker]}
+                  instanceName: {type: [string, 'null']}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/account/password:
+    put:
+      security: [{WebSession: []}]
+      summary: Changer le mot de passe du compte connecté
+      description: Les autres sessions du compte sont fermées.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: {type: string, writeOnly: true}
+                new_password: {type: string, minLength: 8, writeOnly: true}
+      responses:
+        '204': {description: Mot de passe modifié}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/api-keys:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Lister les clés d'API (sans secret ni haché)
+      responses:
+        '200':
+          description: Clés actives d'abord
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/ApiKey'}}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Créer une clé d'API ; sa valeur n'est renvoyée qu'ici
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, role]
+              properties:
+                name: {type: string}
+                role: {type: string, enum: [admin, worker]}
+      responses:
+        '200':
+          description: Clé créée (format fdf_<id>_<secret>)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/ApiKey'}
+                  - type: object
+                    properties:
+                      key: {type: string}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/api-keys/{id}:
+    delete:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Révoquer une clé d'API
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '204': {description: Clé révoquée}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/auth/logout:
     post:
@@ -395,7 +513,7 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /api/v1/workers:
     get:
-      security: [{AdminKey: []}, {WebSession: []}]
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Lister les agents enregistrés, maximum 200
       responses:
         '200':
@@ -407,7 +525,7 @@ paths:
                 items: {$ref: '#/components/schemas/Worker'}
         default: {$ref: '#/components/responses/Error'}
     post:
-      security: [{WorkerKey: []}]
+      security: [{ApiKey: []}]
       summary: Enregistrer un agent ; le même nom conserve son UUID après redémarrage
       requestBody:
         required: true
@@ -427,7 +545,7 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /api/v1/claims:
     post:
-      security: [{WorkerKey: []}]
+      security: [{ApiKey: []}]
       summary: Réserver atomiquement la prochaine tâche disponible pour cet agent
       requestBody:
         required: true
@@ -451,7 +569,7 @@ paths:
   /api/v1/jobs/{id}/heartbeat:
     parameters: [{$ref: '#/components/parameters/JobId'}]
     post:
-      security: [{WorkerKey: []}]
+      security: [{ApiKey: []}]
       summary: Renouveler un bail actif ; agent configuré à un renouvellement toutes les 20 s
       requestBody: {$ref: '#/components/requestBodies/Lease'}
       responses:
@@ -461,7 +579,7 @@ paths:
   /api/v1/jobs/{id}/failure:
     parameters: [{$ref: '#/components/parameters/JobId'}]
     post:
-      security: [{WorkerKey: []}]
+      security: [{ApiKey: []}]
       summary: Marquer une tâche active en échec terminal
       requestBody:
         required: true
@@ -484,7 +602,7 @@ paths:
       - {$ref: '#/components/parameters/WorkerId'}
       - {$ref: '#/components/parameters/LeaseToken'}
     get:
-      security: [{WorkerKey: []}]
+      security: [{ApiKey: []}]
       summary: Télécharger la source pour un bail actif ; l'agent vérifie son empreinte
       responses:
         '200':
@@ -500,7 +618,7 @@ paths:
       - {$ref: '#/components/parameters/WorkerId'}
       - {$ref: '#/components/parameters/LeaseToken'}
     put:
-      security: [{WorkerKey: []}]
+      security: [{ApiKey: []}]
       summary: Téléverser puis valider et publier le résultat atomiquement
       parameters:
         - in: header
@@ -519,9 +637,8 @@ paths:
         default: {$ref: '#/components/responses/Error'}
 components:
   securitySchemes:
-    AdminKey: {type: http, scheme: bearer, description: Clé administrateur ; si Authorization existe elle a priorité sur le cookie, sans repli en cas d'invalidité}
-    WebSession: {type: apiKey, in: cookie, name: flux_session, description: Session web administrateur avec CSRF sur les méthodes mutantes}
-    WorkerKey: {type: http, scheme: bearer, description: Clé du groupe d'agents de confiance}
+    ApiKey: {type: http, scheme: bearer, description: "Clé d'API fdf_<id>_<secret> (rôle admin ou worker) ; si Authorization existe elle a priorité sur le cookie, sans repli en cas d'invalidité"}
+    WebSession: {type: apiKey, in: cookie, name: flux_session, description: Session web d'un compte avec CSRF sur les méthodes mutantes}
   parameters:
     JobId:
       in: path
@@ -575,6 +692,15 @@ components:
                 properties:
                   code: {type: string}
   schemas:
+    ApiKey:
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        role: {type: string, enum: [admin, worker]}
+        createdAt: {type: string}
+        lastUsedAt: {type: [string, 'null']}
+        revokedAt: {type: [string, 'null']}
     WebSession:
       type: object
       required: [csrf_token, expires_at]

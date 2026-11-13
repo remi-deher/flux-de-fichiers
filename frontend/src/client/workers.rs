@@ -109,9 +109,6 @@ pub const SCRIPT: &str = r###"
   let cachedSystemConfig = null;
 
   async function loadSystemConfig() {
-    const configWorkerKey = el('worker-key-display');
-    const btnToggleWorkerKey = el('btn-toggle-worker-key');
-    const btnCopyWorkerKey = el('btn-copy-worker-key');
     const configVersion = el('config-version');
     const configLocalWorker = el('config-local-worker');
     const configMaxBytes = el('config-max-file-bytes');
@@ -134,30 +131,12 @@ pub const SCRIPT: &str = r###"
       if (settingsLocalWorker) settingsLocalWorker.textContent = workerStatusText;
       if (configMaxBytes) configMaxBytes.textContent = formatBytes(cfg.max_file_bytes);
 
-      if (configWorkerKey) {
-        configWorkerKey.value = cfg.worker_key || '';
-        configWorkerKey.placeholder = 'Clé prête';
-      }
-      if (btnToggleWorkerKey) btnToggleWorkerKey.disabled = false;
-      if (btnCopyWorkerKey) btnCopyWorkerKey.disabled = false;
-
       const origin = window.location.origin || 'http://localhost:3000';
       if (dockerCmd) {
-        const keyVal = cfg.worker_key || '<WORKER_KEY>';
-        dockerCmd.textContent = `docker run -d --name flux-worker -e COORDINATOR_URL=${origin} -e WORKER_KEY=${keyVal} -v /chemin/data:/data flux-de-fichiers worker`;
+        dockerCmd.textContent = `docker run -d --name flux-worker -e COORDINATOR_URL=${origin} -e WORKER_KEY=<CLÉ_API_WORKER> -v /chemin/data:/data flux-de-fichiers worker`;
       }
     } catch {
       cachedSystemConfig = null;
-      if (configWorkerKey) {
-        configWorkerKey.value = '';
-        configWorkerKey.type = 'password';
-        configWorkerKey.placeholder = 'Ouvrez une session admin pour révéler la clé';
-      }
-      if (btnToggleWorkerKey) {
-        btnToggleWorkerKey.disabled = true;
-        btnToggleWorkerKey.textContent = 'Afficher';
-      }
-      if (btnCopyWorkerKey) btnCopyWorkerKey.disabled = true;
       if (configLocalWorker) configLocalWorker.textContent = '— (session requise)';
       if (configVersion) configVersion.textContent = '—';
       if (configMaxBytes) configMaxBytes.textContent = '—';
@@ -166,43 +145,14 @@ pub const SCRIPT: &str = r###"
 
       const origin = window.location.origin || 'http://localhost:3000';
       if (dockerCmd) {
-        dockerCmd.textContent = `docker run -d --name flux-worker -e COORDINATOR_URL=${origin} -e WORKER_KEY=<WORKER_KEY> -v /chemin/data:/data flux-de-fichiers worker`;
+        dockerCmd.textContent = `docker run -d --name flux-worker -e COORDINATOR_URL=${origin} -e WORKER_KEY=<CLÉ_API_WORKER> -v /chemin/data:/data flux-de-fichiers worker`;
       }
     }
   }
 
   function setupWorkerConfigUi() {
-    const btnToggle = el('btn-toggle-worker-key');
-    const inputKey = el('worker-key-display');
-    const btnCopyKey = el('btn-copy-worker-key');
     const btnCopyCmd = el('btn-copy-worker-cmd');
     const dockerCmd = el('docker-worker-cmd');
-
-    if (btnToggle && inputKey) {
-      btnToggle.addEventListener('click', () => {
-        if (inputKey.type === 'password') {
-          inputKey.type = 'text';
-          btnToggle.textContent = 'Masquer';
-        } else {
-          inputKey.type = 'password';
-          btnToggle.textContent = 'Afficher';
-        }
-      });
-    }
-
-    if (btnCopyKey && inputKey) {
-      btnCopyKey.addEventListener('click', async () => {
-        if (!inputKey.value) return;
-        try {
-          await navigator.clipboard.writeText(inputKey.value);
-          showNotice('Clé worker copiée dans le presse-papier !', 'success');
-        } catch {
-          inputKey.select();
-          document.execCommand('copy');
-          showNotice('Clé worker copiée !', 'success');
-        }
-      });
-    }
 
     // L'action de capsule ouvre le tiroir directement sur le volet de raccordement.
     const connectBtn = el('btn-workers-connect');

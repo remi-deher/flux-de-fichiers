@@ -30,9 +30,10 @@ installée dans le cache du nœud (ADR 0004, 0007).
    exécution, et l'extraction refuse tout lien ou type spécial. L'installation se déclenche
    avant un job qui exige la sonde, et par `POST /api/v1/tools/{id}/install`.
 6. **Secrets** : les champs `secret` (et tout nom contenant `key`, `token`, `secret`,
-   `password`) sont chiffrés au repos (ChaCha20-Poly1305, clé `/config/secret_key` créée en
-   0600). L'API ne les renvoie jamais (`isSet`) ; un champ laissé vide conserve la valeur.
-   Un ancien enregistrement en clair est chiffré à sa première lecture.
+   `password`) sont chiffrés au repos (ChaCha20-Poly1305, clé générée dans `/config`, 0600, ou
+   `SECRET_KEY_FILE`). L'API ne les renvoie jamais (`isSet`) ; un champ laissé vide conserve la valeur.
+   Un ancien enregistrement en clair est chiffré à sa première lecture. Depuis l'ADR 0011 le
+   format est `enc:v2:<id de clé>:<données>`, lié au plugin et au champ (données associées).
 
 7. **En-têtes de webhook** : les valeurs de `config.custom_headers` d'un bloc `webhook` sont
    chiffrées dans la définition du flux (même clé, même format que les secrets de plugins).

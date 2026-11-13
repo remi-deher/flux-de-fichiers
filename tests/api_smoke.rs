@@ -1,5 +1,7 @@
 //! Tests d'intégration rapides en Rust pur pour l'API du coordinateur.
 
+mod common;
+
 use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
@@ -22,8 +24,6 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
         static_dir: "frontend/dist".into(),
-        admin_key: "test-admin-key".into(),
-        worker_key: "test-worker-key".into(),
         max_file_bytes: 10_000_000,
         local_worker: false,
         web_origin: None,
@@ -35,6 +35,7 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         .connect(&config.database_url)
         .await?;
     sqlx::migrate!().run(&pool).await?;
+    common::install_keys(&pool).await?;
     let (events_tx, _) = tokio::sync::broadcast::channel(128);
     Ok(router(AppState {
         pool,
@@ -88,7 +89,10 @@ async fn test_smoke_auth_protection() -> anyhow::Result<()> {
     let req_auth = Request::builder()
         .uri("/api/v1/files")
         .method("GET")
-        .header("Authorization", "Bearer test-admin-key")
+        .header(
+            "Authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .body(Body::empty())?;
     let resp_auth = app.oneshot(req_auth).await?;
     assert_eq!(resp_auth.status(), StatusCode::OK);
@@ -102,14 +106,17 @@ async fn test_smoke_config_endpoint() -> anyhow::Result<()> {
     let req = Request::builder()
         .uri("/api/v1/config")
         .method("GET")
-        .header("Authorization", "Bearer test-admin-key")
+        .header(
+            "Authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .body(Body::empty())?;
 
     let resp = app.oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::OK);
     let bytes = to_bytes(resp.into_body(), 64 * 1024).await?;
     let json: serde_json::Value = serde_json::from_slice(&bytes)?;
-    assert_eq!(json["worker_key"], "test-worker-key");
+    assert!(json.get("worker_key").is_none());
     assert_eq!(json["max_file_bytes"], 10_000_000);
     Ok(())
 }

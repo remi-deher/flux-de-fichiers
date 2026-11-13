@@ -3,7 +3,7 @@
 use crate::{
     core::{Header, Sidebar},
     features::{
-        activity::JobsPanel, dashboard::DashboardPanel, flows::FlowsPanel,
+        activity::JobsPanel, auth::AuthGate, dashboard::DashboardPanel, flows::FlowsPanel,
         libraries::LibrariesPanel, plugins::PluginsPanel, settings::SettingsPanel,
         updates::UpdatesPanel, workers::WorkersPanel,
     },
@@ -16,7 +16,8 @@ pub fn App() -> impl IntoView {
         <a href="#main-content" class="skip-link">
             "Aller au contenu principal"
         </a>
-        <div class="application-shell">
+        <AuthGate />
+        <div id="application-shell" class="application-shell" hidden>
             <div class="application-navigation-layout">
                 // Barre latérale persistante (Sidebar Rail)
                 <Sidebar />

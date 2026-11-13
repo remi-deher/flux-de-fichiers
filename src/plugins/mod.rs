@@ -26,7 +26,7 @@ pub use sources::{
 };
 pub use sync::{SyncError, SyncPolicy, SyncReport, sync_repository, validate_index_url};
 
-pub use secret_settings::{mask, migrate_plaintext, seal, secret_names};
+pub use secret_settings::{mask, migrate_plaintext, plugin_secret_aad, seal, secret_names};
 pub use settings::{
     ResolvedSettingsField, SettingsField, SettingsFieldType, SettingsSchema, resolve_setting_value,
     resolve_settings_fields,

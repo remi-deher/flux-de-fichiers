@@ -17,8 +17,6 @@ pub struct Config {
     pub tools_cache_dir: PathBuf,
     pub plugins_dir: Option<PathBuf>,
     pub static_dir: PathBuf,
-    pub admin_key: String,
-    pub worker_key: String,
     pub max_file_bytes: u64,
     pub local_worker: bool,
     pub web_origin: Option<String>,
@@ -50,46 +48,6 @@ fn resolve_config_dir() -> PathBuf {
     } else {
         PathBuf::from("var/config")
     }
-}
-
-fn bootstrap_secret(config_dir: &Path, env_name: &str, file_name: &str) -> anyhow::Result<String> {
-    if env::var(env_name).is_ok() || env::var(format!("{env_name}_FILE")).is_ok() {
-        return secret(env_name);
-    }
-    let key_path = config_dir.join(file_name);
-    if key_path.is_file() {
-        let val = std::fs::read_to_string(&key_path)?.trim().to_owned();
-        if val.len() >= 32 {
-            return Ok(val);
-        }
-    }
-    let mut bytes = [0u8; 32];
-    let mut urandom = std::fs::File::open("/dev/urandom")?;
-    use std::io::Read;
-    urandom.read_exact(&mut bytes)?;
-    let generated: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    write_secure_file(&key_path, &generated)?;
-    Ok(generated)
-}
-
-fn write_secure_file(path: &Path, content: &str) -> anyhow::Result<()> {
-    use std::io::Write;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(path)?;
-    file.write_all(content.as_bytes())?;
-    file.flush()?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
 }
 
 pub fn coordinator_url(raw: &str) -> anyhow::Result<reqwest::Url> {
@@ -129,23 +87,6 @@ impl Config {
             (Err(_), Err(_)) => None,
             _ => anyhow::bail!("TLS_CERT and TLS_KEY must be supplied together"),
         };
-
-        let admin_key = bootstrap_secret(&config_dir, "ADMIN_KEY", "admin_key")?;
-        let mut worker_key = bootstrap_secret(&config_dir, "WORKER_KEY", "worker_key")?;
-        if admin_key == worker_key {
-            // If identical, regenerate a distinct worker key file
-            let key_path = config_dir.join("worker_key");
-            let mut bytes = [0u8; 32];
-            let mut urandom = std::fs::File::open("/dev/urandom")?;
-            use std::io::Read;
-            urandom.read_exact(&mut bytes)?;
-            worker_key = bytes.iter().map(|b| format!("{b:02x}")).collect();
-            write_secure_file(&key_path, &worker_key)?;
-        }
-        anyhow::ensure!(
-            admin_key != worker_key,
-            "Admin and worker credentials must differ"
-        );
 
         let max_file_bytes = env::var("MAX_FILE_BYTES")
             .unwrap_or_else(|_| "536870912".into())
@@ -205,8 +146,6 @@ impl Config {
         Ok(Self {
             bind,
             tls,
-            admin_key,
-            worker_key,
             max_file_bytes,
             local_worker: env::var("LOCAL_WORKER")
                 .map(|value| value != "false" && value != "0")

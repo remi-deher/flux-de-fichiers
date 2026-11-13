@@ -1,9 +1,8 @@
 use crate::{
-    auth,
     config::Config,
     error::{AppError, AppResult},
 };
-use axum::http::{HeaderMap, Method, header};
+use axum::http::{HeaderMap, header};
 use chrono::{DateTime, Duration, Utc};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
@@ -26,9 +25,14 @@ pub struct ValidatedSession {
     pub token_hash: String,
     pub csrf_hash: String,
     pub expires_at: DateTime<Utc>,
+    pub account_id: String,
 }
 
-pub async fn create(pool: &SqlitePool, ttl_seconds: i64) -> AppResult<WebSession> {
+pub async fn create(
+    pool: &SqlitePool,
+    ttl_seconds: i64,
+    account_id: &str,
+) -> AppResult<WebSession> {
     let token = Uuid::new_v4().to_string();
     let csrf_token = Uuid::new_v4().to_string();
     let token_hash = digest(&token);
@@ -37,10 +41,13 @@ pub async fn create(pool: &SqlitePool, ttl_seconds: i64) -> AppResult<WebSession
     sqlx::query("DELETE FROM sessions WHERE datetime(expires_at) <= datetime('now')")
         .execute(pool)
         .await?;
-    sqlx::query("INSERT INTO sessions(token_hash, expires_at, csrf_hash) VALUES (?1, ?2, ?3)")
-        .bind(&token_hash)
-        .bind(expires_at)
-        .bind(&csrf_hash)
+    sqlx::query(
+        "INSERT INTO sessions(token_hash, expires_at, csrf_hash, account_id) VALUES (?1, ?2, ?3, ?4)",
+    )
+    .bind(&token_hash)
+    .bind(expires_at)
+    .bind(&csrf_hash)
+    .bind(account_id)
         .execute(pool)
         .await?;
     Ok(WebSession {
@@ -90,17 +97,18 @@ pub fn validate_origin(headers: &HeaderMap, config: &Config) -> AppResult<()> {
 pub async fn from_headers(pool: &SqlitePool, headers: &HeaderMap) -> AppResult<ValidatedSession> {
     let token = cookie(headers, SESSION_COOKIE).ok_or(AppError::Unauthorized)?;
     let token_hash = digest(token);
-    let row: Option<(String, DateTime<Utc>)> = sqlx::query_as(
-        "SELECT csrf_hash, expires_at FROM sessions WHERE token_hash=?1 AND csrf_hash IS NOT NULL AND datetime(expires_at) > datetime('now')",
+    let row: Option<(String, DateTime<Utc>, String)> = sqlx::query_as(
+        "SELECT csrf_hash, expires_at, account_id FROM sessions WHERE token_hash=?1 AND csrf_hash IS NOT NULL AND account_id IS NOT NULL AND datetime(expires_at) > datetime('now')",
     )
     .bind(&token_hash)
     .fetch_optional(pool)
     .await?;
-    let (csrf_hash, expires_at) = row.ok_or(AppError::Unauthorized)?;
+    let (csrf_hash, expires_at, account_id) = row.ok_or(AppError::Unauthorized)?;
     Ok(ValidatedSession {
         token_hash,
         csrf_hash,
         expires_at,
+        account_id,
     })
 }
 
@@ -127,25 +135,6 @@ pub fn validate_csrf_cookie<'a>(
     } else {
         Err(AppError::Forbidden)
     }
-}
-
-pub async fn authorize_admin(
-    pool: &SqlitePool,
-    config: &Config,
-    headers: &HeaderMap,
-    method: &Method,
-) -> AppResult<()> {
-    // An explicit Authorization header selects Bearer auth; do not fall back to
-    // ambient cookies when that credential is malformed or invalid.
-    if headers.contains_key(header::AUTHORIZATION) {
-        return auth::authorize(headers, &config.admin_key);
-    }
-    let session = from_headers(pool, headers).await?;
-    if !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS) {
-        validate_origin(headers, config)?;
-        validate_csrf(headers, &session)?;
-    }
-    Ok(())
 }
 
 pub async fn revoke(pool: &SqlitePool, session: &ValidatedSession) -> AppResult<()> {

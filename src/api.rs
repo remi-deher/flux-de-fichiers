@@ -1,12 +1,14 @@
 pub mod auth;
 mod flows;
 mod jobs;
+mod keys;
 mod libraries;
 mod plugins;
 mod session;
+mod setup;
 pub(crate) mod transfers;
-use crate::{auth::authorize, config::Config, domain::*, error::AppResult, repository};
-pub use auth::AdminAuth;
+use crate::{config::Config, domain::*, error::AppResult, repository};
+pub use auth::{AdminAuth, AnyAuth};
 use axum::{
     Router,
     extract::State,
@@ -139,10 +141,14 @@ fn json_routes() -> Router<AppState> {
             "/api/v1/worker/tools/{id}/distribution",
             get(plugins::worker_tool_distribution),
         )
-        .route(
-            "/api/v1/auth/session",
-            get(session::current).post(session::login),
-        )
+        .route("/api/v1/auth/session", get(session::current))
+        .route("/api/v1/auth/login", post(session::login))
+        .route("/api/v1/setup/status", get(setup::status))
+        .route("/api/v1/setup/central", post(setup::setup_central))
+        .route("/api/v1/me", get(session::me))
+        .route("/api/v1/account/password", put(session::change_password))
+        .route("/api/v1/api-keys", get(keys::list).post(keys::create))
+        .route("/api/v1/api-keys/{id}", axum::routing::delete(keys::revoke))
         .route("/api/v1/auth/logout", post(session::logout))
         .route("/api/v1/jobs", get(jobs::list).post(jobs::create))
         .route("/api/v1/jobs/{id}", get(jobs::get_job))
@@ -235,7 +241,7 @@ async fn register(
     h: HeaderMap,
     axum::Json(r): axum::Json<Register>,
 ) -> AppResult<axum::Json<Worker>> {
-    authorize(&h, &s.config.worker_key)?;
+    crate::auth::authorize_worker(&s.pool, &h).await?;
     if r.name.is_empty()
         || r.name.len() > 80
         || !r
@@ -252,7 +258,7 @@ async fn claim(
     h: HeaderMap,
     axum::Json(r): axum::Json<ClaimRequest>,
 ) -> AppResult<axum::Json<Option<Claim>>> {
-    authorize(&h, &s.config.worker_key)?;
+    crate::auth::authorize_worker(&s.pool, &h).await?;
     let mut claim_res = repository::claim(&s.pool, r.worker_id).await?;
     if let Some(ref mut claim) = claim_res {
         let roots = crate::plugins::catalog_roots(&s.pool, &s.config).await;

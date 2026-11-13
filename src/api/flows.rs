@@ -53,7 +53,7 @@ pub async fn save_flow(
             .map(|flow| flow.definition);
         let secrets = crate::secrets::SecretBox::open(&s.config.config_dir)?;
         payload.definition =
-            crate::flows::seal_definition(&secrets, &payload.definition, existing.as_deref())?;
+            crate::flows::seal_definition(&secrets, &id, &payload.definition, existing.as_deref())?;
     }
     let mut flow = repository::save_flow(&s.pool, &id, &payload).await?;
     flow.definition = crate::flows::mask_definition(&flow.definition);

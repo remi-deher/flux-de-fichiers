@@ -5,7 +5,7 @@
 //! client bascule l'attribut `hidden` d'après `data-capsule-tab`. Une zone d'outils
 //! secondaires pourra s'ajouter quand une page en aura besoin.
 
-use super::panel::{FILES, FLOWS, PLUGINS, Panel, WORKERS};
+use super::panel::{FILES, FLOWS, PLUGINS, Panel, SETTINGS, WORKERS};
 use crate::shared::ui::{Icon, IconName};
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,7 @@ pub enum CapsuleContext {
     FlowEditor,
     Workers,
     Plugins,
+    Settings,
 }
 
 impl CapsuleContext {
@@ -33,6 +34,7 @@ impl CapsuleContext {
             Self::FlowEditor => "flow-editor",
             Self::Workers => "workers",
             Self::Plugins => "plugins",
+            Self::Settings => "settings",
         }
     }
 
@@ -43,6 +45,7 @@ impl CapsuleContext {
             Self::Flows | Self::FlowEditor => FLOWS,
             Self::Workers => WORKERS,
             Self::Plugins => PLUGINS,
+            Self::Settings => SETTINGS,
         }
     }
 }
@@ -116,6 +119,14 @@ pub const CAPSULE_ACTIONS: &[CapsuleAction] = &[
         context: CapsuleContext::Workers,
     },
     CapsuleAction {
+        id: "api-key-new-btn",
+        label: "Créer une clé",
+        aria_label: Some("Créer une clé d'API"),
+        icon: IconName::Plus,
+        tone: CapsuleTone::Primary,
+        context: CapsuleContext::Settings,
+    },
+    CapsuleAction {
         id: "btn-open-add-repo-dialog",
         label: "Ajouter un dépôt",
         aria_label: Some("Ajouter un nouveau dépôt de plugins"),
@@ -156,12 +167,13 @@ mod tests {
     use crate::core::panel::panels;
     use std::collections::HashSet;
 
-    const ALL_CONTEXTS: [CapsuleContext; 5] = [
+    const ALL_CONTEXTS: [CapsuleContext; 6] = [
         CapsuleContext::Files,
         CapsuleContext::Flows,
         CapsuleContext::FlowEditor,
         CapsuleContext::Workers,
         CapsuleContext::Plugins,
+        CapsuleContext::Settings,
     ];
 
     #[test]
@@ -185,6 +197,7 @@ mod tests {
         assert_eq!(CapsuleContext::Flows.as_attr(), FLOWS.slug);
         assert_eq!(CapsuleContext::Workers.as_attr(), WORKERS.slug);
         assert_eq!(CapsuleContext::Plugins.as_attr(), PLUGINS.slug);
+        assert_eq!(CapsuleContext::Settings.as_attr(), SETTINGS.slug);
         assert_eq!(CapsuleContext::FlowEditor.panel().slug, FLOWS.slug);
     }
 

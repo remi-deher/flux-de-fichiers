@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "frontend"]
+members = [".", "frontend", "shared"]
 resolver = "2"
 
 [package]
@@ -10,6 +10,8 @@ rust-version = "1.99"
 
 [dependencies]
 anyhow = "1.0"
+argon2 = "0.5"
+flux-shared = { path = "shared" }
 axum = { version = "0.8", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde"] }
 flate2 = "1.0"

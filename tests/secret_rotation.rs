@@ -24,7 +24,25 @@ async fn seeded_pool(secrets: &SecretBox) -> anyhow::Result<sqlx::SqlitePool> {
         .max_connections(1)
         .connect("sqlite::memory:")
         .await?;
-    sqlx::migrate!().run(&pool).await?;
+    seed(&pool, secrets).await?;
+    Ok(pool)
+}
+
+/// Même contenu dans un fichier, comme la base de production : c'est ce cas que la sauvegarde doit couvrir.
+async fn seeded_file_pool(secrets: &SecretBox, file: &Path) -> anyhow::Result<sqlx::SqlitePool> {
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(file)
+        .create_if_missing(true);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await?;
+    seed(&pool, secrets).await?;
+    Ok(pool)
+}
+
+async fn seed(pool: &sqlx::SqlitePool, secrets: &SecretBox) -> anyhow::Result<()> {
+    sqlx::migrate!().run(pool).await?;
     let settings = json!({
         "url": "http://arr",
         "apiKey": secrets.encrypt("CLE-ARR", &plugin_secret_aad(PLUGIN, "apiKey"))?,
@@ -32,7 +50,7 @@ async fn seeded_pool(secrets: &SecretBox) -> anyhow::Result<sqlx::SqlitePool> {
     sqlx::query("INSERT INTO plugin_settings (plugin_id, settings) VALUES (?1, ?2)")
         .bind(PLUGIN)
         .bind(settings.to_string())
-        .execute(&pool)
+        .execute(pool)
         .await?;
     let definition = json!({"nodes": [
         {"id": "n0", "type": "file-input"},
@@ -44,9 +62,9 @@ async fn seeded_pool(secrets: &SecretBox) -> anyhow::Result<sqlx::SqlitePool> {
     sqlx::query("INSERT INTO flows (id, name, definition) VALUES (?1, 'Webhook', ?2)")
         .bind(FLOW)
         .bind(definition.to_string())
-        .execute(&pool)
+        .execute(pool)
         .await?;
-    Ok(pool)
+    Ok(())
 }
 
 async fn stored_api_key(pool: &sqlx::SqlitePool) -> anyhow::Result<String> {
@@ -150,7 +168,7 @@ async fn test_a_second_rotation_with_the_old_key_is_refused() -> anyhow::Result<
 async fn test_local_key_rotation_backs_up_then_replaces_the_key_file() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let old = SecretBox::open(dir.path())?;
-    let pool = seeded_pool(&old).await?;
+    let pool = seeded_file_pool(&old, &dir.path().join("live.db")).await?;
     let old_key_file = std::fs::read_to_string(SecretBox::local_key_path(dir.path()))?;
 
     let outcome = rotate_local_key(&pool, dir.path()).await?;

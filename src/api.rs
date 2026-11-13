@@ -166,6 +166,7 @@ fn json_routes() -> Router<AppState> {
             "/api/v1/accounts",
             get(accounts::list).post(accounts::create),
         )
+        .route("/api/v1/system/status", get(system::status))
         .route("/api/v1/accounts/{id}", put(accounts::update))
         .route("/api/v1/api-keys", get(keys::list).post(keys::create))
         .route("/api/v1/api-keys/{id}", axum::routing::delete(keys::revoke))

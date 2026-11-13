@@ -1,5 +1,8 @@
 //! Bibliothèque frontend Leptos pour Flux de Fichiers.
 
+// Les vues Leptos imbriquées (page Paramètres, barre latérale) dépassent la limite par défaut de 128.
+#![recursion_limit = "512"]
+
 pub mod app;
 pub mod client;
 pub mod core;

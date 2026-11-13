@@ -41,29 +41,40 @@ pub struct MeResponse {
     instance_name: Option<String>,
 }
 
+/// Vérifie un identifiant et un mot de passe en limitant les essais ; `Unauthorized` sans distinguer
+/// compte inconnu, compte désactivé ou mauvais mot de passe.
+pub(super) async fn verify_credentials(
+    pool: &sqlx::SqlitePool,
+    username: &str,
+    password: String,
+) -> AppResult<repository::Account> {
+    let username = username.trim();
+    auth::check_login_allowed(username)?;
+    let found = repository::find_account_by_username(pool, username).await?;
+    let account = match found {
+        Some((account, hash)) if !account.disabled => {
+            password::verify(password, hash).await.then_some(account)
+        }
+        _ => {
+            password::verify_decoy(password).await;
+            None
+        }
+    };
+    let Some(account) = account else {
+        auth::record_login_failure(username);
+        return Err(AppError::Unauthorized);
+    };
+    auth::record_login_success(username);
+    Ok(account)
+}
+
 pub async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<LoginRequest>,
 ) -> AppResult<Response> {
     web_session::validate_origin(&headers, &state.config)?;
-    let username = request.username.trim().to_owned();
-    auth::check_login_allowed(&username)?;
-    let found = repository::find_account_by_username(&state.pool, &username).await?;
-    let account = match found {
-        Some((account, hash)) if !account.disabled => password::verify(request.password, hash)
-            .await
-            .then_some(account),
-        _ => {
-            password::verify_decoy(request.password).await;
-            None
-        }
-    };
-    let Some(account) = account else {
-        auth::record_login_failure(&username);
-        return Err(AppError::Unauthorized);
-    };
-    auth::record_login_success(&username);
+    let account = verify_credentials(&state.pool, &request.username, request.password).await?;
     open_session(&state, &account).await
 }
 

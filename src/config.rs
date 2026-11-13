@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+const DEFAULT_BIND_ADDRESS: &str = "0.0.0.0:3000";
 const DEFAULT_WEB_SESSION_TTL_SECONDS: i64 = 28_800;
 const MAX_WEB_SESSION_TTL_SECONDS: i64 = 2_592_000;
 
@@ -38,7 +39,8 @@ pub fn secret(name: &str) -> anyhow::Result<String> {
     Ok(value)
 }
 
-fn resolve_config_dir() -> PathBuf {
+/// Dossier de configuration persistant (`/config` en conteneur).
+pub fn resolve_config_dir() -> PathBuf {
     if let Ok(dir) = env::var("CONFIG_DIR") {
         return PathBuf::from(dir);
     }
@@ -48,6 +50,14 @@ fn resolve_config_dir() -> PathBuf {
     } else {
         PathBuf::from("var/config")
     }
+}
+
+/// Adresse d'écoute du port HTTP unique, la même pour la centrale et le worker.
+pub fn bind_address() -> anyhow::Result<SocketAddr> {
+    let raw = env::var("BIND_ADDR")
+        .or_else(|_| env::var("BIND"))
+        .unwrap_or_else(|_| DEFAULT_BIND_ADDRESS.into());
+    Ok(raw.parse()?)
 }
 
 pub fn coordinator_url(raw: &str) -> anyhow::Result<reqwest::Url> {
@@ -77,10 +87,7 @@ impl Config {
         let config_dir = resolve_config_dir();
         std::fs::create_dir_all(&config_dir)?;
 
-        let bind_str = env::var("BIND_ADDR")
-            .or_else(|_| env::var("BIND"))
-            .unwrap_or_else(|_| "0.0.0.0:3000".into());
-        let bind: SocketAddr = bind_str.parse()?;
+        let bind = bind_address()?;
 
         let tls = match (env::var("TLS_CERT"), env::var("TLS_KEY")) {
             (Ok(cert), Ok(key)) => Some((cert.into(), key.into())),

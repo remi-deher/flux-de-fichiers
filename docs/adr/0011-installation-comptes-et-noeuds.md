@@ -63,14 +63,28 @@ des comptes avec mot de passe pour les humains, des clés d'API pour les machine
 automatique, crate `flux-shared`, interface de connexion, Réglages → compte et clés d'API).
 Vérifiée en local, non déployée.
 
+**Phase 2 faite** (code écrit ; tests Rust à exécuter par la CI, rien lancé en local) :
+- `src/node_settings.rs` : le rôle worker est conservé dans `/config/node.json` (nom, adresse de la
+  centrale) et la clé du nœud dans `/config/worker.key` (mode 0600). Sans fichier, le nœud démarre en
+  centrale ; `coordinator` et `worker` restent acceptés comme arguments.
+- Enrôlement : `POST /api/v1/nodes/enroll` (centrale, identifiants d'un administrateur, limités en essais)
+  renvoie une fois une clé de rôle worker ; `POST /api/v1/setup/worker` (nœud non installé) l'appelle,
+  conserve le rôle puis relance le processus en worker sans redémarrage du conteneur
+  (`node::request_role_switch`). Une centrale installée ou un nœud déjà worker répond 409.
+- Worker HTTP (`src/worker_http.rs`, même port 3000) : `/health`, `/api/v1/node/status`,
+  `/api/v1/setup/status` ; la centrale expose aussi `/api/v1/node/status`. Un port occupé ne bloque pas
+  le worker.
+- Assistant : choix du rôle (centrale ou worker) puis formulaire d'enrôlement ; un worker enrôlé affiche
+  un écran d'information en attendant les vues de la phase 3.
+- Limites : le mot de passe administrateur transite vers l'adresse saisie sur la page d'installation
+  (acceptable sur réseau de confiance, comme la fenêtre de réclamation) ; la redirection n'est pas suivie.
+
 **Reste à faire :**
-- Phase 2 : choix du rôle (centrale ou worker) dans l'assistant, serveur HTTP du worker, enrôlement
-  avec le compte administrateur (adresse de la centrale, nom du nœud), clé d'API propre au nœud
-  renvoyée une fois, statut et santé HTTP pour les deux rôles, démarrage sans argument.
 - Phase 3 : vues du worker en lecture seule (vue d'ensemble du nœud, tâches, outils, plugins) via des
   routes de la centrale limitées au nœud ; connexion déléguée à la centrale, comptes copiés
   (centrale → worker, versionnés, suppressions incluses) en secours ; sessions du worker en mémoire.
-- Phase 4 : tests des phases 2 et 3, `openapi.yaml`, ADR, `docs/developpement.md`.
+- Phase 4 : tests de la phase 3 et mise à jour de la documentation correspondante (`openapi.yaml` couvre déjà
+  les routes de la phase 2).
 - Déploiement : pousser `dev → test → main` (ADR 0002), approuver les runs `action_required`,
   remettre l'installation de test à zéro (supprimer `/config` après sauvegarde ; confirmer avant de
   toucher `/data`), recréer le compte par l'assistant, créer les clés worker dans Réglages, mettre à

@@ -13,6 +13,7 @@ Ce guide se consulte à la demande. Le README reste la référence d'utilisation
 | Transferts, intégrité, publication | `src/api/transfers.rs`, `src/storage.rs` | `src/media.rs`, `src/worker.rs` |
 | Remuxage MKV | `src/media.rs`, `src/worker.rs` | `scripts/scenarios.py` |
 | Interface Leptos | `frontend/` | `frontend/README.md` |
+| Rôle du nœud, enrôlement d'un worker | `src/node.rs`, `src/node_settings.rs`, `src/api/nodes.rs` | `src/worker_http.rs`, `tests/nodes_api.rs`, `docs/adr/0011-installation-comptes-et-noeuds.md` |
 | Configuration, TLS | `src/config.rs`, `tests/configuration.rs` | `compose.yaml`, `deploy/` ; déploiement dans le README |
 | Laboratoire Docker | `package.json`, `scripts/dev.py`, `compose.yaml` | Scénarios du README, `deploy/fixtures.Dockerfile` |
 | CI, branches, publication | `docs/adr/0002-flux-git.md` | Workflow concerné dans `.github/workflows/`, `scripts/ci/` |

@@ -8,10 +8,22 @@ pub const SCRIPT: &str = r###"
   const AUTH_ERROR_MESSAGES = {
     unauthenticated: 'Identifiant ou mot de passe incorrect.',
     too_many_attempts: 'Trop d\'essais : réessayez dans quelques minutes.',
-    invalid_input: 'Vérifiez les champs : identifiant de 3 à 40 caractères (lettres, chiffres, . - _), mot de passe d\'au moins 8 caractères.',
-    already_configured: 'La centrale est déjà installée : connectez-vous.',
-    forbidden: 'Requête refusée (origine non autorisée).'
+    invalid_input: 'Vérifiez les champs : identifiant de 3 à 40 caractères (lettres, chiffres, . - _), mot de passe d\'au moins 8 caractères, nom de nœud (lettres, chiffres, . - _) et adresse de la centrale sans chemin.',
+    already_configured: 'Ce nœud est déjà installé : rechargez la page.',
+    forbidden: 'Requête refusée : le compte doit être administrateur et l\'origine autorisée.',
+    central_unavailable: 'Centrale injoignable : vérifiez son adresse.'
   };
+
+  // Chaque écran de la porte d'accès : formulaire affiché, titre, sous-titre et champ à focaliser.
+  const GATE_VIEWS = {
+    role: { form: 'role-choice', title: 'Bienvenue', subtitle: 'Choisissez le rôle de ce nœud.', focus: 'role-central-btn' },
+    setup: { form: 'setup-form', title: 'Installation de la centrale', subtitle: 'Créez le compte administrateur pour commencer.', focus: 'setup-name' },
+    'worker-setup': { form: 'worker-setup-form', title: 'Enrôlement du worker', subtitle: 'Rattachez ce nœud à une centrale existante.', focus: 'worker-url' },
+    login: { form: 'login-form', title: 'Connexion', focus: 'login-username' },
+    worker: { form: null, title: 'Nœud worker' }
+  };
+  const WORKER_START_POLL_MS = 1000;
+  const WORKER_START_MAX_POLLS = 30;
 
   function authErrorMessage(code) {
     return AUTH_ERROR_MESSAGES[code] || 'Opération impossible. Réessayez.';
@@ -22,27 +34,28 @@ pub const SCRIPT: &str = r###"
     if (node) node.textContent = message || '';
   }
 
-  // Affiche l'écran d'accès : kind vaut 'setup' (installation) ou 'login' (connexion).
-  function showAuthGate(kind, instanceName) {
+  // Affiche un écran de la porte d'accès (clé de GATE_VIEWS) ; `detail` complète le sous-titre.
+  function showAuthGate(kind, detail) {
+    const view = GATE_VIEWS[kind];
     const gate = el('auth-gate');
     const shell = el('application-shell');
-    const setupForm = el('setup-form');
-    const loginForm = el('login-form');
     if (typeof stopJobsSse === 'function') stopJobsSse();
     if (shell) shell.hidden = true;
     if (gate) gate.hidden = false;
-    if (setupForm) setupForm.hidden = kind !== 'setup';
-    if (loginForm) loginForm.hidden = kind !== 'login';
+    Object.values(GATE_VIEWS).forEach(other => {
+      const form = other.form && el(other.form);
+      if (form) form.hidden = other !== view;
+    });
     const title = el('auth-gate-title');
     const subtitle = el('auth-gate-subtitle');
-    if (title) title.textContent = kind === 'setup' ? 'Installation de la centrale' : 'Connexion';
+    if (title) title.textContent = view.title;
     if (subtitle) {
-      subtitle.textContent = kind === 'setup'
-        ? 'Créez le compte administrateur pour commencer.'
-        : (instanceName || '');
+      subtitle.textContent = kind === 'worker'
+        ? `Le nœud « ${detail || ''} » est enrôlé : il se pilote depuis la centrale.`
+        : (view.subtitle || detail || '');
     }
     setAuthGateError('');
-    const focusTarget = el(kind === 'setup' ? 'setup-name' : 'login-username');
+    const focusTarget = view.focus && el(view.focus);
     if (focusTarget) focusTarget.focus();
   }
 
@@ -106,7 +119,11 @@ pub const SCRIPT: &str = r###"
       return false;
     }
     if (status.needsSetup) {
-      showAuthGate('setup');
+      showAuthGate('role');
+      return false;
+    }
+    if (status.nodeKind === 'worker') {
+      showAuthGate('worker', status.instanceName);
       return false;
     }
     const session = await fetchJson('/api/v1/auth/session');
@@ -167,6 +184,62 @@ pub const SCRIPT: &str = r###"
     }, 'Installation impossible.');
     el('setup-password').value = '';
     el('setup-password-confirm').value = '';
+  }
+
+  // Enrôle ce nœud auprès d'une centrale, puis attend qu'il ait redémarré en worker.
+  async function submitWorkerSetup(event) {
+    event.preventDefault();
+    setAuthGateError('');
+    const nodeName = el('worker-name').value;
+    try {
+      const res = await fetch('/api/v1/setup/worker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          coordinator_url: el('worker-url').value,
+          username: el('worker-username').value,
+          password: el('worker-password').value,
+          node_name: nodeName
+        })
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAuthGateError(authErrorMessage(body.error && body.error.code));
+        return;
+      }
+    } catch {
+      setAuthGateError('Ce nœud est injoignable.');
+      return;
+    } finally {
+      el('worker-password').value = '';
+    }
+    await waitForWorkerStart(nodeName);
+  }
+
+  async function waitForWorkerStart(nodeName) {
+    for (let attempt = 0; attempt < WORKER_START_MAX_POLLS; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, WORKER_START_POLL_MS));
+      const status = await fetchJson('/api/v1/setup/status');
+      if (status && status.nodeKind === 'worker') {
+        showAuthGate('worker', status.instanceName || nodeName);
+        return;
+      }
+    }
+    setAuthGateError('Le worker met du temps à démarrer : rechargez la page.');
+  }
+
+  // Navigation entre les écrans de la porte d'accès.
+  function setupAuthGate() {
+    const bind = (id, event, handler) => {
+      const node = el(id);
+      if (node) node.addEventListener(event, handler);
+    };
+    bind('role-central-btn', 'click', () => showAuthGate('setup'));
+    bind('role-worker-btn', 'click', () => showAuthGate('worker-setup'));
+    bind('setup-back-btn', 'click', () => showAuthGate('role'));
+    bind('worker-back-btn', 'click', () => showAuthGate('role'));
+    bind('worker-setup-form', 'submit', submitWorkerSetup);
   }
 
   async function submitLogin(event) {

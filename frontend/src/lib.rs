@@ -180,6 +180,8 @@ mod tests {
         assert!(html.contains("function loadFlows"));
         assert!(html.contains("function bootstrapAuth"));
         assert!(html.contains("function submitSetup"));
+        assert!(html.contains("function submitWorkerSetup"));
+        assert!(html.contains("function setupAuthGate"));
         assert!(html.contains("function applyAccess"));
         assert!(html.contains("function loadApiKeys"));
         assert!(!html.contains("volatileAdminKey"));

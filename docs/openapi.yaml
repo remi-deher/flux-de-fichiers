@@ -385,6 +385,83 @@ paths:
               schema: {$ref: '#/components/schemas/WebSession'}
         '409': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/setup/worker:
+    post:
+      security: []
+      summary: Transformer un nœud non installé en worker (usage unique)
+      description: >-
+        Enrôle ce nœud auprès de la centrale `coordinator_url` avec les identifiants d'un
+        administrateur, conserve le rôle et la clé dans `/config`, puis relance le processus en
+        worker. 409 `already_configured` si le nœud est installé ou déjà worker ; 502
+        `central_unavailable` si la centrale est injoignable. Origin exact requis.
+      parameters: [{$ref: '#/components/parameters/OriginHeader'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [coordinator_url, username, password, node_name]
+              properties:
+                coordinator_url: {type: string, description: Origine de la centrale, sans chemin}
+                username: {type: string}
+                password: {type: string, writeOnly: true}
+                node_name: {type: string, maxLength: 80, pattern: '^[A-Za-z0-9._-]+$'}
+      responses:
+        '202': {description: Enrôlement fait, le nœud redémarre en worker}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/nodes/enroll:
+    post:
+      security: []
+      summary: Créer la clé d'API d'un nœud worker
+      description: >-
+        Réservé aux identifiants d'un administrateur (essais limités). Renvoie une clé de rôle
+        worker, affichée une seule fois. Sans cookie : appel de machine à machine.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, node_name]
+              properties:
+                username: {type: string}
+                password: {type: string, writeOnly: true}
+                node_name: {type: string, maxLength: 80, pattern: '^[A-Za-z0-9._-]+$'}
+      responses:
+        '200':
+          description: Clé du nœud
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key]
+                properties:
+                  key: {type: string}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/node/status:
+    get:
+      security: []
+      summary: État public du nœud (centrale ou worker)
+      responses:
+        '200':
+          description: Type de nœud et version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nodeKind, version]
+                properties:
+                  nodeKind: {type: string, enum: [central, worker]}
+                  version: {type: string}
+                  installed: {type: boolean, description: Centrale seulement}
+                  name: {type: string, description: Worker seulement}
+                  coordinatorUrl: {type: string, description: Worker seulement}
+                  registered: {type: boolean, description: Worker seulement}
+                  coordinatorReachable: {type: boolean, description: Worker seulement}
   /api/v1/auth/login:
     post:
       security: []

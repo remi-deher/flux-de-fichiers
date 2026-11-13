@@ -1,12 +1,18 @@
 use crate::{
     config,
     domain::{Claim, ClaimRequest, Failure, LeaseRequest, Register, Worker},
-    media, storage,
+    media, node_settings, storage,
+    worker_http::WorkerState,
 };
 use anyhow::Context;
 use futures_util::StreamExt;
 use reqwest::{Client, RequestBuilder};
-use std::{env, path::PathBuf, time::Duration};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
@@ -21,17 +27,30 @@ pub struct WorkerConfig {
     pub max_bytes: u64,
 }
 impl WorkerConfig {
-    pub fn load() -> anyhow::Result<Self> {
+    /// Un worker enrôlé lit adresse, nom et clé dans `/config` ; sinon (automatisation) dans l'environnement.
+    pub fn load(config_dir: &Path) -> anyhow::Result<Self> {
         let work_dir: PathBuf = env::var("WORK_DIR")
             .unwrap_or_else(|_| "var/work".into())
             .into();
         let tools_cache_dir = env::var("TOOLS_CACHE_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| work_dir.join("tools-cache"));
+        let (url, key, name) = match node_settings::load_worker(config_dir)? {
+            Some(enrolled) => (
+                config::coordinator_url(&enrolled.coordinator_url)?,
+                node_settings::load_worker_key(config_dir)?,
+                enrolled.name,
+            ),
+            None => (
+                config::coordinator_url(&env::var("COORDINATOR_URL")?)?,
+                config::secret("WORKER_KEY")?,
+                env::var("WORKER_NAME").or_else(|_| env::var("HOSTNAME"))?,
+            ),
+        };
         Ok(Self {
-            url: config::coordinator_url(&env::var("COORDINATOR_URL")?)?,
-            key: config::secret("WORKER_KEY")?,
-            name: env::var("WORKER_NAME").or_else(|_| env::var("HOSTNAME"))?,
+            url,
+            key,
+            name,
             work_dir,
             tools_cache_dir,
             ca: env::var("CA_CERT").ok().map(Into::into),
@@ -44,6 +63,7 @@ impl WorkerConfig {
 struct Agent {
     client: Client,
     config: WorkerConfig,
+    status: Arc<WorkerState>,
 }
 impl Agent {
     fn request(&self, method: reqwest::Method, path: &str) -> RequestBuilder {
@@ -274,12 +294,7 @@ impl Agent {
 
 pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
     anyhow::ensure!(
-        !config.name.is_empty()
-            && config.name.len() <= 80
-            && config
-                .name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)),
+        node_settings::is_valid_node_name(&config.name),
         "Invalid WORKER_NAME"
     );
     anyhow::ensure!(config.max_bytes > 0, "MAX_FILE_BYTES must be positive");
@@ -292,68 +307,84 @@ pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
         builder = builder
             .add_root_certificate(reqwest::Certificate::from_pem(&tokio::fs::read(ca).await?)?);
     }
+    let status = WorkerState::new(&config.name, config.url.as_str().trim_end_matches('/'));
+    let http = tokio::spawn(crate::worker_http::serve(status.clone()));
     let agent = Agent {
         client: builder.build()?,
         config,
+        status,
     };
-    let worker = loop {
-        let attempt = async {
-            agent
-                .request(reqwest::Method::POST, "/api/v1/workers")
-                .timeout(Duration::from_secs(10))
-                .json(&Register {
-                    name: agent.config.name.clone(),
-                })
-                .send()
-                .await?
-                .error_for_status()?
-                .json::<Worker>()
-                .await
+    let outcome = agent.work().await;
+    http.abort();
+    outcome
+}
+
+impl Agent {
+    /// Enregistre le worker puis réclame des tâches jusqu'à l'arrêt.
+    async fn work(&self) -> anyhow::Result<()> {
+        let agent = self;
+        let worker = loop {
+            let attempt = async {
+                agent
+                    .request(reqwest::Method::POST, "/api/v1/workers")
+                    .timeout(Duration::from_secs(10))
+                    .json(&Register {
+                        name: agent.config.name.clone(),
+                    })
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json::<Worker>()
+                    .await
+            };
+            tokio::select! {
+                result = attempt => match result { Ok(worker) => break worker, Err(_) => tracing::warn!("registration unavailable; retrying") },
+                _ = crate::api::shutdown_signal() => return Ok(()),
+            }
+            tokio::select! { _=tokio::time::sleep(Duration::from_secs(5))=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
         };
-        tokio::select! {
-            result = attempt => match result { Ok(worker) => break worker, Err(_) => tracing::warn!("registration unavailable; retrying") },
-            _ = crate::api::shutdown_signal() => return Ok(()),
-        }
-        tokio::select! { _=tokio::time::sleep(Duration::from_secs(5))=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
-    };
-    tracing::info!(worker_id=%worker.id, "worker registered");
-    agent.purge_orphaned_work_artifacts().await;
-    let mut was_disconnected = false;
-    loop {
-        let attempt = async {
-            let claim = agent
-                .request(reqwest::Method::POST, "/api/v1/claims")
-                .timeout(Duration::from_secs(10))
-                .json(&ClaimRequest {
-                    worker_id: worker.id,
-                })
-                .send()
-                .await?
-                .error_for_status()?
-                .json::<Option<Claim>>()
-                .await?;
-            Ok::<_, anyhow::Error>(claim)
-        };
-        let claim = tokio::select! { result=attempt=>result, _=crate::api::shutdown_signal()=>return Ok(()) };
-        match claim {
-            Ok(Some(claim)) => {
-                if was_disconnected {
-                    agent.purge_orphaned_work_artifacts().await;
-                    was_disconnected = false;
+        tracing::info!(worker_id=%worker.id, "worker registered");
+        agent.status.mark_registered();
+        agent.status.mark_coordinator_reachable(true);
+        agent.purge_orphaned_work_artifacts().await;
+        let mut was_disconnected = false;
+        loop {
+            let attempt = async {
+                let claim = agent
+                    .request(reqwest::Method::POST, "/api/v1/claims")
+                    .timeout(Duration::from_secs(10))
+                    .json(&ClaimRequest {
+                        worker_id: worker.id,
+                    })
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json::<Option<Claim>>()
+                    .await?;
+                Ok::<_, anyhow::Error>(claim)
+            };
+            let claim = tokio::select! { result=attempt=>result, _=crate::api::shutdown_signal()=>return Ok(()) };
+            agent.status.mark_coordinator_reachable(claim.is_ok());
+            match claim {
+                Ok(Some(claim)) => {
+                    if was_disconnected {
+                        agent.purge_orphaned_work_artifacts().await;
+                        was_disconnected = false;
+                    }
+                    agent.execute(claim, worker.id).await?;
                 }
-                agent.execute(claim, worker.id).await?;
-            }
-            Ok(None) => {
-                if was_disconnected {
-                    agent.purge_orphaned_work_artifacts().await;
-                    was_disconnected = false;
+                Ok(None) => {
+                    if was_disconnected {
+                        agent.purge_orphaned_work_artifacts().await;
+                        was_disconnected = false;
+                    }
+                }
+                Err(_) => {
+                    was_disconnected = true;
+                    tracing::warn!("coordinator unavailable; retrying");
                 }
             }
-            Err(_) => {
-                was_disconnected = true;
-                tracing::warn!("coordinator unavailable; retrying");
-            }
+            tokio::select! { _=tokio::time::sleep(Duration::from_secs(1))=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
         }
-        tokio::select! { _=tokio::time::sleep(Duration::from_secs(1))=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
     }
 }

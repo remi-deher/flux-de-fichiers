@@ -3,6 +3,7 @@ mod flows;
 mod jobs;
 mod keys;
 mod libraries;
+mod nodes;
 mod plugins;
 mod session;
 mod setup;
@@ -145,6 +146,9 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/auth/login", post(session::login))
         .route("/api/v1/setup/status", get(setup::status))
         .route("/api/v1/setup/central", post(setup::setup_central))
+        .route("/api/v1/setup/worker", post(nodes::setup_worker))
+        .route("/api/v1/nodes/enroll", post(nodes::enroll))
+        .route("/api/v1/node/status", get(nodes::status))
         .route("/api/v1/me", get(session::me))
         .route("/api/v1/account/password", put(session::change_password))
         .route("/api/v1/api-keys", get(keys::list).post(keys::create))
@@ -242,13 +246,7 @@ async fn register(
     axum::Json(r): axum::Json<Register>,
 ) -> AppResult<axum::Json<Worker>> {
     crate::auth::authorize_worker(&s.pool, &h).await?;
-    if r.name.is_empty()
-        || r.name.len() > 80
-        || !r
-            .name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
-    {
+    if !crate::node_settings::is_valid_node_name(&r.name) {
         return Err(crate::error::AppError::Invalid);
     }
     Ok(axum::Json(repository::register(&s.pool, &r.name).await?))
@@ -335,7 +333,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         },
         Err(error) => tracing::warn!(error = %error, "clé de chiffrement indisponible"),
     }
-    tokio::spawn(plugin_sync_loop(state.clone()));
+    let plugin_sync = tokio::spawn(plugin_sync_loop(state.clone()));
     let app = router(state);
     tracing::info!(%addr, "coordinator started");
     if let Some((cert, key)) = tls {
@@ -357,11 +355,20 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
             .with_graceful_shutdown(shutdown_signal())
             .await?;
     }
+    plugin_sync.abort();
     pool.close().await;
     Ok(())
 }
 
+/// Arrêt demandé : signal du système ou changement de rôle du nœud.
 pub async fn shutdown_signal() {
+    tokio::select! {
+        () = os_termination_signal() => {},
+        () = crate::node::role_switch_requested() => {},
+    }
+}
+
+async fn os_termination_signal() {
     #[cfg(unix)]
     {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {

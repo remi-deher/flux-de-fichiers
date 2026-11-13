@@ -79,6 +79,7 @@ pub const SCRIPT: &str = r###"
     // Accès : installation, connexion, compte
     const setupForm = el('setup-form');
     if (setupForm) setupForm.addEventListener('submit', submitSetup);
+    if (typeof setupAuthGate === 'function') setupAuthGate();
     const loginForm = el('login-form');
     if (loginForm) loginForm.addEventListener('submit', submitLogin);
     const logoutBtn = el('account-logout-btn');

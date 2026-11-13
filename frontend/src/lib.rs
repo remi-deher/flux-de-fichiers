@@ -12,9 +12,14 @@ pub mod theme;
 
 use leptos::prelude::*;
 
-/// Génère la page HTML complète avec les métadonnées W3C, les styles et le contrôleur client.
-pub fn render_full_page() -> String {
-    let body_html = app::App().to_html();
+/// Chemin public du client WASM (ADR 0014) et dossier de ses fichiers dans `dist`.
+pub const APP_PATH: &str = "/app/";
+pub const APP_DIST_DIR: &str = "app";
+/// Module ES produit par `wasm-bindgen --target web` dans `dist/app/pkg`.
+pub const APP_MODULE: &str = "./pkg/flux_client.js";
+
+/// Document HTML commun : métadonnées W3C et styles du thème, autour d'un corps donné.
+fn html_document(body: &str) -> String {
     format!(
         r##"<!doctype html>
 <html lang="fr">
@@ -37,20 +42,41 @@ pub fn render_full_page() -> String {
 </head>
 <body>
 {body}
-  <script>
-{scripts}
-  </script>
 </body>
 </html>"##,
         styles = theme::get_all_styles(),
-        body = body_html,
-        scripts = client::get_client_script()
     )
+}
+
+/// Génère la page HTML complète avec les métadonnées W3C, les styles et le contrôleur client.
+pub fn render_full_page() -> String {
+    let body = format!(
+        "{}\n  <script>\n{}\n  </script>",
+        app::App().to_html(),
+        client::get_client_script()
+    );
+    html_document(&body)
+}
+
+/// Page du client WASM : mêmes styles, le corps est monté par le module `flux_client`.
+pub fn render_app_page() -> String {
+    html_document(&format!(
+        "  <script type=\"module\">import init from \"{APP_MODULE}\"; init();</script>"
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn app_page_loads_the_wasm_module_with_the_shared_styles() {
+        let html = render_app_page();
+        assert!(html.contains("type=\"module\""));
+        assert!(html.contains("./pkg/flux_client.js"));
+        assert!(html.contains("<style>"));
+        assert!(!html.contains("function syncCapsuleActions"));
+    }
 
     #[test]
     fn test_render_full_page_contains_modern_standards_metadata() {

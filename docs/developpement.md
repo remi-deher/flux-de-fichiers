@@ -12,7 +12,8 @@ Ce guide se consulte à la demande. Le README reste la référence d'utilisation
 | Baux, attribution, reprises | `src/repository.rs`, `src/domain.rs` | `migrations/`, `src/worker.rs` |
 | Transferts, intégrité, publication | `src/api/transfers.rs`, `src/storage.rs` | `src/media.rs`, `src/worker.rs` |
 | Remuxage MKV | `src/media.rs`, `src/worker.rs` | `scripts/scenarios.py` |
-| Interface Leptos | `frontend/` | `frontend/README.md` |
+| Interface historique (page statique + script) | `frontend/` | `frontend/README.md` |
+| Client WASM (`/app/`, ADR 0014) | `client/src/`, contrat dans `shared/src/` | `docs/adr/0014-client-leptos-wasm.md`, `Dockerfile` |
 | Page Paramètres, barre latérale (compte, thème) | `frontend/src/features/settings/`, `frontend/src/core/shell.rs`, `frontend/src/client/settings.rs` | `src/api/system.rs`, `tests/system_status.rs` |
 | Rôle de l'installation, enrôlement d'un worker | `src/instance.rs`, `src/worker_settings.rs`, `src/api/installation.rs` | `src/worker_http.rs`, `src/api/worker_view.rs`, `tests/installation_api.rs`, `tests/worker_web.rs`, `docs/adr/0011-installation-comptes-et-noeuds.md` |
 | Secrets chiffrés, rotation de clé, mot de passe oublié | `src/secrets.rs`, `src/secret_rotation.rs`, `src/account_admin.rs` | `tests/secret_rotation.rs`, `tests/password_reset.rs`, `docs/adr/0011-installation-comptes-et-noeuds.md` |

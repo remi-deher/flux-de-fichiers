@@ -252,7 +252,7 @@ pub(crate) async fn serve_spa(
     if req.uri().path().starts_with("/api/") {
         return not_found();
     }
-    let index_file = static_dir.join("index.html");
+    let index_file = spa_index(static_dir, req.uri().path());
     if !index_file.is_file() {
         return not_found();
     }
@@ -261,6 +261,20 @@ pub(crate) async fn serve_spa(
     match serve_service.oneshot(req).await {
         Ok(res) => res.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+/// Préfixe du client WASM (ADR 0014) ; ses routes retombent sur sa propre page.
+const APP_PREFIX: &str = "/app";
+
+/// Page servie pour une route d'interface inconnue : celle du client WASM sous `/app`,
+/// sinon l'interface historique.
+pub(crate) fn spa_index(static_dir: &std::path::Path, path: &str) -> std::path::PathBuf {
+    let in_app = path == APP_PREFIX || path.starts_with(&format!("{APP_PREFIX}/"));
+    if in_app {
+        static_dir.join("app").join("index.html")
+    } else {
+        static_dir.join("index.html")
     }
 }
 
@@ -417,5 +431,21 @@ async fn os_termination_signal() {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+#[cfg(test)]
+mod spa_tests {
+    use super::spa_index;
+    use std::path::Path;
+
+    #[test]
+    fn app_routes_fall_back_to_the_wasm_client_page() {
+        let dir = Path::new("/static");
+        assert_eq!(spa_index(dir, "/app"), dir.join("app/index.html"));
+        assert_eq!(spa_index(dir, "/app/jobs"), dir.join("app/index.html"));
+        assert_eq!(spa_index(dir, "/"), dir.join("index.html"));
+        assert_eq!(spa_index(dir, "/flows"), dir.join("index.html"));
+        assert_eq!(spa_index(dir, "/application"), dir.join("index.html"));
     }
 }

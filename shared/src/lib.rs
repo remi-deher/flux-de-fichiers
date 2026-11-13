@@ -3,6 +3,10 @@
 //! Ils sont définis une seule fois : le backend s'en sert pour contrôler l'accès de chaque route,
 //! le frontend pour ne montrer que ce que l'utilisateur peut faire (ADR 0011).
 
+pub mod format;
+pub mod jobs;
+pub mod session;
+
 use serde::{Deserialize, Serialize};
 
 /// Type d'installation : décide de ce qui existe sur le serveur.

@@ -1,6 +1,6 @@
 //! Fonctions pures du poste de pilotage, testées en Rust puis émises dans le script.
 
-pub const BYTE_UNITS: [&str; 5] = ["o", "Kio", "Mio", "Gio", "Tio"];
+pub use flux_shared::format::{BYTE_UNITS, format_bytes};
 pub const VIDEO_FLOW_KEYWORDS: [&str; 4] = ["mkv", "vidéo", "mp4", "hevc"];
 
 const HTML_ESCAPES: [(&str, &str); 5] = [
@@ -32,31 +32,6 @@ pub fn escape_html(value: &str) -> String {
         }
     }
     escaped
-}
-
-pub fn format_bytes(bytes: u64) -> String {
-    if bytes == 0 {
-        return format!("0 {}", BYTE_UNITS[0]);
-    }
-    let mut index = 0;
-    let mut scaled = bytes;
-    while scaled >= 1024 && index < BYTE_UNITS.len() - 1 {
-        scaled /= 1024;
-        index += 1;
-    }
-    let divisor = 1024_u64.pow(index as u32) as f64;
-    let rounded = ((bytes as f64 / divisor) * 100.0).round() / 100.0;
-    format!("{} {}", trim_fixed(rounded), BYTE_UNITS[index])
-}
-
-fn trim_fixed(value: f64) -> String {
-    let fixed = format!("{value:.2}");
-    let trimmed = fixed.trim_end_matches('0').trim_end_matches('.');
-    if trimmed.is_empty() {
-        "0".to_owned()
-    } else {
-        trimmed.to_owned()
-    }
 }
 
 pub fn job_status_class(status: &str) -> &'static str {

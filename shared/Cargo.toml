@@ -3,10 +3,17 @@ name = "flux-shared"
 version = "0.15.0"
 edition = "2024"
 rust-version = "1.99"
-description = "Types partagés entre le coordinateur et le frontend : rôles, droits, type de nœud."
+description = "Types partagés entre le central et l'interface : rôles, droits, contrat des tâches."
+
+[features]
+# Dérivations SQLx des types persistés, pour le central seulement (le client WASM n'en a pas besoin).
+sqlx = ["dep:sqlx"]
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["serde", "std"] }
 serde = { version = "1.0", features = ["derive"] }
+sqlx = { version = "0.8", default-features = false, features = ["derive", "chrono", "uuid"], optional = true }
+uuid = { version = "1.18", default-features = false, features = ["serde", "std"] }
 
 [dev-dependencies]
 serde_json = "1.0"

@@ -241,7 +241,7 @@ async fn logout(State(web): Web, headers: HeaderMap) -> AppResult<Response> {
 async fn me(State(web): Web, headers: HeaderMap) -> AppResult<Json<session::MeResponse>> {
     let account = web.authorize(&headers, &Method::GET, Permission::ViewOverview)?;
     Ok(Json(session::MeResponse::new(
-        "account",
+        session::CallerKind::Account,
         account.username,
         account.role,
         InstanceKind::Worker,

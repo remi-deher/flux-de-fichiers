@@ -13,8 +13,8 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use flux_shared::{InstanceKind, Role};
-use serde::{Deserialize, Serialize};
+use flux_shared::InstanceKind;
+use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
@@ -22,24 +22,7 @@ pub struct LoginRequest {
     pub(crate) password: String,
 }
 
-#[derive(Serialize)]
-pub struct SessionResponse {
-    pub(crate) csrf_token: String,
-    pub(crate) expires_at: String,
-    pub(crate) username: String,
-}
-
-/// Identité de l'appelant et ce qu'il peut faire, pour que l'interface n'affiche que le permis.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MeResponse {
-    kind: &'static str,
-    name: String,
-    role: &'static str,
-    permissions: Vec<&'static str>,
-    instance_kind: InstanceKind,
-    instance_name: Option<String>,
-}
+pub use flux_shared::session::{CallerKind, Me as MeResponse, SessionInfo as SessionResponse};
 
 /// Vérifie un identifiant et un mot de passe en limitant les essais ; `Unauthorized` sans distinguer
 /// compte inconnu, compte désactivé ou mauvais mot de passe.
@@ -123,30 +106,6 @@ pub(crate) fn cleared_session_response(config: &crate::config::Config) -> AppRes
     Ok(no_store(response))
 }
 
-impl MeResponse {
-    /// Identité renvoyée par `GET /api/v1/me`, sur un central comme sur un worker.
-    pub(crate) fn new(
-        kind: &'static str,
-        name: String,
-        role: Role,
-        instance_kind: InstanceKind,
-        instance_name: Option<String>,
-    ) -> Self {
-        Self {
-            kind,
-            name,
-            role: role.as_str(),
-            permissions: role
-                .permissions()
-                .into_iter()
-                .map(flux_shared::Permission::as_str)
-                .collect(),
-            instance_kind,
-            instance_name,
-        }
-    }
-}
-
 pub async fn me(
     State(state): State<AppState>,
     AnyAuth(principal): AnyAuth,
@@ -154,8 +113,8 @@ pub async fn me(
     let instance_name = repository::get_setting(&state.pool, repository::INSTANCE_NAME_KEY).await?;
     Ok(Json(MeResponse::new(
         match principal.kind {
-            PrincipalKind::Account => "account",
-            PrincipalKind::ApiKey => "api_key",
+            PrincipalKind::Account => CallerKind::Account,
+            PrincipalKind::ApiKey => CallerKind::ApiKey,
         },
         principal.name.clone(),
         principal.role,

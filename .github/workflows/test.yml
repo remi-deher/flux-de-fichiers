@@ -81,6 +81,12 @@ jobs:
         run: cargo clippy --all-targets --locked -- -D warnings
       - if: needs.changes.outputs.code == 'true'
         run: cargo test --locked
+      - if: needs.changes.outputs.code == 'true'
+        name: Contrat partagé et client WASM (ADR 0014)
+        run: |
+          cargo clippy -p flux-shared -p flux-client --all-targets --locked -- -D warnings
+          cargo clippy -p flux-client --target wasm32-unknown-unknown --locked -- -D warnings
+          cargo test -p flux-shared -p flux-client --locked
 
   image-build:
     name: docker-build

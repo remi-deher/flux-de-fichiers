@@ -40,6 +40,10 @@ pub fn JobsPanel() -> impl IntoView {
                 aria_label="Sous-navigation de la section Activité et Traitements"
                 tabs=subnav_tabs
             />
+            <p class="form-help">
+                "Créer et relancer des tâches : "
+                <a href=crate::APP_PATH>"nouvelle interface"</a>
+            </p>
             <WidgetArea placement=WidgetPlacement::Activity />
             <ActivityRegistre />
         </div>
@@ -69,6 +73,12 @@ mod tests {
             html.matches(&format!("id=\"{JOBS_REGISTRE_ID}\"")).count(),
             1
         );
+    }
+
+    #[test]
+    fn test_jobs_panel_links_to_the_wasm_client() {
+        let html = view! { <JobsPanel /> }.to_html();
+        assert!(html.contains("href=\"/app/\""));
     }
 
     #[test]

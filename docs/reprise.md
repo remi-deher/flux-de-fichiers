@@ -51,12 +51,11 @@ paramètres.
 
 ## Non vérifié (à faire en premier)
 
-- **Le client n'a jamais été compilé en WASM** ni ouvert dans un navigateur : le premier passage
-  CI (clippy `wasm32`) et la première image le diront, ainsi que l'étape `wasm-bindgen` du
-  `Dockerfile`.
+- Le client compile en WASM (CI et image `test-34f365e9af28`) et affiche son écran de connexion
+  en production ; **aucun écran connecté n'a encore été ouvert**.
 - Aucun parcours de bout en bout : connexion, création et relance d'une tâche, édition et
   enregistrement d'un flux, bibliothèques, plugins, comptes.
-- Les tests ajoutés depuis le 13 nov. n'ont tourné qu'en CI.
+- Les tests ajoutés depuis le 13 nov. n'ont tourné qu'en CI (verte sur la PR #102).
 
 ## Limites connues
 
@@ -90,7 +89,7 @@ paramètres.
 
 ## Suite proposée
 
-1. Faire passer la CI et l'image ; ouvrir l'interface et corriger ce que le WASM révèle.
+1. Se connecter à l'essai et parcourir chaque écran ; corriger ce que le WASM révèle.
 2. Exécution des flux par les workers distants (le flux figé doit voyager avec le bail).
 3. Encodage par plugins : blocs des dépôts dans la palette et exécution.
 4. Numéro d'époque des baux.
@@ -98,6 +97,13 @@ paramètres.
 6. IA et MCP (ADR à écrire).
 
 ## Production (NAS)
+
+**Déployé le 14 nov. 2026** : `mrcryllix/flux-de-fichiers:test-34f365e9af28` sur les deux hôtes
+(CI verte, client WASM compilé). Vérifié : santé, page et WASM servis, migrations 12 et 13,
+worker enregistré qui réclame des tâches, écran de connexion du client affiché sur les deux.
+Non vérifié : les parcours connectés (identifiants de l'utilisateur). Sauvegardes et retour
+arrière : journal de Rashin du 14 nov. (`compose-*.avant-0014.json`,
+`arr-config.bak-test-28a81f724ea4-avant-0014-froid`, `frontend/index.html.avant-0014`).
 
 Essai en conditions réelles : central `flux-essai` sur `truenas_admin@192.168.1.50`
 (HTTP `:18480`), worker `flux-essai-worker` (`artemis-essai`) sur `truenas_admin@192.168.1.51`

@@ -1,103 +1,128 @@
+//! Plan de travail du concepteur : rendu du graphe édité, inspecteur et ajout de blocs.
+//!
+//! Le DOM n'est qu'une vue de `editorGraph` (voir `graph.rs`) : la définition enregistrée est
+//! chargée à l'ouverture, et seul ce modèle est renvoyé à l'enregistrement.
+
 pub const SCRIPT: &str = r###"
-    function openCanvas(flowId, flowTitle) {
-      activeCanvasFlowId = flowId;
+    const PORT_STYLES = {
+      true: { label: '✓ Vrai', className: 'out-true', color: 'var(--success)', marker: 'arrow-true' },
+      false: { label: '✗ Faux', className: 'out-false', color: 'var(--warning)', marker: 'arrow-false' },
+      fallback: { label: '⚡ Repli', className: 'out-fallback', color: 'var(--accent)', marker: 'arrow-fallback' },
+    };
+    const DEFAULT_PORT_STYLE = { color: 'var(--primary)', marker: 'arrow-default' };
+    const CONFIG_SUMMARY_MAX = 3;
+
+    function portStyle(port) {
+      return (port != null && PORT_STYLES[port]) || DEFAULT_PORT_STYLE;
+    }
+
+    function blockIcon(type) {
+      const value = String(type || '');
+      if (value === 'file-input') return '📄';
+      if (value === 'condition') return '🔀';
+      if (value === 'mkvpropedit') return '⚡';
+      if (value === FLOW_OUTPUT_BLOCK) return '💾';
+      if (value.startsWith('sonarr')) return '📡';
+      if (value.startsWith('radarr')) return '🎬';
+      if (value.includes('webhook')) return '🔔';
+      if (value.includes('video')) return '🎞️';
+      if (value.includes('audio')) return '🔊';
+      if (value.includes('mp4')) return '📦';
+      return '🧩';
+    }
+
+    // Résumé lisible des premiers réglages scalaires d'un bloc.
+    function configSummary(config) {
+      const entries = Object.entries(config || {})
+        .filter(([, value]) => value === null || typeof value !== 'object')
+        .slice(0, CONFIG_SUMMARY_MAX)
+        .map(([key, value]) => `${key} : ${value}`);
+      return entries.length ? entries.join(' • ') : 'Aucun réglage';
+    }
+
+    function nodeElement(nodeId) {
+      return nodesContainer ? nodesContainer.querySelector(`.canvas-node[data-node-id="${cssAttr(nodeId)}"]`) : null;
+    }
+
+    function renderNode(node) {
+      const div = document.createElement('div');
+      div.className = 'canvas-node';
+      div.id = node.id;
+      div.setAttribute('data-node-id', node.id);
+      div.setAttribute('data-block-type', node.type || '');
+      const ports = outputPorts(editorGraph, node);
+      const hasInput = incomingEdges(editorGraph, node.id).length > 0 || node.type !== 'file-input';
+      const simplePorts = ports.length === 1 && ports[0] == null;
+      const outputs = simplePorts
+        ? '<div class="node-connector connector-out"></div>'
+        : (ports.length ? `<div class="node-multi-outputs">${ports.map(port => {
+            const style = portStyle(port);
+            const label = style.label || escapeHtml(port ?? 'Suite');
+            return `<div class="multi-output-port ${style.className ? `port-${port}` : ''}">
+                <span class="port-label">${label}</span>
+                <div class="node-connector connector-out ${style.className || ''}" data-port="${escapeHtml(port ?? '')}"></div>
+              </div>`;
+          }).join('')}</div>` : '');
+      div.innerHTML = `
+        ${hasInput ? '<div class="node-connector connector-in"></div>' : ''}
+        ${simplePorts ? outputs : ''}
+        <div class="node-header">
+          <span class="node-icon">${blockIcon(node.type)}</span>
+          <div class="node-title-box">
+            <span class="node-kind">${escapeHtml(node.type || 'bloc')}</span>
+            <h4 class="node-name">${escapeHtml(node.name || node.id)}</h4>
+          </div>
+          <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
+        </div>
+        <div class="node-summary" id="${escapeHtml(node.id)}-summary">${escapeHtml(configSummary(node.config))}</div>
+        ${simplePorts ? '' : outputs}
+      `;
+      bindNodeEvents(div);
+      return div;
+    }
+
+    // Redessine tout le graphe depuis le modèle.
+    function renderGraph(selectedId) {
+      if (!nodesContainer) return;
+      nodesContainer.innerHTML = '';
+      if (editorGraph.nodes.length === 0) {
+        nodesContainer.innerHTML = '<p class="canvas-empty-hint">Aucun bloc : ajoutez-en depuis la palette.</p>';
+        renderInspector(null);
+      } else {
+        editorGraph.nodes.forEach(node => nodesContainer.appendChild(renderNode(node)));
+        selectNode(nodeElement(selectedId) || nodesContainer.querySelector('.canvas-node'));
+      }
+      setTimeout(drawCanvasLines, 30);
+    }
+
+    async function loadEditorFlow(flowId) {
+      const cached = cachedFlows.find(flow => flow.id === flowId);
+      if (cached) return cached;
+      const res = await apiFetch(`/api/v1/flows/${encodeURIComponent(flowId)}`);
+      return res.json();
+    }
+
+    function showEditor(flow, graph) {
+      editorFlow = flow;
+      editorGraph = graph;
+      invalidConfigs.clear();
       if (libraryView) libraryView.style.display = 'none';
       if (canvasView) canvasView.style.display = 'block';
       syncCapsuleActions('flow-editor');
       const titleEl = el('canvas-flow-title');
-      if (titleEl) titleEl.textContent = `Éditeur visuel : ${flowTitle}`;
-
-      // Si le flux ouvert est le flux ADR-0008, injecter ses nœuds représentatifs
-      if (flowId === 'flow.smart.adr0008' && nodesContainer) {
-        nodesContainer.innerHTML = `
-          <div class="canvas-node selected" id="node-1" data-node-id="node-1" data-block-type="file-input">
-            <div class="node-connector connector-out"></div>
-            <div class="node-header">
-              <span class="node-icon">📄</span>
-              <div class="node-title-box">
-                <span class="node-kind">Déclencheur entrant</span>
-                <h4 class="node-name">Fichier source</h4>
-              </div>
-              <span class="status-pill success node-pill">Entrée</span>
-            </div>
-            <div class="node-summary">Détection du média • Métadonnées analysées implicitement en tâche de fond (MediaInfo / FFprobe).</div>
-          </div>
-
-          <div class="canvas-node" id="node-2" data-node-id="node-2" data-block-type="condition">
-            <div class="node-connector connector-in"></div>
-            <div class="node-header">
-              <span class="node-icon">🔀</span>
-              <div class="node-title-box">
-                <span class="node-kind">Logique décisionnelle</span>
-                <h4 class="node-name">Condition : Codec == HEVC ?</h4>
-              </div>
-              <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
-            </div>
-            <div class="node-summary" id="node-2-summary">Si Codec == HEVC ➔ Édition In-Place directe • Sinon ➔ Transcodage GPU • Repli ➔ CPU</div>
-            <div class="node-multi-outputs">
-              <div class="multi-output-port port-true" title="Condition vérifiée : saut direct vers en-têtes sans réencodage">
-                <span class="port-label">✓ Vrai (Match)</span>
-                <div class="node-connector connector-out out-true" data-port="true"></div>
-              </div>
-              <div class="multi-output-port port-false" title="Condition non vérifiée : réencodage vidéo nécessaire">
-                <span class="port-label">✗ Faux (Else)</span>
-                <div class="node-connector connector-out out-false" data-port="false"></div>
-              </div>
-              <div class="multi-output-port port-fallback" title="Repli logiciel automatique en cas d'incompatibilité GPU">
-                <span class="port-label">⚡ Repli (CPU)</span>
-                <div class="node-connector connector-out out-fallback" data-port="fallback"></div>
-              </div>
-            </div>
-          </div>
-
-          <div class="canvas-node" id="node-3" data-node-id="node-3" data-block-type="mkvpropedit">
-            <div class="node-connector connector-in"></div>
-            <div class="node-connector connector-out"></div>
-            <div class="node-header">
-              <span class="node-icon">⚡</span>
-              <div class="node-title-box">
-                <span class="node-kind">MKVToolNix • In-Place</span>
-                <h4 class="node-name">Édition En-têtes (mkvpropedit)</h4>
-              </div>
-              <span class="status-pill success node-pill in-place">⚡ In-Place</span>
-              <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
-            </div>
-            <div class="node-summary" id="node-3-summary">Zéro copie • Piste audio 'fre' par défaut • Flag 'forced' sur sous-titres complets.</div>
-          </div>
-
-          <div class="canvas-node" id="node-4" data-node-id="node-4" data-block-type="video-encode">
-            <div class="node-connector connector-in"></div>
-            <div class="node-connector connector-out"></div>
-            <div class="node-header">
-              <span class="node-icon">🎞️</span>
-              <div class="node-title-box">
-                <span class="node-kind">FFmpeg Builder</span>
-                <h4 class="node-name">Transcodage Vidéo HEVC</h4>
-              </div>
-              <span class="status-pill info node-pill working-file">📦 WorkingFile</span>
-              <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
-            </div>
-            <div class="node-summary" id="node-4-summary">HEVC • Accélération GPU Intel QSV (Qualité : 6) • Repli CPU libx265 automatique.</div>
-          </div>
-
-          <div class="canvas-node" id="node-5" data-node-id="node-5" data-block-type="file-output">
-            <div class="node-connector connector-in"></div>
-            <div class="node-header">
-              <span class="node-icon">💾</span>
-              <div class="node-title-box">
-                <span class="node-kind">Système Unix</span>
-                <h4 class="node-name">Finalisation & Notification</h4>
-              </div>
-              <span class="status-pill success node-pill">Sortie</span>
-            </div>
-            <div class="node-summary" id="node-5-summary">Remplacement atomique POSIX Unix • Préservation mtime • Notification Sonarr/Radarr.</div>
-          </div>
-        `;
-        rebindAllNodes();
-      }
-
+      if (titleEl) titleEl.textContent = `Éditeur visuel : ${flow.name || flow.id || 'Nouveau flux'}`;
       resetSimulation();
-      setTimeout(drawCanvasLines, 60);
+      renderGraph(null);
+    }
+
+    // Ouvre un flux enregistré tel qu'il est stocké : blocs, liaisons et réglages.
+    async function openCanvas(flowId) {
+      try {
+        const flow = await loadEditorFlow(flowId);
+        showEditor(flow, parseFlowGraph(flow.definition));
+      } catch (_) {
+        showNotice('Impossible de charger ce flux.', 'error');
+      }
     }
 
     function closeCanvas() {
@@ -112,12 +137,11 @@ pub const SCRIPT: &str = r###"
     if (editFlowBtn) {
       editFlowBtn.addEventListener('click', () => {
         const flowId = editFlowBtn.getAttribute('data-flow');
-        const title = editFlowBtn.getAttribute('data-flow-title') || 'Flux';
         if (!flowId) {
           showNotice('Ouvrez un flux avant de l\'éditer.', 'info');
           return;
         }
-        openCanvas(flowId, title);
+        openCanvas(flowId);
       });
     }
 
@@ -168,386 +192,202 @@ pub const SCRIPT: &str = r###"
       });
     });
 
+    // Graphe de départ d'un modèle de l'assistant ; rien n'est enregistré avant « Enregistrer ».
+    function templateGraph(template) {
+      const graph = parseFlowGraph(null);
+      const input = appendGraphNode(graph, 'file-input', 'Fichier source');
+      if (template === 'smart-hevc') {
+        const condition = appendGraphNode(graph, 'condition', 'Condition : déjà HEVC ?',
+          { property: 'video.codec', operator: 'eq', target: 'hevc' });
+        const headers = appendGraphNode(graph, 'mkvpropedit', 'Édition des en-têtes (sur place)');
+        const encode = { id: nextNodeId(graph), type: 'video-encode', name: 'Réencodage vidéo', config: { codec: 'hevc' } };
+        graph.nodes.push(encode);
+        const output = { id: nextNodeId(graph), type: FLOW_OUTPUT_BLOCK, name: 'Destination finale', config: { mode: 'replace' } };
+        graph.nodes.push(output);
+        graph.connections = [
+          { from: input.id, to: condition.id },
+          { from: condition.id, to: headers.id, port: 'true' },
+          { from: condition.id, to: encode.id, port: 'false' },
+          { from: headers.id, to: output.id },
+          { from: encode.id, to: output.id },
+        ];
+      } else if (template === 'hevc') {
+        appendGraphNode(graph, 'video-encode', 'Réencodage vidéo', { codec: 'hevc' });
+        appendGraphNode(graph, 'audio-encode', 'Réencodage audio', { codec: 'aac' });
+        appendGraphNode(graph, 'remux-mkv', 'Remuxage Matroska');
+      } else if (template === 'mkv-remux') {
+        appendGraphNode(graph, 'remux-mkv', 'Remuxage Matroska');
+      } else if (template === 'mp4-web') {
+        appendGraphNode(graph, 'remux-mp4', 'Remuxage MP4', { faststart: true });
+      }
+      return graph;
+    }
+
     if (generateWizardBtn) {
       generateWizardBtn.addEventListener('click', () => {
         const nameInput = el('wizard-flow-name');
         const flowTitle = nameInput && nameInput.value ? nameInput.value.trim() : 'Nouveau flux';
         closeWizard();
-
-        // Reconstituer les nœuds selon le template choisi
-        if (nodesContainer) {
-          nodesContainer.innerHTML = `
-            <div class="canvas-node selected" id="node-1" data-node-id="node-1" data-block-type="file-input">
-              <div class="node-connector connector-out"></div>
-              <div class="node-header">
-                <span class="node-icon">📄</span>
-                <div class="node-title-box">
-                  <span class="node-kind">Déclencheur entrant</span>
-                  <h4 class="node-name">Fichier source</h4>
-                </div>
-                <span class="status-pill success node-pill">Entrée</span>
-              </div>
-              <div class="node-summary">Détection du média • Métadonnées inspectées automatiquement en sous-main.</div>
-            </div>
-          `;
-
-          if (currentSelectedTemplate === 'smart-hevc') {
-            appendNodeToCanvas('condition', 'Logique de décision', 'Condition : Est déjà HEVC ?', 'Si Codec == HEVC ➔ In-Place mkvpropedit • Sinon ➔ Encodage QSV • Repli ➔ CPU');
-            appendNodeToCanvas('mkvpropedit', 'MKVToolNix', 'Édition En-têtes (In-Place)', 'Zéro copie dans /work • Mise à jour des drapeaux audio/sous-titres');
-            appendNodeToCanvas('video-encode', 'FFmpeg Builder', 'Réencodage Vidéo (GPU)', 'HEVC • Intel QSV • Qualité : 6 • Vitesse : 3');
-            appendNodeToCanvas('file-output', 'Système', 'Destination finale', 'Remplacement sécurisé de l\'original ou dossier de sortie');
-          } else if (currentSelectedTemplate === 'hevc') {
-            appendNodeToCanvas('video-encode', 'FFmpeg Builder', 'Réencodage Vidéo', 'HEVC • Intel QSV • Qualité : 6 • Vitesse : 3');
-            appendNodeToCanvas('audio-encode', 'FFmpeg Builder', 'Réencodage Audio', 'Codec : AAC • 192 kbps • Stéréo');
-            appendNodeToCanvas('remux-mkv', 'MKVToolNix', 'Remuxage Matroska', 'Assemblage final MKV • Langues : fre, eng');
-          } else if (currentSelectedTemplate === 'mkv-remux') {
-            appendNodeToCanvas('remux-mkv', 'MKVToolNix', 'Remuxage Matroska', 'Filtrage langues fre, eng • Copie directe sans transcodage');
-          } else if (currentSelectedTemplate === 'mp4-web') {
-            appendNodeToCanvas('remux-mp4', 'MP4Box GPAC', 'Remuxage MP4', 'FastStart activé • Moov atom en début de fichier');
-          }
-        }
-
-        openCanvas('generated', flowTitle);
-        showNotice(`Flux « ${flowTitle} » généré avec succès ! Prêt dans le Canvas.`, 'success');
+        showEditor({ id: null, name: flowTitle, description: null, file_mask: DEFAULT_FILE_MASK, is_default: false },
+          templateGraph(currentSelectedTemplate));
+        showNotice(`Flux « ${flowTitle} » prêt dans l'éditeur ; enregistrez-le pour le conserver.`, 'info');
       });
     }
 
-    // 3. Tracé des connexions SVG entre les connecteurs
+    // 3. Tracé des liaisons du modèle
+    function connectorCenter(connector, boardRect, board) {
+      const rect = connector.getBoundingClientRect();
+      return {
+        x: rect.left + rect.width / 2 - boardRect.left + board.scrollLeft,
+        y: rect.top + rect.height / 2 - boardRect.top + board.scrollTop,
+      };
+    }
+
+    function outConnector(nodeEl, port) {
+      if (port != null) {
+        const ported = nodeEl.querySelector(`.connector-out[data-port="${cssAttr(port)}"]`);
+        if (ported) return ported;
+      }
+      return nodeEl.querySelector('.connector-out');
+    }
+
     function drawCanvasLines() {
       if (!svgLines || !nodesContainer) return;
-      const nodes = Array.from(nodesContainer.querySelectorAll('.canvas-node'));
-      if (nodes.length < 2) {
-        svgLines.innerHTML = '';
-        return;
-      }
+      const board = nodesContainer.parentElement;
+      const boardRect = board.getBoundingClientRect();
+      const markers = [DEFAULT_PORT_STYLE, ...Object.values(PORT_STYLES)].map(style => `
+          <marker id="${style.marker}" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="${style.color}" />
+          </marker>`).join('');
+      let pathsHtml = `<defs>${markers}</defs>`;
 
-      const boardRect = nodesContainer.parentElement.getBoundingClientRect();
-      let pathsHtml = `
-        <defs>
-          <marker id="arrow-blue" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--primary)" />
-          </marker>
-          <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#10b981" />
-          </marker>
-          <marker id="arrow-orange" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#f59e0b" />
-          </marker>
-          <marker id="arrow-purple" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#8b5cf6" />
-          </marker>
-        </defs>
-      `;
-
-      for (let i = 0; i < nodes.length - 1; i++) {
-        const fromNode = nodes[i];
-        const toNode = nodes[i + 1];
-
-        const outConnectors = Array.from(fromNode.querySelectorAll('.connector-out'));
-        const inConn = toNode.querySelector('.connector-in');
-
-        if (outConnectors.length > 0 && inConn) {
-          const rIn = inConn.getBoundingClientRect();
-          const x2 = rIn.left + rIn.width / 2 - boardRect.left + nodesContainer.parentElement.scrollLeft;
-          const y2 = rIn.top + rIn.height / 2 - boardRect.top + nodesContainer.parentElement.scrollTop;
-
-          outConnectors.forEach(outConn => {
-            const rOut = outConn.getBoundingClientRect();
-            const x1 = rOut.left + rOut.width / 2 - boardRect.left + nodesContainer.parentElement.scrollLeft;
-            const y1 = rOut.top + rOut.height / 2 - boardRect.top + nodesContainer.parentElement.scrollTop;
-
-            let strokeColor = 'var(--primary)';
-            let markerId = 'arrow-blue';
-            let isPulse = false;
-
-            if (outConn.classList.contains('out-true')) {
-              strokeColor = '#10b981';
-              markerId = 'arrow-green';
-              if (activeSimulation === 'true') isPulse = true;
-            } else if (outConn.classList.contains('out-false')) {
-              strokeColor = '#f59e0b';
-              markerId = 'arrow-orange';
-              if (activeSimulation === 'false') isPulse = true;
-            } else if (outConn.classList.contains('out-fallback')) {
-              strokeColor = '#8b5cf6';
-              markerId = 'arrow-purple';
-              if (activeSimulation === 'fallback') isPulse = true;
-            }
-
-            const cy1 = y1 + 18;
-            const cy2 = y2 - 18;
-            const pulseClass = isPulse ? ' class="sim-pulse-line"' : '';
-            pathsHtml += `<path d="M ${x1} ${y1} C ${x1} ${cy1}, ${x2} ${cy2}, ${x2} ${y2}" stroke="${strokeColor}" stroke-width="${isPulse ? '3.5' : '2.5'}" fill="none" marker-end="url(#${markerId})"${pulseClass} />`;
-          });
-        }
-      }
+      editorGraph.connections.forEach(edge => {
+        const fromEl = nodeElement(edge.from);
+        const toEl = nodeElement(edge.to);
+        const outConn = fromEl && outConnector(fromEl, edge.port);
+        const inConn = toEl && toEl.querySelector('.connector-in');
+        if (!outConn || !inConn) return;
+        const start = connectorCenter(outConn, boardRect, board);
+        const end = connectorCenter(inConn, boardRect, board);
+        const style = portStyle(edge.port);
+        const isPulse = activeSimulation != null && edge.port === activeSimulation;
+        const pulseClass = isPulse ? ' class="sim-pulse-line"' : '';
+        pathsHtml += `<path d="M ${start.x} ${start.y} C ${start.x} ${start.y + 18}, ${end.x} ${end.y - 18}, ${end.x} ${end.y}" stroke="${style.color}" stroke-width="${isPulse ? '3.5' : '2.5'}" fill="none" marker-end="url(#${style.marker})"${pulseClass} />`;
+      });
       svgLines.innerHTML = pathsHtml;
     }
 
     window.addEventListener('resize', drawCanvasLines);
 
-    // 4. Ajout d'un bloc au canvas
-    function appendNodeToCanvas(blockType, kind, title, summary) {
-      if (!nodesContainer) return;
-      const count = nodesContainer.querySelectorAll('.canvas-node').length + 1;
-      const nodeId = `node-${count}`;
-      const icon = blockType === 'condition' ? '🔀' : blockType === 'mkvpropedit' ? '⚡' : blockType === 'file-output' ? '💾' : blockType.startsWith('sonarr') ? '📡' : blockType.startsWith('radarr') ? '🎬' : blockType.includes('video') ? '🎞️' : blockType.includes('audio') ? '🔊' : blockType.includes('mp4') ? '📦' : '🎬';
-
-      const div = document.createElement('div');
-      div.className = 'canvas-node';
-      div.id = nodeId;
-      div.setAttribute('data-node-id', nodeId);
-      div.setAttribute('data-block-type', blockType);
-
-      if (blockType === 'condition') {
-        div.innerHTML = `
-          <div class="node-connector connector-in"></div>
-          <div class="node-header">
-            <span class="node-icon">🔀</span>
-            <div class="node-title-box">
-              <span class="node-kind">${kind}</span>
-              <h4 class="node-name">${title}</h4>
-            </div>
-            <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
-          </div>
-          <div class="node-summary" id="${nodeId}-summary">${summary}</div>
-          <div class="node-multi-outputs">
-            <div class="multi-output-port port-true" title="Condition vérifiée : saut direct vers en-têtes In-Place">
-              <span class="port-label">✓ Vrai (Match)</span>
-              <div class="node-connector connector-out out-true" data-port="true"></div>
-            </div>
-            <div class="multi-output-port port-false" title="Condition non vérifiée : réencodage nécessaire">
-              <span class="port-label">✗ Faux (Else)</span>
-              <div class="node-connector connector-out out-false" data-port="false"></div>
-            </div>
-            <div class="multi-output-port port-fallback" title="Repli d'urgence (si échec GPU)">
-              <span class="port-label">⚡ Repli (CPU)</span>
-              <div class="node-connector connector-out out-fallback" data-port="fallback"></div>
-            </div>
-          </div>
-        `;
-      } else if (blockType === 'mkvpropedit') {
-        div.innerHTML = `
-          <div class="node-connector connector-in"></div>
-          <div class="node-connector connector-out"></div>
-          <div class="node-header">
-            <span class="node-icon">⚡</span>
-            <div class="node-title-box">
-              <span class="node-kind">${kind}</span>
-              <h4 class="node-name">${title}</h4>
-            </div>
-            <span class="status-pill success node-pill in-place">⚡ In-Place</span>
-            <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
-          </div>
-          <div class="node-summary" id="${nodeId}-summary">${summary}</div>
-        `;
-      } else {
-        const isWorkingFile = blockType.includes('video') || blockType.includes('audio') || blockType.includes('remux');
-        const pillHtml = isWorkingFile ? '<span class="status-pill info node-pill working-file">📦 WorkingFile</span>' : '';
-        div.innerHTML = `
-          <div class="node-connector connector-in"></div>
-          ${blockType === 'file-output' ? '' : '<div class="node-connector connector-out"></div>'}
-          <div class="node-header">
-            <span class="node-icon">${icon}</span>
-            <div class="node-title-box">
-              <span class="node-kind">${kind}</span>
-              <h4 class="node-name">${title}</h4>
-            </div>
-            ${pillHtml}
-            <button type="button" class="node-remove-btn" title="Supprimer ce bloc">✕</button>
-          </div>
-          <div class="node-summary" id="${nodeId}-summary">${summary}</div>
-        `;
-      }
-
-      nodesContainer.appendChild(div);
-      bindNodeEvents(div);
-      selectNode(div);
-      setTimeout(drawCanvasLines, 30);
+    // 4. Ajout d'un bloc : il rejoint le modèle, relié au dernier bloc sans suite.
+    function addBlock(blockType, title) {
+      const node = appendGraphNode(editorGraph, blockType, title);
+      renderGraph(node.id);
     }
 
-    // 5. Sélection et inspecteur de bloc
+    // 5. Inspecteur : nom et réglages réels du bloc sélectionné.
+    function renderInspector(node) {
+      const titleEl = el('inspector-block-title');
+      const toolEl = el('inspector-block-tool');
+      const formContainer = el('inspector-form-container');
+      if (titleEl) titleEl.textContent = node ? (node.name || node.id) : 'Paramètres du bloc';
+      if (toolEl) toolEl.textContent = node ? (node.type || 'bloc') : '—';
+      if (!formContainer) return;
+      if (!node) {
+        formContainer.innerHTML = '<p class="form-help">Sélectionnez un bloc pour voir ses réglages.</p>';
+        return;
+      }
+      formContainer.innerHTML = `
+        <div class="form-group">
+          <label for="inspector-node-name" class="form-label">Nom du bloc</label>
+          <input type="text" id="inspector-node-name" class="form-input" value="${escapeHtml(node.name || '')}" />
+        </div>
+        <div class="form-group">
+          <label for="inspector-node-config" class="form-label">Réglages (JSON)</label>
+          <textarea id="inspector-node-config" class="form-input form-input--code" rows="10" spellcheck="false">${escapeHtml(JSON.stringify(node.config ?? {}, null, 2))}</textarea>
+          <p class="form-help">Valeurs transmises telles quelles au bloc. Un en-tête de webhook laissé vide garde sa valeur enregistrée.</p>
+          <p class="form-error" id="inspector-node-config-error" role="alert"></p>
+        </div>
+      `;
+      const nameInput = el('inspector-node-name');
+      const configInput = el('inspector-node-config');
+      const errorEl = el('inspector-node-config-error');
+      if (nameInput) nameInput.addEventListener('input', () => {
+        node.name = nameInput.value;
+        const nodeEl = nodeElement(node.id);
+        const nameEl = nodeEl && nodeEl.querySelector('.node-name');
+        if (nameEl) nameEl.textContent = node.name || node.id;
+        if (titleEl) titleEl.textContent = node.name || node.id;
+      });
+      if (configInput) configInput.addEventListener('input', () => {
+        const parsed = parseNodeConfig(configInput.value);
+        if (parsed.ok) {
+          node.config = parsed.value;
+          invalidConfigs.delete(node.id);
+          if (errorEl) errorEl.textContent = '';
+          const summary = el(`${node.id}-summary`);
+          if (summary) summary.textContent = configSummary(node.config);
+        } else {
+          invalidConfigs.add(node.id);
+          if (errorEl) errorEl.textContent = parsed.error;
+        }
+      });
+    }
+
     function selectNode(nodeEl) {
       if (!nodeEl) return;
       document.querySelectorAll('.canvas-node').forEach(n => n.classList.remove('selected'));
       nodeEl.classList.add('selected');
-
-      const blockType = nodeEl.getAttribute('data-block-type') || 'file-input';
-      const nodeName = nodeEl.querySelector('.node-name') ? nodeEl.querySelector('.node-name').textContent : 'Bloc';
-      const nodeKind = nodeEl.querySelector('.node-kind') ? nodeEl.querySelector('.node-kind').textContent : 'Outil';
-
-      const titleEl = el('inspector-block-title');
-      const toolEl = el('inspector-block-tool');
-      const formContainer = el('inspector-form-container');
-
-      if (titleEl) titleEl.textContent = nodeName;
-      if (toolEl) toolEl.textContent = nodeKind.split('•')[0].trim();
-
-      if (formContainer) {
-        if (blockType === 'file-input') {
-          formContainer.innerHTML = `
-            <div class="form-group">
-              <label for="node-cfg-mask" class="form-label">Masque de surveillance</label>
-              <input type="text" id="node-cfg-mask" class="form-input" value="*.mkv, *.mp4, *.avi, *.ts" />
-              <span class="form-help">Filtre les extensions déclenchant ce flux.</span>
-            </div>
-            <div class="status-pill success" style="width: 100%; margin-top: 0.75rem; justify-content: center;">
-              ✓ Métadonnées inspectées automatiquement
-            </div>
-            <p style="font-size: 0.8125rem; color: var(--text-dim); line-height: 1.5; margin-top: 0.5rem;">
-              Conformément à l'ADR 0008, les métadonnées (codecs, résolutions, langues audio et sous-titres) sont injectées automatiquement par MediaInfo et FFprobe dès l'interception du média.
-            </p>
-          `;
-        } else if (blockType === 'condition') {
-          formContainer.innerHTML = `
-            <div class="form-group">
-              <label for="node-cfg-prop" class="form-label">Propriété à tester</label>
-              <select id="node-cfg-prop" class="form-select">
-                <option value="video.codec" selected>Codec Vidéo</option>
-                <option value="video.resolution">Résolution (1080p, 4K...)</option>
-                <option value="audio.language">Langue Audio présente</option>
-                <option value="video.hdr">Profil HDR (HDR10, DV)</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="node-cfg-op" class="form-label">Opérateur</label>
-              <select id="node-cfg-op" class="form-select">
-                <option value="eq" selected>Est égal à (==)</option>
-                <option value="neq">Est différent de (!=)</option>
-                <option value="contains">Contient</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="node-cfg-val" class="form-label">Valeur cible</label>
-              <input type="text" id="node-cfg-val" class="form-input" value="HEVC" />
-            </div>
-            <div style="background: var(--bg-subtle); padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); font-size: 0.75rem; line-height: 1.45;">
-              <strong style="color: var(--text-main);">Aiguillage tri-sorties (ADR-0008) :</strong>
-              <ul style="margin: 0.25rem 0 0 1rem; color: var(--text-dim);">
-                <li><span style="color: #10b981; font-weight: 700;">✓ Vrai :</span> Saut immédiat vers In-Place mkvpropedit</li>
-                <li><span style="color: #f59e0b; font-weight: 700;">✗ Faux :</span> Encodage matériel GPU dans /work</li>
-                <li><span style="color: #8b5cf6; font-weight: 700;">⚡ Repli :</span> Bascule automatique CPU libx265</li>
-              </ul>
-            </div>
-          `;
-        } else if (blockType === 'mkvpropedit') {
-          formContainer.innerHTML = `
-            <div class="status-pill success in-place" style="width: 100%; margin-bottom: 0.75rem; justify-content: center;">
-              ⚡ Exécution In-Place (ADR 0008)
-            </div>
-            <p style="font-size: 0.8125rem; color: var(--text-dim); margin-bottom: 0.75rem;">
-              Modifie directement les en-têtes EBML Matroska sur le fichier sans aucune duplication préalable dans /work (gain massif en E/S disque).
-            </p>
-            <div class="form-group">
-              <label for="prop-audio-default" class="form-label">Piste audio par défaut</label>
-              <input type="text" id="prop-audio-default" class="form-input" value="fre" />
-              <span class="form-help">Code langue ISO-639-2 (ex: fre, fra)</span>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Drapeaux sous-titres</label>
-              <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem;">
-                <input type="checkbox" checked /> Forcer drapeau 'forced' si piste forcée détectée
-              </label>
-            </div>
-          `;
-        } else if (blockType === 'video-encode') {
-          formContainer.innerHTML = `
-            <div class="status-pill info working-file" style="width: 100%; margin-bottom: 0.75rem; justify-content: center;">
-              📦 WorkingFile éphémère (/work)
-            </div>
-            <div class="form-group">
-              <label for="node-cfg-codec" class="form-label">Codec cible</label>
-              <select id="node-cfg-codec" class="form-select">
-                <option value="hevc" selected>HEVC / H.265 (Recommandé)</option>
-                <option value="av1">AV1 (Haute efficacité)</option>
-                <option value="h264">H.264 / AVC (Universel)</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="node-cfg-encoder" class="form-label">Encodeur matériel</label>
-              <select id="node-cfg-encoder" class="form-select">
-                <option value="qsv" selected>Intel QuickSync (hevc_qsv)</option>
-                <option value="nvenc">NVIDIA NVENC (hevc_nvenc)</option>
-                <option value="vaapi">Linux VA-API (hevc_vaapi)</option>
-                <option value="cpu">Processeur CPU (libx265)</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Qualité cible (1 = Débit bas, 9 = Transparent)</label>
-              <input type="range" min="1" max="9" value="6" class="form-range" />
-            </div>
-          `;
-        } else if (blockType === 'file-output') {
-          formContainer.innerHTML = `
-            <div class="form-group">
-              <label for="node-cfg-dest-mode" class="form-label">Mode de destination</label>
-              <select id="node-cfg-dest-mode" class="form-select">
-                <option value="replace" selected>Remplacer l'original (Atomique POSIX)</option>
-                <option value="folder">Dossier de sortie dédié (/data/output)</option>
-              </select>
-              <span class="form-help">Remplacement atomique Unix garantissant zéro fichier corrompu.</span>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Intégration média</label>
-              <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem;">
-                <input type="checkbox" checked /> Notifier Sonarr / Radarr du renommage
-              </label>
-            </div>
-          `;
-        } else {
-          formContainer.innerHTML = `
-            <div class="form-group">
-              <label class="form-label">Paramètres généraux du bloc</label>
-              <input type="text" class="form-input" value="Configuration par défaut" />
-            </div>
-          `;
-        }
-      }
+      renderInspector(graphNode(editorGraph, nodeEl.getAttribute('data-node-id')));
     }
 
     function bindNodeEvents(nodeEl) {
-      if (!nodeEl) return;
       nodeEl.addEventListener('click', (e) => {
-        if (!e.target.classList.contains('node-remove-btn')) {
-          selectNode(nodeEl);
-        }
+        if (!e.target.classList.contains('node-remove-btn')) selectNode(nodeEl);
       });
-
       const removeBtn = nodeEl.querySelector('.node-remove-btn');
       if (removeBtn) {
         removeBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          nodeEl.remove();
-          drawCanvasLines();
-          const firstRemaining = nodesContainer.querySelector('.canvas-node');
-          if (firstRemaining) selectNode(firstRemaining);
+          const nodeId = nodeEl.getAttribute('data-node-id');
+          removeGraphNode(editorGraph, nodeId);
+          invalidConfigs.delete(nodeId);
+          renderGraph(null);
         });
       }
     }
 
-    function rebindAllNodes() {
-      if (!nodesContainer) return;
-      nodesContainer.querySelectorAll('.canvas-node').forEach(nodeEl => {
-        bindNodeEvents(nodeEl);
-      });
-      const first = nodesContainer.querySelector('.canvas-node');
-      if (first) selectNode(first);
-    }
-
-    rebindAllNodes();
+    renderGraph(null);
 
     // 6. Ajout de blocs depuis la barre latérale
     document.querySelectorAll('.draggable-block-item.addable').forEach(item => {
       item.addEventListener('click', () => {
         const blockType = item.getAttribute('data-block-type') || 'remux-mkv';
         const title = item.querySelector('strong') ? item.querySelector('strong').textContent : 'Nouveau bloc';
-        const kind = item.querySelector('span') ? item.querySelector('span').textContent : 'Outil';
-        const desc = item.querySelector('.block-drag-info span') ? item.querySelector('.block-drag-info span').textContent : '';
-
-        appendNodeToCanvas(blockType, kind, title, desc);
+        addBlock(blockType, title);
         showNotice(`Bloc « ${title} » ajouté au flux`, 'info');
       });
     });
 
     // 7. Banc d'essai de simulation interactive ADR 0008
 "###;
+
+#[cfg(test)]
+mod tests {
+    use super::SCRIPT;
+
+    #[test]
+    fn editor_renders_the_stored_graph_and_never_hardcodes_nodes() {
+        assert!(SCRIPT.contains("parseFlowGraph(flow.definition)"));
+        assert!(SCRIPT.contains("editorGraph.connections.forEach"));
+        assert!(!SCRIPT.contains("flow.smart.adr0008"));
+        assert!(!SCRIPT.contains("node-cfg-"));
+    }
+
+    #[test]
+    fn inspector_edits_the_real_block_config() {
+        assert!(SCRIPT.contains("id=\"inspector-node-config\""));
+        assert!(SCRIPT.contains("parseNodeConfig(configInput.value)"));
+        assert!(SCRIPT.contains("invalidConfigs.add(node.id)"));
+    }
+}

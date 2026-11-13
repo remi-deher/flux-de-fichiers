@@ -13,7 +13,7 @@ pub fn FlowWorkspace() -> impl IntoView {
             <div class="canvas-header-bar">
                 <div class="canvas-header-bar__identity">
                     <h2 id="canvas-flow-title" class="section-title canvas-header-bar__title">
-                        "Éditeur visuel : Transcodage HEVC"
+                        "Éditeur visuel"
                     </h2>
                     <span class="status-pill success">"Mode Édition"</span>
                 </div>

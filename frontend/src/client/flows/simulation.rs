@@ -80,41 +80,31 @@ pub const SCRIPT: &str = r###"
       });
     });
 
-    // Sauvegarde des modifications du flux en base SQLite
+    // Enregistrement : le graphe édité complet, avec les métadonnées du flux ouvert.
     const saveFlowBtn = el('btn-canvas-save-flow');
     if (saveFlowBtn) {
       saveFlowBtn.addEventListener('click', async () => {
-        const titleEl = el('canvas-flow-title');
-        const title = titleEl ? titleEl.textContent.replace('Éditeur visuel :', '').trim() : 'Flux';
-        const flowId = activeCanvasFlowId || 'flow.custom';
-
-        const nodes = Array.from(nodesContainer.querySelectorAll('.canvas-node')).map(n => ({
-          id: n.getAttribute('data-node-id') || n.id,
-          type: n.getAttribute('data-block-type') || 'unknown',
-          name: n.querySelector('.node-name') ? n.querySelector('.node-name').textContent : 'Bloc',
-        }));
-
-        const definition = JSON.stringify({ nodes, connections: [] });
-
+        if (!editorFlow) {
+          showNotice('Ouvrez ou créez un flux avant de l\'enregistrer.', 'info');
+          return;
+        }
+        if (invalidConfigs.size > 0) {
+          showNotice('Corrigez les réglages JSON invalides avant d\'enregistrer.', 'warning');
+          return;
+        }
+        const flowId = editorFlow.id || newFlowId(editorFlow.name, Date.now().toString(36));
         try {
           const res = await apiFetch(`/api/v1/flows/${encodeURIComponent(flowId)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: title,
-              description: 'Flux configuré depuis le plan de travail visuel.',
-              file_mask: '*.mkv, *.mp4',
-              is_default: flowId === 'flow.default.mkv',
-              definition,
-            }),
+            body: JSON.stringify(flowSaveRequest(editorFlow, editorGraph)),
           });
-          if (res.ok) {
-            showNotice(`Flux « ${title} » enregistré avec succès en base SQLite.`, 'success');
-          } else {
-            showNotice('Erreur lors de l\'enregistrement du flux.', 'error');
-          }
+          const saved = await res.json();
+          editorFlow = saved;
+          showNotice(`Flux « ${saved.name} » enregistré (version ${saved.version}).`, 'success');
+          loadFlows();
         } catch (_) {
-          showNotice(`Flux « ${title} » mis à jour en mémoire active.`, 'info');
+          showNotice('Échec de l\'enregistrement : le flux n\'a pas été modifié.', 'error');
         }
       });
     }

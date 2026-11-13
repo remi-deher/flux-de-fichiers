@@ -95,7 +95,9 @@ pub const SCRIPT: &str = r###"
 
     let currentSelectedTemplate = 'smart-hevc';
     let activeSimulation = null; // null | 'true' | 'false' | 'fallback'
-    let activeCanvasFlowId = 'flow.default.mkv';
+    let editorFlow = null; // flux ouvert ; `id` nul tant qu'il n'est pas enregistré
+    let editorGraph = parseFlowGraph(null);
+    const invalidConfigs = new Set(); // blocs dont les réglages JSON sont invalides
 
     // 1. Navigation entre le registre et l'éditeur dédié
 "###;

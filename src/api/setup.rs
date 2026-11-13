@@ -1,4 +1,4 @@
-//! Installation de la centrale au premier démarrage : nom, compte administrateur, session ouverte.
+//! Installation du central au premier démarrage : nom, compte administrateur, session ouverte.
 
 use super::{AppState, session};
 use crate::{
@@ -6,7 +6,7 @@ use crate::{
     password, repository, web_session,
 };
 use axum::{Json, extract::State, http::HeaderMap, response::Response};
-use flux_shared::{NodeKind, Role};
+use flux_shared::{InstanceKind, Role};
 use serde::{Deserialize, Serialize};
 
 const INSTANCE_NAME_MAX_LEN: usize = 80;
@@ -16,7 +16,7 @@ const INSTANCE_NAME_MAX_LEN: usize = 80;
 pub struct SetupStatus {
     needs_setup: bool,
     instance_name: Option<String>,
-    node_kind: NodeKind,
+    instance_kind: InstanceKind,
 }
 
 #[derive(Deserialize)]
@@ -31,7 +31,7 @@ pub async fn status(State(state): State<AppState>) -> AppResult<Json<SetupStatus
     Ok(Json(SetupStatus {
         needs_setup: repository::account_count(&state.pool).await? == 0,
         instance_name: repository::get_setting(&state.pool, repository::INSTANCE_NAME_KEY).await?,
-        node_kind: NodeKind::Central,
+        instance_kind: InstanceKind::Central,
     }))
 }
 
@@ -75,7 +75,7 @@ mod tests {
 
     #[test]
     fn test_instance_name_rules() -> AppResult<()> {
-        assert_eq!(validate_instance_name("  Ma centrale ")?, "Ma centrale");
+        assert_eq!(validate_instance_name("  Mon central ")?, "Mon central");
         assert!(validate_instance_name("").is_err());
         assert!(validate_instance_name("   ").is_err());
         assert!(validate_instance_name(&"x".repeat(INSTANCE_NAME_MAX_LEN + 1)).is_err());

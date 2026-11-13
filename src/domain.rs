@@ -60,6 +60,7 @@ pub enum JobEventType {
     JobSucceeded,
     JobFailed,
     JobCanceled,
+    JobRetried,
 }
 
 impl JobEventType {
@@ -72,6 +73,7 @@ impl JobEventType {
             Self::JobSucceeded => "job_succeeded",
             Self::JobFailed => "job_failed",
             Self::JobCanceled => "job_canceled",
+            Self::JobRetried => "job_retried",
         }
     }
 }
@@ -86,7 +88,7 @@ impl fmt::Display for JobEventType {
 ///
 /// Seuls `remux_failed`, `source_integrity`, `transfer_failed` et
 /// `probe_unavailable` peuvent être déclarés par un worker. `lease_expired` et
-/// `missing_source_fingerprint` sont écrits par le coordinateur.
+/// `missing_source_fingerprint` sont écrits par le central.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(rename_all = "snake_case")]
@@ -179,6 +181,9 @@ pub struct Job {
     pub leased_until: Option<DateTime<Utc>>,
     pub output_name: Option<String>,
     pub error_code: Option<JobErrorCode>,
+    /// Flow et version figés à la création de la tâche (aucun si pas de flow par défaut).
+    pub flow_id: Option<String>,
+    pub flow_version: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -257,6 +262,8 @@ pub struct FlowRecord {
     pub file_mask: String,
     pub is_default: bool,
     pub definition: String,
+    /// Dernière version enregistrée ; les versions passées sont immuables (`flow_versions`).
+    pub version: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -273,7 +280,7 @@ pub struct UpdateFlowRequest {
 pub const LIBRARY_NAME_MAX: usize = 80;
 pub const LIBRARY_PATH_MAX: usize = 512;
 
-/// Accès d'un nœud au dossier de la bibliothèque.
+/// Accès d'un worker au dossier de la bibliothèque.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(rename_all = "snake_case")]
@@ -282,21 +289,21 @@ pub enum LibraryAccess {
     ReadWrite,
 }
 
-/// Chemin local d'une bibliothèque sur un nœud.
+/// Chemin local d'une bibliothèque sur un worker.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LibraryNode {
+pub struct LibraryWorkerPath {
     pub worker_id: Uuid,
     pub local_path: String,
     pub access: LibraryAccess,
 }
 
-/// Bibliothèque déclarée : un nom, un flux, des nœuds.
+/// Bibliothèque déclarée : un nom, un flux, des workers.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Library {
     pub id: Uuid,
     pub name: String,
     pub flow_id: Option<String>,
-    pub nodes: Vec<LibraryNode>,
+    pub workers: Vec<LibraryWorkerPath>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -308,7 +315,7 @@ pub struct LibraryWrite {
     #[serde(default)]
     pub flow_id: Option<String>,
     #[serde(default)]
-    pub nodes: Vec<LibraryNode>,
+    pub workers: Vec<LibraryWorkerPath>,
 }
 
 #[cfg(test)]

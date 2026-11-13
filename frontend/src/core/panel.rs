@@ -1,7 +1,7 @@
 //! Catalogue unique des écrans : navigation Leptos et script client.
 
 use crate::shared::ui::IconName;
-use flux_shared::{NodeKind, Permission};
+use flux_shared::{InstanceKind, Permission};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Panel {
@@ -16,8 +16,8 @@ pub struct Panel {
     pub active: bool,
     /// Droit exigé pour voir l'écran.
     pub permission: Permission,
-    /// Types de nœud qui hébergent l'écran.
-    pub hosted_on: &'static [NodeKind],
+    /// Types d'installation qui hébergent l'écran.
+    pub hosted_on: &'static [InstanceKind],
 }
 
 pub struct NavGroup {
@@ -36,7 +36,7 @@ pub const DASHBOARD: Panel = Panel {
     icon: IconName::Dashboard,
     active: true,
     permission: Permission::ViewOverview,
-    hosted_on: &[NodeKind::Central, NodeKind::Worker],
+    hosted_on: &[InstanceKind::Central, InstanceKind::Worker],
 };
 
 pub const FILES: Panel = Panel {
@@ -50,7 +50,7 @@ pub const FILES: Panel = Panel {
     icon: IconName::Libraries,
     active: false,
     permission: Permission::ViewLibraries,
-    hosted_on: &[NodeKind::Central],
+    hosted_on: &[InstanceKind::Central],
 };
 
 pub const FLOWS: Panel = Panel {
@@ -64,7 +64,7 @@ pub const FLOWS: Panel = Panel {
     icon: IconName::Flows,
     active: false,
     permission: Permission::ViewFlows,
-    hosted_on: &[NodeKind::Central],
+    hosted_on: &[InstanceKind::Central],
 };
 
 pub const JOBS: Panel = Panel {
@@ -78,21 +78,21 @@ pub const JOBS: Panel = Panel {
     icon: IconName::Activity,
     active: false,
     permission: Permission::ViewJobs,
-    hosted_on: &[NodeKind::Central, NodeKind::Worker],
+    hosted_on: &[InstanceKind::Central, InstanceKind::Worker],
 };
 
 pub const WORKERS: Panel = Panel {
     slug: "workers",
     button_id: "tab-btn-workers",
     dom_id: "panel-workers",
-    label: "Nœuds",
-    nav_title: "Groupe Infrastructure : État des agents de traitement et workers",
-    search_placeholder: "Filtrer les nœuds et agents…",
+    label: "Workers",
+    nav_title: "Groupe Infrastructure : État des workers de traitement",
+    search_placeholder: "Filtrer les workers…",
     search_label: "Filtrer les serveurs et ressources distribuées",
     icon: IconName::Workers,
     active: false,
-    permission: Permission::ViewNodes,
-    hosted_on: &[NodeKind::Central],
+    permission: Permission::ViewWorkers,
+    hosted_on: &[InstanceKind::Central],
 };
 
 pub const PLUGINS: Panel = Panel {
@@ -106,7 +106,7 @@ pub const PLUGINS: Panel = Panel {
     icon: IconName::Plugins,
     active: false,
     permission: Permission::ViewPlugins,
-    hosted_on: &[NodeKind::Central, NodeKind::Worker],
+    hosted_on: &[InstanceKind::Central, InstanceKind::Worker],
 };
 
 pub const SETTINGS: Panel = Panel {
@@ -120,7 +120,7 @@ pub const SETTINGS: Panel = Panel {
     icon: IconName::Settings,
     active: false,
     permission: Permission::ViewOverview,
-    hosted_on: &[NodeKind::Central],
+    hosted_on: &[InstanceKind::Central],
 };
 
 pub const UPDATES: Panel = Panel {
@@ -134,7 +134,7 @@ pub const UPDATES: Panel = Panel {
     icon: IconName::Updates,
     active: false,
     permission: Permission::ManageSettings,
-    hosted_on: &[NodeKind::Central],
+    hosted_on: &[InstanceKind::Central],
 };
 
 pub const NAV_GROUPS: &[NavGroup] = &[
@@ -240,19 +240,19 @@ mod tests {
     }
 
     #[test]
-    fn every_panel_declares_a_right_and_a_hosting_node() {
+    fn every_panel_declares_a_right_and_a_hosting_instance() {
         for panel in panels() {
-            assert!(!panel.hosted_on.is_empty(), "{} sans nœud", panel.slug);
+            assert!(!panel.hosted_on.is_empty(), "{} sans worker", panel.slug);
         }
         // Tout rôle ouvre les paramètres ; un lecteur n'y voit que son propre compte (ADR 0011).
         assert_eq!(SETTINGS.permission, Permission::ViewOverview);
         assert_eq!(UPDATES.permission, Permission::ManageSettings);
         assert_eq!(DASHBOARD.permission, Permission::ViewOverview);
         for read_only in [&DASHBOARD, &JOBS, &PLUGINS] {
-            assert!(read_only.hosted_on.contains(&NodeKind::Worker));
+            assert!(read_only.hosted_on.contains(&InstanceKind::Worker));
         }
         for central_only in [&FILES, &FLOWS, &WORKERS, &SETTINGS, &UPDATES] {
-            assert_eq!(central_only.hosted_on, &[NodeKind::Central]);
+            assert_eq!(central_only.hosted_on, &[InstanceKind::Central]);
         }
     }
 

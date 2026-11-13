@@ -1,4 +1,4 @@
-//! Enrôlement des nœuds et choix du rôle worker (ADR 0011, phase 2).
+//! Enrôlement des workers et choix du rôle worker (ADR 0011, phase 2).
 
 use axum::{
     body::{Body, to_bytes},
@@ -7,7 +7,7 @@ use axum::{
 use flux_de_fichiers::{
     api::{AppState, router},
     config::Config,
-    node_settings,
+    worker_settings,
 };
 use sqlx::sqlite::SqlitePoolOptions;
 use std::{path::Path, sync::Arc};
@@ -86,21 +86,21 @@ async fn reply(
     ))
 }
 
-/// Centrale installée, avec un administrateur, dans un dossier de configuration isolé.
+/// Central installé, avec un administrateur, dans un dossier de configuration isolé.
 async fn installed_central(dir: &Path) -> anyhow::Result<axum::Router> {
     let app = app_in(dir).await?;
     let (status, _) = post(
         &app,
         "/api/v1/setup/central",
-        serde_json::json!({"name": "Centrale", "username": ADMIN, "password": GOOD_PASSWORD}),
+        serde_json::json!({"name": "Central", "username": ADMIN, "password": GOOD_PASSWORD}),
     )
     .await?;
     assert_eq!(status, StatusCode::OK);
     Ok(app)
 }
 
-fn enroll_body(password: &str, node_name: &str) -> serde_json::Value {
-    serde_json::json!({"username": ADMIN, "password": password, "node_name": node_name})
+fn enroll_body(password: &str, worker_name: &str) -> serde_json::Value {
+    serde_json::json!({"username": ADMIN, "password": password, "worker_name": worker_name})
 }
 
 #[tokio::test]
@@ -109,7 +109,7 @@ async fn test_enroll_returns_a_worker_key_once() -> anyhow::Result<()> {
     let central = installed_central(dir.path()).await?;
     let (status, body) = post(
         &central,
-        "/api/v1/nodes/enroll",
+        "/api/v1/workers/enroll",
         enroll_body(GOOD_PASSWORD, "nas-1"),
     )
     .await?;
@@ -133,21 +133,21 @@ async fn test_enroll_refuses_bad_credentials_and_bad_names() -> anyhow::Result<(
     let central = installed_central(dir.path()).await?;
     let (status, _) = post(
         &central,
-        "/api/v1/nodes/enroll",
+        "/api/v1/workers/enroll",
         enroll_body("mauvais-mot-de-passe", "nas-1"),
     )
     .await?;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     let (status, _) = post(
         &central,
-        "/api/v1/nodes/enroll",
-        serde_json::json!({"username": "inconnu", "password": GOOD_PASSWORD, "node_name": "nas-1"}),
+        "/api/v1/workers/enroll",
+        serde_json::json!({"username": "inconnu", "password": GOOD_PASSWORD, "worker_name": "nas-1"}),
     )
     .await?;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     let (status, _) = post(
         &central,
-        "/api/v1/nodes/enroll",
+        "/api/v1/workers/enroll",
         enroll_body(GOOD_PASSWORD, "nom invalide"),
     )
     .await?;
@@ -156,18 +156,18 @@ async fn test_enroll_refuses_bad_credentials_and_bad_names() -> anyhow::Result<(
 }
 
 #[tokio::test]
-async fn test_node_status_is_public_and_follows_the_installation() -> anyhow::Result<()> {
+async fn test_instance_status_is_public_and_follows_the_installation() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let fresh = app_in(dir.path()).await?;
-    let (status, body) = get(&fresh, "/api/v1/node/status", None).await?;
+    let (status, body) = get(&fresh, "/api/v1/instance/status", None).await?;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["nodeKind"], "central");
+    assert_eq!(body["instanceKind"], "central");
     assert_eq!(body["installed"], false);
     assert!(body["version"].is_string());
 
     let other = tempfile::tempdir()?;
     let central = installed_central(other.path()).await?;
-    let (_, body) = get(&central, "/api/v1/node/status", None).await?;
+    let (_, body) = get(&central, "/api/v1/instance/status", None).await?;
     assert_eq!(body["installed"], true);
     Ok(())
 }
@@ -175,32 +175,32 @@ async fn test_node_status_is_public_and_follows_the_installation() -> anyhow::Re
 #[tokio::test]
 async fn test_setup_worker_rejects_invalid_input_and_writes_nothing() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
-    let node = app_in(dir.path()).await?;
+    let installation = app_in(dir.path()).await?;
     for body in [
-        serde_json::json!({"coordinator_url": "http://central:3000", "username": ADMIN, "password": GOOD_PASSWORD, "node_name": "nom invalide"}),
-        serde_json::json!({"coordinator_url": "ftp://central", "username": ADMIN, "password": GOOD_PASSWORD, "node_name": "nas-1"}),
-        serde_json::json!({"coordinator_url": "http://central:3000/chemin", "username": ADMIN, "password": GOOD_PASSWORD, "node_name": "nas-1"}),
+        serde_json::json!({"central_url": "http://central:3000", "username": ADMIN, "password": GOOD_PASSWORD, "worker_name": "nom invalide"}),
+        serde_json::json!({"central_url": "ftp://central", "username": ADMIN, "password": GOOD_PASSWORD, "worker_name": "nas-1"}),
+        serde_json::json!({"central_url": "http://central:3000/chemin", "username": ADMIN, "password": GOOD_PASSWORD, "worker_name": "nas-1"}),
     ] {
-        let (status, _) = post(&node, "/api/v1/setup/worker", body).await?;
+        let (status, _) = post(&installation, "/api/v1/setup/worker", body).await?;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
-    assert_eq!(node_settings::load_worker(dir.path())?, None);
+    assert_eq!(worker_settings::load_worker(dir.path())?, None);
     Ok(())
 }
 
 #[tokio::test]
 async fn test_setup_worker_reports_an_unreachable_central() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
-    let node = app_in(dir.path()).await?;
+    let installation = app_in(dir.path()).await?;
     let (status, body) = post(
-        &node,
+        &installation,
         "/api/v1/setup/worker",
-        serde_json::json!({"coordinator_url": "http://127.0.0.1:9", "username": ADMIN, "password": GOOD_PASSWORD, "node_name": "nas-1"}),
+        serde_json::json!({"central_url": "http://127.0.0.1:9", "username": ADMIN, "password": GOOD_PASSWORD, "worker_name": "nas-1"}),
     )
     .await?;
     assert_eq!(status, StatusCode::BAD_GATEWAY);
     assert_eq!(body["error"]["code"], "central_unavailable");
-    assert_eq!(node_settings::load_worker(dir.path())?, None);
+    assert_eq!(worker_settings::load_worker(dir.path())?, None);
     Ok(())
 }
 
@@ -211,47 +211,47 @@ async fn test_installed_central_cannot_become_a_worker() -> anyhow::Result<()> {
     let (status, body) = post(
         &central,
         "/api/v1/setup/worker",
-        serde_json::json!({"coordinator_url": "http://127.0.0.1:9", "username": ADMIN, "password": GOOD_PASSWORD, "node_name": "nas-1"}),
+        serde_json::json!({"central_url": "http://127.0.0.1:9", "username": ADMIN, "password": GOOD_PASSWORD, "worker_name": "nas-1"}),
     )
     .await?;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(body["error"]["code"], "already_configured");
-    assert_eq!(node_settings::load_worker(dir.path())?, None);
+    assert_eq!(worker_settings::load_worker(dir.path())?, None);
     Ok(())
 }
 
-/// Enrôlement de bout en bout : une vraie centrale sur un port local, un nœud qui s'y enrôle.
+/// Enrôlement de bout en bout : un vrai central sur un port local, un worker qui s'y enrôle.
 #[tokio::test]
-async fn test_uninstalled_node_enrolls_as_worker_against_a_live_central() -> anyhow::Result<()> {
+async fn test_blank_installation_enrolls_as_worker_against_a_live_central() -> anyhow::Result<()> {
     let central_dir = tempfile::tempdir()?;
     let central = installed_central(central_dir.path()).await?;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let central_url = format!("http://{}", listener.local_addr()?);
     let server = tokio::spawn(async move { axum::serve(listener, central).await });
 
-    let node_dir = tempfile::tempdir()?;
-    let node = app_in(node_dir.path()).await?;
+    let worker_dir = tempfile::tempdir()?;
+    let installation = app_in(worker_dir.path()).await?;
     let (status, _) = post(
-        &node,
+        &installation,
         "/api/v1/setup/worker",
-        serde_json::json!({"coordinator_url": central_url, "username": ADMIN, "password": GOOD_PASSWORD, "node_name": "nas-1"}),
+        serde_json::json!({"central_url": central_url, "username": ADMIN, "password": GOOD_PASSWORD, "worker_name": "nas-1"}),
     )
     .await?;
     assert_eq!(status, StatusCode::ACCEPTED);
 
-    let saved = node_settings::load_worker(node_dir.path())?;
+    let saved = worker_settings::load_worker(worker_dir.path())?;
     assert_eq!(
         saved,
-        Some(node_settings::WorkerNodeSettings {
+        Some(worker_settings::WorkerSettings {
             name: "nas-1".into(),
-            coordinator_url: central_url.clone(),
+            central_url: central_url.clone(),
         })
     );
-    let key = node_settings::load_worker_key(node_dir.path())?;
-    let raw = std::fs::read_to_string(node_dir.path().join("node.json"))?;
+    let key = worker_settings::load_worker_key(worker_dir.path())?;
+    let raw = std::fs::read_to_string(worker_dir.path().join("worker.json"))?;
     assert!(!raw.contains(&key));
 
-    // La clé reçue ouvre bien le protocole d'agent de la centrale.
+    // La clé reçue ouvre bien le protocole de worker du central.
     let client = reqwest::Client::new();
     let me: serde_json::Value = client
         .get(format!("{central_url}/api/v1/me"))
@@ -264,9 +264,9 @@ async fn test_uninstalled_node_enrolls_as_worker_against_a_live_central() -> any
 
     // Le choix est définitif : un second enrôlement est refusé.
     let (status, _) = post(
-        &node,
+        &installation,
         "/api/v1/setup/worker",
-        serde_json::json!({"coordinator_url": central_url, "username": ADMIN, "password": GOOD_PASSWORD, "node_name": "nas-2"}),
+        serde_json::json!({"central_url": central_url, "username": ADMIN, "password": GOOD_PASSWORD, "worker_name": "nas-2"}),
     )
     .await?;
     assert_eq!(status, StatusCode::CONFLICT);

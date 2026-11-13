@@ -35,7 +35,7 @@ pub use settings::{
 };
 pub use vocab::{CatalogCapability, CatalogItemType, PluginCategory};
 
-/// Outil de remuxage requis par les jobs, installé dans le cache du nœud depuis les dépôts.
+/// Outil de remuxage requis par les jobs, installé dans le cache local depuis les dépôts.
 pub const REMUX_TOOL_ID: &str = "app.mkvtoolnix";
 pub const REMUX_TOOL_VERSION: &str = "1.0.0";
 
@@ -140,7 +140,7 @@ pub struct ManifestToolDetails {
     pub current_choice: Option<bool>,
 }
 
-/// État d'un outil dans le cache de ce nœud.
+/// État d'un outil dans le cache local.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolStatus {
@@ -172,7 +172,7 @@ pub struct ParsedIndex {
     pub skipped: Vec<String>,
 }
 
-/// Lit un `catalogue/index.json` en tolérant les fiches que ce coordinateur ne comprend pas.
+/// Lit un `catalogue/index.json` en tolérant les fiches que ce central ne comprend pas.
 pub fn parse_index_tolerant(content: &str) -> anyhow::Result<ParsedIndex> {
     let value: Value = serde_json::from_str(content)?;
     let schema_version = value
@@ -310,14 +310,14 @@ pub fn plugin_exists(roots: &[PathBuf], plugin_id: &str) -> bool {
         .any(|(_, entry)| entry.id == plugin_id)
 }
 
-/// Résumé d'un outil du catalogue : prêt s'il est dans le cache du nœud, sinon installable.
+/// Résumé d'un outil du catalogue : prêt s'il est dans le cache local, sinon installable.
 pub fn summarize_tool(
     entry: CatalogEntry,
     description: String,
     cache_mgr: &ToolCacheManager,
 ) -> ToolStatusSummary {
     let arch = host_arch();
-    // La télémétrie est interne au binaire ; tout autre outil vient du cache du nœud.
+    // La télémétrie est interne au binaire ; tout autre outil vient du cache local.
     let is_system_ready = entry.id == "app.internal.telemetry";
     let status = if is_system_ready || cache_mgr.is_ready(&entry.id, &entry.version, arch) {
         ToolStatus::Ready
@@ -341,7 +341,7 @@ pub fn summarize_tool(
     }
 }
 
-/// Calcule l'état dynamique de chaque outil déclaré par rapport au cache local du nœud.
+/// Calcule l'état dynamique de chaque outil déclaré par rapport au cache local.
 pub fn list_tools_status(
     roots: &[PathBuf],
     cache_mgr: &ToolCacheManager,
@@ -359,8 +359,8 @@ pub fn list_tools_status(
         .collect()
 }
 
-/// Outils d'un catalogue lu à distance : l'état vient du cache local de ce nœud, sans description
-/// (les manifestes restent sur la centrale).
+/// Outils d'un catalogue lu à distance : l'état vient du cache local, sans description
+/// (les manifestes restent sur le central).
 pub fn tool_statuses_for_entries(
     entries: Vec<CatalogEntry>,
     cache_mgr: &ToolCacheManager,

@@ -1,11 +1,10 @@
 //! Copie locale des comptes d'un worker (ADR 0011, phase 3) : elle ne sert qu'à se connecter quand
-//! la centrale est injoignable. Elle est remplacée en bloc à chaque synchronisation, suppressions
+//! le central est injoignable. Elle est remplacée en bloc à chaque synchronisation, suppressions
 //! incluses, et ne contient que des hachés Argon2id.
 
 use crate::{
-    node_settings,
-    node_view::{AccountCopy, AccountSnapshot, VerifiedAccount},
-    password,
+    password, worker_settings,
+    worker_view::{AccountCopy, AccountSnapshot, VerifiedAccount},
 };
 use std::{
     path::{Path, PathBuf},
@@ -42,7 +41,7 @@ impl AccountStore {
             .filter(|account| !account.disabled)
             .map(|account| account.id.clone())
             .collect();
-        node_settings::write_private(&self.path, &serde_json::to_string(&snapshot)?)?;
+        worker_settings::write_private(&self.path, &serde_json::to_string(&snapshot)?)?;
         *self
             .accounts
             .write()

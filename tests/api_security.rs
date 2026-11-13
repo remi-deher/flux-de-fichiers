@@ -114,6 +114,20 @@ async fn protected_routes_reject_missing_keys_before_accessing_resources() -> an
 }
 
 #[tokio::test]
+async fn manual_retry_requires_authentication() -> anyhow::Result<()> {
+    let response = app()?
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/jobs/00000000-0000-0000-0000-000000000001/retry")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+#[tokio::test]
 async fn login_rejects_untrusted_origin_and_unknown_credentials() -> anyhow::Result<()> {
     let (app, _) = migrated_app(None).await?;
     let response = app

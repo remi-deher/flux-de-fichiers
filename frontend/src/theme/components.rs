@@ -238,13 +238,13 @@ pub const COMPONENTS_CSS: &str = r#"
   flex: none;
 }
 
-.library-node-list {
+.library-worker-list {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
 
-.library-node-row {
+.library-worker-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -255,7 +255,7 @@ pub const COMPONENTS_CSS: &str = r#"
   border-radius: var(--radius-sm);
 }
 
-.library-node-path {
+.library-worker-path {
   font-family: var(--font-mono);
   font-size: 0.8125rem;
   color: var(--text-dim);

@@ -138,8 +138,8 @@ jobs:
         run: |
           echo "Téléchargement de l'image de la PR : $PR_IMAGE..."
           docker pull "$PR_IMAGE"
-          echo "Démarrage du conteneur coordinator..."
-          docker run -d --name smoke -p 3000:3000 "$PR_IMAGE" coordinator
+          echo "Démarrage du conteneur central..."
+          docker run -d --name smoke -p 3000:3000 "$PR_IMAGE" central
           
           echo "Vérification de la santé sur http://localhost:3000/health..."
           for i in $(seq 1 20); do

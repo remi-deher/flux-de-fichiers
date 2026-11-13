@@ -7,6 +7,7 @@
 use super::webhook::WebhookBlockConfig;
 use crate::{
     error::{AppError, AppResult},
+    repository::DEFINITION_STORES,
     secrets::{SecretBox, is_encrypted},
 };
 use serde_json::{Map, Value};
@@ -172,24 +173,24 @@ pub fn rotate_definition(
     Ok(Some((rewritten, rotated)))
 }
 
-/// Chiffre au démarrage les en-têtes encore en clair des flux déjà enregistrés.
+/// Chiffre au démarrage les en-têtes encore en clair des flux et de leurs versions.
 pub async fn migrate_flow_secrets(pool: &SqlitePool, secrets: &SecretBox) -> AppResult<usize> {
-    let flows: Vec<(String, String)> = sqlx::query_as("SELECT id, definition FROM flows")
-        .fetch_all(pool)
-        .await?;
     let mut migrated = 0;
-    for (id, definition) in flows {
-        if !has_webhook_headers(&definition) {
-            continue;
-        }
-        let sealed = seal_definition(secrets, &id, &definition, None)?;
-        if sealed != definition {
-            sqlx::query("UPDATE flows SET definition = ?1 WHERE id = ?2")
-                .bind(&sealed)
-                .bind(&id)
-                .execute(pool)
-                .await?;
-            migrated += 1;
+    for store in &DEFINITION_STORES {
+        let rows: Vec<(String, i64, String)> = sqlx::query_as(store.select).fetch_all(pool).await?;
+        for (id, rowid, definition) in rows {
+            if !has_webhook_headers(&definition) {
+                continue;
+            }
+            let sealed = seal_definition(secrets, &id, &definition, None)?;
+            if sealed != definition {
+                sqlx::query(store.update)
+                    .bind(&sealed)
+                    .bind(rowid)
+                    .execute(pool)
+                    .await?;
+                migrated += 1;
+            }
         }
     }
     Ok(migrated)
@@ -344,8 +345,18 @@ mod tests {
         .bind(definition("Bearer SECRET"))
         .execute(&pool)
         .await?;
+        sqlx::query(
+            "INSERT INTO flow_versions (flow_id, version, name, file_mask, definition) VALUES ('f1', 1, 'Flux', '*.mkv', ?1)",
+        )
+        .bind(definition("Bearer SECRET"))
+        .execute(&pool)
+        .await?;
 
-        assert_eq!(migrate_flow_secrets(&pool, &secrets).await?, 1);
+        assert_eq!(migrate_flow_secrets(&pool, &secrets).await?, 2);
+        let version: String = sqlx::query_scalar("SELECT definition FROM flow_versions")
+            .fetch_one(&pool)
+            .await?;
+        assert!(!version.contains("Bearer SECRET"));
         let stored: String = sqlx::query_scalar("SELECT definition FROM flows WHERE id = 'f1'")
             .fetch_one(&pool)
             .await?;

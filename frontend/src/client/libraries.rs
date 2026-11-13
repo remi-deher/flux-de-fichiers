@@ -11,8 +11,8 @@ pub const SCRIPT: &str = r###"
   }
 
   function libraryReadiness(library) {
-    const nodes = library && Array.isArray(library.nodes) ? library.nodes : [];
-    return library && library.flow_id && nodes.length > 0 ? 'Prête' : 'À configurer';
+    const workers = library && Array.isArray(library.workers) ? library.workers : [];
+    return library && library.flow_id && workers.length > 0 ? 'Prête' : 'À configurer';
   }
 
   function libraryAccessLabel(access) {
@@ -27,7 +27,7 @@ pub const SCRIPT: &str = r###"
     const code = error && error.message;
     if (code === 'Non autorisé') return 'Ouvrez une session pour modifier les bibliothèques.';
     if (code === 'lease_expired_or_conflict') return 'Une bibliothèque porte déjà ce nom.';
-    if (code === 'invalid_input') return 'Vérifiez le nom, le flux et les chemins absolus des nœuds.';
+    if (code === 'invalid_input') return 'Vérifiez le nom, le flux et les chemins absolus des workers.';
     if (code === 'not_found') return 'Cette bibliothèque n’existe plus.';
     return 'Enregistrement impossible.';
   }
@@ -52,13 +52,13 @@ pub const SCRIPT: &str = r###"
   }
 
   function librarySearchParts(library) {
-    const nodes = Array.isArray(library.nodes) ? library.nodes : [];
+    const workers = Array.isArray(library.workers) ? library.workers : [];
     return [
       library.name,
       libraryFlowName(library.flow_id),
-      ...nodes.map(node => node.local_path),
-      ...nodes.map(node => {
-        const worker = libraryWorker(node.worker_id);
+      ...workers.map(entry => entry.local_path),
+      ...workers.map(entry => {
+        const worker = libraryWorker(entry.worker_id);
         return worker ? worker.name : '';
       })
     ];
@@ -71,19 +71,19 @@ pub const SCRIPT: &str = r###"
     const filtered = cachedLibraries.filter(library => matchesQuery(librarySearchParts(library), searchInput ? searchInput.value : ''));
     if (filtered.length === 0) {
       const message = cachedLibraries.length === 0
-        ? 'Aucune bibliothèque déclarée. Déclarez-en une pour y accrocher un flux et des nœuds.'
+        ? 'Aucune bibliothèque déclarée. Déclarez-en une pour y accrocher un flux et des workers.'
         : 'Aucune bibliothèque ne correspond à votre recherche.';
       tbody.innerHTML = emptyStateRow(5, escapeHtml(message), false);
       return;
     }
     tbody.innerHTML = filtered.map(library => {
       const safeId = escapeHtml(library.id);
-      const nodes = Array.isArray(library.nodes) ? library.nodes.length : 0;
+      const workers = Array.isArray(library.workers) ? library.workers.length : 0;
       const ready = libraryReadiness(library) === 'Prête';
       return `<tr class="registre-row" data-library-id="${safeId}">
           <td class="text-strong">${escapeHtml(library.name)}</td>
           <td>${escapeHtml(libraryFlowName(library.flow_id))}</td>
-          <td>${nodes}</td>
+          <td>${workers}</td>
           <td>${renderStatusPill(libraryReadiness(library), ready ? 'online' : 'info')}</td>
           <td class="cell-end">
             <button type="button" class="btn btn-secondary btn-sm registre-open-btn" data-library-id="${safeId}">Ouvrir</button>
@@ -106,21 +106,21 @@ pub const SCRIPT: &str = r###"
   }
 
   function openLibrary(library) {
-    const nodes = library && Array.isArray(library.nodes) ? library.nodes : [];
+    const workers = library && Array.isArray(library.workers) ? library.workers : [];
     libraryDraft = {
       id: library ? library.id : null,
       name: library ? library.name : '',
       flow_id: library && library.flow_id ? library.flow_id : null,
-      nodes: nodes.map(node => ({
-        worker_id: node.worker_id,
-        local_path: node.local_path,
-        access: node.access === 'read' ? 'read' : 'read_write'
+      workers: workers.map(entry => ({
+        worker_id: entry.worker_id,
+        local_path: entry.local_path,
+        access: entry.access === 'read' ? 'read' : 'read_write'
       }))
     };
     const title = libraryDraft.name || 'Nouvelle bibliothèque';
     const facts = library
-      ? [libraryFlowName(library.flow_id), `${nodes.length} nœud(s)`, libraryReadiness(library)]
-      : ['Choisissez un nom, un flux et au moins un nœud.'];
+      ? [libraryFlowName(library.flow_id), `${workers.length} worker(s)`, libraryReadiness(library)]
+      : ['Choisissez un nom, un flux et au moins un worker.'];
     showRegistreFact('libraries-fact', title, facts);
     fillLibraryDrawer();
   }
@@ -131,51 +131,51 @@ pub const SCRIPT: &str = r###"
     if (nameInput) nameInput.value = libraryDraft.name || '';
     const deleteBtn = el('libraries-delete-btn');
     if (deleteBtn) deleteBtn.hidden = !libraryDraft.id;
-    renderLibraryNodes();
+    renderLibraryWorkers();
     renderLibraryWorkerSelect();
     renderLibraryFlowSelect();
   }
 
-  function renderLibraryNodes() {
-    const list = el('library-nodes-list');
+  function renderLibraryWorkers() {
+    const list = el('library-workers-list');
     if (!list || !libraryDraft) return;
-    if (libraryDraft.nodes.length === 0) {
-      list.innerHTML = '<p class="inspection-panel__facts">Aucun nœud configuré.</p>';
+    if (libraryDraft.workers.length === 0) {
+      list.innerHTML = '<p class="inspection-panel__facts">Aucun worker configuré.</p>';
       return;
     }
     const now = Date.now();
-    list.innerHTML = libraryDraft.nodes.map(node => {
-      const worker = libraryWorker(node.worker_id);
+    list.innerHTML = libraryDraft.workers.map(entry => {
+      const worker = libraryWorker(entry.worker_id);
       const online = worker && (now - new Date(worker.last_seen).getTime()) < 120000;
       const presence = worker
         ? renderStatusPill(online ? 'En ligne' : 'Hors ligne', online ? 'online' : 'offline')
         : renderStatusPill('Inconnu', 'info');
-      const safeId = escapeHtml(node.worker_id);
-      return `<div class="library-node-row">
+      const safeId = escapeHtml(entry.worker_id);
+      return `<div class="library-entry-row">
           <div>
-            <div class="text-strong">${escapeHtml(worker ? worker.name : node.worker_id)}</div>
-            <div class="library-node-path">${escapeHtml(node.local_path)}</div>
+            <div class="text-strong">${escapeHtml(worker ? worker.name : entry.worker_id)}</div>
+            <div class="library-entry-path">${escapeHtml(entry.local_path)}</div>
           </div>
           <div class="inline-actions">
             ${presence}
-            <span class="status-pill info">${escapeHtml(libraryAccessLabel(node.access))}</span>
-            <button type="button" class="btn btn-secondary btn-sm library-node-remove" data-worker-id="${safeId}">Retirer</button>
+            <span class="status-pill info">${escapeHtml(libraryAccessLabel(entry.access))}</span>
+            <button type="button" class="btn btn-secondary btn-sm library-entry-remove" data-worker-id="${safeId}">Retirer</button>
           </div>
       </div>`;
     }).join('');
-    list.querySelectorAll('.library-node-remove').forEach(btn => {
-      btn.addEventListener('click', () => removeLibraryNode(btn.getAttribute('data-worker-id')));
+    list.querySelectorAll('.library-entry-remove').forEach(btn => {
+      btn.addEventListener('click', () => removeLibraryWorker(btn.getAttribute('data-worker-id')));
     });
   }
 
   function renderLibraryWorkerSelect() {
-    const select = el('library-node-worker');
-    const addBtn = el('library-node-add-btn');
+    const select = el('library-entry-worker');
+    const addBtn = el('library-entry-add-btn');
     if (!select || !libraryDraft) return;
-    const used = new Set(libraryDraft.nodes.map(node => node.worker_id));
+    const used = new Set(libraryDraft.workers.map(entry => entry.worker_id));
     const available = cachedWorkers.filter(worker => !used.has(worker.id));
     if (available.length === 0) {
-      select.innerHTML = '<option value="">Aucun nœud disponible</option>';
+      select.innerHTML = '<option value="">Aucun worker disponible</option>';
       select.disabled = true;
       if (addBtn) addBtn.disabled = true;
       return;
@@ -198,29 +198,29 @@ pub const SCRIPT: &str = r###"
     select.value = current;
   }
 
-  function removeLibraryNode(workerId) {
+  function removeLibraryWorker(workerId) {
     if (!libraryDraft || !workerId) return;
-    libraryDraft.nodes = libraryDraft.nodes.filter(node => node.worker_id !== workerId);
-    renderLibraryNodes();
+    libraryDraft.workers = libraryDraft.workers.filter(entry => entry.worker_id !== workerId);
+    renderLibraryWorkers();
     renderLibraryWorkerSelect();
   }
 
-  function addLibraryNode() {
+  function addLibraryWorker() {
     if (!libraryDraft) return;
-    const workerSelect = el('library-node-worker');
-    const pathInput = el('library-node-path');
-    const accessSelect = el('library-node-access');
+    const workerSelect = el('library-entry-worker');
+    const pathInput = el('library-entry-path');
+    const accessSelect = el('library-entry-access');
     const workerId = workerSelect ? workerSelect.value : '';
     const path = pathInput ? pathInput.value.trim() : '';
     const access = accessSelect && accessSelect.value === 'read' ? 'read' : 'read_write';
     if (!workerId || !path.startsWith('/')) {
-      showNotice('Choisissez un nœud et un chemin absolu.', 'info');
+      showNotice('Choisissez un worker et un chemin absolu.', 'info');
       return;
     }
-    if (libraryDraft.nodes.some(node => node.worker_id === workerId)) return;
-    libraryDraft.nodes.push({ worker_id: workerId, local_path: path, access });
+    if (libraryDraft.workers.some(entry => entry.worker_id === workerId)) return;
+    libraryDraft.workers.push({ worker_id: workerId, local_path: path, access });
     if (pathInput) pathInput.value = '';
-    renderLibraryNodes();
+    renderLibraryWorkers();
     renderLibraryWorkerSelect();
   }
 
@@ -231,7 +231,7 @@ pub const SCRIPT: &str = r###"
     const payload = {
       name: nameInput ? nameInput.value : libraryDraft.name,
       flow_id: flowSelect && flowSelect.value ? flowSelect.value : null,
-      nodes: libraryDraft.nodes
+      workers: libraryDraft.workers
     };
     const creating = !libraryDraft.id;
     const url = creating ? '/api/v1/libraries' : `/api/v1/libraries/${libraryDraft.id}`;
@@ -289,8 +289,8 @@ pub const SCRIPT: &str = r###"
     if (saveBtn) saveBtn.addEventListener('click', saveLibrary);
     const deleteBtn = el('libraries-delete-btn');
     if (deleteBtn) deleteBtn.addEventListener('click', deleteLibrary);
-    const addBtn = el('library-node-add-btn');
-    if (addBtn) addBtn.addEventListener('click', addLibraryNode);
+    const addBtn = el('library-entry-add-btn');
+    if (addBtn) addBtn.addEventListener('click', addLibraryWorker);
     const nameInput = el('library-name-input');
     if (nameInput) {
       nameInput.addEventListener('input', () => {
@@ -318,7 +318,7 @@ mod tests {
     fn script_reads_and_writes_libraries() {
         assert!(SCRIPT.contains("function loadLibraries"));
         assert!(SCRIPT.contains("function saveLibrary"));
-        assert!(SCRIPT.contains("function addLibraryNode"));
+        assert!(SCRIPT.contains("function addLibraryWorker"));
         assert!(SCRIPT.contains("/api/v1/libraries"));
         assert!(SCRIPT.contains("read_write"));
         assert!(SCRIPT.contains("libraries-fact"));

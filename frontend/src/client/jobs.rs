@@ -25,7 +25,7 @@ pub const SCRIPT: &str = r###"
           const payload = JSON.parse(e.data);
           loadJobs();
 
-          // Un worker a réclamé une tâche ou émis un heartbeat : actualiser les agents
+          // Un worker a réclamé une tâche ou émis un heartbeat : actualiser les workers
           if (payload.event_type === 'job_claimed' || payload.event_type === 'job_heartbeat') {
             loadWorkers();
           }
@@ -58,6 +58,7 @@ pub const SCRIPT: &str = r###"
       jobsEventSource.addEventListener('job_succeeded', handleJobEvent);
       jobsEventSource.addEventListener('job_failed', handleJobEvent);
       jobsEventSource.addEventListener('job_canceled', handleJobEvent);
+      jobsEventSource.addEventListener('job_retried', handleJobEvent);
 
       jobsEventSource.addEventListener('job_progress', (e) => {
         try {
@@ -261,7 +262,7 @@ pub const SCRIPT: &str = r###"
     };
     setText('detail-job-id', job.id);
     setText('detail-job-source', job.source_name);
-    setText('detail-job-worker', job.worker_id || job.target_worker_id || 'N\'importe quel agent (ou central autonome)');
+    setText('detail-job-worker', job.worker_id || job.target_worker_id || 'N\'importe quel worker (ou central autonome)');
     setText('detail-job-attempts', `${job.attempts || 1} tentative(s)`);
     setText('detail-job-created', formatDate(job.created_at));
     setText('detail-job-output', job.output_name || 'Non généré');

@@ -11,7 +11,7 @@ x-app: &app
   pids_limit: 128
 
 services:
-  coordinator:
+  central:
     <<: *app
     build:
       context: .
@@ -28,7 +28,7 @@ services:
     volumes:
       - ./var/config:/config
       - data:/data
-      - coordinator_logs:/logs
+      - central_logs:/logs
       - ./var/input:/input:ro
     ports: ["127.0.0.1:3000:3000"]
     healthcheck:
@@ -42,7 +42,7 @@ services:
     pull_policy: never
     command: [worker]
     environment:
-      COORDINATOR_URL: http://coordinator:3000
+      CENTRAL_URL: http://central:3000
       WORKER_KEY_FILE: /config/worker_key
     volumes:
       - ./var/config:/config:ro
@@ -54,7 +54,7 @@ services:
       timeout: 2s
       retries: 10
     depends_on:
-      coordinator: {condition: service_healthy}
+      central: {condition: service_healthy}
 
   # Outils réservés aux scénarios : jamais inclus dans les services de traitement.
   fixtures:
@@ -69,6 +69,6 @@ services:
 
 volumes:
   data:
-  coordinator_logs:
+  central_logs:
   work:
   logs:

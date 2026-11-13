@@ -26,7 +26,7 @@ pub fn SettingsEncryption() -> impl IntoView {
                     "Copier la commande"
                 </Button>
                 <p class="form-help">
-                    "Range l'ancienne clé, la nouvelle et une copie de la base dans /config/backups, rechiffre tous les secrets en une transaction, puis remplace la clé : une valeur illisible annule tout. À lancer de préférence centrale arrêtée. Sans effet si la clé vient de SECRET_KEY_FILE."
+                    "Range l'ancienne clé, la nouvelle et une copie de la base dans /config/backups, rechiffre tous les secrets en une transaction, puis remplace la clé : une valeur illisible annule tout. À lancer de préférence central arrêté. Sans effet si la clé vient de SECRET_KEY_FILE."
                 </p>
             </div>
         </Card>

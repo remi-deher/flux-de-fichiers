@@ -319,7 +319,7 @@ pub const SCRIPT: &str = r###"
 
   const SECRET_KEPT_PLACEHOLDER = 'Défini — laisser vide pour conserver';
 
-  // Installe un outil du catalogue dans le cache du coordinateur, puis rafraîchit son état.
+  // Installe un outil du catalogue dans le cache du central, puis rafraîchit son état.
   async function installTool(toolId, name, button) {
     const previous = button.textContent;
     button.disabled = true;
@@ -399,7 +399,7 @@ pub const SCRIPT: &str = r###"
           return;
         }
         if (verb === 'Distribuer') {
-          showNotice(`${name} est prêt : chaque nœud l'installe depuis le contrat du dépôt.`, 'info');
+          showNotice(`${name} est prêt : chaque worker l'installe depuis le contrat du dépôt.`, 'info');
           return;
         }
         const fact = el('catalog-fact-' + view);

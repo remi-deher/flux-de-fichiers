@@ -123,7 +123,7 @@ async fn test_admin_reads_the_system_status() -> anyhow::Result<()> {
         "POST",
         "/api/v1/setup/central",
         None,
-        Some(serde_json::json!({"name": "Centrale", "username": "admin-systeme", "password": PASSWORD})),
+        Some(serde_json::json!({"name": "Central", "username": "admin-systeme", "password": PASSWORD})),
     )
     .await?;
     assert_eq!(status, StatusCode::OK);
@@ -149,7 +149,7 @@ async fn test_status_is_refused_without_session_and_to_viewers() -> anyhow::Resu
         "POST",
         "/api/v1/setup/central",
         None,
-        Some(serde_json::json!({"name": "Centrale", "username": "admin-systeme2", "password": PASSWORD})),
+        Some(serde_json::json!({"name": "Central", "username": "admin-systeme2", "password": PASSWORD})),
     )
     .await?;
     let admin = cookies_of(&headers);

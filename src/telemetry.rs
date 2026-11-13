@@ -8,7 +8,7 @@ use std::{
 const DEFAULT_CORES: u32 = 1;
 const KILOBYTES_TO_BYTES: u64 = 1024;
 
-/// Instantané des métriques matérielles et système d'un nœud.
+/// Instantané des métriques matérielles et système d'un worker.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct TelemetrySnapshot {
     pub timestamp: DateTime<Utc>,

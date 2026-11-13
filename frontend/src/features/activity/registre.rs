@@ -16,7 +16,7 @@ fn job_panes() -> Vec<InspectionPane> {
                     <DetailRow label="ID de la tâche" id="detail-job-id" />
                     <DetailRow label="Fichier source" id="detail-job-source" />
                     <DetailRow label="Statut" id="detail-job-status" />
-                    <DetailRow label="Agent assigné" id="detail-job-worker" />
+                    <DetailRow label="Worker assigné" id="detail-job-worker" />
                     <DetailRow label="Tentatives" id="detail-job-attempts" />
                     <DetailRow label="Création" id="detail-job-created" />
                     <DetailRow label="Fichier résultat" id="detail-job-output" />

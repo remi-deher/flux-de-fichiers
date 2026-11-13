@@ -136,7 +136,7 @@ async fn setup(app: &axum::Router, username: &str) -> anyhow::Result<Cookies> {
         "POST",
         "/api/v1/setup/central",
         Auth::None,
-        Some(serde_json::json!({"name": "Ma centrale", "username": username, "password": GOOD_PASSWORD})),
+        Some(serde_json::json!({"name": "Mon central", "username": username, "password": GOOD_PASSWORD})),
     )
     .await?;
     assert_eq!(reply.status, StatusCode::OK);
@@ -159,12 +159,12 @@ async fn test_setup_creates_the_admin_once_and_opens_a_session() -> anyhow::Resu
     let app = fresh_app(false).await?;
     let status = call(&app, "GET", "/api/v1/setup/status", Auth::None, None).await?;
     assert_eq!(status.body["needsSetup"], true);
-    assert_eq!(status.body["nodeKind"], "central");
+    assert_eq!(status.body["instanceKind"], "central");
 
     for bad in [
         serde_json::json!({"name": "", "username": "admin1", "password": GOOD_PASSWORD}),
-        serde_json::json!({"name": "Centrale", "username": "a", "password": GOOD_PASSWORD}),
-        serde_json::json!({"name": "Centrale", "username": "admin1", "password": "court"}),
+        serde_json::json!({"name": "Central", "username": "a", "password": GOOD_PASSWORD}),
+        serde_json::json!({"name": "Central", "username": "admin1", "password": "court"}),
     ] {
         let reply = call(&app, "POST", "/api/v1/setup/central", Auth::None, Some(bad)).await?;
         assert_eq!(reply.status, StatusCode::BAD_REQUEST);
@@ -175,7 +175,7 @@ async fn test_setup_creates_the_admin_once_and_opens_a_session() -> anyhow::Resu
 
     let status = call(&app, "GET", "/api/v1/setup/status", Auth::None, None).await?;
     assert_eq!(status.body["needsSetup"], false);
-    assert_eq!(status.body["instanceName"], "Ma centrale");
+    assert_eq!(status.body["instanceName"], "Mon central");
 
     let again = call(
         &app,
@@ -209,14 +209,14 @@ async fn test_setup_creates_the_admin_once_and_opens_a_session() -> anyhow::Resu
     .await?;
     assert_eq!(me.status, StatusCode::OK);
     assert_eq!(me.body["role"], "admin");
-    assert_eq!(me.body["nodeKind"], "central");
-    assert_eq!(me.body["instanceName"], "Ma centrale");
+    assert_eq!(me.body["instanceKind"], "central");
+    assert_eq!(me.body["instanceName"], "Mon central");
     let permissions = me.body["permissions"]
         .as_array()
         .cloned()
         .unwrap_or_default();
     assert!(permissions.iter().any(|p| p == "manage_api_keys"));
-    assert!(!permissions.iter().any(|p| p == "node_agent"));
+    assert!(!permissions.iter().any(|p| p == "worker_protocol"));
     Ok(())
 }
 
@@ -256,7 +256,7 @@ async fn test_repeated_failures_lock_the_account_temporarily() -> anyhow::Result
 async fn test_a_session_needs_csrf_to_change_anything_but_not_to_read() -> anyhow::Result<()> {
     let app = fresh_app(false).await?;
     let cookies = setup(&app, "csrf-admin").await?;
-    let body = Some(serde_json::json!({"name": "Mon nœud", "role": "worker"}));
+    let body = Some(serde_json::json!({"name": "Mon worker", "role": "worker"}));
 
     let without = call(
         &app,
@@ -298,7 +298,7 @@ async fn test_api_keys_are_shown_once_scoped_by_role_and_revocable() -> anyhow::
         "POST",
         "/api/v1/api-keys",
         Auth::Bearer(admin),
-        Some(serde_json::json!({"name": "Nœud NAS", "role": "worker"})),
+        Some(serde_json::json!({"name": "Worker NAS", "role": "worker"})),
     )
     .await?;
     assert_eq!(created.status, StatusCode::OK);
@@ -311,9 +311,9 @@ async fn test_api_keys_are_shown_once_scoped_by_role_and_revocable() -> anyhow::
     let text = listed.body.to_string();
     assert!(!text.contains(&worker_key));
     assert!(!text.contains("keyHash") && !text.contains("key_hash"));
-    assert!(text.contains("Nœud NAS"));
+    assert!(text.contains("Worker NAS"));
 
-    // Un worker n'administre rien ; un administrateur n'est pas un agent.
+    // Un worker n'administre rien ; un administrateur n'est pas un worker.
     let as_worker = call(
         &app,
         "GET",

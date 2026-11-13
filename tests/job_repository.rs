@@ -70,6 +70,26 @@ async fn job_lease_publication_and_flow_queries() -> anyhow::Result<()> {
         .bind(job.id)
         .execute(&pool)
         .await?;
+    // Bail expiré : échec explicite, aucune remise en file automatique.
+    assert!(repository::claim(&pool, worker.id).await?.is_none());
+    let lost = repository::get_job(&pool, job.id).await?;
+    assert_eq!(lost.status, JobStatus::Failed);
+    assert_eq!(lost.error_code, Some(JobErrorCode::LeaseExpired));
+    assert!(matches!(
+        repository::heartbeat(&pool, job.id, &lease).await,
+        Err(AppError::Conflict)
+    ));
+    assert!(matches!(
+        repository::retry_job(&pool, Uuid::nil()).await,
+        Err(AppError::NotFound)
+    ));
+    let requeued = repository::retry_job(&pool, job.id).await?;
+    assert_eq!(requeued.status, JobStatus::Queued);
+    assert_eq!(requeued.error_code, None);
+    assert!(matches!(
+        repository::retry_job(&pool, job.id).await,
+        Err(AppError::Conflict)
+    ));
     let renewed = repository::claim(&pool, worker.id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("reprise du bail"))?;
@@ -89,6 +109,10 @@ async fn job_lease_publication_and_flow_queries() -> anyhow::Result<()> {
     let expired = repository::get_job(&pool, job.id).await?;
     assert_eq!(expired.status, JobStatus::Failed);
     assert_eq!(expired.error_code, Some(JobErrorCode::LeaseExpired));
+    assert!(matches!(
+        repository::retry_job(&pool, job.id).await,
+        Err(AppError::Conflict)
+    ));
 
     let second =
         repository::insert_job(&pool, "autre.mkv", Some(worker.id), &"cd".repeat(32), 8).await?;
@@ -232,5 +256,81 @@ async fn job_lease_publication_and_flow_queries() -> anyhow::Result<()> {
     let spare = repository::register(&pool, "worker-b").await?;
     repository::delete_worker(&pool, spare.id).await?;
     assert!(!repository::worker_exists(&pool, spare.id).await?);
+    Ok(())
+}
+
+fn flow_request(name: &str, definition: &str) -> UpdateFlowRequest {
+    UpdateFlowRequest {
+        name: name.into(),
+        description: None,
+        file_mask: "*.mkv".into(),
+        is_default: true,
+        definition: definition.into(),
+    }
+}
+
+#[tokio::test]
+async fn jobs_keep_the_flow_version_frozen_at_creation() -> anyhow::Result<()> {
+    let pool = pool().await?;
+    let without_flow =
+        repository::insert_job(&pool, "avant.mkv", None, &"ab".repeat(32), 1).await?;
+    assert_eq!(without_flow.flow_id, None);
+    assert_eq!(without_flow.flow_version, None);
+
+    let first = repository::save_flow(&pool, "flow.v", &flow_request("V", "{\"a\":1}")).await?;
+    assert_eq!(first.version, 1);
+    let same = repository::save_flow(&pool, "flow.v", &flow_request("V", "{\"a\":1}")).await?;
+    assert_eq!(
+        same.version, 1,
+        "un contenu identique ne crée pas de version"
+    );
+
+    let job = repository::insert_job(&pool, "film.mkv", None, &"ab".repeat(32), 1).await?;
+    assert_eq!(job.flow_id.as_deref(), Some("flow.v"));
+    assert_eq!(job.flow_version, Some(1));
+
+    let second = repository::save_flow(&pool, "flow.v", &flow_request("V", "{\"a\":2}")).await?;
+    assert_eq!(second.version, 2);
+    let kept = repository::get_job(&pool, job.id).await?;
+    assert_eq!(kept.flow_version, Some(1), "la tâche garde sa version");
+    assert_eq!(
+        kept.status,
+        JobStatus::Queued,
+        "aucune relance ni modification"
+    );
+    let frozen = repository::get_flow_version(&pool, "flow.v", 1).await?;
+    assert_eq!(frozen.definition, "{\"a\":1}");
+    assert_eq!(frozen.version, 1);
+    let next = repository::insert_job(&pool, "suite.mkv", None, &"ab".repeat(32), 1).await?;
+    assert_eq!(next.flow_version, Some(2));
+
+    assert!(
+        sqlx::query("UPDATE flow_versions SET name='x' WHERE flow_id='flow.v'")
+            .execute(&pool)
+            .await
+            .is_err(),
+        "une version publiée est immuable"
+    );
+    assert!(
+        sqlx::query("DELETE FROM flow_versions")
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+
+    repository::save_flow(&pool, "flow.autre", &flow_request("Autre", "{}")).await?;
+    repository::delete_flow(&pool, "flow.v").await?;
+    let survivor = repository::get_flow_version(&pool, "flow.v", 1).await?;
+    assert_eq!(survivor.definition, "{\"a\":1}");
+    assert!(!survivor.is_default);
+    let recreated = repository::save_flow(&pool, "flow.v", &flow_request("V", "{}")).await?;
+    assert_eq!(
+        recreated.version, 3,
+        "la numérotation reprend après suppression"
+    );
+    assert!(matches!(
+        repository::get_flow_version(&pool, "flow.v", 9).await,
+        Err(AppError::NotFound)
+    ));
     Ok(())
 }

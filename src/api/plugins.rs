@@ -53,7 +53,7 @@ pub async fn worker_tool_distribution(
     Ok(Json(plugins::read_distribution(&roots, &id)?))
 }
 
-/// Installe un outil du catalogue dans le cache du coordinateur (nœud intégré).
+/// Installe un outil du catalogue dans le cache du central (worker intégré).
 pub async fn install_tool(
     State(s): State<AppState>,
     Path(id): Path<String>,

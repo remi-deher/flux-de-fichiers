@@ -1,12 +1,12 @@
-//! Client du worker vers les routes de la centrale limitées à son nœud (ADR 0011, phase 3).
+//! Client du worker vers les routes du central limitées à ce worker (ADR 0011, phase 3).
 //! Liste fermée de routes : jamais un proxy générique.
 
 use crate::{
-    node_view::{
-        ACCOUNTS_PATH, AccountSnapshot, JOBS_PATH, LOGIN_PATH, NodeOverview, OVERVIEW_PATH,
-        PLUGINS_PATH, VerifiedAccount, VerifyLoginRequest,
-    },
     plugins::CatalogEntry,
+    worker_view::{
+        ACCOUNTS_PATH, AccountSnapshot, JOBS_PATH, LOGIN_PATH, OVERVIEW_PATH, PLUGINS_PATH,
+        VerifiedAccount, VerifyLoginRequest, WorkerOverview,
+    },
 };
 use reqwest::{Client, StatusCode, Url};
 use serde::de::DeserializeOwned;
@@ -16,9 +16,9 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CentralError {
-    /// La centrale a répondu et refusé (identifiants faux, trop d'essais, clé révoquée…).
+    /// Le central a répondu et refusé (identifiants faux, trop d'essais, clé révoquée…).
     Rejected(StatusCode),
-    /// Pas de réponse exploitable : réseau coupé, centrale arrêtée, réponse illisible.
+    /// Pas de réponse exploitable : réseau coupé, central arrêté, réponse illisible.
     Unreachable,
 }
 
@@ -69,11 +69,11 @@ impl CentralClient {
         Self::decode(response).await
     }
 
-    pub async fn overview(&self) -> Result<NodeOverview, CentralError> {
+    pub async fn overview(&self) -> Result<WorkerOverview, CentralError> {
         self.get(OVERVIEW_PATH).await
     }
 
-    /// Tâches du nœud, relayées telles que la centrale les renvoie.
+    /// Tâches du worker, relayées telles que le central les renvoie.
     pub async fn jobs(&self) -> Result<serde_json::Value, CentralError> {
         self.get(JOBS_PATH).await
     }
@@ -86,7 +86,7 @@ impl CentralClient {
         self.get(ACCOUNTS_PATH).await
     }
 
-    /// Fait vérifier un identifiant et un mot de passe par la centrale.
+    /// Fait vérifier un identifiant et un mot de passe par le central.
     pub async fn login(
         &self,
         username: &str,

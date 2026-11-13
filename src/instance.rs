@@ -1,28 +1,29 @@
 //! Entrée du processus et sélection de son rôle au démarrage.
 //!
 //! Sans argument, le rôle est celui conservé dans `/config` : un worker enrôlé reprend son rôle, tout
-//! autre nœud démarre en centrale (et propose l'assistant d'installation). `coordinator` et `worker`
+//! autre installation démarre en central (et propose l'assistant d'installation). `central` et `worker`
 //! restent acceptés comme arguments pour l'automatisation.
 
 use crate::{
     account_admin, api, config,
     config::Config,
-    node_settings, secret_rotation, secrets,
+    secret_rotation, secrets,
     worker::{self, WorkerConfig},
+    worker_settings,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Notify;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Role {
-    Coordinator,
+    Central,
     Worker,
 }
 
 static ROLE_SWITCH_REQUESTED: AtomicBool = AtomicBool::new(false);
 static ROLE_SWITCH_NOTIFY: Notify = Notify::const_new();
 
-/// Demande l'arrêt propre de la centrale pour que le processus reparte avec le rôle enregistré
+/// Demande l'arrêt propre du central pour que le processus reparte avec le rôle enregistré
 /// (appelé une fois l'enrôlement en worker terminé).
 pub fn request_role_switch() {
     ROLE_SWITCH_REQUESTED.store(true, Ordering::SeqCst);
@@ -48,10 +49,10 @@ fn take_role_switch() -> bool {
 fn parse_role(argument: Option<&str>) -> anyhow::Result<Option<Role>> {
     match argument {
         Some("worker") => Ok(Some(Role::Worker)),
-        Some("coordinator") => Ok(Some(Role::Coordinator)),
+        Some("central") => Ok(Some(Role::Central)),
         None => Ok(None),
         _ => anyhow::bail!(
-            "Usage: flux-de-fichiers [coordinator|worker|reset-password <identifiant>|rotate-secret|--version]"
+            "Usage: flux-de-fichiers [central|worker|reset-password <identifiant>|rotate-secret|--version]"
         ),
     }
 }
@@ -62,15 +63,15 @@ fn initial_role(argument: Option<&str>) -> anyhow::Result<Role> {
         return Ok(role);
     }
     Ok(
-        if node_settings::load_worker(&config::resolve_config_dir())?.is_some() {
+        if worker_settings::load_worker(&config::resolve_config_dir())?.is_some() {
             Role::Worker
         } else {
-            Role::Coordinator
+            Role::Central
         },
     )
 }
 
-/// Réinitialise le mot de passe d'un compte de cette centrale et l'affiche une seule fois.
+/// Réinitialise le mot de passe d'un compte de ce central et l'affiche une seule fois.
 async fn reset_password(username: Option<&str>) -> anyhow::Result<()> {
     let username = username
         .ok_or_else(|| anyhow::anyhow!("Usage: flux-de-fichiers reset-password <identifiant>"))?;
@@ -126,7 +127,7 @@ pub async fn run(argument: Option<&str>, operand: Option<&str>) -> anyhow::Resul
             Role::Worker => {
                 return worker::run(WorkerConfig::load(&config::resolve_config_dir())?).await;
             }
-            Role::Coordinator => {
+            Role::Central => {
                 api::serve(Config::load()?).await?;
                 if !take_role_switch() {
                     return Ok(());
@@ -145,7 +146,7 @@ mod tests {
     #[test]
     fn test_arguments_select_the_role() -> anyhow::Result<()> {
         assert_eq!(parse_role(Some("worker"))?, Some(Role::Worker));
-        assert_eq!(parse_role(Some("coordinator"))?, Some(Role::Coordinator));
+        assert_eq!(parse_role(Some("central"))?, Some(Role::Central));
         assert_eq!(parse_role(None)?, None);
         assert!(parse_role(Some("autre")).is_err());
         Ok(())

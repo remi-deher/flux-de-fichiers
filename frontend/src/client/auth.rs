@@ -1,4 +1,4 @@
-//! Accès : installation de la centrale, connexion, session web et droits de l'utilisateur (ADR 0011).
+//! Accès : installation du central, connexion, session web et droits de l'utilisateur (ADR 0011).
 
 pub const SCRIPT: &str = r###"
 // --- Accès : installation, connexion, session et droits ---
@@ -8,17 +8,17 @@ pub const SCRIPT: &str = r###"
   const AUTH_ERROR_MESSAGES = {
     unauthenticated: 'Identifiant ou mot de passe incorrect.',
     too_many_attempts: 'Trop d\'essais : réessayez dans quelques minutes.',
-    invalid_input: 'Vérifiez les champs : identifiant de 3 à 40 caractères (lettres, chiffres, . - _), mot de passe d\'au moins 8 caractères, nom de nœud (lettres, chiffres, . - _) et adresse de la centrale sans chemin.',
-    already_configured: 'Ce nœud est déjà installé : rechargez la page.',
+    invalid_input: 'Vérifiez les champs : identifiant de 3 à 40 caractères (lettres, chiffres, . - _), mot de passe d\'au moins 8 caractères, nom de worker (lettres, chiffres, . - _) et adresse du central sans chemin.',
+    already_configured: 'Cette installation est déjà configurée : rechargez la page.',
     forbidden: 'Requête refusée : le compte doit être administrateur et l\'origine autorisée.',
-    central_unavailable: 'Centrale injoignable : vérifiez son adresse.'
+    central_unavailable: 'Central injoignable : vérifiez son adresse.'
   };
 
   // Chaque écran de la porte d'accès : formulaire affiché, titre, sous-titre et champ à focaliser.
   const GATE_VIEWS = {
-    role: { form: 'role-choice', title: 'Bienvenue', subtitle: 'Choisissez le rôle de ce nœud.', focus: 'role-central-btn' },
-    setup: { form: 'setup-form', title: 'Installation de la centrale', subtitle: 'Créez le compte administrateur pour commencer.', focus: 'setup-name' },
-    'worker-setup': { form: 'worker-setup-form', title: 'Enrôlement du worker', subtitle: 'Rattachez ce nœud à une centrale existante.', focus: 'worker-url' },
+    role: { form: 'role-choice', title: 'Bienvenue', subtitle: 'Choisissez le rôle de cette installation.', focus: 'role-central-btn' },
+    setup: { form: 'setup-form', title: 'Installation du central', subtitle: 'Créez le compte administrateur pour commencer.', focus: 'setup-name' },
+    'worker-setup': { form: 'worker-setup-form', title: 'Enrôlement du worker', subtitle: 'Rattachez cette installation à un central existant.', focus: 'worker-url' },
     login: { form: 'login-form', title: 'Connexion', focus: 'login-username' }
   };
   const WORKER_START_POLL_MS = 1000;
@@ -63,11 +63,11 @@ pub const SCRIPT: &str = r###"
     if (shell) shell.hidden = false;
   }
 
-  // Un écran est accessible si ce nœud l'héberge et si l'utilisateur a le droit exigé.
+  // Un écran est accessible si cette installation l'héberge et si l'utilisateur a le droit exigé.
   function isTabAllowed(slug, me) {
     const access = PANEL_ACCESS[slug];
     if (!access || !me) return true;
-    return access.hostedOn.includes(me.nodeKind) && me.permissions.includes(access.permission);
+    return access.hostedOn.includes(me.instanceKind) && me.permissions.includes(access.permission);
   }
 
   function renderAccount(me) {
@@ -76,7 +76,7 @@ pub const SCRIPT: &str = r###"
     if (me.instanceName) document.title = `${me.instanceName} — Flux de Fichiers`;
   }
 
-  // Masque les écrans interdits (la même interface sert tous les rôles et tous les types de nœud).
+  // Masque les écrans interdits (la même interface sert tous les rôles et tous les types d'installation).
   function applyAccess(me) {
     currentUser = me;
     sessionMode = 'cookie_session';
@@ -90,10 +90,10 @@ pub const SCRIPT: &str = r###"
     const firstAllowed = TABS.find(slug => isTabAllowed(slug, me));
     if (firstAllowed && !isTabAllowed(activeTab, me)) switchTab(firstAllowed);
     renderAccount(me);
-    if (me.nodeKind === 'worker') prepareWorkerDashboard(me);
+    if (me.instanceKind === 'worker') prepareWorkerDashboard(me);
     restrictSettingsToOwnAccount(me);
-    // Le flux d'événements des tâches n'existe que sur la centrale.
-    if (me.nodeKind === 'central' && typeof startJobsSse === 'function') startJobsSse();
+    // Le flux d'événements des tâches n'existe que sur le central.
+    if (me.instanceKind === 'central' && typeof startJobsSse === 'function') startJobsSse();
   }
 
   async function fetchJson(url) {
@@ -110,7 +110,7 @@ pub const SCRIPT: &str = r###"
     const status = await fetchJson('/api/v1/setup/status');
     if (!status) {
       showAuthGate('login');
-      setAuthGateError('Centrale injoignable.');
+      setAuthGateError('Central injoignable.');
       return false;
     }
     if (status.needsSetup) {
@@ -156,7 +156,7 @@ pub const SCRIPT: &str = r###"
       await loadAllData();
       return true;
     } catch {
-      setAuthGateError('Centrale injoignable.');
+      setAuthGateError('Central injoignable.');
       return false;
     }
   }
@@ -177,21 +177,21 @@ pub const SCRIPT: &str = r###"
     el('setup-password-confirm').value = '';
   }
 
-  // Enrôle ce nœud auprès d'une centrale, puis attend qu'il ait redémarré en worker.
+  // Enrôle cette installation auprès d'un central, puis attend qu'elle ait redémarré en worker.
   async function submitWorkerSetup(event) {
     event.preventDefault();
     setAuthGateError('');
-    const nodeName = el('worker-name').value;
+    const workerName = el('worker-name').value;
     try {
       const res = await fetch('/api/v1/setup/worker', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          coordinator_url: el('worker-url').value,
+          central_url: el('worker-url').value,
           username: el('worker-username').value,
           password: el('worker-password').value,
-          node_name: nodeName
+          worker_name: workerName
         })
       });
       const body = await res.json().catch(() => ({}));
@@ -200,20 +200,20 @@ pub const SCRIPT: &str = r###"
         return;
       }
     } catch {
-      setAuthGateError('Ce nœud est injoignable.');
+      setAuthGateError('Cette installation est injoignable.');
       return;
     } finally {
       el('worker-password').value = '';
     }
-    await waitForWorkerStart(nodeName);
+    await waitForWorkerStart(workerName);
   }
 
-  async function waitForWorkerStart(nodeName) {
+  async function waitForWorkerStart(workerName) {
     for (let attempt = 0; attempt < WORKER_START_MAX_POLLS; attempt++) {
       await new Promise(resolve => setTimeout(resolve, WORKER_START_POLL_MS));
       const status = await fetchJson('/api/v1/setup/status');
-      if (status && status.nodeKind === 'worker') {
-        showAuthGate('login', status.instanceName || nodeName);
+      if (status && status.instanceKind === 'worker') {
+        showAuthGate('login', status.instanceName || workerName);
         return;
       }
     }

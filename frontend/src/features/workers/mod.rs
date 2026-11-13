@@ -1,5 +1,5 @@
-//! Registre des nœuds. Une seule nature, donc pas de sous-navigation.
-//! Le tiroir porte l'aperçu du nœud ouvert, puis le raccordement d'un nouveau nœud.
+//! Registre des workers. Une seule nature, donc pas de sous-navigation.
+//! Le tiroir porte l'aperçu du worker ouvert, puis le raccordement d'un nouveau worker.
 
 use crate::features::widgets::{WidgetArea, WidgetPlacement};
 use crate::shared::ui::{
@@ -16,7 +16,7 @@ fn overview_pane() -> InspectionPane {
         label: "Aperçu",
         body: view! {
             <p id="workers-fact-facts" class="inspection-panel__facts">
-                "Le détail du nœud apparaît ici."
+                "Le détail du worker apparaît ici."
             </p>
         }
         .into_any(),
@@ -29,17 +29,17 @@ fn connect_pane() -> InspectionPane {
         label: "Raccordement",
         body: view! {
             <p class="form-help">
-                "Clé d'agent et commande pour adjoindre un worker distant en HTTP."
+                "Clé de worker et commande pour adjoindre un worker distant en HTTP."
             </p>
             <div class="detail-grid">
                 <DetailRow label="Rôle de l'instance">
-                    <code>"Coordinateur central"</code>" (seule autorité)"
+                    <code>"Central"</code>" (seule autorité)"
                 </DetailRow>
                 <DetailRow label="Répertoire de configuration">
                     <code>"/config"</code>" (SQLite flux.db, clés 256 bits auto-amorcées)"
                 </DetailRow>
                 <DetailRow label="Worker local intégré" id="config-local-worker" />
-                <DetailRow label="Version du coordinateur" id="config-version" />
+                <DetailRow label="Version du central" id="config-version" />
                 <DetailRow label="Taille max par fichier" id="config-max-file-bytes" />
             </div>
 
@@ -56,7 +56,7 @@ fn connect_pane() -> InspectionPane {
                 <label for="docker-worker-cmd" class="form-label">
                     "Commande Docker de raccordement immédiat (HTTP)"
                 </label>
-                <pre class="code-block-wrapper"><code id="docker-worker-cmd">"docker run -d --name flux-worker -e COORDINATOR_URL=http://localhost:3000 -e WORKER_KEY=<CLÉ_API_WORKER> -v /chemin/data:/data flux-de-fichiers worker"</code></pre>
+                <pre class="code-block-wrapper"><code id="docker-worker-cmd">"docker run -d --name flux-worker -e CENTRAL_URL=http://localhost:3000 -e WORKER_KEY=<CLÉ_API_WORKER> -v /chemin/data:/data flux-de-fichiers worker"</code></pre>
                 <Button
                     id="btn-copy-worker-cmd"
                     variant=ButtonVariant::Secondary
@@ -77,10 +77,10 @@ pub fn WorkersPanel() -> impl IntoView {
             <WidgetArea placement=WidgetPlacement::Workers />
             <div class="registre">
                 <RegistreTable
-                    aria_label="Nœuds qui exécutent"
-                    headers=vec!["Nœud", "Rôle", "Présence", "État", "Action"]
+                    aria_label="Workers qui exécutent"
+                    headers=vec!["Worker", "Rôle", "Présence", "État", "Action"]
                     body_id="workers-table-body"
-                    empty="Chargement des nœuds…"
+                    empty="Chargement des workers…"
                 />
                 {inspection_drawer("workers-fact", vec![overview_pane(), connect_pane()], None)}
             </div>

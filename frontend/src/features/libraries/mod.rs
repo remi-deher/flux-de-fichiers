@@ -1,4 +1,4 @@
-//! Registre des bibliothèques déclarées. Le tiroir porte le nom, les nœuds et le flux.
+//! Registre des bibliothèques déclarées. Le tiroir porte le nom, les workers et le flux.
 
 use crate::shared::ui::{InspectionPane, RegistreTable, inspection_drawer};
 use leptos::prelude::*;
@@ -21,32 +21,32 @@ fn library_panes() -> Vec<InspectionPane> {
             <p id="libraries-fact-facts" class="inspection-panel__facts">
                 "Le détail de la bibliothèque apparaît ici."
             </p>
-            <h3 class="section-title">"Nœuds"</h3>
-            <div id="library-nodes-list" class="library-node-list"></div>
+            <h3 class="section-title">"Workers"</h3>
+            <div id="library-workers-list" class="library-entry-list"></div>
             <div class="form-group">
-                <label for="library-node-worker" class="form-label">"Nœud"</label>
-                <select id="library-node-worker" class="form-select"></select>
+                <label for="library-entry-worker" class="form-label">"Worker"</label>
+                <select id="library-entry-worker" class="form-select"></select>
             </div>
             <div class="form-group">
-                <label for="library-node-path" class="form-label">"Chemin sur ce nœud"</label>
+                <label for="library-entry-path" class="form-label">"Chemin sur ce worker"</label>
                 <input
                     type="text"
-                    id="library-node-path"
+                    id="library-entry-path"
                     class="form-input"
                     placeholder="/mnt/medias"
                     autocomplete="off"
                 />
-                <p class="form-help">"Chemin absolu tel que ce nœud le voit."</p>
+                <p class="form-help">"Chemin absolu tel que ce worker le voit."</p>
             </div>
             <div class="form-group">
-                <label for="library-node-access" class="form-label">"Accès"</label>
-                <select id="library-node-access" class="form-select">
+                <label for="library-entry-access" class="form-label">"Accès"</label>
+                <select id="library-entry-access" class="form-select">
                     <option value="read_write">"Lecture / Écriture"</option>
                     <option value="read">"Lecture seule"</option>
                 </select>
             </div>
-            <button type="button" id="library-node-add-btn" class="btn btn-secondary btn-sm">
-                "Ajouter le nœud"
+            <button type="button" id="library-entry-add-btn" class="btn btn-secondary btn-sm">
+                "Ajouter le worker"
             </button>
             <h3 class="section-title">"Flux"</h3>
             <div class="form-group">
@@ -98,7 +98,7 @@ pub fn LibrariesPanel() -> impl IntoView {
                 <input type="search" id="libraries-search-input" hidden />
                 <RegistreTable
                     aria_label="Bibliothèques déclarées"
-                    headers=vec!["Bibliothèque", "Flux", "Nœuds", "État", "Action"]
+                    headers=vec!["Bibliothèque", "Flux", "Workers", "État", "Action"]
                     body_id="libraries-table-body"
                     empty="Chargement des bibliothèques…"
                 />

@@ -1,27 +1,27 @@
-//! Rôle du nœud conservé dans `/config` : un worker enrôlé y garde son nom, l'adresse de la centrale
-//! et la clé d'API de son nœud (ADR 0011). Sans fichier, le nœud est une centrale (ou n'est pas installé).
+//! Rôle de l'installation conservé dans `/config` : un worker enrôlé y garde son nom, l'adresse du central
+//! et sa clé d'API (ADR 0011). Sans fichier, l'installation est un central (ou n'est pas installé).
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-const SETTINGS_FILE: &str = "node.json";
+const SETTINGS_FILE: &str = "worker.json";
 const WORKER_KEY_FILE: &str = "worker.key";
 const TEMPORARY_SUFFIX: &str = ".tmp";
 const NODE_NAME_MAX_LEN: usize = 80;
 #[cfg(unix)]
 const PRIVATE_FILE_MODE: u32 = 0o600;
 
-/// Identité d'un nœud worker enrôlé. La clé d'API vit dans son propre fichier, jamais dans ce JSON.
+/// Identité d'un worker enrôlé. La clé d'API vit dans son propre fichier, jamais dans ce JSON.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct WorkerNodeSettings {
+pub struct WorkerSettings {
     pub name: String,
-    pub coordinator_url: String,
+    pub central_url: String,
 }
 
-/// Nom de nœud admis : lettres, chiffres, `-`, `_` et `.` (il sert aussi d'identifiant de worker).
-pub fn is_valid_node_name(name: &str) -> bool {
+/// Nom de worker admis : lettres, chiffres, `-`, `_` et `.` (il sert aussi d'identifiant de worker).
+pub fn is_valid_worker_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= NODE_NAME_MAX_LEN
         && name
@@ -48,8 +48,8 @@ pub(crate) fn write_private(path: &Path, contents: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Réglages du worker enrôlé, ou `None` si ce nœud n'est pas un worker enrôlé.
-pub fn load_worker(config_dir: &Path) -> anyhow::Result<Option<WorkerNodeSettings>> {
+/// Réglages du worker enrôlé, ou `None` si cette installation n'est pas un worker enrôlé.
+pub fn load_worker(config_dir: &Path) -> anyhow::Result<Option<WorkerSettings>> {
     let path = config_dir.join(SETTINGS_FILE);
     match std::fs::read_to_string(&path) {
         Ok(raw) => {
@@ -62,25 +62,24 @@ pub fn load_worker(config_dir: &Path) -> anyhow::Result<Option<WorkerNodeSetting
     }
 }
 
-/// Clé d'API du nœud, lue dans `/config`.
+/// Clé d'API du worker, lue dans `/config`.
 pub fn load_worker_key(config_dir: &Path) -> anyhow::Result<String> {
     let path = config_dir.join(WORKER_KEY_FILE);
     let key = std::fs::read_to_string(&path)
         .with_context(|| format!("lecture de {}", path.display()))?
         .trim()
         .to_owned();
-    anyhow::ensure!(!key.is_empty(), "clé de nœud vide");
+    anyhow::ensure!(!key.is_empty(), "clé de worker vide");
     Ok(key)
 }
 
-/// Enregistre le rôle worker. La clé est écrite d'abord : la présence de `node.json` garantit
+/// Enregistre le rôle worker. La clé est écrite d'abord : la présence de `worker.json` garantit
 /// qu'elle existe.
-pub fn save_worker(
-    config_dir: &Path,
-    settings: &WorkerNodeSettings,
-    key: &str,
-) -> anyhow::Result<()> {
-    anyhow::ensure!(is_valid_node_name(&settings.name), "nom de nœud invalide");
+pub fn save_worker(config_dir: &Path, settings: &WorkerSettings, key: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        is_valid_worker_name(&settings.name),
+        "nom de worker invalide"
+    );
     std::fs::create_dir_all(config_dir)?;
     write_private(&config_dir.join(WORKER_KEY_FILE), key)?;
     write_private(
@@ -93,18 +92,18 @@ pub fn save_worker(
 mod tests {
     use super::*;
 
-    fn settings() -> WorkerNodeSettings {
-        WorkerNodeSettings {
+    fn settings() -> WorkerSettings {
+        WorkerSettings {
             name: "nas-1".into(),
-            coordinator_url: "http://central:3000".into(),
+            central_url: "http://central:3000".into(),
         }
     }
 
     #[test]
     fn test_node_name_rules() {
-        assert!(is_valid_node_name("nas-1.local_2"));
+        assert!(is_valid_worker_name("nas-1.local_2"));
         for bad in ["", "a b", "é", "a/b", &"x".repeat(NODE_NAME_MAX_LEN + 1)] {
-            assert!(!is_valid_node_name(bad), "{bad}");
+            assert!(!is_valid_worker_name(bad), "{bad}");
         }
     }
 
@@ -142,7 +141,7 @@ mod tests {
     #[test]
     fn test_invalid_name_is_refused_and_nothing_is_written() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
-        let bad = WorkerNodeSettings {
+        let bad = WorkerSettings {
             name: "mauvais nom".into(),
             ..settings()
         };

@@ -2,8 +2,9 @@ use crate::{
     central_client::CentralClient,
     config,
     domain::{Claim, ClaimRequest, Failure, LeaseRequest, Register, Worker},
-    media, node_settings, storage,
+    media, storage,
     worker_http::{WorkerState, WorkerWeb},
+    worker_settings,
 };
 use anyhow::Context;
 use futures_util::StreamExt;
@@ -36,14 +37,14 @@ impl WorkerConfig {
         let tools_cache_dir = env::var("TOOLS_CACHE_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| work_dir.join("tools-cache"));
-        let (url, key, name) = match node_settings::load_worker(config_dir)? {
+        let (url, key, name) = match worker_settings::load_worker(config_dir)? {
             Some(enrolled) => (
-                config::coordinator_url(&enrolled.coordinator_url)?,
-                node_settings::load_worker_key(config_dir)?,
+                config::central_url(&enrolled.central_url)?,
+                worker_settings::load_worker_key(config_dir)?,
                 enrolled.name,
             ),
             None => (
-                config::coordinator_url(&env::var("COORDINATOR_URL")?)?,
+                config::central_url(&env::var("CENTRAL_URL")?)?,
                 config::secret("WORKER_KEY")?,
                 env::var("WORKER_NAME").or_else(|_| env::var("HOSTNAME"))?,
             ),
@@ -61,12 +62,12 @@ impl WorkerConfig {
         })
     }
 }
-struct Agent {
+struct WorkerLoop {
     client: Client,
     config: WorkerConfig,
     status: Arc<WorkerState>,
 }
-impl Agent {
+impl WorkerLoop {
     fn request(&self, method: reqwest::Method, path: &str) -> RequestBuilder {
         self.client
             .request(
@@ -105,7 +106,7 @@ impl Agent {
             .error_for_status()?;
         }
     }
-    /// Demande au coordinateur le contrat de distribution d'un outil, puis l'installe dans le cache local.
+    /// Demande au central le contrat de distribution d'un outil, puis l'installe dans le cache local.
     async fn install_tool(
         &self,
         cache: &crate::tools_cache::ToolCacheManager,
@@ -295,7 +296,7 @@ impl Agent {
 
 pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
     anyhow::ensure!(
-        node_settings::is_valid_node_name(&config.name),
+        worker_settings::is_valid_worker_name(&config.name),
         "Invalid WORKER_NAME"
     );
     anyhow::ensure!(config.max_bytes > 0, "MAX_FILE_BYTES must be positive");
@@ -319,28 +320,28 @@ pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
     );
     let http = tokio::spawn(crate::worker_http::serve(web.clone()));
     let account_sync = tokio::spawn(web.sync_accounts_loop());
-    let agent = Agent {
+    let runner = WorkerLoop {
         client,
         config,
         status,
     };
-    let outcome = agent.work().await;
+    let outcome = runner.work().await;
     http.abort();
     account_sync.abort();
     outcome
 }
 
-impl Agent {
+impl WorkerLoop {
     /// Enregistre le worker puis réclame des tâches jusqu'à l'arrêt.
     async fn work(&self) -> anyhow::Result<()> {
-        let agent = self;
+        let runner = self;
         let worker = loop {
             let attempt = async {
-                agent
+                runner
                     .request(reqwest::Method::POST, "/api/v1/workers")
                     .timeout(Duration::from_secs(10))
                     .json(&Register {
-                        name: agent.config.name.clone(),
+                        name: runner.config.name.clone(),
                     })
                     .send()
                     .await?
@@ -355,13 +356,13 @@ impl Agent {
             tokio::select! { _=tokio::time::sleep(Duration::from_secs(5))=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
         };
         tracing::info!(worker_id=%worker.id, "worker registered");
-        agent.status.mark_registered();
-        agent.status.mark_coordinator_reachable(true);
-        agent.purge_orphaned_work_artifacts().await;
+        runner.status.mark_registered();
+        runner.status.mark_central_reachable(true);
+        runner.purge_orphaned_work_artifacts().await;
         let mut was_disconnected = false;
         loop {
             let attempt = async {
-                let claim = agent
+                let claim = runner
                     .request(reqwest::Method::POST, "/api/v1/claims")
                     .timeout(Duration::from_secs(10))
                     .json(&ClaimRequest {
@@ -375,24 +376,24 @@ impl Agent {
                 Ok::<_, anyhow::Error>(claim)
             };
             let claim = tokio::select! { result=attempt=>result, _=crate::api::shutdown_signal()=>return Ok(()) };
-            agent.status.mark_coordinator_reachable(claim.is_ok());
+            runner.status.mark_central_reachable(claim.is_ok());
             match claim {
                 Ok(Some(claim)) => {
                     if was_disconnected {
-                        agent.purge_orphaned_work_artifacts().await;
+                        runner.purge_orphaned_work_artifacts().await;
                         was_disconnected = false;
                     }
-                    agent.execute(claim, worker.id).await?;
+                    runner.execute(claim, worker.id).await?;
                 }
                 Ok(None) => {
                     if was_disconnected {
-                        agent.purge_orphaned_work_artifacts().await;
+                        runner.purge_orphaned_work_artifacts().await;
                         was_disconnected = false;
                     }
                 }
                 Err(_) => {
                     was_disconnected = true;
-                    tracing::warn!("coordinator unavailable; retrying");
+                    tracing::warn!("central unavailable; retrying");
                 }
             }
             tokio::select! { _=tokio::time::sleep(Duration::from_secs(1))=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }

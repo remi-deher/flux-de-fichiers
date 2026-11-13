@@ -8,7 +8,7 @@ pub const SCRIPT: &str = r###"
   const ATTENTION_FAILED_LIMIT = 5;
   const RUNNING_LIMIT = 6;
   const PERCENT = 100;
-  const WIDGET_ERROR_MESSAGE = 'Données indisponibles : ouvrez une session ou vérifiez le coordinateur.';
+  const WIDGET_ERROR_MESSAGE = 'Données indisponibles : ouvrez une session ou vérifiez le central.';
 
   // État de chaque source de données : 'pending' | 'ready' | 'error'.
   const widgetSources = { jobs: 'pending', workers: 'pending', libraries: 'pending', tools: 'pending' };
@@ -40,8 +40,8 @@ pub const SCRIPT: &str = r###"
     return (Date.now() - new Date(worker.last_seen).getTime()) < WORKER_ONLINE_WINDOW_MS;
   }
 
-  function isLocalCoordinator(worker) {
-    return String(worker.name || '').startsWith('coordinator');
+  function isLocalCentral(worker) {
+    return String(worker.name || '').startsWith('central');
   }
 
   // Une ligne de widget : pastille de ton, libellé, progression et métadonnée optionnelles.
@@ -74,8 +74,8 @@ pub const SCRIPT: &str = r###"
       .slice(0, ATTENTION_FAILED_LIMIT)
       .forEach(job => items.push({ tone: 'danger', label: `Échec : ${job.source_name}`, meta: job.error_code || 'erreur', goto: 'jobs' }));
     cachedWorkers
-      .filter(worker => !isLocalCoordinator(worker) && !isWorkerOnline(worker))
-      .forEach(worker => items.push({ tone: 'warning', label: `Nœud hors ligne : ${worker.name || worker.id}`, meta: formatDate(worker.last_seen), goto: 'workers' }));
+      .filter(worker => !isLocalCentral(worker) && !isWorkerOnline(worker))
+      .forEach(worker => items.push({ tone: 'warning', label: `Worker hors ligne : ${worker.name || worker.id}`, meta: formatDate(worker.last_seen), goto: 'workers' }));
     cachedLibraries
       .filter(library => libraryReadiness(library) !== 'Prête')
       .forEach(library => items.push({ tone: 'warning', label: `À configurer : ${library.name}`, goto: 'files' }));
@@ -121,7 +121,7 @@ pub const SCRIPT: &str = r###"
 
   function renderWidgetFleet() {
     if (cachedWorkers.length === 0) {
-      return widgetList([{ tone: 'success', label: 'Coordinateur local', meta: 'Intégré', goto: 'workers' }]);
+      return widgetList([{ tone: 'success', label: 'Central', meta: 'Intégré', goto: 'workers' }]);
     }
     return widgetList(cachedWorkers.map(worker => {
       const online = isWorkerOnline(worker);
@@ -132,9 +132,9 @@ pub const SCRIPT: &str = r###"
   function renderWidgetLibraries() {
     if (cachedLibraries.length === 0) return null;
     return widgetList(cachedLibraries.map(library => {
-      const nodes = Array.isArray(library.nodes) ? library.nodes.length : 0;
+      const workers = Array.isArray(library.workers) ? library.workers.length : 0;
       const ready = libraryReadiness(library) === 'Prête';
-      return { tone: ready ? 'success' : 'warning', label: library.name, meta: `${nodes} nœud(s)`, goto: 'files' };
+      return { tone: ready ? 'success' : 'warning', label: library.name, meta: `${workers} worker(s)`, goto: 'files' };
     }));
   }
 

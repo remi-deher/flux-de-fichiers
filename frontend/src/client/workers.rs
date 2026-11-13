@@ -1,7 +1,7 @@
-//! Gestion des agents et configuration.
+//! Gestion des workers et configuration.
 
 pub const SCRIPT: &str = r###"
-// --- Serveurs et agents ---
+// --- Workers ---
   async function loadWorkers() {
     const tbody = el('workers-table-body');
     const metricWorkers = el('metric-workers-count');
@@ -17,13 +17,13 @@ pub const SCRIPT: &str = r###"
       renderWorkersTable();
       if (typeof renderSettingsOverview === 'function') renderSettingsOverview();
       if (typeof renderLibrariesTable === 'function') renderLibrariesTable();
-      if (typeof renderLibraryNodes === 'function') renderLibraryNodes();
+      if (typeof renderLibraryWorkers === 'function') renderLibraryWorkers();
       if (typeof renderLibraryWorkerSelect === 'function') renderLibraryWorkerSelect();
       markWidgetSource('workers', true);
     } catch (e) {
       markWidgetSource('workers', false);
       if (tbody) {
-        tbody.innerHTML = emptyStateRow(5, escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session pour afficher les agents enregistrés.' : 'Impossible de récupérer la liste des agents.'), true);
+        tbody.innerHTML = emptyStateRow(5, escapeHtml(e.message === 'Non autorisé' ? 'Veuillez ouvrir une session pour afficher les workers enregistrés.' : 'Impossible de récupérer la liste des workers.'), true);
       }
     }
   }
@@ -34,8 +34,8 @@ pub const SCRIPT: &str = r###"
 
     if (cachedWorkers.length === 0) {
       tbody.innerHTML = `<tr class="registre-row" data-worker-id="local">
-          <td class="text-strong">Coordinateur local</td>
-          <td>Coordinateur</td>
+          <td class="text-strong">Central</td>
+          <td>Central</td>
           <td>—</td>
           <td>${renderStatusPill('Intégré', 'info')}</td>
           <td class="cell-end"><button type="button" class="btn btn-secondary btn-sm registre-open-btn" data-worker-id="local">Ouvrir</button></td>
@@ -51,10 +51,10 @@ pub const SCRIPT: &str = r###"
       const lastSeenMs = new Date(w.last_seen).getTime();
       const isOnline = (now - lastSeenMs) < 120000;
       const statusHtml = renderStatusPill(isOnline ? 'En ligne' : 'Hors ligne', isOnline ? 'online' : 'offline', { pulse: isOnline });
-      const isLocal = safeName.startsWith('coordinator');
-      const role = isLocal ? 'Coordinateur' : 'Agent';
+      const isLocal = safeName.startsWith('central');
+      const role = isLocal ? 'Central' : 'Worker';
       const deleteAction = !isOnline
-        ? `<button type="button" class="btn btn-secondary btn-sm delete-worker-btn btn-danger-quiet" data-worker-id="${safeId}" title="Supprimer cet agent hors ligne">Supprimer</button>`
+        ? `<button type="button" class="btn btn-secondary btn-sm delete-worker-btn btn-danger-quiet" data-worker-id="${safeId}" title="Supprimer ce worker hors ligne">Supprimer</button>`
         : '';
       return `<tr class="registre-row" data-worker-id="${safeId}">
           <td class="text-strong">${safeName}</td>
@@ -80,11 +80,11 @@ pub const SCRIPT: &str = r###"
         const row = btn.closest('tr');
         markRegistreRow(tbody, row);
         if (!worker) {
-          showRegistreFact('workers-fact', 'Coordinateur local', ['Coordinateur', 'Agent intégré']);
+          showRegistreFact('workers-fact', 'Central', ['Central', 'Worker intégré']);
           return;
         }
         const isOnline = (Date.now() - new Date(worker.last_seen).getTime()) < 120000;
-        const role = String(worker.name || '').startsWith('coordinator') ? 'Coordinateur' : 'Agent';
+        const role = String(worker.name || '').startsWith('central') ? 'Central' : 'Worker';
         showRegistreFact('workers-fact', worker.name || worker.id, [role, isOnline ? 'En ligne' : 'Hors ligne', formatDate(worker.last_seen)]);
       });
     });
@@ -93,14 +93,14 @@ pub const SCRIPT: &str = r###"
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const id = btn.getAttribute('data-worker-id');
-        if (!id || !confirm('Confirmer la suppression de cet agent hors ligne ?')) return;
+        if (!id || !confirm('Confirmer la suppression de ce worker hors ligne ?')) return;
         try {
           const res = await apiFetch(`/api/v1/workers/${id}`, { method: 'DELETE' });
           if (!res.ok) throw new Error('Échec suppression');
-          showNotice('Agent supprimé avec succès.', 'success');
+          showNotice('Worker supprimé avec succès.', 'success');
           await loadWorkers();
         } catch {
-          showNotice('Impossible de supprimer cet agent.', 'error');
+          showNotice('Impossible de supprimer ce worker.', 'error');
         }
       });
     });
@@ -127,14 +127,14 @@ pub const SCRIPT: &str = r###"
 
       if (configVersion) configVersion.textContent = 'v' + cfg.version;
       if (settingsVersion) settingsVersion.textContent = 'v' + cfg.version;
-      const workerStatusText = cfg.local_worker ? 'Actif (intégré au conteneur)' : 'Désactivé (agents distants)';
+      const workerStatusText = cfg.local_worker ? 'Actif (intégré au conteneur)' : 'Désactivé (workers distants)';
       if (configLocalWorker) configLocalWorker.textContent = workerStatusText;
       if (settingsLocalWorker) settingsLocalWorker.textContent = workerStatusText;
       if (configMaxBytes) configMaxBytes.textContent = formatBytes(cfg.max_file_bytes);
 
       const origin = window.location.origin || 'http://localhost:3000';
       if (dockerCmd) {
-        dockerCmd.textContent = `docker run -d --name flux-worker -e COORDINATOR_URL=${origin} -e WORKER_KEY=<CLÉ_API_WORKER> -v /chemin/data:/data flux-de-fichiers worker`;
+        dockerCmd.textContent = `docker run -d --name flux-worker -e CENTRAL_URL=${origin} -e WORKER_KEY=<CLÉ_API_WORKER> -v /chemin/data:/data flux-de-fichiers worker`;
       }
     } catch {
       cachedSystemConfig = null;
@@ -146,7 +146,7 @@ pub const SCRIPT: &str = r###"
 
       const origin = window.location.origin || 'http://localhost:3000';
       if (dockerCmd) {
-        dockerCmd.textContent = `docker run -d --name flux-worker -e COORDINATOR_URL=${origin} -e WORKER_KEY=<CLÉ_API_WORKER> -v /chemin/data:/data flux-de-fichiers worker`;
+        dockerCmd.textContent = `docker run -d --name flux-worker -e CENTRAL_URL=${origin} -e WORKER_KEY=<CLÉ_API_WORKER> -v /chemin/data:/data flux-de-fichiers worker`;
       }
     }
   }
@@ -161,7 +161,7 @@ pub const SCRIPT: &str = r###"
       connectBtn.addEventListener('click', () => {
         const drawer = el('workers-fact');
         markRegistreRow(el('workers-table-body'), null);
-        showRegistreFact('workers-fact', 'Raccorder un nœud', []);
+        showRegistreFact('workers-fact', 'Raccorder un worker', []);
         const connectTab = el('workers-fact-tab-connect');
         if (drawer && connectTab) selectInspectionTab(drawer, connectTab);
       });

@@ -1,4 +1,4 @@
-//! Contrat de sonde obligatoire. L'identité vient du catalogue, la présence du cache du nœud.
+//! Contrat de sonde obligatoire. L'identité vient du catalogue, la présence du cache local.
 
 use super::{CatalogCapability, CatalogEntry, CatalogItemType};
 use crate::tools_cache::{ToolCacheManager, host_arch};
@@ -25,13 +25,13 @@ pub fn required_probe(entries: &[CatalogEntry]) -> Option<ProbeContract> {
         })
 }
 
-/// Le cache du nœud a installé cette sonde. Un binaire du système ne compte pas.
+/// Le cache local a installé cette sonde. Un binaire du système ne compte pas.
 pub fn probe_is_ready(cache: &ToolCacheManager, contract: &ProbeContract) -> bool {
     cache.is_ready(&contract.tool_id, &contract.version, host_arch())
 }
 
 /// Un job qui touche un fichier ne démarre que si le catalogue désigne une sonde
-/// et que le cache du nœud l'a installée.
+/// et que le cache local l'a installée.
 pub fn file_job_may_start(cache: &ToolCacheManager, contract: Option<&ProbeContract>) -> bool {
     contract.is_some_and(|contract| probe_is_ready(cache, contract))
 }

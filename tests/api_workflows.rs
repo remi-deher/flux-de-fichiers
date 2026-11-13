@@ -81,7 +81,7 @@ async fn test_job_and_worker_workflow() -> anyhow::Result<()> {
 
     // 2. Enregistrement d'un worker
     let register_payload = serde_json::json!({
-        "name": "worker-node-1"
+        "name": "worker-1"
     });
     let req = Request::builder()
         .uri("/api/v1/workers")
@@ -97,7 +97,7 @@ async fn test_job_and_worker_workflow() -> anyhow::Result<()> {
     assert_eq!(resp.status(), StatusCode::OK);
     let bytes = to_bytes(resp.into_body(), 16 * 1024).await?;
     let worker: Worker = serde_json::from_slice(&bytes)?;
-    assert_eq!(worker.name, "worker-node-1");
+    assert_eq!(worker.name, "worker-1");
 
     // 3. Réclamation de la tâche par le worker
     let claim_payload = serde_json::json!({

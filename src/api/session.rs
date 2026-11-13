@@ -13,7 +13,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use flux_shared::{NodeKind, Role};
+use flux_shared::{InstanceKind, Role};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
@@ -37,7 +37,7 @@ pub struct MeResponse {
     name: String,
     role: &'static str,
     permissions: Vec<&'static str>,
-    node_kind: NodeKind,
+    instance_kind: InstanceKind,
     instance_name: Option<String>,
 }
 
@@ -124,12 +124,12 @@ pub(crate) fn cleared_session_response(config: &crate::config::Config) -> AppRes
 }
 
 impl MeResponse {
-    /// Identité renvoyée par `GET /api/v1/me`, sur une centrale comme sur un worker.
+    /// Identité renvoyée par `GET /api/v1/me`, sur un central comme sur un worker.
     pub(crate) fn new(
         kind: &'static str,
         name: String,
         role: Role,
-        node_kind: NodeKind,
+        instance_kind: InstanceKind,
         instance_name: Option<String>,
     ) -> Self {
         Self {
@@ -141,7 +141,7 @@ impl MeResponse {
                 .into_iter()
                 .map(flux_shared::Permission::as_str)
                 .collect(),
-            node_kind,
+            instance_kind,
             instance_name,
         }
     }
@@ -159,7 +159,7 @@ pub async fn me(
         },
         principal.name.clone(),
         principal.role,
-        NodeKind::Central,
+        InstanceKind::Central,
         instance_name,
     )))
 }

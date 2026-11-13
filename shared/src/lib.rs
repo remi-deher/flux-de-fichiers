@@ -1,19 +1,19 @@
-//! Types partagés entre le coordinateur et le frontend : rôles, droits, type de nœud.
+//! Types partagés entre le central et le frontend : rôles, droits, type d'installation.
 //!
 //! Ils sont définis une seule fois : le backend s'en sert pour contrôler l'accès de chaque route,
 //! le frontend pour ne montrer que ce que l'utilisateur peut faire (ADR 0011).
 
 use serde::{Deserialize, Serialize};
 
-/// Type de nœud : décide de ce qui existe sur le serveur.
+/// Type d'installation : décide de ce qui existe sur le serveur.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum NodeKind {
+pub enum InstanceKind {
     Central,
     Worker,
 }
 
-impl NodeKind {
+impl InstanceKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Central => "central",
@@ -29,8 +29,8 @@ pub enum Permission {
     ViewOverview,
     ViewJobs,
     ManageJobs,
-    ViewNodes,
-    ManageNodes,
+    ViewWorkers,
+    ManageWorkers,
     ViewLibraries,
     ManageLibraries,
     ViewFlows,
@@ -40,8 +40,8 @@ pub enum Permission {
     ManageSettings,
     ManageAccounts,
     ManageApiKeys,
-    /// Protocole d'agent : réclamer des tâches, transférer des fichiers, lire les contrats d'outils.
-    NodeAgent,
+    /// Protocole de worker : réclamer des tâches, transférer des fichiers, lire les contrats d'outils.
+    WorkerProtocol,
 }
 
 impl Permission {
@@ -49,8 +49,8 @@ impl Permission {
         Self::ViewOverview,
         Self::ViewJobs,
         Self::ManageJobs,
-        Self::ViewNodes,
-        Self::ManageNodes,
+        Self::ViewWorkers,
+        Self::ManageWorkers,
         Self::ViewLibraries,
         Self::ManageLibraries,
         Self::ViewFlows,
@@ -60,7 +60,7 @@ impl Permission {
         Self::ManageSettings,
         Self::ManageAccounts,
         Self::ManageApiKeys,
-        Self::NodeAgent,
+        Self::WorkerProtocol,
     ];
 
     /// Nom sérialisé, identique à la valeur échangée avec le navigateur.
@@ -69,8 +69,8 @@ impl Permission {
             Self::ViewOverview => "view_overview",
             Self::ViewJobs => "view_jobs",
             Self::ManageJobs => "manage_jobs",
-            Self::ViewNodes => "view_nodes",
-            Self::ManageNodes => "manage_nodes",
+            Self::ViewWorkers => "view_workers",
+            Self::ManageWorkers => "manage_workers",
             Self::ViewLibraries => "view_libraries",
             Self::ManageLibraries => "manage_libraries",
             Self::ViewFlows => "view_flows",
@@ -80,7 +80,7 @@ impl Permission {
             Self::ManageSettings => "manage_settings",
             Self::ManageAccounts => "manage_accounts",
             Self::ManageApiKeys => "manage_api_keys",
-            Self::NodeAgent => "node_agent",
+            Self::WorkerProtocol => "worker_protocol",
         }
     }
 }
@@ -91,7 +91,7 @@ impl Permission {
 pub enum Role {
     /// Pilote toute l'application.
     Admin,
-    /// Clé d'un nœud : protocole d'agent seulement.
+    /// Clé d'un worker : protocole de worker seulement.
     Worker,
     /// Consulte l'application sans rien modifier : tous les droits « voir », aucune administration.
     Viewer,
@@ -132,13 +132,13 @@ impl Role {
 
     pub const fn allows(self, permission: Permission) -> bool {
         match self {
-            Self::Admin => !matches!(permission, Permission::NodeAgent),
-            Self::Worker => matches!(permission, Permission::NodeAgent),
+            Self::Admin => !matches!(permission, Permission::WorkerProtocol),
+            Self::Worker => matches!(permission, Permission::WorkerProtocol),
             Self::Viewer => matches!(
                 permission,
                 Permission::ViewOverview
                     | Permission::ViewJobs
-                    | Permission::ViewNodes
+                    | Permission::ViewWorkers
                     | Permission::ViewLibraries
                     | Permission::ViewFlows
                     | Permission::ViewPlugins
@@ -147,14 +147,14 @@ impl Role {
     }
 }
 
-/// Un panneau de l'interface est visible si le type de nœud l'héberge et que l'utilisateur a le droit.
+/// Un panneau de l'interface est visible si le type d'installation l'héberge et que l'utilisateur a le droit.
 pub fn panel_visible(
-    node: NodeKind,
-    hosted_on: &[NodeKind],
+    instance: InstanceKind,
+    hosted_on: &[InstanceKind],
     required: Permission,
     granted: &[Permission],
 ) -> bool {
-    hosted_on.contains(&node) && granted.contains(&required)
+    hosted_on.contains(&instance) && granted.contains(&required)
 }
 
 #[cfg(test)]
@@ -174,10 +174,10 @@ mod tests {
             );
             assert_eq!(Role::parse(role.as_str()), Some(role));
         }
-        for node in [NodeKind::Central, NodeKind::Worker] {
+        for kind in [InstanceKind::Central, InstanceKind::Worker] {
             assert_eq!(
-                serde_json::to_string(&node).unwrap_or_default(),
-                format!("\"{}\"", node.as_str())
+                serde_json::to_string(&kind).unwrap_or_default(),
+                format!("\"{}\"", kind.as_str())
             );
         }
         assert_eq!(Role::parse("root"), None);
@@ -187,13 +187,13 @@ mod tests {
     fn test_admin_holds_every_right_except_the_agent_protocol() {
         let admin = Role::Admin.permissions();
         assert_eq!(admin.len(), Permission::ALL.len() - 1);
-        assert!(!admin.contains(&Permission::NodeAgent));
+        assert!(!admin.contains(&Permission::WorkerProtocol));
         assert!(Role::Admin.allows(Permission::ManageApiKeys));
     }
 
     #[test]
     fn test_worker_key_is_limited_to_the_agent_protocol() {
-        assert_eq!(Role::Worker.permissions(), vec![Permission::NodeAgent]);
+        assert_eq!(Role::Worker.permissions(), vec![Permission::WorkerProtocol]);
         assert!(!Role::Worker.allows(Permission::ViewJobs));
     }
 
@@ -210,24 +210,24 @@ mod tests {
     }
 
     #[test]
-    fn test_panel_visibility_needs_both_the_node_kind_and_the_right() {
+    fn test_panel_visibility_needs_both_the_instance_kind_and_the_right() {
         let granted = Role::Admin.permissions();
         assert!(panel_visible(
-            NodeKind::Central,
-            &[NodeKind::Central],
+            InstanceKind::Central,
+            &[InstanceKind::Central],
             Permission::ViewLibraries,
             &granted
         ));
         assert!(!panel_visible(
-            NodeKind::Worker,
-            &[NodeKind::Central],
+            InstanceKind::Worker,
+            &[InstanceKind::Central],
             Permission::ViewLibraries,
             &granted
         ));
         assert!(!panel_visible(
-            NodeKind::Central,
-            &[NodeKind::Central],
-            Permission::NodeAgent,
+            InstanceKind::Central,
+            &[InstanceKind::Central],
+            Permission::WorkerProtocol,
             &granted
         ));
     }

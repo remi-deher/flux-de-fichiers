@@ -18,7 +18,7 @@ fn api_key_panes() -> Vec<InspectionPane> {
                 <div class="form-group">
                     <label for="api-key-role" class="form-label">"Rôle"</label>
                     <select id="api-key-role" class="form-select">
-                        {role_option(Role::Worker, "Worker (agent d'un nœud)")}
+                        {role_option(Role::Worker, "Worker (traitement des tâches)")}
                         {role_option(Role::Admin, "Administrateur (scripts)")}
                     </select>
                     <p class="form-help">"Un worker ne peut que réclamer des tâches. Un administrateur peut tout piloter."</p>

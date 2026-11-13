@@ -101,7 +101,7 @@ async fn save_flow(app: &axum::Router, id: &str, name: &str) -> anyhow::Result<(
 }
 
 #[tokio::test]
-async fn libraries_round_trip_flow_and_node_paths() -> anyhow::Result<()> {
+async fn libraries_round_trip_flow_and_worker_paths() -> anyhow::Result<()> {
     let app = test_app().await?;
     let listed = admin(&app, "GET", "/api/v1/libraries", None).await?;
     assert_eq!(listed.status(), StatusCode::OK);
@@ -114,7 +114,7 @@ async fn libraries_round_trip_flow_and_node_paths() -> anyhow::Result<()> {
         Some(serde_json::json!({
             "name": "Films",
             "flow_id": "flow.absent",
-            "nodes": []
+            "workers": []
         })),
     )
     .await?;
@@ -126,7 +126,7 @@ async fn libraries_round_trip_flow_and_node_paths() -> anyhow::Result<()> {
         "/api/v1/libraries",
         Some(serde_json::json!({
             "name": "Films",
-            "nodes": [{
+            "workers": [{
                 "worker_id": "00000000-0000-0000-0000-000000000001",
                 "local_path": "media",
                 "access": "read"
@@ -147,7 +147,7 @@ async fn libraries_round_trip_flow_and_node_paths() -> anyhow::Result<()> {
         Some(serde_json::json!({
             "name": "  Films  ",
             "flow_id": "flow.films",
-            "nodes": [
+            "workers": [
                 {
                     "worker_id": worker_a,
                     "local_path": "/mnt/films/",
@@ -166,14 +166,14 @@ async fn libraries_round_trip_flow_and_node_paths() -> anyhow::Result<()> {
     let library = json_of(created).await?;
     assert_eq!(library["name"], "Films");
     assert_eq!(library["flow_id"], "flow.films");
-    assert_eq!(library["nodes"].as_array().map(Vec::len), Some(2));
+    assert_eq!(library["workers"].as_array().map(Vec::len), Some(2));
     let id = library["id"].as_str().unwrap_or_default().to_owned();
 
     let duplicate = admin(
         &app,
         "POST",
         "/api/v1/libraries",
-        Some(serde_json::json!({"name": "Films", "nodes": []})),
+        Some(serde_json::json!({"name": "Films", "workers": []})),
     )
     .await?;
     assert_eq!(duplicate.status(), StatusCode::CONFLICT);
@@ -185,7 +185,7 @@ async fn libraries_round_trip_flow_and_node_paths() -> anyhow::Result<()> {
         Some(serde_json::json!({
             "name": "Films",
             "flow_id": "",
-            "nodes": [{
+            "workers": [{
                 "worker_id": worker_a,
                 "local_path": "/mnt/films",
                 "access": "read"
@@ -196,9 +196,9 @@ async fn libraries_round_trip_flow_and_node_paths() -> anyhow::Result<()> {
     assert_eq!(updated.status(), StatusCode::OK);
     let library = json_of(updated).await?;
     assert!(library["flow_id"].is_null());
-    assert_eq!(library["nodes"].as_array().map(Vec::len), Some(1));
-    assert_eq!(library["nodes"][0]["local_path"], "/mnt/films");
-    assert_eq!(library["nodes"][0]["access"], "read");
+    assert_eq!(library["workers"].as_array().map(Vec::len), Some(1));
+    assert_eq!(library["workers"][0]["local_path"], "/mnt/films");
+    assert_eq!(library["workers"][0]["access"], "read");
 
     let twice = admin(
         &app,
@@ -206,7 +206,7 @@ async fn libraries_round_trip_flow_and_node_paths() -> anyhow::Result<()> {
         &format!("/api/v1/libraries/{id}"),
         Some(serde_json::json!({
             "name": "Films",
-            "nodes": [
+            "workers": [
                 {
                     "worker_id": worker_a,
                     "local_path": "/mnt/a",
@@ -231,7 +231,7 @@ async fn libraries_round_trip_flow_and_node_paths() -> anyhow::Result<()> {
         Some(serde_json::json!({
             "name": "Films",
             "flow_id": "flow.other",
-            "nodes": [{
+            "workers": [{
                 "worker_id": worker_b,
                 "local_path": "/data/films",
                 "access": "read_write"
@@ -246,14 +246,14 @@ async fn libraries_round_trip_flow_and_node_paths() -> anyhow::Result<()> {
     let after_flow = admin(&app, "GET", &format!("/api/v1/libraries/{id}"), None).await?;
     let library = json_of(after_flow).await?;
     assert!(library["flow_id"].is_null());
-    assert_eq!(library["nodes"][0]["worker_id"], worker_b);
+    assert_eq!(library["workers"][0]["worker_id"], worker_b);
 
     let removed_worker =
         admin(&app, "DELETE", &format!("/api/v1/workers/{worker_b}"), None).await?;
     assert_eq!(removed_worker.status(), StatusCode::NO_CONTENT);
     let after_worker = admin(&app, "GET", &format!("/api/v1/libraries/{id}"), None).await?;
     let library = json_of(after_worker).await?;
-    assert_eq!(library["nodes"].as_array().map(Vec::len), Some(0));
+    assert_eq!(library["workers"].as_array().map(Vec::len), Some(0));
 
     let removed = admin(&app, "DELETE", &format!("/api/v1/libraries/{id}"), None).await?;
     assert_eq!(removed.status(), StatusCode::NO_CONTENT);

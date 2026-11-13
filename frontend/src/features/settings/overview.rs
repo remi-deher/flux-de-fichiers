@@ -1,4 +1,4 @@
-//! Domaine Réglages : vue d'ensemble de la centrale (tuiles et points à surveiller).
+//! Domaine Réglages : vue d'ensemble du central (tuiles et points à surveiller).
 
 use crate::shared::ui::{Card, DetailRow, IconName, MetricCard, SectionHeader};
 use leptos::prelude::*;
@@ -18,9 +18,9 @@ struct Tile {
 
 const TILES: [Tile; 4] = [
     Tile {
-        id: "settings-tile-nodes",
-        label: "Nœuds en ligne",
-        subtitle: "Centrale et workers",
+        id: "settings-tile-workers",
+        label: "Workers en ligne",
+        subtitle: "Central et workers",
         icon: IconName::Workers,
         opens: super::TAB_STORAGE,
     },
@@ -64,7 +64,7 @@ fn tile_view(tile: &Tile) -> impl IntoView + use<> {
 #[component]
 pub fn SettingsOverview() -> impl IntoView {
     view! {
-        <section class="metrics-grid" aria-label="Chiffres clés de la centrale">
+        <section class="metrics-grid" aria-label="Chiffres clés du central">
             {TILES.iter().map(tile_view).collect_view()}
         </section>
         <Card aria_labelledby="settings-alerts-title">

@@ -1,4 +1,4 @@
-//! Écran d'accès : installation de la centrale au premier démarrage, puis connexion.
+//! Écran d'accès : installation du central au premier démarrage, puis connexion.
 //!
 //! Le script client choisit le formulaire à afficher d'après `GET /api/v1/setup/status` et `/api/v1/me`.
 
@@ -19,17 +19,17 @@ pub fn AuthGate() -> impl IntoView {
 
                 <div id="role-choice" class="auth-gate__form" hidden>
                     <Button id="role-central-btn" variant=ButtonVariant::Primary class="auth-gate__submit">
-                        "Installer une centrale"
+                        "Installer un central"
                     </Button>
-                    <p class="form-help">"Le nœud principal : comptes, bibliothèques, flux et tâches."</p>
+                    <p class="form-help">"L'installation principale : comptes, bibliothèques, flux et tâches."</p>
                     <Button id="role-worker-btn" variant=ButtonVariant::Secondary class="auth-gate__submit">
                         "Enrôler un worker"
                     </Button>
-                    <p class="form-help">"Un nœud d'exécution rattaché à une centrale existante."</p>
+                    <p class="form-help">"Un worker rattaché à un central existant."</p>
                 </div>
 
                 <form id="setup-form" class="auth-gate__form" hidden>
-                    <FormField id="setup-name" label="Nom de la centrale" required=true autocomplete="off" help="Affiché dans l'interface et dans la liste des nœuds." />
+                    <FormField id="setup-name" label="Nom du central" required=true autocomplete="off" help="Affiché dans l'interface et dans la liste des workers." />
                     <FormField id="setup-username" label="Identifiant administrateur" required=true autocomplete="username" />
                     <FormField id="setup-password" label="Mot de passe" input_type="password" required=true minlength=PASSWORD_MIN_LENGTH autocomplete="new-password" help="Au moins 8 caractères." />
                     <FormField id="setup-password-confirm" label="Confirmer le mot de passe" input_type="password" required=true minlength=PASSWORD_MIN_LENGTH autocomplete="new-password" />
@@ -37,7 +37,7 @@ pub fn AuthGate() -> impl IntoView {
                         "Tant que l'installation n'est pas terminée, toute personne qui atteint cette page peut la terminer : faites-le tout de suite."
                     </p>
                     <Button id="setup-submit-btn" variant=ButtonVariant::Primary submit=true class="auth-gate__submit">
-                        "Installer la centrale"
+                        "Installer le central"
                     </Button>
                     <Button id="setup-back-btn" variant=ButtonVariant::Secondary class="auth-gate__submit">
                         "Retour"
@@ -45,10 +45,10 @@ pub fn AuthGate() -> impl IntoView {
                 </form>
 
                 <form id="worker-setup-form" class="auth-gate__form" hidden>
-                    <FormField id="worker-url" label="Adresse de la centrale" required=true autocomplete="off" placeholder="http://centrale:3000" help="Adresse seule, sans chemin." />
+                    <FormField id="worker-url" label="Adresse du central" required=true autocomplete="off" placeholder="http://central:3000" help="Adresse seule, sans chemin." />
                     <FormField id="worker-username" label="Identifiant administrateur" required=true autocomplete="username" />
-                    <FormField id="worker-password" label="Mot de passe" input_type="password" required=true autocomplete="current-password" help="Utilisé une seule fois pour créer la clé du nœud ; il n'est pas conservé." />
-                    <FormField id="worker-name" label="Nom du nœud" required=true autocomplete="off" help="Lettres, chiffres, point, tiret et tiret bas." />
+                    <FormField id="worker-password" label="Mot de passe" input_type="password" required=true autocomplete="current-password" help="Utilisé une seule fois pour créer la clé du worker ; il n'est pas conservé." />
+                    <FormField id="worker-name" label="Nom du worker" required=true autocomplete="off" help="Lettres, chiffres, point, tiret et tiret bas." />
                     <Button id="worker-submit-btn" variant=ButtonVariant::Primary submit=true class="auth-gate__submit">
                         "Enrôler ce worker"
                     </Button>

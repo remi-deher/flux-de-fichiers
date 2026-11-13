@@ -33,7 +33,7 @@ pub const SCRIPT: &str = r###"
         matchCount = cachedLibraries.filter(library => matchesQuery([
           library.name,
           library.flow_id || '',
-          ...(Array.isArray(library.nodes) ? library.nodes.map(node => node.local_path) : [])
+          ...(Array.isArray(library.workers) ? library.workers.map(entry => entry.local_path) : [])
         ], query)).length;
         if (typeof renderLibrariesTable === 'function') {
           renderLibrariesTable();

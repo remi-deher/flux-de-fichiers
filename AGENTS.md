@@ -7,7 +7,9 @@
   (décision utilisateur du 10 nov. 2026). Ne pas changer la stack sans demande
   utilisateur. Détails : `docs/adr/0001-stack.md` et `docs/adr/0005-architecture-arr-conteneur-unique.md`.
 - Mode centralisé de 1 à N serveurs. HA optionnelle, bascule à cadrer ; aucun
-  seuil de nœuds ne l'active. FFmpeg réservé aux médias synthétiques des tests.
+  seuil de workers ne l'active. Encodage (FFmpeg, encodeurs matériels) fourni par
+  plugins, jamais embarqué dans l'image ; IA et MCP dans le périmètre ; installation
+  neuve uniquement (ADR 0012).
 - `npm run dev` doit démarrer sur http://localhost:3000 (bouton de prévisualisation).
 - Builds et tests à distance : ne pas initialiser ni exécuter de builds Docker lourds
   ou de suites de tests en local (faible puissance de la machine hôte, décision utilisateur

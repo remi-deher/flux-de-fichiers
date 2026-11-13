@@ -5,8 +5,8 @@ pub const SCRIPT: &str = r###"
   // Charge les données de toutes les pages, une fois l'utilisateur connecté.
   // Un worker ne charge que ses vues en lecture seule : vue d'ensemble, tâches, outils et catalogue.
   async function loadAllData() {
-    if (isWorkerNode()) {
-      await Promise.allSettled([loadNodeOverview(), loadJobs(), loadToolsStatus(), loadStoreCatalog()]);
+    if (isWorkerInstance()) {
+      await Promise.allSettled([loadWorkerOverview(), loadJobs(), loadToolsStatus(), loadStoreCatalog()]);
       return;
     }
     await Promise.allSettled([

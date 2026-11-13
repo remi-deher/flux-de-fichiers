@@ -182,7 +182,7 @@ pub fn script() -> String {
     if (factId === 'flows-fact') return 'Flux';
     if (factId === 'repos-fact') return 'Dépôt';
     if (factId === 'jobs-fact') return 'Tâche';
-    if (factId === 'workers-fact') return 'Nœud';
+    if (factId === 'workers-fact') return 'Worker';
     if (factId === 'api-keys-fact') return 'Clé d\'API';
     if (factId === 'accounts-fact') return 'Utilisateur';
     const catalog = {{

@@ -112,8 +112,8 @@ pub const CAPSULE_ACTIONS: &[CapsuleAction] = &[
     },
     CapsuleAction {
         id: "btn-workers-connect",
-        label: "Raccorder un nœud",
-        aria_label: Some("Raccorder un nouveau nœud worker"),
+        label: "Raccorder un worker",
+        aria_label: Some("Raccorder un nouveau worker"),
         icon: IconName::Plus,
         tone: CapsuleTone::Primary,
         context: CapsuleContext::Workers,

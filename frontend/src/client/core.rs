@@ -129,21 +129,21 @@ pub const SCRIPT: &str = r###"
   }
 
   // --- Suivi du nombre de workers en ligne (central inclus) ---
-  let isCoordinatorOnline = false;
+  let isCentralOnline = false;
   let remoteActiveWorkersCount = 0;
 
   function updateHeaderWorkersCount(isOnline, remoteCount) {
-    if (typeof isOnline === 'boolean') isCoordinatorOnline = isOnline;
+    if (typeof isOnline === 'boolean') isCentralOnline = isOnline;
     if (typeof remoteCount === 'number') remoteActiveWorkersCount = remoteCount;
 
     const pill = el('header-workers-pill');
     const label = el('header-workers-count-text');
     if (!pill || !label) return;
 
-    if (!isCoordinatorOnline) {
+    if (!isCentralOnline) {
       pill.className = 'status-pill offline';
-      pill.setAttribute('aria-label', 'Coordinateur et workers hors ligne');
-      pill.setAttribute('title', 'Le coordinateur central est inaccessible');
+      pill.setAttribute('aria-label', 'Central et workers hors ligne');
+      pill.setAttribute('title', 'Le central est inaccessible');
       label.textContent = 'Hors ligne';
       return;
     }
@@ -151,8 +151,8 @@ pub const SCRIPT: &str = r###"
     const total = 1 + remoteActiveWorkersCount;
     pill.className = 'status-pill online';
     const text = total === 1 ? '1 worker en ligne' : `${total} workers en ligne`;
-    pill.setAttribute('aria-label', `${text} (coordinateur central inclus)`);
-    pill.setAttribute('title', `${text} (1 coordinateur central autonome + ${remoteActiveWorkersCount} distant(s))`);
+    pill.setAttribute('aria-label', `${text} (central inclus)`);
+    pill.setAttribute('title', `${text} (1 central + ${remoteActiveWorkersCount} distant(s))`);
     label.textContent = text;
   }
 
@@ -227,12 +227,12 @@ pub const SCRIPT: &str = r###"
 
   // --- Bandeau d'état de la vue d'ensemble ---
   function setHeroStatus(reachable) {
-    // Sur un worker, le bandeau décrit la centrale : il est mis à jour par loadNodeOverview.
-    if (isWorkerNode()) return;
+    // Sur un worker, le bandeau décrit le central : il est mis à jour par loadWorkerOverview.
+    if (isWorkerInstance()) return;
     const badge = el('hero-status-badge');
     const text = el('hero-status-text');
     if (badge) badge.dataset.tone = reachable ? 'success' : 'danger';
-    if (text) text.textContent = reachable ? 'Coordinateur joignable' : 'Coordinateur inaccessible';
+    if (text) text.textContent = reachable ? 'Central joignable' : 'Central inaccessible';
   }
 
   // --- Vérification de santé ---

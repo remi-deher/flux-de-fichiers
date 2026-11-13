@@ -1,5 +1,5 @@
 use super::{
-    AdminAuth, AppState, ViewJobsAuth, ViewLibrariesAuth, ViewNodesAuth, ViewOverviewAuth,
+    AdminAuth, AppState, ViewJobsAuth, ViewLibrariesAuth, ViewOverviewAuth, ViewWorkersAuth,
 };
 use crate::{
     domain::*,
@@ -96,9 +96,19 @@ pub async fn get_job(
 ) -> AppResult<Json<Job>> {
     Ok(Json(repository::get_job(&s.pool, id).await?))
 }
+/// Relance manuelle d'une tâche échouée après perte de bail (aucune relance automatique).
+pub async fn retry(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    _auth: AdminAuth,
+) -> AppResult<Json<Job>> {
+    let job = repository::retry_job(&s.pool, id).await?;
+    s.notify_job_event(JobEventType::JobRetried, job.id, JobStatus::Queued, None);
+    Ok(Json(job))
+}
 pub async fn workers(
     State(s): State<AppState>,
-    _auth: ViewNodesAuth,
+    _auth: ViewWorkersAuth,
 ) -> AppResult<Json<Vec<Worker>>> {
     Ok(Json(repository::list_workers(&s.pool).await?))
 }

@@ -26,11 +26,11 @@ fn OverviewHero() -> impl IntoView {
             <div class="hero-content">
                 <div class="hero-badge" id="hero-status-badge" data-tone="neutral">
                     <span class="status-dot"></span>
-                    <span id="hero-status-text">"Vérification du coordinateur…"</span>
+                    <span id="hero-status-text">"Vérification du central…"</span>
                 </div>
                 <h1 class="hero-title">"Vue d'ensemble"</h1>
                 <p class="hero-subtitle">
-                    "Pipelines d'encodage MKV, stockage média et agents de traitement, en direct."
+                    "Pipelines d'encodage MKV, stockage média et workers de traitement, en direct."
                 </p>
             </div>
             <div class="hero-actions">
@@ -60,7 +60,7 @@ fn OverviewMetrics() -> impl IntoView {
                 label="Volume total géré"
                 value=PENDING_VALUE
                 id="metric-storage-volume"
-                subtitle="Médias analysés par le coordinateur"
+                subtitle="Médias analysés par le central"
                 icon=IconName::Storage
             />
             <MetricCard
@@ -75,7 +75,7 @@ fn OverviewMetrics() -> impl IntoView {
                 label="Workers en ligne"
                 value=PENDING_VALUE
                 id="metric-workers-count"
-                subtitle="Coordinateur autonome inclus"
+                subtitle="Central autonome inclus"
                 icon=IconName::Workers
             />
         </section>

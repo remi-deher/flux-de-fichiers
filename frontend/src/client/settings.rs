@@ -42,7 +42,7 @@ pub const SCRIPT: &str = r###"
     if (subtitleNode && subtitle) subtitleNode.textContent = subtitle;
   }
 
-  function onlineNodes() {
+  function onlineWorkers() {
     return cachedWorkers.filter(worker => isWorkerOnline(worker));
   }
 
@@ -50,11 +50,11 @@ pub const SCRIPT: &str = r###"
   function settingsAlerts() {
     const alerts = [];
     if (location.protocol === 'http:') {
-      alerts.push({ tone: 'warning', text: 'Accès en HTTP simple : les mots de passe circulent en clair. Placez la centrale derrière un proxy TLS.', opens: SETTINGS_TAB_NETWORK });
+      alerts.push({ tone: 'warning', text: 'Accès en HTTP simple : les mots de passe circulent en clair. Placez le central derrière un proxy TLS.', opens: SETTINGS_TAB_NETWORK });
     }
-    const offline = cachedWorkers.filter(worker => !isLocalCoordinator(worker) && !isWorkerOnline(worker));
+    const offline = cachedWorkers.filter(worker => !isLocalCentral(worker) && !isWorkerOnline(worker));
     if (offline.length > 0) {
-      alerts.push({ tone: 'warning', text: `Nœud hors ligne : ${offline.map(worker => worker.name || worker.id).join(', ')}`, opens: SETTINGS_TAB_STORAGE });
+      alerts.push({ tone: 'warning', text: `Worker hors ligne : ${offline.map(worker => worker.name || worker.id).join(', ')}`, opens: SETTINGS_TAB_STORAGE });
     }
     const admins = cachedAccounts.filter(account => account.role === 'admin' && !account.disabled);
     if (cachedAccounts.length > 0 && admins.length === 1) {
@@ -67,8 +67,8 @@ pub const SCRIPT: &str = r###"
   }
 
   function renderSettingsOverview() {
-    const nodes = cachedWorkers;
-    setTile('settings-tile-nodes', `${onlineNodes().length} / ${nodes.length}`);
+    const workers = cachedWorkers;
+    setTile('settings-tile-workers', `${onlineWorkers().length} / ${workers.length}`);
     const activeAccounts = cachedAccounts.filter(account => !account.disabled);
     const viewers = activeAccounts.filter(account => account.role === 'viewer').length;
     setTile('settings-tile-accounts', String(activeAccounts.length), viewers === 1 ? '1 lecteur' : `${viewers} lecteurs`);
@@ -89,7 +89,7 @@ pub const SCRIPT: &str = r###"
 
   // Un lecteur ne voit dans les paramètres que son propre compte : un seul onglet, sans création.
   function restrictSettingsToOwnAccount(me) {
-    if (me.nodeKind !== 'central') return;
+    if (me.instanceKind !== 'central') return;
     const isAdmin = me.permissions.includes('manage_settings');
     document.querySelectorAll('#panel-settings .subnav-tab').forEach(tab => {
       tab.hidden = !isAdmin && tab.id !== SETTINGS_TAB_USERS;
@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn test_overview_targets_the_tiles_and_tabs_the_page_declares() {
         for id in [
-            "settings-tile-nodes",
+            "settings-tile-workers",
             "settings-tile-accounts",
             "settings-tile-keys",
             "settings-tile-database",
@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn test_alerts_cover_http_offline_nodes_and_a_single_admin() {
         assert!(SCRIPT.contains("location.protocol === 'http:'"));
-        assert!(SCRIPT.contains("Nœud hors ligne"));
+        assert!(SCRIPT.contains("Worker hors ligne"));
         assert!(SCRIPT.contains("Un seul administrateur actif"));
     }
 }

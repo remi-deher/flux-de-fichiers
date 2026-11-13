@@ -100,11 +100,11 @@ pub const WIDGETS: &[WidgetDef] = &[
     },
     WidgetDef {
         kind: WidgetKind::Fleet,
-        title: "Parc de nœuds",
+        title: "Parc de workers",
         icon: IconName::Workers,
         span: WidgetSpan::Medium,
         placements: &[WidgetPlacement::Dashboard],
-        goto: Some(("Nœuds", WORKERS)),
+        goto: Some(("Workers", WORKERS)),
     },
     WidgetDef {
         kind: WidgetKind::Libraries,

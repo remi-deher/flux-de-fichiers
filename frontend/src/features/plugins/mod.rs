@@ -201,7 +201,7 @@ pub fn PluginsPanel() -> impl IntoView {
                 </div>
                 <div class="dialog-body">
                     <p class="section-subtitle no-margin-top">
-                        "Ces paramètres sont sauvegardés dans votre base centrale SQLite (/config) et sont automatiquement transmis aux blocs correspondants dans les flux."
+                        "Ces paramètres sont sauvegardés dans la base SQLite du central (/config) et sont automatiquement transmis aux blocs correspondants dans les flux."
                     </p>
                     <input type="hidden" id="plugin-config-current-id" value="" />
                     <div id="plugin-config-fields"></div>

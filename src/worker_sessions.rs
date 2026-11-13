@@ -2,8 +2,8 @@
 //! purgées dès qu'un compte disparaît ou est désactivé à la synchronisation.
 
 use crate::{
-    node_view::VerifiedAccount,
     web_session::{ValidatedSession, WebSession, digest},
+    worker_view::VerifiedAccount,
 };
 use chrono::{Duration, Utc};
 use std::{collections::HashMap, sync::Mutex};

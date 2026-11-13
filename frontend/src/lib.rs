@@ -269,7 +269,7 @@ mod tests {
         assert!(html.contains("function submitSetup"));
         assert!(html.contains("function submitWorkerSetup"));
         assert!(html.contains("function setupAuthGate"));
-        assert!(html.contains("function loadNodeOverview"));
+        assert!(html.contains("function loadWorkerOverview"));
         assert!(html.contains("function copyToClipboard"));
         assert!(html.contains("function copyWithFeedback"));
         assert!(html.contains("function applyAccess"));
@@ -286,8 +286,8 @@ mod tests {
         assert!(!html.contains("class=\"registre-split\""));
         assert!(html.contains("id=\"libraries-table-body\""));
         assert!(html.contains("id=\"libraries-fact-pane-overview\""));
-        assert!(!html.contains("id=\"libraries-fact-tab-nodes\""));
-        assert!(!html.contains("id=\"libraries-fact-pane-nodes\""));
+        assert!(!html.contains("id=\"libraries-fact-tab-workers\""));
+        assert!(!html.contains("id=\"libraries-fact-pane-workers\""));
         assert!(!html.contains("id=\"libraries-fact-pane-flow\""));
         assert!(html.contains("id=\"library-name-input\""));
         assert!(html.contains("id=\"library-flow-select\""));
@@ -302,7 +302,7 @@ mod tests {
         assert!(html.contains("id=\"btn-workers-connect\""));
         assert!(html.contains("id=\"workers-fact-tab-connect\""));
         assert!(!html.contains("registre-fact"));
-        assert!(html.contains("Raccorder un nœud"));
+        assert!(html.contains("Raccorder un worker"));
         assert!(html.contains("subtab-plugins-app"));
         assert!(html.contains("subtab-plugins-pack"));
         assert!(html.contains("subtab-plugins-resource"));

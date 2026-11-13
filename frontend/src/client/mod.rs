@@ -9,12 +9,12 @@ pub mod init;
 pub mod jobs;
 pub mod keys;
 pub mod libraries;
-pub mod node_overview;
 pub mod plugins;
 pub mod pure;
 pub mod settings;
 pub mod tabs;
 pub mod widgets;
+pub mod worker_overview;
 pub mod workers;
 
 use std::sync::LazyLock;
@@ -50,7 +50,7 @@ static CLIENT_SCRIPT: LazyLock<String> = LazyLock::new(|| {
     script.push_str("\n\n");
     script.push_str(widgets::SCRIPT);
     script.push_str("\n\n");
-    script.push_str(node_overview::SCRIPT);
+    script.push_str(worker_overview::SCRIPT);
     script.push_str("\n\n");
     script.push_str(&flows::script());
     script.push_str("\n\n");

@@ -2,14 +2,14 @@
 
 use crate::{
     error::{AppError, AppResult},
-    node_view::AccountCopy,
+    worker_view::AccountCopy,
 };
 use flux_shared::Role;
 use serde::Serialize;
 use sqlx::{FromRow, SqlitePool};
 use uuid::Uuid;
 
-/// Clé du réglage d'instance qui porte le nom de la centrale.
+/// Clé du réglage d'instance qui porte le nom du central.
 pub const INSTANCE_NAME_KEY: &str = "instance_name";
 
 /// Un compte humain. Le haché du mot de passe n'en fait jamais partie.
@@ -96,7 +96,7 @@ pub async fn create_account(
     })
 }
 
-/// Change le rôle et/ou l'état d'un compte, sans jamais laisser la centrale sans administrateur actif.
+/// Change le rôle et/ou l'état d'un compte, sans jamais laisser le central sans administrateur actif.
 /// La version du compte augmente et ses sessions sont fermées : les droits changent tout de suite.
 pub async fn update_account(
     pool: &SqlitePool,

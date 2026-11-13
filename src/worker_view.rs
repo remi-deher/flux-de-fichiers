@@ -1,6 +1,6 @@
-//! Échanges entre la centrale et un worker pour ses vues en lecture seule (ADR 0011, phase 3).
+//! Échanges entre le central et un worker pour ses vues en lecture seule (ADR 0011, phase 3).
 //!
-//! La centrale expose des routes limitées au nœud de la clé présentée ; le worker n'a jamais de
+//! Le central expose des routes limitées au worker de la clé présentée ; le worker n'a jamais de
 //! proxy générique, seulement cette liste de routes.
 
 use crate::domain::JobStatus;
@@ -9,15 +9,15 @@ use flux_shared::Role;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub const OVERVIEW_PATH: &str = "/api/v1/node/overview";
-pub const JOBS_PATH: &str = "/api/v1/node/jobs";
-pub const PLUGINS_PATH: &str = "/api/v1/node/plugins";
-pub const LOGIN_PATH: &str = "/api/v1/node/login";
-pub const ACCOUNTS_PATH: &str = "/api/v1/node/accounts";
-/// Nombre de tâches renvoyées pour un nœud.
-pub const NODE_JOBS_LIMIT: i64 = 100;
+pub const OVERVIEW_PATH: &str = "/api/v1/worker/overview";
+pub const JOBS_PATH: &str = "/api/v1/worker/jobs";
+pub const PLUGINS_PATH: &str = "/api/v1/worker/plugins";
+pub const LOGIN_PATH: &str = "/api/v1/worker/login";
+pub const ACCOUNTS_PATH: &str = "/api/v1/worker/accounts";
+/// Nombre de tâches renvoyées pour un worker.
+pub const WORKER_JOBS_LIMIT: i64 = 100;
 
-/// Tâches d'un nœud, par statut.
+/// Tâches d'un worker, par statut.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobCounts {
     pub queued: i64,
@@ -38,10 +38,10 @@ impl JobCounts {
     }
 }
 
-/// Vue d'ensemble d'un nœud, calculée par la centrale.
+/// Vue d'ensemble d'un worker, calculée par le central.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NodeOverview {
+pub struct WorkerOverview {
     pub name: String,
     pub worker_id: Option<Uuid>,
     pub last_seen: Option<DateTime<Utc>>,
@@ -54,7 +54,7 @@ pub struct VerifyLoginRequest {
     pub password: String,
 }
 
-/// Compte dont la centrale a vérifié le mot de passe.
+/// Compte dont le central a vérifié le mot de passe.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifiedAccount {
     pub id: String,
@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn test_overview_uses_camel_case_for_the_browser() -> anyhow::Result<()> {
-        let overview = NodeOverview {
+        let overview = WorkerOverview {
             name: "nas".into(),
             worker_id: None,
             last_seen: None,

@@ -1,7 +1,7 @@
 //! Gestion des comptes : liste, création, changement de rôle, désactivation (ADR 0011).
 //!
 //! Un compte ne se supprime pas : il se désactive, ce qui ferme ses sessions et garde son historique.
-//! La centrale garde toujours au moins un administrateur actif.
+//! Le central garde toujours au moins un administrateur actif.
 
 use super::{AppState, ManageAccountsAuth};
 use crate::{

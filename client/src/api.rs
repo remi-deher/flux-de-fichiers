@@ -84,21 +84,65 @@ pub async fn get<T: DeserializeOwned>(path: &str) -> Result<T, ApiError> {
         .map_err(|_| ApiError::Network)
 }
 
-/// `POST` d'un corps JSON (ou vide), avec le jeton CSRF ; renvoie la réponse JSON.
+/// Méthode d'une requête qui modifie : elle porte le jeton CSRF.
+#[derive(Clone, Copy)]
+enum Write {
+    Post,
+    Put,
+    Delete,
+}
+
+fn write_request(method: Write, path: &str) -> RequestBuilder {
+    let builder = match method {
+        Write::Post => Request::post(path),
+        Write::Put => Request::put(path),
+        Write::Delete => Request::delete(path),
+    };
+    builder.header(CSRF_HEADER, &csrf_token())
+}
+
+async fn send_write<B: Serialize>(
+    method: Write,
+    path: &str,
+    body: Option<&B>,
+) -> Result<Response, ApiError> {
+    let request = write_request(method, path);
+    match body {
+        Some(body) => {
+            let request = request.json(body).map_err(|_| ApiError::Network)?;
+            let response = request.send().await.map_err(|_| ApiError::Network)?;
+            checked(response).await
+        }
+        None => send(request).await,
+    }
+}
+
+/// `POST` d'un corps JSON (ou vide) ; renvoie la réponse JSON.
 pub async fn post<B: Serialize, T: DeserializeOwned>(
     path: &str,
     body: Option<&B>,
 ) -> Result<T, ApiError> {
-    let request = Request::post(path).header(CSRF_HEADER, &csrf_token());
-    let response = match body {
-        Some(body) => {
-            let request = request.json(body).map_err(|_| ApiError::Network)?;
-            let response = request.send().await.map_err(|_| ApiError::Network)?;
-            checked(response).await?
-        }
-        None => send(request).await?,
-    };
-    response.json().await.map_err(|_| ApiError::Network)
+    send_write(Write::Post, path, body)
+        .await?
+        .json()
+        .await
+        .map_err(|_| ApiError::Network)
+}
+
+/// `PUT` d'un corps JSON ; renvoie la réponse JSON.
+pub async fn put<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> Result<T, ApiError> {
+    send_write(Write::Put, path, Some(body))
+        .await?
+        .json()
+        .await
+        .map_err(|_| ApiError::Network)
+}
+
+/// `DELETE` sans corps ni réponse.
+pub async fn delete(path: &str) -> Result<(), ApiError> {
+    send_write::<()>(Write::Delete, path, None)
+        .await
+        .map(|_| ())
 }
 
 #[cfg(test)]

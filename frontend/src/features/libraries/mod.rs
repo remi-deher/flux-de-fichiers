@@ -1,6 +1,6 @@
 //! Registre des bibliothèques déclarées. Le tiroir porte le nom, les workers et le flux.
 
-use crate::shared::ui::{InspectionPane, RegistreTable, inspection_drawer};
+use crate::shared::ui::{InspectionPane, NewInterfaceLink, RegistreTable, inspection_drawer};
 use leptos::prelude::*;
 
 fn library_panes() -> Vec<InspectionPane> {
@@ -95,6 +95,7 @@ pub fn LibrariesPanel() -> impl IntoView {
             hidden
         >
             <div class="registre" id="library-registre">
+                <NewInterfaceLink href=flux_shared::app::LIBRARIES purpose="Déclarer et modifier les bibliothèques" />
                 <input type="search" id="libraries-search-input" hidden />
                 <RegistreTable
                     aria_label="Bibliothèques déclarées"

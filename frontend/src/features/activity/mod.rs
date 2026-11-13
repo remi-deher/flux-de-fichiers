@@ -6,6 +6,7 @@ pub use registre::{ActivityRegistre, JOBS_REGISTRE_ID};
 
 use crate::core::{SubNav, SubNavTabItem};
 use crate::features::widgets::{WidgetArea, WidgetPlacement};
+use crate::shared::ui::NewInterfaceLink;
 use leptos::prelude::*;
 
 #[component]
@@ -40,10 +41,7 @@ pub fn JobsPanel() -> impl IntoView {
                 aria_label="Sous-navigation de la section Activité et Traitements"
                 tabs=subnav_tabs
             />
-            <p class="form-help">
-                "Créer et relancer des tâches : "
-                <a href=crate::APP_PATH>"nouvelle interface"</a>
-            </p>
+            <NewInterfaceLink href=flux_shared::app::JOBS purpose="Créer et relancer des tâches" />
             <WidgetArea placement=WidgetPlacement::Activity />
             <ActivityRegistre />
         </div>

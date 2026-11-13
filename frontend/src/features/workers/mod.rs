@@ -3,7 +3,8 @@
 
 use crate::features::widgets::{WidgetArea, WidgetPlacement};
 use crate::shared::ui::{
-    Button, ButtonVariant, DetailRow, InspectionPane, RegistreTable, inspection_drawer,
+    Button, ButtonVariant, DetailRow, InspectionPane, NewInterfaceLink, RegistreTable,
+    inspection_drawer,
 };
 use leptos::prelude::*;
 
@@ -74,6 +75,7 @@ fn connect_pane() -> InspectionPane {
 pub fn WorkersPanel() -> impl IntoView {
     view! {
         <div id=crate::core::panel::WORKERS.dom_id class="tab-panel" role="tabpanel" aria-labelledby=crate::core::panel::WORKERS.button_id hidden>
+            <NewInterfaceLink href=flux_shared::app::WORKERS purpose="Suivre et raccorder les workers" />
             <WidgetArea placement=WidgetPlacement::Workers />
             <div class="registre">
                 <RegistreTable

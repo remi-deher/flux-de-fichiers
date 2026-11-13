@@ -5,8 +5,12 @@
 
 pub mod api;
 mod app;
+pub mod flows;
 pub mod format;
 pub mod jobs;
+pub mod libraries;
+pub mod route;
+pub mod workers;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

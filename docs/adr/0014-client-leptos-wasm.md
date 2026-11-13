@@ -21,7 +21,7 @@ l'éditeur de flux a longtemps détruit les flux à l'enregistrement sans que ri
    renvoie. Quand tous les écrans sont portés, `/` sert le client et le JavaScript historique
    est supprimé. Aucun pont entre le JavaScript historique et le WASM.
 4. **Contrat partagé** : les réponses lues par le client sont des types de `flux-shared`
-   (`jobs`, `session`, `format`), utilisés aussi par le central ; les dérivations SQLx y sont
+   (`jobs`, `session`, `format`, `flows`, `libraries`, `workers`, `app`), utilisés aussi par le central ; les dérivations SQLx y sont
    derrière la fonctionnalité `sqlx`, que seul le central active.
 5. **Connexion** : tant que le client n'a pas son écran d'accès, il réutilise la session cookie
    ouverte par l'interface historique (`/api/v1/auth/session` donne le jeton CSRF).
@@ -30,17 +30,36 @@ l'éditeur de flux a longtemps détruit les flux à l'enregistrement sans que ri
    vérifie le client en natif et pour `wasm32-unknown-unknown`, et teste `flux-shared` et
    `flux-client`.
 
-## Premier écran porté
+## Écrans portés
 
-Tâches : liste en direct (SSE, progression), filtres par état, fiche, création d'une tâche
-depuis le dossier d'entrée et relance manuelle (ADR 0012), selon les droits de l'appelant.
+- **Tâches** : liste en direct (SSE, progression), filtres par état, fiche, création depuis le
+  dossier d'entrée et relance manuelle (ADR 0012).
+- **Flux** : liste (version, composition), création, suppression, et éditeur :
+  - graphe disposé en couches (plus long chemin depuis l'entrée), liaisons SVG par sortie ;
+  - palette et formulaires générés depuis le **catalogue des blocs exécutables**
+    (`flux_shared::flows::block_catalog`) : un champ décrit est un champ que le moteur lit ;
+    une valeur enregistrée hors liste reste sélectionnable ;
+  - sorties reliées une à une, avec refus des boucles, des sorties déjà prises et des entrées
+    impossibles (`FlowGraph::connect`) ; retrait d'un bloc avec raccord d'un maillon simple ;
+  - enregistrement du graphe complet (clés inconnues conservées), bloqué tant qu'un réglage
+    obligatoire est vide ; un en-tête de webhook laissé vide garde sa valeur enregistrée.
+- **Bibliothèques** : liste et état, création, modification (nom, flux, chemin et accès par
+  worker), suppression.
+- **Workers** : présence, worker intégré, retrait d'un worker hors ligne, commande de
+  raccordement.
+
+L'interface historique renvoie vers chacun de ces écrans (`NewInterfaceLink`), avec les chemins
+de `flux_shared::app`.
+
+Limites connues : les blocs d'un dépôt de plugins sans exécution native n'apparaissent pas dans
+la palette (ils restent lus et conservés) ; pas de glisser-déposer ni de simulation ; quitter
+l'éditeur ne prévient pas des modifications non enregistrées.
 
 ## Conséquences
 
 - Pendant la transition, deux interfaces coexistent ; les tâches se créent et se relancent
   seulement dans la nouvelle.
-- Ordre de portage proposé : éditeur de flux (graphe, formulaires générés depuis les schémas des
-  blocs, versions), bibliothèques, workers, plugins, paramètres, accès et installation, puis
+- Ordre de portage restant : plugins, paramètres, accès et installation, vue d'ensemble, puis
   bascule de `/` et suppression du JavaScript historique.
 - Le client ne s'exécute que dans un navigateur ; ses tests Rust portent sur le modèle (règles
   d'affichage, contrat), pas sur le rendu.

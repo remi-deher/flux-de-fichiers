@@ -12,8 +12,7 @@ pub mod theme;
 
 use leptos::prelude::*;
 
-/// Chemin public du client WASM (ADR 0014) et dossier de ses fichiers dans `dist`.
-pub const APP_PATH: &str = "/app/";
+/// Dossier des fichiers du client WASM (ADR 0014) dans `dist`.
 pub const APP_DIST_DIR: &str = "app";
 /// Module ES produit par `wasm-bindgen --target web` dans `dist/app/pkg`.
 pub const APP_MODULE: &str = "./pkg/flux_client.js";

@@ -1,19 +1,17 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub use flux_shared::flows::{FlowRecord, UpdateFlowRequest};
 pub use flux_shared::jobs::{
     Job, JobErrorCode, JobEvent, JobEventType, JobStatus, MAX_ATTEMPTS, MediaFile, NewJob,
 };
 
-pub const LEASE_SECONDS: i64 = 120;
+pub use flux_shared::libraries::{
+    LIBRARY_NAME_MAX, LIBRARY_PATH_MAX, Library, LibraryAccess, LibraryWorkerPath, LibraryWrite,
+};
+pub use flux_shared::workers::{SystemConfig, Worker};
 
-#[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow)]
-pub struct Worker {
-    pub id: Uuid,
-    pub name: String,
-    pub last_seen: DateTime<Utc>,
-}
+pub const LEASE_SECONDS: i64 = 120;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claim {
@@ -53,70 +51,6 @@ pub struct Failure {
     pub worker_id: Uuid,
     pub lease_token: Uuid,
     pub error_code: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow)]
-pub struct FlowRecord {
-    pub id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub file_mask: String,
-    pub is_default: bool,
-    pub definition: String,
-    /// Dernière version enregistrée ; les versions passées sont immuables (`flow_versions`).
-    pub version: i64,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UpdateFlowRequest {
-    pub name: String,
-    pub description: Option<String>,
-    pub file_mask: String,
-    pub is_default: bool,
-    pub definition: String,
-}
-
-pub const LIBRARY_NAME_MAX: usize = 80;
-pub const LIBRARY_PATH_MAX: usize = 512;
-
-/// Accès d'un worker au dossier de la bibliothèque.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[serde(rename_all = "snake_case")]
-#[sqlx(rename_all = "snake_case")]
-pub enum LibraryAccess {
-    Read,
-    ReadWrite,
-}
-
-/// Chemin local d'une bibliothèque sur un worker.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LibraryWorkerPath {
-    pub worker_id: Uuid,
-    pub local_path: String,
-    pub access: LibraryAccess,
-}
-
-/// Bibliothèque déclarée : un nom, un flux, des workers.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Library {
-    pub id: Uuid,
-    pub name: String,
-    pub flow_id: Option<String>,
-    pub workers: Vec<LibraryWorkerPath>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-/// Création ou remplacement d'une bibliothèque.
-#[derive(Debug, Deserialize)]
-pub struct LibraryWrite {
-    pub name: String,
-    #[serde(default)]
-    pub flow_id: Option<String>,
-    #[serde(default)]
-    pub workers: Vec<LibraryWorkerPath>,
 }
 
 #[cfg(test)]

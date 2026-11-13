@@ -13,7 +13,7 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
 };
 use futures_util::stream::Stream;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::convert::Infallible;
 use uuid::Uuid;
 
@@ -163,20 +163,13 @@ pub async fn failure(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Serialize)]
-pub struct SystemConfigResponse {
-    pub max_file_bytes: u64,
-    pub local_worker: bool,
-    pub version: &'static str,
-}
-
 pub async fn system_config(
     State(s): State<AppState>,
     _auth: ViewOverviewAuth,
-) -> AppResult<Json<SystemConfigResponse>> {
-    Ok(Json(SystemConfigResponse {
+) -> AppResult<Json<SystemConfig>> {
+    Ok(Json(SystemConfig {
         max_file_bytes: s.config.max_file_bytes,
         local_worker: s.config.local_worker,
-        version: env!("CARGO_PKG_VERSION"),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
     }))
 }

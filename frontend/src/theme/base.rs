@@ -63,7 +63,6 @@ pub const BASE_CSS: &str = r#"
 .application-sidebar.is-collapsed .brand-info,
 .application-sidebar.is-collapsed .tab-btn-label,
 .application-sidebar.is-collapsed .nav-group-label,
-.application-sidebar.is-collapsed #theme-toggle-label,
 .application-sidebar.is-collapsed .collapse-label {
   display: none;
 }
@@ -100,12 +99,18 @@ pub const BASE_CSS: &str = r#"
   justify-content: center;
 }
 
-.application-sidebar.is-collapsed #theme-toggle-btn {
+/* Replié : seule la pastille du compte reste, le thème se règle barre dépliée. */
+.application-sidebar.is-collapsed .sidebar-footer-tools,
+.application-sidebar.is-collapsed .account-chip__text,
+.application-sidebar.is-collapsed .account-menu {
+  display: none;
+}
+
+.application-sidebar.is-collapsed .account-chip {
   width: 40px;
   height: 40px;
   padding: 0;
   justify-content: center;
-  min-width: 40px;
 }
 
 /* En-tête de la marque */
@@ -268,8 +273,110 @@ pub const BASE_CSS: &str = r#"
   gap: 0.5rem;
 }
 
-.sidebar-footer-tools button {
+/* Thème : trois boutons exclusifs. */
+.theme-segmented {
+  display: flex;
+  width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.theme-segmented__btn {
   flex: 1;
+  padding: 0.4rem 0.25rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.theme-segmented__btn:hover {
+  color: var(--text-main);
+}
+
+.theme-segmented__btn[aria-pressed="true"] {
+  background-color: var(--bg-subtle);
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+/* Compte connecté : pastille et menu en bas de la barre latérale. */
+.sidebar-account {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.account-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--text-main);
+  text-align: left;
+  cursor: pointer;
+}
+
+.account-chip:hover,
+.account-chip[aria-expanded="true"] {
+  border-color: var(--primary);
+}
+
+.account-chip__avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background-color: var(--bg-card);
+  color: var(--text-main);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.account-chip__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.account-chip__name {
+  font-size: 0.75rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-chip__role {
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+}
+
+.account-menu {
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-card);
+}
+
+.account-menu[hidden] {
+  display: none;
+}
+
+.account-menu__title {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-dim);
 }
 
 /* --- Zone de transition & contenu principal --- */
@@ -1055,8 +1162,33 @@ body[data-filter-sheet] .topbar-search {
     font-size: 0.8125rem;
   }
 
+  /* Étroit : la barre devient une rangée ; le thème et le compte restent accessibles. */
   .sidebar-footer {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    border-top: 0;
+    padding: 0.25rem 0.75rem 0.5rem;
+  }
+
+  .sidebar-collapse-btn {
     display: none;
+  }
+
+  .sidebar-footer-tools {
+    flex: 1 1 12rem;
+  }
+
+  .sidebar-account {
+    flex: 1 1 12rem;
+  }
+
+  .account-menu {
+    position: fixed;
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    z-index: 60;
   }
 
   .page-transition-region {

@@ -49,6 +49,63 @@ pub const COMPONENTS_CSS: &str = r#"
   border-color: var(--primary);
 }
 
+/* Vue d'ensemble des paramètres : tuile cliquable et lignes « à surveiller ». */
+.settings-tile {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-tile:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.settings-tile:hover .metric-card {
+  border-color: var(--primary);
+}
+
+.settings-section[hidden] {
+  display: none;
+}
+
+.settings-alert {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--border-color);
+  font-size: 0.875rem;
+}
+
+.settings-alert:first-child {
+  border-top: 0;
+}
+
+.settings-alert__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--success);
+}
+
+.settings-alert[data-tone="warning"] .settings-alert__dot {
+  background-color: var(--warning);
+}
+
+.settings-alert__text {
+  flex: 1;
+  min-width: 0;
+}
+
 /* Retour visuel d'une copie réussie : le bouton reste en « Copié ✓ » un instant. */
 .btn[data-copied="true"] {
   background-color: var(--success-bg);

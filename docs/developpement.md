@@ -13,6 +13,7 @@ Ce guide se consulte à la demande. Le README reste la référence d'utilisation
 | Transferts, intégrité, publication | `src/api/transfers.rs`, `src/storage.rs` | `src/media.rs`, `src/worker.rs` |
 | Remuxage MKV | `src/media.rs`, `src/worker.rs` | `scripts/scenarios.py` |
 | Interface Leptos | `frontend/` | `frontend/README.md` |
+| Page Paramètres, barre latérale (compte, thème) | `frontend/src/features/settings/`, `frontend/src/core/shell.rs`, `frontend/src/client/settings.rs` | `src/api/system.rs`, `tests/system_status.rs` |
 | Rôle du nœud, enrôlement d'un worker | `src/node.rs`, `src/node_settings.rs`, `src/api/nodes.rs` | `src/worker_http.rs`, `src/api/node_view.rs`, `tests/nodes_api.rs`, `tests/worker_web.rs`, `docs/adr/0011-installation-comptes-et-noeuds.md` |
 | Secrets chiffrés, rotation de clé, mot de passe oublié | `src/secrets.rs`, `src/secret_rotation.rs`, `src/account_admin.rs` | `tests/secret_rotation.rs`, `tests/password_reset.rs`, `docs/adr/0011-installation-comptes-et-noeuds.md` |
 | Configuration, TLS | `src/config.rs`, `tests/configuration.rs` | `compose.yaml`, `deploy/` ; déploiement dans le README |

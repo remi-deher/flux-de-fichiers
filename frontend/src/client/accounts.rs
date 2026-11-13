@@ -21,6 +21,7 @@ pub const SCRIPT: &str = r###"
       const res = await apiFetch('/api/v1/accounts');
       cachedAccounts = await res.json();
       renderAccountsTable();
+      if (typeof renderSettingsOverview === 'function') renderSettingsOverview();
     } catch {
       if (tbody) tbody.innerHTML = emptyStateRow(4, 'Impossible de récupérer les comptes.', true);
     }
@@ -87,16 +88,6 @@ pub const SCRIPT: &str = r###"
     }
   }
 
-  // Un lecteur ne voit dans les paramètres que son propre compte (mot de passe, déconnexion).
-  function restrictSettingsToOwnAccount(me) {
-    if (me.permissions.includes('manage_settings')) return;
-    const panel = el('panel-settings');
-    if (!panel) return;
-    panel.querySelectorAll(':scope > section').forEach(section => {
-      section.hidden = !section.querySelector('#account-settings-title');
-    });
-  }
-
   function setupAccounts() {
     const form = el('account-create-form');
     if (form) form.addEventListener('submit', createAccount);
@@ -114,7 +105,6 @@ mod tests {
             "function createAccount",
             "function updateAccount",
             "function setupAccounts",
-            "function restrictSettingsToOwnAccount",
         ] {
             assert!(SCRIPT.contains(name), "{name}");
         }

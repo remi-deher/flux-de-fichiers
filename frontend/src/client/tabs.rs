@@ -358,7 +358,7 @@ pub const SCRIPT: &str = r###"
     });
   }
 
-  // --- Gestion du Thème (Clair / Sombre / Système) ---
+  // --- Gestion du Thème (Système / Clair / Sombre), choisi dans la barre latérale ---
   function applyTheme(theme) {
     if (theme === 'dark') {
       document.documentElement.setAttribute('data-theme', 'dark');
@@ -367,8 +367,9 @@ pub const SCRIPT: &str = r###"
     } else {
       document.documentElement.removeAttribute('data-theme');
     }
-    const select = el('theme-select');
-    if (select) select.value = theme;
+    document.querySelectorAll('[data-theme-choice]').forEach(button => {
+      button.setAttribute('aria-pressed', String(button.dataset.themeChoice === theme));
+    });
     try {
       localStorage.setItem('flux_theme_pref', theme);
     } catch {}
@@ -381,25 +382,9 @@ pub const SCRIPT: &str = r###"
     } catch {}
     applyTheme(saved);
 
-    const select = el('theme-select');
-    if (select) {
-      select.addEventListener('change', (e) => applyTheme(e.target.value));
-    }
-
-    function toggleThemeCycle() {
-      const current = document.documentElement.getAttribute('data-theme');
-      if (current === 'dark') {
-        applyTheme('light');
-      } else if (current === 'light') {
-        applyTheme('system');
-      } else {
-        applyTheme('dark');
-      }
-    }
-
-    const toggleBtn = el('theme-toggle-btn');
-    if (toggleBtn) toggleBtn.addEventListener('click', toggleThemeCycle);
-
+    document.querySelectorAll('[data-theme-choice]').forEach(button => {
+      button.addEventListener('click', () => applyTheme(button.dataset.themeChoice));
+    });
 
     if (window.matchMedia) {
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {

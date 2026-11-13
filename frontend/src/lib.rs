@@ -1,5 +1,8 @@
 //! Bibliothèque frontend Leptos pour Flux de Fichiers.
 
+// Les vues Leptos imbriquées (page Paramètres, barre latérale) dépassent la limite par défaut de 128.
+#![recursion_limit = "512"]
+
 pub mod app;
 pub mod client;
 pub mod core;
@@ -164,6 +167,34 @@ mod tests {
         assert!(!html.contains("id=\"header-refresh-btn\""));
         assert!(!html.contains("id=\"btn-sync-all-repos\""));
         assert!(!html.contains("repo-sync-btn"));
+    }
+
+    #[test]
+    fn test_settings_page_is_sections_with_account_and_theme_in_the_sidebar() {
+        let html = render_full_page();
+        for id in [
+            "btn-subtab-settings-overview",
+            "btn-subtab-settings-keys",
+            "settings-section-keys",
+            "settings-tile-database",
+            "security-rotate-cmd",
+            "account-menu-btn",
+            "theme-segmented",
+        ] {
+            assert!(html.contains(&format!("id=\"{id}\"")), "{id}");
+        }
+        for function in [
+            "loadSystemStatus",
+            "renderSettingsOverview",
+            "setupAccountMenu",
+            "accountInitials",
+        ] {
+            assert!(html.contains(&format!("function {function}")), "{function}");
+        }
+        // Le compte et le thème n'ont plus de formulaire dans la page des paramètres.
+        assert_eq!(html.matches("id=\"account-password-form\"").count(), 1);
+        assert_eq!(html.matches("id=\"theme-select\"").count(), 0);
+        assert!(html.contains("[data-theme-choice]"));
     }
 
     #[test]

@@ -2,11 +2,8 @@
 //!
 //! Le script client choisit le formulaire à afficher d'après `GET /api/v1/setup/status` et `/api/v1/me`.
 
-use crate::shared::ui::{Button, ButtonVariant, FormField};
+use crate::shared::ui::{Button, ButtonVariant, FormField, PASSWORD_MIN_LENGTH};
 use leptos::prelude::*;
-
-/// Longueur minimale d'un mot de passe, annoncée par le navigateur (le serveur la vérifie aussi).
-const PASSWORD_MIN_LENGTH: u32 = 8;
 
 #[component]
 pub fn AuthGate() -> impl IntoView {

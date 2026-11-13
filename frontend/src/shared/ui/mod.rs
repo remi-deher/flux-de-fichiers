@@ -19,7 +19,7 @@ pub use card::Card;
 pub use detail_drawer::DetailDrawer;
 pub use detail_row::DetailRow;
 pub use empty_state::EmptyState;
-pub use form_field::FormField;
+pub use form_field::{FormField, PASSWORD_MIN_LENGTH};
 pub use icon::{Icon, IconName};
 pub use inspection::{InspectionPane, InspectionPanel, inspection_drawer};
 pub use metric_card::{MetricCard, MetricTone};

@@ -119,7 +119,7 @@ pub const SETTINGS: Panel = Panel {
     search_label: "Rechercher une section ou clé de configuration",
     icon: IconName::Settings,
     active: false,
-    permission: Permission::ViewOverview,
+    permission: Permission::ManageSettings,
     hosted_on: &[NodeKind::Central],
 };
 
@@ -244,8 +244,8 @@ mod tests {
         for panel in panels() {
             assert!(!panel.hosted_on.is_empty(), "{} sans nœud", panel.slug);
         }
-        // Tout utilisateur connecté voit ses paramètres de compte ; le reste est masqué sans droit d'administration.
-        assert_eq!(SETTINGS.permission, Permission::ViewOverview);
+        // Les paramètres sont réservés aux administrateurs : le compte et le thème vivent dans la barre latérale.
+        assert_eq!(SETTINGS.permission, Permission::ManageSettings);
         assert_eq!(UPDATES.permission, Permission::ManageSettings);
         assert_eq!(DASHBOARD.permission, Permission::ViewOverview);
         for read_only in [&DASHBOARD, &JOBS, &PLUGINS] {

@@ -102,9 +102,10 @@ centrale dans le bandeau.
 
 **Reste à faire :**
 - Phase 4, vérification : l'interface d'un worker dans un navigateur (les tests Rust et la CI sont verts).
-- Déploiement : voir `docs/deploiement-essai-0011.md`. Centrale `flux-essai` mise à jour et remise à zéro le
-  13 nov. 2026 (étapes A à F) ; restent l'installation par l'assistant, la clé et la mise à jour du worker
-  (`flux-essai-worker`, encore en 0.12.0 et arrêté), puis les vérifications. Promotion `test → main` non faite.
+- Déploiement : voir `docs/deploiement-essai-0011.md`. Centrale `flux-essai` et worker `flux-essai-worker`
+  mis à jour le 13 nov. 2026 sur `test-89e594c7451b` ; le worker s'enregistre et réclame des tâches. Restent :
+  connexion à l'interface du worker (port à publier), compte lecteur, tâche de remux de bout en bout, et la
+  promotion `test → main`.
 - Mot de passe oublié : fait en ligne de commande, `flux-de-fichiers reset-password <identifiant>` dans le
   conteneur (mot de passe généré, affiché une fois, sessions du compte fermées ; `src/account_admin.rs`).
 - Rotation de la clé de chiffrement : faite, `flux-de-fichiers rotate-secret` dans le conteneur

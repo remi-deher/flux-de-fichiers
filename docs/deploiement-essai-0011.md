@@ -3,10 +3,11 @@
 Procédure pour `flux-essai` (centrale, `192.168.1.50`) et `flux-essai-worker` (worker `artemis-essai`,
 `192.168.1.51`). Chaque étape modifiante demande une confirmation.
 
-**Avancement au 13 nov. 2026** : les étapes A à F sont exécutées sur la centrale, avec l'accord de
-l'utilisateur. `flux-essai` tourne sur `test-89e594c7451b`, installation vierge (`/health` 204,
-`needsSetup: true`). Le worker est arrêté (étape B) et encore en `0.12.0`. Restent G (installation par
-l'assistant, mot de passe saisi par l'utilisateur), H, I et J. Détails et retour arrière dans le journal
+**Avancement au 13 nov. 2026** : les étapes A à I sont exécutées avec l'accord de l'utilisateur.
+`flux-essai` (centrale) et `flux-essai-worker` tournent sur `test-89e594c7451b`. Le compte administrateur a
+été créé par l'utilisateur (G) et la clé du worker écrite par lui dans le secret (H). Le worker s'enregistre
+et réclame des tâches sans 401. Il reste de J : la connexion à l'interface du worker (il faut un port
+publié), un compte lecteur et une tâche de remux de bout en bout. Détails et retour arrière dans le journal
 de Rashin du 13 nov. Écarts constatés à l'exécution :
 
 - l'étape D passe par `midclt call -j app.update` avec `custom_compose_config` (le champ `image` seul

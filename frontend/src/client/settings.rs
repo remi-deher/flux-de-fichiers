@@ -3,27 +3,12 @@
 pub const SCRIPT: &str = r###"
 // --- Paramètres : état système, vue d'ensemble, clé de chiffrement ---
   let cachedSystemStatus = null;
-  const BYTE_UNITS = ['o', 'Ko', 'Mo', 'Go', 'To'];
-  const BYTES_PER_UNIT = 1024;
   const KEY_SOURCE_LABELS = { local: 'Fichier local (/config/secret_key)', external: 'Fichier fourni (SECRET_KEY_FILE)' };
   // Onglets de la sous-barre ouverts depuis la vue d'ensemble.
   const SETTINGS_TAB_USERS = 'btn-subtab-settings-users';
   const SETTINGS_TAB_KEYS = 'btn-subtab-settings-keys';
   const SETTINGS_TAB_NETWORK = 'btn-subtab-settings-network';
   const SETTINGS_TAB_STORAGE = 'btn-subtab-settings-storage';
-
-  // 4 300 000 octets s'écrivent « 4,1 Mo » : la plus grande unité qui garde un nombre à un chiffre ou plus.
-  function formatBytes(bytes) {
-    if (typeof bytes !== 'number' || bytes < 0) return '—';
-    let value = bytes;
-    let unit = 0;
-    while (value >= BYTES_PER_UNIT && unit < BYTE_UNITS.length - 1) {
-      value /= BYTES_PER_UNIT;
-      unit += 1;
-    }
-    const text = unit === 0 ? String(Math.round(value)) : value.toFixed(1).replace('.', ',');
-    return `${text} ${BYTE_UNITS[unit]}`;
-  }
 
   async function loadSystemStatus() {
     if (currentUser && !currentUser.permissions.includes('manage_settings')) return;
@@ -88,7 +73,8 @@ pub const SCRIPT: &str = r###"
     const viewers = activeAccounts.filter(account => account.role === 'viewer').length;
     setTile('settings-tile-accounts', String(activeAccounts.length), viewers === 1 ? '1 lecteur' : `${viewers} lecteurs`);
     setTile('settings-tile-keys', String(cachedApiKeys.filter(key => !key.revokedAt).length));
-    setTile('settings-tile-database', cachedSystemStatus ? formatBytes(cachedSystemStatus.databaseBytes) : '—');
+    const databaseBytes = cachedSystemStatus ? cachedSystemStatus.databaseBytes : null;
+    setTile('settings-tile-database', typeof databaseBytes === 'number' ? formatBytes(databaseBytes) : '—');
     const host = el('settings-alerts');
     if (!host) return;
     const alerts = settingsAlerts();
@@ -99,6 +85,18 @@ pub const SCRIPT: &str = r###"
           <span class="settings-alert__text">${escapeHtml(alert.text)}</span>
           <button type="button" class="btn btn-secondary btn-sm" data-subtab-go="${alert.opens}">Ouvrir</button>
         </div>`).join('');
+  }
+
+  // Un lecteur ne voit dans les paramètres que son propre compte : un seul onglet, sans création.
+  function restrictSettingsToOwnAccount(me) {
+    if (me.nodeKind !== 'central') return;
+    const isAdmin = me.permissions.includes('manage_settings');
+    document.querySelectorAll('#panel-settings .subnav-tab').forEach(tab => {
+      tab.hidden = !isAdmin && tab.id !== SETTINGS_TAB_USERS;
+    });
+    setHidden(['account-new-btn'], !isAdmin);
+    const usersTab = el(SETTINGS_TAB_USERS);
+    if (!isAdmin && usersTab) switchSubtab(usersTab);
   }
 
   function setupSettings() {
@@ -130,12 +128,20 @@ mod tests {
             "function renderSystemStatus",
             "function renderSettingsOverview",
             "function settingsAlerts",
-            "function formatBytes",
             "function setupSettings",
+            "function restrictSettingsToOwnAccount",
         ] {
             assert!(SCRIPT.contains(name), "{name}");
         }
         assert!(SCRIPT.contains("/api/v1/system/status"));
+    }
+
+    #[test]
+    fn test_the_script_reuses_the_shared_byte_formatter_instead_of_redefining_it() {
+        assert!(!SCRIPT.contains("function formatBytes"));
+        assert!(SCRIPT.contains("formatBytes(databaseBytes)"));
+        // Une base en mémoire n'a pas de taille : « — » et non « 0 o ».
+        assert!(SCRIPT.contains("typeof databaseBytes === 'number'"));
     }
 
     #[test]

@@ -99,18 +99,9 @@ pub const BASE_CSS: &str = r#"
   justify-content: center;
 }
 
-/* Replié : seule la pastille du compte reste, le thème se règle barre dépliée. */
-.application-sidebar.is-collapsed .sidebar-footer-tools,
-.application-sidebar.is-collapsed .account-chip__text,
-.application-sidebar.is-collapsed .account-menu {
+/* Replié : le thème se règle barre dépliée, la déconnexion reste accessible. */
+.application-sidebar.is-collapsed .theme-segmented {
   display: none;
-}
-
-.application-sidebar.is-collapsed .account-chip {
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  justify-content: center;
 }
 
 /* En-tête de la marque */
@@ -302,81 +293,33 @@ pub const BASE_CSS: &str = r#"
   font-weight: 600;
 }
 
-/* Compte connecté : pastille et menu en bas de la barre latérale. */
-.sidebar-account {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.account-chip {
-  display: flex;
+/* Déconnexion : un bouton discret à côté du thème, toujours accessible. */
+.sidebar-footer-tools {
   align-items: center;
-  gap: 0.6rem;
-  width: 100%;
-  padding: 0.5rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: var(--bg-subtle);
-  color: var(--text-main);
-  text-align: left;
-  cursor: pointer;
 }
 
-.account-chip:hover,
-.account-chip[aria-expanded="true"] {
-  border-color: var(--primary);
-}
-
-.account-chip__avatar {
+.sidebar-logout-btn {
   display: flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background-color: var(--bg-card);
-  color: var(--text-main);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.account-chip__text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.account-chip__name {
-  font-size: 0.75rem;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.account-chip__role {
-  font-size: 0.6875rem;
-  color: var(--text-dim);
-}
-
-.account-menu {
-  padding: 0.75rem;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  background-color: var(--bg-card);
-}
-
-.account-menu[hidden] {
-  display: none;
-}
-
-.account-menu__title {
-  margin: 0 0 0.5rem;
-  font-size: 0.75rem;
+  background: transparent;
   color: var(--text-dim);
+  cursor: pointer;
+}
+
+.sidebar-logout-btn:hover {
+  border-color: var(--primary);
+  color: var(--text-main);
+}
+
+.subnav-tab[hidden] {
+  display: none;
 }
 
 /* --- Zone de transition & contenu principal --- */
@@ -1179,17 +1122,6 @@ body[data-filter-sheet] .topbar-search {
     flex: 1 1 12rem;
   }
 
-  .sidebar-account {
-    flex: 1 1 12rem;
-  }
-
-  .account-menu {
-    position: fixed;
-    left: 0.75rem;
-    right: 0.75rem;
-    bottom: 0.75rem;
-    z-index: 60;
-  }
 
   .page-transition-region {
     max-width: 100vw;

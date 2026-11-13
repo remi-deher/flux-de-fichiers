@@ -148,14 +148,15 @@ mod tests {
     }
 
     #[test]
-    fn test_account_and_theme_are_not_on_this_page() {
+    fn test_theme_and_logout_are_not_on_this_page_but_the_user_drawer_is() {
         let html = render();
-        for gone in [
-            "account-password-form",
-            "account-logout-btn",
-            "theme-select",
-        ] {
+        for gone in ["account-logout-btn", "sidebar-logout-btn", "theme-select"] {
             assert!(!html.contains(gone), "{gone}");
         }
+        // Le mot de passe se change dans le tiroir du compte, dans la section Utilisateurs.
+        let users = html.find(SECTION_USERS).unwrap_or(usize::MAX);
+        let keys = html.find(SECTION_KEYS).unwrap_or(0);
+        let form = html.find("account-password-form").unwrap_or(usize::MAX);
+        assert!(users < form && form < keys);
     }
 }

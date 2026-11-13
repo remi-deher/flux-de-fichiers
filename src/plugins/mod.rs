@@ -308,13 +308,42 @@ pub fn plugin_exists(roots: &[PathBuf], plugin_id: &str) -> bool {
         .any(|(_, entry)| entry.id == plugin_id)
 }
 
+/// Résumé d'un outil du catalogue : prêt s'il est dans le cache du nœud, sinon installable.
+pub fn summarize_tool(
+    entry: CatalogEntry,
+    description: String,
+    cache_mgr: &ToolCacheManager,
+) -> ToolStatusSummary {
+    let arch = host_arch();
+    // La télémétrie est interne au binaire ; tout autre outil vient du cache du nœud.
+    let is_system_ready = entry.id == "app.internal.telemetry";
+    let status = if is_system_ready || cache_mgr.is_ready(&entry.id, &entry.version, arch) {
+        ToolStatus::Ready
+    } else if is_installing(&entry.id) {
+        ToolStatus::Installing
+    } else {
+        ToolStatus::NotInstalled
+    };
+    ToolStatusSummary {
+        id: entry.id,
+        name: entry.name,
+        version: entry.version,
+        status,
+        capability: entry.capability.unwrap_or(CatalogCapability::Other),
+        current_choice: entry.current_choice.unwrap_or(false),
+        arch: arch.to_string(),
+        distribution: entry
+            .distribution
+            .unwrap_or_else(|| "autonomous-binary".into()),
+        description,
+    }
+}
+
 /// Calcule l'état dynamique de chaque outil déclaré par rapport au cache local du nœud.
 pub fn list_tools_status(
     roots: &[PathBuf],
     cache_mgr: &ToolCacheManager,
 ) -> Vec<ToolStatusSummary> {
-    let arch = host_arch();
-
     catalog_with_roots(roots)
         .into_iter()
         .filter(|(_, entry)| entry.entry_type == CatalogItemType::App)
@@ -323,32 +352,21 @@ pub fn list_tools_status(
                 .ok()
                 .and_then(|manifest| manifest.description)
                 .unwrap_or_default();
-
-            // La télémétrie est interne au binaire ; tout autre outil vient du cache du nœud.
-            let is_system_ready = entry.id == "app.internal.telemetry";
-
-            let status = if is_system_ready || cache_mgr.is_ready(&entry.id, &entry.version, arch) {
-                ToolStatus::Ready
-            } else if is_installing(&entry.id) {
-                ToolStatus::Installing
-            } else {
-                ToolStatus::NotInstalled
-            };
-
-            ToolStatusSummary {
-                id: entry.id,
-                name: entry.name,
-                version: entry.version,
-                status,
-                capability: entry.capability.unwrap_or(CatalogCapability::Other),
-                current_choice: entry.current_choice.unwrap_or(false),
-                arch: arch.to_string(),
-                distribution: entry
-                    .distribution
-                    .unwrap_or_else(|| "autonomous-binary".into()),
-                description,
-            }
+            summarize_tool(entry, description, cache_mgr)
         })
+        .collect()
+}
+
+/// Outils d'un catalogue lu à distance : l'état vient du cache local de ce nœud, sans description
+/// (les manifestes restent sur la centrale).
+pub fn tool_statuses_for_entries(
+    entries: Vec<CatalogEntry>,
+    cache_mgr: &ToolCacheManager,
+) -> Vec<ToolStatusSummary> {
+    entries
+        .into_iter()
+        .filter(|entry| entry.entry_type == CatalogItemType::App)
+        .map(|entry| summarize_tool(entry, String::new(), cache_mgr))
         .collect()
 }
 

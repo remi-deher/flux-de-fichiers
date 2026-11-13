@@ -30,7 +30,7 @@ pub fn is_valid_node_name(name: &str) -> bool {
 }
 
 /// Écrit `contents` dans `path` de façon atomique (fichier temporaire puis renommage).
-fn write_private(path: &Path, contents: &str) -> anyhow::Result<()> {
+pub(crate) fn write_private(path: &Path, contents: &str) -> anyhow::Result<()> {
     use std::io::Write;
     let mut temporary = path.as_os_str().to_owned();
     temporary.push(TEMPORARY_SUFFIX);

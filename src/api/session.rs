@@ -13,20 +13,20 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use flux_shared::NodeKind;
+use flux_shared::{NodeKind, Role};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
-    username: String,
-    password: String,
+    pub(crate) username: String,
+    pub(crate) password: String,
 }
 
 #[derive(Serialize)]
 pub struct SessionResponse {
-    csrf_token: String,
-    expires_at: String,
-    username: String,
+    pub(crate) csrf_token: String,
+    pub(crate) expires_at: String,
+    pub(crate) username: String,
 }
 
 /// Identité de l'appelant et ce qu'il peut faire, pour que l'interface n'affiche que le permis.
@@ -113,9 +113,38 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> AppRes
     let session = web_session::from_headers(&state.pool, &headers).await?;
     web_session::validate_csrf(&headers, &session)?;
     web_session::revoke(&state.pool, &session).await?;
+    cleared_session_response(&state.config)
+}
+
+/// Réponse de déconnexion : 204 et cookies de session effacés.
+pub(crate) fn cleared_session_response(config: &crate::config::Config) -> AppResult<Response> {
     let mut response = StatusCode::NO_CONTENT.into_response();
-    set_cookies(&mut response, web_session::clear_cookies(&state.config))?;
+    set_cookies(&mut response, web_session::clear_cookies(config))?;
     Ok(no_store(response))
+}
+
+impl MeResponse {
+    /// Identité renvoyée par `GET /api/v1/me`, sur une centrale comme sur un worker.
+    pub(crate) fn new(
+        kind: &'static str,
+        name: String,
+        role: Role,
+        node_kind: NodeKind,
+        instance_name: Option<String>,
+    ) -> Self {
+        Self {
+            kind,
+            name,
+            role: role.as_str(),
+            permissions: role
+                .permissions()
+                .into_iter()
+                .map(flux_shared::Permission::as_str)
+                .collect(),
+            node_kind,
+            instance_name,
+        }
+    }
 }
 
 pub async fn me(
@@ -123,22 +152,16 @@ pub async fn me(
     AnyAuth(principal): AnyAuth,
 ) -> AppResult<Json<MeResponse>> {
     let instance_name = repository::get_setting(&state.pool, repository::INSTANCE_NAME_KEY).await?;
-    Ok(Json(MeResponse {
-        kind: match principal.kind {
+    Ok(Json(MeResponse::new(
+        match principal.kind {
             PrincipalKind::Account => "account",
             PrincipalKind::ApiKey => "api_key",
         },
-        name: principal.name.clone(),
-        role: principal.role.as_str(),
-        permissions: principal
-            .role
-            .permissions()
-            .into_iter()
-            .map(flux_shared::Permission::as_str)
-            .collect(),
-        node_kind: NodeKind::Central,
+        principal.name.clone(),
+        principal.role,
+        NodeKind::Central,
         instance_name,
-    }))
+    )))
 }
 
 #[derive(Deserialize)]
@@ -177,7 +200,7 @@ pub async fn change_password(
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn session_response(
+pub(crate) fn session_response(
     session: WebSession,
     username: &str,
     config: &crate::config::Config,
@@ -206,7 +229,7 @@ fn set_cookies(response: &mut Response, cookies: [String; 2]) -> AppResult<()> {
     Ok(())
 }
 
-fn no_store(mut response: Response) -> Response {
+pub(crate) fn no_store(mut response: Response) -> Response {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));

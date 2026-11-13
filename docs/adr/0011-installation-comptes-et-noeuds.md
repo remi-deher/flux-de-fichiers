@@ -75,16 +75,34 @@ Vérifiée en local, non déployée.
   `/api/v1/setup/status` ; la centrale expose aussi `/api/v1/node/status`. Un port occupé ne bloque pas
   le worker.
 - Assistant : choix du rôle (centrale ou worker) puis formulaire d'enrôlement ; un worker enrôlé affiche
-  un écran d'information en attendant les vues de la phase 3.
+  ensuite la connexion (phase 3).
 - Limites : le mot de passe administrateur transite vers l'adresse saisie sur la page d'installation
   (acceptable sur réseau de confiance, comme la fenêtre de réclamation) ; la redirection n'est pas suivie.
 
+**Phase 3 faite** (code écrit, non commité, ni compilé ni testé en local) :
+- Routes de la centrale réservées à la clé d'un nœud, limitées à ce nœud (`src/api/node_view.rs`) :
+  `/api/v1/node/overview`, `/jobs`, `/plugins`, `/login` (connexion déléguée), `/accounts` (copie des
+  comptes). Liste fermée côté worker (`src/central_client.rs`), jamais de proxy générique.
+- Le worker sert la même interface (`src/worker_http.rs`) : `/api/v1/auth/login|session|logout`, `/me`,
+  `/api/v1/node/overview`, `/api/v1/jobs`, `/api/v1/plugins`, `/api/v1/tools` (état d'installation lu
+  dans le cache local du nœud). Droits vérifiés côté serveur ; tout le reste répond 404.
+- Connexion : la centrale vérifie quand elle répond (un refus est définitif) ; la copie locale
+  (`/config/accounts.json`, hachés seulement, remplacée en bloc toutes les 60 s, suppressions incluses)
+  ne sert que si elle est injoignable. Sessions en mémoire, purgées quand un compte disparaît.
+- Frontend : tableau de bord, activité et plugins sont hébergés par les deux types de nœud ; un worker
+  ne charge que vue d'ensemble, tâches, outils et catalogue.
+- Limites : le rôle d'un compte n'est pas relu entre deux synchronisations (un seul rôle, administrateur) ;
+  la vue du worker dépend de la centrale (502 si elle est coupée) ; interface non vérifiée dans un
+  navigateur.
+
+**Phase 4, partie code faite** (non commitée, non testée) : le tableau de bord d'un worker affiche les
+tâches du nœud par statut (`/api/v1/node/overview`, `frontend/src/client/node_overview.rs`), masque les
+raccourcis et la carte « Médias et stockage » qui n'existent que sur la centrale, et décrit l'état de la
+centrale dans le bandeau.
+
 **Reste à faire :**
-- Phase 3 : vues du worker en lecture seule (vue d'ensemble du nœud, tâches, outils, plugins) via des
-  routes de la centrale limitées au nœud ; connexion déléguée à la centrale, comptes copiés
-  (centrale → worker, versionnés, suppressions incluses) en secours ; sessions du worker en mémoire.
-- Phase 4 : tests de la phase 3 et mise à jour de la documentation correspondante (`openapi.yaml` couvre déjà
-  les routes de la phase 2).
+- Phase 4, vérification : exécuter et corriger les tests des phases 2, 3 et 4 via la CI (PR `dev → test`),
+  puis vérifier l'interface d'un worker dans un navigateur.
 - Déploiement : pousser `dev → test → main` (ADR 0002), approuver les runs `action_required`,
   remettre l'installation de test à zéro (supprimer `/config` après sauvegarde ; confirmer avant de
   toucher `/data`), recréer le compte par l'assistant, créer les clés worker dans Réglages, mettre à

@@ -462,6 +462,62 @@ paths:
                   coordinatorUrl: {type: string, description: Worker seulement}
                   registered: {type: boolean, description: Worker seulement}
                   coordinatorReachable: {type: boolean, description: Worker seulement}
+  /api/v1/node/overview:
+    get:
+      security: [{ApiKey: []}]
+      summary: Vue d'ensemble du nœud appelant
+      description: >-
+        Nom, dernière activité et nombre de tâches par statut. Réservé à la clé d'un nœud (rôle worker) ; limité à ce nœud.
+      responses:
+        '200': {description: Vue d'ensemble}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/node/jobs:
+    get:
+      security: [{ApiKey: []}]
+      summary: Tâches traitées par le nœud appelant
+      description: >-
+        Les 100 plus récentes, jamais celles des autres nœuds. Réservé à la clé d'un nœud (rôle worker) ; limité à ce nœud.
+      responses:
+        '200': {description: Tâches du nœud}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/node/plugins:
+    get:
+      security: [{ApiKey: []}]
+      summary: Catalogue de plugins, en lecture seule
+      description: >-
+        Même catalogue que `GET /api/v1/plugins`. Réservé à la clé d'un nœud (rôle worker) ; limité à ce nœud.
+      responses:
+        '200': {description: Entrées du catalogue}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/node/login:
+    post:
+      security: [{ApiKey: []}]
+      summary: Vérifier les identifiants saisis sur un worker
+      description: >-
+        Connexion déléguée : mêmes limites d'essais qu'une connexion directe ; renvoie id, identifiant et rôle du compte. Réservé à la clé d'un nœud (rôle worker) ; limité à ce nœud.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: {type: string}
+                password: {type: string, writeOnly: true}
+      responses:
+        '200': {description: Compte vérifié}
+        '401': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/node/accounts:
+    get:
+      security: [{ApiKey: []}]
+      summary: Copie des comptes pour la connexion de secours
+      description: >-
+        Hachés Argon2id et versions ; la copie remplace celle du worker en bloc (un compte absent est supprimé). Réservé à la clé d'un nœud (rôle worker) ; limité à ce nœud.
+      responses:
+        '200': {description: Copie complète des comptes}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/auth/login:
     post:
       security: []

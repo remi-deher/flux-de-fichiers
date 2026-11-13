@@ -8,6 +8,7 @@ pub mod init;
 pub mod jobs;
 pub mod keys;
 pub mod libraries;
+pub mod node_overview;
 pub mod plugins;
 pub mod pure;
 pub mod tabs;
@@ -42,6 +43,8 @@ static CLIENT_SCRIPT: LazyLock<String> = LazyLock::new(|| {
     script.push_str(plugins::SCRIPT);
     script.push_str("\n\n");
     script.push_str(widgets::SCRIPT);
+    script.push_str("\n\n");
+    script.push_str(node_overview::SCRIPT);
     script.push_str("\n\n");
     script.push_str(&flows::script());
     script.push_str("\n\n");

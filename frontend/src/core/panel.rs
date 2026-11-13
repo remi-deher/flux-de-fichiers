@@ -36,7 +36,7 @@ pub const DASHBOARD: Panel = Panel {
     icon: IconName::Dashboard,
     active: true,
     permission: Permission::ViewOverview,
-    hosted_on: &[NodeKind::Central],
+    hosted_on: &[NodeKind::Central, NodeKind::Worker],
 };
 
 pub const FILES: Panel = Panel {
@@ -78,7 +78,7 @@ pub const JOBS: Panel = Panel {
     icon: IconName::Activity,
     active: false,
     permission: Permission::ViewJobs,
-    hosted_on: &[NodeKind::Central],
+    hosted_on: &[NodeKind::Central, NodeKind::Worker],
 };
 
 pub const WORKERS: Panel = Panel {
@@ -106,7 +106,7 @@ pub const PLUGINS: Panel = Panel {
     icon: IconName::Plugins,
     active: false,
     permission: Permission::ViewPlugins,
-    hosted_on: &[NodeKind::Central],
+    hosted_on: &[NodeKind::Central, NodeKind::Worker],
 };
 
 pub const SETTINGS: Panel = Panel {
@@ -246,6 +246,12 @@ mod tests {
         }
         assert_eq!(SETTINGS.permission, Permission::ManageSettings);
         assert_eq!(DASHBOARD.permission, Permission::ViewOverview);
+        for read_only in [&DASHBOARD, &JOBS, &PLUGINS] {
+            assert!(read_only.hosted_on.contains(&NodeKind::Worker));
+        }
+        for central_only in [&FILES, &FLOWS, &WORKERS, &SETTINGS, &UPDATES] {
+            assert_eq!(central_only.hosted_on, &[NodeKind::Central]);
+        }
     }
 
     #[test]
@@ -256,5 +262,6 @@ mod tests {
             assert!(script.contains(&format!("\"{}\"", panel.permission.as_str())));
         }
         assert!(script.contains("\"hostedOn\":[\"central\"]"));
+        assert!(script.contains("\"hostedOn\":[\"central\",\"worker\"]"));
     }
 }

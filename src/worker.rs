@@ -1,8 +1,9 @@
 use crate::{
+    central_client::CentralClient,
     config,
     domain::{Claim, ClaimRequest, Failure, LeaseRequest, Register, Worker},
     media, node_settings, storage,
-    worker_http::WorkerState,
+    worker_http::{WorkerState, WorkerWeb},
 };
 use anyhow::Context;
 use futures_util::StreamExt;
@@ -308,14 +309,24 @@ pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
             .add_root_certificate(reqwest::Certificate::from_pem(&tokio::fs::read(ca).await?)?);
     }
     let status = WorkerState::new(&config.name, config.url.as_str().trim_end_matches('/'));
-    let http = tokio::spawn(crate::worker_http::serve(status.clone()));
+    let client = builder.build()?;
+    let central = CentralClient::new(client.clone(), config.url.clone(), config.key.clone());
+    let web = WorkerWeb::new(
+        status.clone(),
+        Arc::new(crate::config::Config::load()?),
+        central,
+        config.tools_cache_dir.clone(),
+    );
+    let http = tokio::spawn(crate::worker_http::serve(web.clone()));
+    let account_sync = tokio::spawn(web.sync_accounts_loop());
     let agent = Agent {
-        client: builder.build()?,
+        client,
         config,
         status,
     };
     let outcome = agent.work().await;
     http.abort();
+    account_sync.abort();
     outcome
 }
 

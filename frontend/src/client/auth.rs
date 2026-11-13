@@ -19,8 +19,7 @@ pub const SCRIPT: &str = r###"
     role: { form: 'role-choice', title: 'Bienvenue', subtitle: 'Choisissez le rôle de ce nœud.', focus: 'role-central-btn' },
     setup: { form: 'setup-form', title: 'Installation de la centrale', subtitle: 'Créez le compte administrateur pour commencer.', focus: 'setup-name' },
     'worker-setup': { form: 'worker-setup-form', title: 'Enrôlement du worker', subtitle: 'Rattachez ce nœud à une centrale existante.', focus: 'worker-url' },
-    login: { form: 'login-form', title: 'Connexion', focus: 'login-username' },
-    worker: { form: null, title: 'Nœud worker' }
+    login: { form: 'login-form', title: 'Connexion', focus: 'login-username' }
   };
   const WORKER_START_POLL_MS = 1000;
   const WORKER_START_MAX_POLLS = 30;
@@ -50,9 +49,7 @@ pub const SCRIPT: &str = r###"
     const subtitle = el('auth-gate-subtitle');
     if (title) title.textContent = view.title;
     if (subtitle) {
-      subtitle.textContent = kind === 'worker'
-        ? `Le nœud « ${detail || ''} » est enrôlé : il se pilote depuis la centrale.`
-        : (view.subtitle || detail || '');
+      subtitle.textContent = view.subtitle || detail || '';
     }
     setAuthGateError('');
     const focusTarget = view.focus && el(view.focus);
@@ -98,7 +95,9 @@ pub const SCRIPT: &str = r###"
     const firstAllowed = TABS.find(slug => isTabAllowed(slug, me));
     if (firstAllowed && !isTabAllowed(activeTab, me)) switchTab(firstAllowed);
     renderAccount(me);
-    if (typeof startJobsSse === 'function') startJobsSse();
+    if (me.nodeKind === 'worker') prepareWorkerDashboard(me);
+    // Le flux d'événements des tâches n'existe que sur la centrale.
+    if (me.nodeKind === 'central' && typeof startJobsSse === 'function') startJobsSse();
   }
 
   async function fetchJson(url) {
@@ -120,10 +119,6 @@ pub const SCRIPT: &str = r###"
     }
     if (status.needsSetup) {
       showAuthGate('role');
-      return false;
-    }
-    if (status.nodeKind === 'worker') {
-      showAuthGate('worker', status.instanceName);
       return false;
     }
     const session = await fetchJson('/api/v1/auth/session');
@@ -222,7 +217,7 @@ pub const SCRIPT: &str = r###"
       await new Promise(resolve => setTimeout(resolve, WORKER_START_POLL_MS));
       const status = await fetchJson('/api/v1/setup/status');
       if (status && status.nodeKind === 'worker') {
-        showAuthGate('worker', status.instanceName || nodeName);
+        showAuthGate('login', status.instanceName || nodeName);
         return;
       }
     }

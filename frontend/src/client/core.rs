@@ -181,6 +181,8 @@ pub const SCRIPT: &str = r###"
 
   // --- Bandeau d'état de la vue d'ensemble ---
   function setHeroStatus(reachable) {
+    // Sur un worker, le bandeau décrit la centrale : il est mis à jour par loadNodeOverview.
+    if (isWorkerNode()) return;
     const badge = el('hero-status-badge');
     const text = el('hero-status-text');
     if (badge) badge.dataset.tone = reachable ? 'success' : 'danger';

@@ -20,7 +20,7 @@ pub struct WebSession {
     pub expires_at: DateTime<Utc>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ValidatedSession {
     pub token_hash: String,
     pub csrf_hash: String,
@@ -92,6 +92,13 @@ pub fn validate_origin(headers: &HeaderMap, config: &Config) -> AppResult<()> {
             Err(AppError::Forbidden)
         }
     }
+}
+
+/// Empreinte du jeton de session présenté dans le cookie, sans consulter de stockage.
+pub fn session_token_hash(headers: &HeaderMap) -> AppResult<String> {
+    cookie(headers, SESSION_COOKIE)
+        .map(digest)
+        .ok_or(AppError::Unauthorized)
 }
 
 pub async fn from_headers(pool: &SqlitePool, headers: &HeaderMap) -> AppResult<ValidatedSession> {
@@ -213,6 +220,6 @@ fn single_header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     value.to_str().ok()
 }
 
-fn digest(value: &str) -> String {
+pub fn digest(value: &str) -> String {
     format!("{:x}", Sha256::digest(value.as_bytes()))
 }

@@ -3,9 +3,10 @@ mod flows;
 mod jobs;
 mod keys;
 mod libraries;
+mod node_view;
 mod nodes;
 mod plugins;
-mod session;
+pub(crate) mod session;
 mod setup;
 pub(crate) mod transfers;
 use crate::{config::Config, domain::*, error::AppResult, repository};
@@ -149,6 +150,11 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/setup/worker", post(nodes::setup_worker))
         .route("/api/v1/nodes/enroll", post(nodes::enroll))
         .route("/api/v1/node/status", get(nodes::status))
+        .route(crate::node_view::OVERVIEW_PATH, get(node_view::overview))
+        .route(crate::node_view::JOBS_PATH, get(node_view::jobs))
+        .route(crate::node_view::PLUGINS_PATH, get(node_view::catalog))
+        .route(crate::node_view::LOGIN_PATH, post(node_view::login))
+        .route(crate::node_view::ACCOUNTS_PATH, get(node_view::accounts))
         .route("/api/v1/me", get(session::me))
         .route("/api/v1/account/password", put(session::change_password))
         .route("/api/v1/api-keys", get(keys::list).post(keys::create))
@@ -208,31 +214,35 @@ async fn spa_fallback(
     State(state): State<AppState>,
     req: axum::extract::Request,
 ) -> axum::response::Response {
+    serve_spa(&state.config.static_dir, req).await
+}
+
+/// Sert l'interface (SPA) depuis `static_dir`, ou un 404 JSON pour une route d'API inconnue.
+pub(crate) async fn serve_spa(
+    static_dir: &std::path::Path,
+    req: axum::extract::Request,
+) -> axum::response::Response {
     use axum::response::IntoResponse;
     use tower::ServiceExt;
-    let path = req.uri().path();
-    if path.starts_with("/api/") {
-        return (
-            StatusCode::NOT_FOUND,
-            axum::Json(serde_json::json!({"error":{"code":"invalid_request"}})),
-        )
-            .into_response();
-    }
-    let static_dir = &state.config.static_dir;
-    let index_file = static_dir.join("index.html");
-    if index_file.is_file() {
-        let serve_service = tower_http::services::ServeDir::new(static_dir)
-            .fallback(tower_http::services::ServeFile::new(&index_file));
-        match serve_service.oneshot(req).await {
-            Ok(res) => res.into_response(),
-            Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        }
-    } else {
+    let not_found = || {
         (
             StatusCode::NOT_FOUND,
             axum::Json(serde_json::json!({"error":{"code":"invalid_request"}})),
         )
             .into_response()
+    };
+    if req.uri().path().starts_with("/api/") {
+        return not_found();
+    }
+    let index_file = static_dir.join("index.html");
+    if !index_file.is_file() {
+        return not_found();
+    }
+    let serve_service = tower_http::services::ServeDir::new(static_dir)
+        .fallback(tower_http::services::ServeFile::new(&index_file));
+    match serve_service.oneshot(req).await {
+        Ok(res) => res.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 

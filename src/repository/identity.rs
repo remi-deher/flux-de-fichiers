@@ -1,6 +1,9 @@
 //! Comptes, clés d'API et réglages d'instance.
 
-use crate::error::{AppError, AppResult};
+use crate::{
+    error::{AppError, AppResult},
+    node_view::AccountCopy,
+};
 use flux_shared::Role;
 use serde::Serialize;
 use sqlx::{FromRow, SqlitePool};
@@ -40,6 +43,37 @@ impl AccountRow {
             self.password_hash,
         ))
     }
+}
+
+#[derive(FromRow)]
+struct AccountCopyRow {
+    id: String,
+    username: String,
+    password_hash: String,
+    role: String,
+    disabled: bool,
+    version: i64,
+}
+
+/// Tous les comptes avec leur haché et leur version, pour la copie vers les workers.
+pub async fn list_account_copies(pool: &SqlitePool) -> AppResult<Vec<AccountCopy>> {
+    sqlx::query_as::<_, AccountCopyRow>(
+        "SELECT id, username, password_hash, role, disabled, version FROM accounts ORDER BY username",
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|row| {
+        Ok(AccountCopy {
+            id: row.id,
+            username: row.username,
+            password_hash: row.password_hash,
+            role: Role::parse(&row.role).ok_or(AppError::Internal)?,
+            disabled: row.disabled,
+            version: row.version,
+        })
+    })
+    .collect()
 }
 
 /// Clé d'API telle que listée : jamais son secret ni son haché.

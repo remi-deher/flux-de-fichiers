@@ -1,12 +1,11 @@
 //! Domaine Réglages : comptes des utilisateurs (rôle, désactivation, création).
 
 use super::role_option;
-use crate::shared::ui::{Button, ButtonVariant, FormField, RegistreTable, SectionHeader};
+use crate::shared::ui::{
+    Button, ButtonVariant, FormField, PASSWORD_MIN_LENGTH, RegistreTable, SectionHeader,
+};
 use flux_shared::Role;
 use leptos::prelude::*;
-
-/// Longueur minimale d'un mot de passe, annoncée par le navigateur (le serveur la vérifie aussi).
-const PASSWORD_MIN_LENGTH: u32 = 8;
 
 #[component]
 pub fn SettingsAccounts() -> impl IntoView {

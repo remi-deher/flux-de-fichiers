@@ -9,6 +9,7 @@ mod nodes;
 mod plugins;
 pub(crate) mod session;
 mod setup;
+mod system;
 pub(crate) mod transfers;
 use crate::{config::Config, domain::*, error::AppResult, repository};
 pub use auth::{

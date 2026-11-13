@@ -2,6 +2,9 @@
 
 use leptos::prelude::*;
 
+/// Longueur minimale d'un mot de passe, annoncée par le navigateur (le serveur la vérifie aussi).
+pub const PASSWORD_MIN_LENGTH: u32 = 8;
+
 #[component]
 pub fn FormField(
     id: &'static str,

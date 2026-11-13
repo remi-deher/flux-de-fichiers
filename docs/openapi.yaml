@@ -584,6 +584,28 @@ paths:
       responses:
         '204': {description: Mot de passe modifié}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/system/status:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: État du système pour la page Paramètres
+      description: >-
+        Administrateur seulement. Version, identifiant et origine (`local` ou `external`) de la clé de
+        chiffrement, taille de la base SQLite et de son journal (`null` pour une base en mémoire).
+      responses:
+        '200':
+          description: État du système
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, keyId, keySource, databaseBytes]
+                properties:
+                  version: {type: string}
+                  keyId: {type: string}
+                  keySource: {type: string, enum: [local, external]}
+                  databaseBytes: {type: [integer, 'null']}
+        '403': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/accounts:
     get:
       security: [{ApiKey: []}, {WebSession: []}]

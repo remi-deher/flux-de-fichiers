@@ -70,6 +70,13 @@ pub const SCRIPT: &str = r###"
     return access.hostedOn.includes(me.nodeKind) && me.permissions.includes(access.permission);
   }
 
+  // Deux lettres pour la pastille du compte : « jean.dupont » donne « JD », « admin » donne « AD ».
+  function accountInitials(name) {
+    const words = String(name || '?').split(/[^A-Za-z0-9]+/).filter(Boolean);
+    const letters = words.length > 1 ? words[0][0] + words[1][0] : (words[0] || '?').slice(0, 2);
+    return letters.toUpperCase();
+  }
+
   function renderAccount(me) {
     const setText = (id, text) => {
       const node = el(id);
@@ -77,7 +84,7 @@ pub const SCRIPT: &str = r###"
     };
     setText('account-name-text', me.name);
     setText('account-role-text', ROLE_LABELS[me.role] || me.role);
-    setText('account-instance-text', me.instanceName || '—');
+    setText('account-avatar-text', accountInitials(me.name));
     if (me.instanceName) document.title = `${me.instanceName} — Flux de Fichiers`;
   }
 
@@ -96,7 +103,6 @@ pub const SCRIPT: &str = r###"
     if (firstAllowed && !isTabAllowed(activeTab, me)) switchTab(firstAllowed);
     renderAccount(me);
     if (me.nodeKind === 'worker') prepareWorkerDashboard(me);
-    restrictSettingsToOwnAccount(me);
     // Le flux d'événements des tâches n'existe que sur la centrale.
     if (me.nodeKind === 'central' && typeof startJobsSse === 'function') startJobsSse();
   }
@@ -236,6 +242,35 @@ pub const SCRIPT: &str = r###"
     bind('setup-back-btn', 'click', () => showAuthGate('role'));
     bind('worker-back-btn', 'click', () => showAuthGate('role'));
     bind('worker-setup-form', 'submit', submitWorkerSetup);
+  }
+
+  // Menu du compte (barre latérale) : s'ouvre au clic, se ferme au clic ailleurs ou avec Échap.
+  function setupAccountMenu() {
+    const button = el('account-menu-btn');
+    const menu = el('account-menu');
+    if (!button || !menu) return;
+    const setOpen = open => {
+      menu.hidden = !open;
+      button.setAttribute('aria-expanded', String(open));
+    };
+    button.addEventListener('click', () => {
+      const sidebar = document.querySelector('.application-sidebar');
+      // Replié, le menu n'a pas la place de s'afficher : on déplie d'abord la barre.
+      if (sidebar && sidebar.classList.contains('is-collapsed')) {
+        const collapse = el('sidebar-collapse-btn');
+        if (collapse) collapse.click();
+      }
+      setOpen(menu.hidden);
+    });
+    document.addEventListener('click', event => {
+      if (!menu.hidden && !menu.contains(event.target) && !button.contains(event.target)) setOpen(false);
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !menu.hidden) {
+        setOpen(false);
+        button.focus();
+      }
+    });
   }
 
   async function submitLogin(event) {

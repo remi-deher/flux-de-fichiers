@@ -24,6 +24,7 @@ pub const SCRIPT: &str = r###"
       const res = await apiFetch('/api/v1/api-keys');
       cachedApiKeys = await res.json();
       renderApiKeysTable();
+      if (typeof renderSettingsOverview === 'function') renderSettingsOverview();
     } catch {
       if (tbody) tbody.innerHTML = emptyStateRow(6, 'Impossible de récupérer les clés d\'API.', true);
     }

@@ -124,6 +124,15 @@ centrale dans le bandeau.
   `accounts` (nouvelle contrainte de rôle) et ferme les sessions ouvertes. Limites : les boutons
   d'écriture des écrans Plugins restent visibles pour un lecteur et répondent 403 ; une clé d'API ne
   peut pas porter le rôle lecteur.
+- Page Paramètres refondue (maquette validée le 13 nov. 2026) : réservée aux administrateurs, cinq sections
+  pilotées par la sous-barre (Vue d'ensemble, Utilisateurs, Clés et sécurité, Réseau, Stockage). Le compte
+  (mot de passe, déconnexion) et le thème (Auto, Clair, Sombre) passent dans la barre latérale, accessibles à
+  tous les rôles, y compris un lecteur. La vue d'ensemble affiche quatre tuiles (nœuds en ligne, comptes
+  actifs, clés d'API actives, taille de la base) et les points à surveiller (HTTP simple, nœud hors ligne,
+  administrateur unique, clé de chiffrement). `GET /api/v1/system/status` (administrateur) fournit version,
+  identifiant et origine de la clé, taille de la base. La rotation de clé reste en ligne de commande : la page
+  affiche la commande à copier, car la faire sous le serveur en marche exposerait un instant des secrets
+  chiffrés avec deux clés. Barre repliée, le thème ne se règle pas (la pastille du compte reste).
 - Pistes restantes : déploiement (à confirmer étape par étape).
 
 ## Conséquences et limites

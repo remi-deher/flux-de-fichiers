@@ -167,6 +167,34 @@ mod tests {
     }
 
     #[test]
+    fn test_settings_page_is_sections_with_account_and_theme_in_the_sidebar() {
+        let html = render_full_page();
+        for id in [
+            "btn-subtab-settings-overview",
+            "btn-subtab-settings-keys",
+            "settings-section-keys",
+            "settings-tile-database",
+            "security-rotate-cmd",
+            "account-menu-btn",
+            "theme-segmented",
+        ] {
+            assert!(html.contains(&format!("id=\"{id}\"")), "{id}");
+        }
+        for function in [
+            "loadSystemStatus",
+            "renderSettingsOverview",
+            "setupAccountMenu",
+            "accountInitials",
+        ] {
+            assert!(html.contains(&format!("function {function}")), "{function}");
+        }
+        // Le compte et le thème n'ont plus de formulaire dans la page des paramètres.
+        assert_eq!(html.matches("id=\"account-password-form\"").count(), 1);
+        assert_eq!(html.matches("id=\"theme-select\"").count(), 0);
+        assert!(html.contains("[data-theme-choice]"));
+    }
+
+    #[test]
     fn test_every_copy_button_goes_through_the_one_clipboard_helper() {
         let html = render_full_page();
         // Un seul appel direct à l'API du navigateur : le reste passe par le repli HTTP et le retour visuel.

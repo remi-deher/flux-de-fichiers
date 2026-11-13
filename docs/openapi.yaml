@@ -584,6 +584,58 @@ paths:
       responses:
         '204': {description: Mot de passe modifié}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/accounts:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Lister les comptes (sans haché)
+      responses:
+        '200': {description: Comptes par identifiant}
+        '403': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Créer un compte
+      description: >-
+        Rôles admis : `admin` et `viewer` (le rôle `worker` est réservé aux clés d'API). Identifiant déjà
+        pris : 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, role]
+              properties:
+                username: {type: string, minLength: 3, maxLength: 40}
+                password: {type: string, minLength: 8, writeOnly: true}
+                role: {type: string, enum: [admin, viewer]}
+      responses:
+        '201': {description: Compte créé}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/accounts/{id}:
+    put:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Changer le rôle ou désactiver un compte
+      description: >-
+        Au moins un champ. Les sessions du compte sont fermées. 409 si l'opération retirerait le dernier
+        administrateur actif.
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role: {type: string, enum: [admin, viewer]}
+                disabled: {type: boolean}
+      responses:
+        '200': {description: Compte mis à jour}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/api-keys:
     get:
       security: [{ApiKey: []}, {WebSession: []}]

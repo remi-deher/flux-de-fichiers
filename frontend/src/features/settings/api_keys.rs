@@ -1,16 +1,12 @@
 //! Domaine Réglages : clés d'API des machines (workers, scripts), au gabarit commun des registres.
 
+use super::role_option;
 use crate::shared::ui::{
     Button, ButtonVariant, DetailRow, FormField, InspectionPane, RegistreTable, SectionHeader,
     inspection_drawer,
 };
 use flux_shared::Role;
 use leptos::prelude::*;
-
-/// Une option du choix de rôle : la valeur est le nom partagé avec le serveur.
-fn role_option(role: Role, label: &'static str) -> impl IntoView {
-    view! { <option value=role.as_str()>{label}</option> }
-}
 
 fn api_key_panes() -> Vec<InspectionPane> {
     vec![InspectionPane {

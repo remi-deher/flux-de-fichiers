@@ -115,7 +115,17 @@ centrale dans le bandeau.
   (réglages de plugins, en-têtes de webhook) en une seule transaction : une valeur illisible annule tout.
   Le fichier de clé n'est remplacé qu'après le commit. Refusée si `SECRET_KEY_FILE` est défini (la clé
   appartient alors à l'orchestrateur). À lancer centrale arrêtée de préférence.
-- Pistes non prioritaires : rôles supplémentaires (il faut d'abord décider des rôles et des droits).
+- Rôle lecteur et gestion des comptes : fait. Le rôle `viewer` porte tous les droits « voir » (vue d'ensemble,
+  tâches, nœuds, bibliothèques, flux, plugins) et aucun droit d'administration. Les routes de lecture
+  exigent leur droit « voir » (`ViewJobsAuth`, `ViewFlowsAuth`…, déclarés par `permission_auth!` dans
+  `src/api/auth.rs`) ; les routes qui modifient restent réservées à l'administrateur. `GET/POST
+  /api/v1/accounts` et `PUT /api/v1/accounts/{id}` (rôle, désactivation) : un compte se désactive et ne se
+  supprime pas, ses sessions sont fermées, et la centrale garde toujours un administrateur actif. Un
+  lecteur ne voit dans les paramètres que son propre compte. La migration 0011 recrée la table
+  `accounts` (nouvelle contrainte de rôle) et ferme les sessions ouvertes. Limites : les boutons
+  d'écriture des écrans Plugins restent visibles pour un lecteur et répondent 403 ; une clé d'API ne
+  peut pas porter le rôle lecteur.
+- Pistes restantes : déploiement (à confirmer étape par étape).
 
 ## Conséquences et limites
 

@@ -1,4 +1,6 @@
-use super::{AdminAuth, AppState};
+use super::{
+    AdminAuth, AppState, ViewJobsAuth, ViewLibrariesAuth, ViewNodesAuth, ViewOverviewAuth,
+};
 use crate::{
     domain::*,
     error::{AppError, AppResult},
@@ -15,7 +17,10 @@ use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use uuid::Uuid;
 
-pub async fn files(State(s): State<AppState>, _auth: AdminAuth) -> AppResult<Json<Vec<MediaFile>>> {
+pub async fn files(
+    State(s): State<AppState>,
+    _auth: ViewLibrariesAuth,
+) -> AppResult<Json<Vec<MediaFile>>> {
     Ok(Json(
         storage::list_inputs(&s.config.input_dir, s.config.max_file_bytes).await?,
     ))
@@ -53,7 +58,7 @@ pub struct Page {
 pub async fn list(
     State(s): State<AppState>,
     Query(p): Query<Page>,
-    _auth: AdminAuth,
+    _auth: ViewJobsAuth,
 ) -> AppResult<Json<Vec<Job>>> {
     let limit = p.limit.unwrap_or(50);
     if !(1..=200).contains(&limit) {
@@ -64,7 +69,7 @@ pub async fn list(
 
 pub async fn events(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ViewJobsAuth,
 ) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     let rx = s.events_tx.subscribe();
     let stream = futures_util::stream::unfold(rx, |mut rx| async move {
@@ -87,11 +92,14 @@ pub async fn events(
 pub async fn get_job(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
-    _auth: AdminAuth,
+    _auth: ViewJobsAuth,
 ) -> AppResult<Json<Job>> {
     Ok(Json(repository::get_job(&s.pool, id).await?))
 }
-pub async fn workers(State(s): State<AppState>, _auth: AdminAuth) -> AppResult<Json<Vec<Worker>>> {
+pub async fn workers(
+    State(s): State<AppState>,
+    _auth: ViewNodesAuth,
+) -> AppResult<Json<Vec<Worker>>> {
     Ok(Json(repository::list_workers(&s.pool).await?))
 }
 
@@ -154,7 +162,7 @@ pub struct SystemConfigResponse {
 
 pub async fn system_config(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ViewOverviewAuth,
 ) -> AppResult<Json<SystemConfigResponse>> {
     Ok(Json(SystemConfigResponse {
         max_file_bytes: s.config.max_file_bytes,

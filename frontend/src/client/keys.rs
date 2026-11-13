@@ -19,7 +19,7 @@ pub const SCRIPT: &str = r###"
 
   async function loadApiKeys() {
     const tbody = el('api-keys-table-body');
-    if (currentUser && !isTabAllowed('settings', currentUser)) return;
+    if (currentUser && !currentUser.permissions.includes('manage_settings')) return;
     try {
       const res = await apiFetch('/api/v1/api-keys');
       cachedApiKeys = await res.json();

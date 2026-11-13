@@ -18,7 +18,8 @@ pub const SCRIPT: &str = r###"
       loadToolsStatus(),
       loadFlows(),
       loadRepositories(),
-      loadApiKeys()
+      loadApiKeys(),
+      loadAccounts()
     ]);
   }
 
@@ -92,6 +93,7 @@ pub const SCRIPT: &str = r###"
     const passwordForm = el('account-password-form');
     if (passwordForm) passwordForm.addEventListener('submit', changePassword);
     if (typeof setupApiKeys === 'function') setupApiKeys();
+    if (typeof setupAccounts === 'function') setupAccounts();
 
     if (typeof setupLibraries === 'function') setupLibraries();
 

@@ -1,3 +1,4 @@
+mod accounts;
 pub mod auth;
 mod flows;
 mod jobs;
@@ -10,7 +11,10 @@ pub(crate) mod session;
 mod setup;
 pub(crate) mod transfers;
 use crate::{config::Config, domain::*, error::AppResult, repository};
-pub use auth::{AdminAuth, AnyAuth};
+pub use auth::{
+    AdminAuth, AnyAuth, ManageAccountsAuth, ViewFlowsAuth, ViewJobsAuth, ViewLibrariesAuth,
+    ViewNodesAuth, ViewOverviewAuth, ViewPluginsAuth,
+};
 use axum::{
     Router,
     extract::State,
@@ -157,6 +161,11 @@ fn json_routes() -> Router<AppState> {
         .route(crate::node_view::ACCOUNTS_PATH, get(node_view::accounts))
         .route("/api/v1/me", get(session::me))
         .route("/api/v1/account/password", put(session::change_password))
+        .route(
+            "/api/v1/accounts",
+            get(accounts::list).post(accounts::create),
+        )
+        .route("/api/v1/accounts/{id}", put(accounts::update))
         .route("/api/v1/api-keys", get(keys::list).post(keys::create))
         .route("/api/v1/api-keys/{id}", axum::routing::delete(keys::revoke))
         .route("/api/v1/auth/logout", post(session::logout))

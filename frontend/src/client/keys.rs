@@ -117,13 +117,8 @@ pub const SCRIPT: &str = r###"
     }
   }
 
-  async function copyCreatedApiKey() {
-    try {
-      await navigator.clipboard.writeText(el('api-key-created-value').textContent);
-      showNotice('Clé copiée.', 'success');
-    } catch {
-      showNotice('Copie impossible : sélectionnez la clé manuellement.', 'error');
-    }
+  function copyCreatedApiKey() {
+    return copyWithFeedback(el('api-key-copy-btn'), el('api-key-created-value').textContent, 'Clé copiée.');
   }
 
   function setupApiKeys() {

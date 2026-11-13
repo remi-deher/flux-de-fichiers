@@ -49,6 +49,24 @@ pub const COMPONENTS_CSS: &str = r#"
   border-color: var(--primary);
 }
 
+/* Retour visuel d'une copie réussie : le bouton reste en « Copié ✓ » un instant. */
+.btn[data-copied="true"] {
+  background-color: var(--success-bg);
+  color: var(--success);
+  border-color: var(--success);
+}
+
+/* Zone de texte hors champ utilisée pour copier en HTTP simple (jamais visible). */
+.clipboard-proxy {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .btn-danger {
   background-color: var(--danger-bg);
   color: var(--danger);

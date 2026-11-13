@@ -167,15 +167,9 @@ pub const SCRIPT: &str = r###"
     }
 
     if (btnCopyCmd && dockerCmd) {
-      btnCopyCmd.addEventListener('click', async () => {
+      btnCopyCmd.addEventListener('click', () => {
         const text = dockerCmd.textContent;
-        if (!text) return;
-        try {
-          await navigator.clipboard.writeText(text);
-          showNotice('Commande Docker copiée dans le presse-papier !', 'success');
-        } catch {
-          showNotice('Veuillez copier manuellement la commande.', 'info');
-        }
+        if (text) copyWithFeedback(btnCopyCmd, text, 'Commande Docker copiée dans le presse-papier.');
       });
     }
   }

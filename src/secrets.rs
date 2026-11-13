@@ -107,25 +107,30 @@ impl SecretBox {
         let path = config_dir.join(KEY_FILE_NAME);
         match fs::read_to_string(&path) {
             Ok(text) => Ok(text),
-            Err(error) if error.kind() == ErrorKind::NotFound => {
-                let key = ChaCha20Poly1305::generate_key(&mut OsRng);
-                let created = fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .mode(KEY_FILE_MODE)
-                    .open(&path);
-                match created {
-                    Ok(mut file) => {
-                        file.write_all(encode_hex(&key).as_bytes())?;
-                        Ok(encode_hex(&key))
-                    }
-                    // Une autre requête vient de la créer : on relit la sienne.
-                    Err(error) if error.kind() == ErrorKind::AlreadyExists => {
-                        Ok(fs::read_to_string(&path)?)
-                    }
-                    Err(error) => Err(AppError::Storage(error)),
-                }
-            }
+            Err(error) if error.kind() == ErrorKind::NotFound => Self::create_local_key(&path),
+            Err(error) => Err(AppError::Storage(error)),
+        }
+    }
+
+    /// Crée la clé locale sans qu'un lecteur concurrent puisse en voir une moitié : elle est écrite en
+    /// entier dans un fichier temporaire, puis publiée d'un seul geste. Si une autre requête l'a publiée
+    /// entre-temps, on relit la sienne.
+    fn create_local_key(path: &Path) -> AppResult<String> {
+        let key_hex = encode_hex(&ChaCha20Poly1305::generate_key(&mut OsRng));
+        let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(KEY_FILE_MODE)
+            .open(&temporary)?;
+        file.write_all(key_hex.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        let published = fs::hard_link(&temporary, path);
+        let _ = fs::remove_file(&temporary);
+        match published {
+            Ok(()) => Ok(key_hex),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => Ok(fs::read_to_string(path)?),
             Err(error) => Err(AppError::Storage(error)),
         }
     }
@@ -300,6 +305,36 @@ mod tests {
             SecretBox::open_with(dir.path(), None),
             Err(AppError::Internal)
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn test_concurrent_first_opens_agree_on_one_complete_key() -> AppResult<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().to_path_buf();
+        let handles: Vec<_> = (0..16)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    SecretBox::open_with(&path, None).map(|b| b.key_id().to_owned())
+                })
+            })
+            .collect();
+        let ids: Vec<String> = handles
+            .into_iter()
+            .map(|handle| handle.join().map_err(|_| AppError::Internal)?)
+            .collect::<AppResult<_>>()?;
+        assert!(ids.windows(2).all(|pair| pair[0] == pair[1]));
+        // Aucun fichier temporaire ne subsiste, et la clé publiée est complète.
+        let names: Vec<String> = fs::read_dir(dir.path())?
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, [KEY_FILE_NAME.to_owned()]);
+        assert_eq!(
+            fs::read_to_string(dir.path().join(KEY_FILE_NAME))?.len(),
+            KEY_BYTES * 2
+        );
         Ok(())
     }
 

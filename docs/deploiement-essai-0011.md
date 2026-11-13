@@ -6,8 +6,10 @@ Procédure pour `flux-essai` (centrale, `192.168.1.50`) et `flux-essai-worker` (
 **Avancement au 13 nov. 2026** : les étapes A à I sont exécutées avec l'accord de l'utilisateur.
 `flux-essai` (centrale) et `flux-essai-worker` tournent sur `test-89e594c7451b`. Le compte administrateur a
 été créé par l'utilisateur (G) et la clé du worker écrite par lui dans le secret (H). Le worker s'enregistre
-et réclame des tâches sans 401. Il reste de J : la connexion à l'interface du worker (il faut un port
-publié), un compte lecteur et une tâche de remux de bout en bout. Détails et retour arrière dans le journal
+et réclame des tâches sans 401. Le worker publie `18481:3000` (interface sur `http://192.168.1.51:18481`, HTTP) et monte un volume
+inscriptible sur `/config` : la copie locale des comptes est écrite (`accounts.json`). Il reste de J, qui
+demande les identifiants de l'utilisateur : la connexion à l'interface du worker, un compte lecteur et une
+tâche de remux de bout en bout. Détails et retour arrière dans le journal
 de Rashin du 13 nov. Écarts constatés à l'exécution :
 
 - l'étape D passe par `midclt call -j app.update` avec `custom_compose_config` (le champ `image` seul

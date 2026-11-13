@@ -170,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn test_settings_page_is_sections_with_account_and_theme_in_the_sidebar() {
+    fn test_settings_page_is_sections_and_the_sidebar_keeps_theme_and_logout() {
         let html = render_full_page();
         for id in [
             "btn-subtab-settings-overview",
@@ -178,23 +178,54 @@ mod tests {
             "settings-section-keys",
             "settings-tile-database",
             "security-rotate-cmd",
-            "account-menu-btn",
+            "accounts-fact",
+            "account-new-btn",
             "theme-segmented",
+            "sidebar-logout-btn",
         ] {
             assert!(html.contains(&format!("id=\"{id}\"")), "{id}");
         }
         for function in [
             "loadSystemStatus",
             "renderSettingsOverview",
-            "setupAccountMenu",
-            "accountInitials",
+            "restrictSettingsToOwnAccount",
+            "showAccountDetail",
         ] {
             assert!(html.contains(&format!("function {function}")), "{function}");
         }
-        // Le compte et le thème n'ont plus de formulaire dans la page des paramètres.
+        // Plus de pastille compte dans la barre latérale ; le mot de passe se change dans le tiroir.
+        for gone in [
+            "account-menu-btn",
+            "account-chip",
+            "accountInitials",
+            "setupAccountMenu",
+        ] {
+            assert!(!html.contains(gone), "{gone}");
+        }
         assert_eq!(html.matches("id=\"account-password-form\"").count(), 1);
         assert_eq!(html.matches("id=\"theme-select\"").count(), 0);
         assert!(html.contains("[data-theme-choice]"));
+    }
+
+    #[test]
+    fn test_no_client_function_is_declared_twice() {
+        // Une seconde déclaration remplace silencieusement la première pour toute la page.
+        let html = render_full_page();
+        let mut seen = std::collections::BTreeSet::new();
+        for line in html.lines() {
+            let Some(rest) = line
+                .strip_prefix("  async function ")
+                .or_else(|| line.strip_prefix("  function "))
+            else {
+                continue;
+            };
+            let name = rest.split('(').next().unwrap_or_default();
+            assert!(
+                seen.insert(name.to_owned()),
+                "fonction déclarée deux fois : {name}"
+            );
+        }
+        assert!(seen.contains("formatBytes"));
     }
 
     #[test]

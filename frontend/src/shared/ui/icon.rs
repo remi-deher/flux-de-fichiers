@@ -28,6 +28,7 @@ pub enum IconName {
     Filters,
     Plus,
     Storage,
+    Logout,
 }
 
 impl IconName {
@@ -89,6 +90,9 @@ impl IconName {
             Self::Storage => {
                 r#"<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>"#
             }
+            Self::Logout => {
+                r#"<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>"#
+            }
         }
     }
 }
@@ -141,6 +145,11 @@ mod tests {
         assert!(html.contains("viewBox=\"0 0 24 24\""));
         assert!(html.contains("stroke=\"currentColor\""));
         assert!(html.contains("class=\"lucide-icon\""));
+    }
+
+    #[test]
+    fn test_logout_icon_has_vector_markup() {
+        assert!(IconName::Logout.inner_svg().contains("<polyline"));
     }
 
     #[test]

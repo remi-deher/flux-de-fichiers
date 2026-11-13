@@ -55,59 +55,6 @@ fn ThemeSegmented() -> impl IntoView {
     }
 }
 
-/// Compte connecté : pastille en bas de la barre, menu pour le mot de passe et la déconnexion.
-#[component]
-fn SidebarAccount() -> impl IntoView {
-    view! {
-        <div class="sidebar-account">
-            <div id="account-menu" class="account-menu" hidden>
-                <p class="account-menu__title">"Changer le mot de passe"</p>
-                <form id="account-password-form" class="settings-form">
-                    <FormField
-                        id="account-current-password"
-                        label="Mot de passe actuel"
-                        input_type="password"
-                        required=true
-                        autocomplete="current-password"
-                    />
-                    <FormField
-                        id="account-new-password"
-                        label="Nouveau mot de passe"
-                        input_type="password"
-                        required=true
-                        minlength=PASSWORD_MIN_LENGTH
-                        autocomplete="new-password"
-                        help="Au moins 8 caractères. Vos autres sessions sont fermées."
-                    />
-                    <div class="inline-actions">
-                        <Button id="account-password-submit-btn" variant=ButtonVariant::Primary submit=true>
-                            "Enregistrer"
-                        </Button>
-                        <Button id="account-logout-btn" variant=ButtonVariant::Secondary>
-                            "Se déconnecter"
-                        </Button>
-                    </div>
-                </form>
-            </div>
-            <button
-                type="button"
-                id="account-menu-btn"
-                class="account-chip"
-                aria-haspopup="true"
-                aria-expanded="false"
-                aria-controls="account-menu"
-                title="Compte et mot de passe"
-            >
-                <span class="account-chip__avatar" id="account-avatar-text" aria-hidden="true">"?"</span>
-                <span class="account-chip__text">
-                    <span id="account-name-text" class="account-chip__name">"—"</span>
-                    <span id="account-role-text" class="account-chip__role">"—"</span>
-                </span>
-            </button>
-        </div>
-    }
-}
-
 #[component]
 pub fn Sidebar() -> impl IntoView {
     view! {
@@ -137,8 +84,16 @@ pub fn Sidebar() -> impl IntoView {
                 </button>
                 <div class="sidebar-footer-tools">
                     <ThemeSegmented />
+                    <button
+                        type="button"
+                        id="sidebar-logout-btn"
+                        class="sidebar-logout-btn"
+                        aria-label="Se déconnecter"
+                        title="Se déconnecter"
+                    >
+                        <Icon name=IconName::Logout size=16 />
+                    </button>
                 </div>
-                <SidebarAccount />
             </div>
         </aside>
     }
@@ -255,20 +210,17 @@ mod tests {
     }
 
     #[test]
-    fn test_sidebar_carries_the_account_menu_with_the_ids_used_by_the_client() {
+    fn test_sidebar_has_a_discreet_logout_and_no_account_menu() {
         let html = sidebar();
-        for id in [
-            "account-menu-btn",
+        assert!(html.contains("id=\"sidebar-logout-btn\""));
+        assert!(html.contains("aria-label=\"Se déconnecter\""));
+        for gone in [
             "account-menu",
-            "account-name-text",
-            "account-role-text",
-            "account-avatar-text",
+            "account-chip",
             "account-password-form",
-            "account-current-password",
-            "account-new-password",
-            "account-logout-btn",
+            "account-avatar-text",
         ] {
-            assert!(html.contains(&format!("id=\"{id}\"")), "{id}");
+            assert!(!html.contains(gone), "{gone}");
         }
         assert!(!html.contains("style="));
     }

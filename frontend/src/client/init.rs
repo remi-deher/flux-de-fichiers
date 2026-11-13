@@ -89,13 +89,12 @@ pub const SCRIPT: &str = r###"
     if (typeof setupAuthGate === 'function') setupAuthGate();
     const loginForm = el('login-form');
     if (loginForm) loginForm.addEventListener('submit', submitLogin);
-    const logoutBtn = el('account-logout-btn');
+    const logoutBtn = el('sidebar-logout-btn');
     if (logoutBtn) logoutBtn.addEventListener('click', logout);
     const passwordForm = el('account-password-form');
     if (passwordForm) passwordForm.addEventListener('submit', changePassword);
     if (typeof setupApiKeys === 'function') setupApiKeys();
     if (typeof setupAccounts === 'function') setupAccounts();
-    if (typeof setupAccountMenu === 'function') setupAccountMenu();
     if (typeof setupSettings === 'function') setupSettings();
 
     if (typeof setupLibraries === 'function') setupLibraries();

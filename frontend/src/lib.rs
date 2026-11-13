@@ -1,20 +1,16 @@
-//! Bibliothèque frontend Leptos pour Flux de Fichiers.
+//! Page HTML du client web (ADR 0014) : métadonnées, styles du thème et chargement du module WASM.
+//!
+//! Toute l'interface est le client Leptos compilé en WASM (`client/`) ; ce crate ne génère que la
+//! page qui le charge, avec les styles typés du thème.
 
-// Les vues Leptos imbriquées (page Paramètres, barre latérale) dépassent la limite par défaut de 128.
-#![recursion_limit = "512"]
-
-pub mod app;
-pub mod client;
-pub mod core;
-pub mod features;
-pub mod shared;
 pub mod theme;
 
-use leptos::prelude::*;
+/// Module ES produit par `wasm-bindgen --target web` dans `dist/pkg`, chargé en chemin absolu
+/// pour que toute route du client (`/flows/…`) le retrouve.
+pub const APP_MODULE: &str = "/pkg/flux_client.js";
 
-/// Génère la page HTML complète avec les métadonnées W3C, les styles et le contrôleur client.
-pub fn render_full_page() -> String {
-    let body_html = app::App().to_html();
+/// Document HTML commun : métadonnées W3C et styles du thème, autour d'un corps donné.
+fn html_document(body: &str) -> String {
     format!(
         r##"<!doctype html>
 <html lang="fr">
@@ -37,15 +33,17 @@ pub fn render_full_page() -> String {
 </head>
 <body>
 {body}
-  <script>
-{scripts}
-  </script>
 </body>
 </html>"##,
         styles = theme::get_all_styles(),
-        body = body_html,
-        scripts = client::get_client_script()
     )
+}
+
+/// Page unique servie pour toute route d'interface : le corps est monté par le module WASM.
+pub fn render_page() -> String {
+    html_document(&format!(
+        "  <noscript>Flux de Fichiers demande JavaScript et WebAssembly.</noscript>\n  <script type=\"module\">import init from \"{APP_MODULE}\"; init();</script>"
+    ))
 }
 
 #[cfg(test)]
@@ -53,281 +51,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_render_full_page_contains_modern_standards_metadata() {
-        let html = render_full_page();
-        assert!(html.contains("viewport-fit=cover"));
-        assert!(html.contains("apple-mobile-web-app-capable"));
-        assert!(html.contains("apple-mobile-web-app-status-bar-style"));
-        assert!(html.contains("color-scheme"));
-        assert!(html.contains("theme-color"));
-        assert!(html.contains("format-detection"));
+    fn the_page_loads_the_wasm_module_with_the_theme_styles() {
+        let html = render_page();
+        assert!(html.contains("type=\"module\""));
+        assert!(html.contains("\"/pkg/flux_client.js\""));
+        assert!(html.contains("<style>"));
         assert!(html.contains("lang=\"fr\""));
-    }
-
-    #[test]
-    fn test_render_full_page_contains_contextual_search_bar() {
-        let html = render_full_page();
-        assert!(html.contains("role=\"search\""));
-        assert!(html.contains("id=\"app-topbar\""));
-        assert!(html.contains("id=\"global-search-input\""));
-        assert!(html.contains("id=\"search-match-count\""));
-        assert!(!html.contains("id=\"header-search-clear-btn\""));
-        assert!(!html.contains("search-kbd"));
-        assert!(html.contains("search-capsule__tools"));
-        assert!(html.contains("id=\"search-capsule\""));
-        assert!(html.contains("id=\"search-filter-btn\""));
-        assert!(html.contains("id=\"filter-sheet\""));
-        assert!(html.contains("data-capsule-tab=\"flows\""));
-        assert!(html.contains("data-capsule-tab=\"files\""));
-        assert!(html.contains("data-capsule-tab=\"flow-editor\""));
-        assert!(html.contains("id=\"btn-canvas-save-flow\""));
-        assert!(html.contains("function syncCapsuleActions"));
-        assert!(html.contains(&format!(
-            "syncCapsuleActions('{}')",
-            crate::core::CapsuleContext::FlowEditor.as_attr()
-        )));
-        assert!(!html.contains("topbar-context"));
-        assert!(!html.contains("breadcrumb"));
-        assert!(!html.contains("current-section-title"));
-        assert!(!html.contains("TAB_TITLES"));
-        assert!(!html.contains("registre-toolbar"));
-        assert!(html.contains("data-filter-page=\"jobs\""));
-        assert!(html.contains("function toggleFilterSheet"));
-        assert!(html.contains("applyContextualSearch"));
-        assert!(html.contains("setupChromeAutoHide"));
-        assert!(html.contains("id=\"header-workers-pill\""));
-        assert!(!html.contains("id=\"header-theme-toggle-btn\""));
-        assert!(!html.contains("id=\"header-refresh-btn\""));
-    }
-
-    #[test]
-    fn test_render_full_page_contains_overview_hub() {
-        let html = render_full_page();
-        assert!(html.contains("Vue d'ensemble"));
-        assert!(html.contains("overview-hero-card"));
-        assert!(html.contains("id=\"metric-storage-volume\""));
-        assert!(html.contains("id=\"metric-success-rate\""));
-        assert!(html.contains("id=\"media-formats-bar\""));
-        assert!(html.contains("updateOverviewStats"));
-        assert!(html.contains("function successRateTone"));
-        assert!(html.contains("function setHeroStatus"));
-        assert!(html.contains("id=\"hero-status-badge\""));
-        assert!(!html.contains("id=\"quick-goto-settings-btn\""));
-    }
-
-    #[test]
-    fn test_widgets_reach_the_page_with_their_client_renderers() {
-        let html = render_full_page();
-        for def in crate::features::widgets::WIDGETS {
-            assert!(
-                html.contains(&format!("data-widget=\"{}\"", def.kind.as_attr())),
-                "widget absent : {}",
-                def.kind.as_attr()
-            );
-        }
-        assert!(html.contains("id=\"widget-dashboard-attention\""));
-        assert!(html.contains("id=\"widget-activity-running\""));
-        assert!(html.contains("id=\"widget-workers-tools\""));
-        assert!(html.contains("function renderWidgets"));
-        assert!(html.contains("function installTool"));
-        assert!(html.contains("function scheduleToolsStatusRefresh"));
-        assert!(!html.contains("'locked'"));
-        assert!(html.contains("field.isSet"));
-        assert!(html.contains("function markWidgetSource"));
-        assert!(html.contains("[data-goto]"));
-        assert!(html.contains(".widget-grid {"));
-    }
-
-    #[test]
-    fn test_activity_uses_the_common_registre_and_drawer() {
-        let html = render_full_page();
-        assert!(html.contains("id=\"jobs-fact\""));
-        assert!(html.contains("id=\"jobs-registre\""));
-        assert!(!html.contains("job-detail-dialog"));
-        assert!(!html.contains("activity-view-diagnostic"));
-        assert!(html.contains("function setJobFilter"));
-        assert!(html.contains("function openJob"));
-        assert!(html.contains("function fillJobDrawer"));
-        assert!(html.contains("JOBS_VIEW_FILTERS"));
-        assert!(html.contains("if (factId === 'jobs-fact') return 'Tâche';"));
-    }
-
-    #[test]
-    fn test_render_full_page_subnav_and_no_refresh_buttons() {
-        let html = render_full_page();
-        assert!(html.contains("class=\"app-subnav\""));
-        assert!(html.contains("app-subnav__scroller"));
-        assert!(html.contains("app-subnav__item"));
-        assert!(html.contains("app-subnav-toolbar"));
-
-        assert!(!html.contains("id=\"refresh-all-btn\""));
-        assert!(!html.contains("id=\"files-refresh-btn\""));
-        assert!(!html.contains("id=\"jobs-refresh-btn\""));
-        assert!(!html.contains("id=\"btn-refresh-workers\""));
-        assert!(!html.contains("id=\"header-refresh-btn\""));
-        assert!(!html.contains("id=\"btn-sync-all-repos\""));
-        assert!(!html.contains("repo-sync-btn"));
-    }
-
-    #[test]
-    fn test_settings_page_is_sections_and_the_sidebar_keeps_theme_and_logout() {
-        let html = render_full_page();
-        for id in [
-            "btn-subtab-settings-overview",
-            "btn-subtab-settings-keys",
-            "settings-section-keys",
-            "settings-tile-database",
-            "security-rotate-cmd",
-            "accounts-fact",
-            "account-new-btn",
-            "theme-segmented",
-            "sidebar-logout-btn",
-        ] {
-            assert!(html.contains(&format!("id=\"{id}\"")), "{id}");
-        }
-        for function in [
-            "loadSystemStatus",
-            "renderSettingsOverview",
-            "restrictSettingsToOwnAccount",
-            "showAccountDetail",
-        ] {
-            assert!(html.contains(&format!("function {function}")), "{function}");
-        }
-        // Plus de pastille compte dans la barre latérale ; le mot de passe se change dans le tiroir.
-        for gone in [
-            "account-menu-btn",
-            "account-chip",
-            "accountInitials",
-            "setupAccountMenu",
-        ] {
-            assert!(!html.contains(gone), "{gone}");
-        }
-        assert_eq!(html.matches("id=\"account-password-form\"").count(), 1);
-        assert_eq!(html.matches("id=\"theme-select\"").count(), 0);
-        assert!(html.contains("[data-theme-choice]"));
-    }
-
-    #[test]
-    fn test_the_subnav_capsule_has_no_background_of_its_own() {
-        let html = render_full_page();
-        let start = html.find("\n.app-subnav {").unwrap_or(0);
-        let rule = &html[start
-            ..html[start..]
-                .find('}')
-                .map_or(html.len(), |end| start + end)];
-        assert!(rule.contains("background: transparent"));
-        assert!(!rule.contains("bg-card"));
-        assert!(!rule.contains("backdrop-filter"));
-    }
-
-    #[test]
-    fn test_no_client_function_is_declared_twice() {
-        // Une seconde déclaration remplace silencieusement la première pour toute la page.
-        let html = render_full_page();
-        let mut seen = std::collections::BTreeSet::new();
-        for line in html.lines() {
-            let Some(rest) = line
-                .strip_prefix("  async function ")
-                .or_else(|| line.strip_prefix("  function "))
-            else {
-                continue;
-            };
-            let name = rest.split('(').next().unwrap_or_default();
-            assert!(
-                seen.insert(name.to_owned()),
-                "fonction déclarée deux fois : {name}"
-            );
-        }
-        assert!(seen.contains("formatBytes"));
-    }
-
-    #[test]
-    fn test_every_copy_button_goes_through_the_one_clipboard_helper() {
-        let html = render_full_page();
-        // Un seul appel direct à l'API du navigateur : le reste passe par le repli HTTP et le retour visuel.
-        assert_eq!(html.matches("navigator.clipboard.writeText").count(), 1);
-        assert!(html.contains("document.execCommand('copy')"));
-        assert!(html.contains("copyWithFeedback(el('api-key-copy-btn')"));
-        assert!(html.contains("copyWithFeedback(btnCopyCmd"));
-        assert!(html.contains(".btn[data-copied=\"true\"]"));
-        assert!(html.contains(".clipboard-proxy"));
-    }
-
-    #[test]
-    fn test_catalog_ids_and_pure_functions_reach_the_page() {
-        let html = render_full_page();
-        for panel in crate::core::panels() {
-            assert!(html.contains(&format!("id=\"{}\"", panel.dom_id)));
-            assert!(html.contains(&format!("id=\"{}\"", panel.button_id)));
-            assert!(html.contains(panel.search_placeholder));
-        }
-        assert!(html.contains("function matchesQuery"));
-        assert!(html.contains("function isVideoFlowName"));
-        assert!(html.contains("function emptyStateRow"));
-        assert!(html.contains("function loadFlows"));
-        assert!(html.contains("function bootstrapAuth"));
-        assert!(html.contains("function submitSetup"));
-        assert!(html.contains("function submitWorkerSetup"));
-        assert!(html.contains("function setupAuthGate"));
-        assert!(html.contains("function loadNodeOverview"));
-        assert!(html.contains("function copyToClipboard"));
-        assert!(html.contains("function copyWithFeedback"));
-        assert!(html.contains("function applyAccess"));
-        assert!(html.contains("function loadApiKeys"));
-        assert!(!html.contains("volatileAdminKey"));
-        assert!(!html.contains("checkSession"));
-        assert!(html.contains("function openCanvas"));
-        assert!(html.contains("class=\"registre\""));
-        assert!(html.contains("class=\"inspection-drawer\""));
-        assert!(html.contains("class=\"inspection-drawer__header\""));
-        assert!(html.contains("class=\"inspection-drawer__subnav\""));
-        assert!(html.contains(">Aperçu<"));
-        assert!(html.contains("data-inspection-close"));
-        assert!(!html.contains("class=\"registre-split\""));
-        assert!(html.contains("id=\"libraries-table-body\""));
-        assert!(html.contains("id=\"libraries-fact-pane-overview\""));
-        assert!(!html.contains("id=\"libraries-fact-tab-nodes\""));
-        assert!(!html.contains("id=\"libraries-fact-pane-nodes\""));
-        assert!(!html.contains("id=\"libraries-fact-pane-flow\""));
-        assert!(html.contains("id=\"library-name-input\""));
-        assert!(html.contains("id=\"library-flow-select\""));
-        assert!(html.contains("function loadLibraries"));
-        assert!(html.contains("function saveLibrary"));
-        assert!(!html.contains("id=\"files-table-body\""));
-        assert!(!html.contains("id=\"confirm-remux-dialog\""));
-        assert!(!html.contains("btn-subtab-files-browser"));
-        assert!(!html.contains("Volume /input"));
-        assert!(html.contains("id=\"flows-fact-action\""));
-        assert!(html.contains(">Éditer<"));
-        assert!(html.contains("id=\"btn-workers-connect\""));
-        assert!(html.contains("id=\"workers-fact-tab-connect\""));
-        assert!(!html.contains("registre-fact"));
-        assert!(html.contains("Raccorder un nœud"));
-        assert!(html.contains("subtab-plugins-app"));
-        assert!(html.contains("subtab-plugins-pack"));
-        assert!(html.contains("subtab-plugins-resource"));
-        assert!(html.contains("subtab-plugins-repos"));
-        assert!(html.contains("Retour aux flux"));
-        assert!(html.contains("function showRegistreFact"));
-        assert!(!html.contains("btn-subtab-flows-canvas"));
-        assert!(html.contains("function resetSimulation"));
-    }
-
-    #[test]
-    fn plugin_form_comes_from_the_manifest_schema() {
-        let html = render_full_page();
-        assert!(html.contains("id=\"plugin-config-fields\""));
-        assert!(html.contains("function renderPluginConfigFields"));
-        assert!(html.contains("data-setting-name"));
-        assert!(html.contains("data-tags"));
-        assert!(!html.contains("192.168.1.50"));
-        assert!(!html.contains("plugin-cfg-url"));
-        assert!(!html.contains("plugin-cfg-apikey"));
-        assert!(!html.contains("plugin-cfg-local-path"));
-        assert!(!html.contains("plugin-cfg-remote-path"));
-        assert!(!html.contains("value=\"/data\""));
-        assert!(!html.contains("value=\"/media\""));
-        assert!(!html.contains("'/tv'"));
-        assert!(!html.contains("'/movies'"));
+        assert!(html.contains("viewport-fit=cover"));
+        assert!(!html.contains("<script>\n"));
     }
 }

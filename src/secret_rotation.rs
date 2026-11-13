@@ -7,8 +7,9 @@
 
 use crate::{
     error::{AppError, AppResult},
-    flows, node_settings, plugins,
+    flows, plugins, repository,
     secrets::SecretBox,
+    worker_settings,
 };
 use chrono::Utc;
 use sqlx::SqlitePool;
@@ -58,18 +59,20 @@ pub async fn rotate_values(
             report.plugin_values += count;
         }
     }
-    let definitions: Vec<(String, String)> = sqlx::query_as("SELECT id, definition FROM flows")
-        .fetch_all(&mut *tx)
-        .await?;
-    for (flow_id, definition) in definitions {
-        if let Some((rewritten, count)) = flows::rotate_definition(old, new, &flow_id, &definition)?
-        {
-            sqlx::query("UPDATE flows SET definition = ?1 WHERE id = ?2")
-                .bind(rewritten)
-                .bind(&flow_id)
-                .execute(&mut *tx)
-                .await?;
-            report.flow_values += count;
+    for store in &repository::DEFINITION_STORES {
+        let definitions: Vec<(String, i64, String)> =
+            sqlx::query_as(store.select).fetch_all(&mut *tx).await?;
+        for (flow_id, rowid, definition) in definitions {
+            if let Some((rewritten, count)) =
+                flows::rotate_definition(old, new, &flow_id, &definition)?
+            {
+                sqlx::query(store.update)
+                    .bind(rewritten)
+                    .bind(rowid)
+                    .execute(&mut *tx)
+                    .await?;
+                report.flow_values += count;
+            }
         }
     }
     tx.commit().await?;
@@ -81,7 +84,7 @@ fn storage_error(error: anyhow::Error) -> AppError {
     AppError::Internal
 }
 
-/// Copie cohérente de la base (`VACUUM INTO`), lisible même pendant que la centrale écrit.
+/// Copie cohérente de la base (`VACUUM INTO`), lisible même pendant que le central écrit.
 async fn backup_database(pool: &SqlitePool, destination: &Path) -> AppResult<()> {
     let literal = destination.to_string_lossy().replace('\'', "''");
     sqlx::query(&format!("VACUUM INTO '{literal}'"))
@@ -105,14 +108,14 @@ pub async fn rotate_local_key(pool: &SqlitePool, config_dir: &Path) -> AppResult
     ));
     std::fs::create_dir_all(&backup_dir)?;
     let old_hex = std::fs::read_to_string(&key_path)?;
-    node_settings::write_private(&backup_dir.join(OLD_KEY_BACKUP_NAME), old_hex.trim())
+    worker_settings::write_private(&backup_dir.join(OLD_KEY_BACKUP_NAME), old_hex.trim())
         .map_err(storage_error)?;
-    node_settings::write_private(&backup_dir.join(NEW_KEY_BACKUP_NAME), &new_hex)
+    worker_settings::write_private(&backup_dir.join(NEW_KEY_BACKUP_NAME), &new_hex)
         .map_err(storage_error)?;
     backup_database(pool, &backup_dir.join(DATABASE_BACKUP_NAME)).await?;
 
     let report = rotate_values(pool, &old, &new).await?;
-    node_settings::write_private(&key_path, &new_hex).map_err(storage_error)?;
+    worker_settings::write_private(&key_path, &new_hex).map_err(storage_error)?;
     Ok(RotationOutcome {
         report,
         backup_dir,

@@ -11,8 +11,8 @@ const IDLE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 
 pub async fn run(state: AppState) {
-    let worker_name =
-        std::env::var("LOCAL_WORKER_NAME").unwrap_or_else(|_| "coordinator-local".into());
+    let worker_name = std::env::var("LOCAL_WORKER_NAME")
+        .unwrap_or_else(|_| flux_shared::workers::INTEGRATED_WORKER_NAME.into());
     let worker = match repository::register(&state.pool, &worker_name).await {
         Ok(worker) => worker,
         Err(error) => {
@@ -118,7 +118,15 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
         )
         .await?;
         let cache_mgr = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
-        let default_flow = repository::default_flow(&state.pool).await?;
+        // Version figée à la création de la tâche, jamais le flow courant.
+        let frozen_flow = match repository::get_job(&state.pool, claim.job_id).await? {
+            crate::domain::Job {
+                flow_id: Some(flow_id),
+                flow_version: Some(version),
+                ..
+            } => Some(repository::get_flow_version(&state.pool, &flow_id, version).await?),
+            _ => None,
+        };
 
         let state_progress = state.clone();
         let job_id = claim.job_id;
@@ -127,7 +135,7 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
         });
 
         let http_client = reqwest::Client::new();
-        let (final_output, warning) = if let Some(flow) = default_flow {
+        let (final_output, warning) = if let Some(flow) = frozen_flow {
             let arr = crate::flows::ArrContext::load(
                 &state.pool,
                 &state.config.config_dir,

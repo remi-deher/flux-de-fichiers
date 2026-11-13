@@ -52,7 +52,7 @@ pub fn resolve_config_dir() -> PathBuf {
     }
 }
 
-/// Adresse d'écoute du port HTTP unique, la même pour la centrale et le worker.
+/// Adresse d'écoute du port HTTP unique, la même pour le central et le worker.
 pub fn bind_address() -> anyhow::Result<SocketAddr> {
     let raw = env::var("BIND_ADDR")
         .or_else(|_| env::var("BIND"))
@@ -60,11 +60,11 @@ pub fn bind_address() -> anyhow::Result<SocketAddr> {
     Ok(raw.parse()?)
 }
 
-pub fn coordinator_url(raw: &str) -> anyhow::Result<reqwest::Url> {
+pub fn central_url(raw: &str) -> anyhow::Result<reqwest::Url> {
     let url = reqwest::Url::parse(raw)?;
     anyhow::ensure!(
         url.scheme() == "https" || url.scheme() == "http",
-        "Coordinator requires HTTP or HTTPS"
+        "Central URL requires HTTP or HTTPS"
     );
     anyhow::ensure!(
         url.path() == "/"
@@ -72,7 +72,7 @@ pub fn coordinator_url(raw: &str) -> anyhow::Result<reqwest::Url> {
             && url.fragment().is_none()
             && url.username().is_empty()
             && url.password().is_none(),
-        "Coordinator URL must be an origin without credentials"
+        "Central URL must be an origin without credentials"
     );
     Ok(url)
 }

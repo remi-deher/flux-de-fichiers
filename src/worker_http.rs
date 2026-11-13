@@ -1,7 +1,7 @@
-//! Port HTTP d'un worker : santé, état du nœud, connexion et vues en lecture seule (ADR 0011).
+//! Port HTTP d'un worker : santé, état de l'installation, connexion et vues en lecture seule (ADR 0011).
 //!
-//! L'interface est la même que celle de la centrale ; seule la source des données change : les vues
-//! viennent de routes de la centrale limitées au nœud, jamais d'un proxy générique.
+//! L'interface est la même que celle du central ; seule la source des données change : les vues
+//! viennent de routes du central limitées au worker, jamais d'un proxy générique.
 
 use crate::{
     api::{self, session},
@@ -9,12 +9,12 @@ use crate::{
     central_client::{CentralClient, CentralError},
     config::{self, Config},
     error::{AppError, AppResult},
-    node_view::VerifiedAccount,
     plugins::{self, ToolStatusSummary},
     tools_cache::ToolCacheManager,
     web_session,
     worker_accounts::AccountStore,
     worker_sessions::SessionStore,
+    worker_view::VerifiedAccount,
 };
 use axum::{
     Json, Router,
@@ -23,7 +23,8 @@ use axum::{
     response::Response,
     routing::{get, post},
 };
-use flux_shared::{NodeKind, Permission};
+use flux_shared::system::SetupStatus;
+use flux_shared::{InstanceKind, Permission};
 use serde::Serialize;
 use std::{
     path::PathBuf,
@@ -34,24 +35,24 @@ use std::{
     time::Duration,
 };
 
-/// Intervalle entre deux copies des comptes depuis la centrale.
+/// Intervalle entre deux copies des comptes depuis le central.
 const ACCOUNT_SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Ce que le worker sait de lui-même ; la boucle d'agent met les indicateurs à jour.
+/// Ce que le worker sait de lui-même ; la boucle de worker met les indicateurs à jour.
 pub struct WorkerState {
     pub name: String,
-    pub coordinator_url: String,
+    pub central_url: String,
     registered: AtomicBool,
-    coordinator_reachable: AtomicBool,
+    central_reachable: AtomicBool,
 }
 
 impl WorkerState {
-    pub fn new(name: &str, coordinator_url: &str) -> Arc<Self> {
+    pub fn new(name: &str, central_url: &str) -> Arc<Self> {
         Arc::new(Self {
             name: name.to_owned(),
-            coordinator_url: coordinator_url.to_owned(),
+            central_url: central_url.to_owned(),
             registered: AtomicBool::new(false),
-            coordinator_reachable: AtomicBool::new(false),
+            central_reachable: AtomicBool::new(false),
         })
     }
 
@@ -59,13 +60,12 @@ impl WorkerState {
         self.registered.store(true, Ordering::Relaxed);
     }
 
-    pub fn mark_coordinator_reachable(&self, reachable: bool) {
-        self.coordinator_reachable
-            .store(reachable, Ordering::Relaxed);
+    pub fn mark_central_reachable(&self, reachable: bool) {
+        self.central_reachable.store(reachable, Ordering::Relaxed);
     }
 }
 
-/// Tout ce dont l'interface d'un worker a besoin : état, centrale, comptes copiés et sessions.
+/// Tout ce dont l'interface d'un worker a besoin : état, central, comptes copiés et sessions.
 pub struct WorkerWeb {
     status: Arc<WorkerState>,
     config: Arc<Config>,
@@ -92,7 +92,7 @@ impl WorkerWeb {
         })
     }
 
-    /// Copie les comptes de la centrale ; les sessions des comptes disparus ou désactivés sont fermées.
+    /// Copie les comptes du central ; les sessions des comptes disparus ou désactivés sont fermées.
     pub async fn sync_accounts(&self) -> Result<(), CentralError> {
         let snapshot = self.central.accounts().await?;
         match self.accounts.replace(snapshot) {
@@ -106,7 +106,7 @@ impl WorkerWeb {
     pub async fn sync_accounts_loop(self: Arc<Self>) {
         loop {
             if self.sync_accounts().await.is_err() {
-                tracing::debug!("comptes non synchronisés : centrale indisponible");
+                tracing::debug!("comptes non synchronisés : central indisponible");
             }
             tokio::time::sleep(ACCOUNT_SYNC_INTERVAL).await;
         }
@@ -140,20 +140,12 @@ type Web = State<Arc<WorkerWeb>>;
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkerStatus {
-    node_kind: NodeKind,
+    instance_kind: InstanceKind,
     name: String,
-    coordinator_url: String,
+    central_url: String,
     version: &'static str,
     registered: bool,
-    coordinator_reachable: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SetupStatus {
-    needs_setup: bool,
-    instance_name: String,
-    node_kind: NodeKind,
+    central_reachable: bool,
 }
 
 async fn health() -> StatusCode {
@@ -163,25 +155,25 @@ async fn health() -> StatusCode {
 async fn status(State(web): Web) -> Json<WorkerStatus> {
     let state = &web.status;
     Json(WorkerStatus {
-        node_kind: NodeKind::Worker,
+        instance_kind: InstanceKind::Worker,
         name: state.name.clone(),
-        coordinator_url: state.coordinator_url.clone(),
+        central_url: state.central_url.clone(),
         version: env!("CARGO_PKG_VERSION"),
         registered: state.registered.load(Ordering::Relaxed),
-        coordinator_reachable: state.coordinator_reachable.load(Ordering::Relaxed),
+        central_reachable: state.central_reachable.load(Ordering::Relaxed),
     })
 }
 
-/// Même route que la centrale : l'interface sait ainsi qu'elle parle à un worker déjà enrôlé.
+/// Même route que le central : l'interface sait ainsi qu'elle parle à un worker déjà enrôlé.
 async fn setup_status(State(web): Web) -> Json<SetupStatus> {
     Json(SetupStatus {
         needs_setup: false,
-        instance_name: web.status.name.clone(),
-        node_kind: NodeKind::Worker,
+        instance_name: Some(web.status.name.clone()),
+        instance_kind: InstanceKind::Worker,
     })
 }
 
-/// Connexion : la centrale vérifie quand elle répond ; la copie locale ne sert que si elle est
+/// Connexion : le central vérifie quand il répond ; la copie locale ne sert que si elle est
 /// injoignable (jamais quand elle refuse, pour que révocation et nouveau mot de passe soient immédiats).
 async fn login(
     State(web): Web,
@@ -242,10 +234,10 @@ async fn logout(State(web): Web, headers: HeaderMap) -> AppResult<Response> {
 async fn me(State(web): Web, headers: HeaderMap) -> AppResult<Json<session::MeResponse>> {
     let account = web.authorize(&headers, &Method::GET, Permission::ViewOverview)?;
     Ok(Json(session::MeResponse::new(
-        "account",
+        session::CallerKind::Account,
         account.username,
         account.role,
-        NodeKind::Worker,
+        InstanceKind::Worker,
         Some(web.status.name.clone()),
     )))
 }
@@ -253,7 +245,7 @@ async fn me(State(web): Web, headers: HeaderMap) -> AppResult<Json<session::MeRe
 async fn overview(
     State(web): Web,
     headers: HeaderMap,
-) -> AppResult<Json<crate::node_view::NodeOverview>> {
+) -> AppResult<Json<crate::worker_view::WorkerOverview>> {
     web.authorize(&headers, &Method::GET, Permission::ViewOverview)?;
     Ok(Json(web.central.overview().await?))
 }
@@ -271,7 +263,7 @@ async fn catalog(
     Ok(Json(web.central.plugins().await?))
 }
 
-/// Outils du catalogue de la centrale, avec l'état d'installation dans le cache de ce nœud.
+/// Outils du catalogue du central, avec l'état d'installation dans le cache local.
 async fn tools(State(web): Web, headers: HeaderMap) -> AppResult<Json<Vec<ToolStatusSummary>>> {
     web.authorize(&headers, &Method::GET, Permission::ViewPlugins)?;
     let entries = web.central.plugins().await?;
@@ -286,13 +278,13 @@ async fn interface(State(web): Web, request: Request) -> Response {
 pub fn router(web: Arc<WorkerWeb>) -> Router {
     Router::new()
         .route("/health", get(health))
-        .route("/api/v1/node/status", get(status))
+        .route("/api/v1/instance/status", get(status))
         .route("/api/v1/setup/status", get(setup_status))
         .route("/api/v1/auth/login", post(login))
         .route("/api/v1/auth/session", get(current_session))
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/me", get(me))
-        .route(crate::node_view::OVERVIEW_PATH, get(overview))
+        .route(crate::worker_view::OVERVIEW_PATH, get(overview))
         .route("/api/v1/jobs", get(jobs))
         .route("/api/v1/plugins", get(catalog))
         .route("/api/v1/tools", get(tools))

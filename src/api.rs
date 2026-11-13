@@ -1,20 +1,20 @@
 mod accounts;
 pub mod auth;
 mod flows;
+mod installation;
 mod jobs;
 mod keys;
 mod libraries;
-mod node_view;
-mod nodes;
 mod plugins;
 pub(crate) mod session;
 mod setup;
 mod system;
 pub(crate) mod transfers;
+mod worker_view;
 use crate::{config::Config, domain::*, error::AppResult, repository};
 pub use auth::{
     AdminAuth, AnyAuth, ManageAccountsAuth, ViewFlowsAuth, ViewJobsAuth, ViewLibrariesAuth,
-    ViewNodesAuth, ViewOverviewAuth, ViewPluginsAuth,
+    ViewOverviewAuth, ViewPluginsAuth, ViewWorkersAuth,
 };
 use axum::{
     Router,
@@ -152,14 +152,20 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/auth/login", post(session::login))
         .route("/api/v1/setup/status", get(setup::status))
         .route("/api/v1/setup/central", post(setup::setup_central))
-        .route("/api/v1/setup/worker", post(nodes::setup_worker))
-        .route("/api/v1/nodes/enroll", post(nodes::enroll))
-        .route("/api/v1/node/status", get(nodes::status))
-        .route(crate::node_view::OVERVIEW_PATH, get(node_view::overview))
-        .route(crate::node_view::JOBS_PATH, get(node_view::jobs))
-        .route(crate::node_view::PLUGINS_PATH, get(node_view::catalog))
-        .route(crate::node_view::LOGIN_PATH, post(node_view::login))
-        .route(crate::node_view::ACCOUNTS_PATH, get(node_view::accounts))
+        .route("/api/v1/setup/worker", post(installation::setup_worker))
+        .route("/api/v1/workers/enroll", post(installation::enroll))
+        .route("/api/v1/instance/status", get(installation::status))
+        .route(
+            crate::worker_view::OVERVIEW_PATH,
+            get(worker_view::overview),
+        )
+        .route(crate::worker_view::JOBS_PATH, get(worker_view::jobs))
+        .route(crate::worker_view::PLUGINS_PATH, get(worker_view::catalog))
+        .route(crate::worker_view::LOGIN_PATH, post(worker_view::login))
+        .route(
+            crate::worker_view::ACCOUNTS_PATH,
+            get(worker_view::accounts),
+        )
         .route("/api/v1/me", get(session::me))
         .route("/api/v1/account/password", put(session::change_password))
         .route(
@@ -173,6 +179,7 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/auth/logout", post(session::logout))
         .route("/api/v1/jobs", get(jobs::list).post(jobs::create))
         .route("/api/v1/jobs/{id}", get(jobs::get_job))
+        .route("/api/v1/jobs/{id}/retry", post(jobs::retry))
         .route("/api/v1/workers", get(jobs::workers).post(register))
         .route(
             "/api/v1/workers/{id}",
@@ -267,7 +274,7 @@ async fn register(
     axum::Json(r): axum::Json<Register>,
 ) -> AppResult<axum::Json<Worker>> {
     crate::auth::authorize_worker(&s.pool, &h).await?;
-    if !crate::node_settings::is_valid_node_name(&r.name) {
+    if !crate::worker_settings::is_valid_worker_name(&r.name) {
         return Err(crate::error::AppError::Invalid);
     }
     Ok(axum::Json(repository::register(&s.pool, &r.name).await?))
@@ -307,7 +314,7 @@ async fn plugin_sync_loop(state: AppState) {
     }
 }
 
-/// Ouvre la base SQLite de la centrale et applique les migrations embarquées.
+/// Ouvre la base SQLite du central et applique les migrations embarquées.
 pub async fn connect_database(config: &Config) -> anyhow::Result<SqlitePool> {
     let connect_options = if config.database_url.starts_with("sqlite:") {
         SqliteConnectOptions::from_str(&config.database_url)?
@@ -362,7 +369,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     }
     let plugin_sync = tokio::spawn(plugin_sync_loop(state.clone()));
     let app = router(state);
-    tracing::info!(%addr, "coordinator started");
+    tracing::info!(%addr, "central started");
     if let Some((cert, key)) = tls {
         let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key).await?;
         let handle = axum_server::Handle::new();
@@ -387,11 +394,11 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Arrêt demandé : signal du système ou changement de rôle du nœud.
+/// Arrêt demandé : signal du système ou changement de rôle de l'installation.
 pub async fn shutdown_signal() {
     tokio::select! {
         () = os_termination_signal() => {},
-        () = crate::node::role_switch_requested() => {},
+        () = crate::instance::role_switch_requested() => {},
     }
 }
 

@@ -81,6 +81,12 @@ jobs:
         run: cargo clippy --all-targets --locked -- -D warnings
       - if: needs.changes.outputs.code == 'true'
         run: cargo test --locked
+      - if: needs.changes.outputs.code == 'true'
+        name: Contrat partagé, client WASM et page (ADR 0014)
+        run: |
+          cargo clippy -p flux-shared -p flux-client -p flux-frontend --all-targets --locked -- -D warnings
+          cargo clippy -p flux-client --target wasm32-unknown-unknown --locked -- -D warnings
+          cargo test -p flux-shared -p flux-client -p flux-frontend --locked
 
   image-build:
     name: docker-build
@@ -138,8 +144,8 @@ jobs:
         run: |
           echo "Téléchargement de l'image de la PR : $PR_IMAGE..."
           docker pull "$PR_IMAGE"
-          echo "Démarrage du conteneur coordinator..."
-          docker run -d --name smoke -p 3000:3000 "$PR_IMAGE" coordinator
+          echo "Démarrage du conteneur central..."
+          docker run -d --name smoke -p 3000:3000 "$PR_IMAGE" central
           
           echo "Vérification de la santé sur http://localhost:3000/health..."
           for i in $(seq 1 20); do

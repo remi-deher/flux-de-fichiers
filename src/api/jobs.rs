@@ -1,5 +1,5 @@
 use super::{
-    AdminAuth, AppState, ViewJobsAuth, ViewLibrariesAuth, ViewNodesAuth, ViewOverviewAuth,
+    AdminAuth, AppState, ViewJobsAuth, ViewLibrariesAuth, ViewOverviewAuth, ViewWorkersAuth,
 };
 use crate::{
     domain::*,
@@ -13,7 +13,7 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
 };
 use futures_util::stream::Stream;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::convert::Infallible;
 use uuid::Uuid;
 
@@ -96,9 +96,19 @@ pub async fn get_job(
 ) -> AppResult<Json<Job>> {
     Ok(Json(repository::get_job(&s.pool, id).await?))
 }
+/// Relance manuelle d'une tâche échouée après perte de bail (aucune relance automatique).
+pub async fn retry(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    _auth: AdminAuth,
+) -> AppResult<Json<Job>> {
+    let job = repository::retry_job(&s.pool, id).await?;
+    s.notify_job_event(JobEventType::JobRetried, job.id, JobStatus::Queued, None);
+    Ok(Json(job))
+}
 pub async fn workers(
     State(s): State<AppState>,
-    _auth: ViewNodesAuth,
+    _auth: ViewWorkersAuth,
 ) -> AppResult<Json<Vec<Worker>>> {
     Ok(Json(repository::list_workers(&s.pool).await?))
 }
@@ -153,20 +163,13 @@ pub async fn failure(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Serialize)]
-pub struct SystemConfigResponse {
-    pub max_file_bytes: u64,
-    pub local_worker: bool,
-    pub version: &'static str,
-}
-
 pub async fn system_config(
     State(s): State<AppState>,
     _auth: ViewOverviewAuth,
-) -> AppResult<Json<SystemConfigResponse>> {
-    Ok(Json(SystemConfigResponse {
+) -> AppResult<Json<SystemConfig>> {
+    Ok(Json(SystemConfig {
         max_file_bytes: s.config.max_file_bytes,
         local_worker: s.config.local_worker,
-        version: env!("CARGO_PKG_VERSION"),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
     }))
 }

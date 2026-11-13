@@ -99,10 +99,10 @@ pub async fn authenticate(
     })
 }
 
-/// Clé d'API d'un nœud : protocole d'agent seulement.
+/// Clé d'API d'un worker : protocole de worker seulement.
 pub async fn authorize_worker(pool: &SqlitePool, headers: &HeaderMap) -> AppResult<Principal> {
     let principal = authenticate_bearer(pool, headers).await?;
-    require(&principal, Permission::NodeAgent)?;
+    require(&principal, Permission::WorkerProtocol)?;
     Ok(principal)
 }
 
@@ -225,6 +225,6 @@ mod tests {
             require(&worker, Permission::ManageApiKeys),
             Err(AppError::Forbidden)
         ));
-        assert!(require(&worker, Permission::NodeAgent).is_ok());
+        assert!(require(&worker, Permission::WorkerProtocol).is_ok());
     }
 }

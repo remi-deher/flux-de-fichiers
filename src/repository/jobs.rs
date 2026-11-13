@@ -1,3 +1,4 @@
+use super::flows::DEFAULT_FLOW_SQL;
 use crate::{
     domain::{
         Claim, Job, JobErrorCode, JobStatus, LEASE_SECONDS, LeaseRequest, MAX_ATTEMPTS, Worker,
@@ -77,7 +78,7 @@ pub async fn list_workers(pool: &SqlitePool) -> AppResult<Vec<Worker>> {
 
 pub async fn delete_worker(pool: &SqlitePool, id: Uuid) -> AppResult<()> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    sqlx::query("DELETE FROM library_nodes WHERE worker_id=?1")
+    sqlx::query("DELETE FROM library_workers WHERE worker_id=?1")
         .bind(id)
         .execute(&mut *tx)
         .await?;
@@ -100,10 +101,15 @@ pub async fn insert_job(
     source_sha256: &str,
     source_bytes: i64,
 ) -> AppResult<Job> {
-    let job = sqlx::query_as(
-        "INSERT INTO jobs(id, source_name, target_worker_id, source_sha256, source_bytes) \
-         VALUES(?1, ?2, ?3, ?4, ?5) RETURNING *",
-    )
+    // La tâche fige le flow par défaut et sa version courante : modifier le flow ensuite
+    // ne la change pas.
+    let job = sqlx::query_as(&format!(
+        "WITH chosen AS ({DEFAULT_FLOW_SQL}) \
+         INSERT INTO jobs(id, source_name, target_worker_id, source_sha256, source_bytes, \
+                          flow_id, flow_version) \
+         SELECT ?1, ?2, ?3, ?4, ?5, chosen.id, chosen.version \
+         FROM (SELECT 1) LEFT JOIN chosen RETURNING *"
+    ))
     .bind(Uuid::new_v4())
     .bind(source_name)
     .bind(target_worker_id)
@@ -145,15 +151,14 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
     if touched != 1 {
         return Err(AppError::NotFound);
     }
+    // Bail expiré : échec explicite, jamais de remise en file silencieuse (relance : `retry_job`).
     sqlx::query(
         "UPDATE jobs \
-         SET status=CASE WHEN attempts >= ?1 THEN ?2 ELSE ?3 END, \
-             error_code=?4, lease_token=NULL, leased_until=NULL, updated_at=datetime('now') \
-         WHERE status=?5 AND leased_until <= datetime('now')",
+         SET status=?1, error_code=?2, lease_token=NULL, leased_until=NULL, \
+             updated_at=datetime('now') \
+         WHERE status=?3 AND leased_until <= datetime('now')",
     )
-    .bind(MAX_ATTEMPTS)
     .bind(JobStatus::Failed)
-    .bind(JobStatus::Queued)
     .bind(JobErrorCode::LeaseExpired)
     .bind(JobStatus::Running)
     .execute(&mut *tx)
@@ -200,6 +205,33 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
         })
     })
     .transpose()
+}
+
+/// Relance manuelle d'une tâche échouée après perte de bail, dans la limite de `MAX_ATTEMPTS`.
+pub async fn retry_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM jobs WHERE id=?1)")
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+    if !exists {
+        return Err(AppError::NotFound);
+    }
+    let job: Option<Job> = sqlx::query_as(
+        "UPDATE jobs \
+         SET status=?2, worker_id=NULL, error_code=NULL, updated_at=datetime('now') \
+         WHERE id=?1 AND status=?3 AND error_code=?4 AND attempts < ?5 RETURNING *",
+    )
+    .bind(id)
+    .bind(JobStatus::Queued)
+    .bind(JobStatus::Failed)
+    .bind(JobErrorCode::LeaseExpired)
+    .bind(MAX_ATTEMPTS)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let job = job.ok_or(AppError::Conflict)?;
+    tx.commit().await?;
+    Ok(job)
 }
 
 pub async fn active(pool: &SqlitePool, id: Uuid, lease: &LeaseRequest) -> AppResult<Job> {

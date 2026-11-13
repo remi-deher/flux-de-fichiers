@@ -83,9 +83,9 @@ permission_auth!(
     Permission::ViewJobs
 );
 permission_auth!(
-    /// Peut consulter les nœuds.
-    ViewNodesAuth,
-    Permission::ViewNodes
+    /// Peut consulter les workers.
+    ViewWorkersAuth,
+    Permission::ViewWorkers
 );
 permission_auth!(
     /// Peut consulter les bibliothèques et les fichiers sources.

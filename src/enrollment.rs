@@ -1,5 +1,5 @@
-//! Enrôlement d'un worker auprès de la centrale (ADR 0011) : le worker présente les identifiants d'un
-//! administrateur, la centrale crée la clé d'API du nœud et la renvoie une seule fois. Le mot de passe
+//! Enrôlement d'un worker auprès du central (ADR 0011) : le worker présente les identifiants d'un
+//! administrateur, le central crée la clé d'API du worker et la renvoie une seule fois. Le mot de passe
 //! n'est jamais conservé par le worker.
 
 use crate::error::{AppError, AppResult};
@@ -7,8 +7,8 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-/// Chemin de la route d'enrôlement, partagé entre le client (worker) et le serveur (centrale).
-pub const ENROLL_PATH: &str = "/api/v1/nodes/enroll";
+/// Chemin de la route d'enrôlement, partagé entre le client (worker) et le serveur (central).
+pub const ENROLL_PATH: &str = "/api/v1/workers/enroll";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -16,16 +16,16 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 pub struct EnrollRequest {
     pub username: String,
     pub password: String,
-    pub node_name: String,
+    pub worker_name: String,
 }
 
-/// Réponse de la centrale : `key` n'existe qu'ici.
+/// Réponse du central : `key` n'existe qu'ici.
 #[derive(Serialize, Deserialize)]
-pub struct EnrolledNode {
+pub struct EnrolledWorker {
     pub key: String,
 }
 
-/// Traduit le statut renvoyé par la centrale en erreur applicative pour l'interface.
+/// Traduit le statut renvoyé par le central en erreur applicative pour l'interface.
 pub fn error_for_status(status: StatusCode) -> Option<AppError> {
     match status {
         status if status.is_success() => None,
@@ -37,18 +37,16 @@ pub fn error_for_status(status: StatusCode) -> Option<AppError> {
     }
 }
 
-/// Demande à la centrale la clé d'API d'un nouveau nœud. Aucune redirection n'est suivie et le détail
+/// Demande au central la clé d'API d'un nouveau worker. Aucune redirection n'est suivie et le détail
 /// des erreurs réseau n'est pas relayé (l'adresse saisie ne doit pas fuiter dans les messages).
-pub async fn request_key(coordinator: &reqwest::Url, request: &EnrollRequest) -> AppResult<String> {
+pub async fn request_key(central: &reqwest::Url, request: &EnrollRequest) -> AppResult<String> {
     let client = reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| AppError::Internal)?;
-    let url = coordinator
-        .join(ENROLL_PATH)
-        .map_err(|_| AppError::Invalid)?;
+    let url = central.join(ENROLL_PATH).map_err(|_| AppError::Invalid)?;
     let response = client
         .post(url)
         .json(request)
@@ -58,7 +56,7 @@ pub async fn request_key(coordinator: &reqwest::Url, request: &EnrollRequest) ->
     if let Some(error) = error_for_status(response.status()) {
         return Err(error);
     }
-    let enrolled: EnrolledNode = response
+    let enrolled: EnrolledWorker = response
         .json()
         .await
         .map_err(|_| AppError::CentralUnavailable)?;
@@ -106,7 +104,7 @@ mod tests {
             &EnrollRequest {
                 username: "admin".into(),
                 password: "x".into(),
-                node_name: "nas".into(),
+                worker_name: "nas".into(),
             },
         )
         .await;

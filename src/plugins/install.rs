@@ -1,4 +1,4 @@
-//! Installation d'un outil distribué dans le cache du nœud, d'après son contrat de distribution.
+//! Installation d'un outil distribué dans le cache local, d'après son contrat de distribution.
 
 use super::{SyncPolicy, sync::fetch_archive};
 use crate::{
@@ -10,10 +10,10 @@ use std::path::{Path, PathBuf};
 
 const DISTRIBUTION_FILE_NAME: &str = "distribution.v1.json";
 
-/// Outils dont l'installation est en cours sur ce nœud (en file d'attente ou en téléchargement).
+/// Outils dont l'installation est en cours sur ce worker (en file d'attente ou en téléchargement).
 static INSTALLING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
-/// L'outil est-il en cours d'installation sur ce nœud ?
+/// L'outil est-il en cours d'installation sur ce worker ?
 pub fn is_installing(tool_id: &str) -> bool {
     INSTALLING
         .lock()

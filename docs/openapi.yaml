@@ -3,7 +3,7 @@ info:
   title: Flux de Fichiers — API de remuxage
   version: 0.1.0
   description: >-
-    Coordinateur centralisé, workers MKVToolNix et frontend Leptos.
+    Central unique, workers MKVToolNix et frontend Leptos.
     Les noms de fichiers sont des noms MKV simples présents dans INPUT_DIR.
     Les humains ouvrent une session par compte (identifiant et mot de passe) ; les
     machines utilisent des clés d'API nommées et révocables (ADR 0011). Le bail est un secret
@@ -32,7 +32,7 @@ paths:
   /health:
     get:
       security: []
-      summary: Disponibilité du coordinateur et de PostgreSQL
+      summary: Disponibilité du central et de PostgreSQL
       responses:
         '204': {description: PostgreSQL joignable}
         '500': {$ref: '#/components/responses/Error'}
@@ -60,7 +60,7 @@ paths:
       summary: Lister les bibliothèques déclarées, triées par nom
       responses:
         '200':
-          description: Chaque bibliothèque porte au plus un flux et un chemin par nœud
+          description: Chaque bibliothèque porte au plus un flux et un chemin par worker
           content:
             application/json:
               schema:
@@ -102,7 +102,7 @@ paths:
         default: {$ref: '#/components/responses/Error'}
     put:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Remplacer le nom, le flux et les chemins de nœuds
+      summary: Remplacer le nom, le flux et les chemins de workers
       requestBody:
         required: true
         content:
@@ -120,7 +120,7 @@ paths:
         default: {$ref: '#/components/responses/Error'}
     delete:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Supprimer une bibliothèque et ses chemins de nœuds
+      summary: Supprimer une bibliothèque et ses chemins de workers
       responses:
         '204': {description: Supprimée}
         default: {$ref: '#/components/responses/Error'}
@@ -187,6 +187,22 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Job'}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/retry:
+    parameters: [{$ref: '#/components/parameters/JobId'}]
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: >-
+        Relancer à la main une tâche échouée après perte de bail (`lease_expired`).
+        Un bail expiré n'est jamais remis en file automatiquement ; la relance est
+        refusée (409) pour un autre échec ou après trois tentatives.
+      responses:
+        '200':
+          description: Tâche remise en file
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Job'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/jobs/{id}/output:
     parameters: [{$ref: '#/components/parameters/JobId'}]
     get:
@@ -216,7 +232,7 @@ paths:
       summary: Catalogue lu dans les dépôts de plugins synchronisés (vide tant qu'aucun dépôt n'est synchronisé)
       responses:
         '200':
-          description: Fiches du catalogue ; une fiche inconnue du coordinateur est ignorée
+          description: Fiches du catalogue ; une fiche inconnue du central est ignorée
           content:
             application/json:
               schema: {type: array, items: {type: object}}
@@ -300,7 +316,7 @@ paths:
   /api/v1/tools:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: État des outils du catalogue dans le cache du coordinateur (ready ou not_installed)
+      summary: État des outils du catalogue dans le cache du central (ready ou not_installed)
       responses:
         '200': {description: Outils}
         default: {$ref: '#/components/responses/Error'}
@@ -316,7 +332,7 @@ paths:
     post:
       security: [{ApiKey: []}, {WebSession: []}]
       summary: >-
-        Installer un outil du catalogue dans le cache du coordinateur : téléchargement https,
+        Installer un outil du catalogue dans le cache du central : téléchargement https,
         redirections revérifiées, SHA-256 de l'archive et du binaire contrôlés avant exécution.
       parameters: [{in: path, name: id, required: true, schema: {type: string}}]
       responses:
@@ -345,10 +361,10 @@ paths:
   /api/v1/setup/status:
     get:
       security: []
-      summary: Indiquer si la centrale attend son installation
+      summary: Indiquer si le central attend son installation
       responses:
         '200':
-          description: État d'installation et nom de la centrale une fois installée
+          description: État d'installation et nom du central une fois installé
           content:
             application/json:
               schema:
@@ -360,10 +376,10 @@ paths:
   /api/v1/setup/central:
     post:
       security: []
-      summary: Installer la centrale (usage unique) et ouvrir la session de l'administrateur
+      summary: Installer le central (usage unique) et ouvrir la session de l'administrateur
       description: >-
         Crée le compte administrateur (mot de passe haché en Argon2id), enregistre le nom
-        de la centrale et génère le secret de chiffrement. Refusé en 409 `already_configured`
+        du central et génère le secret de chiffrement. Refusé en 409 `already_configured`
         dès qu'un compte existe. Origin exact requis ; la session est posée comme à la connexion.
       parameters: [{$ref: '#/components/parameters/OriginHeader'}]
       requestBody:
@@ -388,12 +404,12 @@ paths:
   /api/v1/setup/worker:
     post:
       security: []
-      summary: Transformer un nœud non installé en worker (usage unique)
+      summary: Transformer une installation vierge en worker (usage unique)
       description: >-
-        Enrôle ce nœud auprès de la centrale `coordinator_url` avec les identifiants d'un
+        Enrôle cette installation auprès du central `central_url` avec les identifiants d'un
         administrateur, conserve le rôle et la clé dans `/config`, puis relance le processus en
-        worker. 409 `already_configured` si le nœud est installé ou déjà worker ; 502
-        `central_unavailable` si la centrale est injoignable. Origin exact requis.
+        worker. 409 `already_configured` si l'installation est déjà configurée ; 502
+        `central_unavailable` si le central est injoignable. Origin exact requis.
       parameters: [{$ref: '#/components/parameters/OriginHeader'}]
       requestBody:
         required: true
@@ -401,20 +417,20 @@ paths:
           application/json:
             schema:
               type: object
-              required: [coordinator_url, username, password, node_name]
+              required: [central_url, username, password, worker_name]
               properties:
-                coordinator_url: {type: string, description: Origine de la centrale, sans chemin}
+                central_url: {type: string, description: Origine du central, sans chemin}
                 username: {type: string}
                 password: {type: string, writeOnly: true}
-                node_name: {type: string, maxLength: 80, pattern: '^[A-Za-z0-9._-]+$'}
+                worker_name: {type: string, maxLength: 80, pattern: '^[A-Za-z0-9._-]+$'}
       responses:
-        '202': {description: Enrôlement fait, le nœud redémarre en worker}
+        '202': {description: Enrôlement fait, l'installation redémarre en worker}
         '409': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
-  /api/v1/nodes/enroll:
+  /api/v1/workers/enroll:
     post:
       security: []
-      summary: Créer la clé d'API d'un nœud worker
+      summary: Créer la clé d'API d'un worker
       description: >-
         Réservé aux identifiants d'un administrateur (essais limités). Renvoie une clé de rôle
         worker, affichée une seule fois. Sans cookie : appel de machine à machine.
@@ -424,14 +440,14 @@ paths:
           application/json:
             schema:
               type: object
-              required: [username, password, node_name]
+              required: [username, password, worker_name]
               properties:
                 username: {type: string}
                 password: {type: string, writeOnly: true}
-                node_name: {type: string, maxLength: 80, pattern: '^[A-Za-z0-9._-]+$'}
+                worker_name: {type: string, maxLength: 80, pattern: '^[A-Za-z0-9._-]+$'}
       responses:
         '200':
-          description: Clé du nœud
+          description: Clé du worker
           content:
             application/json:
               schema:
@@ -442,59 +458,59 @@ paths:
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
-  /api/v1/node/status:
+  /api/v1/instance/status:
     get:
       security: []
-      summary: État public du nœud (centrale ou worker)
+      summary: État public de l'installation (central ou worker)
       responses:
         '200':
-          description: Type de nœud et version
+          description: Type d'installation et version
           content:
             application/json:
               schema:
                 type: object
-                required: [nodeKind, version]
+                required: [instanceKind, version]
                 properties:
-                  nodeKind: {type: string, enum: [central, worker]}
+                  instanceKind: {type: string, enum: [central, worker]}
                   version: {type: string}
-                  installed: {type: boolean, description: Centrale seulement}
+                  installed: {type: boolean, description: Central seulement}
                   name: {type: string, description: Worker seulement}
-                  coordinatorUrl: {type: string, description: Worker seulement}
+                  centralUrl: {type: string, description: Worker seulement}
                   registered: {type: boolean, description: Worker seulement}
-                  coordinatorReachable: {type: boolean, description: Worker seulement}
-  /api/v1/node/overview:
+                  centralReachable: {type: boolean, description: Worker seulement}
+  /api/v1/worker/overview:
     get:
       security: [{ApiKey: []}]
-      summary: Vue d'ensemble du nœud appelant
+      summary: Vue d'ensemble du worker appelant
       description: >-
-        Nom, dernière activité et nombre de tâches par statut. Réservé à la clé d'un nœud (rôle worker) ; limité à ce nœud.
+        Nom, dernière activité et nombre de tâches par statut. Réservé à la clé d'un worker (rôle worker) ; limité à ce worker.
       responses:
         '200': {description: Vue d'ensemble}
         default: {$ref: '#/components/responses/Error'}
-  /api/v1/node/jobs:
+  /api/v1/worker/jobs:
     get:
       security: [{ApiKey: []}]
-      summary: Tâches traitées par le nœud appelant
+      summary: Tâches traitées par le worker appelant
       description: >-
-        Les 100 plus récentes, jamais celles des autres nœuds. Réservé à la clé d'un nœud (rôle worker) ; limité à ce nœud.
+        Les 100 plus récentes, jamais celles des autres workers. Réservé à la clé d'un worker (rôle worker) ; limité à ce worker.
       responses:
-        '200': {description: Tâches du nœud}
+        '200': {description: Tâches du worker}
         default: {$ref: '#/components/responses/Error'}
-  /api/v1/node/plugins:
+  /api/v1/worker/plugins:
     get:
       security: [{ApiKey: []}]
       summary: Catalogue de plugins, en lecture seule
       description: >-
-        Même catalogue que `GET /api/v1/plugins`. Réservé à la clé d'un nœud (rôle worker) ; limité à ce nœud.
+        Même catalogue que `GET /api/v1/plugins`. Réservé à la clé d'un worker (rôle worker) ; limité à ce worker.
       responses:
         '200': {description: Entrées du catalogue}
         default: {$ref: '#/components/responses/Error'}
-  /api/v1/node/login:
+  /api/v1/worker/login:
     post:
       security: [{ApiKey: []}]
       summary: Vérifier les identifiants saisis sur un worker
       description: >-
-        Connexion déléguée : mêmes limites d'essais qu'une connexion directe ; renvoie id, identifiant et rôle du compte. Réservé à la clé d'un nœud (rôle worker) ; limité à ce nœud.
+        Connexion déléguée : mêmes limites d'essais qu'une connexion directe ; renvoie id, identifiant et rôle du compte. Réservé à la clé d'un worker (rôle worker) ; limité à ce worker.
       requestBody:
         required: true
         content:
@@ -509,12 +525,12 @@ paths:
         '200': {description: Compte vérifié}
         '401': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
-  /api/v1/node/accounts:
+  /api/v1/worker/accounts:
     get:
       security: [{ApiKey: []}]
       summary: Copie des comptes pour la connexion de secours
       description: >-
-        Hachés Argon2id et versions ; la copie remplace celle du worker en bloc (un compte absent est supprimé). Réservé à la clé d'un nœud (rôle worker) ; limité à ce nœud.
+        Hachés Argon2id et versions ; la copie remplace celle du worker en bloc (un compte absent est supprimé). Réservé à la clé d'un worker (rôle worker) ; limité à ce worker.
       responses:
         '200': {description: Copie complète des comptes}
         default: {$ref: '#/components/responses/Error'}
@@ -549,7 +565,7 @@ paths:
   /api/v1/me:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Identité, rôle, droits et type de nœud de l'appelant
+      summary: Identité, rôle, droits et type d'installation de l'appelant
       description: L'interface n'affiche que ce que ces droits permettent ; chaque route les revérifie.
       responses:
         '200':
@@ -563,7 +579,7 @@ paths:
                   name: {type: string}
                   role: {type: string, enum: [admin, worker]}
                   permissions: {type: array, items: {type: string}}
-                  nodeKind: {type: string, enum: [central, worker]}
+                  instanceKind: {type: string, enum: [central, worker]}
                   instanceName: {type: [string, 'null']}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/account/password:
@@ -721,10 +737,10 @@ paths:
   /api/v1/workers:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Lister les agents enregistrés, maximum 200
+      summary: Lister les workers enregistrés, maximum 200
       responses:
         '200':
-          description: Agents par nom ; last_seen est actualisé à chaque demande de travail
+          description: Workers par nom ; last_seen est actualisé à chaque demande de travail
           content:
             application/json:
               schema:
@@ -733,7 +749,7 @@ paths:
         default: {$ref: '#/components/responses/Error'}
     post:
       security: [{ApiKey: []}]
-      summary: Enregistrer un agent ; le même nom conserve son UUID après redémarrage
+      summary: Enregistrer un worker ; le même nom conserve son UUID après redémarrage
       requestBody:
         required: true
         content:
@@ -745,7 +761,7 @@ paths:
                 name: {type: string, minLength: 1, maxLength: 80, pattern: '^[A-Za-z0-9_.-]+$'}
       responses:
         '200':
-          description: Agent enregistré
+          description: Worker enregistré
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Worker'}
@@ -753,7 +769,7 @@ paths:
   /api/v1/claims:
     post:
       security: [{ApiKey: []}]
-      summary: Réserver atomiquement la prochaine tâche disponible pour cet agent
+      summary: Réserver atomiquement la prochaine tâche disponible pour ce worker
       requestBody:
         required: true
         content:
@@ -777,7 +793,7 @@ paths:
     parameters: [{$ref: '#/components/parameters/JobId'}]
     post:
       security: [{ApiKey: []}]
-      summary: Renouveler un bail actif ; agent configuré à un renouvellement toutes les 20 s
+      summary: Renouveler un bail actif ; worker configuré à un renouvellement toutes les 20 s
       requestBody: {$ref: '#/components/requestBodies/Lease'}
       responses:
         '204': {description: Bail prolongé de 120 secondes}
@@ -810,7 +826,7 @@ paths:
       - {$ref: '#/components/parameters/LeaseToken'}
     get:
       security: [{ApiKey: []}]
-      summary: Télécharger la source pour un bail actif ; l'agent vérifie son empreinte
+      summary: Télécharger la source pour un bail actif ; le worker vérifie son empreinte
       responses:
         '200':
           description: Fichier source, Content-Length fourni
@@ -927,7 +943,7 @@ components:
         id: {type: string, format: uuid}
         name: {type: string}
         last_seen: {type: string, format: date-time}
-    LibraryNode:
+    LibraryWorkerPath:
       type: object
       required: [worker_id, local_path, access]
       properties:
@@ -940,19 +956,19 @@ components:
       properties:
         name: {type: string, minLength: 1, maxLength: 80}
         flow_id: {type: [string, 'null']}
-        nodes:
+        workers:
           type: array
-          items: {$ref: '#/components/schemas/LibraryNode'}
+          items: {$ref: '#/components/schemas/LibraryWorkerPath'}
     Library:
       type: object
-      required: [id, name, flow_id, nodes, created_at, updated_at]
+      required: [id, name, flow_id, workers, created_at, updated_at]
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
         flow_id: {type: [string, 'null']}
-        nodes:
+        workers:
           type: array
-          items: {$ref: '#/components/schemas/LibraryNode'}
+          items: {$ref: '#/components/schemas/LibraryWorkerPath'}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     Claim:
@@ -982,5 +998,11 @@ components:
         output_bytes: {type: [integer, 'null']}
         warning: {type: boolean}
         error_code: {type: [string, 'null']}
+        flow_id:
+          type: [string, 'null']
+          description: Flow par défaut retenu à la création de la tâche.
+        flow_version:
+          type: [integer, 'null']
+          description: Version figée du flow ; modifier le flow ensuite ne change pas la tâche.
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}

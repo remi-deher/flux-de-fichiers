@@ -11,15 +11,15 @@ services d'exécution :
 
 | Responsabilité | État / emplacement |
 | --- | --- |
-| `node` | Choix du rôle au démarrage dans `src/node.rs` ; coordinateur par défaut ou worker distant. |
-| `coordinator` | API Axum, accès PostgreSQL et lancement de l'exécuteur local facultatif ; `src/api.rs`, façade `src/coordinator.rs`. |
+| `instance` | Choix du rôle au démarrage dans `src/instance.rs` ; central par défaut ou worker distant. |
+| `central` | API Axum, accès PostgreSQL et lancement de l'exécuteur local facultatif ; `src/api.rs`, façade `src/coordinator.rs`. |
 | `execution` | Remux MKVToolNix et validation des médias ; `src/media.rs`, façade `src/execution.rs`. |
-| `workers` | Agent distant HTTPS et exécuteur intégré au central ; `src/worker.rs`, `src/local_worker.rs`, façade `src/workers.rs`. |
+| `workers` | Worker distant HTTPS et exécuteur intégré au central ; `src/worker.rs`, `src/local_worker.rs`, façade `src/workers.rs`. |
 | `storage` | Sources, empreintes, fichiers de résultat et publication ; `src/storage.rs`, `src/api/transfers.rs`. |
 | `security` | Autorisation API, TLS et configuration des secrets ; `src/auth.rs`, `src/config.rs`, façade `src/security.rs`. |
 | `flows` | Emplacement réservé aux définitions de flux ; aucun moteur ni catalogue n'est livré. |
 | `plugins` | Frontière réservée aux contrats consommés par l'application ; aucun chargeur n'est livré. |
-| Frontend Leptos | `frontend/` implémenté. Interface moderne de pilotage Leptos servie sur localhost:3000 avec proxy API local. |
+| Interface | Client Leptos compilé en WASM (`client/`), page et thème générés par `frontend/`, servis par Axum sur le port 3000 (ADR 0014). |
 
 Les façades nommées rendent les responsabilités visibles sans déplacer ni
 remplacer la chaîne existante. PostgreSQL reste l'autorité sur les tâches et les
@@ -59,4 +59,4 @@ notamment PostgreSQL ; il ne reçoit pas les migrations de l'application. La
 décision utilisateur du 9 novembre 2026 formalise le modèle Bare Core et la
 distribution d'outils par plugins (Option B, documentée dans l'ADR 0004 et dans
 `docs/architecture/socle-execution-outils-distribues.md`). La haute disponibilité
-et la bascule entre coordinateurs ne sont pas impliquées par l'existence de plusieurs nœuds.
+et la bascule entre centraux ne sont pas impliquées par l'existence de plusieurs workers.

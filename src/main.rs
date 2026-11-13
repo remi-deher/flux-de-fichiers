@@ -1,4 +1,4 @@
-use flux_de_fichiers::node;
+use flux_de_fichiers::instance;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -15,5 +15,5 @@ async fn main() -> anyhow::Result<()> {
     let mut arguments = std::env::args().skip(1);
     let command = arguments.next();
     let operand = arguments.next();
-    node::run(command.as_deref(), operand.as_deref()).await
+    instance::run(command.as_deref(), operand.as_deref()).await
 }

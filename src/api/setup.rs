@@ -1,4 +1,4 @@
-//! Installation de la centrale au premier démarrage : nom, compte administrateur, session ouverte.
+//! Installation du central au premier démarrage : nom, compte administrateur, session ouverte.
 
 use super::{AppState, session};
 use crate::{
@@ -6,32 +6,16 @@ use crate::{
     password, repository, web_session,
 };
 use axum::{Json, extract::State, http::HeaderMap, response::Response};
-use flux_shared::{NodeKind, Role};
-use serde::{Deserialize, Serialize};
+pub use flux_shared::system::{SetupRequest, SetupStatus};
+use flux_shared::{InstanceKind, Role};
 
 const INSTANCE_NAME_MAX_LEN: usize = 80;
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetupStatus {
-    needs_setup: bool,
-    instance_name: Option<String>,
-    node_kind: NodeKind,
-}
-
-#[derive(Deserialize)]
-pub struct SetupRequest {
-    name: String,
-    username: String,
-    password: String,
-}
-
-/// L'installation est-elle à faire ? Public : l'interface choisit entre assistant et connexion.
 pub async fn status(State(state): State<AppState>) -> AppResult<Json<SetupStatus>> {
     Ok(Json(SetupStatus {
         needs_setup: repository::account_count(&state.pool).await? == 0,
         instance_name: repository::get_setting(&state.pool, repository::INSTANCE_NAME_KEY).await?,
-        node_kind: NodeKind::Central,
+        instance_kind: InstanceKind::Central,
     }))
 }
 
@@ -75,7 +59,7 @@ mod tests {
 
     #[test]
     fn test_instance_name_rules() -> AppResult<()> {
-        assert_eq!(validate_instance_name("  Ma centrale ")?, "Ma centrale");
+        assert_eq!(validate_instance_name("  Mon central ")?, "Mon central");
         assert!(validate_instance_name("").is_err());
         assert!(validate_instance_name("   ").is_err());
         assert!(validate_instance_name(&"x".repeat(INSTANCE_NAME_MAX_LEN + 1)).is_err());

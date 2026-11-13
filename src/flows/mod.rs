@@ -69,32 +69,7 @@ impl FlowContext {
     }
 }
 
-/// Nœud unitaire d'un graphe de flux.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FlowNode {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub kind: FlowBlockKind,
-    pub name: String,
-    #[serde(default)]
-    pub config: serde_json::Value,
-}
-
-/// Connexion orientée entre deux nœuds d'un flux.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FlowConnection {
-    pub from: String,
-    pub to: String,
-    #[serde(default)]
-    pub port: Option<String>,
-}
-
-/// Représentation complète d'un graphe de flux désérialisé.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FlowGraph {
-    pub nodes: Vec<FlowNode>,
-    pub connections: Vec<FlowConnection>,
-}
+pub use flux_shared::flows::{FlowConnection, FlowGraph, FlowNode};
 
 /// Résultat final de l'exécution d'un flux.
 #[derive(Clone, Debug)]
@@ -178,6 +153,7 @@ impl<'a> FlowEngine<'a> {
                 kind: FlowBlockKind::FileInput,
                 name: "Fichier source".into(),
                 config: serde_json::Value::Null,
+                extra: serde_json::Map::new(),
             });
         let mut current_node_id = input_node.id;
         let mut max_steps = 32;

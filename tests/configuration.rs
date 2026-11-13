@@ -1,25 +1,25 @@
-use flux_de_fichiers::config::coordinator_url;
+use flux_de_fichiers::config::central_url;
 
 #[test]
-fn remote_coordinator_requires_no_embedded_credentials() {
+fn remote_central_requires_no_embedded_credentials() {
     for invalid in [
         "ftp://localhost",
-        "https://user:password@coordinator",
-        "https://coordinator/path",
-        "https://coordinator/?token=secret",
-        "https://coordinator/#fragment",
-        "http://user:password@coordinator",
-        "http://coordinator/path",
+        "https://user:password@central",
+        "https://central/path",
+        "https://central/?token=secret",
+        "https://central/#fragment",
+        "http://user:password@central",
+        "http://central/path",
     ] {
-        assert!(coordinator_url(invalid).is_err(), "{invalid}");
+        assert!(central_url(invalid).is_err(), "{invalid}");
     }
     for valid in [
-        "http://coordinator:3000",
-        "https://coordinator:3443",
+        "http://central:3000",
+        "https://central:3443",
         "http://127.0.0.1:3000",
         "http://localhost:3000",
     ] {
-        assert!(coordinator_url(valid).is_ok(), "{valid}");
+        assert!(central_url(valid).is_ok(), "{valid}");
     }
 }
 
@@ -27,7 +27,7 @@ fn remote_coordinator_requires_no_embedded_credentials() {
 fn admin_and_worker_roles_are_distinct() {
     use flux_shared::{Permission, Role};
     assert!(Role::Admin.allows(Permission::ManageApiKeys));
-    assert!(!Role::Admin.allows(Permission::NodeAgent));
-    assert!(Role::Worker.allows(Permission::NodeAgent));
+    assert!(!Role::Admin.allows(Permission::WorkerProtocol));
+    assert!(Role::Worker.allows(Permission::WorkerProtocol));
     assert!(!Role::Worker.allows(Permission::ManageApiKeys));
 }

@@ -4,79 +4,8 @@ use super::{
     tool::{InPlaceEdit, in_place_edit},
     webhook::WebhookBlockConfig,
 };
-use serde::{Deserialize, Serialize, de::Deserializer, ser::Serializer};
-use std::fmt;
 
-/// Type de bloc d'un graphe de flux. Les valeurs inconnues restent traversables.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum FlowBlockKind {
-    FileInput,
-    Condition,
-    Mkvpropedit,
-    RemuxMkv,
-    VideoEncode,
-    Webhook,
-    SonarrRescan,
-    SonarrRename,
-    RadarrRescan,
-    RadarrRename,
-    FileOutput,
-    Other(String),
-}
-
-impl FlowBlockKind {
-    pub fn parse(value: &str) -> Self {
-        match value {
-            "file-input" => Self::FileInput,
-            "condition" => Self::Condition,
-            "mkvpropedit" => Self::Mkvpropedit,
-            "remux-mkv" => Self::RemuxMkv,
-            "video-encode" => Self::VideoEncode,
-            "webhook" => Self::Webhook,
-            "sonarr-rescan" => Self::SonarrRescan,
-            "sonarr-rename" => Self::SonarrRename,
-            "radarr-rescan" => Self::RadarrRescan,
-            "radarr-rename" => Self::RadarrRename,
-            "file-output" => Self::FileOutput,
-            other => Self::Other(other.to_owned()),
-        }
-    }
-
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::FileInput => "file-input",
-            Self::Condition => "condition",
-            Self::Mkvpropedit => "mkvpropedit",
-            Self::RemuxMkv => "remux-mkv",
-            Self::VideoEncode => "video-encode",
-            Self::Webhook => "webhook",
-            Self::SonarrRescan => "sonarr-rescan",
-            Self::SonarrRename => "sonarr-rename",
-            Self::RadarrRescan => "radarr-rescan",
-            Self::RadarrRename => "radarr-rename",
-            Self::FileOutput => "file-output",
-            Self::Other(value) => value,
-        }
-    }
-}
-
-impl fmt::Display for FlowBlockKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl Serialize for FlowBlockKind {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for FlowBlockKind {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Self::parse(&String::deserialize(deserializer)?))
-    }
-}
+pub use flux_shared::flows::FlowBlockKind;
 
 /// Effet d'un bloc, sans exécuter d'outil ni d'appel réseau.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -194,36 +123,6 @@ pub fn decide_step(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn kind_roundtrip_keeps_unknown_blocks() -> Result<(), serde_json::Error> {
-        for label in [
-            "file-input",
-            "condition",
-            "mkvpropedit",
-            "remux-mkv",
-            "video-encode",
-            "webhook",
-            "sonarr-rescan",
-            "sonarr-rename",
-            "radarr-rescan",
-            "radarr-rename",
-            "file-output",
-            "remux-mp4",
-        ] {
-            let kind = FlowBlockKind::parse(label);
-            assert_eq!(kind.as_str(), label);
-            assert_eq!(
-                serde_json::from_str::<FlowBlockKind>(&serde_json::to_string(&kind)?)?,
-                kind
-            );
-        }
-        assert!(matches!(
-            FlowBlockKind::parse("remux-mp4"),
-            FlowBlockKind::Other(_)
-        ));
-        Ok(())
-    }
 
     #[test]
     fn each_block_kind_plans_a_single_effect() {

@@ -128,7 +128,7 @@ async fn login(app: &axum::Router, username: &str) -> anyhow::Result<Reply> {
     .await
 }
 
-/// Centrale installée : l'administrateur est connecté.
+/// Central installé : l'administrateur est connecté.
 async fn installed() -> anyhow::Result<(axum::Router, Cookies, tempfile::TempDir)> {
     let (app, dir) = fresh_app().await?;
     let reply = call(
@@ -136,7 +136,7 @@ async fn installed() -> anyhow::Result<(axum::Router, Cookies, tempfile::TempDir
         "POST",
         "/api/v1/setup/central",
         None,
-        Some(serde_json::json!({"name": "Centrale", "username": ADMIN, "password": PASSWORD})),
+        Some(serde_json::json!({"name": "Central", "username": ADMIN, "password": PASSWORD})),
     )
     .await?;
     assert_eq!(reply.status, StatusCode::OK);

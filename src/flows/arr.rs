@@ -2,7 +2,7 @@
 //!
 //! L'URL, la clé d'API (chiffrée au repos) et la correspondance de chemins viennent des réglages du
 //! plugin ; le bloc ne porte que sa politique d'échec. Le fichier visé est le média source, traduit du
-//! chemin vu par ce coordinateur vers le chemin vu par Sonarr ou Radarr.
+//! chemin vu par ce central vers le chemin vu par Sonarr ou Radarr.
 
 use crate::{
     repository,
@@ -261,7 +261,7 @@ pub async fn execute_arr_block(
 #[derive(Clone, Debug, Default)]
 pub struct ArrContext {
     pub connections: HashMap<ArrService, ArrConnection>,
-    /// Dossier des médias sources, tel que vu par ce coordinateur.
+    /// Dossier des médias sources, tel que vu par ce central.
     pub media_root: PathBuf,
 }
 

@@ -2,7 +2,7 @@
 
 Ces routes permettent au frontend same-origin d'utiliser l'API avec un compte
 (identifiant et mot de passe, ADR 0011), sans conserver de clé dans le navigateur.
-L'API Bearer reste disponible pour les outils et les agents, avec des clés d'API
+L'API Bearer reste disponible pour les outils et les workers, avec des clés d'API
 (`fdf_<id>_<secret>`) de rôle admin ou worker.
 
 ## Configuration
@@ -46,7 +46,7 @@ présent, il a priorité sur la session : une valeur invalide renvoie 401 sans
 repli sur les cookies. Supprimer l'en-tête pour utiliser la session navigateur.
 Une requête Bearer ne repose pas sur les cookies et n'est pas soumise au contrôle CSRF. Les endpoints
 worker exigent une clé d'API de rôle worker et gardent leur protocole actuel.
-`GET /api/v1/me` renvoie le rôle, les droits et le type de nœud qui pilotent l'interface.
+`GET /api/v1/me` renvoie le rôle, les droits et le type d'installation qui pilotent l'interface.
 
 ## Téléchargements en flux
 

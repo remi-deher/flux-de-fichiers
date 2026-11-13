@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "frontend", "shared"]
+members = [".", "frontend", "shared", "client"]
 resolver = "2"
 
 [package]
@@ -11,7 +11,7 @@ rust-version = "1.99"
 [dependencies]
 anyhow = "1.0"
 argon2 = "0.5"
-flux-shared = { path = "shared" }
+flux-shared = { path = "shared", features = ["sqlx"] }
 axum = { version = "0.8", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde"] }
 flate2 = "1.0"

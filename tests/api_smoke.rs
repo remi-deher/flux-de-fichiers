@@ -1,4 +1,4 @@
-//! Tests d'intégration rapides en Rust pur pour l'API du coordinateur.
+//! Tests d'intégration rapides en Rust pur pour l'API du central.
 
 mod common;
 

@@ -1,4 +1,4 @@
-//! Interface d'un worker : connexion déléguée ou de secours, vues limitées au nœud (ADR 0011, phase 3).
+//! Interface d'un worker : connexion déléguée ou de secours, vues limitées au worker (ADR 0011, phase 3).
 
 use axum::{
     body::{Body, to_bytes},
@@ -18,7 +18,7 @@ const HOST: &str = "localhost:3000";
 const ORIGIN: &str = "http://localhost:3000";
 const RESPONSE_LIMIT_BYTES: usize = 64 * 1024;
 const PASSWORD: &str = "un-bon-mot-de-passe";
-const NODE: &str = "nas-1";
+const WORKER_NAME: &str = "nas-1";
 const DEAD_CENTRAL: &str = "http://127.0.0.1:9";
 
 fn config_in(dir: &Path) -> anyhow::Result<Config> {
@@ -134,10 +134,10 @@ impl Cookies {
     }
 }
 
-/// Une vraie centrale installée sur un port local, et la clé du nœud `NODE`.
+/// Un vrai central installé sur un port local, et la clé du worker `WORKER_NAME`.
 struct Fixture {
     central_url: String,
-    node_key: String,
+    worker_key: String,
     central_app: axum::Router,
     server: tokio::task::JoinHandle<std::io::Result<()>>,
     _dir: tempfile::TempDir,
@@ -151,25 +151,25 @@ async fn fixture(admin: &str) -> anyhow::Result<Fixture> {
         &central_app,
         "/api/v1/setup/central",
         None,
-        serde_json::json!({"name": "Centrale", "username": admin, "password": PASSWORD}),
+        serde_json::json!({"name": "Central", "username": admin, "password": PASSWORD}),
     )
     .await?;
     assert_eq!(setup.status, StatusCode::OK);
     let enrolled = post(
         &central_app,
-        "/api/v1/nodes/enroll",
+        "/api/v1/workers/enroll",
         None,
-        serde_json::json!({"username": admin, "password": PASSWORD, "node_name": NODE}),
+        serde_json::json!({"username": admin, "password": PASSWORD, "worker_name": WORKER_NAME}),
     )
     .await?;
-    let node_key = enrolled.body["key"].as_str().unwrap_or_default().to_owned();
+    let worker_key = enrolled.body["key"].as_str().unwrap_or_default().to_owned();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let central_url = format!("http://{}", listener.local_addr()?);
     let served = central_app.clone();
     let server = tokio::spawn(async move { axum::serve(listener, served).await });
     Ok(Fixture {
         central_url,
-        node_key,
+        worker_key,
         central_app,
         server,
         _dir: dir,
@@ -180,7 +180,7 @@ fn worker_web(config_dir: &Path, central_url: &str, key: &str) -> anyhow::Result
     let config = config_in(config_dir)?;
     let cache = config.tools_cache_dir.clone();
     Ok(WorkerWeb::new(
-        WorkerState::new(NODE, central_url),
+        WorkerState::new(WORKER_NAME, central_url),
         Arc::new(config),
         CentralClient::new(reqwest::Client::new(), central_url.parse()?, key.to_owned()),
         cache,
@@ -205,7 +205,7 @@ async fn test_login_is_delegated_to_the_central_and_opens_a_memory_session() -> 
     let worker = worker_router(worker_web(
         dir.path(),
         &fixture.central_url,
-        &fixture.node_key,
+        &fixture.worker_key,
     )?);
 
     let wrong = login(&worker, admin, "mauvais-mot-de-passe").await?;
@@ -218,10 +218,10 @@ async fn test_login_is_delegated_to_the_central_and_opens_a_memory_session() -> 
 
     let me = get(&worker, "/api/v1/me", Some(&cookies), None).await?;
     assert_eq!(me.status, StatusCode::OK);
-    assert_eq!(me.body["nodeKind"], "worker");
+    assert_eq!(me.body["instanceKind"], "worker");
     assert_eq!(me.body["role"], "admin");
     assert_eq!(me.body["name"], admin);
-    assert_eq!(me.body["instanceName"], NODE);
+    assert_eq!(me.body["instanceName"], WORKER_NAME);
 
     let session = get(&worker, "/api/v1/auth/session", Some(&cookies), None).await?;
     assert_eq!(session.status, StatusCode::OK);
@@ -250,17 +250,17 @@ async fn test_login_is_delegated_to_the_central_and_opens_a_memory_session() -> 
 }
 
 #[tokio::test]
-async fn test_views_need_a_session_and_come_from_the_node_routes() -> anyhow::Result<()> {
+async fn test_views_need_a_session_and_come_from_the_worker_routes() -> anyhow::Result<()> {
     let admin = "admin-vues";
     let fixture = fixture(admin).await?;
     let dir = tempfile::tempdir()?;
     let worker = worker_router(worker_web(
         dir.path(),
         &fixture.central_url,
-        &fixture.node_key,
+        &fixture.worker_key,
     )?);
     for path in [
-        "/api/v1/node/overview",
+        "/api/v1/worker/overview",
         "/api/v1/jobs",
         "/api/v1/plugins",
         "/api/v1/tools",
@@ -270,9 +270,9 @@ async fn test_views_need_a_session_and_come_from_the_node_routes() -> anyhow::Re
     }
     let cookies = Cookies::from_headers(&login(&worker, admin, PASSWORD).await?.headers);
 
-    let overview = get(&worker, "/api/v1/node/overview", Some(&cookies), None).await?;
+    let overview = get(&worker, "/api/v1/worker/overview", Some(&cookies), None).await?;
     assert_eq!(overview.status, StatusCode::OK);
-    assert_eq!(overview.body["name"], NODE);
+    assert_eq!(overview.body["name"], WORKER_NAME);
     assert_eq!(overview.body["jobs"]["queued"], 0);
 
     let jobs = get(&worker, "/api/v1/jobs", Some(&cookies), None).await?;
@@ -297,7 +297,7 @@ async fn test_local_copy_logs_in_only_while_the_central_is_unreachable() -> anyh
     let admin = "admin-secours";
     let fixture = fixture(admin).await?;
     let dir = tempfile::tempdir()?;
-    let live = worker_web(dir.path(), &fixture.central_url, &fixture.node_key)?;
+    let live = worker_web(dir.path(), &fixture.central_url, &fixture.worker_key)?;
     live.sync_accounts()
         .await
         .map_err(|_| anyhow::anyhow!("synchronisation"))?;
@@ -305,8 +305,8 @@ async fn test_local_copy_logs_in_only_while_the_central_is_unreachable() -> anyh
     let raw = std::fs::read_to_string(dir.path().join("accounts.json"))?;
     assert!(!raw.contains(PASSWORD));
 
-    // Centrale coupée : la copie persistée (relue au démarrage) permet de se connecter.
-    let isolated = worker_router(worker_web(dir.path(), DEAD_CENTRAL, &fixture.node_key)?);
+    // Central coupé : la copie persistée (relue au démarrage) permet de se connecter.
+    let isolated = worker_router(worker_web(dir.path(), DEAD_CENTRAL, &fixture.worker_key)?);
     let opened = login(&isolated, admin, PASSWORD).await?;
     assert_eq!(opened.status, StatusCode::OK);
     assert_eq!(
@@ -321,14 +321,14 @@ async fn test_local_copy_logs_in_only_while_the_central_is_unreachable() -> anyh
     let blank = worker_router(worker_web(
         empty_dir.path(),
         DEAD_CENTRAL,
-        &fixture.node_key,
+        &fixture.worker_key,
     )?);
     assert_eq!(
         login(&blank, admin, PASSWORD).await?.status,
         StatusCode::UNAUTHORIZED
     );
 
-    // Les vues, elles, exigent la centrale.
+    // Les vues, elles, exigent le central.
     let cookies = Cookies::from_headers(&opened.headers);
     let jobs = get(&isolated, "/api/v1/jobs", Some(&cookies), None).await?;
     assert_eq!(jobs.status, StatusCode::BAD_GATEWAY);
@@ -337,15 +337,15 @@ async fn test_local_copy_logs_in_only_while_the_central_is_unreachable() -> anyh
 }
 
 #[tokio::test]
-async fn test_central_node_routes_serve_worker_keys_only() -> anyhow::Result<()> {
+async fn test_central_worker_routes_serve_worker_keys_only() -> anyhow::Result<()> {
     let admin = "admin-routes";
     let fixture = fixture(admin).await?;
-    let key = fixture.node_key.as_str();
+    let key = fixture.worker_key.as_str();
     for path in [
-        "/api/v1/node/overview",
-        "/api/v1/node/jobs",
-        "/api/v1/node/plugins",
-        "/api/v1/node/accounts",
+        "/api/v1/worker/overview",
+        "/api/v1/worker/jobs",
+        "/api/v1/worker/plugins",
+        "/api/v1/worker/accounts",
     ] {
         let anonymous = get(&fixture.central_app, path, None, None).await?;
         assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED, "{path}");
@@ -354,7 +354,7 @@ async fn test_central_node_routes_serve_worker_keys_only() -> anyhow::Result<()>
     }
     let accounts = get(
         &fixture.central_app,
-        "/api/v1/node/accounts",
+        "/api/v1/worker/accounts",
         None,
         Some(key),
     )
@@ -371,7 +371,7 @@ async fn test_central_node_routes_serve_worker_keys_only() -> anyhow::Result<()>
             .is_some_and(|hash| hash.starts_with("$argon2"))
     );
 
-    let login_url = "/api/v1/node/login";
+    let login_url = "/api/v1/worker/login";
     let credentials = serde_json::json!({"username": admin, "password": PASSWORD});
     let anonymous = post(&fixture.central_app, login_url, None, credentials.clone()).await?;
     assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
@@ -400,11 +400,11 @@ async fn test_health_and_status_stay_public_on_a_worker() -> anyhow::Result<()> 
         get(&worker, "/health", None, None).await?.status,
         StatusCode::NO_CONTENT
     );
-    let status = get(&worker, "/api/v1/node/status", None, None).await?;
-    assert_eq!(status.body["nodeKind"], "worker");
+    let status = get(&worker, "/api/v1/instance/status", None, None).await?;
+    assert_eq!(status.body["instanceKind"], "worker");
     assert_eq!(status.body["registered"], false);
     let setup = get(&worker, "/api/v1/setup/status", None, None).await?;
     assert_eq!(setup.body["needsSetup"], false);
-    assert_eq!(setup.body["nodeKind"], "worker");
+    assert_eq!(setup.body["instanceKind"], "worker");
     Ok(())
 }

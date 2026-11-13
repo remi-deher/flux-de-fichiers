@@ -1,6 +1,7 @@
 # Développement : lire selon la tâche
 
 `AGENTS.md` contient les règles permanentes ; `CLAUDE.md` l'importe sans copie.
+État du chantier, points non vérifiés et suite : [`reprise.md`](reprise.md).
 Ce guide se consulte à la demande. Le README reste la référence d'utilisation
 (démarrage, API, scénarios, déploiement), les ADR celle des décisions.
 
@@ -12,22 +13,23 @@ Ce guide se consulte à la demande. Le README reste la référence d'utilisation
 | Baux, attribution, reprises | `src/repository.rs`, `src/domain.rs` | `migrations/`, `src/worker.rs` |
 | Transferts, intégrité, publication | `src/api/transfers.rs`, `src/storage.rs` | `src/media.rs`, `src/worker.rs` |
 | Remuxage MKV | `src/media.rs`, `src/worker.rs` | `scripts/scenarios.py` |
-| Interface Leptos | `frontend/` | `frontend/README.md` |
-| Page Paramètres, barre latérale (compte, thème) | `frontend/src/features/settings/`, `frontend/src/core/shell.rs`, `frontend/src/client/settings.rs` | `src/api/system.rs`, `tests/system_status.rs` |
-| Rôle du nœud, enrôlement d'un worker | `src/node.rs`, `src/node_settings.rs`, `src/api/nodes.rs` | `src/worker_http.rs`, `src/api/node_view.rs`, `tests/nodes_api.rs`, `tests/worker_web.rs`, `docs/adr/0011-installation-comptes-et-noeuds.md` |
+| Page HTML et thème (CSS typé) | `frontend/src/lib.rs`, `frontend/src/theme/` | `frontend/README.md` |
+| Interface (client Leptos WASM, ADR 0014) | `client/src/` (un dossier par écran), contrat dans `shared/src/` | `docs/adr/0014-client-leptos-wasm.md`, `Dockerfile` |
+| Paramètres (compte, thème, comptes, clés, système) | `client/src/settings/`, `client/src/theme.rs` | `src/api/system.rs`, `tests/system_status.rs` |
+| Rôle de l'installation, enrôlement d'un worker | `src/instance.rs`, `src/worker_settings.rs`, `src/api/installation.rs` | `src/worker_http.rs`, `src/api/worker_view.rs`, `tests/installation_api.rs`, `tests/worker_web.rs`, `docs/adr/0011-installation-comptes-et-noeuds.md` |
 | Secrets chiffrés, rotation de clé, mot de passe oublié | `src/secrets.rs`, `src/secret_rotation.rs`, `src/account_admin.rs` | `tests/secret_rotation.rs`, `tests/password_reset.rs`, `docs/adr/0011-installation-comptes-et-noeuds.md` |
 | Configuration, TLS | `src/config.rs`, `tests/configuration.rs` | `compose.yaml`, `deploy/` ; déploiement dans le README |
 | Laboratoire Docker | `package.json`, `scripts/dev.py`, `compose.yaml` | Scénarios du README, `deploy/fixtures.Dockerfile` |
 | CI, branches, publication | `docs/adr/0002-flux-git.md` | Workflow concerné dans `.github/workflows/`, `scripts/ci/` |
 
-Un seul crate et un seul binaire, deux modes : coordinateur ou agent. Les façades
-`node`, `coordinator`, `execution`, `workers`, `plugins`, `flows`, `storage` et
+Un seul crate et un seul binaire, deux modes : central ou worker. Les façades
+`instance`, `central`, `execution`, `workers`, `plugins`, `flows`, `storage` et
 `security` rendent les responsabilités visibles ; voir
 [`architecture/deux-depots.md`](architecture/deux-depots.md) pour les frontières
 entre socle et dépôt plugins. Seul le
-coordinateur accède à SQLite (`/config/flux.db`) ; les agents échangent avec lui par HTTP
+central accède à SQLite (`/config/flux.db`) ; les workers échangent avec lui par HTTP
 (TLS éventuel via le reverse proxy externe).
-Les migrations sont embarquées et appliquées au démarrage du coordinateur.
+Les migrations sont embarquées et appliquées au démarrage du central.
 
 ## Vérifier selon le changement
 
@@ -42,7 +44,7 @@ Les migrations sont embarquées et appliquées au démarrage du coordinateur.
 - CI : vérifier le workflow concerné. Le job `docker-scenarios` de `test.yml`
   démarre l'image `pr-<sha12>` et attend `/health`, sans reconstruire le service.
   Sur la PR `test → main`, `main-checks.yml` tire l'image `test-<sha12>` à promouvoir
-  et démarre coordinateur et worker avec `compose.yaml`. Sans changement de code,
+  et démarre central et worker avec `compose.yaml`. Sans changement de code,
   les étapes de `test.yml` sont sautées et le check reste vert ; cela ne constitue
   pas une nouvelle exécution.
 

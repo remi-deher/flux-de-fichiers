@@ -2,24 +2,15 @@
 
 use crate::{
     error::{AppError, AppResult},
-    node_view::AccountCopy,
+    worker_view::AccountCopy,
 };
 use flux_shared::Role;
-use serde::Serialize;
+pub use flux_shared::accounts::{Account, ApiKeyRecord};
 use sqlx::{FromRow, SqlitePool};
 use uuid::Uuid;
 
-/// Clé du réglage d'instance qui porte le nom de la centrale.
+/// Clé du réglage d'instance qui porte le nom du central.
 pub const INSTANCE_NAME_KEY: &str = "instance_name";
-
-/// Un compte humain. Le haché du mot de passe n'en fait jamais partie.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Account {
-    pub id: String,
-    pub username: String,
-    pub role: Role,
-    pub disabled: bool,
-}
 
 #[derive(FromRow)]
 struct AccountRow {
@@ -96,7 +87,7 @@ pub async fn create_account(
     })
 }
 
-/// Change le rôle et/ou l'état d'un compte, sans jamais laisser la centrale sans administrateur actif.
+/// Change le rôle et/ou l'état d'un compte, sans jamais laisser le central sans administrateur actif.
 /// La version du compte augmente et ses sessions sont fermées : les droits changent tout de suite.
 pub async fn update_account(
     pool: &SqlitePool,
@@ -161,18 +152,6 @@ pub async fn list_account_copies(pool: &SqlitePool) -> AppResult<Vec<AccountCopy
         })
     })
     .collect()
-}
-
-/// Clé d'API telle que listée : jamais son secret ni son haché.
-#[derive(Clone, Debug, PartialEq, Eq, FromRow, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ApiKeyRecord {
-    pub id: String,
-    pub name: String,
-    pub role: String,
-    pub created_at: String,
-    pub last_used_at: Option<String>,
-    pub revoked_at: Option<String>,
 }
 
 pub async fn account_count(pool: &SqlitePool) -> AppResult<i64> {

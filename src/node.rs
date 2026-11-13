@@ -5,7 +5,7 @@
 //! restent acceptés comme arguments pour l'automatisation.
 
 use crate::{
-    api, config,
+    account_admin, api, config,
     config::Config,
     node_settings,
     worker::{self, WorkerConfig},
@@ -50,7 +50,9 @@ fn parse_role(argument: Option<&str>) -> anyhow::Result<Option<Role>> {
         Some("worker") => Ok(Some(Role::Worker)),
         Some("coordinator") => Ok(Some(Role::Coordinator)),
         None => Ok(None),
-        _ => anyhow::bail!("Usage: flux-de-fichiers [coordinator|worker|--version]"),
+        _ => anyhow::bail!(
+            "Usage: flux-de-fichiers [coordinator|worker|reset-password <identifiant>|--version]"
+        ),
     }
 }
 
@@ -68,10 +70,26 @@ fn initial_role(argument: Option<&str>) -> anyhow::Result<Role> {
     )
 }
 
-pub async fn run(argument: Option<&str>) -> anyhow::Result<()> {
+/// Réinitialise le mot de passe d'un compte de cette centrale et l'affiche une seule fois.
+async fn reset_password(username: Option<&str>) -> anyhow::Result<()> {
+    let username = username
+        .ok_or_else(|| anyhow::anyhow!("Usage: flux-de-fichiers reset-password <identifiant>"))?;
+    let pool = api::connect_database(&Config::load()?).await?;
+    let new_password = account_admin::reset_password(&pool, username)
+        .await
+        .map_err(|error| anyhow::anyhow!("réinitialisation impossible : {error}"))?;
+    println!("Nouveau mot de passe de {username} : {new_password}");
+    println!("Il n'est affiché qu'une fois ; les sessions du compte sont fermées.");
+    Ok(())
+}
+
+pub async fn run(argument: Option<&str>, operand: Option<&str>) -> anyhow::Result<()> {
     if argument == Some("--version") {
         println!("{}", env!("CARGO_PKG_VERSION"));
         return Ok(());
+    }
+    if argument == Some("reset-password") {
+        return reset_password(operand).await;
     }
     let mut role = initial_role(argument)?;
     loop {

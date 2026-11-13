@@ -12,5 +12,8 @@ async fn main() -> anyhow::Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
-    node::run(std::env::args().nth(1).as_deref()).await
+    let mut arguments = std::env::args().skip(1);
+    let command = arguments.next();
+    let operand = arguments.next();
+    node::run(command.as_deref(), operand.as_deref()).await
 }

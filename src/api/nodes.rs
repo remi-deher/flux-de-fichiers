@@ -68,9 +68,13 @@ pub async fn setup_worker(
 ) -> AppResult<StatusCode> {
     web_session::validate_origin(&headers, &state.config)?;
     let config_dir = &state.config.config_dir;
-    if repository::account_count(&state.pool).await? > 0
-        || node_settings::load_worker(config_dir)?.is_some()
-    {
+    let already_worker = node_settings::load_worker(config_dir)
+        .map_err(|error| {
+            tracing::error!(error = %error, "rôle du nœud illisible");
+            AppError::Internal
+        })?
+        .is_some();
+    if already_worker || repository::account_count(&state.pool).await? > 0 {
         return Err(AppError::AlreadyConfigured);
     }
     if !node_settings::is_valid_node_name(&request.node_name) {

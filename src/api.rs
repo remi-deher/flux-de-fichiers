@@ -296,7 +296,8 @@ async fn plugin_sync_loop(state: AppState) {
     }
 }
 
-pub async fn serve(config: Config) -> anyhow::Result<()> {
+/// Ouvre la base SQLite de la centrale et applique les migrations embarquées.
+pub async fn connect_database(config: &Config) -> anyhow::Result<SqlitePool> {
     let connect_options = if config.database_url.starts_with("sqlite:") {
         SqliteConnectOptions::from_str(&config.database_url)?
     } else {
@@ -315,6 +316,11 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         .await?;
 
     sqlx::migrate!().run(&pool).await?;
+    Ok(pool)
+}
+
+pub async fn serve(config: Config) -> anyhow::Result<()> {
+    let pool = connect_database(&config).await?;
     tokio::fs::create_dir_all(config.data_dir.join("output")).await?;
     tokio::fs::create_dir_all(config.data_dir.join("staging")).await?;
     tokio::fs::create_dir_all(&config.input_dir).await?;

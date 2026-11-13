@@ -108,7 +108,9 @@ centrale dans le bandeau.
   toucher `/data`), recréer le compte par l'assistant, créer les clés worker dans Réglages, mettre à
   jour les workers (`WORKER_KEY_FILE` = clé d'API de rôle worker), redéployer l'app TrueNAS
   `flux-essai` et copier `frontend/dist/index.html` dans le volume.
-- Pistes non prioritaires : récupération de mot de passe oublié, rôles supplémentaires, rotation de la
+- Mot de passe oublié : fait en ligne de commande, `flux-de-fichiers reset-password <identifiant>` dans le
+  conteneur (mot de passe généré, affiché une fois, sessions du compte fermées ; `src/account_admin.rs`).
+- Pistes non prioritaires : rôles supplémentaires, rotation de la
   clé de chiffrement (identifiant de clé déjà présent dans `enc:v2:`).
 
 ## Conséquences et limites

@@ -138,6 +138,40 @@ pub fn decrypt_headers(
     Ok(())
 }
 
+/// Re-chiffre avec la nouvelle clé les en-têtes d'une définition de flux ; `None` s'il n'y en a pas.
+/// Renvoie la définition réécrite et le nombre de valeurs changées.
+pub fn rotate_definition(
+    old: &SecretBox,
+    new: &SecretBox,
+    flow_id: &str,
+    definition: &str,
+) -> AppResult<Option<(String, usize)>> {
+    let Ok(mut value) = serde_json::from_str::<Value>(definition) else {
+        return Ok(None);
+    };
+    let mut rotated = 0;
+    for node in nodes_of(&mut value) {
+        let id = node_id(node);
+        let Some(headers) = headers_of(node) else {
+            continue;
+        };
+        for (name, header_value) in headers.iter_mut() {
+            let Some(text) = header_value.as_str().filter(|text| is_encrypted(text)) else {
+                continue;
+            };
+            let aad = header_aad(flow_id, &id, name);
+            let plaintext = old.decrypt(text, &aad)?;
+            *header_value = Value::String(new.encrypt(&plaintext, &aad)?);
+            rotated += 1;
+        }
+    }
+    if rotated == 0 {
+        return Ok(None);
+    }
+    let rewritten = serde_json::to_string(&value).map_err(|_| AppError::Invalid)?;
+    Ok(Some((rewritten, rotated)))
+}
+
 /// Chiffre au démarrage les en-têtes encore en clair des flux déjà enregistrés.
 pub async fn migrate_flow_secrets(pool: &SqlitePool, secrets: &SecretBox) -> AppResult<usize> {
     let flows: Vec<(String, String)> = sqlx::query_as("SELECT id, definition FROM flows")

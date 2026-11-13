@@ -16,6 +16,7 @@ pub mod node_view;
 pub mod password;
 pub mod plugins;
 pub mod repository;
+pub mod secret_rotation;
 pub mod secrets;
 pub mod storage;
 pub mod telemetry;

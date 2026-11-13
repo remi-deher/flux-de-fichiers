@@ -12,7 +12,8 @@ pub use arr::{ArrAction, ArrBlock, ArrConnection, ArrContext, ArrService, execut
 pub use block::{FlowBlockKind, StepDecision, decide_step};
 pub use condition::{ConditionConfig, evaluate_condition};
 pub use header_secrets::{
-    decrypt_headers, has_webhook_headers, mask_definition, migrate_flow_secrets, seal_definition,
+    decrypt_headers, has_webhook_headers, mask_definition, migrate_flow_secrets, rotate_definition,
+    seal_definition,
 };
 pub use route::next_connection;
 pub use tool::{InPlaceEdit, in_place_edit};

@@ -109,8 +109,13 @@ centrale dans le bandeau.
   `flux-essai` et copier `frontend/dist/index.html` dans le volume.
 - Mot de passe oublié : fait en ligne de commande, `flux-de-fichiers reset-password <identifiant>` dans le
   conteneur (mot de passe généré, affiché une fois, sessions du compte fermées ; `src/account_admin.rs`).
-- Pistes non prioritaires : rôles supplémentaires, rotation de la
-  clé de chiffrement (identifiant de clé déjà présent dans `enc:v2:`).
+- Rotation de la clé de chiffrement : faite, `flux-de-fichiers rotate-secret` dans le conteneur
+  (`src/secret_rotation.rs`). Sauvegarde d'abord dans `/config/backups/secret-rotation-<date>-<clé>/`
+  (ancienne clé, nouvelle clé, copie cohérente de la base), puis rechiffrement de tous les secrets
+  (réglages de plugins, en-têtes de webhook) en une seule transaction : une valeur illisible annule tout.
+  Le fichier de clé n'est remplacé qu'après le commit. Refusée si `SECRET_KEY_FILE` est défini (la clé
+  appartient alors à l'orchestrateur). À lancer centrale arrêtée de préférence.
+- Pistes non prioritaires : rôles supplémentaires (il faut d'abord décider des rôles et des droits).
 
 ## Conséquences et limites
 

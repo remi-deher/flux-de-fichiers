@@ -78,6 +78,11 @@ impl SecretBox {
             Some(path) => fs::read_to_string(path)?,
             None => Self::read_or_create_local_key(config_dir)?,
         };
+        Self::from_key_hex(&key_hex)
+    }
+
+    /// Boîte construite sur une clé de 32 octets écrite en hexadécimal.
+    pub fn from_key_hex(key_hex: &str) -> AppResult<Self> {
         let key_bytes = decode_hex(key_hex.trim())
             .filter(|bytes| bytes.len() == KEY_BYTES)
             .ok_or(AppError::Internal)?;
@@ -85,6 +90,16 @@ impl SecretBox {
             cipher: ChaCha20Poly1305::new(Key::from_slice(&key_bytes)),
             key_id: key_id_of(&key_bytes),
         })
+    }
+
+    /// Nouvelle clé aléatoire, en hexadécimal, prête à être écrite dans un fichier de clé.
+    pub fn generate_key_hex() -> String {
+        encode_hex(&ChaCha20Poly1305::generate_key(&mut OsRng))
+    }
+
+    /// Fichier de la clé locale dans le dossier de configuration.
+    pub fn local_key_path(config_dir: &Path) -> std::path::PathBuf {
+        config_dir.join(KEY_FILE_NAME)
     }
 
     fn read_or_create_local_key(config_dir: &Path) -> AppResult<String> {

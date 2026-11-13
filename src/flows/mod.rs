@@ -228,7 +228,12 @@ impl<'a> FlowEngine<'a> {
             if let Some(webhook_cfg) = &decision.notify {
                 let mut webhook_cfg = webhook_cfg.clone();
                 if let Some(dir) = self.secrets_dir {
-                    decrypt_headers(&crate::secrets::SecretBox::open(dir)?, &mut webhook_cfg)?;
+                    decrypt_headers(
+                        &crate::secrets::SecretBox::open(dir)?,
+                        &flow.id,
+                        &node.id,
+                        &mut webhook_cfg,
+                    )?;
                 }
                 execute_webhook_block(&webhook_cfg, &step_ctx, self.http_client).await?;
             }

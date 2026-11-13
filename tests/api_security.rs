@@ -1,3 +1,5 @@
+mod common;
+
 use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
@@ -20,8 +22,6 @@ fn app() -> anyhow::Result<axum::Router> {
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
         static_dir: "frontend/dist".into(),
-        admin_key: "test-admin-key-not-a-real-credential".into(),
-        worker_key: "test-worker-key-not-a-real-credential".into(),
         max_file_bytes: 1024,
         local_worker: false,
         web_origin: None,
@@ -37,6 +37,51 @@ fn app() -> anyhow::Result<axum::Router> {
     }))
 }
 
+async fn migrated_app(
+    web_origin: Option<&str>,
+) -> anyhow::Result<(axum::Router, sqlx::SqlitePool)> {
+    let config = Config {
+        bind: "127.0.0.1:3000".parse()?,
+        database_url: "sqlite::memory:".into(),
+        data_dir: "var".into(),
+        input_dir: "var/input".into(),
+        config_dir: "var/config".into(),
+        tools_cache_dir: "var/tools-cache".into(),
+        plugins_dir: None,
+        static_dir: "frontend/dist".into(),
+        max_file_bytes: 1024,
+        local_worker: false,
+        web_origin: web_origin.map(str::to_owned),
+        web_session_ttl_seconds: 28_800,
+        tls: None,
+    };
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&config.database_url)
+        .await?;
+    sqlx::migrate!().run(&pool).await?;
+    common::install_keys(&pool).await?;
+    let (events_tx, _) = tokio::sync::broadcast::channel(128);
+    let app = router(AppState {
+        pool: pool.clone(),
+        config: Arc::new(config),
+        events_tx,
+    });
+    Ok((app, pool))
+}
+
+fn login_request(host: &str, origin: &str) -> anyhow::Result<Request<Body>> {
+    Ok(Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/login")
+        .header("host", host)
+        .header("content-type", "application/json")
+        .header("origin", origin)
+        .body(Body::from(
+            r#"{"username":"inconnu","password":"pas-le-bon-mot-de-passe"}"#,
+        ))?)
+}
+
 #[tokio::test]
 async fn protected_routes_reject_missing_keys_before_accessing_resources() -> anyhow::Result<()> {
     for path in [
@@ -49,6 +94,8 @@ async fn protected_routes_reject_missing_keys_before_accessing_resources() -> an
         "/api/v1/tools",
         "/api/v1/config",
         "/api/v1/auth/session",
+        "/api/v1/me",
+        "/api/v1/api-keys",
         "/api/v1/workers",
         "/api/v1/jobs/00000000-0000-0000-0000-000000000001/output",
         "/api/v1/jobs/00000000-0000-0000-0000-000000000001/source",
@@ -67,106 +114,88 @@ async fn protected_routes_reject_missing_keys_before_accessing_resources() -> an
 }
 
 #[tokio::test]
-async fn session_login_rejects_untrusted_origin_and_invalid_key() -> anyhow::Result<()> {
-    let request = Request::builder()
-        .method("POST")
-        .uri("/api/v1/auth/session")
-        .header("host", "localhost:3000")
-        .header("content-type", "application/json")
-        .header("origin", "https://attacker.example")
-        .body(Body::from(r#"{"admin_key":"not-the-admin-key"}"#))?;
-    let response = app()?.oneshot(request).await?;
+async fn login_rejects_untrusted_origin_and_unknown_credentials() -> anyhow::Result<()> {
+    let (app, _) = migrated_app(None).await?;
+    let response = app
+        .clone()
+        .oneshot(login_request("localhost:3000", "https://attacker.example")?)
+        .await?;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
-    let request = Request::builder()
-        .method("POST")
-        .uri("/api/v1/auth/session")
-        .header("host", "localhost:3000")
-        .header("content-type", "application/json")
-        .header("origin", "http://localhost:3000")
-        .body(Body::from(r#"{"admin_key":"not-the-admin-key"}"#))?;
-    let response = app()?.oneshot(request).await?;
+    let response = app
+        .oneshot(login_request("localhost:3000", "http://localhost:3000")?)
+        .await?;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     Ok(())
 }
 
 #[tokio::test]
-async fn session_login_accepts_nas_ip_when_web_origin_not_set() -> anyhow::Result<()> {
-    let request = Request::builder()
-        .method("POST")
-        .uri("/api/v1/auth/session")
-        .header("host", "192.168.1.50:3000")
-        .header("content-type", "application/json")
-        .header("origin", "http://192.168.1.50:3000")
-        .body(Body::from(r#"{"admin_key":"not-the-admin-key"}"#))?;
-    let response = app()?.oneshot(request).await?;
+async fn login_accepts_nas_ip_when_web_origin_not_set() -> anyhow::Result<()> {
+    let (app, _) = migrated_app(None).await?;
+    let response = app
+        .clone()
+        .oneshot(login_request(
+            "192.168.1.50:3000",
+            "http://192.168.1.50:3000",
+        )?)
+        .await?;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-    let request = Request::builder()
-        .method("POST")
-        .uri("/api/v1/auth/session")
-        .header("host", "192.168.1.50:3000")
-        .header("content-type", "application/json")
-        .header("origin", "http://attacker.example")
-        .body(Body::from(r#"{"admin_key":"not-the-admin-key"}"#))?;
-    let response = app()?.oneshot(request).await?;
+    let response = app
+        .oneshot(login_request(
+            "192.168.1.50:3000",
+            "http://attacker.example",
+        )?)
+        .await?;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     Ok(())
 }
 
 #[tokio::test]
 async fn explicit_web_origin_strictly_enforces_configured_origin() -> anyhow::Result<()> {
-    let config = Config {
-        bind: "127.0.0.1:3000".parse()?,
-        database_url: "sqlite::memory:".into(),
-        data_dir: "var".into(),
-        input_dir: "var/input".into(),
-        config_dir: "var/config".into(),
-        tools_cache_dir: "var/tools-cache".into(),
-        plugins_dir: None,
-        static_dir: "frontend/dist".into(),
-        admin_key: "test-admin-key-not-a-real-credential".into(),
-        worker_key: "test-worker-key-not-a-real-credential".into(),
-        max_file_bytes: 1024,
-        local_worker: false,
-        web_origin: Some("http://custom.domain.local:3000".into()),
-        web_session_ttl_seconds: 28_800,
-        tls: None,
-    };
-    let pool = SqlitePoolOptions::new().connect_lazy(&config.database_url)?;
-    let (events_tx, _) = tokio::sync::broadcast::channel(128);
-    let app = router(AppState {
-        pool,
-        config: Arc::new(config),
-        events_tx,
-    });
-
-    let request = Request::builder()
-        .method("POST")
-        .uri("/api/v1/auth/session")
-        .header("host", "custom.domain.local:3000")
-        .header("content-type", "application/json")
-        .header("origin", "http://custom.domain.local:3000")
-        .body(Body::from(r#"{"admin_key":"not-the-admin-key"}"#))?;
-    let response = app.clone().oneshot(request).await?;
+    let (app, _) = migrated_app(Some("http://custom.domain.local:3000")).await?;
+    let response = app
+        .clone()
+        .oneshot(login_request(
+            "custom.domain.local:3000",
+            "http://custom.domain.local:3000",
+        )?)
+        .await?;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-    let request = Request::builder()
-        .method("POST")
-        .uri("/api/v1/auth/session")
-        .header("host", "other.domain.local:3000")
-        .header("content-type", "application/json")
-        .header("origin", "http://other.domain.local:3000")
-        .body(Body::from(r#"{"admin_key":"not-the-admin-key"}"#))?;
-    let response = app.oneshot(request).await?;
+    let response = app
+        .oneshot(login_request(
+            "other.domain.local:3000",
+            "http://other.domain.local:3000",
+        )?)
+        .await?;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_old_key_less_web_session_endpoint_no_longer_exists() -> anyhow::Result<()> {
+    let (app, _) = migrated_app(None).await?;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/session")
+                .header("host", "localhost:3000")
+                .header("content-type", "application/json")
+                .header("origin", "http://localhost:3000")
+                .body(Body::from("{}"))?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
     Ok(())
 }
 
 #[tokio::test]
 async fn authorization_header_takes_priority_over_web_session_cookie() -> anyhow::Result<()> {
     use axum::http::{HeaderMap, Method};
-    use flux_de_fichiers::web_session::authorize_admin;
+    use flux_de_fichiers::auth::authenticate;
+    let (_, pool) = migrated_app(None).await?;
     let config = Config {
         bind: "127.0.0.1:3000".parse()?,
         database_url: "sqlite::memory:".into(),
@@ -176,30 +205,24 @@ async fn authorization_header_takes_priority_over_web_session_cookie() -> anyhow
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
         static_dir: "frontend/dist".into(),
-        admin_key: "test-admin-key-not-a-real-credential".into(),
-        worker_key: "test-worker-key-not-a-real-credential".into(),
         max_file_bytes: 1024,
         local_worker: false,
         web_origin: None,
         web_session_ttl_seconds: 28_800,
         tls: None,
     };
-    let pool = SqlitePoolOptions::new().connect_lazy(&config.database_url)?;
     let mut headers = HeaderMap::new();
     headers.insert(
         "authorization",
-        "Bearer test-admin-key-not-a-real-credential".parse()?,
+        format!("Bearer {}", common::ADMIN_KEY).parse()?,
     );
-    assert!(
-        authorize_admin(&pool, &config, &headers, &Method::GET)
-            .await
-            .is_ok()
-    );
+    let principal = authenticate(&pool, &config, &headers, &Method::GET).await?;
+    assert_eq!(principal.role, flux_shared::Role::Admin);
 
     headers.insert("authorization", "Bearer invalid".parse()?);
     headers.insert("cookie", "flux_session=valid-session-cookie".parse()?);
     assert!(matches!(
-        authorize_admin(&pool, &config, &headers, &Method::GET).await,
+        authenticate(&pool, &config, &headers, &Method::GET).await,
         Err(flux_de_fichiers::error::AppError::Unauthorized)
     ));
     Ok(())
@@ -216,6 +239,7 @@ fn csrf_requires_matching_cookie_header_and_server_verifier() -> anyhow::Result<
         token_hash: "opaque-session-hash".into(),
         csrf_hash,
         expires_at: Utc::now(),
+        account_id: "account".into(),
     };
     let mut headers = axum::http::HeaderMap::new();
     headers.insert("cookie", format!("flux_csrf={token}").parse()?);
@@ -243,8 +267,6 @@ fn web_cookies_have_scoped_flags_and_secure_on_https() -> anyhow::Result<()> {
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
         static_dir: "frontend/dist".into(),
-        admin_key: "test-admin-key-not-a-real-credential".into(),
-        worker_key: "test-worker-key-not-a-real-credential".into(),
         max_file_bytes: 1024,
         local_worker: false,
         web_origin: Some("https://localhost:3000".into()),

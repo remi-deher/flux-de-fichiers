@@ -1,3 +1,5 @@
+mod common;
+
 use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
@@ -20,8 +22,6 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
         static_dir: "frontend/dist".into(),
-        admin_key: "test-admin-key".into(),
-        worker_key: "test-worker-key".into(),
         max_file_bytes: 1024,
         local_worker: false,
         web_origin: None,
@@ -33,6 +33,7 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         .connect(&config.database_url)
         .await?;
     sqlx::migrate!().run(&pool).await?;
+    common::install_keys(&pool).await?;
     let (events_tx, _) = tokio::sync::broadcast::channel(128);
     Ok(router(AppState {
         pool,
@@ -52,10 +53,10 @@ async fn admin(
     uri: &str,
     body: Option<serde_json::Value>,
 ) -> anyhow::Result<axum::response::Response> {
-    let mut builder = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("authorization", "Bearer test-admin-key");
+    let mut builder = Request::builder().method(method).uri(uri).header(
+        "authorization",
+        "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
     let request = if let Some(body) = body {
         builder = builder.header("content-type", "application/json");
         builder.body(Body::from(serde_json::to_vec(&body)?))?
@@ -69,7 +70,10 @@ async fn register_worker(app: &axum::Router, name: &str) -> anyhow::Result<Strin
     let request = Request::builder()
         .method("POST")
         .uri("/api/v1/workers")
-        .header("authorization", "Bearer test-worker-key")
+        .header(
+            "authorization",
+            "Bearer fdf_b0000001_fedcba9876543210fedcba9876543210fedcba9876543210",
+        )
         .header("content-type", "application/json")
         .body(Body::from(format!(r#"{{"name":"{name}"}}"#)))?;
     let response = app.clone().oneshot(request).await?;

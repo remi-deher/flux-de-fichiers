@@ -28,15 +28,18 @@ via un reverse proxy externe). Au premier démarrage, le coordinateur crée dans
 | Fichier | Rôle |
 |---------|------|
 | `flux.db` | base SQLite (tâches, flux, bibliothèques, réglages) |
-| `admin_key`, `worker_key` | clés admin et worker, générées en 0600 si absentes |
-| `secret_key` | clé de chiffrement des secrets de plugins |
+| `secret_key` | clé de chiffrement des secrets, générée à l'installation (0600) |
 | `plugins/<dépôt>/` | copie locale de chaque dépôt de plugins synchronisé |
 
-Les clés ne sont jamais journalisées ni affichées. Pour un déploiement orchestré, les
-fournir par fichiers : `ADMIN_KEY_FILE`, `WORKER_KEY_FILE`.
+**Première ouverture** : la page d'installation demande le nom de la centrale, puis un
+identifiant et un mot de passe administrateur ; la session s'ouvre ensuite toute seule
+([ADR 0011](docs/adr/0011-installation-comptes-et-noeuds.md)). Tant que l'installation n'est
+pas faite, la page est ouverte à qui atteint le port : à faire sur un réseau de confiance.
+Le secret n'est jamais affiché ; pour le fournir par fichier, `SECRET_KEY_FILE`.
 
 Un agent distant utilise la même image : `docker run … worker` avec `COORDINATOR_URL`,
-`WORKER_KEY_FILE`, `WORKER_NAME`, `WORK_DIR` (voir
+`WORKER_KEY_FILE` (clé d'API de rôle worker créée dans Réglages → Clés d'API),
+`WORKER_NAME`, `WORK_DIR` (voir
 [deploy/worker.compose.yaml](deploy/worker.compose.yaml)).
 
 ## Configuration
@@ -59,10 +62,11 @@ webhooks sont chiffrés au repos et ne sont jamais renvoyés par l'API. Détails
 
 ## API et authentification
 
-Contrat : [docs/openapi.yaml](docs/openapi.yaml). Un client utilise
-`Authorization: Bearer …` : la clé admin crée et lit les tâches et administre la
-plateforme, la clé worker enregistre les agents et exécute les baux. Le navigateur utilise
-une session cookie avec CSRF ([docs/api/session-web.md](docs/api/session-web.md)).
+Contrat : [docs/openapi.yaml](docs/openapi.yaml). Une machine utilise
+`Authorization: Bearer fdf_…` : une clé d'API de rôle admin crée et lit les tâches et
+administre la plateforme, une clé de rôle worker enregistre les agents et exécute les baux
+(clés nommées, révocables, affichées une seule fois). Le navigateur utilise un compte et une
+session cookie avec CSRF ([docs/api/session-web.md](docs/api/session-web.md)).
 
 Créer une tâche : `POST /api/v1/jobs`, corps `{"source_name":"exemple.mkv","target_worker_id":null}`.
 Lire son état avec `GET /api/v1/jobs/{id}` et télécharger le résultat avec

@@ -48,7 +48,7 @@ pub async fn worker_tool_distribution(
     headers: axum::http::HeaderMap,
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
-    crate::auth::authorize(&headers, &s.config.worker_key)?;
+    crate::auth::authorize_worker(&s.pool, &headers).await?;
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     Ok(Json(plugins::read_distribution(&roots, &id)?))
 }
@@ -108,7 +108,7 @@ pub async fn get_settings(
     );
     let names = plugins::secret_names(&schema_fields, keys_of(&saved).iter());
     // Anciens enregistrements en clair : chiffrés à la première lecture.
-    if let Some(migrated) = plugins::migrate_plaintext(&secrets, &saved, &names)? {
+    if let Some(migrated) = plugins::migrate_plaintext(&secrets, &id, &saved, &names)? {
         let migrated_str = serde_json::to_string(&migrated).map_err(|_| AppError::Invalid)?;
         crate::repository::set_plugin_settings(&s.pool, &id, &migrated_str).await?;
         saved = migrated;
@@ -153,7 +153,7 @@ pub async fn save_settings(
         .chain(keys_of(&payload))
         .collect();
     let names = plugins::secret_names(&schema_fields, keys.iter());
-    let sealed = plugins::seal(&secrets, &payload, &existing, &names)?;
+    let sealed = plugins::seal(&secrets, &id, &payload, &existing, &names)?;
     let sealed_str = serde_json::to_string(&sealed).map_err(|_| AppError::Invalid)?;
     crate::repository::set_plugin_settings(&s.pool, &id, &sealed_str).await?;
     let (public, _) = plugins::mask(&sealed, &names);

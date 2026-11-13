@@ -1,12 +1,16 @@
 pub mod auth;
 mod flows;
 mod jobs;
+mod keys;
 mod libraries;
+mod node_view;
+mod nodes;
 mod plugins;
-mod session;
+pub(crate) mod session;
+mod setup;
 pub(crate) mod transfers;
-use crate::{auth::authorize, config::Config, domain::*, error::AppResult, repository};
-pub use auth::AdminAuth;
+use crate::{config::Config, domain::*, error::AppResult, repository};
+pub use auth::{AdminAuth, AnyAuth};
 use axum::{
     Router,
     extract::State,
@@ -139,10 +143,22 @@ fn json_routes() -> Router<AppState> {
             "/api/v1/worker/tools/{id}/distribution",
             get(plugins::worker_tool_distribution),
         )
-        .route(
-            "/api/v1/auth/session",
-            get(session::current).post(session::login),
-        )
+        .route("/api/v1/auth/session", get(session::current))
+        .route("/api/v1/auth/login", post(session::login))
+        .route("/api/v1/setup/status", get(setup::status))
+        .route("/api/v1/setup/central", post(setup::setup_central))
+        .route("/api/v1/setup/worker", post(nodes::setup_worker))
+        .route("/api/v1/nodes/enroll", post(nodes::enroll))
+        .route("/api/v1/node/status", get(nodes::status))
+        .route(crate::node_view::OVERVIEW_PATH, get(node_view::overview))
+        .route(crate::node_view::JOBS_PATH, get(node_view::jobs))
+        .route(crate::node_view::PLUGINS_PATH, get(node_view::catalog))
+        .route(crate::node_view::LOGIN_PATH, post(node_view::login))
+        .route(crate::node_view::ACCOUNTS_PATH, get(node_view::accounts))
+        .route("/api/v1/me", get(session::me))
+        .route("/api/v1/account/password", put(session::change_password))
+        .route("/api/v1/api-keys", get(keys::list).post(keys::create))
+        .route("/api/v1/api-keys/{id}", axum::routing::delete(keys::revoke))
         .route("/api/v1/auth/logout", post(session::logout))
         .route("/api/v1/jobs", get(jobs::list).post(jobs::create))
         .route("/api/v1/jobs/{id}", get(jobs::get_job))
@@ -198,31 +214,35 @@ async fn spa_fallback(
     State(state): State<AppState>,
     req: axum::extract::Request,
 ) -> axum::response::Response {
+    serve_spa(&state.config.static_dir, req).await
+}
+
+/// Sert l'interface (SPA) depuis `static_dir`, ou un 404 JSON pour une route d'API inconnue.
+pub(crate) async fn serve_spa(
+    static_dir: &std::path::Path,
+    req: axum::extract::Request,
+) -> axum::response::Response {
     use axum::response::IntoResponse;
     use tower::ServiceExt;
-    let path = req.uri().path();
-    if path.starts_with("/api/") {
-        return (
-            StatusCode::NOT_FOUND,
-            axum::Json(serde_json::json!({"error":{"code":"invalid_request"}})),
-        )
-            .into_response();
-    }
-    let static_dir = &state.config.static_dir;
-    let index_file = static_dir.join("index.html");
-    if index_file.is_file() {
-        let serve_service = tower_http::services::ServeDir::new(static_dir)
-            .fallback(tower_http::services::ServeFile::new(&index_file));
-        match serve_service.oneshot(req).await {
-            Ok(res) => res.into_response(),
-            Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        }
-    } else {
+    let not_found = || {
         (
             StatusCode::NOT_FOUND,
             axum::Json(serde_json::json!({"error":{"code":"invalid_request"}})),
         )
             .into_response()
+    };
+    if req.uri().path().starts_with("/api/") {
+        return not_found();
+    }
+    let index_file = static_dir.join("index.html");
+    if !index_file.is_file() {
+        return not_found();
+    }
+    let serve_service = tower_http::services::ServeDir::new(static_dir)
+        .fallback(tower_http::services::ServeFile::new(&index_file));
+    match serve_service.oneshot(req).await {
+        Ok(res) => res.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 
@@ -235,14 +255,8 @@ async fn register(
     h: HeaderMap,
     axum::Json(r): axum::Json<Register>,
 ) -> AppResult<axum::Json<Worker>> {
-    authorize(&h, &s.config.worker_key)?;
-    if r.name.is_empty()
-        || r.name.len() > 80
-        || !r
-            .name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
-    {
+    crate::auth::authorize_worker(&s.pool, &h).await?;
+    if !crate::node_settings::is_valid_node_name(&r.name) {
         return Err(crate::error::AppError::Invalid);
     }
     Ok(axum::Json(repository::register(&s.pool, &r.name).await?))
@@ -252,7 +266,7 @@ async fn claim(
     h: HeaderMap,
     axum::Json(r): axum::Json<ClaimRequest>,
 ) -> AppResult<axum::Json<Option<Claim>>> {
-    authorize(&h, &s.config.worker_key)?;
+    crate::auth::authorize_worker(&s.pool, &h).await?;
     let mut claim_res = repository::claim(&s.pool, r.worker_id).await?;
     if let Some(ref mut claim) = claim_res {
         let roots = crate::plugins::catalog_roots(&s.pool, &s.config).await;
@@ -282,7 +296,8 @@ async fn plugin_sync_loop(state: AppState) {
     }
 }
 
-pub async fn serve(config: Config) -> anyhow::Result<()> {
+/// Ouvre la base SQLite de la centrale et applique les migrations embarquées.
+pub async fn connect_database(config: &Config) -> anyhow::Result<SqlitePool> {
     let connect_options = if config.database_url.starts_with("sqlite:") {
         SqliteConnectOptions::from_str(&config.database_url)?
     } else {
@@ -301,6 +316,11 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         .await?;
 
     sqlx::migrate!().run(&pool).await?;
+    Ok(pool)
+}
+
+pub async fn serve(config: Config) -> anyhow::Result<()> {
+    let pool = connect_database(&config).await?;
     tokio::fs::create_dir_all(config.data_dir.join("output")).await?;
     tokio::fs::create_dir_all(config.data_dir.join("staging")).await?;
     tokio::fs::create_dir_all(&config.input_dir).await?;
@@ -329,7 +349,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         },
         Err(error) => tracing::warn!(error = %error, "clé de chiffrement indisponible"),
     }
-    tokio::spawn(plugin_sync_loop(state.clone()));
+    let plugin_sync = tokio::spawn(plugin_sync_loop(state.clone()));
     let app = router(state);
     tracing::info!(%addr, "coordinator started");
     if let Some((cert, key)) = tls {
@@ -351,11 +371,20 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
             .with_graceful_shutdown(shutdown_signal())
             .await?;
     }
+    plugin_sync.abort();
     pool.close().await;
     Ok(())
 }
 
+/// Arrêt demandé : signal du système ou changement de rôle du nœud.
 pub async fn shutdown_signal() {
+    tokio::select! {
+        () = os_termination_signal() => {},
+        () = crate::node::role_switch_requested() => {},
+    }
+}
+
+async fn os_termination_signal() {
     #[cfg(unix)]
     {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {

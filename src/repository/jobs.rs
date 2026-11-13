@@ -33,6 +33,41 @@ pub async fn worker_exists(pool: &SqlitePool, id: Uuid) -> AppResult<bool> {
     Ok(exists)
 }
 
+pub async fn find_worker_by_name(pool: &SqlitePool, name: &str) -> AppResult<Option<Worker>> {
+    Ok(sqlx::query_as("SELECT * FROM workers WHERE name=?1")
+        .bind(name)
+        .fetch_optional(pool)
+        .await?)
+}
+
+/// Tâches traitées par ce worker, les plus récentes d'abord.
+pub async fn list_jobs_for_worker(
+    pool: &SqlitePool,
+    worker: Uuid,
+    limit: i64,
+) -> AppResult<Vec<Job>> {
+    Ok(sqlx::query_as(
+        "SELECT * FROM jobs WHERE worker_id=?1 ORDER BY created_at DESC, id DESC LIMIT ?2",
+    )
+    .bind(worker)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Nombre de tâches de ce worker par statut.
+pub async fn count_jobs_for_worker(
+    pool: &SqlitePool,
+    worker: Uuid,
+) -> AppResult<Vec<(JobStatus, i64)>> {
+    Ok(
+        sqlx::query_as("SELECT status, COUNT(*) FROM jobs WHERE worker_id=?1 GROUP BY status")
+            .bind(worker)
+            .fetch_all(pool)
+            .await?,
+    )
+}
+
 pub async fn list_workers(pool: &SqlitePool) -> AppResult<Vec<Worker>> {
     let workers = sqlx::query_as("SELECT * FROM workers ORDER BY name LIMIT 200")
         .fetch_all(pool)

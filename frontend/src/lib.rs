@@ -178,6 +178,15 @@ mod tests {
         assert!(html.contains("function isVideoFlowName"));
         assert!(html.contains("function emptyStateRow"));
         assert!(html.contains("function loadFlows"));
+        assert!(html.contains("function bootstrapAuth"));
+        assert!(html.contains("function submitSetup"));
+        assert!(html.contains("function submitWorkerSetup"));
+        assert!(html.contains("function setupAuthGate"));
+        assert!(html.contains("function loadNodeOverview"));
+        assert!(html.contains("function applyAccess"));
+        assert!(html.contains("function loadApiKeys"));
+        assert!(!html.contains("volatileAdminKey"));
+        assert!(!html.contains("checkSession"));
         assert!(html.contains("function openCanvas"));
         assert!(html.contains("class=\"registre\""));
         assert!(html.contains("class=\"inspection-drawer\""));

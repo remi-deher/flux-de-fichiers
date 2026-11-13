@@ -1,6 +1,5 @@
 use super::{AdminAuth, AppState};
 use crate::{
-    auth::authorize,
     domain::*,
     error::{AppError, AppResult},
     repository, storage,
@@ -110,7 +109,7 @@ pub async fn heartbeat(
     Path(id): Path<Uuid>,
     Json(r): Json<LeaseRequest>,
 ) -> AppResult<StatusCode> {
-    authorize(&h, &s.config.worker_key)?;
+    crate::auth::authorize_worker(&s.pool, &h).await?;
     repository::heartbeat(&s.pool, id, &r).await?;
     s.notify_job_event(JobEventType::JobHeartbeat, id, JobStatus::Running, None);
     Ok(StatusCode::NO_CONTENT)
@@ -121,7 +120,7 @@ pub async fn failure(
     Path(id): Path<Uuid>,
     Json(r): Json<Failure>,
 ) -> AppResult<StatusCode> {
-    authorize(&h, &s.config.worker_key)?;
+    crate::auth::authorize_worker(&s.pool, &h).await?;
     let error_code: JobErrorCode = r.error_code.parse().map_err(|_| AppError::Invalid)?;
     if !error_code.is_worker_reportable() {
         return Err(AppError::Invalid);
@@ -148,7 +147,6 @@ pub async fn failure(
 
 #[derive(Serialize)]
 pub struct SystemConfigResponse {
-    pub worker_key: String,
     pub max_file_bytes: u64,
     pub local_worker: bool,
     pub version: &'static str,
@@ -159,7 +157,6 @@ pub async fn system_config(
     _auth: AdminAuth,
 ) -> AppResult<Json<SystemConfigResponse>> {
     Ok(Json(SystemConfigResponse {
-        worker_key: s.config.worker_key.clone(),
         max_file_bytes: s.config.max_file_bytes,
         local_worker: s.config.local_worker,
         version: env!("CARGO_PKG_VERSION"),

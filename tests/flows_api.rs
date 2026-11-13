@@ -1,3 +1,5 @@
+mod common;
+
 use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
@@ -21,8 +23,6 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
         static_dir: "frontend/dist".into(),
-        admin_key: "test-admin-key".into(),
-        worker_key: "test-worker-key".into(),
         max_file_bytes: 1024,
         local_worker: false,
         web_origin: None,
@@ -33,6 +33,7 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         .connect(&config.database_url)
         .await?;
     sqlx::migrate!().run(&pool).await?;
+    common::install_keys(&pool).await?;
     let (events_tx, _) = tokio::sync::broadcast::channel(128);
     Ok(router(AppState {
         pool,
@@ -94,7 +95,10 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     // 1. Démarrage en mode Bare Core : aucun flux n'est pré-embarqué par défaut
     let req = Request::builder()
         .uri("/api/v1/flows")
-        .header("authorization", "Bearer test-admin-key")
+        .header(
+            "authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .body(Body::empty())?;
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::OK);
@@ -119,7 +123,10 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     let req = Request::builder()
         .method("PUT")
         .uri("/api/v1/flows/flow.default.mkv")
-        .header("authorization", "Bearer test-admin-key")
+        .header(
+            "authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .header("content-type", "application/json")
         .body(Body::from(serde_json::to_vec(&default_flow)?))?;
     let resp = app.clone().oneshot(req).await?;
@@ -137,7 +144,10 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     let req = Request::builder()
         .method("PUT")
         .uri("/api/v1/flows/flow.custom.test")
-        .header("authorization", "Bearer test-admin-key")
+        .header(
+            "authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .header("content-type", "application/json")
         .body(Body::from(serde_json::to_vec(&custom_flow)?))?;
     let resp = app.clone().oneshot(req).await?;
@@ -146,7 +156,10 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     // 4. Lire le flux personnalisé créé
     let req = Request::builder()
         .uri("/api/v1/flows/flow.custom.test")
-        .header("authorization", "Bearer test-admin-key")
+        .header(
+            "authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .body(Body::empty())?;
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::OK);
@@ -155,7 +168,10 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     let req = Request::builder()
         .method("DELETE")
         .uri("/api/v1/flows/flow.default.mkv")
-        .header("authorization", "Bearer test-admin-key")
+        .header(
+            "authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .body(Body::empty())?;
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::CONFLICT);
@@ -164,7 +180,10 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     let req = Request::builder()
         .method("DELETE")
         .uri("/api/v1/flows/flow.custom.test")
-        .header("authorization", "Bearer test-admin-key")
+        .header(
+            "authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .body(Body::empty())?;
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
@@ -234,8 +253,6 @@ async fn secrets_app() -> anyhow::Result<(axum::Router, sqlx::SqlitePool, tempfi
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
         static_dir: "frontend/dist".into(),
-        admin_key: "test-admin-key".into(),
-        worker_key: "test-worker-key".into(),
         max_file_bytes: 1024,
         local_worker: false,
         web_origin: None,
@@ -247,6 +264,7 @@ async fn secrets_app() -> anyhow::Result<(axum::Router, sqlx::SqlitePool, tempfi
         .connect(&config.database_url)
         .await?;
     sqlx::migrate!().run(&pool).await?;
+    common::install_keys(&pool).await?;
     let (events_tx, _) = tokio::sync::broadcast::channel(128);
     let app = router(AppState {
         pool: pool.clone(),
@@ -287,7 +305,10 @@ async fn save_webhook_flow(
             Request::builder()
                 .method("PUT")
                 .uri("/api/v1/flows/flow.webhook")
-                .header("authorization", "Bearer test-admin-key")
+                .header(
+                    "authorization",
+                    "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+                )
                 .header("content-type", "application/json")
                 .body(Body::from(serde_json::to_vec(&body)?))?,
         )
@@ -315,14 +336,17 @@ async fn test_webhook_headers_are_encrypted_at_rest_and_masked_by_the_api() -> a
 
     let raw = stored_definition(&pool).await?;
     assert!(!raw.contains("SECRET-HEADER"));
-    assert!(raw.contains("enc:v1:"));
+    assert!(raw.contains("enc:v2:"));
 
     let response = app
         .clone()
         .oneshot(
             Request::builder()
                 .uri("/api/v1/flows/flow.webhook")
-                .header("authorization", "Bearer test-admin-key")
+                .header(
+                    "authorization",
+                    "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+                )
                 .body(Body::empty())?,
         )
         .await?;
@@ -345,6 +369,9 @@ async fn test_resaving_a_masked_flow_keeps_the_stored_header() -> anyhow::Result
     let encrypted = stored["nodes"][1]["config"]["custom_headers"]["Authorization"]
         .as_str()
         .unwrap_or_default();
-    assert_eq!(secrets.decrypt(encrypted)?, "Bearer SECRET-HEADER");
+    assert_eq!(
+        secrets.decrypt(encrypted, "flow:flow.webhook:n2:Authorization")?,
+        "Bearer SECRET-HEADER"
+    );
     Ok(())
 }

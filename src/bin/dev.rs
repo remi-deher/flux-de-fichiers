@@ -1,26 +1,8 @@
 //! Outil de développement local et préparation de l'environnement en Rust pur.
 
-use std::fmt::Write as _;
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
-fn generate_token_hex() -> String {
-    let mut bytes = [0u8; 32];
-    if let Ok(mut f) = fs::File::open("/dev/urandom")
-        && f.read_exact(&mut bytes).is_ok()
-    {
-        let mut s = String::with_capacity(64);
-        for b in bytes {
-            let _ = write!(s, "{b:02x}");
-        }
-        return s;
-    }
-    let u1 = uuid::Uuid::new_v4().simple();
-    let u2 = uuid::Uuid::new_v4().simple();
-    format!("{u1}{u2}")
-}
 
 fn repo_root() -> PathBuf {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -31,28 +13,8 @@ pub fn prepare(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let config_dir = root.join("var/config");
     fs::create_dir_all(&config_dir)?;
 
-    let secrets_dir = root.join("var/secrets");
-    fs::create_dir_all(&secrets_dir)?;
-
     let input_dir = root.join("var/input");
     fs::create_dir_all(&input_dir)?;
-
-    for name in ["admin_key", "worker_key"] {
-        let cfg_path = config_dir.join(name);
-        let sec_path = secrets_dir.join(name);
-
-        let val = if cfg_path.exists() {
-            fs::read_to_string(&cfg_path)?.trim().to_string()
-        } else {
-            let generated = generate_token_hex();
-            fs::write(&cfg_path, &generated)?;
-            generated
-        };
-
-        if !sec_path.exists() {
-            fs::write(&sec_path, &val)?;
-        }
-    }
 
     let dist_file = root.join("frontend/dist/index.html");
     let needs_build = if !dist_file.exists() {

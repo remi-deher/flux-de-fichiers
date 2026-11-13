@@ -1,3 +1,5 @@
+mod common;
+
 use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
@@ -11,7 +13,7 @@ use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 use std::{path::Path, sync::Arc};
 use tower::ServiceExt;
 
-const TEST_ADMIN_KEY: &str = "test-admin-secret-key";
+const TEST_ADMIN_KEY: &str = "fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef";
 const BROADCAST_CAPACITY: usize = 128;
 const MAX_TEST_FILE_BYTES: u64 = 1024;
 const WEB_SESSION_TTL_SECONDS: i64 = 28_800;
@@ -56,8 +58,6 @@ async fn harness() -> anyhow::Result<Harness> {
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: Some(catalog_dir.path().to_path_buf()),
         static_dir: "frontend/dist".into(),
-        admin_key: TEST_ADMIN_KEY.into(),
-        worker_key: "test-worker-key".into(),
         max_file_bytes: MAX_TEST_FILE_BYTES,
         local_worker: false,
         web_origin: None,
@@ -69,6 +69,7 @@ async fn harness() -> anyhow::Result<Harness> {
         .connect(&config.database_url)
         .await?;
     sqlx::migrate!().run(&pool).await?;
+    common::install_keys(&pool).await?;
     let (events_tx, _) = tokio::sync::broadcast::channel(BROADCAST_CAPACITY);
     let path = config.config_dir.clone();
     let app = router(AppState {
@@ -137,7 +138,7 @@ async fn test_secret_is_encrypted_at_rest_and_never_returned() -> anyhow::Result
 
     let raw = stored(&h.pool).await?;
     assert!(!raw.contains(SECRET_VALUE));
-    assert!(raw.contains("enc:v1:"));
+    assert!(raw.contains("enc:v2:"));
 
     let (status, read) = call(&h.app, "GET", &uri, None).await?;
     assert_eq!(status, StatusCode::OK);
@@ -176,7 +177,10 @@ async fn test_empty_secret_keeps_the_stored_value_and_a_new_one_replaces_it() ->
     let value: serde_json::Value = serde_json::from_str(&stored(&h.pool).await?)?;
     assert_eq!(value["url"], "http://b");
     assert_eq!(
-        secrets.decrypt(value["apiKey"].as_str().unwrap_or_default())?,
+        secrets.decrypt(
+            value["apiKey"].as_str().unwrap_or_default(),
+            &flux_de_fichiers::plugins::plugin_secret_aad(PLUGIN_ID, "apiKey"),
+        )?,
         SECRET_VALUE
     );
 
@@ -189,7 +193,10 @@ async fn test_empty_secret_keeps_the_stored_value_and_a_new_one_replaces_it() ->
     .await?;
     let value: serde_json::Value = serde_json::from_str(&stored(&h.pool).await?)?;
     assert_eq!(
-        secrets.decrypt(value["apiKey"].as_str().unwrap_or_default())?,
+        secrets.decrypt(
+            value["apiKey"].as_str().unwrap_or_default(),
+            &flux_de_fichiers::plugins::plugin_secret_aad(PLUGIN_ID, "apiKey"),
+        )?,
         "AUTRE"
     );
     Ok(())
@@ -217,7 +224,7 @@ async fn test_legacy_plaintext_secret_is_encrypted_on_first_read() -> anyhow::Re
     assert!(!read.to_string().contains(SECRET_VALUE));
     let raw = stored(&h.pool).await?;
     assert!(!raw.contains(SECRET_VALUE));
-    assert!(raw.contains("enc:v1:"));
+    assert!(raw.contains("enc:v2:"));
     Ok(())
 }
 

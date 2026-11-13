@@ -1,6 +1,7 @@
 //! Fonctionnalités métier de l'application organisées par rôles.
 
 pub mod activity;
+pub mod auth;
 pub mod dashboard;
 pub mod flows;
 pub mod libraries;

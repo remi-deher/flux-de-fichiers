@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.15.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.14.0...v0.15.0) (2026-11-12)
+
+
+### Features
+
+* **frontend:** kit de widgets, vue d'ensemble refondue et registres alignés ([c2f6430](https://github.com/remi-deher/flux-de-fichiers/commit/c2f643086317551e0b22be64d9b0535fd7550ab2))
+* **frontend:** kit de widgets, vue d'ensemble refondue et registres alignés ([f03b56e](https://github.com/remi-deher/flux-de-fichiers/commit/f03b56e11191d49925e6e23f2068bde0c7a733ed))
+* **plugins:** blocs Sonarr et Radarr, webhooks chiffrés, statut d'installation et README ([6156f7a](https://github.com/remi-deher/flux-de-fichiers/commit/6156f7ac8f2bc9ddcbb354c6679f3dd879620359))
+* **plugins:** dépôts synchronisés, installateur d'outils et secrets chiffrés ([4742013](https://github.com/remi-deher/flux-de-fichiers/commit/47420136b5322b12790dffeef2bd3aa5734d4de3))
+* **plugins:** dépôts synchronisés, installateur, secrets chiffrés et blocs *arr ([6665d39](https://github.com/remi-deher/flux-de-fichiers/commit/6665d39be013c8527885a24c3b20abf6e36804e5))
+* **plugins:** installer le remux avant un job et retirer les outils de l'image ([de19dd9](https://github.com/remi-deher/flux-de-fichiers/commit/de19dd9e7051d4121df6b62d428be7e14362893d))
+* **plugins:** installer le remux avant un job et retirer mkvtoolnix et mediainfo de l'image ([b0c6a3d](https://github.com/remi-deher/flux-de-fichiers/commit/b0c6a3dbf689a3eb30c1330224237f3bee187188))
+
 ## [0.14.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.13.0...v0.14.0) (2026-11-12)
 
 

@@ -1,6 +1,5 @@
 use super::AppState;
 use crate::{
-    auth::authorize,
     domain::{Job, JobEventType, JobStatus, LeaseRequest},
     error::{AppError, AppResult},
     media, repository, storage,
@@ -60,7 +59,7 @@ pub async fn source(
     h: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> AppResult<Response> {
-    authorize(&h, &s.config.worker_key)?;
+    crate::auth::authorize_worker(&s.pool, &h).await?;
     let job = repository::active(&s.pool, id, &lease(&h)?).await?;
     stream_file(
         &storage::input_path(&s.config.input_dir, &job.source_name).await?,
@@ -94,7 +93,7 @@ pub async fn result(
     Path(id): Path<Uuid>,
     body: Body,
 ) -> AppResult<StatusCode> {
-    authorize(&h, &s.config.worker_key)?;
+    crate::auth::authorize_worker(&s.pool, &h).await?;
     let credentials = lease(&h)?;
     let job = repository::active(&s.pool, id, &credentials).await?;
     let warning = match h.get("x-remux-warning").and_then(|v| v.to_str().ok()) {

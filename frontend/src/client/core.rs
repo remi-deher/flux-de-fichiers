@@ -3,15 +3,13 @@
 pub const SCRIPT: &str = r###"
 // Sécurité : la clé d'administration réside UNIQUEMENT en mémoire volatile JavaScript de l'onglet actif.
   // Aucun stockage en clair dans sessionStorage ni localStorage.
-  let volatileAdminKey = '';
   let csrfToken = '';
   let activeTab = 'dashboard';
   let cachedFiles = [];
   let cachedJobs = [];
   let cachedWorkers = [];
   let activeJobFilter = 'all';
-  let sessionMode = 'none'; // 'none' | 'memory_key' | 'cookie_session'
-  let manualLogout = false;
+  let sessionMode = 'none'; // 'none' | 'cookie_session'
 
   const el = (id) => document.getElementById(id);
 
@@ -60,11 +58,6 @@ pub const SCRIPT: &str = r###"
       headers['x-csrf-token'] = csrfToken;
     }
 
-    // Authentification Bearer si clé volatile présente
-    if (volatileAdminKey) {
-      headers['Authorization'] = 'Bearer ' + volatileAdminKey;
-    }
-
     const res = await fetch(endpoint, {
       ...options,
       headers,
@@ -73,12 +66,11 @@ pub const SCRIPT: &str = r###"
 
     if (res.status === 401) {
       const hadActiveSession = sessionMode !== 'none';
-      volatileAdminKey = '';
       sessionMode = 'none';
       csrfToken = '';
-      updateSessionUI();
       if (hadActiveSession) {
-        showNotice('Accès non autorisé (401) : clé révoquée ou session invalide. Mémoire purgée.', 'error');
+        showNotice('Session expirée ou invalide : reconnectez-vous.', 'error');
+        showAuthGate('login', currentUser ? currentUser.instanceName : '');
       }
       throw new Error('Non autorisé');
     }
@@ -189,6 +181,8 @@ pub const SCRIPT: &str = r###"
 
   // --- Bandeau d'état de la vue d'ensemble ---
   function setHeroStatus(reachable) {
+    // Sur un worker, le bandeau décrit la centrale : il est mis à jour par loadNodeOverview.
+    if (isWorkerNode()) return;
     const badge = el('hero-status-badge');
     const text = el('hero-status-text');
     if (badge) badge.dataset.tone = reachable ? 'success' : 'danger';

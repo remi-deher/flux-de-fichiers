@@ -2,9 +2,13 @@
 
 pub const SCRIPT: &str = r###"
 // --- Synchronisation globale ---
-  async function refreshAll() {
-    await checkHealth();
-    await checkSession();
+  // Charge les données de toutes les pages, une fois l'utilisateur connecté.
+  // Un worker ne charge que ses vues en lecture seule : vue d'ensemble, tâches, outils et catalogue.
+  async function loadAllData() {
+    if (isWorkerNode()) {
+      await Promise.allSettled([loadNodeOverview(), loadJobs(), loadToolsStatus(), loadStoreCatalog()]);
+      return;
+    }
     await Promise.allSettled([
       loadFiles(),
       loadLibraries(),
@@ -12,8 +16,15 @@ pub const SCRIPT: &str = r###"
       loadWorkers(),
       loadSystemConfig(),
       loadToolsStatus(),
-      loadFlows()
+      loadFlows(),
+      loadRepositories(),
+      loadApiKeys()
     ]);
+  }
+
+  async function refreshAll() {
+    await checkHealth();
+    if (await bootstrapAuth()) await loadAllData();
   }
 
 
@@ -70,18 +81,17 @@ pub const SCRIPT: &str = r###"
     const gotoSettingsBtn = el('quick-goto-settings-btn');
     if (gotoSettingsBtn) gotoSettingsBtn.addEventListener('click', () => switchTab('settings'));
 
-    // Formulaire de session
-    const saveKeyBtn = el('admin-key-save-btn');
-    const inputKey = el('admin-key-input');
-    if (saveKeyBtn && inputKey) {
-      saveKeyBtn.addEventListener('click', () => login(inputKey.value));
-      inputKey.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') login(inputKey.value);
-      });
-    }
-
-    const logoutBtn = el('admin-key-logout-btn');
+    // Accès : installation, connexion, compte
+    const setupForm = el('setup-form');
+    if (setupForm) setupForm.addEventListener('submit', submitSetup);
+    if (typeof setupAuthGate === 'function') setupAuthGate();
+    const loginForm = el('login-form');
+    if (loginForm) loginForm.addEventListener('submit', submitLogin);
+    const logoutBtn = el('account-logout-btn');
     if (logoutBtn) logoutBtn.addEventListener('click', logout);
+    const passwordForm = el('account-password-form');
+    if (passwordForm) passwordForm.addEventListener('submit', changePassword);
+    if (typeof setupApiKeys === 'function') setupApiKeys();
 
     if (typeof setupLibraries === 'function') setupLibraries();
 
@@ -160,6 +170,7 @@ pub const SCRIPT: &str = r###"
     // Synchronisation d'arrière-plan périodique (sonde de santé et relais si déconnexion SSE)
     setInterval(() => {
       checkHealth();
+      if (!currentUser) return;
       if (!jobsEventSource || jobsEventSource.readyState !== 1) {
         loadJobs();
         loadWorkers();

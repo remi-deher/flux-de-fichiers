@@ -44,46 +44,19 @@ fn connect_pane() -> InspectionPane {
             </div>
 
             <div class="form-group">
-                <label for="worker-key-display" class="form-label">
-                    "Clé d'authentification worker (WORKER_KEY)"
-                </label>
-                <div class="copy-input-row">
-                    <input
-                        type="password"
-                        id="worker-key-display"
-                        class="form-input form-input--key"
-                        readonly
-                        aria-label="Clé secrète d'agent worker"
-                        value=""
-                        placeholder="Ouvrez une session admin pour révéler la clé"
-                    />
-                    <Button
-                        id="btn-toggle-worker-key"
-                        variant=ButtonVariant::Secondary
-                        aria_label="Afficher ou masquer la clé worker"
-                        disabled=true
-                    >
-                        "Afficher"
-                    </Button>
-                    <Button
-                        id="btn-copy-worker-key"
-                        variant=ButtonVariant::Primary
-                        aria_label="Copier la clé worker dans le presse-papier"
-                        disabled=true
-                    >
-                        "Copier la clé"
-                    </Button>
-                </div>
-                <p id="worker-key-hint" class="form-help">
-                    "Clé secrète requise par les conteneurs worker pour s'enregistrer et réclamer des baux."
+                <p class="form-help">
+                    "Créez une clé d'API de rôle « Worker » dans les Paramètres, puis passez-la au worker avec WORKER_KEY. Elle est montrée une seule fois, à sa création."
                 </p>
+                <Button id="btn-open-api-keys" variant=ButtonVariant::Secondary data_goto="settings">
+                    "Ouvrir les clés d'API"
+                </Button>
             </div>
 
             <div class="form-group">
                 <label for="docker-worker-cmd" class="form-label">
                     "Commande Docker de raccordement immédiat (HTTP)"
                 </label>
-                <pre class="code-block-wrapper"><code id="docker-worker-cmd">"docker run -d --name flux-worker -e COORDINATOR_URL=http://localhost:3000 -e WORKER_KEY=<WORKER_KEY> -v /chemin/data:/data flux-de-fichiers worker"</code></pre>
+                <pre class="code-block-wrapper"><code id="docker-worker-cmd">"docker run -d --name flux-worker -e COORDINATOR_URL=http://localhost:3000 -e WORKER_KEY=<CLÉ_API_WORKER> -v /chemin/data:/data flux-de-fichiers worker"</code></pre>
                 <Button
                     id="btn-copy-worker-cmd"
                     variant=ButtonVariant::Secondary
@@ -140,10 +113,7 @@ mod tests {
             "config-local-worker",
             "config-version",
             "config-max-file-bytes",
-            "worker-key-display",
-            "btn-toggle-worker-key",
-            "btn-copy-worker-key",
-            "worker-key-hint",
+            "btn-open-api-keys",
             "docker-worker-cmd",
             "btn-copy-worker-cmd",
             "workers-fact-facts",

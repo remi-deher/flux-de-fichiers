@@ -7,7 +7,9 @@ ARG CARGO_JOBS=1
 # Mise en cache des dépendances du workspace unifié
 COPY Cargo.toml Cargo.lock ./
 COPY frontend/Cargo.toml ./frontend/
-RUN mkdir -p src frontend/src && \
+COPY shared/Cargo.toml ./shared/
+RUN mkdir -p src frontend/src shared/src && \
+    echo '' > shared/src/lib.rs && \
     echo 'fn main() {}' > src/main.rs && \
     echo 'pub fn render_full_page() -> String { String::new() }' > frontend/src/lib.rs && \
     echo 'fn main() {}' > frontend/src/main.rs
@@ -20,10 +22,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 COPY src ./src
 COPY migrations ./migrations
 COPY frontend/src ./frontend/src
+COPY shared/src ./shared/src
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/src/target \
-    find src frontend/src -type f -exec touch {} + && \
+    find src frontend/src shared/src -type f -exec touch {} + && \
     cargo build --locked --release -j ${CARGO_JOBS} && \
     cp target/release/flux-de-fichiers /usr/local/bin/flux-de-fichiers && \
     cargo run --locked --release -p flux-frontend -j ${CARGO_JOBS} && \

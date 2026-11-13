@@ -1,6 +1,7 @@
 //! Catalogue unique des écrans : navigation Leptos et script client.
 
 use crate::shared::ui::IconName;
+use flux_shared::{NodeKind, Permission};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Panel {
@@ -13,6 +14,10 @@ pub struct Panel {
     pub search_label: &'static str,
     pub icon: IconName,
     pub active: bool,
+    /// Droit exigé pour voir l'écran.
+    pub permission: Permission,
+    /// Types de nœud qui hébergent l'écran.
+    pub hosted_on: &'static [NodeKind],
 }
 
 pub struct NavGroup {
@@ -30,6 +35,8 @@ pub const DASHBOARD: Panel = Panel {
     search_label: "Filtrer les indicateurs, statistiques et raccourcis d'accueil",
     icon: IconName::Dashboard,
     active: true,
+    permission: Permission::ViewOverview,
+    hosted_on: &[NodeKind::Central, NodeKind::Worker],
 };
 
 pub const FILES: Panel = Panel {
@@ -42,6 +49,8 @@ pub const FILES: Panel = Panel {
     search_label: "Filtrer les bibliothèques déclarées",
     icon: IconName::Libraries,
     active: false,
+    permission: Permission::ViewLibraries,
+    hosted_on: &[NodeKind::Central],
 };
 
 pub const FLOWS: Panel = Panel {
@@ -54,6 +63,8 @@ pub const FLOWS: Panel = Panel {
     search_label: "Rechercher parmi les flux que vous exécutez",
     icon: IconName::Flows,
     active: false,
+    permission: Permission::ViewFlows,
+    hosted_on: &[NodeKind::Central],
 };
 
 pub const JOBS: Panel = Panel {
@@ -66,6 +77,8 @@ pub const JOBS: Panel = Panel {
     search_label: "Filtrer les tâches enregistrées et diagnostics",
     icon: IconName::Activity,
     active: false,
+    permission: Permission::ViewJobs,
+    hosted_on: &[NodeKind::Central, NodeKind::Worker],
 };
 
 pub const WORKERS: Panel = Panel {
@@ -78,6 +91,8 @@ pub const WORKERS: Panel = Panel {
     search_label: "Filtrer les serveurs et ressources distribuées",
     icon: IconName::Workers,
     active: false,
+    permission: Permission::ViewNodes,
+    hosted_on: &[NodeKind::Central],
 };
 
 pub const PLUGINS: Panel = Panel {
@@ -90,6 +105,8 @@ pub const PLUGINS: Panel = Panel {
     search_label: "Rechercher une pièce du catalogue ou un dépôt",
     icon: IconName::Plugins,
     active: false,
+    permission: Permission::ViewPlugins,
+    hosted_on: &[NodeKind::Central, NodeKind::Worker],
 };
 
 pub const SETTINGS: Panel = Panel {
@@ -102,6 +119,8 @@ pub const SETTINGS: Panel = Panel {
     search_label: "Rechercher une section ou clé de configuration",
     icon: IconName::Settings,
     active: false,
+    permission: Permission::ManageSettings,
+    hosted_on: &[NodeKind::Central],
 };
 
 pub const UPDATES: Panel = Panel {
@@ -114,6 +133,8 @@ pub const UPDATES: Panel = Panel {
     search_label: "Rechercher dans l'historique des versions",
     icon: IconName::Updates,
     active: false,
+    permission: Permission::ManageSettings,
+    hosted_on: &[NodeKind::Central],
 };
 
 pub const NAV_GROUPS: &[NavGroup] = &[
@@ -147,7 +168,7 @@ pub fn active_panel() -> &'static Panel {
     panels().find(|panel| panel.active).unwrap_or(&DASHBOARD)
 }
 
-/// Objets JavaScript `TABS` et `SEARCH_CONTEXTS` émis depuis le catalogue.
+/// Objets JavaScript `TABS`, `SEARCH_CONTEXTS` et `PANEL_ACCESS` émis depuis le catalogue.
 pub fn catalog_script() -> String {
     let slugs: Vec<&str> = panels().map(|panel| panel.slug).collect();
     let contexts: serde_json::Map<String, serde_json::Value> = panels()
@@ -161,9 +182,23 @@ pub fn catalog_script() -> String {
             )
         })
         .collect();
+    let access: serde_json::Map<String, serde_json::Value> = panels()
+        .map(|panel| {
+            (
+                panel.slug.to_owned(),
+                serde_json::json!({
+                    "permission": panel.permission,
+                    "hostedOn": panel.hosted_on,
+                }),
+            )
+        })
+        .collect();
     let tabs = serde_json::to_string(&slugs).unwrap_or_else(|_| "[]".to_owned());
     let contexts = serde_json::to_string(&contexts).unwrap_or_else(|_| "{}".to_owned());
-    format!("  const TABS = {tabs};\n  const SEARCH_CONTEXTS = {contexts};\n")
+    let access = serde_json::to_string(&access).unwrap_or_else(|_| "{}".to_owned());
+    format!(
+        "  const TABS = {tabs};\n  const SEARCH_CONTEXTS = {contexts};\n  const PANEL_ACCESS = {access};\n"
+    )
 }
 
 #[cfg(test)]
@@ -202,5 +237,31 @@ mod tests {
             assert!(tabs.iter().any(|slug| slug == panel.slug));
         }
         Ok(())
+    }
+
+    #[test]
+    fn every_panel_declares_a_right_and_a_hosting_node() {
+        for panel in panels() {
+            assert!(!panel.hosted_on.is_empty(), "{} sans nœud", panel.slug);
+        }
+        assert_eq!(SETTINGS.permission, Permission::ManageSettings);
+        assert_eq!(DASHBOARD.permission, Permission::ViewOverview);
+        for read_only in [&DASHBOARD, &JOBS, &PLUGINS] {
+            assert!(read_only.hosted_on.contains(&NodeKind::Worker));
+        }
+        for central_only in [&FILES, &FLOWS, &WORKERS, &SETTINGS, &UPDATES] {
+            assert_eq!(central_only.hosted_on, &[NodeKind::Central]);
+        }
+    }
+
+    #[test]
+    fn catalog_script_embeds_the_access_table_with_shared_names() {
+        let script = catalog_script();
+        assert!(script.contains("const PANEL_ACCESS = "));
+        for panel in panels() {
+            assert!(script.contains(&format!("\"{}\"", panel.permission.as_str())));
+        }
+        assert!(script.contains("\"hostedOn\":[\"central\"]"));
+        assert!(script.contains("\"hostedOn\":[\"central\",\"worker\"]"));
     }
 }

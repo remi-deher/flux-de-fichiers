@@ -1,11 +1,13 @@
 //! Module d'administration et de réglages organisé par domaines métier.
 
 pub mod access;
+pub mod api_keys;
 pub mod connections;
 pub mod network;
 pub mod storage;
 
 use access::SettingsAccess;
+use api_keys::SettingsApiKeys;
 use connections::SettingsConnections;
 use leptos::prelude::*;
 use network::SettingsNetwork;
@@ -22,6 +24,7 @@ pub fn SettingsPanel() -> impl IntoView {
             hidden
         >
             <SettingsAccess />
+            <SettingsApiKeys />
             <SettingsConnections />
             <SettingsNetwork />
             <SettingsStorage />

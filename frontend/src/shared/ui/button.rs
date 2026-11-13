@@ -32,6 +32,9 @@ pub fn Button(
     #[prop(optional)]
     data_goto: Option<&'static str>,
     #[prop(optional)] disabled: bool,
+    /// Bouton qui valide son formulaire (`type="submit"`).
+    #[prop(optional)]
+    submit: bool,
     children: Children,
 ) -> impl IntoView {
     let base_class = variant.as_class();
@@ -42,7 +45,7 @@ pub fn Button(
 
     view! {
         <button
-            type="button"
+            type=if submit { "submit" } else { "button" }
             id=id
             class=final_class
             aria-label=aria_label
@@ -71,5 +74,13 @@ mod tests {
         assert!(with_goto.contains("data-goto=\"jobs\""));
         let without = view! { <Button>"Aller"</Button> }.to_html();
         assert!(!without.contains("data-goto"));
+    }
+
+    #[test]
+    fn test_button_type_is_button_unless_it_submits() {
+        let plain = view! { <Button>"Ok"</Button> }.to_html();
+        assert!(plain.contains("type=\"button\""));
+        let submit = view! { <Button submit=true>"Ok"</Button> }.to_html();
+        assert!(submit.contains("type=\"submit\""));
     }
 }

@@ -101,7 +101,7 @@ pub struct ArrConnection {
 
 impl ArrConnection {
     /// Lit les réglages enregistrés ; `None` tant que l'URL ou la clé d'API manque.
-    pub fn from_settings(settings: &Value, secrets: &SecretBox) -> Option<Self> {
+    pub fn from_settings(settings: &Value, secrets: &SecretBox, plugin_id: &str) -> Option<Self> {
         let text = |name: &str| {
             settings
                 .get(name)
@@ -111,7 +111,12 @@ impl ArrConnection {
         };
         let stored_key = text("apiKey")?;
         let api_key = if is_encrypted(&stored_key) {
-            secrets.decrypt(&stored_key).ok()?
+            secrets
+                .decrypt(
+                    &stored_key,
+                    &crate::plugins::plugin_secret_aad(plugin_id, "apiKey"),
+                )
+                .ok()?
         } else {
             stored_key
         };
@@ -278,9 +283,9 @@ impl ArrContext {
             let settings = stored
                 .as_deref()
                 .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
-            if let Some(connection) =
-                settings.and_then(|value| ArrConnection::from_settings(&value, &secrets))
-            {
+            if let Some(connection) = settings.and_then(|value| {
+                ArrConnection::from_settings(&value, &secrets, service.plugin_id())
+            }) {
                 connections.insert(service, connection);
             }
         }
@@ -516,14 +521,23 @@ mod tests {
     fn test_from_settings_decrypts_the_key_and_requires_url_and_key() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         let secrets = SecretBox::open(dir.path())?;
-        let sealed = secrets.encrypt("CLE")?;
+        let sealed = secrets.encrypt(
+            "CLE",
+            &crate::plugins::plugin_secret_aad("plugin.sonarr", "apiKey"),
+        )?;
         let settings = json!({"url": "http://arr", "apiKey": sealed, "pathMappingLocal": "/data"});
-        let connection = ArrConnection::from_settings(&settings, &secrets)
+        let connection = ArrConnection::from_settings(&settings, &secrets, "plugin.sonarr")
             .ok_or_else(|| anyhow!("connexion attendue"))?;
         assert_eq!(connection.api_key, "CLE");
         assert_eq!(connection.path_remote, "");
-        assert!(ArrConnection::from_settings(&json!({"url": "http://arr"}), &secrets).is_none());
-        assert!(ArrConnection::from_settings(&json!({"apiKey": "x"}), &secrets).is_none());
+        assert!(
+            ArrConnection::from_settings(&json!({"url": "http://arr"}), &secrets, "plugin.sonarr")
+                .is_none()
+        );
+        assert!(
+            ArrConnection::from_settings(&json!({"apiKey": "x"}), &secrets, "plugin.sonarr")
+                .is_none()
+        );
         Ok(())
     }
 

@@ -10,9 +10,31 @@ use web_sys::{EventSource, MessageEvent};
 
 const EVENTS_PATH: &str = "/api/v1/jobs/events";
 
+/// État en direct des tâches, partagé par contexte : un seul abonnement pour toute la session.
+#[derive(Clone, Copy)]
+pub struct LiveJobs {
+    /// Incrémenté à chaque changement d'état d'une tâche.
+    pub reload: RwSignal<u32>,
+    /// Dernière progression connue par tâche.
+    pub progress: RwSignal<HashMap<Uuid, u32>>,
+}
+
+impl LiveJobs {
+    /// Ouvre l'abonnement une fois, au niveau de l'application (central seulement).
+    pub fn install() -> Self {
+        let live = Self {
+            reload: RwSignal::new(0),
+            progress: RwSignal::new(HashMap::new()),
+        };
+        subscribe(live.reload, live.progress);
+        provide_context(live);
+        live
+    }
+}
+
 /// Écoute `/api/v1/jobs/events` pour toute la vie de la page : chaque changement d'état
 /// incrémente `reload`, chaque progression met à jour `progress`.
-pub fn subscribe(reload: RwSignal<u32>, progress: RwSignal<HashMap<Uuid, u32>>) {
+fn subscribe(reload: RwSignal<u32>, progress: RwSignal<HashMap<Uuid, u32>>) {
     let Ok(source) = EventSource::new(EVENTS_PATH) else {
         return;
     };

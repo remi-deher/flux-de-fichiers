@@ -1,5 +1,6 @@
 //! Contrat des workers et de la configuration système lue par l'interface (ADR 0014).
 
+use crate::jobs::JobStatus;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -36,6 +37,37 @@ pub struct SystemConfig {
     pub max_file_bytes: u64,
     pub local_worker: bool,
     pub version: String,
+}
+
+/// Tâches d'un worker, par statut.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobCounts {
+    pub queued: i64,
+    pub running: i64,
+    pub succeeded: i64,
+    pub failed: i64,
+}
+
+impl JobCounts {
+    pub fn add(&mut self, status: JobStatus, count: i64) {
+        let slot = match status {
+            JobStatus::Queued => &mut self.queued,
+            JobStatus::Running => &mut self.running,
+            JobStatus::Succeeded => &mut self.succeeded,
+            JobStatus::Failed => &mut self.failed,
+        };
+        *slot += count;
+    }
+}
+
+/// Vue d'ensemble d'un worker, calculée par le central.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerOverview {
+    pub name: String,
+    pub worker_id: Option<Uuid>,
+    pub last_seen: Option<DateTime<Utc>>,
+    pub jobs: JobCounts,
 }
 
 #[cfg(test)]

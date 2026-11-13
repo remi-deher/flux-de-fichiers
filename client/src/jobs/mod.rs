@@ -3,6 +3,8 @@
 mod create;
 mod detail;
 mod live;
+
+pub use live::LiveJobs;
 pub mod model;
 mod table;
 
@@ -23,16 +25,21 @@ const JOBS_PATH: &str = "/api/v1/jobs?limit=200";
 
 #[component]
 pub fn JobsPage(me: Me) -> impl IntoView {
-    let can_manage = me.allows(Permission::ManageJobs);
-    let reload = RwSignal::new(0_u32);
-    let progress = RwSignal::new(HashMap::<Uuid, u32>::new());
+    let central = me.instance_kind == flux_shared::InstanceKind::Central;
+    let can_manage = central && me.allows(Permission::ManageJobs);
+    // Sur le central, la liste suit le flux d'événements de l'application ; sur un worker, non.
+    let live = use_context::<LiveJobs>();
+    let reload = live.map_or_else(|| RwSignal::new(0_u32), |live| live.reload);
+    let progress = live.map_or_else(
+        || RwSignal::new(HashMap::<Uuid, u32>::new()),
+        |live| live.progress,
+    );
     let filter = RwSignal::new(JobFilter::All);
     let selected = RwSignal::new(None::<Uuid>);
     let jobs = LocalResource::new(move || {
         reload.track();
         api::get::<Vec<Job>>(JOBS_PATH)
     });
-    live::subscribe(reload, progress);
 
     let refresh = Callback::new(move |job: Job| {
         selected.set(Some(job.id));

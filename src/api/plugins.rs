@@ -97,7 +97,7 @@ pub async fn get_settings(
     State(s): State<AppState>,
     Path(id): Path<String>,
     _auth: AdminAuth,
-) -> AppResult<Json<Value>> {
+) -> AppResult<Json<plugins::PluginSettingsView>> {
     let secrets = SecretBox::open(&s.config.config_dir)?;
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     let schema_fields = plugins::settings_fields(&roots, &id);
@@ -123,11 +123,11 @@ pub async fn get_settings(
             field.value.clear();
         }
     }
-    Ok(Json(serde_json::json!({
-        "pluginId": id,
-        "settings": public,
-        "fields": fields,
-    })))
+    Ok(Json(plugins::PluginSettingsView {
+        plugin_id: id,
+        settings: public.as_object().cloned().unwrap_or_default(),
+        fields,
+    }))
 }
 
 /// Enregistre la configuration d'un plugin du catalogue ; les secrets saisis sont chiffrés, les secrets laissés vides sont conservés.

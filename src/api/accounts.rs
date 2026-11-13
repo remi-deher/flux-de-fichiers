@@ -15,20 +15,7 @@ use axum::{
     http::StatusCode,
 };
 use flux_shared::Role;
-use serde::Deserialize;
-
-#[derive(Deserialize)]
-pub struct CreateAccountRequest {
-    username: String,
-    password: String,
-    role: String,
-}
-
-#[derive(Deserialize)]
-pub struct UpdateAccountRequest {
-    role: Option<String>,
-    disabled: Option<bool>,
-}
+use flux_shared::accounts::{CreateAccountRequest, UpdateAccountRequest};
 
 /// Rôle d'un compte humain : un rôle inconnu ou réservé aux machines est refusé.
 fn account_role(raw: &str) -> AppResult<Role> {

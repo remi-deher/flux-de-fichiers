@@ -1,15 +1,20 @@
-//! Client web Leptos compilé en WASM (ADR 0014).
+//! Client web Leptos compilé en WASM (ADR 0014) : toute l'interface, servie à la racine.
 //!
-//! Il remplace l'interface historique écran par écran ; il est servi sous `/app/` et partage
-//! avec le central les types de `flux-shared`.
+//! Il partage avec le central les types de `flux-shared`.
 
+mod access;
 pub mod api;
 mod app;
 pub mod flows;
 pub mod format;
 pub mod jobs;
 pub mod libraries;
+mod overview;
+mod plugins;
 pub mod route;
+mod settings;
+mod sleep;
+pub mod theme;
 pub mod workers;
 
 use wasm_bindgen::prelude::wasm_bindgen;

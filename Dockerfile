@@ -17,7 +17,7 @@ RUN mkdir -p src frontend/src shared/src client/src && \
     echo '' > shared/src/lib.rs && \
     echo '' > client/src/lib.rs && \
     echo 'fn main() {}' > src/main.rs && \
-    echo 'pub fn render_full_page() -> String { String::new() }' > frontend/src/lib.rs && \
+    echo '' > frontend/src/lib.rs && \
     echo 'fn main() {}' > frontend/src/main.rs
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
@@ -39,10 +39,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo run --locked --release -p flux-frontend -j ${CARGO_JOBS} && \
     test -s /src/frontend/dist/index.html && \
     cargo build --locked --release -p flux-client --target wasm32-unknown-unknown -j ${CARGO_JOBS} && \
-    wasm-bindgen --target web --no-typescript --out-dir /src/frontend/dist/app/pkg \
+    wasm-bindgen --target web --no-typescript --out-dir /src/frontend/dist/pkg \
       target/wasm32-unknown-unknown/release/flux_client.wasm && \
-    test -s /src/frontend/dist/app/index.html && \
-    test -s /src/frontend/dist/app/pkg/flux_client_bg.wasm
+    test -s /src/frontend/dist/pkg/flux_client_bg.wasm
 
 FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS runtime
 ARG APP_VERSION=0.1.0

@@ -1,6 +1,6 @@
 # 0014 — Client web Leptos compilé en WASM, écran par écran
 
-Statut : accepté par l'utilisateur (14 nov. 2026).
+Statut : accepté par l'utilisateur (14 nov. 2026). Bascule terminée le 14 nov. 2026 : le client sert toute l'interface.
 
 ## Contexte
 
@@ -21,14 +21,15 @@ l'éditeur de flux a longtemps détruit les flux à l'enregistrement sans que ri
    renvoie. Quand tous les écrans sont portés, `/` sert le client et le JavaScript historique
    est supprimé. Aucun pont entre le JavaScript historique et le WASM.
 4. **Contrat partagé** : les réponses lues par le client sont des types de `flux-shared`
-   (`jobs`, `session`, `format`, `flows`, `libraries`, `workers`, `app`), utilisés aussi par le central ; les dérivations SQLx y sont
-   derrière la fonctionnalité `sqlx`, que seul le central active.
-5. **Connexion** : tant que le client n'a pas son écran d'accès, il réutilise la session cookie
-   ouverte par l'interface historique (`/api/v1/auth/session` donne le jeton CSRF).
+   (`jobs`, `session`, `format`, `flows`, `libraries`, `workers`, `plugins`, `accounts`,
+   `system`, `app`), utilisés aussi par le central ; les dérivations SQLx y sont derrière la
+   fonctionnalité `sqlx`, que seul le central active.
+5. **Accès** : le client porte l'installation (central ou worker), la connexion et la session
+   cookie (`/api/v1/auth/session` donne le jeton CSRF).
 6. **Construction** : la cible WASM est déclarée dans `rust-toolchain.toml` ; l'image installe
    `wasm-bindgen-cli` à la version exacte du crate verrouillé (`WASM_BINDGEN_VERSION`). La CI
-   vérifie le client en natif et pour `wasm32-unknown-unknown`, et teste `flux-shared` et
-   `flux-client`.
+   vérifie le client en natif et pour `wasm32-unknown-unknown`, et teste `flux-shared`,
+   `flux-client` et `flux-frontend`.
 
 ## Écrans portés
 
@@ -48,8 +49,21 @@ l'éditeur de flux a longtemps détruit les flux à l'enregistrement sans que ri
 - **Workers** : présence, worker intégré, retrait d'un worker hors ligne, commande de
   raccordement.
 
-L'interface historique renvoie vers chacun de ces écrans (`NewInterfaceLink`), avec les chemins
-de `flux_shared::app`.
+- **Accès** : choix du rôle d'une installation vierge, installation du central, enrôlement d'un
+  worker (attente de son redémarrage), connexion, déconnexion.
+- **Vue d'ensemble** : chiffres clés, points d'attention, tâches récentes ; sur un worker, ses
+  tâches relayées par le central.
+- **Plugins** : dépôts (ajout, synchronisation, activation, retrait), outils (état,
+  installation), catalogue et réglages des plugins générés depuis leur `settingsSchema`.
+- **Paramètres** : mon compte et mot de passe, thème, comptes, clés d'API (secret affiché une
+  fois), état système.
+
+## Bascule (14 nov. 2026)
+
+Le client est servi à la racine (`/`, chemins de `flux_shared::app`) ; les anciens liens `/app/…`
+restent valides. Le crate `flux-frontend` ne génère plus que la page et le thème : le script
+historique et ses vues générées sont supprimés. Sur un worker, le client n'offre que la vue
+d'ensemble, les tâches (lecture), les plugins (lecture) et les paramètres (compte, thème).
 
 Limites connues : les blocs d'un dépôt de plugins sans exécution native n'apparaissent pas dans
 la palette (ils restent lus et conservés) ; pas de glisser-déposer ni de simulation ; quitter
@@ -57,14 +71,11 @@ l'éditeur ne prévient pas des modifications non enregistrées.
 
 ## Conséquences
 
-- Pendant la transition, deux interfaces coexistent ; les tâches se créent et se relancent
-  seulement dans la nouvelle.
-- Ordre de portage restant : plugins, paramètres, accès et installation, vue d'ensemble, puis
-  bascule de `/` et suppression du JavaScript historique.
+- Une seule interface ; elle ne fonctionne qu'avec JavaScript et WebAssembly.
 - Le client ne s'exécute que dans un navigateur ; ses tests Rust portent sur le modèle (règles
   d'affichage, contrat), pas sur le rendu.
 
 ## Retour arrière
 
-Retirer le crate `client`, son étape de construction et le renvoi `/app` ; l'interface
-historique n'en dépend pas.
+Revenir au commit précédant la bascule rétablit l'interface historique ; le contrat partagé peut
+rester, le central ne dépend pas du client.

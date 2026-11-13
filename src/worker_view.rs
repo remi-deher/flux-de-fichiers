@@ -3,11 +3,9 @@
 //! Le central expose des routes limitées au worker de la clé présentée ; le worker n'a jamais de
 //! proxy générique, seulement cette liste de routes.
 
-use crate::domain::JobStatus;
-use chrono::{DateTime, Utc};
 use flux_shared::Role;
+pub use flux_shared::workers::{JobCounts, WorkerOverview};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 pub const OVERVIEW_PATH: &str = "/api/v1/worker/overview";
 pub const JOBS_PATH: &str = "/api/v1/worker/jobs";
@@ -16,37 +14,6 @@ pub const LOGIN_PATH: &str = "/api/v1/worker/login";
 pub const ACCOUNTS_PATH: &str = "/api/v1/worker/accounts";
 /// Nombre de tâches renvoyées pour un worker.
 pub const WORKER_JOBS_LIMIT: i64 = 100;
-
-/// Tâches d'un worker, par statut.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct JobCounts {
-    pub queued: i64,
-    pub running: i64,
-    pub succeeded: i64,
-    pub failed: i64,
-}
-
-impl JobCounts {
-    pub fn add(&mut self, status: JobStatus, count: i64) {
-        let slot = match status {
-            JobStatus::Queued => &mut self.queued,
-            JobStatus::Running => &mut self.running,
-            JobStatus::Succeeded => &mut self.succeeded,
-            JobStatus::Failed => &mut self.failed,
-        };
-        *slot += count;
-    }
-}
-
-/// Vue d'ensemble d'un worker, calculée par le central.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkerOverview {
-    pub name: String,
-    pub worker_id: Option<Uuid>,
-    pub last_seen: Option<DateTime<Utc>>,
-    pub jobs: JobCounts,
-}
 
 #[derive(Serialize, Deserialize)]
 pub struct VerifyLoginRequest {
@@ -82,6 +49,7 @@ pub struct AccountSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::JobStatus;
 
     #[test]
     fn test_counts_accumulate_per_status() {

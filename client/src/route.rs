@@ -5,37 +5,44 @@ use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 
 use flux_shared::app;
 
-/// Préfixe servi par le central pour le client (ADR 0014).
-pub const BASE: &str = app::BASE;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
+    Overview,
     Jobs,
     Flows,
     NewFlow,
     FlowEditor(String),
     Libraries,
     Workers,
+    Plugins,
+    Settings,
 }
 
 impl Route {
     /// Chemin complet sous `/app`.
     pub fn path(&self) -> String {
         match self {
+            Self::Overview => app::OVERVIEW.to_owned(),
             Self::Jobs => app::JOBS.to_owned(),
             Self::Flows => app::FLOWS.to_owned(),
             Self::NewFlow => app::NEW_FLOW.to_owned(),
             Self::FlowEditor(id) => format!("{}/{}", app::FLOWS, encode_segment(id)),
             Self::Libraries => app::LIBRARIES.to_owned(),
             Self::Workers => app::WORKERS.to_owned(),
+            Self::Plugins => app::PLUGINS.to_owned(),
+            Self::Settings => app::SETTINGS.to_owned(),
         }
     }
 
-    /// Écran d'un chemin ; un chemin inconnu mène aux tâches.
+    /// Écran d'un chemin ; un chemin inconnu mène à la vue d'ensemble.
     pub fn parse(path: &str) -> Self {
-        let rest = path.strip_prefix(BASE).unwrap_or(path).trim_matches('/');
+        let rest = path
+            .strip_prefix(app::LEGACY_PREFIX)
+            .unwrap_or(path)
+            .trim_matches('/');
         let mut parts = rest.split('/');
         match (parts.next(), parts.next(), parts.next()) {
+            (Some("jobs"), None, _) => Self::Jobs,
             (Some("flows"), None, _) => Self::Flows,
             (Some("flows"), Some("new"), None) => Self::NewFlow,
             (Some("flows"), Some(id), None) if !id.is_empty() => {
@@ -43,14 +50,16 @@ impl Route {
             }
             (Some("libraries"), None, _) => Self::Libraries,
             (Some("workers"), None, _) => Self::Workers,
-            _ => Self::Jobs,
+            (Some("plugins"), None, _) => Self::Plugins,
+            (Some("settings"), None, _) => Self::Settings,
+            _ => Self::Overview,
         }
     }
 
     /// Entrée de navigation à laquelle l'écran appartient.
     pub fn section(&self) -> Self {
         match self {
-            Self::NewFlow | Self::FlowEditor(_) => Self::Flows,
+            Self::FlowEditor(_) => Self::Flows,
             other => other.clone(),
         }
     }
@@ -158,6 +167,7 @@ mod tests {
     #[test]
     fn every_route_parses_back_from_its_path() {
         for route in [
+            Route::Overview,
             Route::Jobs,
             Route::Flows,
             Route::NewFlow,
@@ -165,17 +175,21 @@ mod tests {
             Route::FlowEditor("flux à part".into()),
             Route::Libraries,
             Route::Workers,
+            Route::Plugins,
+            Route::Settings,
         ] {
             assert_eq!(Route::parse(&route.path()), route);
         }
     }
 
     #[test]
-    fn unknown_paths_lead_to_jobs_and_sections_group_the_editor() {
-        assert_eq!(Route::parse("/app"), Route::Jobs);
-        assert_eq!(Route::parse("/app/inconnu"), Route::Jobs);
-        assert_eq!(Route::parse("/app/flows/a/b"), Route::Jobs);
+    fn unknown_paths_lead_to_the_overview_and_old_app_links_still_work() {
+        assert_eq!(Route::parse("/"), Route::Overview);
+        assert_eq!(Route::parse("/inconnu"), Route::Overview);
+        assert_eq!(Route::parse("/flows/a/b"), Route::Overview);
+        assert_eq!(Route::parse("/app/flows"), Route::Flows);
+        assert_eq!(Route::parse("/app"), Route::Overview);
         assert_eq!(Route::FlowEditor("x".into()).section(), Route::Flows);
-        assert_eq!(Route::NewFlow.section(), Route::Flows);
+        assert_eq!(Route::NewFlow.section(), Route::NewFlow);
     }
 }

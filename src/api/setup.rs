@@ -6,27 +6,11 @@ use crate::{
     password, repository, web_session,
 };
 use axum::{Json, extract::State, http::HeaderMap, response::Response};
+pub use flux_shared::system::{SetupRequest, SetupStatus};
 use flux_shared::{InstanceKind, Role};
-use serde::{Deserialize, Serialize};
 
 const INSTANCE_NAME_MAX_LEN: usize = 80;
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetupStatus {
-    needs_setup: bool,
-    instance_name: Option<String>,
-    instance_kind: InstanceKind,
-}
-
-#[derive(Deserialize)]
-pub struct SetupRequest {
-    name: String,
-    username: String,
-    password: String,
-}
-
-/// L'installation est-elle à faire ? Public : l'interface choisit entre assistant et connexion.
 pub async fn status(State(state): State<AppState>) -> AppResult<Json<SetupStatus>> {
     Ok(Json(SetupStatus {
         needs_setup: repository::account_count(&state.pool).await? == 0,

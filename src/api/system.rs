@@ -6,26 +6,8 @@ use crate::{
     secrets::{KEY_FILE_ENV, SecretBox},
 };
 use axum::{Json, extract::State};
-use serde::Serialize;
+pub use flux_shared::system::{KeySource, SystemStatus};
 use std::path::PathBuf;
-
-/// Origine de la clé de chiffrement : fichier local de `/config`, ou fichier fourni par l'orchestrateur.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum KeySource {
-    Local,
-    External,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SystemStatus {
-    version: &'static str,
-    key_id: String,
-    key_source: KeySource,
-    /// Taille de la base SQLite et de son journal ; `None` pour une base en mémoire.
-    database_bytes: Option<u64>,
-}
 
 /// Chemin du fichier SQLite d'une URL de base (`sqlite:///config/flux.db?mode=rwc`) ; `None` en mémoire.
 pub fn database_file(database_url: &str) -> Option<PathBuf> {
@@ -51,7 +33,7 @@ pub async fn status(
 ) -> AppResult<Json<SystemStatus>> {
     let secrets = SecretBox::open(&state.config.config_dir)?;
     Ok(Json(SystemStatus {
-        version: env!("CARGO_PKG_VERSION"),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         key_id: secrets.key_id().to_owned(),
         key_source: if std::env::var(KEY_FILE_ENV).is_ok() {
             KeySource::External

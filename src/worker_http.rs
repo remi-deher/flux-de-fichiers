@@ -23,6 +23,7 @@ use axum::{
     response::Response,
     routing::{get, post},
 };
+use flux_shared::system::SetupStatus;
 use flux_shared::{InstanceKind, Permission};
 use serde::Serialize;
 use std::{
@@ -147,14 +148,6 @@ struct WorkerStatus {
     central_reachable: bool,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SetupStatus {
-    needs_setup: bool,
-    instance_name: String,
-    instance_kind: InstanceKind,
-}
-
 async fn health() -> StatusCode {
     StatusCode::NO_CONTENT
 }
@@ -175,7 +168,7 @@ async fn status(State(web): Web) -> Json<WorkerStatus> {
 async fn setup_status(State(web): Web) -> Json<SetupStatus> {
     Json(SetupStatus {
         needs_setup: false,
-        instance_name: web.status.name.clone(),
+        instance_name: Some(web.status.name.clone()),
         instance_kind: InstanceKind::Worker,
     })
 }

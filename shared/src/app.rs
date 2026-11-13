@@ -1,9 +1,12 @@
-//! Chemins du client WASM (ADR 0014), partagés par ses routes et les renvois de l'interface
-//! historique.
+//! Chemins des écrans du client web (ADR 0014), servis à la racine.
 
-pub const BASE: &str = "/app";
-pub const JOBS: &str = "/app/";
-pub const FLOWS: &str = "/app/flows";
-pub const NEW_FLOW: &str = "/app/flows/new";
-pub const LIBRARIES: &str = "/app/libraries";
-pub const WORKERS: &str = "/app/workers";
+pub const OVERVIEW: &str = "/";
+pub const JOBS: &str = "/jobs";
+pub const FLOWS: &str = "/flows";
+pub const NEW_FLOW: &str = "/flows/new";
+pub const LIBRARIES: &str = "/libraries";
+pub const WORKERS: &str = "/workers";
+pub const PLUGINS: &str = "/plugins";
+pub const SETTINGS: &str = "/settings";
+/// Préfixe du client pendant la transition : ses anciens liens restent valides.
+pub const LEGACY_PREFIX: &str = "/app";

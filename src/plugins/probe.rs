@@ -39,7 +39,7 @@ pub fn file_job_may_start(cache: &ToolCacheManager, contract: Option<&ProbeContr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugins::vocab::CatalogItemType;
+    use crate::plugins::CatalogItemType;
 
     fn tool(id: &str, version: &str, capability: CatalogCapability, current: bool) -> CatalogEntry {
         CatalogEntry {

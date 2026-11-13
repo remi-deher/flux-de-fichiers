@@ -12,21 +12,7 @@ use axum::{
     http::StatusCode,
 };
 use flux_shared::Role;
-use serde::{Deserialize, Serialize};
-
-#[derive(Deserialize)]
-pub struct CreateKeyRequest {
-    name: String,
-    role: String,
-}
-
-/// Clé créée : `key` n'est renvoyée qu'ici.
-#[derive(Serialize)]
-pub struct CreatedKey {
-    key: String,
-    #[serde(flatten)]
-    record: ApiKeyRecord,
-}
+use flux_shared::accounts::{CreateKeyRequest, CreatedKey};
 
 pub async fn list(
     State(state): State<AppState>,

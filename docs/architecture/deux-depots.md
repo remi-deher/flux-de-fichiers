@@ -19,7 +19,7 @@ services d'exécution :
 | `security` | Autorisation API, TLS et configuration des secrets ; `src/auth.rs`, `src/config.rs`, façade `src/security.rs`. |
 | `flows` | Emplacement réservé aux définitions de flux ; aucun moteur ni catalogue n'est livré. |
 | `plugins` | Frontière réservée aux contrats consommés par l'application ; aucun chargeur n'est livré. |
-| Frontend Leptos | `frontend/` implémenté. Interface moderne de pilotage Leptos servie sur localhost:3000 avec proxy API local. |
+| Interface | Client Leptos compilé en WASM (`client/`), page et thème générés par `frontend/`, servis par Axum sur le port 3000 (ADR 0014). |
 
 Les façades nommées rendent les responsabilités visibles sans déplacer ni
 remplacer la chaîne existante. PostgreSQL reste l'autorité sur les tâches et les

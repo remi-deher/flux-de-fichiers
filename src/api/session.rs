@@ -14,13 +14,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use flux_shared::InstanceKind;
-use serde::Deserialize;
-
-#[derive(Deserialize)]
-pub struct LoginRequest {
-    pub(crate) username: String,
-    pub(crate) password: String,
-}
+pub use flux_shared::accounts::{ChangePasswordRequest, LoginRequest};
 
 pub use flux_shared::session::{CallerKind, Me as MeResponse, SessionInfo as SessionResponse};
 
@@ -121,12 +115,6 @@ pub async fn me(
         InstanceKind::Central,
         instance_name,
     )))
-}
-
-#[derive(Deserialize)]
-pub struct ChangePasswordRequest {
-    current_password: String,
-    new_password: String,
 }
 
 /// Change le mot de passe du compte connecté ; ses autres sessions sont fermées.

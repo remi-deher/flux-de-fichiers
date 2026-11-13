@@ -3,12 +3,15 @@
 //! Ils sont définis une seule fois : le backend s'en sert pour contrôler l'accès de chaque route,
 //! le frontend pour ne montrer que ce que l'utilisateur peut faire (ADR 0011).
 
+pub mod accounts;
 pub mod app;
 pub mod flows;
 pub mod format;
 pub mod jobs;
 pub mod libraries;
+pub mod plugins;
 pub mod session;
+pub mod system;
 pub mod workers;
 
 use serde::{Deserialize, Serialize};

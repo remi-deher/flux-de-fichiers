@@ -12,8 +12,9 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
+pub use flux_shared::system::SetupWorkerRequest;
 use flux_shared::{InstanceKind, Role};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// État public de l'installation, identique pour le central et le worker (sondes, supervision).
 #[derive(Serialize)]
@@ -49,14 +50,6 @@ pub async fn enroll(
     let issued = crate::api_keys::issue(&state.pool, &request.worker_name, Role::Worker).await?;
     let body = Json(enrollment::EnrolledWorker { key: issued.raw });
     Ok(([(header::CACHE_CONTROL, "no-store")], body).into_response())
-}
-
-#[derive(Deserialize)]
-pub struct SetupWorkerRequest {
-    central_url: String,
-    username: String,
-    password: String,
-    worker_name: String,
 }
 
 /// Transforme une installation vierge en worker : enrôlement auprès du central, rôle conservé dans

@@ -32,6 +32,14 @@ pub enum ApiError {
 }
 
 impl ApiError {
+    /// Code d'erreur stable du central, s'il a répondu.
+    pub fn code(&self) -> Option<&str> {
+        match self {
+            Self::Rejected { code, .. } => Some(code),
+            _ => None,
+        }
+    }
+
     pub fn message(&self) -> String {
         match self {
             Self::Unauthorized => "Session absente ou expirée : reconnectez-vous.".into(),
@@ -136,6 +144,15 @@ pub async fn put<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> Res
         .json()
         .await
         .map_err(|_| ApiError::Network)
+}
+
+/// `POST` ou `PUT` dont la réponse n'a pas de corps (204).
+pub async fn post_empty<B: Serialize>(path: &str, body: Option<&B>) -> Result<(), ApiError> {
+    send_write(Write::Post, path, body).await.map(|_| ())
+}
+
+pub async fn put_empty<B: Serialize>(path: &str, body: &B) -> Result<(), ApiError> {
+    send_write(Write::Put, path, Some(body)).await.map(|_| ())
 }
 
 /// `DELETE` sans corps ni réponse.

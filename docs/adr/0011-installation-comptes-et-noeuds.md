@@ -63,7 +63,7 @@ des comptes avec mot de passe pour les humains, des clés d'API pour les machine
 automatique, crate `flux-shared`, interface de connexion, Réglages → compte et clés d'API).
 Vérifiée en local, non déployée.
 
-**Phase 2 faite** (code écrit ; tests Rust à exécuter par la CI, rien lancé en local) :
+**Phase 2 faite** (CI verte sur la PR #92 le 13 nov. 2026 : fmt, clippy, tests Rust, build Docker et scénarios ; interface non vérifiée dans un navigateur) :
 - `src/node_settings.rs` : le rôle worker est conservé dans `/config/node.json` (nom, adresse de la
   centrale) et la clé du nœud dans `/config/worker.key` (mode 0600). Sans fichier, le nœud démarre en
   centrale ; `coordinator` et `worker` restent acceptés comme arguments.
@@ -79,7 +79,7 @@ Vérifiée en local, non déployée.
 - Limites : le mot de passe administrateur transite vers l'adresse saisie sur la page d'installation
   (acceptable sur réseau de confiance, comme la fenêtre de réclamation) ; la redirection n'est pas suivie.
 
-**Phase 3 faite** (code écrit, non commité, ni compilé ni testé en local) :
+**Phase 3 faite** (CI verte sur la PR #92, même run) :
 - Routes de la centrale réservées à la clé d'un nœud, limitées à ce nœud (`src/api/node_view.rs`) :
   `/api/v1/node/overview`, `/jobs`, `/plugins`, `/login` (connexion déléguée), `/accounts` (copie des
   comptes). Liste fermée côté worker (`src/central_client.rs`), jamais de proxy générique.
@@ -95,14 +95,13 @@ Vérifiée en local, non déployée.
   la vue du worker dépend de la centrale (502 si elle est coupée) ; interface non vérifiée dans un
   navigateur.
 
-**Phase 4, partie code faite** (non commitée, non testée) : le tableau de bord d'un worker affiche les
+**Phase 4, partie code faite** (CI verte sur la PR #92) : le tableau de bord d'un worker affiche les
 tâches du nœud par statut (`/api/v1/node/overview`, `frontend/src/client/node_overview.rs`), masque les
 raccourcis et la carte « Médias et stockage » qui n'existent que sur la centrale, et décrit l'état de la
 centrale dans le bandeau.
 
 **Reste à faire :**
-- Phase 4, vérification : exécuter et corriger les tests des phases 2, 3 et 4 via la CI (PR `dev → test`),
-  puis vérifier l'interface d'un worker dans un navigateur.
+- Phase 4, vérification : l'interface d'un worker dans un navigateur (les tests Rust et la CI sont verts).
 - Déploiement : pousser `dev → test → main` (ADR 0002), approuver les runs `action_required`,
   remettre l'installation de test à zéro (supprimer `/config` après sauvegarde ; confirmer avant de
   toucher `/data`), recréer le compte par l'assistant, créer les clés worker dans Réglages, mettre à

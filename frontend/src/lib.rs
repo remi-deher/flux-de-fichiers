@@ -208,6 +208,19 @@ mod tests {
     }
 
     #[test]
+    fn test_the_subnav_capsule_has_no_background_of_its_own() {
+        let html = render_full_page();
+        let start = html.find("\n.app-subnav {").unwrap_or(0);
+        let rule = &html[start
+            ..html[start..]
+                .find('}')
+                .map_or(html.len(), |end| start + end)];
+        assert!(rule.contains("background: transparent"));
+        assert!(!rule.contains("bg-card"));
+        assert!(!rule.contains("backdrop-filter"));
+    }
+
+    #[test]
     fn test_no_client_function_is_declared_twice() {
         // Une seconde déclaration remplace silencieusement la première pour toute la page.
         let html = render_full_page();

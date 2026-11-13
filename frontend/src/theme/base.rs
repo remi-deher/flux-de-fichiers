@@ -931,8 +931,7 @@ body[data-filter-sheet] .topbar-search {
   padding: 3px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg, 12px);
-  background: var(--bg-card);
-  backdrop-filter: blur(14px);
+  background: transparent;
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }

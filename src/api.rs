@@ -323,11 +323,14 @@ async fn claim(
             flow.definition =
                 crate::flows::decrypt_definition_headers(&secrets, &flow.id, &flow.definition)?;
         }
-        let arr =
-            crate::flows::ArrContext::load(&s.pool, &s.config.config_dir, &s.config.input_dir)
-                .await;
-        if !arr.connections.is_empty() {
-            claim.arr = Some((&arr).into());
+        // Seules les connexions *arr* des blocs du flux figé voyagent ; rien sans flux ni sans bloc.
+        if let Some(flow) = &claim.frozen_flow
+            && !crate::flows::arr_services_in(&flow.definition).is_empty()
+        {
+            let arr =
+                crate::flows::ArrContext::load(&s.pool, &s.config.config_dir, &s.config.input_dir)
+                    .await;
+            claim.arr = crate::flows::lease_arr_context(&flow.definition, &arr);
         }
         s.notify_job_event(
             JobEventType::JobClaimed,

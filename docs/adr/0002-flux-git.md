@@ -3,7 +3,7 @@
 Statut : accepté par l'utilisateur.
 
 ```
-dev  ──●──●──●──   push direct, aucune CI : sauvegarde rapide du code
+dev  ──●──●──●──   PR de branche de travail : fmt, clippy, tests (feature.yml)
         \
 test ────●──────   PR dev→test : fmt, clippy, tests, build → fusion auto
           \        → Docker Hub :test et :test-<sha>
@@ -14,7 +14,12 @@ main ──────●────   PR test→main : main-checks (image tes
 
 ## Règles
 
-- `dev` reçoit des push directs, sans CI. Ni suppression ni force-push.
+- `dev` reçoit les branches de travail (`feat/…`, `fix/…`) par PR. Le workflow
+  `feature.yml` y exécute `cargo fmt --check`, clippy (`-D warnings`, natif et WASM),
+  les tests et la vérification que `frontend/dist/index.html` est à jour (décision
+  utilisateur du 14 nov. 2026). Pas d'image Docker : elle reste construite sur la PR
+  `dev → test`. Ni suppression ni force-push. Rendre `fmt-clippy-tests` obligatoire
+  sur `dev` est un réglage GitHub, hors dépôt.
 - `test` n'accepte que les PR depuis `dev` (job `source-is-dev`). Si
   `fmt-clippy-tests` (fmt, clippy, `cargo test`), `docker-build` et `docker-scenarios`
   (l'image démarre et répond sur `/health`) sont verts, le workflow fusionne la PR

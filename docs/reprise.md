@@ -114,20 +114,19 @@ Chaque point est indépendant sauf mention. Cocher ou retirer au fil de l'eau.
 
 ### 0. En cours
 
-- [ ] PR [#111](https://github.com/remi-deher/flux-de-fichiers/pull/111) `dev → test` (versions de
-      flux, #110) : attendre la CI, puis déployer l'image `:test-<sha12>` produite sur les NAS
-      (procédure dans « Production » ci-dessous ; **vérifier d'abord que le WASM de l'image est le
-      bon**, voir « Non vérifié »).
+- [x] PR [#111](https://github.com/remi-deher/flux-de-fichiers/pull/111) `dev → test` fusionnée
+      (CI verte, image `:test-67cb9cc…` publiée).
+- [ ] Déployer cette image sur les NAS (procédure dans « Production » ci-dessous ; **vérifier
+      d'abord que le WASM de l'image est le bon**, voir « Non vérifié »).
 
-### 1. Vérifier en réel (prioritaire, rien n'a été testé connecté)
+### 1. Vérifier en réel
 
-- [ ] Parcours connecté de chaque écran sur l'essai (`http://192.168.1.50:18480`, identifiants
-      de Remi) : Activité (créer, relancer), Flux (éditeur, liaisons, réglages, enregistrement,
-      versions), Bibliothèques, Workers, Plugins (réglages, dépôts), Paramètres (comptes, clés).
-- [ ] Tâche réelle de bout en bout **sur le worker distant** (flux figé #105 jamais exercé en vrai).
-- [ ] Bloc d'encodage plugin réel (#108) : nécessite un vrai FFmpeg installé (voir 3).
-- [ ] Expliquer les avertissements `slow statement` / `slow acquire` SQLite vus sur le central le
-      14 nov. vers 09:10 (avant déploiement).
+Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera plus tard.
+
+- [ ] Parcours connecté de chaque écran sur l'essai (`http://192.168.1.50:18480`).
+- [ ] Tâche réelle de bout en bout **sur le worker distant** (flux figé #105).
+- [ ] Bloc d'encodage plugin réel (#108) : nécessite un vrai FFmpeg.
+- [ ] Expliquer les avertissements `slow statement` / `slow acquire` SQLite du 14 nov. vers 09:10.
 
 ### 2. Interface (client WASM, `client/src/`)
 
@@ -161,14 +160,13 @@ Chaque point est indépendant sauf mention. Cocher ou retirer au fil de l'eau.
 
 ### 5. Hygiène et process
 
-- [ ] CI sur les PR feature → `dev` (aujourd'hui aucune : #108 est arrivée avec des `expect()`
-      refusés par clippy), ou au minimum `cargo clippy --workspace --all-targets -- -D warnings`
-      obligatoire avant fusion.
-- [ ] Aligner `.cursorrules` / `.cursor/rules` sur la stack actuelle (client Leptos WASM, contrat
-      `flux-shared`).
-- [ ] Release `test → main` : aucune depuis 0.15.0, la production tourne sur des `:test-<sha>`.
-- [ ] `frontend/dist/index.html` versionné : le régénérer à chaque changement du thème ou le
-      sortir du dépôt.
+- [x] CI sur les PR feature → `dev` : `.github/workflows/feature.yml` (fmt, clippy natif et WASM,
+      tests, page générée à jour), ADR 0002 mis à jour. Reste à rendre `fmt-clippy-tests`
+      obligatoire sur `dev` (réglage GitHub, hors dépôt).
+- [x] `.cursorrules` / `.cursor/rules` alignés sur la stack actuelle.
+- [x] Release `test → main` : aucune pour le moment (décision du 14 nov.).
+- [x] `frontend/dist/index.html` reste versionné et régénéré à chaque changement ;
+      `feature.yml` échoue si la page est périmée.
 
 ## Ordre suggéré pour un autre agent
 

@@ -262,7 +262,7 @@ mod tests {
         let encode = catalog
             .iter()
             .find(|spec| spec.kind == "block.video.encode")
-            .expect("encodage vidéo");
+            .ok_or_else(|| anyhow::anyhow!("bloc d'encodage vidéo absent"))?;
         assert!(encode.from_plugin);
         assert!(
             encode
@@ -294,7 +294,9 @@ mod tests {
             "max": 3,
             "default": 2
         });
-        let field = parse_ui_field(&raw).expect("field");
+        let Some(field) = parse_ui_field(&raw) else {
+            panic!("un champ range doit être lu");
+        };
         match field.kind {
             OwnedFieldKind::Select(options) => {
                 assert_eq!(options.len(), 3);

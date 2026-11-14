@@ -403,7 +403,7 @@ async fn test_flow_blocks_catalog_includes_native_encode_blocks() -> anyhow::Res
     let encode = blocks
         .iter()
         .find(|block| block["kind"] == "block.video.encode")
-        .expect("video encode");
+        .ok_or_else(|| anyhow::anyhow!("bloc d'encodage vidéo absent"))?;
     assert!(
         encode["fields"]
             .as_array()

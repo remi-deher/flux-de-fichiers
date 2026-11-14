@@ -184,10 +184,12 @@ mod tests {
 
     #[test]
     fn default_config_fills_select_defaults() {
-        let webhook = native_owned_catalog()
+        let Some(webhook) = native_owned_catalog()
             .into_iter()
             .find(|spec| spec.kind == "webhook")
-            .expect("webhook");
+        else {
+            panic!("le catalogue natif doit contenir le bloc webhook");
+        };
         let config = webhook.default_config();
         assert_eq!(config["method"], "POST");
         assert_eq!(webhook.missing_fields(&config), vec!["URL".to_owned()]);

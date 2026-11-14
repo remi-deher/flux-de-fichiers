@@ -13,9 +13,10 @@ mod versions;
 
 pub use editor::FlowEditor;
 
-use crate::route::{Link, Route, encode_segment};
+use crate::route::{Link, Route, encode_segment, use_router};
 use crate::ui::search::{matches, query};
-use crate::ui::{Registre, RegistreMessage, StatusBadge, SubNav, SubTab};
+use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
+use crate::ui::{Registre, RegistreMessage, StatusBadge};
 use crate::{api, format};
 use flux_shared::Permission;
 use flux_shared::flows::{FlowGraph, FlowRecord};
@@ -79,7 +80,13 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
         api::get::<Vec<FlowRecord>>(FLOWS_PATH)
     });
     let on_removed = Callback::new(move |()| reload.update(|count| *count = count.wrapping_add(1)));
-    let tab = RwSignal::new(0_usize);
+    let router = use_router();
+    if can_manage {
+        provide_topbar_action(ActionSpec {
+            label: "Nouveau flux",
+            on_click: Callback::new(move |()| router.go(Route::NewFlow)),
+        });
+    }
     let rows = move || {
         let text = query();
         match flows.get() {
@@ -104,14 +111,8 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
             }
         }
     };
-    let actions = can_manage.then(|| {
-        view! { <Link to=Route::NewFlow class="btn btn-primary btn-sm">"Nouveau flux"</Link> }
-            .into_any()
-    });
     view! {
         <div class="tab-panel" role="tabpanel">
-            <SubNav aria_label="Sous-navigation des flux" tabs=vec![SubTab::new("Flux installés", "📦")] selected=tab
-                actions=actions.unwrap_or_else(|| ().into_any()) />
             <div class="registre">
                 <Registre aria_label="Flux" headers=HEADERS.to_vec()>{rows}</Registre>
             </div>

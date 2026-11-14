@@ -655,25 +655,14 @@ button, a, select, input {
   display: flex;
   align-items: stretch;
   min-height: 40px;
-  background-color: var(--bg-subtle);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
   color: var(--text-dim);
   box-sizing: border-box;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  transition: color 0.2s ease;
 }
 
 .topbar-search:focus-within,
 body[data-filter-sheet] .topbar-search {
-  border-color: var(--primary);
-  background-color: var(--bg-card);
-  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.15);
   color: var(--text-main);
-}
-
-body[data-filter-sheet] .topbar-search {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
 }
 
 .search-capsule__query {

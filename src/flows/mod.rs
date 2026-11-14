@@ -6,6 +6,7 @@ mod condition;
 mod encode;
 mod encode_run;
 mod header_secrets;
+mod lease_secrets;
 mod mp4box;
 mod route;
 mod tool;
@@ -21,6 +22,7 @@ pub use header_secrets::{
     decrypt_definition_headers, decrypt_headers, has_webhook_headers, mask_definition,
     migrate_flow_secrets, rotate_definition, seal_definition,
 };
+pub use lease_secrets::{arr_services_in, lease_arr_context};
 pub use mp4box::{Mp4Plan, mp4_plan, mp4box_argv};
 pub use route::next_connection;
 pub use tool::{InPlaceEdit, in_place_edit};

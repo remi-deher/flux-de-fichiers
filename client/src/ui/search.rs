@@ -3,11 +3,18 @@
 use leptos::prelude::*;
 
 #[derive(Clone, Copy)]
-pub struct Search(pub RwSignal<String>);
+pub struct Search {
+    pub text: RwSignal<String>,
+    /// Texte à appliquer au prochain changement d'écran (résultat de la recherche globale).
+    pub pending: RwSignal<Option<String>>,
+}
 
 impl Search {
     pub fn install() -> Self {
-        let search = Self(RwSignal::new(String::new()));
+        let search = Self {
+            text: RwSignal::new(String::new()),
+            pending: RwSignal::new(None),
+        };
         provide_context(search);
         search
     }
@@ -16,7 +23,7 @@ impl Search {
 /// Texte recherché (vide hors contexte).
 pub fn query() -> String {
     use_context::<Search>()
-        .map(|search| search.0.get())
+        .map(|search| search.text.get())
         .unwrap_or_default()
 }
 

@@ -1,9 +1,10 @@
 //! Coque de l'application : barre latérale (marque, navigation par groupes, thème, déconnexion)
-//! et barre du haut (recherche contextuelle, workers en ligne), sur le gabarit du thème.
+//! et barre du haut (recherche globale et filtre de l'écran, workers en ligne), sur le gabarit du thème.
 
 use crate::route::{Route, use_router};
 use crate::settings::logout;
 use crate::theme::ThemePicker;
+use crate::ui::global_search::SearchResults;
 use crate::ui::search::Search;
 use crate::ui::{Icon, IconName};
 use chrono::Utc;
@@ -236,10 +237,15 @@ fn WorkersPill() -> impl IntoView {
 fn Topbar(me: Me) -> impl IntoView {
     let router = use_router();
     let search = use_context::<Search>().unwrap_or_else(Search::install);
-    // Changer d'écran vide la recherche.
+    let opened = RwSignal::new(0_u32);
+    let focused = RwSignal::new(false);
+    // Changer d'écran vide la recherche, sauf si un résultat de la recherche globale y mène.
     Effect::new(move |_| {
         router.current();
-        search.0.set(String::new());
+        search
+            .text
+            .set(search.pending.get_untracked().unwrap_or_default());
+        search.pending.set(None);
     });
     let central = me.instance_kind == InstanceKind::Central && me.allows(Permission::ViewWorkers);
     view! {
@@ -250,12 +256,15 @@ fn Topbar(me: Me) -> impl IntoView {
                         <div class="search-capsule__query">
                             <Icon name=IconName::Search size=15 class="search-icon" />
                             <input type="search" class="topbar-search-input" autocomplete="off" spellcheck="false"
-                                enterkeyhint="search" aria-label="Recherche contextuelle"
+                                enterkeyhint="search" aria-label="Recherche globale"
+                                on:focus=move |_| { opened.update(|count| *count += 1); focused.set(true); }
+                                on:blur=move |_| focused.set(false)
                                 placeholder=move || search_placeholder(&router.current())
-                                prop:value=move || search.0.get()
-                                on:input=move |event| search.0.set(event_target_value(&event)) />
+                                prop:value=move || search.text.get()
+                                on:input=move |event| search.text.set(event_target_value(&event)) />
                         </div>
                     </div>
+                    <SearchResults me=me.clone() opened=opened focused=focused />
                 </div>
                 <div class="topbar-actions">
                     {central.then(|| view! { <WorkersPill /> })}

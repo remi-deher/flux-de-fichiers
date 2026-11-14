@@ -45,11 +45,11 @@ pub const REMUX_TOOL_ID: &str = "app.mkvtoolnix";
 pub const REMUX_TOOL_VERSION: &str = "1.0.0";
 
 /// FFmpeg distribué par les dépôts de plugins (jamais embarqué dans l'image).
-pub const FFMPEG_TOOL_ID: &str = "tool.ffmpeg";
+pub const FFMPEG_TOOL_ID: &str = "app.ffmpeg";
 pub const FFMPEG_TOOL_VERSION: &str = "1.0.0";
 
 /// MP4Box (GPAC) distribué par les dépôts de plugins, pour le remuxage MP4.
-pub const MP4BOX_TOOL_ID: &str = "tool.mp4box";
+pub const MP4BOX_TOOL_ID: &str = "app.mp4box";
 pub const MP4BOX_TOOL_VERSION: &str = "1.0.0";
 
 /// Conteneur de l'index du catalogue.
@@ -142,6 +142,7 @@ pub fn parse_index_tolerant(content: &str) -> anyhow::Result<ParsedIndex> {
             }
         }
     }
+    drop_orphan_blocks(&mut entries, &mut skipped);
     Ok(ParsedIndex {
         index: CatalogIndex {
             schema_version,
@@ -150,6 +151,29 @@ pub fn parse_index_tolerant(content: &str) -> anyhow::Result<ParsedIndex> {
         },
         skipped,
     })
+}
+
+/// Un bloc appartient à un plugin du même index : sans propriétaire connu, il est écarté.
+fn drop_orphan_blocks(entries: &mut Vec<CatalogEntry>, skipped: &mut Vec<String>) {
+    let plugins: HashSet<String> = entries
+        .iter()
+        .filter(|entry| entry.entry_type == CatalogItemType::Plugin)
+        .map(|entry| entry.id.clone())
+        .collect();
+    entries.retain(|entry| {
+        let orphan = !entry.entry_type.can_stand_alone()
+            && !entry
+                .owner
+                .as_ref()
+                .is_some_and(|owner| plugins.contains(owner));
+        if orphan {
+            skipped.push(format!(
+                "{} : un bloc doit appartenir à un plugin du dépôt (owner)",
+                entry.id
+            ));
+        }
+        !orphan
+    });
 }
 
 /// Charge l'index du catalogue depuis un dossier de dépôt ; les fiches inconnues sont journalisées.
@@ -198,6 +222,14 @@ pub fn list_catalog(roots: &[PathBuf]) -> Vec<CatalogEntry> {
     catalog_with_roots(roots)
         .into_iter()
         .map(|(_, entry)| entry)
+        .collect()
+}
+
+/// Pièces visibles par l'utilisateur : tout le catalogue sauf les blocs, qui appartiennent à un plugin.
+pub fn exposed_catalog(roots: &[PathBuf]) -> Vec<CatalogEntry> {
+    list_catalog(roots)
+        .into_iter()
+        .filter(|entry| entry.entry_type.section().is_some())
         .collect()
 }
 
@@ -339,6 +371,7 @@ mod tests {
             distribution: None,
             category: None,
             tags: Vec::new(),
+            owner: None,
         };
         let mut hidden = entry.clone();
         hidden.category = Some(PluginCategory::Other);
@@ -495,6 +528,43 @@ mod tests {
             serde_json::to_string(&ToolStatus::NotInstalled)?,
             "\"not_installed\""
         );
+        Ok(())
+    }
+
+    #[test]
+    fn blocks_without_a_known_owner_plugin_are_dropped() -> anyhow::Result<()> {
+        let raw = r#"{"schemaVersion":"1.0.0","entries":[
+            {"id":"plugin.a","type":"plugin","version":"1.0.0","name":"A","manifestPath":"a.json"},
+            {"id":"block.a.run","type":"block","owner":"plugin.a","version":"1.0.0","name":"Run","manifestPath":"plugins/a/blocks/run.json"},
+            {"id":"block.alone","type":"block","version":"1.0.0","name":"Seul","manifestPath":"b.json"},
+            {"id":"block.lost","type":"block","owner":"plugin.absent","version":"1.0.0","name":"Perdu","manifestPath":"c.json"},
+            {"id":"block.wrong","type":"block","owner":"app.x","version":"1.0.0","name":"Faux","manifestPath":"d.json"},
+            {"id":"app.x","type":"app","version":"1.0.0","name":"X","manifestPath":"x.json"}]}"#;
+        let parsed = parse_index_tolerant(raw)?;
+        let ids: Vec<_> = parsed.index.entries.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec!["plugin.a", "block.a.run", "app.x"]);
+        assert_eq!(parsed.skipped.len(), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn exposed_catalog_never_lists_blocks() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::create_dir_all(dir.path().join("catalogue"))?;
+        std::fs::write(
+            dir.path().join("catalogue/index.json"),
+            r#"{"schemaVersion":"1.0.0","entries":[
+                {"id":"plugin.a","type":"plugin","version":"1.0.0","name":"A","manifestPath":"a.json"},
+                {"id":"block.a.run","type":"block","owner":"plugin.a","version":"1.0.0","name":"Run","manifestPath":"b.json"},
+                {"id":"pack.x","type":"pack","version":"1.0.0","name":"X","manifestPath":"x.json"}]}"#,
+        )?;
+        let roots = [dir.path().to_path_buf()];
+        assert_eq!(list_catalog(&roots).len(), 3);
+        let ids: Vec<_> = exposed_catalog(&roots)
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect();
+        assert_eq!(ids, vec!["plugin.a", "pack.x"]);
         Ok(())
     }
 }

@@ -65,29 +65,21 @@ pub fn read_distribution(roots: &[PathBuf], tool_id: &str) -> AppResult<serde_js
     }
     for root in roots {
         for name in &candidates {
-            for path in [
-                distribution_path(root, name),
-                tool_distribution_path(root, name),
-            ] {
-                if path.is_file() {
-                    let content = std::fs::read_to_string(&path)?;
-                    return serde_json::from_str(&content)
-                        .map_err(|error| AppError::InvalidManifest(error.to_string()));
-                }
+            let path = distribution_path(root, name);
+            if path.is_file() {
+                let content = std::fs::read_to_string(&path)?;
+                return serde_json::from_str(&content)
+                    .map_err(|error| AppError::InvalidManifest(error.to_string()));
             }
         }
     }
     Err(AppError::NotFound)
 }
 
-/// Noms de dossier possibles pour un outil (`app.ffmpeg` → `ffmpeg`, `tool.ffmpeg` → `ffmpeg`).
+/// Noms de dossier possibles pour un outil (`app.ffmpeg` → `ffmpeg`).
 fn distribution_lookup_names(tool_id: &str) -> Vec<String> {
     let mut names = Vec::new();
-    for stripped in [
-        tool_id.trim_start_matches("app."),
-        tool_id.trim_start_matches("tool."),
-        tool_id,
-    ] {
+    for stripped in [tool_id.trim_start_matches("app."), tool_id] {
         if super::is_valid_repository_id(stripped) && !names.iter().any(|name| name == stripped) {
             names.push(stripped.to_owned());
         }
@@ -197,11 +189,6 @@ pub async fn ensure_job_tools(
 /// Chemin du contrat de distribution d'une application dans un dossier de catalogue.
 fn distribution_path(root: &Path, name: &str) -> PathBuf {
     root.join("apps").join(name).join(DISTRIBUTION_FILE_NAME)
-}
-
-/// Chemin du contrat sous `tools/<name>/` (catalogue plugins ADR 0004).
-fn tool_distribution_path(root: &Path, name: &str) -> PathBuf {
-    root.join("tools").join(name).join(DISTRIBUTION_FILE_NAME)
 }
 
 #[cfg(test)]
@@ -346,9 +333,9 @@ mod tests {
         ));
 
         let sibling = Path::new(env!("CARGO_MANIFEST_DIR")).join("../flux-de-fichiers-plugins");
-        if sibling.join("tools/ffmpeg/distribution.v1.json").is_file() {
-            let ffmpeg = read_distribution(std::slice::from_ref(&sibling), "tool.ffmpeg")?;
-            assert_eq!(ffmpeg["toolId"], "tool.ffmpeg");
+        if sibling.join("apps/ffmpeg/distribution.v1.json").is_file() {
+            let ffmpeg = read_distribution(std::slice::from_ref(&sibling), "app.ffmpeg")?;
+            assert_eq!(ffmpeg["toolId"], "app.ffmpeg");
         }
         Ok(())
     }

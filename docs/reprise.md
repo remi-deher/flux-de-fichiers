@@ -59,11 +59,13 @@ paramètres.
 |---|---|---|
 | Flux figé sur workers distants | [#105](https://github.com/remi-deher/flux-de-fichiers/pull/105) | Le bail porte `frozen_flow` (+ contexte *arr*) ; le worker distant exécute via `FlowEngine` |
 | SSE progression distant | [#106](https://github.com/remi-deher/flux-de-fichiers/pull/106) | `job_progress` via `POST /api/v1/jobs/{id}/progress` puis SSE (même contrat que le worker intégré) |
-| Palette + exécution encode plugins | [#108](https://github.com/remi-deher/flux-de-fichiers/pull/108) | Blocs plugins dans le catalogue (`GET /api/v1/flows/blocks`) ; `video/audio.encode` via FFmpeg (`tool.ffmpeg`, repli `FFMPEG`/PATH) |
+| Palette + exécution encode plugins | [#108](https://github.com/remi-deher/flux-de-fichiers/pull/108) | Blocs plugins dans le catalogue (`GET /api/v1/flows/blocks`) ; `video/audio.encode` via FFmpeg (`app.ffmpeg`, repli `FFMPEG`/PATH) |
 | Versions de flux | [#110](https://github.com/remi-deher/flux-de-fichiers/pull/110) | `GET /api/v1/flows/{id}/versions[/{v}]` ; tiroir « Versions » de l'éditeur (restaurer puis enregistrer) |
-| Remux MP4 (MP4Box) | [#114](https://github.com/remi-deher/flux-de-fichiers/pull/114) | `block.video.remux-mp4` exécuté (`tool.mp4box`, repli `MP4BOX`/PATH) ; exécuteur partagé `tool_run` (erreurs typées `ToolRunError`, progression lue sur `\r`/`\n`) |
+| Remux MP4 (MP4Box) | [#114](https://github.com/remi-deher/flux-de-fichiers/pull/114) | `block.video.remux-mp4` exécuté (`app.mp4box`, repli `MP4BOX`/PATH) ; exécuteur partagé `tool_run` (erreurs typées `ToolRunError`, progression lue sur `\r`/`\n`) |
 | Repli GPU → CPU | [#133](https://github.com/remi-deher/flux-de-fichiers/pull/133) | Échec FFmpeg avec encodeur matériel : repli journalisé et une seule retentative en CPU |
 | Secrets du bail limités | [#134](https://github.com/remi-deher/flux-de-fichiers/pull/134) | Le bail ne porte que les connexions *arr* des blocs du flux figé |
+| Sections du catalogue | branche `feat/catalogue-sections-et-proprietaire` | Page Plugins : Applications, Plugins, Flows, Autre, Packs, Dépôts ; blocs jamais exposés par `GET /api/v1/plugins` ; `owner` obligatoire pour un bloc (voir [deux-depots](architecture/deux-depots.md)) |
+| Refonte du dépôt plugins | `flux-de-fichiers-plugins` branche `refonte/types-et-proprietes` | `tools/` → `apps/` (`app.*`), `app.media` → `pack.media`, blocs sous leur plugin, exemples sous `examples/catalogue/`. À fusionner avec la branche du moteur |
 | Défaut `encoder: auto` | `flux-de-fichiers-plugins` `main` | `plugins/video/blocks/video-encode.json` |
 
 ## Non vérifié

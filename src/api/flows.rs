@@ -1,21 +1,31 @@
 //! Gestionnaires HTTP pour l'API REST des flux de traitement (Flows).
 
-use super::{AdminAuth, AppState};
+use super::{AdminAuth, AppState, ViewFlowsAuth};
 use crate::{
     domain::UpdateFlowRequest,
     error::{AppError, AppResult},
-    repository,
+    plugins, repository,
 };
 use axum::{
     Json,
     extract::{Path, State},
     http::StatusCode,
 };
+use flux_shared::flows::OwnedBlockSpec;
+
+/// Catalogue des blocs pour la palette : natifs + blocs des dépôts synchronisés.
+pub async fn list_blocks(
+    State(s): State<AppState>,
+    _auth: ViewFlowsAuth,
+) -> AppResult<Json<Vec<OwnedBlockSpec>>> {
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    Ok(Json(plugins::flow_block_catalog(&roots)))
+}
 
 /// Liste l'ensemble des flux configurés en base de données.
 pub async fn list_flows(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ViewFlowsAuth,
 ) -> AppResult<Json<Vec<crate::domain::FlowRecord>>> {
     let mut flows = repository::list_flows(&s.pool).await?;
     for flow in &mut flows {
@@ -28,9 +38,29 @@ pub async fn list_flows(
 pub async fn get_flow(
     State(s): State<AppState>,
     Path(id): Path<String>,
-    _auth: AdminAuth,
+    _auth: ViewFlowsAuth,
 ) -> AppResult<Json<crate::domain::FlowRecord>> {
     let mut flow = repository::get_flow(&s.pool, &id).await?;
+    flow.definition = crate::flows::mask_definition(&flow.definition);
+    Ok(Json(flow))
+}
+
+/// Versions figées d'un flux, la plus récente d'abord.
+pub async fn list_versions(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    _auth: ViewFlowsAuth,
+) -> AppResult<Json<Vec<crate::domain::FlowVersionSummary>>> {
+    Ok(Json(repository::list_flow_versions(&s.pool, &id).await?))
+}
+
+/// Une version figée d'un flux ; les en-têtes secrets sont masqués comme pour le flux courant.
+pub async fn get_version(
+    State(s): State<AppState>,
+    Path((id, version)): Path<(String, i64)>,
+    _auth: ViewFlowsAuth,
+) -> AppResult<Json<crate::domain::FlowRecord>> {
+    let mut flow = repository::get_flow_version(&s.pool, &id, version).await?;
     flow.definition = crate::flows::mask_definition(&flow.definition);
     Ok(Json(flow))
 }
@@ -53,7 +83,7 @@ pub async fn save_flow(
             .map(|flow| flow.definition);
         let secrets = crate::secrets::SecretBox::open(&s.config.config_dir)?;
         payload.definition =
-            crate::flows::seal_definition(&secrets, &payload.definition, existing.as_deref())?;
+            crate::flows::seal_definition(&secrets, &id, &payload.definition, existing.as_deref())?;
     }
     let mut flow = repository::save_flow(&s.pool, &id, &payload).await?;
     flow.definition = crate::flows::mask_definition(&flow.definition);

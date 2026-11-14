@@ -1,9 +1,14 @@
+use serde::{Deserialize, Serialize};
 use std::{
     env,
     net::SocketAddr,
     path::{Path, PathBuf},
 };
 
+const SMTP_STARTTLS_PORT: u16 = 587;
+const SMTP_TLS_PORT: u16 = 465;
+const SMTP_PLAIN_PORT: u16 = 25;
+const DEFAULT_BIND_ADDRESS: &str = "0.0.0.0:3000";
 const DEFAULT_WEB_SESSION_TTL_SECONDS: i64 = 28_800;
 const MAX_WEB_SESSION_TTL_SECONDS: i64 = 2_592_000;
 
@@ -17,13 +22,99 @@ pub struct Config {
     pub tools_cache_dir: PathBuf,
     pub plugins_dir: Option<PathBuf>,
     pub static_dir: PathBuf,
-    pub admin_key: String,
-    pub worker_key: String,
     pub max_file_bytes: u64,
     pub local_worker: bool,
     pub web_origin: Option<String>,
     pub web_session_ttl_seconds: i64,
     pub tls: Option<(PathBuf, PathBuf)>,
+    /// Relais d'envoi des courriels ; absent, le mot de passe oublié par courriel est désactivé.
+    pub smtp: Option<SmtpConfig>,
+}
+
+/// Chiffrement de la connexion au relais SMTP (`SMTP_TLS`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SmtpTls {
+    /// Connexion en clair puis passage en TLS (port 587 par défaut).
+    #[serde(rename = "starttls")]
+    StartTls,
+    /// TLS dès la connexion (port 465 par défaut).
+    Tls,
+    /// Aucun chiffrement (port 25 par défaut) : à réserver à un relais local.
+    None,
+}
+
+impl SmtpTls {
+    pub const fn default_port(self) -> u16 {
+        match self {
+            Self::StartTls => SMTP_STARTTLS_PORT,
+            Self::Tls => SMTP_TLS_PORT,
+            Self::None => SMTP_PLAIN_PORT,
+        }
+    }
+
+    fn parse(raw: &str) -> anyhow::Result<Self> {
+        Ok(serde_json::from_value(serde_json::Value::String(
+            raw.trim().to_lowercase(),
+        ))?)
+    }
+}
+
+/// Réglages SMTP. Le mot de passe vient d'un fichier ou de l'environnement, jamais de la base.
+#[derive(Clone)]
+pub struct SmtpConfig {
+    pub host: String,
+    pub port: u16,
+    pub tls: SmtpTls,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub from: String,
+}
+
+impl SmtpConfig {
+    /// Lit `SMTP_*` ; `None` si `SMTP_HOST` n'est pas défini.
+    pub fn from_env() -> anyhow::Result<Option<Self>> {
+        let password =
+            if env::var("SMTP_PASSWORD").is_ok() || env::var("SMTP_PASSWORD_FILE").is_ok() {
+                Some(value("SMTP_PASSWORD")?)
+            } else {
+                None
+            };
+        Self::from_variables(|name| env::var(name).ok(), password)
+    }
+
+    fn from_variables(
+        variable: impl Fn(&str) -> Option<String>,
+        password: Option<String>,
+    ) -> anyhow::Result<Option<Self>> {
+        let Some(host) = variable("SMTP_HOST").filter(|host| !host.trim().is_empty()) else {
+            return Ok(None);
+        };
+        let tls = variable("SMTP_TLS")
+            .map(|raw| SmtpTls::parse(&raw))
+            .transpose()?
+            .unwrap_or(SmtpTls::StartTls);
+        let port = variable("SMTP_PORT")
+            .map(|raw| raw.trim().parse())
+            .transpose()?
+            .unwrap_or_else(|| tls.default_port());
+        let from = variable("SMTP_FROM")
+            .filter(|from| !from.trim().is_empty())
+            .ok_or_else(|| anyhow::anyhow!("SMTP_FROM is required with SMTP_HOST"))?;
+        let username = variable("SMTP_USERNAME").filter(|name| !name.is_empty());
+        anyhow::ensure!(
+            username.is_some() == password.is_some(),
+            "SMTP_USERNAME and SMTP_PASSWORD must be supplied together"
+        );
+        Ok(Some(Self {
+            host: host.trim().to_owned(),
+            port,
+            tls,
+            username,
+            password,
+            from: from.trim().to_owned(),
+        }))
+    }
 }
 
 pub fn value(name: &str) -> anyhow::Result<String> {
@@ -40,7 +131,8 @@ pub fn secret(name: &str) -> anyhow::Result<String> {
     Ok(value)
 }
 
-fn resolve_config_dir() -> PathBuf {
+/// Dossier de configuration persistant (`/config` en conteneur).
+pub fn resolve_config_dir() -> PathBuf {
     if let Ok(dir) = env::var("CONFIG_DIR") {
         return PathBuf::from(dir);
     }
@@ -52,51 +144,19 @@ fn resolve_config_dir() -> PathBuf {
     }
 }
 
-fn bootstrap_secret(config_dir: &Path, env_name: &str, file_name: &str) -> anyhow::Result<String> {
-    if env::var(env_name).is_ok() || env::var(format!("{env_name}_FILE")).is_ok() {
-        return secret(env_name);
-    }
-    let key_path = config_dir.join(file_name);
-    if key_path.is_file() {
-        let val = std::fs::read_to_string(&key_path)?.trim().to_owned();
-        if val.len() >= 32 {
-            return Ok(val);
-        }
-    }
-    let mut bytes = [0u8; 32];
-    let mut urandom = std::fs::File::open("/dev/urandom")?;
-    use std::io::Read;
-    urandom.read_exact(&mut bytes)?;
-    let generated: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    write_secure_file(&key_path, &generated)?;
-    Ok(generated)
+/// Adresse d'écoute du port HTTP unique, la même pour le central et le worker.
+pub fn bind_address() -> anyhow::Result<SocketAddr> {
+    let raw = env::var("BIND_ADDR")
+        .or_else(|_| env::var("BIND"))
+        .unwrap_or_else(|_| DEFAULT_BIND_ADDRESS.into());
+    Ok(raw.parse()?)
 }
 
-fn write_secure_file(path: &Path, content: &str) -> anyhow::Result<()> {
-    use std::io::Write;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(path)?;
-    file.write_all(content.as_bytes())?;
-    file.flush()?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
-}
-
-pub fn coordinator_url(raw: &str) -> anyhow::Result<reqwest::Url> {
+pub fn central_url(raw: &str) -> anyhow::Result<reqwest::Url> {
     let url = reqwest::Url::parse(raw)?;
     anyhow::ensure!(
         url.scheme() == "https" || url.scheme() == "http",
-        "Coordinator requires HTTP or HTTPS"
+        "Central URL requires HTTP or HTTPS"
     );
     anyhow::ensure!(
         url.path() == "/"
@@ -104,7 +164,7 @@ pub fn coordinator_url(raw: &str) -> anyhow::Result<reqwest::Url> {
             && url.fragment().is_none()
             && url.username().is_empty()
             && url.password().is_none(),
-        "Coordinator URL must be an origin without credentials"
+        "Central URL must be an origin without credentials"
     );
     Ok(url)
 }
@@ -119,33 +179,13 @@ impl Config {
         let config_dir = resolve_config_dir();
         std::fs::create_dir_all(&config_dir)?;
 
-        let bind_str = env::var("BIND_ADDR")
-            .or_else(|_| env::var("BIND"))
-            .unwrap_or_else(|_| "0.0.0.0:3000".into());
-        let bind: SocketAddr = bind_str.parse()?;
+        let bind = bind_address()?;
 
         let tls = match (env::var("TLS_CERT"), env::var("TLS_KEY")) {
             (Ok(cert), Ok(key)) => Some((cert.into(), key.into())),
             (Err(_), Err(_)) => None,
             _ => anyhow::bail!("TLS_CERT and TLS_KEY must be supplied together"),
         };
-
-        let admin_key = bootstrap_secret(&config_dir, "ADMIN_KEY", "admin_key")?;
-        let mut worker_key = bootstrap_secret(&config_dir, "WORKER_KEY", "worker_key")?;
-        if admin_key == worker_key {
-            // If identical, regenerate a distinct worker key file
-            let key_path = config_dir.join("worker_key");
-            let mut bytes = [0u8; 32];
-            let mut urandom = std::fs::File::open("/dev/urandom")?;
-            use std::io::Read;
-            urandom.read_exact(&mut bytes)?;
-            worker_key = bytes.iter().map(|b| format!("{b:02x}")).collect();
-            write_secure_file(&key_path, &worker_key)?;
-        }
-        anyhow::ensure!(
-            admin_key != worker_key,
-            "Admin and worker credentials must differ"
-        );
 
         let max_file_bytes = env::var("MAX_FILE_BYTES")
             .unwrap_or_else(|_| "536870912".into())
@@ -205,8 +245,6 @@ impl Config {
         Ok(Self {
             bind,
             tls,
-            admin_key,
-            worker_key,
             max_file_bytes,
             local_worker: env::var("LOCAL_WORKER")
                 .map(|value| value != "false" && value != "0")
@@ -244,6 +282,125 @@ impl Config {
                 }
             }),
             static_dir,
+            smtp: SmtpConfig::from_env()?,
         })
+    }
+
+    /// Le lien de réinitialisation peut-il être envoyé : relais SMTP et adresse publique connus ?
+    pub fn password_reset_enabled(&self) -> bool {
+        self.smtp.is_some() && self.web_origin.is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn smtp(vars: &[(&str, &str)], password: Option<&str>) -> anyhow::Result<Option<SmtpConfig>> {
+        let map: HashMap<String, String> = vars
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+            .collect();
+        SmtpConfig::from_variables(|name| map.get(name).cloned(), password.map(str::to_owned))
+    }
+
+    #[test]
+    fn test_smtp_is_disabled_without_a_host() -> anyhow::Result<()> {
+        assert!(smtp(&[("SMTP_FROM", "a@b.fr")], None)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_smtp_defaults_follow_the_tls_mode() -> anyhow::Result<()> {
+        let config = smtp(
+            &[("SMTP_HOST", "smtp.exemple.fr"), ("SMTP_FROM", "a@b.fr")],
+            None,
+        )?
+        .ok_or_else(|| anyhow::anyhow!("absent"))?;
+        assert_eq!((config.tls, config.port), (SmtpTls::StartTls, 587));
+        let implicit = smtp(
+            &[
+                ("SMTP_HOST", "h"),
+                ("SMTP_FROM", "a@b.fr"),
+                ("SMTP_TLS", "TLS"),
+            ],
+            None,
+        )?
+        .ok_or_else(|| anyhow::anyhow!("absent"))?;
+        assert_eq!((implicit.tls, implicit.port), (SmtpTls::Tls, 465));
+        let plain = smtp(
+            &[
+                ("SMTP_HOST", "h"),
+                ("SMTP_FROM", "a@b.fr"),
+                ("SMTP_TLS", "none"),
+                ("SMTP_PORT", "2525"),
+            ],
+            None,
+        )?
+        .ok_or_else(|| anyhow::anyhow!("absent"))?;
+        assert_eq!((plain.tls, plain.port), (SmtpTls::None, 2525));
+        Ok(())
+    }
+
+    #[test]
+    fn test_smtp_rejects_incomplete_or_unknown_settings() {
+        assert!(smtp(&[("SMTP_HOST", "h")], None).is_err());
+        assert!(
+            smtp(
+                &[
+                    ("SMTP_HOST", "h"),
+                    ("SMTP_FROM", "a@b.fr"),
+                    ("SMTP_TLS", "ssl")
+                ],
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            smtp(
+                &[
+                    ("SMTP_HOST", "h"),
+                    ("SMTP_FROM", "a@b.fr"),
+                    ("SMTP_PORT", "x")
+                ],
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            smtp(
+                &[
+                    ("SMTP_HOST", "h"),
+                    ("SMTP_FROM", "a@b.fr"),
+                    ("SMTP_USERNAME", "u")
+                ],
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            smtp(
+                &[("SMTP_HOST", "h"), ("SMTP_FROM", "a@b.fr")],
+                Some("secret")
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_smtp_accepts_credentials_together() -> anyhow::Result<()> {
+        let config = smtp(
+            &[
+                ("SMTP_HOST", "h"),
+                ("SMTP_FROM", "a@b.fr"),
+                ("SMTP_USERNAME", "u"),
+            ],
+            Some("secret"),
+        )?
+        .ok_or_else(|| anyhow::anyhow!("absent"))?;
+        assert_eq!(config.username.as_deref(), Some("u"));
+        assert_eq!(config.password.as_deref(), Some("secret"));
+        Ok(())
     }
 }

@@ -1,16 +1,20 @@
 //! Module de gestion du thème et des styles CSS-in-Rust typés.
 
+pub mod auth;
 pub mod base;
 pub mod components;
 pub mod flows;
+pub mod graph;
 pub mod plugins;
 pub mod styles;
 pub mod tokens;
 pub mod widgets;
 
+pub use auth::AUTH_CSS;
 pub use base::BASE_CSS;
 pub use components::COMPONENTS_CSS;
 pub use flows::FLOWS_CSS;
+pub use graph::GRAPH_CSS;
 pub use plugins::PLUGINS_CSS;
 pub use styles::{generate_global_style, generate_global_tokens_css};
 pub use tokens::{DARK_THEME, LIGHT_THEME, ThemeTokens};
@@ -30,7 +34,11 @@ static ALL_STYLES: LazyLock<String> = LazyLock::new(|| {
     s.push('\n');
     s.push_str(FLOWS_CSS);
     s.push('\n');
+    s.push_str(GRAPH_CSS);
+    s.push('\n');
     s.push_str(WIDGETS_CSS);
+    s.push('\n');
+    s.push_str(AUTH_CSS);
     s
 });
 
@@ -51,6 +59,7 @@ mod tests {
         assert!(styles.contains(".application-shell {"));
         assert!(styles.contains(".status-pill {"));
         assert!(styles.contains(".widget-grid {"));
+        assert!(styles.contains(".auth-gate {"));
         assert!(styles.contains(".widget[data-state=\"loading\"]"));
     }
 }

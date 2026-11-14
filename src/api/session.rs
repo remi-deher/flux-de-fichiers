@@ -1,7 +1,10 @@
-use super::AppState;
+//! Connexion, session web, identité de l'appelant et changement de mot de passe.
+
+use super::{AppState, auth::AnyAuth};
 use crate::{
-    auth,
+    auth::{self, PrincipalKind},
     error::{AppError, AppResult},
+    password, repository,
     web_session::{self, WebSession},
 };
 use axum::{
@@ -10,18 +13,36 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use serde::{Deserialize, Serialize};
+use flux_shared::InstanceKind;
+pub use flux_shared::accounts::{ChangePasswordRequest, LoginRequest};
 
-#[derive(Deserialize, Default)]
-pub struct LoginRequest {
-    #[serde(default)]
-    admin_key: Option<String>,
-}
+pub use flux_shared::session::{CallerKind, Me as MeResponse, SessionInfo as SessionResponse};
 
-#[derive(Serialize)]
-pub struct SessionResponse {
-    csrf_token: String,
-    expires_at: String,
+/// Vérifie un identifiant et un mot de passe en limitant les essais ; `Unauthorized` sans distinguer
+/// compte inconnu, compte désactivé ou mauvais mot de passe.
+pub(super) async fn verify_credentials(
+    pool: &sqlx::SqlitePool,
+    username: &str,
+    password: String,
+) -> AppResult<repository::Account> {
+    let username = username.trim();
+    auth::check_login_allowed(username)?;
+    let found = repository::find_account_by_username(pool, username).await?;
+    let account = match found {
+        Some((account, hash)) if !account.disabled => {
+            password::verify(password, hash).await.then_some(account)
+        }
+        _ => {
+            password::verify_decoy(password).await;
+            None
+        }
+    };
+    let Some(account) = account else {
+        auth::record_login_failure(username);
+        return Err(AppError::Unauthorized);
+    };
+    auth::record_login_success(username);
+    Ok(account)
 }
 
 pub async fn login(
@@ -30,13 +51,19 @@ pub async fn login(
     Json(request): Json<LoginRequest>,
 ) -> AppResult<Response> {
     web_session::validate_origin(&headers, &state.config)?;
-    if let Some(ref key) = request.admin_key
-        && !key.trim().is_empty()
-    {
-        auth::verify_key(key.trim(), &state.config.admin_key)?;
-    }
-    let session = web_session::create(&state.pool, state.config.web_session_ttl_seconds).await?;
-    session_response(session, &state.config)
+    let account = verify_credentials(&state.pool, &request.username, request.password).await?;
+    open_session(&state, &account).await
+}
+
+/// Ouvre une session web pour ce compte et renvoie ses cookies.
+pub async fn open_session(state: &AppState, account: &repository::Account) -> AppResult<Response> {
+    let session = web_session::create(
+        &state.pool,
+        state.config.web_session_ttl_seconds,
+        &account.id,
+    )
+    .await?;
+    session_response(session, &account.username, &state.config)
 }
 
 pub async fn current(State(state): State<AppState>, headers: HeaderMap) -> AppResult<Response> {
@@ -45,10 +72,14 @@ pub async fn current(State(state): State<AppState>, headers: HeaderMap) -> AppRe
     }
     let stored = web_session::from_headers(&state.pool, &headers).await?;
     let csrf_token = web_session::validate_csrf_cookie(&headers, &stored)?.to_owned();
+    let (account, _) = repository::get_account(&state.pool, &stored.account_id)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
     Ok(no_store(
         Json(SessionResponse {
             csrf_token,
             expires_at: stored.expires_at.to_rfc3339(),
+            username: account.username,
         })
         .into_response(),
     ))
@@ -59,15 +90,72 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> AppRes
     let session = web_session::from_headers(&state.pool, &headers).await?;
     web_session::validate_csrf(&headers, &session)?;
     web_session::revoke(&state.pool, &session).await?;
+    cleared_session_response(&state.config)
+}
+
+/// Réponse de déconnexion : 204 et cookies de session effacés.
+pub(crate) fn cleared_session_response(config: &crate::config::Config) -> AppResult<Response> {
     let mut response = StatusCode::NO_CONTENT.into_response();
-    set_cookies(&mut response, web_session::clear_cookies(&state.config))?;
+    set_cookies(&mut response, web_session::clear_cookies(config))?;
     Ok(no_store(response))
 }
 
-fn session_response(session: WebSession, config: &crate::config::Config) -> AppResult<Response> {
+pub async fn me(
+    State(state): State<AppState>,
+    AnyAuth(principal): AnyAuth,
+) -> AppResult<Json<MeResponse>> {
+    let instance_name = repository::get_setting(&state.pool, repository::INSTANCE_NAME_KEY).await?;
+    Ok(Json(MeResponse::new(
+        match principal.kind {
+            PrincipalKind::Account => CallerKind::Account,
+            PrincipalKind::ApiKey => CallerKind::ApiKey,
+        },
+        principal.name.clone(),
+        principal.role,
+        InstanceKind::Central,
+        instance_name,
+    )))
+}
+
+/// Change le mot de passe du compte connecté ; ses autres sessions sont fermées.
+pub async fn change_password(
+    State(state): State<AppState>,
+    AnyAuth(principal): AnyAuth,
+    Json(request): Json<ChangePasswordRequest>,
+) -> AppResult<StatusCode> {
+    if principal.kind != PrincipalKind::Account {
+        return Err(AppError::Forbidden);
+    }
+    auth::check_login_allowed(&principal.name)?;
+    password::validate_password(&request.new_password)?;
+    let (_, stored_hash) = repository::get_account(&state.pool, &principal.id)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+    if !password::verify(request.current_password, stored_hash).await {
+        auth::record_login_failure(&principal.name);
+        return Err(AppError::Unauthorized);
+    }
+    auth::record_login_success(&principal.name);
+    let new_hash = password::hash(request.new_password).await?;
+    repository::update_password(
+        &state.pool,
+        &principal.id,
+        &new_hash,
+        principal.session_hash.as_deref(),
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub(crate) fn session_response(
+    session: WebSession,
+    username: &str,
+    config: &crate::config::Config,
+) -> AppResult<Response> {
     let mut response = Json(SessionResponse {
         csrf_token: session.csrf_token.clone(),
         expires_at: session.expires_at.to_rfc3339(),
+        username: username.to_owned(),
     })
     .into_response();
     set_cookies(
@@ -88,7 +176,7 @@ fn set_cookies(response: &mut Response, cookies: [String; 2]) -> AppResult<()> {
     Ok(())
 }
 
-fn no_store(mut response: Response) -> Response {
+pub(crate) fn no_store(mut response: Response) -> Response {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));

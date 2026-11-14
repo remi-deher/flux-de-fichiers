@@ -1,12 +1,23 @@
+mod accounts;
 pub mod auth;
+pub mod diagnostics;
 mod flows;
+mod installation;
 mod jobs;
+mod keys;
 mod libraries;
+mod password_reset;
 mod plugins;
-mod session;
+pub(crate) mod session;
+mod setup;
+mod system;
 pub(crate) mod transfers;
-use crate::{auth::authorize, config::Config, domain::*, error::AppResult, repository};
-pub use auth::AdminAuth;
+mod worker_view;
+use crate::{config::Config, domain::*, error::AppResult, repository};
+pub use auth::{
+    AdminAuth, AnyAuth, ManageAccountsAuth, ViewFlowsAuth, ViewJobsAuth, ViewLibrariesAuth,
+    ViewOverviewAuth, ViewPluginsAuth, ViewWorkersAuth,
+};
 use axum::{
     Router,
     extract::State,
@@ -102,6 +113,12 @@ fn json_routes() -> Router<AppState> {
                 .delete(libraries::delete),
         )
         .route("/api/v1/flows", get(flows::list_flows))
+        .route("/api/v1/flows/blocks", get(flows::list_blocks))
+        .route("/api/v1/flows/{id}/versions", get(flows::list_versions))
+        .route(
+            "/api/v1/flows/{id}/versions/{version}",
+            get(flows::get_version),
+        )
         .route(
             "/api/v1/flows/{id}",
             get(flows::get_flow)
@@ -139,13 +156,42 @@ fn json_routes() -> Router<AppState> {
             "/api/v1/worker/tools/{id}/distribution",
             get(plugins::worker_tool_distribution),
         )
+        .route("/api/v1/auth/session", get(session::current))
+        .route("/api/v1/auth/login", post(session::login))
+        .route("/api/v1/auth/forgot-password", post(password_reset::forgot))
+        .route("/api/v1/auth/reset-password", post(password_reset::reset))
+        .route("/api/v1/setup/status", get(setup::status))
+        .route("/api/v1/setup/central", post(setup::setup_central))
+        .route("/api/v1/setup/worker", post(installation::setup_worker))
+        .route("/api/v1/workers/enroll", post(installation::enroll))
+        .route("/api/v1/instance/status", get(installation::status))
         .route(
-            "/api/v1/auth/session",
-            get(session::current).post(session::login),
+            crate::worker_view::OVERVIEW_PATH,
+            get(worker_view::overview),
         )
+        .route(crate::worker_view::JOBS_PATH, get(worker_view::jobs))
+        .route(crate::worker_view::PLUGINS_PATH, get(worker_view::catalog))
+        .route(crate::worker_view::LOGIN_PATH, post(worker_view::login))
+        .route(
+            crate::worker_view::ACCOUNTS_PATH,
+            get(worker_view::accounts),
+        )
+        .route("/api/v1/me", get(session::me))
+        .route("/api/v1/account/password", put(session::change_password))
+        .route(
+            "/api/v1/accounts",
+            get(accounts::list).post(accounts::create),
+        )
+        .route("/api/v1/system/status", get(system::status))
+        .route("/api/v1/system/hardware", get(system::hardware))
+        .route("/api/v1/system/diagnostics", post(diagnostics::diagnostics))
+        .route("/api/v1/accounts/{id}", put(accounts::update))
+        .route("/api/v1/api-keys", get(keys::list).post(keys::create))
+        .route("/api/v1/api-keys/{id}", axum::routing::delete(keys::revoke))
         .route("/api/v1/auth/logout", post(session::logout))
         .route("/api/v1/jobs", get(jobs::list).post(jobs::create))
         .route("/api/v1/jobs/{id}", get(jobs::get_job))
+        .route("/api/v1/jobs/{id}/retry", post(jobs::retry))
         .route("/api/v1/workers", get(jobs::workers).post(register))
         .route(
             "/api/v1/workers/{id}",
@@ -153,6 +199,7 @@ fn json_routes() -> Router<AppState> {
         )
         .route("/api/v1/claims", post(claim))
         .route("/api/v1/jobs/{id}/heartbeat", post(jobs::heartbeat))
+        .route("/api/v1/jobs/{id}/progress", post(jobs::progress))
         .route("/api/v1/jobs/{id}/failure", post(jobs::failure))
         .layer(axum::extract::DefaultBodyLimit::max(JSON_BODY_LIMIT))
         .layer(tower_http::timeout::TimeoutLayer::with_status_code(
@@ -198,31 +245,47 @@ async fn spa_fallback(
     State(state): State<AppState>,
     req: axum::extract::Request,
 ) -> axum::response::Response {
+    serve_spa(&state.config.static_dir, req).await
+}
+
+/// Politique de cache des fichiers de l'interface : revalidation à chaque chargement.
+const INTERFACE_CACHE_CONTROL: &str = "no-cache";
+
+/// Sert l'interface (SPA) depuis `static_dir`, ou un 404 JSON pour une route d'API inconnue.
+pub(crate) async fn serve_spa(
+    static_dir: &std::path::Path,
+    req: axum::extract::Request,
+) -> axum::response::Response {
     use axum::response::IntoResponse;
     use tower::ServiceExt;
-    let path = req.uri().path();
-    if path.starts_with("/api/") {
-        return (
-            StatusCode::NOT_FOUND,
-            axum::Json(serde_json::json!({"error":{"code":"invalid_request"}})),
-        )
-            .into_response();
-    }
-    let static_dir = &state.config.static_dir;
-    let index_file = static_dir.join("index.html");
-    if index_file.is_file() {
-        let serve_service = tower_http::services::ServeDir::new(static_dir)
-            .fallback(tower_http::services::ServeFile::new(&index_file));
-        match serve_service.oneshot(req).await {
-            Ok(res) => res.into_response(),
-            Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        }
-    } else {
+    let not_found = || {
         (
             StatusCode::NOT_FOUND,
             axum::Json(serde_json::json!({"error":{"code":"invalid_request"}})),
         )
             .into_response()
+    };
+    if req.uri().path().starts_with("/api/") {
+        return not_found();
+    }
+    let index_file = static_dir.join("index.html");
+    if !index_file.is_file() {
+        return not_found();
+    }
+    let serve_service = tower_http::services::ServeDir::new(static_dir)
+        .fallback(tower_http::services::ServeFile::new(&index_file));
+    match serve_service.oneshot(req).await {
+        Ok(res) => {
+            let mut res = res.into_response();
+            // La page et le module WASM gardent le même nom d'une version à l'autre : le navigateur
+            // doit revalider (ETag, Last-Modified) pour ne jamais garder une interface périmée.
+            res.headers_mut().insert(
+                axum::http::header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static(INTERFACE_CACHE_CONTROL),
+            );
+            res
+        }
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 
@@ -235,14 +298,8 @@ async fn register(
     h: HeaderMap,
     axum::Json(r): axum::Json<Register>,
 ) -> AppResult<axum::Json<Worker>> {
-    authorize(&h, &s.config.worker_key)?;
-    if r.name.is_empty()
-        || r.name.len() > 80
-        || !r
-            .name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
-    {
+    crate::auth::authorize_worker(&s.pool, &h).await?;
+    if !crate::worker_settings::is_valid_worker_name(&r.name) {
         return Err(crate::error::AppError::Invalid);
     }
     Ok(axum::Json(repository::register(&s.pool, &r.name).await?))
@@ -252,7 +309,7 @@ async fn claim(
     h: HeaderMap,
     axum::Json(r): axum::Json<ClaimRequest>,
 ) -> AppResult<axum::Json<Option<Claim>>> {
-    authorize(&h, &s.config.worker_key)?;
+    crate::auth::authorize_worker(&s.pool, &h).await?;
     let mut claim_res = repository::claim(&s.pool, r.worker_id).await?;
     if let Some(ref mut claim) = claim_res {
         let roots = crate::plugins::catalog_roots(&s.pool, &s.config).await;
@@ -260,6 +317,22 @@ async fn claim(
         if let Some(probe) = crate::plugins::required_probe(&catalog) {
             claim.probe_tool_id = Some(probe.tool_id);
             claim.probe_version = Some(probe.version);
+        }
+        // Worker distant : déchiffrer les en-têtes webhook et joindre les connexions *arr.
+        if let Some(ref mut flow) = claim.frozen_flow
+            && let Ok(secrets) = crate::secrets::SecretBox::open(&s.config.config_dir)
+        {
+            flow.definition =
+                crate::flows::decrypt_definition_headers(&secrets, &flow.id, &flow.definition)?;
+        }
+        // Seules les connexions *arr* des blocs du flux figé voyagent ; rien sans flux ni sans bloc.
+        if let Some(flow) = &claim.frozen_flow
+            && !crate::flows::arr_services_in(&flow.definition).is_empty()
+        {
+            let arr =
+                crate::flows::ArrContext::load(&s.pool, &s.config.config_dir, &s.config.input_dir)
+                    .await;
+            claim.arr = crate::flows::lease_arr_context(&flow.definition, &arr);
         }
         s.notify_job_event(
             JobEventType::JobClaimed,
@@ -282,7 +355,8 @@ async fn plugin_sync_loop(state: AppState) {
     }
 }
 
-pub async fn serve(config: Config) -> anyhow::Result<()> {
+/// Ouvre la base SQLite du central et applique les migrations embarquées.
+pub async fn connect_database(config: &Config) -> anyhow::Result<SqlitePool> {
     let connect_options = if config.database_url.starts_with("sqlite:") {
         SqliteConnectOptions::from_str(&config.database_url)?
     } else {
@@ -301,6 +375,11 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         .await?;
 
     sqlx::migrate!().run(&pool).await?;
+    Ok(pool)
+}
+
+pub async fn serve(config: Config) -> anyhow::Result<()> {
+    let pool = connect_database(&config).await?;
     tokio::fs::create_dir_all(config.data_dir.join("output")).await?;
     tokio::fs::create_dir_all(config.data_dir.join("staging")).await?;
     tokio::fs::create_dir_all(&config.input_dir).await?;
@@ -329,9 +408,9 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         },
         Err(error) => tracing::warn!(error = %error, "clé de chiffrement indisponible"),
     }
-    tokio::spawn(plugin_sync_loop(state.clone()));
+    let plugin_sync = tokio::spawn(plugin_sync_loop(state.clone()));
     let app = router(state);
-    tracing::info!(%addr, "coordinator started");
+    tracing::info!(%addr, "central started");
     if let Some((cert, key)) = tls {
         let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key).await?;
         let handle = axum_server::Handle::new();
@@ -351,11 +430,20 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
             .with_graceful_shutdown(shutdown_signal())
             .await?;
     }
+    plugin_sync.abort();
     pool.close().await;
     Ok(())
 }
 
+/// Arrêt demandé : signal du système ou changement de rôle de l'installation.
 pub async fn shutdown_signal() {
+    tokio::select! {
+        () = os_termination_signal() => {},
+        () = crate::instance::role_switch_requested() => {},
+    }
+}
+
+async fn os_termination_signal() {
     #[cfg(unix)]
     {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {

@@ -2,7 +2,7 @@
 //!
 //! L'URL, la clé d'API (chiffrée au repos) et la correspondance de chemins viennent des réglages du
 //! plugin ; le bloc ne porte que sa politique d'échec. Le fichier visé est le média source, traduit du
-//! chemin vu par ce coordinateur vers le chemin vu par Sonarr ou Radarr.
+//! chemin vu par ce central vers le chemin vu par Sonarr ou Radarr.
 
 use crate::{
     repository,
@@ -91,7 +91,7 @@ pub struct ArrBlock {
 }
 
 /// Réglages de connexion d'un plugin *arr, secret déchiffré.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArrConnection {
     pub url: String,
     pub api_key: String,
@@ -101,7 +101,7 @@ pub struct ArrConnection {
 
 impl ArrConnection {
     /// Lit les réglages enregistrés ; `None` tant que l'URL ou la clé d'API manque.
-    pub fn from_settings(settings: &Value, secrets: &SecretBox) -> Option<Self> {
+    pub fn from_settings(settings: &Value, secrets: &SecretBox, plugin_id: &str) -> Option<Self> {
         let text = |name: &str| {
             settings
                 .get(name)
@@ -111,7 +111,12 @@ impl ArrConnection {
         };
         let stored_key = text("apiKey")?;
         let api_key = if is_encrypted(&stored_key) {
-            secrets.decrypt(&stored_key).ok()?
+            secrets
+                .decrypt(
+                    &stored_key,
+                    &crate::plugins::plugin_secret_aad(plugin_id, "apiKey"),
+                )
+                .ok()?
         } else {
             stored_key
         };
@@ -256,8 +261,34 @@ pub async fn execute_arr_block(
 #[derive(Clone, Debug, Default)]
 pub struct ArrContext {
     pub connections: HashMap<ArrService, ArrConnection>,
-    /// Dossier des médias sources, tel que vu par ce coordinateur.
+    /// Dossier des médias sources, tel que vu par ce central.
     pub media_root: PathBuf,
+}
+
+/// Contexte *arr sérialisable qui voyage avec le bail vers un worker distant.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArrLeaseContext {
+    pub connections: HashMap<ArrService, ArrConnection>,
+    /// Dossier des médias sources, tel que vu par le central (traduction de chemins).
+    pub media_root: PathBuf,
+}
+
+impl From<&ArrContext> for ArrLeaseContext {
+    fn from(value: &ArrContext) -> Self {
+        Self {
+            connections: value.connections.clone(),
+            media_root: value.media_root.clone(),
+        }
+    }
+}
+
+impl From<ArrLeaseContext> for ArrContext {
+    fn from(value: ArrLeaseContext) -> Self {
+        Self {
+            connections: value.connections,
+            media_root: value.media_root,
+        }
+    }
 }
 
 impl ArrContext {
@@ -278,9 +309,9 @@ impl ArrContext {
             let settings = stored
                 .as_deref()
                 .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
-            if let Some(connection) =
-                settings.and_then(|value| ArrConnection::from_settings(&value, &secrets))
-            {
+            if let Some(connection) = settings.and_then(|value| {
+                ArrConnection::from_settings(&value, &secrets, service.plugin_id())
+            }) {
                 connections.insert(service, connection);
             }
         }
@@ -513,17 +544,50 @@ mod tests {
     }
 
     #[test]
+    fn arr_lease_context_roundtrips_through_json() -> Result<(), serde_json::Error> {
+        let mut connections = HashMap::new();
+        connections.insert(
+            ArrService::Sonarr,
+            ArrConnection {
+                url: "http://sonarr".into(),
+                api_key: "cle".into(),
+                path_local: "/media".into(),
+                path_remote: "/tv".into(),
+            },
+        );
+        let lease = ArrLeaseContext {
+            connections,
+            media_root: PathBuf::from("/data/input"),
+        };
+        let context = ArrContext::from(lease.clone());
+        assert_eq!(ArrLeaseContext::from(&context), lease);
+        let encoded = serde_json::to_value(&lease)?;
+        assert_eq!(encoded["connections"]["sonarr"]["api_key"], "cle");
+        assert_eq!(encoded["media_root"], "/data/input");
+        Ok(())
+    }
+
+    #[test]
     fn test_from_settings_decrypts_the_key_and_requires_url_and_key() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         let secrets = SecretBox::open(dir.path())?;
-        let sealed = secrets.encrypt("CLE")?;
+        let sealed = secrets.encrypt(
+            "CLE",
+            &crate::plugins::plugin_secret_aad("plugin.sonarr", "apiKey"),
+        )?;
         let settings = json!({"url": "http://arr", "apiKey": sealed, "pathMappingLocal": "/data"});
-        let connection = ArrConnection::from_settings(&settings, &secrets)
+        let connection = ArrConnection::from_settings(&settings, &secrets, "plugin.sonarr")
             .ok_or_else(|| anyhow!("connexion attendue"))?;
         assert_eq!(connection.api_key, "CLE");
         assert_eq!(connection.path_remote, "");
-        assert!(ArrConnection::from_settings(&json!({"url": "http://arr"}), &secrets).is_none());
-        assert!(ArrConnection::from_settings(&json!({"apiKey": "x"}), &secrets).is_none());
+        assert!(
+            ArrConnection::from_settings(&json!({"url": "http://arr"}), &secrets, "plugin.sonarr")
+                .is_none()
+        );
+        assert!(
+            ArrConnection::from_settings(&json!({"apiKey": "x"}), &secrets, "plugin.sonarr")
+                .is_none()
+        );
         Ok(())
     }
 

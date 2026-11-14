@@ -11,8 +11,8 @@ const IDLE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 
 pub async fn run(state: AppState) {
-    let worker_name =
-        std::env::var("LOCAL_WORKER_NAME").unwrap_or_else(|_| "coordinator-local".into());
+    let worker_name = std::env::var("LOCAL_WORKER_NAME")
+        .unwrap_or_else(|_| flux_shared::workers::INTEGRATED_WORKER_NAME.into());
     let worker = match repository::register(&state.pool, &worker_name).await {
         Ok(worker) => worker,
         Err(error) => {
@@ -118,7 +118,8 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
         )
         .await?;
         let cache_mgr = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
-        let default_flow = repository::default_flow(&state.pool).await?;
+        // Version figée portée par le bail (même contrat que les workers distants).
+        let frozen_flow = claim.frozen_flow.clone();
 
         let state_progress = state.clone();
         let job_id = claim.job_id;
@@ -127,7 +128,7 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
         });
 
         let http_client = reqwest::Client::new();
-        let (final_output, warning) = if let Some(flow) = default_flow {
+        let (final_output, warning) = if let Some(flow) = frozen_flow.as_ref() {
             let arr = crate::flows::ArrContext::load(
                 &state.pool,
                 &state.config.config_dir,
@@ -138,7 +139,7 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
                 .with_secrets_dir(&state.config.config_dir)
                 .with_arr(&arr);
             let outcome = engine
-                .execute_flow(&flow, job_id, &source_snapshot, &work_dir, progress_cb)
+                .execute_flow(flow, job_id, &source_snapshot, &work_dir, progress_cb)
                 .await
                 .map_err(|error| anyhow::anyhow!("flow_execution_failed: {error}"))?;
             (outcome.working_file, outcome.warning)

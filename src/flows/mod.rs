@@ -3,17 +3,27 @@
 mod arr;
 mod block;
 mod condition;
+mod encode;
+mod encode_run;
 mod header_secrets;
+mod lease_secrets;
+mod mp4box;
 mod route;
 mod tool;
 mod webhook;
 
-pub use arr::{ArrAction, ArrBlock, ArrConnection, ArrContext, ArrService, execute_arr_block};
+pub use arr::{
+    ArrAction, ArrBlock, ArrConnection, ArrContext, ArrLeaseContext, ArrService, execute_arr_block,
+};
 pub use block::{FlowBlockKind, StepDecision, decide_step};
 pub use condition::{ConditionConfig, evaluate_condition};
+pub use encode::{EncodePlan, argv_for, audio_plan, video_plan};
 pub use header_secrets::{
-    decrypt_headers, has_webhook_headers, mask_definition, migrate_flow_secrets, seal_definition,
+    decrypt_definition_headers, decrypt_headers, has_webhook_headers, mask_definition,
+    migrate_flow_secrets, rotate_definition, seal_definition,
 };
+pub use lease_secrets::{arr_services_in, lease_arr_context};
+pub use mp4box::{Mp4Plan, mp4_plan, mp4box_argv};
 pub use route::next_connection;
 pub use tool::{InPlaceEdit, in_place_edit};
 pub use webhook::{WebhookBlockConfig, execute_webhook_block, webhook_method};
@@ -68,32 +78,7 @@ impl FlowContext {
     }
 }
 
-/// Nœud unitaire d'un graphe de flux.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FlowNode {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub kind: FlowBlockKind,
-    pub name: String,
-    #[serde(default)]
-    pub config: serde_json::Value,
-}
-
-/// Connexion orientée entre deux nœuds d'un flux.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FlowConnection {
-    pub from: String,
-    pub to: String,
-    #[serde(default)]
-    pub port: Option<String>,
-}
-
-/// Représentation complète d'un graphe de flux désérialisé.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FlowGraph {
-    pub nodes: Vec<FlowNode>,
-    pub connections: Vec<FlowConnection>,
-}
+pub use flux_shared::flows::{FlowConnection, FlowGraph, FlowNode};
 
 /// Résultat final de l'exécution d'un flux.
 #[derive(Clone, Debug)]
@@ -158,7 +143,7 @@ impl<'a> FlowEngine<'a> {
         let mut current_working_file = source_file.to_path_buf();
         let mut is_in_place = true;
         let mut final_warning = false;
-        let ctx = FlowContext::new(
+        let mut ctx = FlowContext::new(
             job_id,
             source_file
                 .file_name()
@@ -177,6 +162,7 @@ impl<'a> FlowEngine<'a> {
                 kind: FlowBlockKind::FileInput,
                 name: "Fichier source".into(),
                 config: serde_json::Value::Null,
+                extra: serde_json::Map::new(),
             });
         let mut current_node_id = input_node.id;
         let mut max_steps = 32;
@@ -209,6 +195,10 @@ impl<'a> FlowEngine<'a> {
                 .await?;
                 tracing::info!(job_id = %job_id, "in-place mkvpropedit completed directly on working file");
             }
+            if decision.reinpect {
+                ctx.media_info = media::inspect_with(&mkvmerge_bin, &current_working_file).await?;
+                tracing::info!(job_id = %job_id, "media inspect refreshed for working file");
+            }
             if decision.transform {
                 is_in_place = false;
                 let target_output = work_dir.join("output.mkv");
@@ -225,10 +215,59 @@ impl<'a> FlowEngine<'a> {
                 current_working_file = target_output;
                 tracing::info!(job_id = %job_id, "remux step executed into staging working file");
             }
+            if let Some(plan) = &decision.remux_mp4 {
+                is_in_place = false;
+                let mp4box_bin = self.cache_mgr.resolve_executable(
+                    crate::plugins::MP4BOX_TOOL_ID,
+                    crate::plugins::MP4BOX_TOOL_VERSION,
+                    "MP4Box",
+                    "MP4BOX",
+                );
+                let target_output = work_dir.join("remuxed.mp4");
+                let args = mp4box_argv(plan, &current_working_file, &target_output);
+                let on_p = on_progress.clone();
+                media::mp4box_with_progress(&mp4box_bin, &args, move |pct: u32, line: &str| {
+                    on_p(pct, line);
+                })
+                .await?;
+                current_working_file = target_output;
+                ctx.working_file = current_working_file.clone();
+                tracing::info!(job_id = %job_id, "mp4 remux step completed");
+            }
+            if let Some(plan) = &decision.encode {
+                is_in_place = false;
+                let ffmpeg_bin = self.cache_mgr.resolve_executable(
+                    crate::plugins::FFMPEG_TOOL_ID,
+                    crate::plugins::FFMPEG_TOOL_VERSION,
+                    "ffmpeg",
+                    "FFMPEG",
+                );
+                let target_output = work_dir.join(match plan {
+                    EncodePlan::Video(_) => "encoded.mkv",
+                    EncodePlan::Audio(_) => "encoded-audio.mkv",
+                });
+                encode_run::run_encode(
+                    &ffmpeg_bin,
+                    plan,
+                    &current_working_file,
+                    &target_output,
+                    &on_progress,
+                    job_id,
+                )
+                .await?;
+                current_working_file = target_output;
+                ctx.working_file = current_working_file.clone();
+                tracing::info!(job_id = %job_id, block = %node.kind, "plugin encode step completed");
+            }
             if let Some(webhook_cfg) = &decision.notify {
                 let mut webhook_cfg = webhook_cfg.clone();
                 if let Some(dir) = self.secrets_dir {
-                    decrypt_headers(&crate::secrets::SecretBox::open(dir)?, &mut webhook_cfg)?;
+                    decrypt_headers(
+                        &crate::secrets::SecretBox::open(dir)?,
+                        &flow.id,
+                        &node.id,
+                        &mut webhook_cfg,
+                    )?;
                 }
                 execute_webhook_block(&webhook_cfg, &step_ctx, self.http_client).await?;
             }
@@ -269,6 +308,9 @@ impl<'a> FlowEngine<'a> {
 }
 
 #[cfg(test)]
+mod engine_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::JobStatus;
@@ -289,15 +331,16 @@ mod tests {
     #[test]
     fn flow_graph_keeps_block_types_on_the_wire() -> Result<(), serde_json::Error> {
         let graph: FlowGraph = serde_json::from_str(
-            r#"{"nodes":[{"id":"node-1","type":"file-input","name":"Source"},{"id":"node-2","type":"remux-mp4","name":"MP4"}],"connections":[{"from":"node-1","to":"node-2"}]}"#,
+            r#"{"nodes":[{"id":"node-1","type":"file-input","name":"Source"},{"id":"node-2","type":"block.video.remux-mp4","name":"MP4"},{"id":"node-3","type":"legacy-unknown","name":"X"}],"connections":[{"from":"node-1","to":"node-2"}]}"#,
         )?;
         assert_eq!(graph.nodes[0].kind, FlowBlockKind::FileInput);
+        assert_eq!(graph.nodes[1].kind, FlowBlockKind::RemuxMp4);
         assert_eq!(
-            graph.nodes[1].kind,
-            FlowBlockKind::Other("remux-mp4".into())
+            graph.nodes[2].kind,
+            FlowBlockKind::Other("legacy-unknown".into())
         );
         let encoded = serde_json::to_value(&graph)?;
-        assert_eq!(encoded["nodes"][1]["type"], "remux-mp4");
+        assert_eq!(encoded["nodes"][1]["type"], "block.video.remux-mp4");
         Ok(())
     }
 }

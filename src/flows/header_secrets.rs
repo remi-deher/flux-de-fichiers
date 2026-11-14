@@ -7,6 +7,7 @@
 use super::webhook::WebhookBlockConfig;
 use crate::{
     error::{AppError, AppResult},
+    repository::DEFINITION_STORES,
     secrets::{SecretBox, is_encrypted},
 };
 use serde_json::{Map, Value};
@@ -41,6 +42,11 @@ fn node_id(node: &Value) -> String {
         .to_owned()
 }
 
+/// Données associées d'un en-tête : il ne se déchiffre que pour ce flux, ce bloc et cet en-tête.
+fn header_aad(flow_id: &str, node_id: &str, header: &str) -> String {
+    format!("flow:{flow_id}:{node_id}:{header}")
+}
+
 /// La définition déclare-t-elle des en-têtes de webhook ?
 pub fn has_webhook_headers(definition: &str) -> bool {
     let Ok(mut value) = serde_json::from_str::<Value>(definition) else {
@@ -73,6 +79,7 @@ fn existing_headers(existing: Option<&str>) -> HashMap<(String, String), String>
 /// Chiffre les en-têtes en clair d'une définition ; un en-tête laissé vide reprend sa valeur enregistrée.
 pub fn seal_definition(
     secrets: &SecretBox,
+    flow_id: &str,
     incoming: &str,
     existing: Option<&str>,
 ) -> AppResult<String> {
@@ -93,7 +100,7 @@ pub fn seal_definition(
                     }
                 }
                 Some(text) if !is_encrypted(text) => {
-                    *value = Value::String(secrets.encrypt(text)?);
+                    *value = Value::String(secrets.encrypt(text, &header_aad(flow_id, &id, name))?);
                 }
                 _ => {}
             }
@@ -118,33 +125,97 @@ pub fn mask_definition(definition: &str) -> String {
 }
 
 /// Remplace les valeurs chiffrées par leur clair, juste avant l'appel HTTP.
-pub fn decrypt_headers(secrets: &SecretBox, config: &mut WebhookBlockConfig) -> AppResult<()> {
-    for value in config.custom_headers.values_mut() {
+pub fn decrypt_headers(
+    secrets: &SecretBox,
+    flow_id: &str,
+    node_id: &str,
+    config: &mut WebhookBlockConfig,
+) -> AppResult<()> {
+    for (name, value) in config.custom_headers.iter_mut() {
         if is_encrypted(value) {
-            *value = secrets.decrypt(value)?;
+            *value = secrets.decrypt(value, &header_aad(flow_id, node_id, name))?;
         }
     }
     Ok(())
 }
 
-/// Chiffre au démarrage les en-têtes encore en clair des flux déjà enregistrés.
-pub async fn migrate_flow_secrets(pool: &SqlitePool, secrets: &SecretBox) -> AppResult<usize> {
-    let flows: Vec<(String, String)> = sqlx::query_as("SELECT id, definition FROM flows")
-        .fetch_all(pool)
-        .await?;
-    let mut migrated = 0;
-    for (id, definition) in flows {
-        if !has_webhook_headers(&definition) {
+/// Déchiffre tous les en-têtes webhook d'une définition pour qu'un worker distant
+/// puisse exécuter le flux sans la clé du central.
+pub fn decrypt_definition_headers(
+    secrets: &SecretBox,
+    flow_id: &str,
+    definition: &str,
+) -> AppResult<String> {
+    let Ok(mut value) = serde_json::from_str::<Value>(definition) else {
+        return Ok(definition.to_owned());
+    };
+    for node in nodes_of(&mut value) {
+        let id = node_id(node);
+        let Some(headers) = headers_of(node) else {
             continue;
+        };
+        for (name, header_value) in headers.iter_mut() {
+            let Some(text) = header_value.as_str().filter(|text| is_encrypted(text)) else {
+                continue;
+            };
+            *header_value = Value::String(secrets.decrypt(text, &header_aad(flow_id, &id, name))?);
         }
-        let sealed = seal_definition(secrets, &definition, None)?;
-        if sealed != definition {
-            sqlx::query("UPDATE flows SET definition = ?1 WHERE id = ?2")
-                .bind(&sealed)
-                .bind(&id)
-                .execute(pool)
-                .await?;
-            migrated += 1;
+    }
+    Ok(serde_json::to_string(&value).unwrap_or_else(|_| definition.to_owned()))
+}
+
+/// Re-chiffre avec la nouvelle clé les en-têtes d'une définition de flux ; `None` s'il n'y en a pas.
+/// Renvoie la définition réécrite et le nombre de valeurs changées.
+pub fn rotate_definition(
+    old: &SecretBox,
+    new: &SecretBox,
+    flow_id: &str,
+    definition: &str,
+) -> AppResult<Option<(String, usize)>> {
+    let Ok(mut value) = serde_json::from_str::<Value>(definition) else {
+        return Ok(None);
+    };
+    let mut rotated = 0;
+    for node in nodes_of(&mut value) {
+        let id = node_id(node);
+        let Some(headers) = headers_of(node) else {
+            continue;
+        };
+        for (name, header_value) in headers.iter_mut() {
+            let Some(text) = header_value.as_str().filter(|text| is_encrypted(text)) else {
+                continue;
+            };
+            let aad = header_aad(flow_id, &id, name);
+            let plaintext = old.decrypt(text, &aad)?;
+            *header_value = Value::String(new.encrypt(&plaintext, &aad)?);
+            rotated += 1;
+        }
+    }
+    if rotated == 0 {
+        return Ok(None);
+    }
+    let rewritten = serde_json::to_string(&value).map_err(|_| AppError::Invalid)?;
+    Ok(Some((rewritten, rotated)))
+}
+
+/// Chiffre au démarrage les en-têtes encore en clair des flux et de leurs versions.
+pub async fn migrate_flow_secrets(pool: &SqlitePool, secrets: &SecretBox) -> AppResult<usize> {
+    let mut migrated = 0;
+    for store in &DEFINITION_STORES {
+        let rows: Vec<(String, i64, String)> = sqlx::query_as(store.select).fetch_all(pool).await?;
+        for (id, rowid, definition) in rows {
+            if !has_webhook_headers(&definition) {
+                continue;
+            }
+            let sealed = seal_definition(secrets, &id, &definition, None)?;
+            if sealed != definition {
+                sqlx::query(store.update)
+                    .bind(&sealed)
+                    .bind(rowid)
+                    .execute(pool)
+                    .await?;
+                migrated += 1;
+            }
         }
     }
     Ok(migrated)
@@ -154,6 +225,8 @@ pub async fn migrate_flow_secrets(pool: &SqlitePool, secrets: &SecretBox) -> App
 mod tests {
     use super::*;
     use serde_json::json;
+
+    const FLOW: &str = "flow.test";
 
     fn secrets() -> anyhow::Result<(tempfile::TempDir, SecretBox)> {
         let dir = tempfile::tempdir()?;
@@ -189,34 +262,52 @@ mod tests {
     #[test]
     fn test_seal_encrypts_clear_headers_and_leaves_other_fields() -> anyhow::Result<()> {
         let (_dir, secrets) = secrets()?;
-        let sealed = seal_definition(&secrets, &definition("Bearer SECRET"), None)?;
+        let sealed = seal_definition(&secrets, FLOW, &definition("Bearer SECRET"), None)?;
         assert!(!sealed.contains("Bearer SECRET"));
         assert!(is_encrypted(&header_of(&sealed)));
         assert!(sealed.contains("https://hook.example/x"));
-        assert_eq!(secrets.decrypt(&header_of(&sealed))?, "Bearer SECRET");
+        assert_eq!(
+            secrets.decrypt(
+                &header_of(&sealed),
+                &header_aad(FLOW, "n2", "Authorization")
+            )?,
+            "Bearer SECRET"
+        );
         Ok(())
     }
 
     #[test]
     fn test_empty_header_keeps_the_stored_value_of_the_same_block() -> anyhow::Result<()> {
         let (_dir, secrets) = secrets()?;
-        let first = seal_definition(&secrets, &definition("Bearer SECRET"), None)?;
+        let first = seal_definition(&secrets, FLOW, &definition("Bearer SECRET"), None)?;
         let masked = mask_definition(&first);
         assert_eq!(header_of(&masked), "");
 
-        let resaved = seal_definition(&secrets, &masked, Some(&first))?;
-        assert_eq!(secrets.decrypt(&header_of(&resaved))?, "Bearer SECRET");
+        let resaved = seal_definition(&secrets, FLOW, &masked, Some(&first))?;
+        assert_eq!(
+            secrets.decrypt(
+                &header_of(&resaved),
+                &header_aad(FLOW, "n2", "Authorization")
+            )?,
+            "Bearer SECRET"
+        );
 
-        let replaced = seal_definition(&secrets, &definition("Bearer AUTRE"), Some(&first))?;
-        assert_eq!(secrets.decrypt(&header_of(&replaced))?, "Bearer AUTRE");
+        let replaced = seal_definition(&secrets, FLOW, &definition("Bearer AUTRE"), Some(&first))?;
+        assert_eq!(
+            secrets.decrypt(
+                &header_of(&replaced),
+                &header_aad(FLOW, "n2", "Authorization")
+            )?,
+            "Bearer AUTRE"
+        );
         Ok(())
     }
 
     #[test]
     fn test_sealing_twice_does_not_encrypt_an_encrypted_value_again() -> anyhow::Result<()> {
         let (_dir, secrets) = secrets()?;
-        let once = seal_definition(&secrets, &definition("x"), None)?;
-        let twice = seal_definition(&secrets, &once, Some(&once))?;
+        let once = seal_definition(&secrets, FLOW, &definition("x"), None)?;
+        let twice = seal_definition(&secrets, FLOW, &once, Some(&once))?;
         assert_eq!(header_of(&once), header_of(&twice));
         Ok(())
     }
@@ -233,7 +324,7 @@ mod tests {
     fn test_non_json_definitions_and_other_blocks_are_untouched() -> anyhow::Result<()> {
         let (_dir, secrets) = secrets()?;
         assert_eq!(
-            seal_definition(&secrets, "pas du json", None)?,
+            seal_definition(&secrets, FLOW, "pas du json", None)?,
             "pas du json"
         );
         assert!(!has_webhook_headers("pas du json"));
@@ -253,15 +344,29 @@ mod tests {
             custom_headers: HashMap::from([
                 (
                     "Authorization".to_owned(),
-                    secrets.encrypt("Bearer SECRET")?,
+                    secrets.encrypt("Bearer SECRET", &header_aad(FLOW, "n2", "Authorization"))?,
                 ),
                 ("X-Plain".to_owned(), "tel quel".to_owned()),
             ]),
             fail_on_error: false,
         };
-        decrypt_headers(&secrets, &mut config)?;
+        decrypt_headers(&secrets, FLOW, "n2", &mut config)?;
         assert_eq!(config.custom_headers["Authorization"], "Bearer SECRET");
         assert_eq!(config.custom_headers["X-Plain"], "tel quel");
+        Ok(())
+    }
+
+    #[test]
+    fn test_decrypt_definition_headers_clears_webhook_secrets_for_workers() -> anyhow::Result<()> {
+        let (_dir, secrets) = secrets()?;
+        let sealed = seal_definition(&secrets, FLOW, &definition("Bearer SECRET"), None)?;
+        assert!(header_of(&sealed).starts_with("enc:"));
+        let clear = decrypt_definition_headers(&secrets, FLOW, &sealed)?;
+        assert_eq!(header_of(&clear), "Bearer SECRET");
+        assert_eq!(
+            decrypt_definition_headers(&secrets, FLOW, "pas du json")?,
+            "pas du json"
+        );
         Ok(())
     }
 
@@ -279,8 +384,18 @@ mod tests {
         .bind(definition("Bearer SECRET"))
         .execute(&pool)
         .await?;
+        sqlx::query(
+            "INSERT INTO flow_versions (flow_id, version, name, file_mask, definition) VALUES ('f1', 1, 'Flux', '*.mkv', ?1)",
+        )
+        .bind(definition("Bearer SECRET"))
+        .execute(&pool)
+        .await?;
 
-        assert_eq!(migrate_flow_secrets(&pool, &secrets).await?, 1);
+        assert_eq!(migrate_flow_secrets(&pool, &secrets).await?, 2);
+        let version: String = sqlx::query_scalar("SELECT definition FROM flow_versions")
+            .fetch_one(&pool)
+            .await?;
+        assert!(!version.contains("Bearer SECRET"));
         let stored: String = sqlx::query_scalar("SELECT definition FROM flows WHERE id = 'f1'")
             .fetch_one(&pool)
             .await?;

@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     read_only: true
     environment:
-      COORDINATOR_URL: ${COORDINATOR_URL:?Provide the HTTP or HTTPS coordinator origin}
+      CENTRAL_URL: ${CENTRAL_URL:?Provide the HTTP or HTTPS central origin}
       WORKER_NAME: ${WORKER_NAME:?Provide a unique worker name}
       WORKER_KEY: ${WORKER_KEY:-}
       WORKER_KEY_FILE: ${WORKER_KEY_FILE:-/run/secrets/worker_key}

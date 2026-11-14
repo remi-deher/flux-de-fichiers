@@ -3,7 +3,7 @@
 Statut : accepté par l'utilisateur.
 
 ```
-dev  ──●──●──●──   push direct, aucune CI : sauvegarde rapide du code
+dev  ──●──●──●──   PR de branche de travail : fmt, clippy, tests (feature.yml)
         \
 test ────●──────   PR dev→test : fmt, clippy, tests, build → fusion auto
           \        → Docker Hub :test et :test-<sha>
@@ -14,7 +14,12 @@ main ──────●────   PR test→main : main-checks (image tes
 
 ## Règles
 
-- `dev` reçoit des push directs, sans CI. Ni suppression ni force-push.
+- `dev` reçoit les branches de travail (`feat/…`, `fix/…`) par PR. Le workflow
+  `feature.yml` y exécute `cargo fmt --check`, clippy (`-D warnings`, natif et WASM),
+  les tests et la vérification que `frontend/dist/index.html` est à jour (décision
+  utilisateur du 14 nov. 2026). Pas d'image Docker : elle reste construite sur la PR
+  `dev → test`. Ni suppression ni force-push. Rendre `fmt-clippy-tests` obligatoire
+  sur `dev` est un réglage GitHub, hors dépôt.
 - `test` n'accepte que les PR depuis `dev` (job `source-is-dev`). Si
   `fmt-clippy-tests` (fmt, clippy, `cargo test`), `docker-build` et `docker-scenarios`
   (l'image démarre et répond sur `/health`) sont verts, le workflow fusionne la PR
@@ -42,7 +47,8 @@ main ──────●────   PR test→main : main-checks (image tes
   `pr-<sha>`. Après la fusion elle est renommée `:test` et `:test-<sha du merge>`
   sans recompiler. Les tags `pr-*` non fusionnés restent sur Docker Hub et
   peuvent être purgés.
-- Si la PR ne modifie aucun chemin du build (`src/`, `migrations/`, `tests/`,
+- Si la PR ne modifie aucun chemin du build (`src/`, `frontend/`, `client/`, `shared/`,
+  `migrations/`, `tests/`,
   `Cargo.*`, `Dockerfile`, `.dockerignore`, `rust-toolchain.toml`, `test.yml`,
   `scripts/`, `deploy/`, `compose.yaml`, `package.json`), les vérifications
   requises restent vertes mais sautent leurs étapes lourdes, et `:test` est

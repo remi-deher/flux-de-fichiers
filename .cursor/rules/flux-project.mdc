@@ -1,35 +1,31 @@
 ---
-description: Règles de développement, tests, déploiement TrueNAS et flux Git de Flux de Fichiers
+description: Règles de développement, vérifications, déploiement TrueNAS et flux Git de Flux de Fichiers
 globs: **/*
 alwaysApply: true
 ---
 
 # Flux de Fichiers - Cursor Rules
 
-Tu travailles sur le projet **Flux de Fichiers**. Respecte scrupuleusement les consignes ci-dessous.
+Source de vérité : `AGENTS.md`, `docs/developpement.md`, `docs/reprise.md`. Résumé ci-dessous.
 
 ## 1. Annonce Préalable
-- Annonce systématiquement en DEUX lignes maximum l'action exacte prévue avant d'écrire ou de modifier du code.
+- Annonce en DEUX lignes maximum l'action exacte prévue avant d'écrire ou de modifier du code.
 
 ## 2. Stack & Principes
-- 100 % Rust pur : aucun fichier JS/CSS externe. HTML/CSS/JS sont intégrés dans les modules Rust (`frontend/src/theme/`, `frontend/src/client/`, Leptos SSR).
-- Zéro Boilerplate & Factorisation continue : pas de code HTML/CSS dupliqué, design tokens obligatoires (`var(--primary)`, `var(--bg-card)`...), enums typés Serde.
-- Tester systématiquement toutes les fonctions et modifications avec des tests natifs légers.
+- Rust, Axum/Tokio, SQLx/SQLite, Docker. Interface : client Leptos WASM (`client/`, ADR 0014), contrat partagé dans `shared/` (`flux-shared`). `frontend/` ne contient que la page `dist/index.html` et le thème CSS typé.
+- Aucun fichier JS/CSS externe. Vocabulaire : central / worker ; « nœud » = bloc d'un graphe.
+- Zéro Boilerplate & Factorisation continue : pas de code ni de balisage dupliqué, design tokens obligatoires (`var(--primary)`, `var(--bg-card)`...), enums typés Serde, pas de constante numérique sans nom.
+- Tester toutes les fonctions et routes avec des tests Rust natifs légers.
 
 ## 3. Commandes Locales (Machine hôte légère)
-- Ne jamais lancer de build Docker lourd en local (CI GitHub s'en charge).
-- Tester le frontend : `cargo test -p flux-frontend`
-- Formater le code : `cargo fmt` (obligatoire avant git commit pour le pre-commit hook)
-- Générer `frontend/dist/index.html` : `cargo run -p flux-frontend`
+- Jamais de build Docker ni de `cargo clippy` en local (la CI s'en charge : `feature.yml`).
+- En local : `cargo fmt` et `cargo test -p <paquet>` (ciblé, assez rapide).
+- Régénérer `frontend/dist/index.html` après un changement du thème ou de la page : `cargo run -p flux-frontend`
 
 ## 4. Déploiement Test TrueNAS
-```bash
-SSH_AUTH_SOCK=$HOME/.1password/agent.sock scp -o BatchMode=yes frontend/dist/index.html truenas_admin@192.168.1.50:/tmp/index.html && \
-SSH_AUTH_SOCK=$HOME/.1password/agent.sock ssh -o BatchMode=yes truenas_admin@192.168.1.50 "sudo cp /tmp/index.html /mnt/DATA/flux-de-fichiers-test/essai25/frontend/index.html && sudo chmod 644 /mnt/DATA/flux-de-fichiers-test/essai25/frontend/index.html && sudo rm -f /tmp/index.html"
-```
-Vérifier l'instance : `curl -s http://192.168.1.50:18480/`
+- Procédure et retour arrière : `docs/deploiement-essai-0011.md`. Accès NAS depuis DELL-LAPTOP uniquement.
+- Recopier `index.html` **et** `pkg/` de l'image `:test-<sha12>` dans le volume `frontend` du central.
 
 ## 5. Flux Git
-- Branche de travail : `dev`
-- Workflow : `dev` → `test` → `main` par merge commits.
-- PR vers test : `gh pr create --base test --head dev --title "..." --body "..." && gh pr merge <PR_NUM> --merge --auto`
+- Branche de travail → PR vers `dev` (`feature.yml` vert) → PR `dev → test` (CI complète) → `test → main` (release, aucune pour le moment).
+- Merge commits uniquement. Aucune ligne `Co-Authored-By` ni mention d'agent.

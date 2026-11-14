@@ -1,0 +1,38 @@
+# Branches de travail : toute PR vers dev passe fmt, clippy et tests avant fusion
+# (ADR 0002). Même vérification que le job fmt-clippy-tests de test.yml, sans
+# image Docker : celle-ci reste construite sur la PR dev → test.
+name: feature
+
+on:
+  pull_request:
+    branches: [dev]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: feature-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: fmt-clippy-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Installer la toolchain de rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+      - name: Contrat partagé, client WASM et page (ADR 0014)
+        run: |
+          cargo clippy -p flux-shared -p flux-client -p flux-frontend --all-targets --locked -- -D warnings
+          cargo clippy -p flux-client --target wasm32-unknown-unknown --locked -- -D warnings
+          cargo test -p flux-shared -p flux-client -p flux-frontend --locked
+      - name: La page générée est à jour
+        run: |
+          cargo run -p flux-frontend --locked
+          git diff --exit-code frontend/dist/index.html

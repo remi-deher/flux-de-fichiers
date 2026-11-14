@@ -1,82 +1,13 @@
 use super::{
     arr::{ArrAction, ArrBlock, ArrService},
     condition::{ConditionConfig, evaluate_condition},
+    encode::EncodePlan,
+    mp4box::{Mp4Plan, mp4_plan},
     tool::{InPlaceEdit, in_place_edit},
     webhook::WebhookBlockConfig,
 };
-use serde::{Deserialize, Serialize, de::Deserializer, ser::Serializer};
-use std::fmt;
 
-/// Type de bloc d'un graphe de flux. Les valeurs inconnues restent traversables.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum FlowBlockKind {
-    FileInput,
-    Condition,
-    Mkvpropedit,
-    RemuxMkv,
-    VideoEncode,
-    Webhook,
-    SonarrRescan,
-    SonarrRename,
-    RadarrRescan,
-    RadarrRename,
-    FileOutput,
-    Other(String),
-}
-
-impl FlowBlockKind {
-    pub fn parse(value: &str) -> Self {
-        match value {
-            "file-input" => Self::FileInput,
-            "condition" => Self::Condition,
-            "mkvpropedit" => Self::Mkvpropedit,
-            "remux-mkv" => Self::RemuxMkv,
-            "video-encode" => Self::VideoEncode,
-            "webhook" => Self::Webhook,
-            "sonarr-rescan" => Self::SonarrRescan,
-            "sonarr-rename" => Self::SonarrRename,
-            "radarr-rescan" => Self::RadarrRescan,
-            "radarr-rename" => Self::RadarrRename,
-            "file-output" => Self::FileOutput,
-            other => Self::Other(other.to_owned()),
-        }
-    }
-
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::FileInput => "file-input",
-            Self::Condition => "condition",
-            Self::Mkvpropedit => "mkvpropedit",
-            Self::RemuxMkv => "remux-mkv",
-            Self::VideoEncode => "video-encode",
-            Self::Webhook => "webhook",
-            Self::SonarrRescan => "sonarr-rescan",
-            Self::SonarrRename => "sonarr-rename",
-            Self::RadarrRescan => "radarr-rescan",
-            Self::RadarrRename => "radarr-rename",
-            Self::FileOutput => "file-output",
-            Self::Other(value) => value,
-        }
-    }
-}
-
-impl fmt::Display for FlowBlockKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl Serialize for FlowBlockKind {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for FlowBlockKind {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Self::parse(&String::deserialize(deserializer)?))
-    }
-}
+pub use flux_shared::flows::FlowBlockKind;
 
 /// Effet d'un bloc, sans exécuter d'outil ni d'appel réseau.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,6 +15,9 @@ pub struct StepDecision {
     pub port: Option<String>,
     pub stop: bool,
     pub transform: bool,
+    pub encode: Option<EncodePlan>,
+    pub remux_mp4: Option<Mp4Plan>,
+    pub reinpect: bool,
     pub edit: Option<InPlaceEdit>,
     pub notify: Option<WebhookBlockConfig>,
     pub integration: Option<ArrBlock>,
@@ -95,6 +29,9 @@ impl StepDecision {
             port: None,
             stop: false,
             transform: false,
+            encode: None,
+            remux_mp4: None,
+            reinpect: false,
             edit: None,
             notify: None,
             integration: None,
@@ -118,6 +55,27 @@ impl StepDecision {
     fn transform() -> Self {
         Self {
             transform: true,
+            ..Self::pass()
+        }
+    }
+
+    fn remux_mp4(plan: Mp4Plan) -> Self {
+        Self {
+            remux_mp4: Some(plan),
+            ..Self::pass()
+        }
+    }
+
+    fn encode(plan: EncodePlan) -> Self {
+        Self {
+            encode: Some(plan),
+            ..Self::pass()
+        }
+    }
+
+    fn reinpect() -> Self {
+        Self {
+            reinpect: true,
             ..Self::pass()
         }
     }
@@ -165,6 +123,7 @@ pub fn decide_step(
     match kind {
         FlowBlockKind::FileInput | FlowBlockKind::Other(_) => StepDecision::pass(),
         FlowBlockKind::FileOutput => StepDecision::stop(),
+        FlowBlockKind::MediaInspect => StepDecision::reinpect(),
         FlowBlockKind::Condition => {
             let parsed =
                 serde_json::from_value::<ConditionConfig>(config.clone()).unwrap_or_else(|_| {
@@ -177,7 +136,14 @@ pub fn decide_step(
             StepDecision::branch(evaluate_condition(&parsed, media_info))
         }
         FlowBlockKind::Mkvpropedit => StepDecision::edit(in_place_edit(config)),
-        FlowBlockKind::RemuxMkv | FlowBlockKind::VideoEncode => StepDecision::transform(),
+        FlowBlockKind::RemuxMkv => StepDecision::transform(),
+        FlowBlockKind::RemuxMp4 => StepDecision::remux_mp4(mp4_plan(config)),
+        FlowBlockKind::VideoEncode => {
+            StepDecision::encode(EncodePlan::Video(super::encode::video_plan(config)))
+        }
+        FlowBlockKind::AudioEncode => {
+            StepDecision::encode(EncodePlan::Audio(super::encode::audio_plan(config)))
+        }
         FlowBlockKind::SonarrRescan => arr_step(ArrService::Sonarr, ArrAction::Rescan, config),
         FlowBlockKind::SonarrRename => arr_step(ArrService::Sonarr, ArrAction::Rename, config),
         FlowBlockKind::RadarrRescan => arr_step(ArrService::Radarr, ArrAction::Rescan, config),
@@ -196,36 +162,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn kind_roundtrip_keeps_unknown_blocks() -> Result<(), serde_json::Error> {
-        for label in [
-            "file-input",
-            "condition",
-            "mkvpropedit",
-            "remux-mkv",
-            "video-encode",
-            "webhook",
-            "sonarr-rescan",
-            "sonarr-rename",
-            "radarr-rescan",
-            "radarr-rename",
-            "file-output",
-            "remux-mp4",
-        ] {
-            let kind = FlowBlockKind::parse(label);
-            assert_eq!(kind.as_str(), label);
-            assert_eq!(
-                serde_json::from_str::<FlowBlockKind>(&serde_json::to_string(&kind)?)?,
-                kind
-            );
-        }
-        assert!(matches!(
-            FlowBlockKind::parse("remux-mp4"),
-            FlowBlockKind::Other(_)
-        ));
-        Ok(())
-    }
-
-    #[test]
     fn each_block_kind_plans_a_single_effect() {
         let hevc = serde_json::json!({"tracks": [{"type": "video", "codec": "HEVC"}]});
         let empty = serde_json::json!({});
@@ -237,10 +173,16 @@ mod tests {
         );
         assert!(!decide_step(&FlowBlockKind::FileInput, &empty, &hevc).stop);
 
-        let other = decide_step(&FlowBlockKind::Other("remux-mp4".into()), &empty, &hevc);
-        assert!(!other.stop && !other.transform && other.notify.is_none());
+        let other = decide_step(&FlowBlockKind::Other("macro.unknown".into()), &empty, &hevc);
+        assert!(
+            !other.stop && !other.transform && other.encode.is_none() && other.notify.is_none()
+        );
 
         assert!(decide_step(&FlowBlockKind::FileOutput, &empty, &hevc).stop);
+        assert!(decide_step(&FlowBlockKind::MediaInspect, &empty, &hevc).reinpect);
+        let mp4 = decide_step(&FlowBlockKind::RemuxMp4, &empty, &hevc);
+        assert!(mp4.encode.is_none() && !mp4.transform);
+        assert!(mp4.remux_mp4.is_some_and(|plan| plan.faststart));
 
         let matched = decide_step(
             &FlowBlockKind::Condition,
@@ -265,7 +207,15 @@ mod tests {
         assert_eq!(edit.map(|value| value.force_subtitles), Some(true));
 
         assert!(decide_step(&FlowBlockKind::RemuxMkv, &empty, &hevc).transform);
-        assert!(decide_step(&FlowBlockKind::VideoEncode, &empty, &hevc).transform);
+        let video = decide_step(&FlowBlockKind::VideoEncode, &empty, &hevc);
+        assert!(matches!(video.encode, Some(EncodePlan::Video(_))));
+        assert!(!video.transform);
+        let audio = decide_step(
+            &FlowBlockKind::AudioEncode,
+            &serde_json::json!({"codec": "aac", "normalize": true}),
+            &hevc,
+        );
+        assert!(matches!(audio.encode, Some(EncodePlan::Audio(plan)) if plan.normalize));
 
         let notify = decide_step(
             &FlowBlockKind::Webhook,

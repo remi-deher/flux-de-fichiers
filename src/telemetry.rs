@@ -8,7 +8,7 @@ use std::{
 const DEFAULT_CORES: u32 = 1;
 const KILOBYTES_TO_BYTES: u64 = 1024;
 
-/// Instantané des métriques matérielles et système d'un nœud.
+/// Instantané des métriques matérielles et système d'un worker.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct TelemetrySnapshot {
     pub timestamp: DateTime<Utc>,
@@ -157,7 +157,7 @@ impl TelemetryProbe {
     }
 
     /// Lit l'espace total et disponible via l'appel POSIX `statvfs`.
-    fn read_storage_info(path: &Path) -> Option<(u64, u64)> {
+    pub fn read_storage_info(path: &Path) -> Option<(u64, u64)> {
         use std::ffi::CString;
         use std::os::unix::ffi::OsStrExt;
 

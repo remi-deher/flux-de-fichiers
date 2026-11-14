@@ -8,14 +8,15 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod blocks;
 mod install;
 mod probe;
 mod secret_settings;
 mod settings;
 mod sources;
 mod sync;
-mod vocab;
 
+pub use blocks::{flow_block_catalog, plugin_default_config};
 pub use install::{
     ensure_job_tools, ensure_tool_installed, install_from_distribution, is_installing,
     parse_distribution, read_distribution,
@@ -26,64 +27,30 @@ pub use sources::{
 };
 pub use sync::{SyncError, SyncPolicy, SyncReport, sync_repository, validate_index_url};
 
-pub use secret_settings::{mask, migrate_plaintext, seal, secret_names};
+pub use flux_shared::plugins::vocab::{self, CatalogCapability, CatalogItemType, PluginCategory};
+pub use flux_shared::plugins::{
+    CatalogEntry, CreateRepositoryRequest, PluginRepository, PluginSettingsView, ToolStatus,
+    ToolStatusSummary,
+};
+pub use secret_settings::{
+    mask, migrate_plaintext, plugin_secret_aad, rotate_settings, seal, secret_names,
+};
 pub use settings::{
     ResolvedSettingsField, SettingsField, SettingsFieldType, SettingsSchema, resolve_setting_value,
     resolve_settings_fields,
 };
-pub use vocab::{CatalogCapability, CatalogItemType, PluginCategory};
 
-/// Outil de remuxage requis par les jobs, installé dans le cache du nœud depuis les dépôts.
+/// Outil de remuxage requis par les jobs, installé dans le cache local depuis les dépôts.
 pub const REMUX_TOOL_ID: &str = "app.mkvtoolnix";
 pub const REMUX_TOOL_VERSION: &str = "1.0.0";
 
-/// Dépôt distant de distribution de plugins, outils et flux.
-#[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginRepository {
-    pub id: String,
-    pub name: String,
-    pub index_url: String,
-    pub is_official: bool,
-    pub enabled: bool,
-    pub last_synced_at: Option<String>,
-    pub created_at: String,
-}
+/// FFmpeg distribué par les dépôts de plugins (jamais embarqué dans l'image).
+pub const FFMPEG_TOOL_ID: &str = "tool.ffmpeg";
+pub const FFMPEG_TOOL_VERSION: &str = "1.0.0";
 
-/// Requête d'enregistrement d'un nouveau dépôt de plugins.
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateRepositoryRequest {
-    pub id: Option<String>,
-    pub name: String,
-    pub index_url: String,
-}
-
-/// Fiche d'index dans `catalogue/index.json`.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct CatalogEntry {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub entry_type: CatalogItemType,
-    pub version: String,
-    pub name: String,
-    pub manifest_path: String,
-    #[serde(default)]
-    pub capability: Option<CatalogCapability>,
-    #[serde(default)]
-    pub current_choice: Option<bool>,
-    #[serde(default)]
-    pub distribution: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "vocab::deserialize_optional_category",
-        skip_serializing_if = "vocab::hides_category_badge"
-    )]
-    pub category: Option<PluginCategory>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tags: Vec<String>,
-}
+/// MP4Box (GPAC) distribué par les dépôts de plugins, pour le remuxage MP4.
+pub const MP4BOX_TOOL_ID: &str = "tool.mp4box";
+pub const MP4BOX_TOOL_VERSION: &str = "1.0.0";
 
 /// Conteneur de l'index du catalogue.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -138,31 +105,6 @@ pub struct ManifestToolDetails {
     pub current_choice: Option<bool>,
 }
 
-/// État d'un outil dans le cache de ce nœud.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolStatus {
-    Ready,
-    /// Téléchargement ou extraction en cours.
-    Installing,
-    NotInstalled,
-}
-
-/// Résumé de l'état d'un outil pour l'API et l'interface utilisateur.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ToolStatusSummary {
-    pub id: String,
-    pub name: String,
-    pub version: String,
-    pub status: ToolStatus,
-    pub capability: CatalogCapability,
-    pub current_choice: bool,
-    pub arch: String,
-    pub distribution: String,
-    pub description: String,
-}
-
 /// Index lu entrée par entrée : une fiche inconnue est ignorée sans invalider les autres.
 pub struct ParsedIndex {
     pub index: CatalogIndex,
@@ -170,7 +112,7 @@ pub struct ParsedIndex {
     pub skipped: Vec<String>,
 }
 
-/// Lit un `catalogue/index.json` en tolérant les fiches que ce coordinateur ne comprend pas.
+/// Lit un `catalogue/index.json` en tolérant les fiches que ce central ne comprend pas.
 pub fn parse_index_tolerant(content: &str) -> anyhow::Result<ParsedIndex> {
     let value: Value = serde_json::from_str(content)?;
     let schema_version = value
@@ -308,13 +250,42 @@ pub fn plugin_exists(roots: &[PathBuf], plugin_id: &str) -> bool {
         .any(|(_, entry)| entry.id == plugin_id)
 }
 
-/// Calcule l'état dynamique de chaque outil déclaré par rapport au cache local du nœud.
+/// Résumé d'un outil du catalogue : prêt s'il est dans le cache local, sinon installable.
+pub fn summarize_tool(
+    entry: CatalogEntry,
+    description: String,
+    cache_mgr: &ToolCacheManager,
+) -> ToolStatusSummary {
+    let arch = host_arch();
+    // La télémétrie est interne au binaire ; tout autre outil vient du cache local.
+    let is_system_ready = entry.id == "app.internal.telemetry";
+    let status = if is_system_ready || cache_mgr.is_ready(&entry.id, &entry.version, arch) {
+        ToolStatus::Ready
+    } else if is_installing(&entry.id) {
+        ToolStatus::Installing
+    } else {
+        ToolStatus::NotInstalled
+    };
+    ToolStatusSummary {
+        id: entry.id,
+        name: entry.name,
+        version: entry.version,
+        status,
+        capability: entry.capability.unwrap_or(CatalogCapability::Other),
+        current_choice: entry.current_choice.unwrap_or(false),
+        arch: arch.to_string(),
+        distribution: entry
+            .distribution
+            .unwrap_or_else(|| "autonomous-binary".into()),
+        description,
+    }
+}
+
+/// Calcule l'état dynamique de chaque outil déclaré par rapport au cache local.
 pub fn list_tools_status(
     roots: &[PathBuf],
     cache_mgr: &ToolCacheManager,
 ) -> Vec<ToolStatusSummary> {
-    let arch = host_arch();
-
     catalog_with_roots(roots)
         .into_iter()
         .filter(|(_, entry)| entry.entry_type == CatalogItemType::App)
@@ -323,32 +294,21 @@ pub fn list_tools_status(
                 .ok()
                 .and_then(|manifest| manifest.description)
                 .unwrap_or_default();
-
-            // La télémétrie est interne au binaire ; tout autre outil vient du cache du nœud.
-            let is_system_ready = entry.id == "app.internal.telemetry";
-
-            let status = if is_system_ready || cache_mgr.is_ready(&entry.id, &entry.version, arch) {
-                ToolStatus::Ready
-            } else if is_installing(&entry.id) {
-                ToolStatus::Installing
-            } else {
-                ToolStatus::NotInstalled
-            };
-
-            ToolStatusSummary {
-                id: entry.id,
-                name: entry.name,
-                version: entry.version,
-                status,
-                capability: entry.capability.unwrap_or(CatalogCapability::Other),
-                current_choice: entry.current_choice.unwrap_or(false),
-                arch: arch.to_string(),
-                distribution: entry
-                    .distribution
-                    .unwrap_or_else(|| "autonomous-binary".into()),
-                description,
-            }
+            summarize_tool(entry, description, cache_mgr)
         })
+        .collect()
+}
+
+/// Outils d'un catalogue lu à distance : l'état vient du cache local, sans description
+/// (les manifestes restent sur le central).
+pub fn tool_statuses_for_entries(
+    entries: Vec<CatalogEntry>,
+    cache_mgr: &ToolCacheManager,
+) -> Vec<ToolStatusSummary> {
+    entries
+        .into_iter()
+        .filter(|entry| entry.entry_type == CatalogItemType::App)
+        .map(|entry| summarize_tool(entry, String::new(), cache_mgr))
         .collect()
 }
 

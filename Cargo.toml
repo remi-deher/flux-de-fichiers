@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "frontend"]
+members = [".", "frontend", "shared", "client"]
 resolver = "2"
 
 [package]
@@ -10,11 +10,14 @@ rust-version = "1.99"
 
 [dependencies]
 anyhow = "1.0"
+argon2 = "0.5"
+flux-shared = { path = "shared", features = ["sqlx"] }
 axum = { version = "0.8", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde"] }
 flate2 = "1.0"
 futures-util = "0.3"
 axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-rustls", "ring", "webpki-roots"] }
 libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 serde = { version = "1.0", features = ["derive"] }

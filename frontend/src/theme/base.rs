@@ -63,7 +63,6 @@ pub const BASE_CSS: &str = r#"
 .application-sidebar.is-collapsed .brand-info,
 .application-sidebar.is-collapsed .tab-btn-label,
 .application-sidebar.is-collapsed .nav-group-label,
-.application-sidebar.is-collapsed #theme-toggle-label,
 .application-sidebar.is-collapsed .collapse-label {
   display: none;
 }
@@ -100,12 +99,9 @@ pub const BASE_CSS: &str = r#"
   justify-content: center;
 }
 
-.application-sidebar.is-collapsed #theme-toggle-btn {
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  justify-content: center;
-  min-width: 40px;
+/* Replié : le thème se règle barre dépliée, la déconnexion reste accessible. */
+.application-sidebar.is-collapsed .theme-segmented {
+  display: none;
 }
 
 /* En-tête de la marque */
@@ -268,8 +264,62 @@ pub const BASE_CSS: &str = r#"
   gap: 0.5rem;
 }
 
-.sidebar-footer-tools button {
+/* Thème : trois boutons exclusifs. */
+.theme-segmented {
+  display: flex;
+  width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.theme-segmented__btn {
   flex: 1;
+  padding: 0.4rem 0.25rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.theme-segmented__btn:hover {
+  color: var(--text-main);
+}
+
+.theme-segmented__btn[aria-pressed="true"] {
+  background-color: var(--bg-subtle);
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+/* Déconnexion : un bouton discret à côté du thème, toujours accessible. */
+.sidebar-footer-tools {
+  align-items: center;
+}
+
+.sidebar-logout-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.sidebar-logout-btn:hover {
+  border-color: var(--primary);
+  color: var(--text-main);
+}
+
+.subnav-tab[hidden] {
+  display: none;
 }
 
 /* --- Zone de transition & contenu principal --- */
@@ -337,12 +387,93 @@ pub const BASE_CSS: &str = r#"
 
 /* Capsule de recherche : saisie, actions de la page, bouton Filtres.
    La feuille est un enfant du champ : elle en sort par le bas, à la même largeur. */
+/* Bouton du tiroir de navigation : visible seulement sur écran étroit. */
+.topbar-menu-btn {
+  display: none;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.sidebar-scrim {
+  display: none;
+}
+
 .topbar-search-anchor {
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
   max-width: 720px;
   margin-inline: auto;
+}
+
+/* Résultats de la recherche globale : menu sous le champ, même largeur. */
+.search-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 0.25rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.search-results[hidden] {
+  display: none;
+}
+
+.search-result {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-result:hover,
+.search-result:focus-visible {
+  background: color-mix(in srgb, var(--primary) 14%, var(--bg-card));
+}
+
+.search-result__kind {
+  color: var(--primary);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.search-result__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-result__detail {
+  color: var(--text-muted);
+  font-size: 0.75rem;
 }
 
 .topbar-search {
@@ -699,6 +830,31 @@ body[data-filter-sheet] .topbar-search {
   flex-shrink: 0;
 }
 
+/* Panneau repliable de la barre d'actions (widgets, filtres) */
+.popover {
+  position: relative;
+}
+
+.popover > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.popover__panel {
+  position: absolute;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  padding: var(--space-3);
+  min-width: 200px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
 /* Grille de métriques et KPIs statistiques */
 .metrics-grid {
   display: grid;
@@ -881,8 +1037,7 @@ body[data-filter-sheet] .topbar-search {
   padding: 3px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg, 12px);
-  background: var(--bg-card);
-  backdrop-filter: blur(14px);
+  background: transparent;
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
@@ -1000,62 +1155,76 @@ body[data-filter-sheet] .topbar-search {
   }
 
   .application-navigation-layout {
-    flex-direction: column;
     overflow-x: hidden;
     max-width: 100vw;
     min-width: 0;
   }
 
-  .application-sidebar {
-    width: 100%;
-    max-width: 100vw;
-    min-width: 0;
-    flex: none;
-    border-right: none;
-    border-bottom: 1px solid var(--border-color);
-    overflow-x: hidden;
+  /* Étroit : la barre latérale devient un tiroir, ouvert par le bouton de la barre du haut. */
+  .application-sidebar,
+  .application-sidebar.is-collapsed {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    height: 100dvh;
+    width: min(18rem, 85vw);
+    max-width: 85vw;
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.2s ease-in-out, visibility 0.2s;
+    z-index: 80;
+    box-shadow: var(--shadow-md);
+  }
+
+  .application-sidebar.is-open {
+    transform: translateX(0);
+    visibility: visible;
+  }
+
+  .application-sidebar.is-collapsed .brand-info,
+  .application-sidebar.is-collapsed .tab-btn-label,
+  .application-sidebar.is-collapsed .nav-group-label {
+    display: revert;
+  }
+
+  .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    border: 0;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.45);
+  }
+
+  .sidebar-scrim[hidden] {
+    display: none;
+  }
+
+  .topbar-menu-btn {
+    display: inline-flex;
   }
 
   .sidebar-header {
     padding: 0.75rem 1rem;
-    max-width: 100vw;
     box-sizing: border-box;
   }
 
   .tab-navigation {
     padding: 0.5rem;
-    max-width: 100vw;
     min-width: 0;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    overflow-y: auto;
     box-sizing: border-box;
-  }
-
-  .tab-list {
-    flex-direction: row;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    max-width: 100%;
-    width: 100%;
-    min-width: 0;
-    padding-bottom: 4px;
-    scrollbar-width: thin;
-    box-sizing: border-box;
-  }
-
-  .nav-group-label {
-    display: none;
   }
 
   .tab-btn {
-    width: auto;
-    flex: 0 0 auto;
+    width: 100%;
+    min-height: 44px;
     white-space: nowrap;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.8125rem;
   }
 
-  .sidebar-footer {
+  .sidebar-collapse-btn {
     display: none;
   }
 
@@ -1070,10 +1239,6 @@ body[data-filter-sheet] .topbar-search {
 
   .topbar-container {
     padding: 0.35rem 0.5rem;
-  }
-
-  .topbar-actions {
-    display: none;
   }
 
   .topbar-search-anchor {

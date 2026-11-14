@@ -5,16 +5,9 @@
 //! un champ seulement si la clé n'a jamais été enregistrée.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
 
-/// Type de champ connu des manifestes Sonarr et Radarr. Une valeur inconnue est refusée.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SettingsFieldType {
-    Url,
-    Secret,
-    String,
-}
+pub use flux_shared::plugins::{ResolvedSettingsField, SettingsFieldType};
+use serde_json::{Map, Value};
 
 /// Un champ de `settingsSchema.fields`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,22 +28,6 @@ pub struct SettingsField {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SettingsSchema {
     pub fields: Vec<SettingsField>,
-}
-
-/// Champ prêt à être affiché. `value` est la proposition, jamais une écriture en base.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ResolvedSettingsField {
-    pub name: String,
-    pub label: String,
-    #[serde(rename = "type")]
-    pub field_type: SettingsFieldType,
-    pub required: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    pub value: String,
-    /// Secret : une valeur est enregistrée (elle n'est jamais renvoyée).
-    #[serde(rename = "isSet")]
-    pub is_set: bool,
 }
 
 /// Valeur affichée : clé sauvée (même vide), sinon défaut du manifeste, sinon vide.

@@ -1,6 +1,6 @@
 //! Gestionnaires HTTP pour les plugins, le catalogue et les outils distribués.
 
-use super::{AdminAuth, AppState};
+use super::{AdminAuth, AppState, ViewPluginsAuth};
 use crate::{
     error::{AppError, AppResult},
     plugins::{self, CatalogEntry, ToolStatusSummary},
@@ -16,7 +16,7 @@ use serde_json::Value;
 /// Liste l'ensemble des composants déclarés dans le catalogue.
 pub async fn catalog(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ViewPluginsAuth,
 ) -> AppResult<Json<Vec<CatalogEntry>>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     Ok(Json(plugins::list_catalog(&roots)))
@@ -25,7 +25,7 @@ pub async fn catalog(
 /// Liste l'état d'installation et de cache des outils distribués.
 pub async fn tools(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ViewPluginsAuth,
 ) -> AppResult<Json<Vec<ToolStatusSummary>>> {
     let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
@@ -48,12 +48,12 @@ pub async fn worker_tool_distribution(
     headers: axum::http::HeaderMap,
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
-    crate::auth::authorize(&headers, &s.config.worker_key)?;
+    crate::auth::authorize_worker(&s.pool, &headers).await?;
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     Ok(Json(plugins::read_distribution(&roots, &id)?))
 }
 
-/// Installe un outil du catalogue dans le cache du coordinateur (nœud intégré).
+/// Installe un outil du catalogue dans le cache du central (worker intégré).
 pub async fn install_tool(
     State(s): State<AppState>,
     Path(id): Path<String>,
@@ -97,7 +97,7 @@ pub async fn get_settings(
     State(s): State<AppState>,
     Path(id): Path<String>,
     _auth: AdminAuth,
-) -> AppResult<Json<Value>> {
+) -> AppResult<Json<plugins::PluginSettingsView>> {
     let secrets = SecretBox::open(&s.config.config_dir)?;
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     let schema_fields = plugins::settings_fields(&roots, &id);
@@ -108,7 +108,7 @@ pub async fn get_settings(
     );
     let names = plugins::secret_names(&schema_fields, keys_of(&saved).iter());
     // Anciens enregistrements en clair : chiffrés à la première lecture.
-    if let Some(migrated) = plugins::migrate_plaintext(&secrets, &saved, &names)? {
+    if let Some(migrated) = plugins::migrate_plaintext(&secrets, &id, &saved, &names)? {
         let migrated_str = serde_json::to_string(&migrated).map_err(|_| AppError::Invalid)?;
         crate::repository::set_plugin_settings(&s.pool, &id, &migrated_str).await?;
         saved = migrated;
@@ -123,11 +123,11 @@ pub async fn get_settings(
             field.value.clear();
         }
     }
-    Ok(Json(serde_json::json!({
-        "pluginId": id,
-        "settings": public,
-        "fields": fields,
-    })))
+    Ok(Json(plugins::PluginSettingsView {
+        plugin_id: id,
+        settings: public.as_object().cloned().unwrap_or_default(),
+        fields,
+    }))
 }
 
 /// Enregistre la configuration d'un plugin du catalogue ; les secrets saisis sont chiffrés, les secrets laissés vides sont conservés.
@@ -153,7 +153,7 @@ pub async fn save_settings(
         .chain(keys_of(&payload))
         .collect();
     let names = plugins::secret_names(&schema_fields, keys.iter());
-    let sealed = plugins::seal(&secrets, &payload, &existing, &names)?;
+    let sealed = plugins::seal(&secrets, &id, &payload, &existing, &names)?;
     let sealed_str = serde_json::to_string(&sealed).map_err(|_| AppError::Invalid)?;
     crate::repository::set_plugin_settings(&s.pool, &id, &sealed_str).await?;
     let (public, _) = plugins::mask(&sealed, &names);
@@ -167,7 +167,7 @@ pub async fn save_settings(
 /// Liste l'ensemble des dépôts configurés.
 pub async fn list_repositories(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ViewPluginsAuth,
 ) -> AppResult<Json<Vec<plugins::PluginRepository>>> {
     let repos = crate::repository::list_plugin_repositories(&s.pool).await?;
     Ok(Json(repos))

@@ -15,6 +15,11 @@ const MAX_SETTINGS_BYTES: usize = 64 * 1024;
 const MAX_SETTINGS_KEYS: usize = 64;
 
 /// Champs secrets : ceux que le schéma déclare, plus tout nom évocateur parmi les clés connues.
+/// Données associées d'un secret de plugin : il ne se déchiffre que pour ce plugin et ce champ.
+pub fn plugin_secret_aad(plugin_id: &str, field: &str) -> String {
+    format!("plugin:{plugin_id}:{field}")
+}
+
 pub fn secret_names<'a>(
     fields: &[SettingsField],
     keys: impl Iterator<Item = &'a String>,
@@ -40,6 +45,7 @@ fn as_object(value: &Value) -> Map<String, Value> {
 /// Prépare l'enregistrement : chiffre les secrets saisis, conserve ceux déjà enregistrés si le champ est laissé vide.
 pub fn seal(
     secrets: &SecretBox,
+    plugin_id: &str,
     incoming: &Value,
     existing: &Value,
     secret_names: &HashSet<String>,
@@ -62,7 +68,10 @@ pub fn seal(
         }
         match value.as_str() {
             Some(text) if !text.is_empty() => {
-                sealed.insert(name.clone(), Value::String(secrets.encrypt(text)?));
+                sealed.insert(
+                    name.clone(),
+                    Value::String(secrets.encrypt(text, &plugin_secret_aad(plugin_id, name))?),
+                );
             }
             _ => {
                 if let Some(previous) = existing.get(name) {
@@ -84,6 +93,7 @@ pub fn seal(
 /// Chiffre les secrets encore en clair d'un ancien enregistrement ; `None` si rien à migrer.
 pub fn migrate_plaintext(
     secrets: &SecretBox,
+    plugin_id: &str,
     stored: &Value,
     secret_names: &HashSet<String>,
 ) -> AppResult<Option<Value>> {
@@ -94,12 +104,43 @@ pub fn migrate_plaintext(
             && !text.is_empty()
             && !is_encrypted(text)
         {
-            let encrypted = secrets.encrypt(text)?;
+            let encrypted = secrets.encrypt(text, &plugin_secret_aad(plugin_id, name))?;
             object.insert(name.clone(), Value::String(encrypted));
             changed = true;
         }
     }
     Ok(changed.then_some(Value::Object(object)))
+}
+
+/// Re-chiffre avec la nouvelle clé les secrets d'un enregistrement de réglages ; `None` s'il n'y en a pas.
+/// Renvoie les réglages réécrits et le nombre de valeurs changées.
+pub fn rotate_settings(
+    old: &SecretBox,
+    new: &SecretBox,
+    plugin_id: &str,
+    stored: &str,
+) -> AppResult<Option<(String, usize)>> {
+    let Ok(mut value) = serde_json::from_str::<Value>(stored) else {
+        return Ok(None);
+    };
+    let Some(object) = value.as_object_mut() else {
+        return Ok(None);
+    };
+    let mut rotated = 0;
+    for (name, field) in object.iter_mut() {
+        let Some(text) = field.as_str().filter(|text| is_encrypted(text)) else {
+            continue;
+        };
+        let aad = plugin_secret_aad(plugin_id, name);
+        let plaintext = old.decrypt(text, &aad)?;
+        *field = Value::String(new.encrypt(&plaintext, &aad)?);
+        rotated += 1;
+    }
+    if rotated == 0 {
+        return Ok(None);
+    }
+    let rewritten = serde_json::to_string(&value).map_err(|_| AppError::Invalid)?;
+    Ok(Some((rewritten, rotated)))
 }
 
 /// Réglages sans les secrets, et noms des secrets qui ont une valeur enregistrée.
@@ -120,6 +161,8 @@ pub fn mask(stored: &Value, secret_names: &HashSet<String>) -> (Value, HashSet<S
 mod tests {
     use super::*;
     use serde_json::json;
+
+    const PLUGIN: &str = "plugin.demo";
 
     fn secret_field(name: &str) -> SettingsField {
         SettingsField {
@@ -158,6 +201,7 @@ mod tests {
 
         let first = seal(
             &secrets,
+            PLUGIN,
             &json!({"url": "http://s", "apiKey": "clef"}),
             &json!({}),
             &secret,
@@ -165,10 +209,14 @@ mod tests {
         let stored = first["apiKey"].as_str().unwrap_or_default().to_owned();
         assert!(is_encrypted(&stored));
         assert_eq!(first["url"], "http://s");
-        assert_eq!(secrets.decrypt(&stored)?, "clef");
+        assert_eq!(
+            secrets.decrypt(&stored, &plugin_secret_aad(PLUGIN, "apiKey"))?,
+            "clef"
+        );
 
         let kept = seal(
             &secrets,
+            PLUGIN,
             &json!({"url": "http://t", "apiKey": ""}),
             &first,
             &secret,
@@ -176,12 +224,27 @@ mod tests {
         assert_eq!(kept["apiKey"], stored);
         assert_eq!(kept["url"], "http://t");
 
-        let omitted = seal(&secrets, &json!({"url": "http://u"}), &first, &secret)?;
+        let omitted = seal(
+            &secrets,
+            PLUGIN,
+            &json!({"url": "http://u"}),
+            &first,
+            &secret,
+        )?;
         assert_eq!(omitted["apiKey"], stored);
 
-        let replaced = seal(&secrets, &json!({"apiKey": "nouvelle"}), &first, &secret)?;
+        let replaced = seal(
+            &secrets,
+            PLUGIN,
+            &json!({"apiKey": "nouvelle"}),
+            &first,
+            &secret,
+        )?;
         assert_eq!(
-            secrets.decrypt(replaced["apiKey"].as_str().unwrap_or_default())?,
+            secrets.decrypt(
+                replaced["apiKey"].as_str().unwrap_or_default(),
+                &plugin_secret_aad(PLUGIN, "apiKey"),
+            )?,
             "nouvelle"
         );
         Ok(())
@@ -193,19 +256,19 @@ mod tests {
         let secrets = SecretBox::open(dir.path())?;
         let none = HashSet::new();
         assert!(matches!(
-            seal(&secrets, &json!([1]), &json!({}), &none),
+            seal(&secrets, PLUGIN, &json!([1]), &json!({}), &none),
             Err(AppError::Invalid)
         ));
         let big = json!({"note": "x".repeat(MAX_SETTINGS_BYTES + 1)});
         assert!(matches!(
-            seal(&secrets, &big, &json!({}), &none),
+            seal(&secrets, PLUGIN, &big, &json!({}), &none),
             Err(AppError::TooLarge)
         ));
         let many: Map<String, Value> = (0..=MAX_SETTINGS_KEYS)
             .map(|index| (format!("k{index}"), Value::Bool(true)))
             .collect();
         assert!(matches!(
-            seal(&secrets, &Value::Object(many), &json!({}), &none),
+            seal(&secrets, PLUGIN, &Value::Object(many), &json!({}), &none),
             Err(AppError::TooLarge)
         ));
         Ok(())
@@ -218,6 +281,7 @@ mod tests {
         let secret = names(&[], &["apiKey"]);
         let migrated = migrate_plaintext(
             &secrets,
+            PLUGIN,
             &json!({"apiKey": "clair", "url": "http://s"}),
             &secret,
         )?
@@ -226,7 +290,7 @@ mod tests {
             migrated["apiKey"].as_str().unwrap_or_default()
         ));
         assert_eq!(migrated["url"], "http://s");
-        assert!(migrate_plaintext(&secrets, &migrated, &secret)?.is_none());
+        assert!(migrate_plaintext(&secrets, PLUGIN, &migrated, &secret)?.is_none());
         Ok(())
     }
 
@@ -234,7 +298,7 @@ mod tests {
     fn test_mask_removes_secrets_and_reports_which_are_set() {
         let secret = names(&[], &["apiKey", "token"]);
         let (public, set) = mask(
-            &json!({"url": "http://s", "apiKey": "enc:v1:aa", "token": ""}),
+            &json!({"url": "http://s", "apiKey": "enc:v2:aa", "token": ""}),
             &secret,
         );
         assert_eq!(public, json!({"url": "http://s"}));

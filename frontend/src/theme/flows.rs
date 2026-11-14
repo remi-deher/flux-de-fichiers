@@ -2,6 +2,19 @@
 
 pub const FLOWS_CSS: &str = r#"
 /* --- Concepteur et Gestionnaire de Flux (Flows) --- */
+.form-input--code {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.canvas-empty-hint {
+  color: var(--text-dim);
+  text-align: center;
+  padding: 2rem 1rem;
+}
+
 .flows-grid {
   display: grid;
   grid-template-columns: 1fr;

@@ -1,3 +1,5 @@
+mod common;
+
 use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
@@ -21,18 +23,18 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
         static_dir: "frontend/dist".into(),
-        admin_key: "test-admin-key".into(),
-        worker_key: "test-worker-key".into(),
         max_file_bytes: 1024,
         local_worker: false,
         web_origin: None,
         web_session_ttl_seconds: 28_800,
         tls: None,
+        smtp: None,
     };
     let pool = SqlitePoolOptions::new()
         .connect(&config.database_url)
         .await?;
     sqlx::migrate!().run(&pool).await?;
+    common::install_keys(&pool).await?;
     let (events_tx, _) = tokio::sync::broadcast::channel(128);
     Ok(router(AppState {
         pool,
@@ -94,7 +96,10 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     // 1. Démarrage en mode Bare Core : aucun flux n'est pré-embarqué par défaut
     let req = Request::builder()
         .uri("/api/v1/flows")
-        .header("authorization", "Bearer test-admin-key")
+        .header(
+            "authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .body(Body::empty())?;
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::OK);
@@ -119,7 +124,10 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     let req = Request::builder()
         .method("PUT")
         .uri("/api/v1/flows/flow.default.mkv")
-        .header("authorization", "Bearer test-admin-key")
+        .header(
+            "authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .header("content-type", "application/json")
         .body(Body::from(serde_json::to_vec(&default_flow)?))?;
     let resp = app.clone().oneshot(req).await?;
@@ -137,16 +145,52 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     let req = Request::builder()
         .method("PUT")
         .uri("/api/v1/flows/flow.custom.test")
-        .header("authorization", "Bearer test-admin-key")
+        .header(
+            "authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .header("content-type", "application/json")
         .body(Body::from(serde_json::to_vec(&custom_flow)?))?;
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::OK);
 
+    // 3 bis. Ses versions : une seule, lisible, et une version inconnue répond 404.
+    let get = |uri: &str| {
+        Request::builder()
+            .uri(uri)
+            .header(
+                "authorization",
+                "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+            )
+            .body(Body::empty())
+    };
+    let resp = app
+        .clone()
+        .oneshot(get("/api/v1/flows/flow.custom.test/versions")?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let versions: Vec<serde_json::Value> =
+        serde_json::from_slice(&to_bytes(resp.into_body(), 16 * 1024).await?)?;
+    assert_eq!(versions.len(), 1);
+    assert_eq!(versions[0]["version"], 1);
+    let resp = app
+        .clone()
+        .oneshot(get("/api/v1/flows/flow.custom.test/versions/1")?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let resp = app
+        .clone()
+        .oneshot(get("/api/v1/flows/flow.custom.test/versions/9")?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
     // 4. Lire le flux personnalisé créé
     let req = Request::builder()
         .uri("/api/v1/flows/flow.custom.test")
-        .header("authorization", "Bearer test-admin-key")
+        .header(
+            "authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .body(Body::empty())?;
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::OK);
@@ -155,7 +199,10 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     let req = Request::builder()
         .method("DELETE")
         .uri("/api/v1/flows/flow.default.mkv")
-        .header("authorization", "Bearer test-admin-key")
+        .header(
+            "authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .body(Body::empty())?;
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::CONFLICT);
@@ -164,7 +211,10 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     let req = Request::builder()
         .method("DELETE")
         .uri("/api/v1/flows/flow.custom.test")
-        .header("authorization", "Bearer test-admin-key")
+        .header(
+            "authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
         .body(Body::empty())?;
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
@@ -234,19 +284,19 @@ async fn secrets_app() -> anyhow::Result<(axum::Router, sqlx::SqlitePool, tempfi
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
         static_dir: "frontend/dist".into(),
-        admin_key: "test-admin-key".into(),
-        worker_key: "test-worker-key".into(),
         max_file_bytes: 1024,
         local_worker: false,
         web_origin: None,
         web_session_ttl_seconds: 28_800,
         tls: None,
+        smtp: None,
     };
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect(&config.database_url)
         .await?;
     sqlx::migrate!().run(&pool).await?;
+    common::install_keys(&pool).await?;
     let (events_tx, _) = tokio::sync::broadcast::channel(128);
     let app = router(AppState {
         pool: pool.clone(),
@@ -287,7 +337,10 @@ async fn save_webhook_flow(
             Request::builder()
                 .method("PUT")
                 .uri("/api/v1/flows/flow.webhook")
-                .header("authorization", "Bearer test-admin-key")
+                .header(
+                    "authorization",
+                    "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+                )
                 .header("content-type", "application/json")
                 .body(Body::from(serde_json::to_vec(&body)?))?,
         )
@@ -315,14 +368,17 @@ async fn test_webhook_headers_are_encrypted_at_rest_and_masked_by_the_api() -> a
 
     let raw = stored_definition(&pool).await?;
     assert!(!raw.contains("SECRET-HEADER"));
-    assert!(raw.contains("enc:v1:"));
+    assert!(raw.contains("enc:v2:"));
 
     let response = app
         .clone()
         .oneshot(
             Request::builder()
                 .uri("/api/v1/flows/flow.webhook")
-                .header("authorization", "Bearer test-admin-key")
+                .header(
+                    "authorization",
+                    "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+                )
                 .body(Body::empty())?,
         )
         .await?;
@@ -345,6 +401,45 @@ async fn test_resaving_a_masked_flow_keeps_the_stored_header() -> anyhow::Result
     let encrypted = stored["nodes"][1]["config"]["custom_headers"]["Authorization"]
         .as_str()
         .unwrap_or_default();
-    assert_eq!(secrets.decrypt(encrypted)?, "Bearer SECRET-HEADER");
+    assert_eq!(
+        secrets.decrypt(encrypted, "flow:flow.webhook:n2:Authorization")?,
+        "Bearer SECRET-HEADER"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_flow_blocks_catalog_includes_native_encode_blocks() -> anyhow::Result<()> {
+    let app = test_app().await?;
+    let req = Request::builder()
+        .uri("/api/v1/flows/blocks")
+        .header(
+            "authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        .body(Body::empty())?;
+    let resp = app.clone().oneshot(req).await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = to_bytes(resp.into_body(), 64 * 1024).await?;
+    let blocks: Vec<serde_json::Value> = serde_json::from_slice(&bytes)?;
+    assert!(
+        blocks
+            .iter()
+            .any(|block| block["kind"] == "block.video.encode")
+    );
+    assert!(
+        blocks
+            .iter()
+            .any(|block| block["kind"] == "block.audio.encode")
+    );
+    let encode = blocks
+        .iter()
+        .find(|block| block["kind"] == "block.video.encode")
+        .ok_or_else(|| anyhow::anyhow!("bloc d'encodage vidéo absent"))?;
+    assert!(
+        encode["fields"]
+            .as_array()
+            .is_some_and(|fields| fields.iter().any(|field| field["name"] == "codec"))
+    );
     Ok(())
 }

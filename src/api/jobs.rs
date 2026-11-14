@@ -1,6 +1,7 @@
-use super::{AdminAuth, AppState};
+use super::{
+    AdminAuth, AppState, ViewJobsAuth, ViewLibrariesAuth, ViewOverviewAuth, ViewWorkersAuth,
+};
 use crate::{
-    auth::authorize,
     domain::*,
     error::{AppError, AppResult},
     repository, storage,
@@ -12,11 +13,14 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
 };
 use futures_util::stream::Stream;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::convert::Infallible;
 use uuid::Uuid;
 
-pub async fn files(State(s): State<AppState>, _auth: AdminAuth) -> AppResult<Json<Vec<MediaFile>>> {
+pub async fn files(
+    State(s): State<AppState>,
+    _auth: ViewLibrariesAuth,
+) -> AppResult<Json<Vec<MediaFile>>> {
     Ok(Json(
         storage::list_inputs(&s.config.input_dir, s.config.max_file_bytes).await?,
     ))
@@ -54,7 +58,7 @@ pub struct Page {
 pub async fn list(
     State(s): State<AppState>,
     Query(p): Query<Page>,
-    _auth: AdminAuth,
+    _auth: ViewJobsAuth,
 ) -> AppResult<Json<Vec<Job>>> {
     let limit = p.limit.unwrap_or(50);
     if !(1..=200).contains(&limit) {
@@ -65,7 +69,7 @@ pub async fn list(
 
 pub async fn events(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ViewJobsAuth,
 ) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     let rx = s.events_tx.subscribe();
     let stream = futures_util::stream::unfold(rx, |mut rx| async move {
@@ -88,11 +92,24 @@ pub async fn events(
 pub async fn get_job(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
-    _auth: AdminAuth,
+    _auth: ViewJobsAuth,
 ) -> AppResult<Json<Job>> {
     Ok(Json(repository::get_job(&s.pool, id).await?))
 }
-pub async fn workers(State(s): State<AppState>, _auth: AdminAuth) -> AppResult<Json<Vec<Worker>>> {
+/// Relance manuelle d'une tâche échouée après perte de bail (aucune relance automatique).
+pub async fn retry(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    _auth: AdminAuth,
+) -> AppResult<Json<Job>> {
+    let job = repository::retry_job(&s.pool, id).await?;
+    s.notify_job_event(JobEventType::JobRetried, job.id, JobStatus::Queued, None);
+    Ok(Json(job))
+}
+pub async fn workers(
+    State(s): State<AppState>,
+    _auth: ViewWorkersAuth,
+) -> AppResult<Json<Vec<Worker>>> {
     Ok(Json(repository::list_workers(&s.pool).await?))
 }
 
@@ -110,18 +127,44 @@ pub async fn heartbeat(
     Path(id): Path<Uuid>,
     Json(r): Json<LeaseRequest>,
 ) -> AppResult<StatusCode> {
-    authorize(&h, &s.config.worker_key)?;
+    crate::auth::authorize_worker(&s.pool, &h).await?;
     repository::heartbeat(&s.pool, id, &r).await?;
     s.notify_job_event(JobEventType::JobHeartbeat, id, JobStatus::Running, None);
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// Progression éphémère d'un worker distant → bus SSE `job_progress` (même contrat que le local).
+pub async fn progress(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(r): Json<ProgressReport>,
+) -> AppResult<StatusCode> {
+    crate::auth::authorize_worker(&s.pool, &h).await?;
+    if r.progress > 100 {
+        return Err(AppError::Invalid);
+    }
+    repository::active(
+        &s.pool,
+        id,
+        &LeaseRequest {
+            worker_id: r.worker_id,
+            lease_token: r.lease_token,
+            telemetry: None,
+        },
+    )
+    .await?;
+    s.notify_job_progress(id, r.progress, r.message);
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn failure(
     State(s): State<AppState>,
     h: HeaderMap,
     Path(id): Path<Uuid>,
     Json(r): Json<Failure>,
 ) -> AppResult<StatusCode> {
-    authorize(&h, &s.config.worker_key)?;
+    crate::auth::authorize_worker(&s.pool, &h).await?;
     let error_code: JobErrorCode = r.error_code.parse().map_err(|_| AppError::Invalid)?;
     if !error_code.is_worker_reportable() {
         return Err(AppError::Invalid);
@@ -146,22 +189,13 @@ pub async fn failure(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Serialize)]
-pub struct SystemConfigResponse {
-    pub worker_key: String,
-    pub max_file_bytes: u64,
-    pub local_worker: bool,
-    pub version: &'static str,
-}
-
 pub async fn system_config(
     State(s): State<AppState>,
-    _auth: AdminAuth,
-) -> AppResult<Json<SystemConfigResponse>> {
-    Ok(Json(SystemConfigResponse {
-        worker_key: s.config.worker_key.clone(),
+    _auth: ViewOverviewAuth,
+) -> AppResult<Json<SystemConfig>> {
+    Ok(Json(SystemConfig {
         max_file_bytes: s.config.max_file_bytes,
         local_worker: s.config.local_worker,
-        version: env!("CARGO_PKG_VERSION"),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
     }))
 }

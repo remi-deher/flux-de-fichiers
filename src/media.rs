@@ -1,3 +1,4 @@
+use crate::tool_run::{ExternalTool, ToolRunError, run_with_progress};
 use anyhow::Context;
 use serde_json::Value;
 use std::{path::Path, process::Stdio, time::Duration};
@@ -15,6 +16,10 @@ pub fn executable() -> String {
 
 pub fn propedit_executable() -> String {
     std::env::var("MKVPROPEDIT").unwrap_or_else(|_| "mkvpropedit".into())
+}
+
+pub fn ffmpeg_executable() -> String {
+    std::env::var("FFMPEG").unwrap_or_else(|_| "ffmpeg".into())
 }
 
 /// Édition non destructive en place des en-têtes EBML Matroska (ADR 0008).
@@ -235,4 +240,28 @@ where
     };
     validate_remux_with(bin, source, output).await?;
     Ok(warning)
+}
+
+/// Lance FFmpeg avec un argv déjà construit (sans l'exécutable) ; progresse via stderr.
+pub async fn encode_with_progress<F>(
+    bin: &Path,
+    args: &[String],
+    on_progress: F,
+) -> Result<(), ToolRunError>
+where
+    F: FnMut(u32, &str) + Send + 'static,
+{
+    run_with_progress(ExternalTool::Ffmpeg, bin, args, on_progress).await
+}
+
+/// Lance MP4Box avec un argv déjà construit (sans l'exécutable) ; progresse via stderr.
+pub async fn mp4box_with_progress<F>(
+    bin: &Path,
+    args: &[String],
+    on_progress: F,
+) -> Result<(), ToolRunError>
+where
+    F: FnMut(u32, &str) + Send + 'static,
+{
+    run_with_progress(ExternalTool::Mp4Box, bin, args, on_progress).await
 }

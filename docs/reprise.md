@@ -82,8 +82,9 @@ paramètres.
 
 - Workers distants : le flux figé voyage avec le bail (`Claim.frozen_flow`) et s'exécute via
   `FlowEngine` comme le worker intégré ; les en-têtes webhook sont déchiffrés à la réclamation
-  et le contexte *arr* est joint (`Claim.arr`). Reste : pas de progression SSE depuis un worker
-  distant ; encodage par plugins toujours hors périmètre d'exécution.
+  et le contexte *arr* est joint (`Claim.arr`). Progression remux/flux remontée au central via
+  `POST /api/v1/jobs/{id}/progress` puis SSE `job_progress` (même contrat que le worker intégré).
+  Reste : encodage par plugins toujours hors périmètre d'exécution.
 - Encodage par plugins non construit ; blocs des dépôts de plugins non exécutables (traversés).
 - IA et MCP non commencés.
 - Baux sans numéro d'époque (*fencing*) : un ancien worker peut encore répondre tard.
@@ -95,10 +96,9 @@ paramètres.
 
 1. Se connecter à l'essai et parcourir chaque écran ; corriger ce que le WASM révèle.
 2. Encodage par plugins : blocs des dépôts dans la palette et exécution.
-3. Progression SSE / télémétrie fine depuis les workers distants pendant l'exécution d'un flux.
-4. Numéro d'époque des baux.
-5. Écrans manquants : versions des flux, recherche, navigation mobile.
-6. IA et MCP (ADR à écrire).
+3. Numéro d'époque des baux.
+4. Écrans manquants : versions des flux, recherche, navigation mobile.
+5. IA et MCP (ADR à écrire).
 
 ## Production (NAS)
 

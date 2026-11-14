@@ -60,6 +60,16 @@ pub struct Failure {
     pub error_code: String,
 }
 
+/// Progression remontée par un worker distant pendant l'exécution (remux / flux).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProgressReport {
+    pub worker_id: Uuid,
+    pub lease_token: Uuid,
+    pub progress: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,6 +188,25 @@ mod tests {
         assert_eq!(encoded["frozen_flow"]["id"], "flow.x");
         assert_eq!(encoded["frozen_flow"]["version"], 3);
         assert!(encoded.get("arr").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn progress_report_roundtrip() -> Result<(), serde_json::Error> {
+        let report = ProgressReport {
+            worker_id: Uuid::nil(),
+            lease_token: Uuid::from_u128(1),
+            progress: 42,
+            message: Some("Progress: 42%".into()),
+        };
+        let encoded = serde_json::to_value(&report)?;
+        assert_eq!(encoded["progress"], 42);
+        assert_eq!(encoded["message"], "Progress: 42%");
+        let bare: ProgressReport = serde_json::from_str(
+            r#"{"worker_id":"00000000-0000-0000-0000-000000000000","lease_token":"00000000-0000-0000-0000-000000000001","progress":7}"#,
+        )?;
+        assert_eq!(bare.progress, 7);
+        assert!(bare.message.is_none());
         Ok(())
     }
 

@@ -25,11 +25,11 @@ Tu travailles sur le projet **Flux de Fichiers**. Source de vérité : `AGENTS.m
 
 ## 3. Vérifications locales (machine hôte légère)
 
-- **Jamais** de build Docker ni de suite de tests complète en local : tests et images tournent sur GitHub CI.
-- Locale seulement :
+- **Jamais** de build Docker ni de `cargo clippy` en local : clippy, la suite complète et les images tournent sur GitHub CI.
+- En local seulement (`cargo test` est assez rapide, le cibler sur le paquet ou le module touché) :
   ```bash
   cargo fmt
-  cargo clippy --workspace --all-targets -- -D warnings
+  cargo test -p <paquet>
   ```
 - La cible `wasm32-unknown-unknown` n'est pas installée en local : le client se vérifie en natif ici, en WASM en CI.
 - **Régénérer la page** après toute modification du thème ou de la page (`feature.yml` refuse une page périmée) :

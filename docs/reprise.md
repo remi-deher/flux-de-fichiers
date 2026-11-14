@@ -138,12 +138,10 @@ paramètres.
 
 ## Production (NAS)
 
-**Déployé le 14 nov. 2026** : `mrcryllix/flux-de-fichiers:test-34f365e9af28` sur les deux hôtes
-(CI verte, client WASM compilé). Vérifié : santé, page et WASM servis, migrations 12 et 13,
-worker enregistré qui réclame des tâches, écran de connexion du client affiché sur les deux.
-Non vérifié : les parcours connectés (identifiants de l'utilisateur). Sauvegardes et retour
-arrière : journal de Rashin du 14 nov. (`compose-*.avant-0014.json`,
-`arr-config.bak-test-28a81f724ea4-avant-0014-froid`, `frontend/index.html.avant-0014`).
+**Déployé le 14 nov. 2026** : `mrcryllix/flux-de-fichiers:test-0c6de4f0a632` (PR #109 : gabarit
+d'origine, #105, #106, #108) sur les deux hôtes. Vérifié : santé, WASM au bon contenu et sans
+cache, worker enregistré, porte d'accès affichée. Non vérifié : écrans connectés. Sauvegardes et
+retour arrière : journal de Rashin du 14 nov. (`*.avant-0c6de4f*`).
 
 Essai en conditions réelles : central `flux-essai` sur `truenas_admin@192.168.1.50`
 (HTTP `:18480`), worker `flux-essai-worker` (`artemis-essai`) sur `truenas_admin@192.168.1.51`

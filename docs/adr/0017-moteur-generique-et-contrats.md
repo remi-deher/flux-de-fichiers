@@ -1,7 +1,6 @@
 # 0017 — Moteur générique : tout passe par les contrats du dépôt
 
-Statut : proposé (14 nov. 2026), orientation validée par l'utilisateur ; une question de
-vocabulaire reste ouverte (voir plus bas).
+Statut : proposé (14 nov. 2026), orientation et vocabulaire validés par l'utilisateur.
 
 ## Contexte
 
@@ -64,17 +63,24 @@ la console (`console-capture`), bloc (`block`), flow, preset et application. Le 
 - Contrat de **sonde média** consommé par le moteur à la place de `mkvmerge -J` en dur.
 - Les artefacts d'outils réels (encore `contract-only`) : prérequis de l'installation à la demande.
 
-## Question de vocabulaire ouverte
+## Vocabulaire (décision de l'utilisateur, 14 nov. 2026)
 
-Le dépôt appelle **tool** un binaire ou un service, et **app** un paquet installable qui regroupe
-des outils, plugins et blocs (par exemple `app.media`). L'utilisateur emploie **app** pour un
-binaire ou une API. Il faut trancher : adopter son vocabulaire (« app » = binaire ou API, et
-renommer le paquet en « pack »), ou garder « tool » dans les contrats et n'utiliser « app » que
-dans l'interface. Le choix touche les schémas du dépôt de plugins ; il suit le précédent de
-l'ADR 0013.
+| Concept | Mot dans l'interface | Identifiant des contrats et du code |
+|---|---|---|
+| Binaire ou API (FFmpeg, MKVToolNix, Sonarr…) | **Application** | `app`, avec un type `binary` ou `api` |
+| Plugin | **Plugin** | `plugin` |
+| Bloc | **Bloc** | `block` |
+| Paquet qui regroupe applications, plugins et blocs | **Pack** | `pack` |
+
+Dans le dépôt de plugins, `tool` devient `app` (champ `kind`) et l'ancien `app` devient `pack` :
+`tool.ffmpeg` → `app.ffmpeg`, `app.media` → `pack.media`, schémas et documentation renommés. Le
+renommage précède la lecture des contrats par le moteur, pour ne changer les identifiants qu'une
+fois (précédent : ADR 0013).
 
 ## Phasage
 
+0. Renommage `tool` → `app`, `app` → `pack` dans le dépôt de plugins et dans les identifiants lus
+   par le moteur.
 1. Runner générique et contrats d'argv pour MP4Box et FFmpeg ; besoins d'un flux et installation à
    la demande des apps binaires ; retrait des constantes.
 2. Contrats API ; Sonarr, Radarr et webhook en plugins ; sonde par contrat.

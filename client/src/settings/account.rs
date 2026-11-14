@@ -1,6 +1,7 @@
 //! Mon compte : identité, changement de mot de passe et déconnexion.
 
 use crate::api;
+use crate::ui::SectionHeader;
 use flux_shared::InstanceKind;
 use flux_shared::accounts::ChangePasswordRequest;
 use flux_shared::session::Me;
@@ -48,12 +49,11 @@ pub fn AccountSection(me: Me) -> impl IntoView {
     let can_change = me.instance_kind == InstanceKind::Central
         && me.kind == flux_shared::session::CallerKind::Account;
     view! {
-        <section class="section-panel" aria-labelledby="account-title">
-            <div class="cluster-spread">
-                <h2 id="account-title" class="section-title">"Mon compte"</h2>
+        <div class="settings-section">
+            <SectionHeader title="Mon compte" actions=view! {
                 <button type="button" class="btn btn-secondary btn-sm"
                     on:click=move |_| leptos::task::spawn_local(logout())>"Se déconnecter"</button>
-            </div>
+            }.into_any() />
             <div class="detail-grid">
                 <div class="detail-term">"Identifiant"</div><div class="detail-val">{me.name.clone()}</div>
                 <div class="detail-term">"Rôle"</div><div class="detail-val">{role_label(me.role)}</div>
@@ -84,6 +84,6 @@ pub fn AccountSection(me: Me) -> impl IntoView {
                 </form>
             })}
             <p class="form-help" role="status">{move || feedback.get()}</p>
-        </section>
+        </div>
     }
 }

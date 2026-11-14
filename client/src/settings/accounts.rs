@@ -3,6 +3,7 @@
 
 use super::account::role_label;
 use crate::api;
+use crate::ui::Drawer;
 use flux_shared::Role;
 use flux_shared::accounts::{Account, CreateAccountRequest, UpdateAccountRequest};
 use leptos::prelude::*;
@@ -17,6 +18,7 @@ pub fn AccountsSection() -> impl IntoView {
         api::get::<Vec<Account>>(ACCOUNTS_PATH)
     });
     let feedback = RwSignal::new(None::<String>);
+    let creating = RwSignal::new(false);
     let update = Action::new_local(move |(id, request): &(String, UpdateAccountRequest)| {
         let (path, request) = (format!("{ACCOUNTS_PATH}/{id}"), request.clone());
         async move { api::put::<UpdateAccountRequest, Account>(&path, &request).await }
@@ -28,6 +30,7 @@ pub fn AccountsSection() -> impl IntoView {
     let done = move |result: Option<Result<Account, api::ApiError>>| match result {
         Some(Ok(_)) => {
             feedback.set(None);
+            creating.set(false);
             reload.update(|count| *count = count.wrapping_add(1));
         }
         Some(Err(api::ApiError::Rejected { status: 409, .. })) => {
@@ -46,8 +49,10 @@ pub fn AccountsSection() -> impl IntoView {
         RwSignal::new(Role::Viewer),
     );
     view! {
-        <section class="section-panel" aria-labelledby="accounts-title">
-            <h2 id="accounts-title" class="section-title">"Comptes"</h2>
+        <div class="registre">
+            <div class="cluster-end">
+                <button type="button" class="btn btn-primary btn-sm" on:click=move |_| creating.set(true)>"Créer un compte"</button>
+            </div>
             <div class="table-wrapper">
                 <table class="data-table" aria-label="Comptes">
                     <thead><tr>
@@ -78,7 +83,8 @@ pub fn AccountsSection() -> impl IntoView {
                     </tbody>
                 </table>
             </div>
-            <form class="form-grid-2" on:submit=move |event| {
+            <Drawer open=creating eyebrow="Utilisateurs" title="Nouveau compte".to_owned()>
+            <form class="inspection-panel" on:submit=move |event| {
                 event.prevent_default();
                 create.dispatch(CreateAccountRequest { username: username.get_untracked(), password: password.get_untracked(), role: role.get_untracked().as_str().into() });
                 username.set(String::new());
@@ -104,9 +110,12 @@ pub fn AccountsSection() -> impl IntoView {
                         }).collect_view()}
                     </select>
                 </div>
-                <button type="submit" class="btn btn-primary" disabled=move || create.pending().get()>"Créer le compte"</button>
+                <div class="inspection-drawer__actions">
+                    <button type="submit" class="btn btn-primary" disabled=move || create.pending().get()>"Créer le compte"</button>
+                </div>
             </form>
+            </Drawer>
             <p class="form-help" role="status">{move || feedback.get()}</p>
-        </section>
+        </div>
     }
 }

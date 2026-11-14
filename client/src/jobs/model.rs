@@ -2,33 +2,30 @@
 
 use flux_shared::jobs::{Job, JobErrorCode, JobEvent, JobEventType, JobStatus};
 
-/// Filtre de la liste des tâches.
+/// Onglet de l'écran Activité : la file en direct, l'historique ou les échecs à diagnostiquer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JobFilter {
-    All,
-    Status(JobStatus),
+    Live,
+    History,
+    Diagnostic,
 }
 
 impl JobFilter {
-    pub const CHOICES: [Self; 5] = [
-        Self::All,
-        Self::Status(JobStatus::Queued),
-        Self::Status(JobStatus::Running),
-        Self::Status(JobStatus::Succeeded),
-        Self::Status(JobStatus::Failed),
-    ];
+    pub const TABS: [Self; 3] = [Self::Live, Self::History, Self::Diagnostic];
 
-    pub fn label(self) -> &'static str {
+    pub fn tab(self) -> crate::ui::SubTab {
         match self {
-            Self::All => "Toutes",
-            Self::Status(status) => status_label(status),
+            Self::Live => crate::ui::SubTab::new("File en direct", "⚡"),
+            Self::History => crate::ui::SubTab::new("Historique", "📜"),
+            Self::Diagnostic => crate::ui::SubTab::new("Diagnostic", "🔬"),
         }
     }
 
     pub fn accepts(self, job: &Job) -> bool {
         match self {
-            Self::All => true,
-            Self::Status(status) => job.status == status,
+            Self::Live => matches!(job.status, JobStatus::Queued | JobStatus::Running),
+            Self::History => matches!(job.status, JobStatus::Succeeded | JobStatus::Failed),
+            Self::Diagnostic => job.status == JobStatus::Failed,
         }
     }
 }
@@ -96,20 +93,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn filters_cover_every_status_once() {
-        for status in [
-            JobStatus::Queued,
-            JobStatus::Running,
-            JobStatus::Succeeded,
-            JobStatus::Failed,
-        ] {
-            let count = JobFilter::CHOICES
-                .iter()
-                .filter(|filter| **filter == JobFilter::Status(status))
-                .count();
-            assert_eq!(count, 1);
-        }
-        assert_eq!(JobFilter::All.label(), "Toutes");
+    fn every_status_appears_in_the_live_queue_or_the_history() -> Result<(), serde_json::Error> {
+        use flux_shared::jobs::{Job, MAX_ATTEMPTS};
+        let job: Job = serde_json::from_value(serde_json::json!({
+            "id": "00000000-0000-0000-0000-000000000001", "source_name": "a.mkv", "source_sha256": null,
+            "source_bytes": null, "output_sha256": null, "output_bytes": null, "warning": false,
+            "target_worker_id": null, "worker_id": null, "status": "failed", "attempts": MAX_ATTEMPTS,
+            "leased_until": null, "output_name": null, "error_code": null, "flow_id": null,
+            "flow_version": null, "created_at": "2026-11-14T10:00:00Z", "updated_at": "2026-11-14T10:00:00Z"
+        }))?;
+        assert!(JobFilter::History.accepts(&job) && JobFilter::Diagnostic.accepts(&job));
+        assert!(!JobFilter::Live.accepts(&job));
+        assert_eq!(JobFilter::TABS.len(), 3);
+        Ok(())
     }
 
     #[test]

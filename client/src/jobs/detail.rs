@@ -1,6 +1,7 @@
 //! Fiche d'une tâche : état, erreur, flux figé, téléchargement et relance manuelle.
 
 use super::model::{error_label, status_label, status_tone};
+use crate::ui::StatusBadge;
 use crate::{api, format};
 use flux_shared::format::format_bytes;
 use flux_shared::jobs::{Job, JobStatus, MAX_ATTEMPTS};
@@ -52,11 +53,8 @@ pub fn JobDetail(job: Job, can_manage: bool, on_changed: Callback<Job>) -> impl 
     let job_id = job.id;
 
     view! {
-        <aside class="section-panel" aria-labelledby="job-detail-title">
-            <div class="section-panel-header">
-                <h2 id="job-detail-title" class="section-title">{job.source_name.clone()}</h2>
-                <span class=format!("status-pill {}", status_tone(job.status))>{status_label(job.status)}</span>
-            </div>
+        <div class="inspection-panel">
+            <StatusBadge label=status_label(job.status) variant=status_tone(job.status) />
             <div class="detail-grid">
                 {row("Identifiant", job.id.to_string())}
                 {row("Tentatives", format!("{} sur {MAX_ATTEMPTS}", job.attempts))}
@@ -68,7 +66,7 @@ pub fn JobDetail(job: Job, can_manage: bool, on_changed: Callback<Job>) -> impl 
                 {row("Créée", format::datetime(job.created_at))}
                 {row("Mise à jour", format::datetime(job.updated_at))}
             </div>
-            <div class="inline-actions">
+            <div class="inspection-drawer__actions">
                 {download}
                 {retryable.then(|| view! {
                     <button
@@ -82,6 +80,6 @@ pub fn JobDetail(job: Job, can_manage: bool, on_changed: Callback<Job>) -> impl 
                 })}
             </div>
             <p class="form-help" role="status">{move || feedback.get()}</p>
-        </aside>
+        </div>
     }
 }

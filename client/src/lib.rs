@@ -13,8 +13,10 @@ mod overview;
 mod plugins;
 pub mod route;
 mod settings;
+mod shell;
 mod sleep;
 pub mod theme;
+mod ui;
 pub mod workers;
 
 use wasm_bindgen::prelude::wasm_bindgen;

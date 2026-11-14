@@ -79,3 +79,17 @@ pub struct SystemStatus {
     pub network: NetworkStatus,
     pub storage: StorageStatus,
 }
+
+/// Charge matérielle du central, relevée à la demande (`GET /api/v1/system/hardware`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HardwareStatus {
+    pub logical_cores: u32,
+    /// Charge sur 1 minute rapportée aux cœurs, bornée à 0–100.
+    pub cpu_usage_percent: f32,
+    pub ram_total_bytes: u64,
+    pub ram_used_bytes: u64,
+    pub gpu_devices: Vec<String>,
+    /// Volume de `data_dir` ; `None` si illisible.
+    pub volume: Option<VolumeSpace>,
+}

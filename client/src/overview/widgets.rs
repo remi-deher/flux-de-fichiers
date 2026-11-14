@@ -12,16 +12,23 @@ const STORAGE_KEY: &str = "flux_overview_hidden";
 #[serde(rename_all = "kebab-case")]
 pub enum Widget {
     Metrics,
+    Hardware,
     Attention,
     RecentJobs,
 }
 
 impl Widget {
-    pub const ALL: [Self; 3] = [Self::Metrics, Self::Attention, Self::RecentJobs];
+    pub const ALL: [Self; 4] = [
+        Self::Metrics,
+        Self::Hardware,
+        Self::Attention,
+        Self::RecentJobs,
+    ];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Metrics => "Chiffres clés",
+            Self::Hardware => "Matériel du central",
             Self::Attention => "À surveiller",
             Self::RecentJobs => "Tâches récentes",
         }

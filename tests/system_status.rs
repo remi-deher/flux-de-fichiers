@@ -186,3 +186,46 @@ async fn test_status_is_refused_without_session_and_to_viewers() -> anyhow::Resu
     assert_eq!(forbidden, StatusCode::FORBIDDEN);
     Ok(())
 }
+
+#[tokio::test]
+async fn test_hardware_is_readable_by_a_viewer_and_refused_without_session() -> anyhow::Result<()> {
+    let (app, _dir) = app().await?;
+    let (_, headers, _) = call(
+        &app,
+        "POST",
+        "/api/v1/setup/central",
+        None,
+        Some(serde_json::json!({"name": "Central", "username": "admin-materiel", "password": PASSWORD})),
+    )
+    .await?;
+    let admin = cookies_of(&headers);
+    let (created, _, _) = call(
+        &app,
+        "POST",
+        "/api/v1/accounts",
+        Some(&admin),
+        Some(serde_json::json!({"username": "lecteur-materiel", "password": PASSWORD, "role": "viewer"})),
+    )
+    .await?;
+    assert_eq!(created, StatusCode::CREATED);
+    let (_, headers, _) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(serde_json::json!({"username": "lecteur-materiel", "password": PASSWORD})),
+    )
+    .await?;
+    let viewer = cookies_of(&headers);
+
+    let (status, _, body) =
+        call(&app, "GET", "/api/v1/system/hardware", Some(&viewer), None).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["logicalCores"].as_u64().unwrap_or(0) >= 1);
+    let cpu = body["cpuUsagePercent"].as_f64().unwrap_or(-1.0);
+    assert!((0.0..=100.0).contains(&cpu));
+    assert!(body["gpuDevices"].is_array());
+    let (anonymous, _, _) = call(&app, "GET", "/api/v1/system/hardware", None, None).await?;
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+    Ok(())
+}

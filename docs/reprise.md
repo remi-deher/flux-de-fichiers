@@ -139,9 +139,9 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 - [x] Widgets de la vue d'ensemble : choix des widgets affichés (bouton « Personnaliser »), préférence gardée dans le navigateur.
 - [x] Paramètres : onglets Réseau (écoute, TLS, origine, session) et Stockage (dossiers, taille maximale, espace du volume), lus dans `/api/v1/system/status` ; lecture seule.
 - [x] Télémétrie matérielle du central en vue d'ensemble (processeur, mémoire, disque, GPU ; `GET /api/v1/system/hardware`, relevé à l'ouverture, pas d'historique). Les workers distants n'ont pas de relevé côté central : la télémétrie qu'ils envoient avec leurs échéances n'est pas conservée.
+- [x] Page Mises à jour (onglet des Paramètres) : version du central et de l'interface, procédure. Limite : pas de « version disponible », le central n'appelle aucun service externe (une vérification facultative reste à décider).
 - [ ] Repris de l'ancienne interface : feuille de filtres de la
-      barre du haut, page Mises à
-      jour, simulation dans l'éditeur.
+      barre du haut, simulation dans l'éditeur.
 - [x] Éditeur de flux : glisser-déposer palette → carte et carte → carte (`flows/dnd.rs`, règles de `FlowGraph::connect`, alternative clic/liste conservée) ; confirmation avant de quitter avec des modifications (routeur, retour arrière, `beforeunload`).
 - [x] Tâches : choix du worker à la création (#118) ; pagination au-delà de 200 (#119, bouton « Charger les tâches plus anciennes »).
 - [x] Session expirée : un 401 sur session ouverte recharge la page, qui affiche la connexion (#117).

@@ -1,7 +1,7 @@
-//! Contrôles de réglage générés depuis la fiche du bloc (`FieldSpec`).
+//! Contrôles de réglage générés depuis la fiche du bloc (`OwnedFieldSpec`).
 
 use super::state::Editor;
-use flux_shared::flows::{FieldKind, FieldSpec};
+use flux_shared::flows::{OwnedFieldKind, OwnedFieldSpec};
 use leptos::prelude::*;
 use serde_json::{Map, Value};
 
@@ -34,24 +34,19 @@ fn current(editor: Editor, node_id: &str, field: &str) -> Value {
 }
 
 /// Options d'une liste, plus la valeur enregistrée si elle n'en fait pas partie.
-pub fn select_options(
-    options: &[(&'static str, &'static str)],
-    stored: &str,
-) -> Vec<(String, String)> {
-    let mut list: Vec<(String, String)> = options
-        .iter()
-        .map(|(value, label)| ((*value).to_owned(), (*label).to_owned()))
-        .collect();
-    if !stored.is_empty() && !options.iter().any(|(value, _)| *value == stored) {
+pub fn select_options(options: &[(String, String)], stored: &str) -> Vec<(String, String)> {
+    let mut list = options.to_vec();
+    if !stored.is_empty() && !options.iter().any(|(value, _)| value == stored) {
         list.push((stored.to_owned(), format!("{stored} (valeur enregistrée)")));
     }
     list
 }
 
 #[component]
-fn HeadersField(editor: Editor, node_id: String, field: FieldSpec) -> impl IntoView {
+fn HeadersField(editor: Editor, node_id: String, field: OwnedFieldSpec) -> impl IntoView {
+    let field_name = StoredValue::new(field.name.clone());
     let rows = move |node_id: &str| -> Vec<(String, String)> {
-        current(editor, node_id, field.name)
+        current(editor, node_id, &field_name.get_value())
             .as_object()
             .map(|map| {
                 map.iter()
@@ -68,13 +63,15 @@ fn HeadersField(editor: Editor, node_id: String, field: FieldSpec) -> impl IntoV
             .filter(|(name, _)| !name.trim().is_empty())
             .map(|(name, value)| (name, Value::String(value)))
             .collect();
-        set_field(editor, node_id, field.name, Value::Object(map));
+        set_field(editor, node_id, &field_name.get_value(), Value::Object(map));
     };
     let new_name = RwSignal::new(String::new());
     let id = StoredValue::new(node_id);
+    let field_label = field.label.clone();
+    let field_help = field.help.clone();
     view! {
         <div class="form-group">
-            <span class="form-label">{field.label}</span>
+            <span class="form-label">{field_label}</span>
             {move || rows(&id.read_value()).into_iter().enumerate().map(|(index, (name, value))| view! {
                 <div class="flow-headers__row">
                     <span class="text-mono">{name}</span>
@@ -115,57 +112,64 @@ fn HeadersField(editor: Editor, node_id: String, field: FieldSpec) -> impl IntoV
                     new_name.set(String::new());
                 }>"Ajouter"</button>
             </div>
-            <p class="form-help">{field.help}</p>
+            <p class="form-help">{field_help}</p>
         </div>
     }
 }
 
 #[component]
-pub fn FieldControl(editor: Editor, node_id: String, field: FieldSpec) -> impl IntoView {
+pub fn FieldControl(editor: Editor, node_id: String, field: OwnedFieldSpec) -> impl IntoView {
     let input_id = format!("field-{}-{}", node_id, field.name);
     let label = if field.required {
         format!("{} *", field.label)
     } else {
-        field.label.to_owned()
+        field.label.clone()
     };
     let id = StoredValue::new(node_id.clone());
-    let text_value = move || {
-        current(editor, &id.read_value(), field.name)
-            .as_str()
-            .unwrap_or_default()
-            .to_owned()
-    };
-    let control = match field.kind {
-        FieldKind::Headers => return view! { <HeadersField editor=editor node_id=node_id field=field /> }.into_any(),
-        FieldKind::Bool => view! {
+    let field_name = StoredValue::new(field.name.clone());
+    let field_help = field.help.clone();
+    let control = match field.kind.clone() {
+        OwnedFieldKind::Headers => {
+            return view! { <HeadersField editor=editor node_id=node_id field=field /> }.into_any();
+        }
+        OwnedFieldKind::Bool => view! {
             <label class="cluster">
                 <input id=input_id.clone() type="checkbox"
-                    prop:checked=move || current(editor, &id.read_value(), field.name).as_bool().unwrap_or(false)
-                    on:change=move |event| set_field(editor, &id.read_value(), field.name, Value::Bool(event_target_checked(&event))) />
+                    prop:checked=move || current(editor, &id.read_value(), &field_name.get_value()).as_bool().unwrap_or(false)
+                    on:change=move |event| set_field(editor, &id.read_value(), &field_name.get_value(), Value::Bool(event_target_checked(&event))) />
                 <span>{label.clone()}</span>
             </label>
         }.into_any(),
-        FieldKind::Select(options) => view! {
-            <label for=input_id.clone() class="form-label">{label.clone()}</label>
-            <select id=input_id.clone() class="form-select"
-                prop:value=text_value
-                on:change=move |event| set_field(editor, &id.read_value(), field.name, Value::String(event_target_value(&event)))>
-                {move || select_options(options, &text_value()).into_iter().map(|(value, label)| view! {
-                    <option value=value>{label}</option>
-                }).collect_view()}
-            </select>
-        }.into_any(),
-        FieldKind::Text => view! {
+        OwnedFieldKind::Select(options) => {
+            let options = StoredValue::new(options);
+            view! {
+                <label for=input_id.clone() class="form-label">{label.clone()}</label>
+                <select id=input_id.clone() class="form-select"
+                    prop:value=move || current(editor, &id.read_value(), &field_name.get_value()).as_str().unwrap_or_default().to_owned()
+                    on:change=move |event| set_field(editor, &id.read_value(), &field_name.get_value(), Value::String(event_target_value(&event)))>
+                    {move || {
+                        let stored = current(editor, &id.read_value(), &field_name.get_value())
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_owned();
+                        select_options(&options.get_value(), &stored).into_iter().map(|(value, label)| view! {
+                            <option value=value>{label}</option>
+                        }).collect_view()
+                    }}
+                </select>
+            }.into_any()
+        }
+        OwnedFieldKind::Text => view! {
             <label for=input_id.clone() class="form-label">{label.clone()}</label>
             <input id=input_id.clone() class="form-input"
-                prop:value=text_value
-                on:input=move |event| set_field(editor, &id.read_value(), field.name, Value::String(event_target_value(&event))) />
+                prop:value=move || current(editor, &id.read_value(), &field_name.get_value()).as_str().unwrap_or_default().to_owned()
+                on:input=move |event| set_field(editor, &id.read_value(), &field_name.get_value(), Value::String(event_target_value(&event))) />
         }.into_any(),
     };
     view! {
         <div class="form-group">
             {control}
-            {(!field.help.is_empty()).then(|| view! { <p class="form-help">{field.help}</p> })}
+            {(!field_help.is_empty()).then(move || view! { <p class="form-help">{field_help.clone()}</p> })}
         </div>
     }
     .into_any()
@@ -177,7 +181,10 @@ mod tests {
 
     #[test]
     fn an_unknown_stored_value_stays_selectable() {
-        let options = [("eq", "Contient"), ("neq", "Ne contient pas")];
+        let options = vec![
+            ("eq".into(), "Contient".into()),
+            ("neq".into(), "Ne contient pas".into()),
+        ];
         assert_eq!(select_options(&options, "eq").len(), 2);
         let with_legacy = select_options(&options, "contains");
         assert_eq!(with_legacy.len(), 3);

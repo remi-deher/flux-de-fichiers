@@ -375,3 +375,39 @@ async fn test_resaving_a_masked_flow_keeps_the_stored_header() -> anyhow::Result
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn test_flow_blocks_catalog_includes_native_encode_blocks() -> anyhow::Result<()> {
+    let app = test_app().await?;
+    let req = Request::builder()
+        .uri("/api/v1/flows/blocks")
+        .header(
+            "authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        .body(Body::empty())?;
+    let resp = app.clone().oneshot(req).await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = to_bytes(resp.into_body(), 64 * 1024).await?;
+    let blocks: Vec<serde_json::Value> = serde_json::from_slice(&bytes)?;
+    assert!(
+        blocks
+            .iter()
+            .any(|block| block["kind"] == "block.video.encode")
+    );
+    assert!(
+        blocks
+            .iter()
+            .any(|block| block["kind"] == "block.audio.encode")
+    );
+    let encode = blocks
+        .iter()
+        .find(|block| block["kind"] == "block.video.encode")
+        .expect("video encode");
+    assert!(
+        encode["fields"]
+            .as_array()
+            .is_some_and(|fields| fields.iter().any(|field| field["name"] == "codec"))
+    );
+    Ok(())
+}

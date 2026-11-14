@@ -9,12 +9,14 @@ use crate::route::{Link, Route, encode_segment, use_router};
 use chrono::{DateTime, Utc};
 use flux_shared::Permission;
 use flux_shared::flows::{
-    FlowBlockKind, FlowGraph, FlowRecord, UpdateFlowRequest, block_spec, new_flow_id,
+    FlowBlockKind, FlowGraph, FlowRecord, OwnedBlockSpec, UpdateFlowRequest, block_spec,
+    new_flow_id,
 };
 use flux_shared::session::Me;
 use leptos::prelude::*;
 
 const FLOWS_PATH: &str = "/api/v1/flows";
+const BLOCKS_PATH: &str = "/api/v1/flows/blocks";
 const DEFAULT_FILE_MASK: &str = "*.mkv";
 
 /// Flux encore jamais enregistré : une entrée, pas d'identifiant.
@@ -38,8 +40,8 @@ fn blank_flow() -> (FlowRecord, FlowGraph) {
 }
 
 /// Message bloquant l'enregistrement, s'il manque un réglage obligatoire.
-pub fn save_blocker(graph: &FlowGraph) -> Option<String> {
-    let incomplete = incomplete_blocks(graph);
+pub fn save_blocker(graph: &FlowGraph, catalog: &[OwnedBlockSpec]) -> Option<String> {
+    let incomplete = incomplete_blocks(graph, catalog);
     (!incomplete.is_empty()).then(|| {
         let list = incomplete
             .into_iter()
@@ -57,6 +59,12 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
     let editor = Editor::new(graph);
     let meta = RwSignal::new(record);
     let feedback = RwSignal::new(None::<String>);
+    let blocks = LocalResource::new(|| api::get::<Vec<OwnedBlockSpec>>(BLOCKS_PATH));
+    Effect::new(move |_| {
+        if let Some(Ok(catalog)) = blocks.get() {
+            editor.catalog.set(catalog);
+        }
+    });
     let save = Action::new_local(move |(id, body): &(String, UpdateFlowRequest)| {
         let path = format!("{FLOWS_PATH}/{}", encode_segment(id));
         let body = body.clone();
@@ -77,7 +85,8 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
     });
     let on_save = move |_| {
         let graph = editor.graph.get_untracked();
-        if let Some(message) = save_blocker(&graph) {
+        let catalog = editor.catalog.get_untracked();
+        if let Some(message) = save_blocker(&graph, &catalog) {
             feedback.set(Some(message));
             return;
         }
@@ -196,11 +205,14 @@ mod tests {
 
     #[test]
     fn saving_is_blocked_by_an_empty_required_field() {
+        let catalog = flux_shared::flows::native_owned_catalog();
         let mut graph = FlowGraph::default();
         graph.append(FlowBlockKind::Webhook, "Hook", json!({}));
-        assert!(save_blocker(&graph).is_some_and(|message| message.contains("Hook (URL)")));
+        assert!(
+            save_blocker(&graph, &catalog).is_some_and(|message| message.contains("Hook (URL)"))
+        );
         graph.nodes[0].config = json!({"url": "https://hook.example"});
-        assert_eq!(save_blocker(&graph), None);
+        assert_eq!(save_blocker(&graph, &catalog), None);
         assert_eq!(encode_segment("flux à"), "flux%20%C3%A0");
     }
 }

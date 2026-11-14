@@ -1,7 +1,8 @@
 //! Blocs que le moteur sait exécuter, et les réglages qu'il lit pour chacun.
 //!
 //! L'éditeur génère ses formulaires depuis ces fiches ; un champ absent ici n'est pas lu par le
-//! moteur. Les blocs d'un dépôt de plugins sans exécution native restent des `Other`.
+//! moteur. Les blocs des dépôts de plugins (mêmes identifiants ADR 0006) enrichissent la palette
+//! via l'API ; une fiche native garantit l'exécution même sans dépôt synchronisé.
 
 use super::FlowBlockKind;
 use serde_json::{Value, json};
@@ -49,12 +50,18 @@ impl BlockSpec {
         let mut config = serde_json::Map::new();
         for field in self.fields {
             let value = match field.kind {
-                FieldKind::Bool => json!(false),
+                FieldKind::Bool => {
+                    // Aligné sur les défauts des manifestes plugins (remux MKV).
+                    json!(field.name == "disable_track_stats" || field.name == "faststart")
+                }
                 FieldKind::Headers => json!({}),
                 FieldKind::Select(options) => {
                     json!(options.first().map_or("", |(value, _)| *value))
                 }
-                FieldKind::Text => json!(""),
+                FieldKind::Text => match field.name {
+                    "audio_languages" | "subtitle_languages" => json!("all"),
+                    _ => json!(""),
+                },
             };
             config.insert(field.name.to_owned(), value);
         }
@@ -88,6 +95,170 @@ const FAIL_ON_ERROR: FieldSpec = FieldSpec {
 const CONDITION_PORTS: &[(&str, &str)] = &[("true", "✓ Vrai"), ("false", "✗ Faux")];
 
 const ARR_FIELDS: &[FieldSpec] = &[FAIL_ON_ERROR];
+
+const QUALITY_OPTIONS: &[(&str, &str)] = &[
+    ("6", "6 — défaut"),
+    ("1", "1 — minimal"),
+    ("2", "2"),
+    ("3", "3"),
+    ("4", "4"),
+    ("5", "5"),
+    ("7", "7"),
+    ("8", "8"),
+    ("9", "9 — maximal"),
+];
+
+const SPEED_OPTIONS: &[(&str, &str)] = &[
+    ("3", "3 — défaut"),
+    ("1", "1 — lent"),
+    ("2", "2"),
+    ("4", "4"),
+    ("5", "5 — rapide"),
+];
+
+const VIDEO_ENCODE_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        name: "codec",
+        label: "Codec",
+        kind: FieldKind::Select(&[
+            ("h265", "HEVC (Automatic)"),
+            ("h264", "H.264"),
+            ("h265_10bit", "HEVC (10-Bit)"),
+            ("av1", "AV1"),
+            ("av1_10bit", "AV1 (10-Bit)"),
+            ("vp9", "VP9"),
+        ]),
+        required: false,
+        help: "Codec de sortie ; HEVC par défaut.",
+    },
+    FieldSpec {
+        name: "encoder",
+        label: "Encodeur",
+        kind: FieldKind::Select(&[
+            ("auto", "Automatique"),
+            ("cpu", "Processeur (CPU)"),
+            ("nvidia", "NVIDIA (NVENC)"),
+            ("intel_qsv", "Intel QSV"),
+            ("vaapi", "VAAPI (Linux)"),
+            ("amd_amf", "AMD AMF"),
+        ]),
+        required: false,
+        help: "Un encodeur matériel indisponible fait échouer l'étape.",
+    },
+    FieldSpec {
+        name: "quality",
+        label: "Qualité",
+        kind: FieldKind::Select(QUALITY_OPTIONS),
+        required: false,
+        help: "Plus élevé = meilleure qualité et fichier plus volumineux.",
+    },
+    FieldSpec {
+        name: "speed",
+        label: "Vitesse",
+        kind: FieldKind::Select(SPEED_OPTIONS),
+        required: false,
+        help: "Plus rapide = compression moins efficace.",
+    },
+    FieldSpec {
+        name: "custom_parameters",
+        label: "Paramètres personnalisés (FFmpeg)",
+        kind: FieldKind::Text,
+        required: false,
+        help: "Arguments FFmpeg additionnels, ex. -tune film -bf 3.",
+    },
+];
+
+const AUDIO_ENCODE_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        name: "codec",
+        label: "Format / Codec Audio",
+        kind: FieldKind::Select(&[
+            ("aac", "AAC (Universel)"),
+            ("eac3", "E-AC3 / Dolby Digital Plus"),
+            ("ac3", "AC3 / Dolby Digital"),
+            ("flac", "FLAC (Sans perte)"),
+            ("mp3", "MP3"),
+            ("opus", "Opus"),
+        ]),
+        required: false,
+        help: "",
+    },
+    FieldSpec {
+        name: "bitrate",
+        label: "Débit binaire (kbps)",
+        kind: FieldKind::Select(&[
+            ("192", "192 kbps (Recommandé)"),
+            ("128", "128 kbps"),
+            ("256", "256 kbps"),
+            ("320", "320 kbps (Haute qualité)"),
+            ("640", "640 kbps (Dolby 5.1)"),
+        ]),
+        required: false,
+        help: "",
+    },
+    FieldSpec {
+        name: "channels",
+        label: "Canaux",
+        kind: FieldKind::Select(&[
+            ("preserve", "Conserver la disposition d'origine"),
+            ("stereo", "Stéréo (2.0)"),
+            ("5.1", "Surround (5.1)"),
+        ]),
+        required: false,
+        help: "",
+    },
+    FieldSpec {
+        name: "normalize",
+        label: "Normalisation sonore (EBU R128)",
+        kind: FieldKind::Bool,
+        required: false,
+        help: "Égalise le niveau sonore (loudnorm).",
+    },
+    FieldSpec {
+        name: "custom_parameters",
+        label: "Paramètres audio personnalisés (FFmpeg)",
+        kind: FieldKind::Text,
+        required: false,
+        help: "Arguments FFmpeg audio additionnels.",
+    },
+];
+
+/// Première valeur de chaque select = défaut sain (qualité 6, vitesse 3).
+const _: () = {
+    assert!(QUALITY_OPTIONS[0].0.as_bytes()[0] == b'6');
+    assert!(SPEED_OPTIONS[0].0.as_bytes()[0] == b'3');
+};
+
+const REMUX_MKV_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        name: "disable_track_stats",
+        label: "Désactiver les tags de statistiques de pistes",
+        kind: FieldKind::Bool,
+        required: false,
+        help: "",
+    },
+    FieldSpec {
+        name: "audio_languages",
+        label: "Langues audio à conserver",
+        kind: FieldKind::Text,
+        required: false,
+        help: "Codes ISO séparés par des virgules, ou all.",
+    },
+    FieldSpec {
+        name: "subtitle_languages",
+        label: "Langues de sous-titres à conserver",
+        kind: FieldKind::Text,
+        required: false,
+        help: "Codes ISO séparés par des virgules, all, ou none.",
+    },
+    FieldSpec {
+        name: "custom_parameters",
+        label: "Paramètres personnalisés (mkvmerge)",
+        kind: FieldKind::Text,
+        required: false,
+        help: "Arguments mkvmerge additionnels.",
+    },
+];
 
 const CATALOG: &[BlockSpec] = &[
     BlockSpec {
@@ -140,6 +311,16 @@ const CATALOG: &[BlockSpec] = &[
         ],
     },
     BlockSpec {
+        kind: "block.media.inspect",
+        label: "Inspection média",
+        category: "Média",
+        description: "Réinspecte le fichier de travail (la sonde initiale reste implicite).",
+        has_input: true,
+        ports: &[],
+        terminal: false,
+        fields: &[],
+    },
+    BlockSpec {
         kind: "mkvpropedit",
         label: "Édition des en-têtes",
         category: "MKVToolNix",
@@ -165,24 +346,59 @@ const CATALOG: &[BlockSpec] = &[
         ],
     },
     BlockSpec {
-        kind: "remux-mkv",
+        kind: "block.video.remux-mkv",
         label: "Remuxage Matroska",
         category: "MKVToolNix",
-        description: "Produit un fichier de travail remuxé par mkvmerge.",
+        description: "Produit un fichier de travail remuxé par mkvmerge (outil distribué).",
         has_input: true,
         ports: &[],
         terminal: false,
-        fields: &[],
+        fields: REMUX_MKV_FIELDS,
     },
     BlockSpec {
-        kind: "video-encode",
-        label: "Transformation vidéo",
+        kind: "block.video.remux-mp4",
+        label: "Remuxage MP4",
         category: "Média",
-        description: "Produit un fichier de travail ; les réglages d'encodage arriveront avec les plugins.",
+        description: "Remuxage MP4 via l'outil distribué (MP4Box) ; non exécuté tant que l'outil n'est pas prêt.",
         has_input: true,
         ports: &[],
         terminal: false,
-        fields: &[],
+        fields: &[
+            FieldSpec {
+                name: "faststart",
+                label: "Optimisation streaming (moov au début)",
+                kind: FieldKind::Bool,
+                required: false,
+                help: "",
+            },
+            FieldSpec {
+                name: "custom_parameters",
+                label: "Paramètres personnalisés (MP4Box)",
+                kind: FieldKind::Text,
+                required: false,
+                help: "",
+            },
+        ],
+    },
+    BlockSpec {
+        kind: "block.video.encode",
+        label: "Encodage vidéo",
+        category: "Média",
+        description: "Encode la vidéo via FFmpeg distribué (plugins), avec codec, encodeur, qualité et vitesse.",
+        has_input: true,
+        ports: &[],
+        terminal: false,
+        fields: VIDEO_ENCODE_FIELDS,
+    },
+    BlockSpec {
+        kind: "block.audio.encode",
+        label: "Encodage audio",
+        category: "Média",
+        description: "Transcode l'audio via FFmpeg distribué (plugins).",
+        has_input: true,
+        ports: &[],
+        terminal: false,
+        fields: AUDIO_ENCODE_FIELDS,
     },
     BlockSpec {
         kind: "webhook",
@@ -295,8 +511,12 @@ mod tests {
             assert!(!matches!(kind, FlowBlockKind::Other(_)), "{}", spec.kind);
             assert_eq!(block_spec(&kind).map(|found| found.kind), Some(spec.kind));
         }
-        assert_eq!(block_catalog().len(), 11);
-        assert!(block_spec(&FlowBlockKind::parse("remux-mp4")).is_none());
+        assert_eq!(block_catalog().len(), 14);
+        assert!(block_spec(&FlowBlockKind::parse("macro.unknown")).is_none());
+        assert_eq!(
+            block_spec(&FlowBlockKind::parse("video-encode")).map(|spec| spec.kind),
+            Some("block.video.encode")
+        );
     }
 
     #[test]

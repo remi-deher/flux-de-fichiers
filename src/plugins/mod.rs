@@ -8,6 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod blocks;
 mod install;
 mod probe;
 mod secret_settings;
@@ -15,6 +16,7 @@ mod settings;
 mod sources;
 mod sync;
 
+pub use blocks::{flow_block_catalog, plugin_default_config};
 pub use install::{
     ensure_job_tools, ensure_tool_installed, install_from_distribution, is_installing,
     parse_distribution, read_distribution,
@@ -41,6 +43,10 @@ pub use settings::{
 /// Outil de remuxage requis par les jobs, installé dans le cache local depuis les dépôts.
 pub const REMUX_TOOL_ID: &str = "app.mkvtoolnix";
 pub const REMUX_TOOL_VERSION: &str = "1.0.0";
+
+/// FFmpeg distribué par les dépôts de plugins (jamais embarqué dans l'image).
+pub const FFMPEG_TOOL_ID: &str = "tool.ffmpeg";
+pub const FFMPEG_TOOL_VERSION: &str = "1.0.0";
 
 /// Conteneur de l'index du catalogue.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

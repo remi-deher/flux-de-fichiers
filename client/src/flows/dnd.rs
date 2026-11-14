@@ -191,24 +191,33 @@ mod tests {
 
     #[test]
     fn a_card_moves_behind_another_and_the_chain_closes_up() {
-        let (graph, input, remux) = chain();
+        let (mut graph, input, remux) = chain();
+        let hook = graph.append(FlowBlockKind::Webhook, "Hook", json!({}));
         let end = graph.nodes[2].id.clone();
-        let Ok(dropped) = drop_outcome(&graph, &DragPayload::Card(remux.clone()), &input) else {
+        // Fin est terminal : Hook reste non relié, puis s'insère derrière l'entrée.
+        let Ok(moved) = drop_outcome(&graph, &DragPayload::Card(remux.clone()), &input) else {
             panic!("déplacement refusé");
         };
-        // Déjà derrière l'entrée : l'ordre ne change pas.
-        assert_eq!(dropped.graph.connections.len(), 2);
-        let Ok(moved) = drop_outcome(&graph, &DragPayload::Card(input.clone()), &remux) else {
+        assert_eq!(moved.graph.connections.len(), graph.connections.len());
+        let Ok(moved) = drop_outcome(&graph, &DragPayload::Card(hook.clone()), &input) else {
             panic!("déplacement refusé");
         };
-        assert_eq!(moved.graph.incoming(&input).count(), 1);
         assert_eq!(
-            moved.graph.incoming(&input).next().map(|e| &e.from),
-            Some(&remux)
+            moved.graph.incoming(&hook).next().map(|e| &e.from),
+            Some(&input)
         );
-        assert_eq!(moved.graph.incoming(&remux).count(), 0);
-        assert_eq!(moved.graph.nodes.len(), 3);
+        assert_eq!(
+            moved.graph.incoming(&remux).next().map(|e| &e.from),
+            Some(&hook)
+        );
+        assert_eq!(moved.graph.nodes.len(), graph.nodes.len());
         assert!(moved.graph.node(&end).is_some());
+    }
+
+    #[test]
+    fn the_entry_block_cannot_move_behind_another() {
+        let (graph, input, remux) = chain();
+        assert!(drop_outcome(&graph, &DragPayload::Card(input), &remux).is_err());
     }
 
     #[test]

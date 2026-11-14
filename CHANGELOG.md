@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.16.0...v0.17.0) (2026-11-14)
+
+
+### Features
+
+* **plugins:** sections du catalogue et propriétaire des blocs ([c7ea6e8](https://github.com/remi-deher/flux-de-fichiers/commit/c7ea6e8372b04108274d1f7f04dcb991e644a2cd))
+* **plugins:** sections du catalogue et propriétaire des blocs ([17b9b17](https://github.com/remi-deher/flux-de-fichiers/commit/17b9b17f3782aaaf5e131d59decf2164c97af6db))
+
 ## [0.16.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.15.0...v0.16.0) (2026-11-14)
 
 

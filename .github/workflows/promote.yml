@@ -27,8 +27,12 @@ jobs:
             echo "La PR #$existing est déjà ouverte : elle suit dev."
             exit 0
           fi
-          # Sans commit d'avance, gh refuse de créer la PR : rien à promouvoir.
+          ahead=$(gh api "repos/$GITHUB_REPOSITORY/compare/test...dev" --jq .ahead_by)
+          if [ "$ahead" = "0" ]; then
+            echo "dev n'a aucun commit d'avance sur test : rien à promouvoir."
+            exit 0
+          fi
+          # Toute autre erreur (jeton refusé, droits manquants) fait échouer le job.
           gh pr create --repo "$GITHUB_REPOSITORY" --base test --head dev \
             --title "chore: dev → test" \
-            --body "Promotion automatique de dev vers test." \
-            || echo "Rien à promouvoir."
+            --body "Promotion automatique de dev vers test."

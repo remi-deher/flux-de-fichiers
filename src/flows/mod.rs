@@ -5,6 +5,7 @@ mod block;
 mod condition;
 mod encode;
 mod header_secrets;
+mod mp4box;
 mod route;
 mod tool;
 mod webhook;
@@ -19,6 +20,7 @@ pub use header_secrets::{
     decrypt_definition_headers, decrypt_headers, has_webhook_headers, mask_definition,
     migrate_flow_secrets, rotate_definition, seal_definition,
 };
+pub use mp4box::{Mp4Plan, mp4_plan, mp4box_argv};
 pub use route::next_connection;
 pub use tool::{InPlaceEdit, in_place_edit};
 pub use webhook::{WebhookBlockConfig, execute_webhook_block, webhook_method};
@@ -210,6 +212,25 @@ impl<'a> FlowEngine<'a> {
                 current_working_file = target_output;
                 tracing::info!(job_id = %job_id, "remux step executed into staging working file");
             }
+            if let Some(plan) = &decision.remux_mp4 {
+                is_in_place = false;
+                let mp4box_bin = self.cache_mgr.resolve_executable(
+                    crate::plugins::MP4BOX_TOOL_ID,
+                    crate::plugins::MP4BOX_TOOL_VERSION,
+                    "MP4Box",
+                    "MP4BOX",
+                );
+                let target_output = work_dir.join("remuxed.mp4");
+                let args = mp4box_argv(plan, &current_working_file, &target_output);
+                let on_p = on_progress.clone();
+                media::mp4box_with_progress(&mp4box_bin, &args, move |pct: u32, line: &str| {
+                    on_p(pct, line);
+                })
+                .await?;
+                current_working_file = target_output;
+                ctx.working_file = current_working_file.clone();
+                tracing::info!(job_id = %job_id, "mp4 remux step completed");
+            }
             if let Some(plan) = &decision.encode {
                 is_in_place = false;
                 let ffmpeg_bin = self.cache_mgr.resolve_executable(
@@ -279,6 +300,9 @@ impl<'a> FlowEngine<'a> {
         })
     }
 }
+
+#[cfg(test)]
+mod engine_tests;
 
 #[cfg(test)]
 mod tests {

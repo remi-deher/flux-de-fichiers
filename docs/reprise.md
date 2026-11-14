@@ -159,7 +159,7 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 - [x] Exécuter `block.video.remux-mp4` (MP4Box) (#114).
 - [ ] Artefacts FFmpeg réels dans le catalogue (aujourd'hui `contract-only`, repli `FFMPEG`/PATH).
 - [x] Repli automatique GPU → CPU quand l'encodeur matériel échoue (#133).
-- [ ] Runner générique déclaratif (argv décrit par le plugin) au lieu du mapping par type en Rust.
+- [ ] Moteur générique, tout par contrats ([ADR 0017](adr/0017-moteur-generique-et-contrats.md), proposé) : runner déclaratif, besoins d'un flux installés à la demande, plus rien en dur.
 - [x] Limiter les secrets du bail à ceux du flux figé (#134). Reste : chiffrement par clé de worker (à cadrer).
 - [ ] Requêtes SQL vérifiées à la compilation (`sqlx::query!` + `.sqlx`, voir l'audit).
 

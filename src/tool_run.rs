@@ -12,6 +12,10 @@ const READ_CHUNK_BYTES: usize = 4096;
 /// Garde-fou : un segment de sortie plus long est tronqué (jamais conservé en entier).
 const MAX_SEGMENT_BYTES: usize = 64 * 1024;
 const PERCENT_MAX: u32 = 100;
+/// Un exécutable tout juste écrit (téléchargé ou généré) peut rester brièvement « occupé » : ces
+/// retentatives courtes laissent le noyau libérer le fichier (`ETXTBSY`).
+const SPAWN_BUSY_RETRIES: u32 = 5;
+const SPAWN_BUSY_DELAY: Duration = Duration::from_millis(25);
 
 /// Outil externe piloté par le moteur de flux.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,6 +113,29 @@ where
     flush(&mut pending);
 }
 
+/// Lance le processus ; réessaie quelques fois seulement si l'exécutable est encore occupé.
+async fn spawn_tool(bin: &Path, args: &[String]) -> std::io::Result<tokio::process::Child> {
+    let mut attempt = 0;
+    loop {
+        let spawned = Command::new(bin)
+            .args(args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn();
+        match spawned {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && attempt < SPAWN_BUSY_RETRIES =>
+            {
+                attempt += 1;
+                tokio::time::sleep(SPAWN_BUSY_DELAY).await;
+            }
+            other => return other,
+        }
+    }
+}
+
 /// Lance `bin args…` ; la progression est lue sur stderr. Succès seulement si le code de sortie est 0.
 pub async fn run_with_progress<F>(
     tool: ExternalTool,
@@ -120,12 +147,8 @@ where
     F: FnMut(u32, &str) + Send + 'static,
 {
     let label = tool.label();
-    let mut child = Command::new(bin)
-        .args(args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
+    let mut child = spawn_tool(bin, args)
+        .await
         .map_err(|source| ToolRunError::Spawn {
             tool: label,
             source,

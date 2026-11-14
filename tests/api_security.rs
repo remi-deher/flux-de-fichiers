@@ -325,5 +325,7 @@ async fn malformed_identifiers_and_unknown_routes_have_safe_json_errors() -> any
         .oneshot(Request::builder().uri("/unknown").body(Body::empty())?)
         .await?;
     assert_eq!(response.status(), StatusCode::OK);
+    // La page et le WASM se revalident : une mise à jour n'est jamais masquée par le cache.
+    assert_eq!(response.headers()["cache-control"], "no-cache");
     Ok(())
 }

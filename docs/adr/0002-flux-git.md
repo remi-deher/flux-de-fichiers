@@ -42,7 +42,8 @@ main ──────●────   PR test→main : main-checks (image tes
   `pr-<sha>`. Après la fusion elle est renommée `:test` et `:test-<sha du merge>`
   sans recompiler. Les tags `pr-*` non fusionnés restent sur Docker Hub et
   peuvent être purgés.
-- Si la PR ne modifie aucun chemin du build (`src/`, `migrations/`, `tests/`,
+- Si la PR ne modifie aucun chemin du build (`src/`, `frontend/`, `client/`, `shared/`,
+  `migrations/`, `tests/`,
   `Cargo.*`, `Dockerfile`, `.dockerignore`, `rust-toolchain.toml`, `test.yml`,
   `scripts/`, `deploy/`, `compose.yaml`, `package.json`), les vérifications
   requises restent vertes mais sautent leurs étapes lourdes, et `:test` est

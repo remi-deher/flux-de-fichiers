@@ -235,6 +235,9 @@ async fn spa_fallback(
     serve_spa(&state.config.static_dir, req).await
 }
 
+/// Politique de cache des fichiers de l'interface : revalidation à chaque chargement.
+const INTERFACE_CACHE_CONTROL: &str = "no-cache";
+
 /// Sert l'interface (SPA) depuis `static_dir`, ou un 404 JSON pour une route d'API inconnue.
 pub(crate) async fn serve_spa(
     static_dir: &std::path::Path,
@@ -259,7 +262,16 @@ pub(crate) async fn serve_spa(
     let serve_service = tower_http::services::ServeDir::new(static_dir)
         .fallback(tower_http::services::ServeFile::new(&index_file));
     match serve_service.oneshot(req).await {
-        Ok(res) => res.into_response(),
+        Ok(res) => {
+            let mut res = res.into_response();
+            // La page et le module WASM gardent le même nom d'une version à l'autre : le navigateur
+            // doit revalider (ETag, Last-Modified) pour ne jamais garder une interface périmée.
+            res.headers_mut().insert(
+                axum::http::header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static(INTERFACE_CACHE_CONTROL),
+            );
+            res
+        }
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }

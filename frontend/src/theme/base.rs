@@ -387,6 +387,26 @@ pub const BASE_CSS: &str = r#"
 
 /* Capsule de recherche : saisie, actions de la page, bouton Filtres.
    La feuille est un enfant du champ : elle en sort par le bas, à la même largeur. */
+/* Bouton du tiroir de navigation : visible seulement sur écran étroit. */
+.topbar-menu-btn {
+  display: none;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.sidebar-scrim {
+  display: none;
+}
+
 .topbar-search-anchor {
   position: relative;
   flex: 1 1 auto;
@@ -1110,78 +1130,78 @@ body[data-filter-sheet] .topbar-search {
   }
 
   .application-navigation-layout {
-    flex-direction: column;
     overflow-x: hidden;
     max-width: 100vw;
     min-width: 0;
   }
 
-  .application-sidebar {
-    width: 100%;
-    max-width: 100vw;
-    min-width: 0;
-    flex: none;
-    border-right: none;
-    border-bottom: 1px solid var(--border-color);
-    overflow-x: hidden;
+  /* Étroit : la barre latérale devient un tiroir, ouvert par le bouton de la barre du haut. */
+  .application-sidebar,
+  .application-sidebar.is-collapsed {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    height: 100dvh;
+    width: min(18rem, 85vw);
+    max-width: 85vw;
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.2s ease-in-out, visibility 0.2s;
+    z-index: 80;
+    box-shadow: var(--shadow-md);
+  }
+
+  .application-sidebar.is-open {
+    transform: translateX(0);
+    visibility: visible;
+  }
+
+  .application-sidebar.is-collapsed .brand-info,
+  .application-sidebar.is-collapsed .tab-btn-label,
+  .application-sidebar.is-collapsed .nav-group-label {
+    display: revert;
+  }
+
+  .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    border: 0;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.45);
+  }
+
+  .sidebar-scrim[hidden] {
+    display: none;
+  }
+
+  .topbar-menu-btn {
+    display: inline-flex;
   }
 
   .sidebar-header {
     padding: 0.75rem 1rem;
-    max-width: 100vw;
     box-sizing: border-box;
   }
 
   .tab-navigation {
     padding: 0.5rem;
-    max-width: 100vw;
     min-width: 0;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    overflow-y: auto;
     box-sizing: border-box;
-  }
-
-  .tab-list {
-    flex-direction: row;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    max-width: 100%;
-    width: 100%;
-    min-width: 0;
-    padding-bottom: 4px;
-    scrollbar-width: thin;
-    box-sizing: border-box;
-  }
-
-  .nav-group-label {
-    display: none;
   }
 
   .tab-btn {
-    width: auto;
-    flex: 0 0 auto;
+    width: 100%;
+    min-height: 44px;
     white-space: nowrap;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.8125rem;
-  }
-
-  /* Étroit : la barre devient une rangée ; le thème et le compte restent accessibles. */
-  .sidebar-footer {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    border-top: 0;
-    padding: 0.25rem 0.75rem 0.5rem;
   }
 
   .sidebar-collapse-btn {
     display: none;
   }
-
-  .sidebar-footer-tools {
-    flex: 1 1 12rem;
-  }
-
 
   .page-transition-region {
     max-width: 100vw;
@@ -1194,10 +1214,6 @@ body[data-filter-sheet] .topbar-search {
 
   .topbar-container {
     padding: 0.35rem 0.5rem;
-  }
-
-  .topbar-actions {
-    display: none;
   }
 
   .topbar-search-anchor {

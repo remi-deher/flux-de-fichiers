@@ -145,7 +145,7 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 - [x] Paramètres : onglets Réseau (écoute, TLS, origine, session) et Stockage (dossiers, taille maximale, espace du volume), lus dans `/api/v1/system/status` ; lecture seule.
 - [x] Réseau, lot A : carte Configuration (lecture seule, bloc d'environnement), connectivité des workers (dernier contact, ancienneté, alerte au-delà de `WORKER_SILENT_ALERT_SECONDS`, « Ajouter un worker » avec bloc `compose`) et diagnostic `POST /api/v1/system/diagnostics` (`CheckStatus`, six contrôles purs). Non fait : version et adresse vue par le central de chaque worker (rien ne les transmet ni ne les stocke aujourd'hui ; demande un en-tête ou un champ de heartbeat, donc un stockage). Reste lot B (adresse publique, sessions, SMTP modifiables en base) et lot C (proxy sortant).
 - [x] Télémétrie matérielle du central en vue d'ensemble (processeur, mémoire, disque, GPU ; `GET /api/v1/system/hardware`, relevé à l'ouverture, pas d'historique). Les workers distants n'ont pas de relevé côté central : la télémétrie qu'ils envoient avec leurs échéances n'est pas conservée.
-- [x] Page Mises à jour (onglet des Paramètres) : version du central et de l'interface, procédure. Limite : pas de « version disponible », le central n'appelle aucun service externe (une vérification facultative reste à décider).
+- [x] Paramètres (14 nov.) : onglet « Stockage » retiré (taille maximale d'un fichier et espace libre déplacés dans « Système ») ; « Mises à jour » fusionné dans « Système ». Ancienne page Mises à jour : version du central et de l'interface, procédure. Limite : pas de « version disponible », le central n'appelle aucun service externe (une vérification facultative reste à décider).
 - [x] Feuille de filtres de la barre du haut : période des tâches (Activité) et présence des workers ; remise à zéro au changement d'écran. Les autres écrans n'ont pas de critère propre.
 - [ ] Repris de l'ancienne interface : simulation dans l'éditeur.
 - [x] Éditeur de flux : glisser-déposer palette → carte et carte → carte (`flows/dnd.rs`, règles de `FlowGraph::connect`, alternative clic/liste conservée) ; confirmation avant de quitter avec des modifications (routeur, retour arrière, `beforeunload`).
@@ -160,12 +160,13 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 - [x] Exécuter `block.video.remux-mp4` (MP4Box) (#114).
 - [ ] Artefacts FFmpeg réels dans le catalogue (aujourd'hui `contract-only`, repli `FFMPEG`/PATH).
 - [x] Repli automatique GPU → CPU quand l'encodeur matériel échoue (#133).
-- [ ] Runner générique déclaratif (argv décrit par le plugin) au lieu du mapping par type en Rust.
+- [ ] Moteur générique, tout par contrats ([ADR 0017](adr/0017-moteur-generique-et-contrats.md), proposé) : runner déclaratif, besoins d'un flux installés à la demande, plus rien en dur.
 - [x] Limiter les secrets du bail à ceux du flux figé (#134). Reste : chiffrement par clé de worker (à cadrer).
 - [ ] Requêtes SQL vérifiées à la compilation (`sqlx::query!` + `.sqlx`, voir l'audit).
 
 ### 4. À cadrer avec Remi avant de coder
 
+- [ ] Enrôlement par demande à approuver : [ADR 0016](adr/0016-enrolement-par-approbation.md) (proposé, orientation validée le 14 nov.) ; à implémenter.
 - [ ] Époque des baux (*fencing*) : un ancien worker ne doit plus pouvoir répondre sur une tâche
       reprise. Reporté (« à voir après », 14 nov.).
 - [x] IA et MCP : [ADR 0015](adr/0015-ia-et-mcp.md) rédigé (proposé), questions ouvertes à trancher

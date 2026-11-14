@@ -1,11 +1,13 @@
-//! État système : version, clé de chiffrement, taille de la base ; socle des sections Réseau et Stockage.
+//! Système : versions et mise à jour, clé de chiffrement, base de données, limites et espace disque ; socle de la section Réseau.
 
 use crate::api;
 use crate::ui::SectionHeader;
 use flux_shared::format::format_bytes;
-use flux_shared::system::{KeySource, SystemStatus};
+use flux_shared::system::{KeySource, SystemStatus, VolumeSpace};
 use leptos::prelude::*;
 
+/// Version de l'interface WASM actuellement chargée dans le navigateur.
+const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const STATUS_PATH: &str = "/api/v1/system/status";
 const SECONDS_PER_MINUTE: i64 = 60;
 const SECONDS_PER_HOUR: i64 = 60 * SECONDS_PER_MINUTE;
@@ -96,9 +98,36 @@ pub fn duration_label(seconds: i64) -> String {
     }
 }
 
+/// Ce que dit la comparaison des versions du central et de l'interface.
+fn coherence_label(central: &str, client: &str) -> &'static str {
+    if central == client {
+        "Interface et central sont à la même version"
+    } else {
+        "Versions différentes : recharger la page sans cache, ou vérifier le volume du frontend"
+    }
+}
+
+fn volume_label(volume: Option<VolumeSpace>) -> String {
+    volume.map_or_else(
+        || "Illisible".to_owned(),
+        |space| {
+            format!(
+                "{} libres sur {}",
+                format_bytes(space.available_bytes),
+                format_bytes(space.total_bytes)
+            )
+        },
+    )
+}
+
 fn system_rows(status: &SystemStatus) -> Vec<DetailRow> {
     vec![
-        DetailRow::mono("Version", status.version.clone()),
+        DetailRow::mono("Version du central", status.version.clone()),
+        DetailRow::mono("Version de l'interface", CLIENT_VERSION),
+        DetailRow::text(
+            "Cohérence",
+            coherence_label(&status.version, CLIENT_VERSION),
+        ),
         DetailRow::mono("Clé de chiffrement", status.key_id.clone()),
         DetailRow::text("Origine de la clé", key_source_label(status.key_source)),
         DetailRow::text(
@@ -107,6 +136,11 @@ fn system_rows(status: &SystemStatus) -> Vec<DetailRow> {
                 .database_bytes
                 .map_or_else(|| "En mémoire".to_owned(), format_bytes),
         ),
+        DetailRow::text(
+            "Taille maximale d'un fichier",
+            format_bytes(status.storage.max_file_bytes),
+        ),
+        DetailRow::text("Volume des données", volume_label(status.storage.volume)),
     ]
 }
 
@@ -118,10 +152,16 @@ pub fn SystemSection() -> impl IntoView {
             <code>"flux-de-fichiers rotate-secret"</code>
             " ; une copie de l'ancienne clé et de la base est rangée dans /config/backups."
         </p>
+        <p class="form-help">
+            "Version disponible : le central ne contacte aucun service externe, il ne peut donc pas la connaître. Les versions publiées se consultent sur le dépôt de l'image."
+        </p>
+        <p class="form-help">
+            "Mettre à jour : sauvegarder /config, tirer la nouvelle image puis redémarrer le conteneur du central, ensuite celui de chaque worker. Les migrations de la base s'appliquent au démarrage."
+        </p>
     }
     .into_any();
     view! {
-        <StatusSection title="Système" subtitle="Version, clé de chiffrement et base de données."
+        <StatusSection title="Système" subtitle="Versions, mise à jour, clé de chiffrement, base de données et espace disque."
             rows=system_rows footer=footer />
     }
 }
@@ -129,6 +169,22 @@ pub fn SystemSection() -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_version_mismatch_is_called_out() {
+        assert!(coherence_label("1.0.0", "1.0.0").contains("même version"));
+        assert!(coherence_label("1.0.0", "0.9.0").contains("différentes"));
+    }
+
+    #[test]
+    fn the_volume_reads_free_over_total_or_says_it_is_unreadable() {
+        let space = VolumeSpace {
+            total_bytes: 2048,
+            available_bytes: 1024,
+        };
+        assert_eq!(volume_label(Some(space)), "1 Kio libres sur 2 Kio");
+        assert_eq!(volume_label(None), "Illisible");
+    }
 
     #[test]
     fn durations_skip_empty_units_and_fall_back_to_seconds() {

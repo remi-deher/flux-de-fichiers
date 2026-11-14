@@ -157,7 +157,7 @@ impl TelemetryProbe {
     }
 
     /// Lit l'espace total et disponible via l'appel POSIX `statvfs`.
-    fn read_storage_info(path: &Path) -> Option<(u64, u64)> {
+    pub fn read_storage_info(path: &Path) -> Option<(u64, u64)> {
         use std::ffi::CString;
         use std::os::unix::ffi::OsStrExt;
 

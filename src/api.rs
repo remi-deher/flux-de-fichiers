@@ -5,6 +5,7 @@ mod installation;
 mod jobs;
 mod keys;
 mod libraries;
+mod password_reset;
 mod plugins;
 pub(crate) mod session;
 mod setup;
@@ -156,6 +157,8 @@ fn json_routes() -> Router<AppState> {
         )
         .route("/api/v1/auth/session", get(session::current))
         .route("/api/v1/auth/login", post(session::login))
+        .route("/api/v1/auth/forgot-password", post(password_reset::forgot))
+        .route("/api/v1/auth/reset-password", post(password_reset::reset))
         .route("/api/v1/setup/status", get(setup::status))
         .route("/api/v1/setup/central", post(setup::setup_central))
         .route("/api/v1/setup/worker", post(installation::setup_worker))
@@ -179,6 +182,7 @@ fn json_routes() -> Router<AppState> {
             get(accounts::list).post(accounts::create),
         )
         .route("/api/v1/system/status", get(system::status))
+        .route("/api/v1/system/hardware", get(system::hardware))
         .route("/api/v1/accounts/{id}", put(accounts::update))
         .route("/api/v1/api-keys", get(keys::list).post(keys::create))
         .route("/api/v1/api-keys/{id}", axum::routing::delete(keys::revoke))

@@ -101,10 +101,21 @@ fn decode_segment(value: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Question posée avant d'abandonner des modifications non enregistrées.
+const LEAVE_PROMPT: &str =
+    "Des modifications ne sont pas enregistrées. Quitter cet écran sans les enregistrer ?";
+
+/// Faut-il demander confirmation avant de passer de `current` à `target` ?
+pub fn needs_leave_confirmation(unsaved: bool, current: &Route, target: &Route) -> bool {
+    unsaved && current != target
+}
+
 /// Écran courant, partagé par contexte.
 #[derive(Clone, Copy)]
 pub struct Router {
     current: RwSignal<Route>,
+    /// Vrai tant que l'écran affiché porte des modifications non enregistrées.
+    unsaved: RwSignal<bool>,
 }
 
 impl Router {
@@ -113,14 +124,34 @@ impl Router {
         let current = RwSignal::new(Route::parse(
             &window().location().pathname().unwrap_or_default(),
         ));
+        let unsaved = RwSignal::new(false);
         let on_pop = Closure::<dyn FnMut()>::new(move || {
-            current.set(Route::parse(
-                &window().location().pathname().unwrap_or_default(),
-            ));
+            let target = Route::parse(&window().location().pathname().unwrap_or_default());
+            let shown = current.get_untracked();
+            if needs_leave_confirmation(unsaved.get_untracked(), &shown, &target)
+                && !confirm_leaving()
+            {
+                // Le navigateur a déjà changé d'adresse : on remet celle de l'écran gardé.
+                let _ = window().history().and_then(|history| {
+                    history.push_state_with_url(&JsValue::NULL, "", Some(&shown.path()))
+                });
+                return;
+            }
+            current.set(target);
         });
         window().set_onpopstate(Some(on_pop.as_ref().unchecked_ref()));
         on_pop.forget();
-        let router = Self { current };
+        let on_unload = Closure::<dyn FnMut(web_sys::BeforeUnloadEvent)>::new(
+            move |event: web_sys::BeforeUnloadEvent| {
+                if unsaved.get_untracked() {
+                    event.prevent_default();
+                    event.set_return_value(LEAVE_PROMPT);
+                }
+            },
+        );
+        window().set_onbeforeunload(Some(on_unload.as_ref().unchecked_ref()));
+        on_unload.forget();
+        let router = Self { current, unsaved };
         provide_context(router);
         router
     }
@@ -129,12 +160,29 @@ impl Router {
         self.current.get()
     }
 
+    /// Déclare (ou lève) la garde : les changements d'écran demandent alors confirmation.
+    pub fn set_unsaved(&self, unsaved: bool) {
+        self.unsaved.set(unsaved);
+    }
+
     pub fn go(&self, route: Route) {
+        if needs_leave_confirmation(
+            self.unsaved.get_untracked(),
+            &self.current.get_untracked(),
+            &route,
+        ) && !confirm_leaving()
+        {
+            return;
+        }
         let _ = window().history().and_then(|history| {
             history.push_state_with_url(&JsValue::NULL, "", Some(&route.path()))
         });
         self.current.set(route);
     }
+}
+
+fn confirm_leaving() -> bool {
+    window().confirm_with_message(LEAVE_PROMPT).unwrap_or(true)
 }
 
 pub fn use_router() -> Router {
@@ -180,6 +228,19 @@ mod tests {
         ] {
             assert_eq!(Route::parse(&route.path()), route);
         }
+    }
+
+    #[test]
+    fn only_a_real_change_of_screen_with_unsaved_edits_asks_to_confirm() {
+        let editor = Route::FlowEditor("a".into());
+        assert!(needs_leave_confirmation(true, &editor, &Route::Flows));
+        assert!(needs_leave_confirmation(
+            true,
+            &editor,
+            &Route::FlowEditor("b".into())
+        ));
+        assert!(!needs_leave_confirmation(true, &editor, &editor));
+        assert!(!needs_leave_confirmation(false, &editor, &Route::Flows));
     }
 
     #[test]

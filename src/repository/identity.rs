@@ -19,6 +19,7 @@ struct AccountRow {
     password_hash: String,
     role: String,
     disabled: bool,
+    email: Option<String>,
 }
 
 impl AccountRow {
@@ -30,6 +31,7 @@ impl AccountRow {
                 username: self.username,
                 role,
                 disabled: self.disabled,
+                email: self.email,
             },
             self.password_hash,
         ))
@@ -55,7 +57,7 @@ impl AccountRow {
 /// Comptes humains, par identifiant, sans leur haché.
 pub async fn list_accounts(pool: &SqlitePool) -> AppResult<Vec<Account>> {
     sqlx::query_as::<_, AccountRow>(
-        "SELECT id, username, password_hash, role, disabled FROM accounts ORDER BY username",
+        "SELECT id, username, password_hash, role, disabled, email FROM accounts ORDER BY username",
     )
     .fetch_all(pool)
     .await?
@@ -70,20 +72,25 @@ pub async fn create_account(
     username: &str,
     password_hash: &str,
     role: Role,
+    email: Option<&str>,
 ) -> AppResult<Account> {
     let id = Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO accounts(id, username, password_hash, role) VALUES (?1, ?2, ?3, ?4)")
-        .bind(&id)
-        .bind(username)
-        .bind(password_hash)
-        .bind(role.as_str())
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO accounts(id, username, password_hash, role, email) VALUES (?1, ?2, ?3, ?4, ?5)",
+    )
+    .bind(&id)
+    .bind(username)
+    .bind(password_hash)
+    .bind(role.as_str())
+    .bind(email)
+    .execute(pool)
+    .await?;
     Ok(Account {
         id,
         username: username.to_owned(),
         role,
         disabled: false,
+        email: email.map(str::to_owned),
     })
 }
 
@@ -97,7 +104,7 @@ pub async fn update_account(
 ) -> AppResult<Account> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let row = sqlx::query_as::<_, AccountRow>(
-        "SELECT id, username, password_hash, role, disabled FROM accounts WHERE id = ?1",
+        "SELECT id, username, password_hash, role, disabled, email FROM accounts WHERE id = ?1",
     )
     .bind(id)
     .fetch_optional(&mut *tx)
@@ -154,6 +161,33 @@ pub async fn list_account_copies(pool: &SqlitePool) -> AppResult<Vec<AccountCopy
     .collect()
 }
 
+/// Retrouve un compte par adresse e-mail (sans tenir compte de la casse).
+pub async fn find_account_by_email(pool: &SqlitePool, email: &str) -> AppResult<Option<Account>> {
+    sqlx::query_as::<_, AccountRow>(
+        "SELECT id, username, password_hash, role, disabled, email FROM accounts WHERE email = ?1",
+    )
+    .bind(email)
+    .fetch_optional(pool)
+    .await?
+    .map(AccountRow::into_account)
+    .transpose()
+}
+
+/// Définit l'adresse d'un compte (`None` l'efface) ; une adresse déjà prise donne `Conflict`.
+pub async fn set_account_email(pool: &SqlitePool, id: &str, email: Option<&str>) -> AppResult<()> {
+    let updated =
+        sqlx::query("UPDATE accounts SET email = ?1, updated_at = datetime('now') WHERE id = ?2")
+            .bind(email)
+            .bind(id)
+            .execute(pool)
+            .await?
+            .rows_affected();
+    if updated == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(())
+}
+
 pub async fn account_count(pool: &SqlitePool) -> AppResult<i64> {
     Ok(sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
         .fetch_one(pool)
@@ -166,16 +200,18 @@ pub async fn create_first_account(
     username: &str,
     password_hash: &str,
     role: Role,
+    email: Option<&str>,
 ) -> AppResult<Option<Account>> {
     let id = Uuid::new_v4().to_string();
     let inserted = sqlx::query(
-        "INSERT INTO accounts (id, username, password_hash, role) \
-         SELECT ?1, ?2, ?3, ?4 WHERE NOT EXISTS (SELECT 1 FROM accounts)",
+        "INSERT INTO accounts (id, username, password_hash, role, email) \
+         SELECT ?1, ?2, ?3, ?4, ?5 WHERE NOT EXISTS (SELECT 1 FROM accounts)",
     )
     .bind(&id)
     .bind(username)
     .bind(password_hash)
     .bind(role.as_str())
+    .bind(email)
     .execute(pool)
     .await?
     .rows_affected();
@@ -184,6 +220,7 @@ pub async fn create_first_account(
         username: username.to_owned(),
         role,
         disabled: false,
+        email: email.map(str::to_owned),
     }))
 }
 
@@ -192,7 +229,7 @@ pub async fn find_account_by_username(
     username: &str,
 ) -> AppResult<Option<(Account, String)>> {
     sqlx::query_as::<_, AccountRow>(
-        "SELECT id, username, password_hash, role, disabled FROM accounts WHERE username = ?1",
+        "SELECT id, username, password_hash, role, disabled, email FROM accounts WHERE username = ?1",
     )
     .bind(username)
     .fetch_optional(pool)
@@ -203,7 +240,7 @@ pub async fn find_account_by_username(
 
 pub async fn get_account(pool: &SqlitePool, id: &str) -> AppResult<Option<(Account, String)>> {
     sqlx::query_as::<_, AccountRow>(
-        "SELECT id, username, password_hash, role, disabled FROM accounts WHERE id = ?1",
+        "SELECT id, username, password_hash, role, disabled, email FROM accounts WHERE id = ?1",
     )
     .bind(id)
     .fetch_optional(pool)

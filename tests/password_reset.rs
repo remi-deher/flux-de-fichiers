@@ -16,7 +16,7 @@ async fn pool_with_admin() -> anyhow::Result<sqlx::SqlitePool> {
     let hash = password::hash(OLD_PASSWORD.into())
         .await
         .map_err(|_| anyhow::anyhow!("hachage"))?;
-    repository::create_first_account(&pool, USERNAME, &hash, Role::Admin)
+    repository::create_first_account(&pool, USERNAME, &hash, Role::Admin, None)
         .await
         .map_err(|_| anyhow::anyhow!("création du compte"))?;
     Ok(pool)

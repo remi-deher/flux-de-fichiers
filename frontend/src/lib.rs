@@ -60,4 +60,16 @@ mod tests {
         assert!(html.contains("viewport-fit=cover"));
         assert!(!html.contains("<script>\n"));
     }
+
+    #[test]
+    fn narrow_screens_get_a_navigation_drawer_and_its_menu_button() {
+        let html = render_page();
+        for rule in [
+            ".topbar-menu-btn",
+            ".application-sidebar.is-open",
+            ".sidebar-scrim",
+        ] {
+            assert!(html.contains(rule), "règle absente : {rule}");
+        }
+    }
 }

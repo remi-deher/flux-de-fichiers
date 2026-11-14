@@ -11,6 +11,8 @@ pub mod search;
 pub mod section_header;
 pub mod status_badge;
 pub mod subnav;
+pub mod table_tabs;
+pub mod topbar_action;
 
 pub use drawer::Drawer;
 pub use empty_state::EmptyState;
@@ -20,3 +22,4 @@ pub use registre::{Registre, RegistreMessage};
 pub use section_header::SectionHeader;
 pub use status_badge::StatusBadge;
 pub use subnav::{SubNav, SubTab};
+pub use table_tabs::TabbedTable;

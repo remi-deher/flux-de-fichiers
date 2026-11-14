@@ -995,7 +995,7 @@ body[data-filter-sheet] .topbar-search {
   top: max(60px, calc(var(--sat, 0px) + 54px));
   z-index: 15;
   display: block;
-  margin-bottom: 1.25rem;
+  margin-bottom: 0.75rem;
   background: transparent;
   pointer-events: none;
   transition: opacity 0.2s cubic-bezier(0.2, 0, 0, 1), transform 0.2s cubic-bezier(0.2, 0, 0, 1);
@@ -1014,7 +1014,7 @@ body[data-filter-sheet] .topbar-search {
   position: relative;
   width: 100%;
   min-width: 0;
-  min-height: 40px;
+  min-height: 0;
   pointer-events: none;
 }
 
@@ -1034,7 +1034,7 @@ body[data-filter-sheet] .topbar-search {
   width: max-content;
   min-width: 0;
   max-width: 100%;
-  padding: 3px;
+  padding: 2px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg, 12px);
   background: transparent;
@@ -1049,7 +1049,7 @@ body[data-filter-sheet] .topbar-search {
 .app-subnav__scroller {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   width: max-content;
   min-width: 0;
   max-width: 100%;
@@ -1071,14 +1071,14 @@ body[data-filter-sheet] .topbar-search {
   flex: none;
   align-items: center;
   justify-content: center;
-  gap: 0.45rem;
-  min-height: 34px;
-  padding: 0 12px;
+  gap: 0.35rem;
+  min-height: 28px;
+  padding: 0 9px;
   border: 0;
-  border-radius: calc(var(--radius-lg, 12px) - 3px);
+  border-radius: calc(var(--radius-lg, 12px) - 2px);
   background: transparent;
   color: var(--text-dim);
-  font-size: 0.84rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   white-space: nowrap;
   text-decoration: none;

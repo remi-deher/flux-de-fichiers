@@ -5,7 +5,8 @@ mod settings;
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
-use crate::ui::{Drawer, SubNav, SubTab};
+use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
+use crate::ui::{Drawer, SubTab, TabbedTable};
 use flux_shared::plugins::vocab::{CatalogItemType, CatalogSection};
 use flux_shared::plugins::{
     CatalogEntry, CreateRepositoryRequest, PluginRepository, ToolStatus, ToolStatusSummary,
@@ -326,18 +327,23 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
     let tabs = visible_tabs(can_manage);
     let sub_tabs = tabs.iter().map(|tab| tab.sub_tab()).collect();
     let repositories_index = tabs.iter().position(|tab| *tab == PluginsTab::Repositories);
-    let actions = repositories_index.map(|index| view! {
-        <button type="button" class="btn btn-primary btn-sm" on:click=move |_| { tab.set(index); adding.set(true); }>"Ajouter un dépôt"</button>
-    }.into_any());
+    if let Some(index) = repositories_index {
+        provide_topbar_action(ActionSpec {
+            label: "Ajouter un dépôt",
+            on_click: Callback::new(move |()| {
+                tab.set(index);
+                adding.set(true);
+            }),
+        });
+    }
     view! {
-        <div class="tab-panel" role="tabpanel">
-            <SubNav aria_label="Sous-navigation des plugins" tabs=sub_tabs selected=tab actions=actions.unwrap_or_else(|| ().into_any()) />
+        <TabbedTable aria_label="Sections des plugins" tabs=sub_tabs selected=tab>
             {move || match tabs.get(tab.get()).copied() {
                 Some(PluginsTab::Section(CatalogSection::Applications)) => view! { <Tools can_install=can_manage /> }.into_any(),
                 Some(PluginsTab::Section(section)) => view! { <Catalog section=section reload=reload_catalog can_configure=can_manage /> }.into_any(),
                 _ => view! { <Repositories reload_catalog=reload_catalog adding=adding /> }.into_any(),
             }}
-        </div>
+        </TabbedTable>
     }
 }
 

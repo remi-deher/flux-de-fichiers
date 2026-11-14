@@ -193,18 +193,28 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
         None
     };
     tx.commit().await?;
-    job.map(|j| {
-        Ok(Claim {
-            job_id: j.id,
-            lease_token: j.lease_token.ok_or(AppError::Internal)?,
-            source_name: j.source_name,
-            source_sha256: j.source_sha256.ok_or(AppError::Internal)?,
-            source_bytes: j.source_bytes.ok_or(AppError::Internal)?,
-            probe_tool_id: None,
-            probe_version: None,
-        })
-    })
-    .transpose()
+    match job {
+        None => Ok(None),
+        Some(j) => {
+            let frozen_flow = match (&j.flow_id, j.flow_version) {
+                (Some(flow_id), Some(version)) => {
+                    Some(super::get_flow_version(pool, flow_id, version).await?)
+                }
+                _ => None,
+            };
+            Ok(Some(Claim {
+                job_id: j.id,
+                lease_token: j.lease_token.ok_or(AppError::Internal)?,
+                source_name: j.source_name,
+                source_sha256: j.source_sha256.ok_or(AppError::Internal)?,
+                source_bytes: j.source_bytes.ok_or(AppError::Internal)?,
+                probe_tool_id: None,
+                probe_version: None,
+                frozen_flow,
+                arr: None,
+            }))
+        }
+    }
 }
 
 /// Relance manuelle d'une tâche échouée après perte de bail, dans la limite de `MAX_ATTEMPTS`.

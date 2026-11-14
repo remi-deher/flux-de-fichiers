@@ -200,18 +200,38 @@ impl WorkerLoop {
             hash == claim.source_sha256 && bytes as i64 == claim.source_bytes,
             "source_integrity"
         );
-        let mkvmerge_bin = cache_mgr.resolve_executable(
-            crate::plugins::REMUX_TOOL_ID,
-            crate::plugins::REMUX_TOOL_VERSION,
-            "mkvmerge",
-            "MKVMERGE",
-        );
-        let warning = media::remux_with(&mkvmerge_bin, &input, &output)
-            .await
-            .context("remux_failed")?;
-        let (_, output_size) = storage::fingerprint(&output, self.config.max_bytes).await?;
-        let body =
-            reqwest::Body::wrap_stream(ReaderStream::new(tokio::fs::File::open(&output).await?));
+
+        let http_client = self.client.clone();
+        let progress_cb: crate::flows::FlowProgressCallback =
+            std::sync::Arc::new(|_pct: u32, _line: &str| {});
+        let (final_output, warning) = if let Some(flow) = claim.frozen_flow.as_ref() {
+            let arr = claim.arr.clone().map(crate::flows::ArrContext::from);
+            let mut engine = crate::flows::FlowEngine::new(&cache_mgr, &http_client);
+            if let Some(ref arr_ctx) = arr {
+                engine = engine.with_arr(arr_ctx);
+            }
+            let outcome = engine
+                .execute_flow(flow, claim.job_id, &input, dir, progress_cb)
+                .await
+                .map_err(|error| anyhow::anyhow!("flow_execution_failed: {error}"))?;
+            (outcome.working_file, outcome.warning)
+        } else {
+            let mkvmerge_bin = cache_mgr.resolve_executable(
+                crate::plugins::REMUX_TOOL_ID,
+                crate::plugins::REMUX_TOOL_VERSION,
+                "mkvmerge",
+                "MKVMERGE",
+            );
+            let warning = media::remux_with(&mkvmerge_bin, &input, &output)
+                .await
+                .context("remux_failed")?;
+            (output, warning)
+        };
+
+        let (_, output_size) = storage::fingerprint(&final_output, self.config.max_bytes).await?;
+        let body = reqwest::Body::wrap_stream(ReaderStream::new(
+            tokio::fs::File::open(&final_output).await?,
+        ));
         self.leased(reqwest::Method::PUT, claim, worker, "result")
             .header("content-length", output_size)
             .header("x-remux-warning", warning.to_string())
@@ -238,11 +258,15 @@ impl WorkerLoop {
                 tokio::fs::remove_dir_all(&dir).await?;
                 return result;
             }
-            let code = if error.to_string() == "source_integrity" {
+            let message = error.to_string();
+            let code = if message == "source_integrity" || message.contains("source_integrity") {
                 "source_integrity"
-            } else if error.to_string() == "remux_failed" {
+            } else if message == "remux_failed"
+                || message.contains("remux_failed")
+                || message.contains("flow_execution_failed")
+            {
                 "remux_failed"
-            } else if error.to_string() == "probe_unavailable" {
+            } else if message == "probe_unavailable" || message.contains("probe_unavailable") {
                 "probe_unavailable"
             } else {
                 "transfer_failed"

@@ -118,15 +118,8 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
         )
         .await?;
         let cache_mgr = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
-        // Version figée à la création de la tâche, jamais le flow courant.
-        let frozen_flow = match repository::get_job(&state.pool, claim.job_id).await? {
-            crate::domain::Job {
-                flow_id: Some(flow_id),
-                flow_version: Some(version),
-                ..
-            } => Some(repository::get_flow_version(&state.pool, &flow_id, version).await?),
-            _ => None,
-        };
+        // Version figée portée par le bail (même contrat que les workers distants).
+        let frozen_flow = claim.frozen_flow.clone();
 
         let state_progress = state.clone();
         let job_id = claim.job_id;
@@ -135,7 +128,7 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
         });
 
         let http_client = reqwest::Client::new();
-        let (final_output, warning) = if let Some(flow) = frozen_flow {
+        let (final_output, warning) = if let Some(flow) = frozen_flow.as_ref() {
             let arr = crate::flows::ArrContext::load(
                 &state.pool,
                 &state.config.config_dir,
@@ -146,7 +139,7 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
                 .with_secrets_dir(&state.config.config_dir)
                 .with_arr(&arr);
             let outcome = engine
-                .execute_flow(&flow, job_id, &source_snapshot, &work_dir, progress_cb)
+                .execute_flow(flow, job_id, &source_snapshot, &work_dir, progress_cb)
                 .await
                 .map_err(|error| anyhow::anyhow!("flow_execution_failed: {error}"))?;
             (outcome.working_file, outcome.warning)

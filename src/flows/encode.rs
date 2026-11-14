@@ -10,6 +10,26 @@ pub enum EncodePlan {
     Audio(AudioEncodePlan),
 }
 
+/// Valeurs de `encoder` qui demandent une accélération matérielle (repli CPU possible).
+const HARDWARE_ENCODERS: [&str; 4] = ["nvidia", "intel_qsv", "vaapi", "amd_amf"];
+/// Valeur de `encoder` qui force l'encodage logiciel.
+const CPU_ENCODER: &str = "cpu";
+
+impl EncodePlan {
+    /// Même plan en encodage logiciel, si celui-ci demande un encodeur matériel.
+    pub fn cpu_fallback(&self) -> Option<Self> {
+        match self {
+            Self::Video(plan) if HARDWARE_ENCODERS.contains(&plan.encoder.as_str()) => {
+                Some(Self::Video(VideoEncodePlan {
+                    encoder: CPU_ENCODER.to_owned(),
+                    ..plan.clone()
+                }))
+            }
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VideoEncodePlan {
     pub codec: String,
@@ -308,6 +328,27 @@ mod tests {
         assert!(args.windows(2).any(|pair| pair == ["-b:a", "256k"]));
         assert!(args.windows(2).any(|pair| pair == ["-ac", "2"]));
         assert!(args.windows(2).any(|pair| pair == ["-af", "loudnorm"]));
+    }
+
+    #[test]
+    fn only_hardware_video_plans_have_a_cpu_fallback() {
+        for hardware in HARDWARE_ENCODERS {
+            let plan = EncodePlan::Video(video_plan(&json!({"encoder": hardware})));
+            let Some(EncodePlan::Video(cpu)) = plan.cpu_fallback() else {
+                panic!("repli attendu pour {hardware}");
+            };
+            assert_eq!(cpu.encoder, "cpu");
+            assert_eq!(cpu.quality, 6);
+        }
+        for software in ["auto", "cpu"] {
+            let plan = EncodePlan::Video(video_plan(&json!({"encoder": software})));
+            assert!(plan.cpu_fallback().is_none());
+        }
+        assert!(
+            EncodePlan::Audio(audio_plan(&json!({})))
+                .cpu_fallback()
+                .is_none()
+        );
     }
 
     #[test]

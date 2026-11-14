@@ -43,6 +43,8 @@ services:
     command: [worker]
     environment:
       CENTRAL_URL: http://central:3000
+      # Le nom doit être celui de la clé enrôlée (voir .github/workflows/main-checks.yml).
+      WORKER_NAME: lab-worker
       WORKER_KEY_FILE: /config/worker_key
     volumes:
       - ./var/config:/config:ro

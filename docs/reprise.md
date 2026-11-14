@@ -165,6 +165,7 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 
 ### 4. À cadrer avec Remi avant de coder
 
+- [ ] Enrôlement par demande à approuver : [ADR 0016](adr/0016-enrolement-par-approbation.md) (proposé, orientation validée le 14 nov.) ; à implémenter.
 - [ ] Époque des baux (*fencing*) : un ancien worker ne doit plus pouvoir répondre sur une tâche
       reprise. Reporté (« à voir après », 14 nov.).
 - [x] IA et MCP : [ADR 0015](adr/0015-ia-et-mcp.md) rédigé (proposé), questions ouvertes à trancher

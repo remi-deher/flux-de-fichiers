@@ -4,7 +4,9 @@ mod arr;
 mod block;
 mod condition;
 mod encode;
+mod encode_run;
 mod header_secrets;
+mod lease_secrets;
 mod mp4box;
 mod route;
 mod tool;
@@ -20,6 +22,7 @@ pub use header_secrets::{
     decrypt_definition_headers, decrypt_headers, has_webhook_headers, mask_definition,
     migrate_flow_secrets, rotate_definition, seal_definition,
 };
+pub use lease_secrets::{arr_services_in, lease_arr_context};
 pub use mp4box::{Mp4Plan, mp4_plan, mp4box_argv};
 pub use route::next_connection;
 pub use tool::{InPlaceEdit, in_place_edit};
@@ -243,11 +246,14 @@ impl<'a> FlowEngine<'a> {
                     EncodePlan::Video(_) => "encoded.mkv",
                     EncodePlan::Audio(_) => "encoded-audio.mkv",
                 });
-                let args = argv_for(plan, &current_working_file, &target_output);
-                let on_p = on_progress.clone();
-                media::encode_with_progress(&ffmpeg_bin, &args, move |pct: u32, line: &str| {
-                    on_p(pct, line);
-                })
+                encode_run::run_encode(
+                    &ffmpeg_bin,
+                    plan,
+                    &current_working_file,
+                    &target_output,
+                    &on_progress,
+                    job_id,
+                )
                 .await?;
                 current_working_file = target_output;
                 ctx.working_file = current_working_file.clone();

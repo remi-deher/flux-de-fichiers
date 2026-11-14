@@ -61,6 +61,9 @@ paramètres.
 | SSE progression distant | [#106](https://github.com/remi-deher/flux-de-fichiers/pull/106) | `job_progress` via `POST /api/v1/jobs/{id}/progress` puis SSE (même contrat que le worker intégré) |
 | Palette + exécution encode plugins | [#108](https://github.com/remi-deher/flux-de-fichiers/pull/108) | Blocs plugins dans le catalogue (`GET /api/v1/flows/blocks`) ; `video/audio.encode` via FFmpeg (`tool.ffmpeg`, repli `FFMPEG`/PATH) |
 | Versions de flux | [#110](https://github.com/remi-deher/flux-de-fichiers/pull/110) | `GET /api/v1/flows/{id}/versions[/{v}]` ; tiroir « Versions » de l'éditeur (restaurer puis enregistrer) |
+| Remux MP4 (MP4Box) | [#114](https://github.com/remi-deher/flux-de-fichiers/pull/114) | `block.video.remux-mp4` exécuté (`tool.mp4box`, repli `MP4BOX`/PATH) ; exécuteur partagé `tool_run` (erreurs typées `ToolRunError`, progression lue sur `\r`/`\n`) |
+| Repli GPU → CPU | [#133](https://github.com/remi-deher/flux-de-fichiers/pull/133) | Échec FFmpeg avec encodeur matériel : repli journalisé et une seule retentative en CPU |
+| Secrets du bail limités | [#134](https://github.com/remi-deher/flux-de-fichiers/pull/134) | Le bail ne porte que les connexions *arr* des blocs du flux figé |
 | Défaut `encoder: auto` | `flux-de-fichiers-plugins` `main` | `plugins/video/blocks/video-encode.json` |
 
 ## Non vérifié
@@ -102,7 +105,9 @@ paramètres.
 
 **Moteur et plugins**
 
-- `block.video.remux-mp4` (MP4Box) encore traversé, pas exécuté.
+- Le remux MP4 est exécuté par `MP4Box -add … -new` ; le fichier de sortie reste validé par `mkvmerge` à la publication (à vérifier en réel sur un `.mp4`).
+- Le bail porte encore le clair des secrets nécessaires au flux (le worker n'a pas la clé) ; seul un chiffrement par clé de worker changerait cela.
+- `binaryRelativePath` des fiches de distribution (`bin/MP4Box`, `bin/ffmpeg`, `bin/mkvmerge`) contient déjà `bin/` alors que `tools_cache` l'ajoute : à vérifier quand les artefacts réels existeront.
 - Artefacts FFmpeg du catalogue encore `contract-only` (besoin de binaires réels ou `FFMPEG`).
 - Pas de fallback GPU → CPU automatique.
 - Pas de runner argv déclaratif générique (mapping kind encore en Rust).
@@ -151,11 +156,11 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 
 ### 3. Moteur et plugins
 
-- [ ] Exécuter `block.video.remux-mp4` (MP4Box) — aujourd'hui traversé.
+- [x] Exécuter `block.video.remux-mp4` (MP4Box) (#114).
 - [ ] Artefacts FFmpeg réels dans le catalogue (aujourd'hui `contract-only`, repli `FFMPEG`/PATH).
-- [ ] Repli automatique GPU → CPU quand l'encodeur matériel échoue.
+- [x] Repli automatique GPU → CPU quand l'encodeur matériel échoue (#133).
 - [ ] Runner générique déclaratif (argv décrit par le plugin) au lieu du mapping par type en Rust.
-- [ ] Ne plus faire voyager en clair dans le bail les secrets webhook / *arr* (à durcir).
+- [x] Limiter les secrets du bail à ceux du flux figé (#134). Reste : chiffrement par clé de worker (à cadrer).
 - [ ] Requêtes SQL vérifiées à la compilation (`sqlx::query!` + `.sqlx`, voir l'audit).
 
 ### 4. À cadrer avec Remi avant de coder

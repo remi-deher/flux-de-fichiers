@@ -17,6 +17,10 @@ pub fn propedit_executable() -> String {
     std::env::var("MKVPROPEDIT").unwrap_or_else(|_| "mkvpropedit".into())
 }
 
+pub fn ffmpeg_executable() -> String {
+    std::env::var("FFMPEG").unwrap_or_else(|_| "ffmpeg".into())
+}
+
 /// Édition non destructive en place des en-têtes EBML Matroska (ADR 0008).
 pub async fn propedit_in_place(
     bin: &Path,
@@ -235,4 +239,51 @@ where
     };
     validate_remux_with(bin, source, output).await?;
     Ok(warning)
+}
+
+/// Lance FFmpeg avec un argv déjà construit (sans l'exécutable) ; progresse via stderr.
+pub async fn encode_with_progress<F>(
+    bin: &Path,
+    args: &[String],
+    mut on_progress: F,
+) -> anyhow::Result<()>
+where
+    F: FnMut(u32, &str) + Send + 'static,
+{
+    let mut child = Command::new(bin)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()?;
+    let stderr = child.stderr.take().context("missing stderr")?;
+    let mut reader = tokio::io::BufReader::new(stderr).lines();
+    let read_progress = async {
+        while let Ok(Some(line)) = reader.next_line().await {
+            if let Some(time) = line.split("time=").nth(1) {
+                let stamp = time.split_whitespace().next().unwrap_or("");
+                on_progress(0, stamp);
+            } else if line.contains("frame=") {
+                on_progress(0, &line);
+            }
+        }
+    };
+    let wait_child = async {
+        let status = child.wait().await?;
+        anyhow::Ok(status)
+    };
+    let (status, _) = tokio::time::timeout(TOOL_TIMEOUT, async {
+        tokio::try_join!(wait_child, async {
+            read_progress.await;
+            anyhow::Ok(())
+        })
+    })
+    .await
+    .context("ffmpeg timed out")??;
+    anyhow::ensure!(
+        status.code() == Some(0),
+        "ffmpeg failed with code: {:?}",
+        status.code()
+    );
+    Ok(())
 }

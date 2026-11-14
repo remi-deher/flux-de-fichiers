@@ -70,7 +70,8 @@ paramètres.
   à jour, import de flux depuis le catalogue (route inexistante), simulation animée.
 - Éditeur de flux : pas de glisser-déposer, pas d'avertissement en quittant avec des
   modifications, pas de consultation ni de restauration des versions ; les blocs des dépôts de
-  plugins n'apparaissent pas dans la palette ; le bloc vidéo n'a pas de réglages d'encodage.
+  plugins apparaissent dans la palette via `GET /api/v1/flows/blocks` ; le remux MP4
+  (MP4Box) n'est pas encore exécuté.
 - Tâches : pas de choix du worker à la création ; 200 tâches au plus, sans pagination.
 - Session expirée en cours d'usage : message d'erreur, retour à la connexion seulement en
   rechargeant la page.
@@ -82,7 +83,9 @@ paramètres.
 
 - **Les workers distants ne font qu'un remux et ignorent les flux** ; seul le worker intégré
   exécute les flux. Priorité produit.
-- Encodage par plugins non construit ; blocs des dépôts de plugins non exécutables (traversés).
+- Encodage vidéo/audio via FFmpeg distribué (`tool.ffmpeg`, repli `FFMPEG`/PATH) ;
+  remux MP4 (MP4Box) encore traversé ; artefacts FFmpeg du catalogue encore
+  `contract-only` (URL d'exemple).
 - IA et MCP non commencés.
 - Baux sans numéro d'époque (*fencing*) : un ancien worker peut encore répondre tard.
 - Requêtes SQL non vérifiées à la compilation (`query!` non adopté, voir l'audit).
@@ -93,7 +96,7 @@ paramètres.
 
 1. Se connecter à l'essai et parcourir chaque écran ; corriger ce que le WASM révèle.
 2. Exécution des flux par les workers distants (le flux figé doit voyager avec le bail).
-3. Encodage par plugins : blocs des dépôts dans la palette et exécution.
+3. ~~Encodage par plugins~~ (palette + exécution vidéo/audio) ; rester : MP4Box, binaires FFmpeg réels.
 4. Numéro d'époque des baux.
 5. Écrans manquants : versions des flux, recherche, navigation mobile.
 6. IA et MCP (ADR à écrire).

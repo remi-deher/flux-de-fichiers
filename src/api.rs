@@ -111,6 +111,7 @@ fn json_routes() -> Router<AppState> {
                 .delete(libraries::delete),
         )
         .route("/api/v1/flows", get(flows::list_flows))
+        .route("/api/v1/flows/blocks", get(flows::list_blocks))
         .route(
             "/api/v1/flows/{id}",
             get(flows::get_flow)

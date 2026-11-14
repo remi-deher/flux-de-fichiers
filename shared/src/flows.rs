@@ -10,9 +10,11 @@ use std::fmt;
 
 mod catalog;
 mod graph;
+mod owned;
 
 pub use catalog::{BlockSpec, FieldKind, FieldSpec, block_catalog, block_spec};
 pub use graph::{GraphError, GraphPosition, layout};
+pub use owned::{OwnedBlockSpec, OwnedFieldKind, OwnedFieldSpec, find_owned, native_owned_catalog};
 
 /// Flux enregistré, tel que l'API le renvoie (définition JSON en texte, secrets masqués).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -92,7 +94,10 @@ pub enum FlowBlockKind {
     Condition,
     Mkvpropedit,
     RemuxMkv,
+    RemuxMp4,
     VideoEncode,
+    AudioEncode,
+    MediaInspect,
     Webhook,
     SonarrRescan,
     SonarrRename,
@@ -108,8 +113,12 @@ impl FlowBlockKind {
             "file-input" => Self::FileInput,
             "condition" => Self::Condition,
             "mkvpropedit" => Self::Mkvpropedit,
-            "remux-mkv" => Self::RemuxMkv,
-            "video-encode" => Self::VideoEncode,
+            // Identifiants plugins (ADR 0006) et alias historiques de l'éditeur natif.
+            "remux-mkv" | "block.video.remux-mkv" => Self::RemuxMkv,
+            "remux-mp4" | "block.video.remux-mp4" => Self::RemuxMp4,
+            "video-encode" | "block.video.encode" => Self::VideoEncode,
+            "audio-encode" | "block.audio.encode" => Self::AudioEncode,
+            "media-inspect" | "block.media.inspect" => Self::MediaInspect,
             "webhook" => Self::Webhook,
             "sonarr-rescan" => Self::SonarrRescan,
             "sonarr-rename" => Self::SonarrRename,
@@ -125,8 +134,11 @@ impl FlowBlockKind {
             Self::FileInput => "file-input",
             Self::Condition => "condition",
             Self::Mkvpropedit => "mkvpropedit",
-            Self::RemuxMkv => "remux-mkv",
-            Self::VideoEncode => "video-encode",
+            Self::RemuxMkv => "block.video.remux-mkv",
+            Self::RemuxMp4 => "block.video.remux-mp4",
+            Self::VideoEncode => "block.video.encode",
+            Self::AudioEncode => "block.audio.encode",
+            Self::MediaInspect => "block.media.inspect",
             Self::Webhook => "webhook",
             Self::SonarrRescan => "sonarr-rescan",
             Self::SonarrRename => "sonarr-rename",
@@ -204,29 +216,34 @@ mod tests {
 
     #[test]
     fn kind_roundtrip_keeps_unknown_blocks() -> Result<(), serde_json::Error> {
-        for label in [
-            "file-input",
-            "condition",
-            "mkvpropedit",
-            "remux-mkv",
-            "video-encode",
-            "webhook",
-            "sonarr-rescan",
-            "sonarr-rename",
-            "radarr-rescan",
-            "radarr-rename",
-            "file-output",
-            "remux-mp4",
+        for (stored, canonical) in [
+            ("file-input", "file-input"),
+            ("condition", "condition"),
+            ("mkvpropedit", "mkvpropedit"),
+            ("remux-mkv", "block.video.remux-mkv"),
+            ("block.video.remux-mkv", "block.video.remux-mkv"),
+            ("video-encode", "block.video.encode"),
+            ("block.video.encode", "block.video.encode"),
+            ("audio-encode", "block.audio.encode"),
+            ("block.audio.encode", "block.audio.encode"),
+            ("block.media.inspect", "block.media.inspect"),
+            ("block.video.remux-mp4", "block.video.remux-mp4"),
+            ("webhook", "webhook"),
+            ("sonarr-rescan", "sonarr-rescan"),
+            ("sonarr-rename", "sonarr-rename"),
+            ("radarr-rescan", "radarr-rescan"),
+            ("radarr-rename", "radarr-rename"),
+            ("file-output", "file-output"),
         ] {
-            let kind = FlowBlockKind::parse(label);
-            assert_eq!(kind.as_str(), label);
+            let kind = FlowBlockKind::parse(stored);
+            assert_eq!(kind.as_str(), canonical);
             assert_eq!(
                 serde_json::from_str::<FlowBlockKind>(&serde_json::to_string(&kind)?)?,
                 kind
             );
         }
         assert!(matches!(
-            FlowBlockKind::parse("remux-mp4"),
+            FlowBlockKind::parse("macro.unknown"),
             FlowBlockKind::Other(_)
         ));
         Ok(())

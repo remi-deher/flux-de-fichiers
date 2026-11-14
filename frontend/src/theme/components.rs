@@ -232,6 +232,58 @@ pub const COMPONENTS_CSS: &str = r#"
   margin-top: 0;
 }
 
+/* --- Tableau à onglets : la navigation est attachée au haut du tableau --- */
+.tabbed-table {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.tabbed-table__tabs {
+  padding: 0.35rem 0.5rem 0;
+  background-color: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tabbed-table__tabs .app-subnav__scroller {
+  gap: 0.15rem;
+  width: 100%;
+}
+
+.tabbed-table__tabs .subnav-tab {
+  min-height: 34px;
+  margin-bottom: -1px;
+  padding: 0 0.85rem;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.tabbed-table__tabs .subnav-tab.active,
+.tabbed-table__tabs .subnav-tab[aria-selected="true"] {
+  background: var(--bg-card);
+  border-color: var(--border-color);
+  box-shadow: inset 0 2px 0 var(--primary);
+}
+
+.tabbed-table__body .table-wrapper {
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.tabbed-table__body .registre {
+  gap: 0;
+}
+
+.tabbed-table__body .section-subtitle,
+.tabbed-table__body .form-help:not(:empty) {
+  margin: 0;
+  padding: 0.6rem 1rem;
+}
+
 .inspection-drawer__actions {
   display: flex;
   gap: 0.5rem;

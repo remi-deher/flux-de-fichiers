@@ -18,6 +18,24 @@ impl SubTab {
     }
 }
 
+/// Rangée d'onglets sélectionnables, commune à la sous-navigation et au tableau à onglets.
+#[component]
+pub fn SubTabList(tabs: Vec<SubTab>, selected: RwSignal<usize>) -> impl IntoView {
+    view! {
+        <div class="app-subnav__scroller subnav-tabs" role="tablist">
+            {tabs.into_iter().enumerate().map(|(index, tab)| view! {
+                <button type="button" role="tab" class="app-subnav__item subnav-tab"
+                    class:active=move || selected.get() == index
+                    aria-selected=move || (selected.get() == index).to_string()
+                    on:click=move |_| selected.set(index)>
+                    {tab.icon.map(|icon| view! { <span class="app-subnav__icon subnav-tab-icon" aria-hidden="true">{icon}</span> })}
+                    <span class="app-subnav__label subnav-tab-label">{tab.label}</span>
+                </button>
+            }).collect_view()}
+        </div>
+    }
+}
+
 #[component]
 pub fn SubNav(
     aria_label: &'static str,
@@ -29,17 +47,7 @@ pub fn SubNav(
         <nav class="page-subnav app-subnav-toolbar" aria-label=aria_label>
             <div class="subnav-container app-subnav-container">
                 <div class="app-subnav">
-                    <div class="app-subnav__scroller subnav-tabs" role="tablist">
-                        {tabs.into_iter().enumerate().map(|(index, tab)| view! {
-                            <button type="button" role="tab" class="app-subnav__item subnav-tab"
-                                class:active=move || selected.get() == index
-                                aria-selected=move || (selected.get() == index).to_string()
-                                on:click=move |_| selected.set(index)>
-                                {tab.icon.map(|icon| view! { <span class="app-subnav__icon subnav-tab-icon" aria-hidden="true">{icon}</span> })}
-                                <span class="app-subnav__label subnav-tab-label">{tab.label}</span>
-                            </button>
-                        }).collect_view()}
-                    </div>
+                    <SubTabList tabs=tabs selected=selected />
                 </div>
                 <div class="subnav-actions">{actions}</div>
             </div>

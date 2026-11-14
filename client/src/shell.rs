@@ -7,6 +7,7 @@ use crate::theme::ThemePicker;
 use crate::ui::filters::{FilterSheet, Filters};
 use crate::ui::global_search::SearchResults;
 use crate::ui::search::Search;
+use crate::ui::topbar_action::{TopbarAction, TopbarActionSlot};
 use crate::ui::{Icon, IconName};
 use chrono::Utc;
 use flux_shared::session::Me;
@@ -282,6 +283,7 @@ fn Topbar(me: Me) -> impl IntoView {
                                 prop:value=move || search.text.get()
                                 on:input=move |event| search.text.set(event_target_value(&event)) />
                         </div>
+                        <TopbarActionSlot />
                     </div>
                     <SearchResults me=me.clone() opened=opened focused=focused />
                 </div>
@@ -299,6 +301,7 @@ fn Topbar(me: Me) -> impl IntoView {
 pub fn Shell(me: Me, children: Children) -> impl IntoView {
     Search::install();
     Filters::install();
+    TopbarAction::install();
     let nav = RwSignal::new(false);
     provide_context(NavDrawer(nav));
     let _escape = window_event_listener(leptos::ev::keydown, move |event| {

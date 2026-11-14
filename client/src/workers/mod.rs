@@ -22,7 +22,27 @@ mrcryllix/flux-de-fichiers:latest worker"
     )
 }
 
-fn origin() -> String {
+/// Service `compose` d'un worker distant ; la clé vient d'un fichier, jamais d'une valeur en clair.
+pub fn enroll_compose(origin: &str) -> String {
+    format!(
+        "services:
+  flux-worker:
+    image: mrcryllix/flux-de-fichiers:latest
+    command: worker
+    restart: unless-stopped
+    environment:
+      CENTRAL_URL: {origin}
+      WORKER_KEY_FILE: /config/worker_key
+    volumes:
+      - flux-worker:/config
+      - /chemin/data:/data
+volumes:
+  flux-worker:
+"
+    )
+}
+
+pub fn origin() -> String {
     window().location().origin().unwrap_or_default()
 }
 
@@ -191,5 +211,13 @@ mod tests {
         assert!(command.contains("WORKER_KEY_FILE="));
         assert!(command.ends_with(" worker"));
         assert!(!command.contains("WORKER_KEY="));
+    }
+
+    #[test]
+    fn compose_snippet_targets_this_central_without_any_secret() {
+        let compose = enroll_compose("https://flux.example");
+        assert!(compose.contains("CENTRAL_URL: https://flux.example"));
+        assert!(compose.contains("WORKER_KEY_FILE: /config/worker_key"));
+        assert!(!compose.contains("WORKER_KEY:"));
     }
 }

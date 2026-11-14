@@ -164,7 +164,8 @@ pub async fn list_account_copies(pool: &SqlitePool) -> AppResult<Vec<AccountCopy
 /// Retrouve un compte par adresse e-mail (sans tenir compte de la casse).
 pub async fn find_account_by_email(pool: &SqlitePool, email: &str) -> AppResult<Option<Account>> {
     sqlx::query_as::<_, AccountRow>(
-        "SELECT id, username, password_hash, role, disabled, email FROM accounts WHERE email = ?1",
+        "SELECT id, username, password_hash, role, disabled, email FROM accounts \
+         WHERE email = ?1 COLLATE NOCASE",
     )
     .bind(email)
     .fetch_optional(pool)

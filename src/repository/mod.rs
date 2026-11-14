@@ -6,7 +6,7 @@ mod plugins;
 
 pub use flows::{
     DEFINITION_STORES, DefinitionStore, default_flow, delete_flow, get_flow, get_flow_version,
-    list_flows, save_flow,
+    list_flow_versions, list_flows, save_flow,
 };
 pub use identity::{
     Account, ApiKeyRecord, INSTANCE_NAME_KEY, account_count, create_account, create_first_account,

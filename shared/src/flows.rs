@@ -32,6 +32,15 @@ pub struct FlowRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Version figée d'un flux, telle que listée par `GET /api/v1/flows/{id}/versions`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
+pub struct FlowVersionSummary {
+    pub version: i64,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+}
+
 /// Corps de `PUT /api/v1/flows/{id}`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UpdateFlowRequest {

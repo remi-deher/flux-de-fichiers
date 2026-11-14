@@ -36,6 +36,7 @@ async fn test_app() -> anyhow::Result<(axum::Router, tempfile::TempDir)> {
         web_origin: None,
         web_session_ttl_seconds: 28_800,
         tls: None,
+        smtp: None,
     };
     std::fs::create_dir_all(&config.config_dir)?;
     std::fs::create_dir_all(&config.tools_cache_dir)?;

@@ -33,6 +33,7 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         web_origin: None,
         web_session_ttl_seconds: WEB_SESSION_TTL_SECONDS,
         tls: None,
+        smtp: None,
     };
     let pool = SqlitePoolOptions::new()
         .connect(&config.database_url)

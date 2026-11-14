@@ -1,9 +1,13 @@
+use serde::{Deserialize, Serialize};
 use std::{
     env,
     net::SocketAddr,
     path::{Path, PathBuf},
 };
 
+const SMTP_STARTTLS_PORT: u16 = 587;
+const SMTP_TLS_PORT: u16 = 465;
+const SMTP_PLAIN_PORT: u16 = 25;
 const DEFAULT_BIND_ADDRESS: &str = "0.0.0.0:3000";
 const DEFAULT_WEB_SESSION_TTL_SECONDS: i64 = 28_800;
 const MAX_WEB_SESSION_TTL_SECONDS: i64 = 2_592_000;
@@ -23,6 +27,94 @@ pub struct Config {
     pub web_origin: Option<String>,
     pub web_session_ttl_seconds: i64,
     pub tls: Option<(PathBuf, PathBuf)>,
+    /// Relais d'envoi des courriels ; absent, le mot de passe oublié par courriel est désactivé.
+    pub smtp: Option<SmtpConfig>,
+}
+
+/// Chiffrement de la connexion au relais SMTP (`SMTP_TLS`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SmtpTls {
+    /// Connexion en clair puis passage en TLS (port 587 par défaut).
+    #[serde(rename = "starttls")]
+    StartTls,
+    /// TLS dès la connexion (port 465 par défaut).
+    Tls,
+    /// Aucun chiffrement (port 25 par défaut) : à réserver à un relais local.
+    None,
+}
+
+impl SmtpTls {
+    pub const fn default_port(self) -> u16 {
+        match self {
+            Self::StartTls => SMTP_STARTTLS_PORT,
+            Self::Tls => SMTP_TLS_PORT,
+            Self::None => SMTP_PLAIN_PORT,
+        }
+    }
+
+    fn parse(raw: &str) -> anyhow::Result<Self> {
+        Ok(serde_json::from_value(serde_json::Value::String(
+            raw.trim().to_lowercase(),
+        ))?)
+    }
+}
+
+/// Réglages SMTP. Le mot de passe vient d'un fichier ou de l'environnement, jamais de la base.
+#[derive(Clone)]
+pub struct SmtpConfig {
+    pub host: String,
+    pub port: u16,
+    pub tls: SmtpTls,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub from: String,
+}
+
+impl SmtpConfig {
+    /// Lit `SMTP_*` ; `None` si `SMTP_HOST` n'est pas défini.
+    pub fn from_env() -> anyhow::Result<Option<Self>> {
+        let password =
+            if env::var("SMTP_PASSWORD").is_ok() || env::var("SMTP_PASSWORD_FILE").is_ok() {
+                Some(value("SMTP_PASSWORD")?)
+            } else {
+                None
+            };
+        Self::from_variables(|name| env::var(name).ok(), password)
+    }
+
+    fn from_variables(
+        variable: impl Fn(&str) -> Option<String>,
+        password: Option<String>,
+    ) -> anyhow::Result<Option<Self>> {
+        let Some(host) = variable("SMTP_HOST").filter(|host| !host.trim().is_empty()) else {
+            return Ok(None);
+        };
+        let tls = variable("SMTP_TLS")
+            .map(|raw| SmtpTls::parse(&raw))
+            .transpose()?
+            .unwrap_or(SmtpTls::StartTls);
+        let port = variable("SMTP_PORT")
+            .map(|raw| raw.trim().parse())
+            .transpose()?
+            .unwrap_or_else(|| tls.default_port());
+        let from = variable("SMTP_FROM")
+            .filter(|from| !from.trim().is_empty())
+            .ok_or_else(|| anyhow::anyhow!("SMTP_FROM is required with SMTP_HOST"))?;
+        let username = variable("SMTP_USERNAME").filter(|name| !name.is_empty());
+        anyhow::ensure!(
+            username.is_some() == password.is_some(),
+            "SMTP_USERNAME and SMTP_PASSWORD must be supplied together"
+        );
+        Ok(Some(Self {
+            host: host.trim().to_owned(),
+            port,
+            tls,
+            username,
+            password,
+            from: from.trim().to_owned(),
+        }))
+    }
 }
 
 pub fn value(name: &str) -> anyhow::Result<String> {
@@ -190,6 +282,125 @@ impl Config {
                 }
             }),
             static_dir,
+            smtp: SmtpConfig::from_env()?,
         })
+    }
+
+    /// Le lien de réinitialisation peut-il être envoyé : relais SMTP et adresse publique connus ?
+    pub fn password_reset_enabled(&self) -> bool {
+        self.smtp.is_some() && self.web_origin.is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn smtp(vars: &[(&str, &str)], password: Option<&str>) -> anyhow::Result<Option<SmtpConfig>> {
+        let map: HashMap<String, String> = vars
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+            .collect();
+        SmtpConfig::from_variables(|name| map.get(name).cloned(), password.map(str::to_owned))
+    }
+
+    #[test]
+    fn test_smtp_is_disabled_without_a_host() -> anyhow::Result<()> {
+        assert!(smtp(&[("SMTP_FROM", "a@b.fr")], None)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_smtp_defaults_follow_the_tls_mode() -> anyhow::Result<()> {
+        let config = smtp(
+            &[("SMTP_HOST", "smtp.exemple.fr"), ("SMTP_FROM", "a@b.fr")],
+            None,
+        )?
+        .ok_or_else(|| anyhow::anyhow!("absent"))?;
+        assert_eq!((config.tls, config.port), (SmtpTls::StartTls, 587));
+        let implicit = smtp(
+            &[
+                ("SMTP_HOST", "h"),
+                ("SMTP_FROM", "a@b.fr"),
+                ("SMTP_TLS", "TLS"),
+            ],
+            None,
+        )?
+        .ok_or_else(|| anyhow::anyhow!("absent"))?;
+        assert_eq!((implicit.tls, implicit.port), (SmtpTls::Tls, 465));
+        let plain = smtp(
+            &[
+                ("SMTP_HOST", "h"),
+                ("SMTP_FROM", "a@b.fr"),
+                ("SMTP_TLS", "none"),
+                ("SMTP_PORT", "2525"),
+            ],
+            None,
+        )?
+        .ok_or_else(|| anyhow::anyhow!("absent"))?;
+        assert_eq!((plain.tls, plain.port), (SmtpTls::None, 2525));
+        Ok(())
+    }
+
+    #[test]
+    fn test_smtp_rejects_incomplete_or_unknown_settings() {
+        assert!(smtp(&[("SMTP_HOST", "h")], None).is_err());
+        assert!(
+            smtp(
+                &[
+                    ("SMTP_HOST", "h"),
+                    ("SMTP_FROM", "a@b.fr"),
+                    ("SMTP_TLS", "ssl")
+                ],
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            smtp(
+                &[
+                    ("SMTP_HOST", "h"),
+                    ("SMTP_FROM", "a@b.fr"),
+                    ("SMTP_PORT", "x")
+                ],
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            smtp(
+                &[
+                    ("SMTP_HOST", "h"),
+                    ("SMTP_FROM", "a@b.fr"),
+                    ("SMTP_USERNAME", "u")
+                ],
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            smtp(
+                &[("SMTP_HOST", "h"), ("SMTP_FROM", "a@b.fr")],
+                Some("secret")
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_smtp_accepts_credentials_together() -> anyhow::Result<()> {
+        let config = smtp(
+            &[
+                ("SMTP_HOST", "h"),
+                ("SMTP_FROM", "a@b.fr"),
+                ("SMTP_USERNAME", "u"),
+            ],
+            Some("secret"),
+        )?
+        .ok_or_else(|| anyhow::anyhow!("absent"))?;
+        assert_eq!(config.username.as_deref(), Some("u"));
+        assert_eq!(config.password.as_deref(), Some("secret"));
+        Ok(())
     }
 }

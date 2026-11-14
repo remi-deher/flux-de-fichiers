@@ -3,7 +3,7 @@
 use super::{AppState, session};
 use crate::{
     error::{AppError, AppResult},
-    password, repository, web_session,
+    password, password_reset, repository, web_session,
 };
 use axum::{Json, extract::State, http::HeaderMap, response::Response};
 pub use flux_shared::system::{SetupRequest, SetupStatus};
@@ -16,6 +16,7 @@ pub async fn status(State(state): State<AppState>) -> AppResult<Json<SetupStatus
         needs_setup: repository::account_count(&state.pool).await? == 0,
         instance_name: repository::get_setting(&state.pool, repository::INSTANCE_NAME_KEY).await?,
         instance_kind: InstanceKind::Central,
+        password_reset_enabled: state.config.password_reset_enabled(),
     }))
 }
 
@@ -45,10 +46,22 @@ pub async fn setup_central(
     password::validate_password(&request.password)?;
     // Le secret de chiffrement est généré maintenant, sans rien demander à l'utilisateur.
     crate::secrets::SecretBox::open(&state.config.config_dir)?;
+    let email = request
+        .email
+        .as_deref()
+        .map(password_reset::parse_optional_email)
+        .transpose()?
+        .flatten();
     let hash = password::hash(request.password).await?;
-    let account = repository::create_first_account(&state.pool, &username, &hash, Role::Admin)
-        .await?
-        .ok_or(AppError::AlreadyConfigured)?;
+    let account = repository::create_first_account(
+        &state.pool,
+        &username,
+        &hash,
+        Role::Admin,
+        email.as_deref(),
+    )
+    .await?
+    .ok_or(AppError::AlreadyConfigured)?;
     repository::set_setting(&state.pool, repository::INSTANCE_NAME_KEY, &name).await?;
     session::open_session(&state, &account).await
 }

@@ -170,6 +170,7 @@ async fn setup_status(State(web): Web) -> Json<SetupStatus> {
         needs_setup: false,
         instance_name: Some(web.status.name.clone()),
         instance_kind: InstanceKind::Worker,
+        password_reset_enabled: false,
     })
 }
 

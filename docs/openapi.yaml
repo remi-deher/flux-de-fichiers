@@ -373,6 +373,9 @@ paths:
                 properties:
                   needsSetup: {type: boolean}
                   instanceName: {type: [string, 'null']}
+                  passwordResetEnabled:
+                    type: boolean
+                    description: Le central peut envoyer un lien de réinitialisation par courriel (SMTP et WEB_ORIGIN configurés).
   /api/v1/setup/central:
     post:
       security: []
@@ -393,6 +396,7 @@ paths:
                 name: {type: string}
                 username: {type: string, minLength: 3, maxLength: 40}
                 password: {type: string, minLength: 8, writeOnly: true}
+                email: {type: string, description: Adresse de l'administrateur, facultative (mot de passe oublié)}
       responses:
         '200':
           description: Installation faite et session ouverte
@@ -562,6 +566,54 @@ paths:
         '401': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/auth/forgot-password:
+    post:
+      security: []
+      summary: Demander un lien de réinitialisation du mot de passe par courriel
+      description: >-
+        Répond 202 que l'adresse corresponde à un compte actif ou non (l'envoi se fait en arrière-plan).
+        Un jeton à usage unique (30 minutes, haché en base) est envoyé dans un lien `<WEB_ORIGIN>/#reset=<jeton>`.
+        Limites : 5 demandes par quart d'heure et par adresse (429 `too_many_attempts`), un courriel par
+        minute et par compte. 404 si SMTP ou WEB_ORIGIN n'est pas configuré. Origin exact requis (ADR 0015).
+      parameters: [{$ref: '#/components/parameters/OriginHeader'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: {type: string}
+      responses:
+        '202': {description: Demande prise en compte}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/auth/reset-password:
+    post:
+      security: []
+      summary: Choisir un nouveau mot de passe avec le jeton reçu par courriel
+      description: >-
+        Consomme le jeton (un seul usage), change le mot de passe et ferme toutes les sessions du compte.
+        400 si le jeton est inconnu, expiré ou déjà utilisé, ou si le mot de passe est refusé (le jeton
+        n'est alors pas consommé). Origin exact requis.
+      parameters: [{$ref: '#/components/parameters/OriginHeader'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, new_password]
+              properties:
+                token: {type: string}
+                new_password: {type: string, minLength: 8, writeOnly: true}
+      responses:
+        '204': {description: Mot de passe changé}
+        '400': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/me:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
@@ -695,6 +747,9 @@ paths:
               properties:
                 role: {type: string, enum: [admin, viewer]}
                 disabled: {type: boolean}
+                email:
+                  type: string
+                  description: Nouvelle adresse (chaîne vide pour l'effacer) ; ne ferme pas les sessions. 409 si elle est déjà prise.
       responses:
         '200': {description: Compte mis à jour}
         '404': {$ref: '#/components/responses/Error'}

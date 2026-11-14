@@ -28,6 +28,7 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         web_origin: None,
         web_session_ttl_seconds: 28_800,
         tls: None,
+        smtp: None,
     };
     let pool = SqlitePoolOptions::new()
         .connect(&config.database_url)
@@ -288,6 +289,7 @@ async fn secrets_app() -> anyhow::Result<(axum::Router, sqlx::SqlitePool, tempfi
         web_origin: None,
         web_session_ttl_seconds: 28_800,
         tls: None,
+        smtp: None,
     };
     let pool = SqlitePoolOptions::new()
         .max_connections(1)

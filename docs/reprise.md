@@ -93,8 +93,11 @@ paramètres.
 - Éditeur de flux : glisser-déposer sans position libre (mise en page automatique) ; non essayé
   en réel (HTML5 DnD, `beforeunload`). Restaurer une version garde les en-têtes secrets du flux courant (masqués).
 - Aucun de ces écrans ni leurs correctifs (recherche globale, tiroir mobile, session expirée, choix du worker, pagination) n'a été ouvert en réel : seuls clippy et les tests natifs ont tourné.
-- Pas d'écran « mot de passe oublié » ; rotation de clé en CLI ; pas de changement de mot de
-  passe sur un worker.
+- « Mot de passe oublié » par courriel SMTP (ADR 0015) : écrit et couvert par des tests natifs, jamais
+  essayé contre un vrai relais SMTP ni dans le navigateur. Les comptes existants n'ont pas d'adresse :
+  un administrateur la renseigne (Paramètres > Utilisateurs, bouton « E-mail »). Rotation de clé en CLI ;
+  pas de changement de mot de passe sur un worker (le worker ne propose pas le lien : ses comptes sont
+  une copie du central, il faudrait une route de relais vers le central).
 - Accessibilité non auditée ; sans JavaScript ni WebAssembly, aucune interface.
 
 **Moteur et plugins**
@@ -141,8 +144,8 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 - [x] Éditeur de flux : glisser-déposer palette → carte et carte → carte (`flows/dnd.rs`, règles de `FlowGraph::connect`, alternative clic/liste conservée) ; confirmation avant de quitter avec des modifications (routeur, retour arrière, `beforeunload`).
 - [x] Tâches : choix du worker à la création (#118) ; pagination au-delà de 200 (#119, bouton « Charger les tâches plus anciennes »).
 - [x] Session expirée : un 401 sur session ouverte recharge la page, qui affiche la connexion (#117).
-- [ ] « Mot de passe oublié » à l'écran (aujourd'hui CLI `reset-password`) ; changement de mot de
-      passe sur un worker (route absente).
+- [x] « Mot de passe oublié » par courriel SMTP (ADR 0015) ; la CLI `reset-password` reste le recours.
+- [ ] Changement de mot de passe sur un worker (route absente, relais vers le central à cadrer).
 - [ ] Audit d'accessibilité.
 
 ### 3. Moteur et plugins

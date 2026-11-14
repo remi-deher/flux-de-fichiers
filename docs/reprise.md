@@ -91,8 +91,7 @@ paramètres.
   simulation animée.
 - Éditeur de flux : pas de glisser-déposer, pas d'avertissement en quittant avec des
   modifications. Restaurer une version garde les en-têtes secrets du flux courant (masqués).
-- Tâches : pas de choix du worker à la création ; 200 tâches au plus, sans pagination.
-- Session expirée : message d'erreur ; retour à la connexion seulement en rechargeant.
+- Aucun de ces écrans ni leurs correctifs (recherche globale, tiroir mobile, session expirée, choix du worker, pagination) n'a été ouvert en réel : seuls clippy et les tests natifs ont tourné.
 - Pas d'écran « mot de passe oublié » ; rotation de clé en CLI ; pas de changement de mot de
   passe sur un worker.
 - Accessibilité non auditée ; sans JavaScript ni WebAssembly, aucune interface.
@@ -132,14 +131,14 @@ Chaque point est indépendant sauf mention. Cocher ou retirer au fil de l'eau.
 
 ### 2. Interface (client WASM, `client/src/`)
 
-- [ ] Recherche globale (aujourd'hui la recherche de la barre du haut filtre l'écran courant).
-- [ ] Navigation mobile.
+- [x] Recherche globale (#115) : tâches, flux, bibliothèques, workers, plugins ; le résultat mène à l'objet (éditeur du flux, ou écran filtré). Les listes sont lues à l'ouverture du champ, sans route dédiée ; les tâches se limitent à la première page de 200.
+- [x] Navigation mobile (#116) : barre latérale en tiroir sous 768 px. Non vérifiée sur un vrai écran.
 - [ ] Repris de l'ancienne interface : widgets de la vue d'ensemble, feuille de filtres de la
       barre du haut, onglets Réseau / Stockage des paramètres, télémétrie matérielle, page Mises à
       jour, simulation dans l'éditeur.
 - [ ] Éditeur de flux : glisser-déposer ; avertir avant de quitter avec des modifications.
-- [ ] Tâches : choisir le worker à la création ; pagination au-delà de 200.
-- [ ] Session expirée : retour automatique à la connexion (aujourd'hui message + rechargement).
+- [x] Tâches : choix du worker à la création (#118) ; pagination au-delà de 200 (#119, bouton « Charger les tâches plus anciennes »).
+- [x] Session expirée : un 401 sur session ouverte recharge la page, qui affiche la connexion (#117).
 - [ ] « Mot de passe oublié » à l'écran (aujourd'hui CLI `reset-password`) ; changement de mot de
       passe sur un worker (route absente).
 - [ ] Audit d'accessibilité.

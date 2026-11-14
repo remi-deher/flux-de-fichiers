@@ -17,6 +17,7 @@ const ORIGIN: &str = "http://localhost:3000";
 const PASSWORD: &str = "un-bon-mot-de-passe";
 const RESPONSE_LIMIT_BYTES: usize = 64 * 1024;
 const KEY_ID_HEX_LEN: usize = 8;
+const DIAGNOSTIC_CHECK_COUNT: usize = 6;
 
 async fn app() -> anyhow::Result<(axum::Router, tempfile::TempDir)> {
     let dir = tempfile::tempdir()?;
@@ -227,6 +228,83 @@ async fn test_hardware_is_readable_by_a_viewer_and_refused_without_session() -> 
     assert!((0.0..=100.0).contains(&cpu));
     assert!(body["gpuDevices"].is_array());
     let (anonymous, _, _) = call(&app, "GET", "/api/v1/system/hardware", None, None).await?;
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_diagnostics_are_admin_only_and_list_every_check() -> anyhow::Result<()> {
+    let (app, _dir) = app().await?;
+    let (_, headers, _) = call(
+        &app,
+        "POST",
+        "/api/v1/setup/central",
+        None,
+        Some(
+            serde_json::json!({"name": "Central", "username": "admin-diag", "password": PASSWORD}),
+        ),
+    )
+    .await?;
+    let admin = cookies_of(&headers);
+    let (created, _, _) = call(
+        &app,
+        "POST",
+        "/api/v1/accounts",
+        Some(&admin),
+        Some(
+            serde_json::json!({"username": "lecteur-diag", "password": PASSWORD, "role": "viewer"}),
+        ),
+    )
+    .await?;
+    assert_eq!(created, StatusCode::CREATED);
+    let (_, headers, _) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(serde_json::json!({"username": "lecteur-diag", "password": PASSWORD})),
+    )
+    .await?;
+    let viewer = cookies_of(&headers);
+    let request = serde_json::json!({"browserOrigin": ORIGIN});
+
+    let (status, _, body) = call(
+        &app,
+        "POST",
+        "/api/v1/system/diagnostics",
+        Some(&admin),
+        Some(request.clone()),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    let checks = body["checks"].as_array().cloned().unwrap_or_default();
+    assert_eq!(checks.len(), DIAGNOSTIC_CHECK_COUNT);
+    assert!(checks.iter().all(|check| {
+        ["ok", "warning", "error"].contains(&check["status"].as_str().unwrap_or_default())
+    }));
+    let smtp = checks.iter().find(|check| check["id"] == "smtp");
+    assert_eq!(
+        smtp.map(|check| check["status"].clone()),
+        Some("warning".into())
+    );
+
+    let (forbidden, _, _) = call(
+        &app,
+        "POST",
+        "/api/v1/system/diagnostics",
+        Some(&viewer),
+        Some(request.clone()),
+    )
+    .await?;
+    assert_eq!(forbidden, StatusCode::FORBIDDEN);
+    let (anonymous, _, _) = call(
+        &app,
+        "POST",
+        "/api/v1/system/diagnostics",
+        None,
+        Some(request),
+    )
+    .await?;
     assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
     Ok(())
 }

@@ -5,6 +5,7 @@
 
 pub mod accounts;
 pub mod app;
+pub mod diagnostics;
 pub mod flows;
 pub mod format;
 pub mod jobs;

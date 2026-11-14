@@ -42,8 +42,10 @@ Les migrations sont embarquées et appliquées au démarrage du central.
 - Chaîne média, baux, transferts ou Docker : tests d'intégration Rust de `tests/`
   (`cargo test`, exécutés par la CI). Ils ne prouvent ni la HA ni le
   fonctionnement sur plusieurs machines physiques.
-- CI : vérifier le workflow concerné. Le job `docker-scenarios` de `test.yml`
-  démarre l'image `pr-<sha12>` et attend `/health`, sans reconstruire le service.
+- CI : vérifier le workflow concerné. Le job `docker-build` de `test.yml`
+  construit l'image, la charge localement et attend `/health` sans rien publier ;
+  l'image `:test` / `:test-<sha12>` n'est construite et poussée qu'à la fusion
+  `dev → test` (job `docker-publish`, action `.github/actions/build-image`).
   Sur la PR `test → main`, `main-checks.yml` tire l'image `test-<sha12>` à promouvoir
   et démarre central et worker avec `compose.yaml`. Sans changement de code,
   les étapes de `test.yml` sont sautées et le check reste vert ; cela ne constitue

@@ -289,10 +289,19 @@ async fn jobs_keep_the_flow_version_frozen_at_creation() -> anyhow::Result<()> {
     assert_eq!(job.flow_id.as_deref(), Some("flow.v"));
     assert_eq!(job.flow_version, Some(1));
 
-    let worker = repository::register(&pool, "claim-flow").await?;
-    let claim = repository::claim(&pool, worker.id)
+    // Deux tâches créées dans la même seconde sortent dans un ordre non garanti
+    // (départage par id aléatoire) : un second worker prend l'autre au besoin.
+    let mut worker = repository::register(&pool, "claim-flow").await?;
+    let mut claim = repository::claim(&pool, worker.id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("bail avec flux figé"))?;
+    if claim.job_id != job.id {
+        worker = repository::register(&pool, "claim-flow-2").await?;
+        claim = repository::claim(&pool, worker.id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("bail de la tâche avec flux"))?;
+    }
+    assert_eq!(claim.job_id, job.id);
     let claimed_flow = claim
         .frozen_flow
         .as_ref()

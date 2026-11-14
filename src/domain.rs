@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub use flux_shared::flows::{FlowRecord, UpdateFlowRequest};
+pub use flux_shared::flows::{FlowRecord, FlowVersionSummary, UpdateFlowRequest};
 pub use flux_shared::jobs::{
     Job, JobErrorCode, JobEvent, JobEventType, JobStatus, MAX_ATTEMPTS, MediaFile, NewJob,
 };

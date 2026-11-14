@@ -4,8 +4,10 @@ use super::canvas::GraphCanvas;
 use super::inspector::NodeInspector;
 use super::palette::Palette;
 use super::state::{Editor, incomplete_blocks};
+use super::versions::FlowVersions;
 use crate::api;
 use crate::route::{Link, Route, encode_segment, use_router};
+use crate::ui::Drawer;
 use chrono::{DateTime, Utc};
 use flux_shared::Permission;
 use flux_shared::flows::{
@@ -58,6 +60,7 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
     let router = use_router();
     let editor = Editor::new(graph);
     let meta = RwSignal::new(record);
+    let versions_open = RwSignal::new(false);
     let feedback = RwSignal::new(None::<String>);
     let blocks = LocalResource::new(|| api::get::<Vec<OwnedBlockSpec>>(BLOCKS_PATH));
     Effect::new(move |_| {
@@ -121,12 +124,29 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
                     }}
                     {move || editor.dirty.get().then_some(" • modifications non enregistrées")}
                 </span>
-                {can_manage.then(|| view! {
-                    <button type="button" class="btn btn-primary" disabled=move || save.pending().get() on:click=on_save>
-                        "Enregistrer"
-                    </button>
-                })}
+                <div class="inline-actions">
+                    {move || (meta.get().version > 0).then(|| view! {
+                        <button type="button" class="btn btn-secondary btn-sm" on:click=move |_| versions_open.set(true)>"Versions"</button>
+                    })}
+                    {can_manage.then(|| view! {
+                        <button type="button" class="btn btn-primary" disabled=move || save.pending().get() on:click=on_save>
+                            "Enregistrer"
+                        </button>
+                    })}
+                </div>
             </div>
+            <Drawer open=versions_open eyebrow="Versions du flux" title=Signal::derive(move || meta.get().name)>
+                {move || {
+                    let record = meta.get_untracked();
+                    view! {
+                        <FlowVersions flow_id=record.id current=record.version editor=editor meta=meta
+                            on_restored=Callback::new(move |version: i64| {
+                                versions_open.set(false);
+                                feedback.set(Some(format!("Version {version} chargée : enregistrez pour la publier.")));
+                            }) />
+                    }
+                }}
+            </Drawer>
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="flow-name" class="form-label">"Nom"</label>

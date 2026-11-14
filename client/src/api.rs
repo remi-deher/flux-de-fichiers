@@ -6,6 +6,7 @@ use std::cell::RefCell;
 
 /// En-tête CSRF exigé par le central sur toute requête qui modifie.
 const CSRF_HEADER: &str = "x-csrf-token";
+const UNAUTHORIZED_STATUS: u16 = 401;
 
 thread_local! {
     static CSRF_TOKEN: RefCell<String> = const { RefCell::new(String::new()) };
@@ -18,6 +19,24 @@ pub fn set_csrf_token(token: &str) {
 
 fn csrf_token() -> String {
     CSRF_TOKEN.with(|cell| cell.borrow().clone())
+}
+
+/// Une session ouverte est-elle connue ? (le jeton CSRF ne vient qu'avec une session)
+fn session_active() -> bool {
+    CSRF_TOKEN.with(|cell| !cell.borrow().is_empty())
+}
+
+/// Un 401 sur une session ouverte signifie qu'elle a expiré : retour à l'écran de connexion.
+fn is_expired_session(status: u16, session_active: bool) -> bool {
+    status == UNAUTHORIZED_STATUS && session_active
+}
+
+/// Oublie la session expirée puis recharge la page, qui affiche alors la connexion.
+fn restart_login() {
+    CSRF_TOKEN.with(|cell| cell.borrow_mut().clear());
+    if let Some(window) = web_sys::window() {
+        let _ = window.location().reload();
+    }
 }
 
 /// Échec d'un appel, tel que l'interface doit le présenter.
@@ -64,6 +83,9 @@ struct ErrorDetail {
 }
 
 async fn checked(response: Response) -> Result<Response, ApiError> {
+    if is_expired_session(response.status(), session_active()) {
+        restart_login();
+    }
     match response.status() {
         200..=299 => Ok(response),
         401 => Err(ApiError::Unauthorized),
@@ -165,6 +187,14 @@ pub async fn delete(path: &str) -> Result<(), ApiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_401_on_an_open_session_restarts_the_login() {
+        assert!(is_expired_session(401, true));
+        assert!(!is_expired_session(401, false));
+        assert!(!is_expired_session(403, true));
+        assert!(!is_expired_session(200, true));
+    }
 
     #[test]
     fn errors_have_a_readable_message() {

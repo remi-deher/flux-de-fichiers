@@ -45,6 +45,26 @@ pub async fn get_flow(
     Ok(Json(flow))
 }
 
+/// Versions figées d'un flux, la plus récente d'abord.
+pub async fn list_versions(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    _auth: ViewFlowsAuth,
+) -> AppResult<Json<Vec<crate::domain::FlowVersionSummary>>> {
+    Ok(Json(repository::list_flow_versions(&s.pool, &id).await?))
+}
+
+/// Une version figée d'un flux ; les en-têtes secrets sont masqués comme pour le flux courant.
+pub async fn get_version(
+    State(s): State<AppState>,
+    Path((id, version)): Path<(String, i64)>,
+    _auth: ViewFlowsAuth,
+) -> AppResult<Json<crate::domain::FlowRecord>> {
+    let mut flow = repository::get_flow_version(&s.pool, &id, version).await?;
+    flow.definition = crate::flows::mask_definition(&flow.definition);
+    Ok(Json(flow))
+}
+
 /// Enregistre ou met à jour la définition d'un flux.
 pub async fn save_flow(
     State(s): State<AppState>,

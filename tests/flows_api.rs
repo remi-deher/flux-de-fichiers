@@ -153,6 +153,36 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
     let resp = app.clone().oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::OK);
 
+    // 3 bis. Ses versions : une seule, lisible, et une version inconnue répond 404.
+    let get = |uri: &str| {
+        Request::builder()
+            .uri(uri)
+            .header(
+                "authorization",
+                "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+            )
+            .body(Body::empty())
+    };
+    let resp = app
+        .clone()
+        .oneshot(get("/api/v1/flows/flow.custom.test/versions")?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let versions: Vec<serde_json::Value> =
+        serde_json::from_slice(&to_bytes(resp.into_body(), 16 * 1024).await?)?;
+    assert_eq!(versions.len(), 1);
+    assert_eq!(versions[0]["version"], 1);
+    let resp = app
+        .clone()
+        .oneshot(get("/api/v1/flows/flow.custom.test/versions/1")?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let resp = app
+        .clone()
+        .oneshot(get("/api/v1/flows/flow.custom.test/versions/9")?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
     // 4. Lire le flux personnalisé créé
     let req = Request::builder()
         .uri("/api/v1/flows/flow.custom.test")

@@ -59,6 +59,7 @@ paramètres.
 | Flux figé sur workers distants | [#105](https://github.com/remi-deher/flux-de-fichiers/pull/105) | Le bail porte `frozen_flow` (+ contexte *arr*) ; le worker distant exécute via `FlowEngine` |
 | SSE progression distant | [#106](https://github.com/remi-deher/flux-de-fichiers/pull/106) | `job_progress` via `POST /api/v1/jobs/{id}/progress` puis SSE (même contrat que le worker intégré) |
 | Palette + exécution encode plugins | [#108](https://github.com/remi-deher/flux-de-fichiers/pull/108) | Blocs plugins dans le catalogue (`GET /api/v1/flows/blocks`) ; `video/audio.encode` via FFmpeg (`tool.ffmpeg`, repli `FFMPEG`/PATH) |
+| Versions de flux | [#110](https://github.com/remi-deher/flux-de-fichiers/pull/110) | `GET /api/v1/flows/{id}/versions[/{v}]` ; tiroir « Versions » de l'éditeur (restaurer puis enregistrer) |
 | Défaut `encoder: auto` | `flux-de-fichiers-plugins` `main` | `plugins/video/blocks/video-encode.json` |
 
 ## Non vérifié
@@ -70,7 +71,12 @@ paramètres.
 - Essai E2E NAS **non refait** après #105/#106/#108 : déployer une image `:test-<sha>` récente +
   `index.html` **et** `pkg/`.
 - Les tests des PR récentes n'ont tourné que là où la CI s'applique (`dev → test`) ; les PR
-  feature → `dev` n'ont pas de checks (ADR 0002).
+  feature → `dev` n'ont pas de checks (ADR 0002). Exemple : #108 a laissé des `expect()` refusés
+  par clippy, corrigés par `cc52dd6` avant la PR `dev → test` #109. Lancer
+  `cargo clippy --workspace --all-targets -- -D warnings` avant de fusionner dans `dev`.
+- Jusqu'à #104, le filtre de chemins de `test.yml` ignorait `client/` et `shared/` : une PR qui
+  ne touchait que ces dossiers ne reconstruisait ni ne testait rien (image `test-24aaadc4aebe` =
+  ancien WASM). Vérifier qu'une image contient le WASM attendu avant de la déployer.
 
 ## Limites connues / gaps techniques
 
@@ -84,7 +90,7 @@ paramètres.
   matérielle, page Mises à jour, import de flux depuis le catalogue (route inexistante),
   simulation animée.
 - Éditeur de flux : pas de glisser-déposer, pas d'avertissement en quittant avec des
-  modifications, pas de consultation ni de restauration des versions.
+  modifications. Restaurer une version garde les en-têtes secrets du flux courant (masqués).
 - Tâches : pas de choix du worker à la création ; 200 tâches au plus, sans pagination.
 - Session expirée : message d'erreur ; retour à la connexion seulement en rechargeant.
 - Pas d'écran « mot de passe oublié » ; rotation de clé en CLI ; pas de changement de mot de
@@ -108,7 +114,6 @@ paramètres.
 ### Produit — à coder (Remi a dit « à faire »)
 
 1. **Écrans UX manquants** (prioriser avec Remi si le scope est trop large)
-   - Versions de flux : consultation / restauration (éditeur)
    - Recherche globale
    - Navigation mobile (aujourd'hui barre du haut seulement)
    - Autres trous listés ci-dessus (widgets overview, onglets paramètres, télémétrie, etc.)

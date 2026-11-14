@@ -112,6 +112,11 @@ fn json_routes() -> Router<AppState> {
         )
         .route("/api/v1/flows", get(flows::list_flows))
         .route("/api/v1/flows/blocks", get(flows::list_blocks))
+        .route("/api/v1/flows/{id}/versions", get(flows::list_versions))
+        .route(
+            "/api/v1/flows/{id}/versions/{version}",
+            get(flows::get_version),
+        )
         .route(
             "/api/v1/flows/{id}",
             get(flows::get_flow)

@@ -7,6 +7,7 @@ mod geometry;
 mod inspector;
 mod palette;
 mod state;
+mod versions;
 
 pub use editor::FlowEditor;
 

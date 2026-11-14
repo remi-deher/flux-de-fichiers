@@ -325,6 +325,15 @@ async fn jobs_keep_the_flow_version_frozen_at_creation() -> anyhow::Result<()> {
     let frozen = repository::get_flow_version(&pool, "flow.v", 1).await?;
     assert_eq!(frozen.definition, "{\"a\":1}");
     assert_eq!(frozen.version, 1);
+    let listed = repository::list_flow_versions(&pool, "flow.v").await?;
+    assert_eq!(
+        listed.iter().map(|v| v.version).collect::<Vec<_>>(),
+        vec![2, 1]
+    );
+    assert!(matches!(
+        repository::list_flow_versions(&pool, "absent").await,
+        Err(AppError::NotFound)
+    ));
     let next = repository::insert_job(&pool, "suite.mkv", None, &"ab".repeat(32), 1).await?;
     assert_eq!(next.flow_version, Some(2));
 

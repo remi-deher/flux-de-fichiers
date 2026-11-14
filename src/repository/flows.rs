@@ -1,5 +1,5 @@
 use crate::{
-    domain::{FlowRecord, UpdateFlowRequest},
+    domain::{FlowRecord, FlowVersionSummary, UpdateFlowRequest},
     error::{AppError, AppResult},
 };
 use sqlx::SqlitePool;
@@ -59,6 +59,20 @@ pub async fn get_flow_version(pool: &SqlitePool, id: &str, version: i64) -> AppR
         .fetch_optional(pool)
         .await?
         .ok_or(AppError::NotFound)
+}
+
+/// Versions figées d'un flux, de la plus récente à la plus ancienne (aussi après suppression).
+pub async fn list_flow_versions(pool: &SqlitePool, id: &str) -> AppResult<Vec<FlowVersionSummary>> {
+    let versions = sqlx::query_as::<_, FlowVersionSummary>(
+        "SELECT version, name, created_at FROM flow_versions WHERE flow_id=?1 ORDER BY version DESC",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+    if versions.is_empty() {
+        return Err(AppError::NotFound);
+    }
+    Ok(versions)
 }
 
 pub async fn default_flow(pool: &SqlitePool) -> AppResult<Option<FlowRecord>> {

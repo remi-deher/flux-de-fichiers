@@ -77,9 +77,9 @@ impl WidgetLayout {
 #[component]
 pub fn WidgetPicker(layout: RwSignal<WidgetLayout>) -> impl IntoView {
     view! {
-        <details class="widget-picker">
+        <details class="popover">
             <summary class="btn btn-secondary btn-sm">"Personnaliser"</summary>
-            <div class="widget-picker__list">
+            <div class="popover__panel">
                 {Widget::ALL.into_iter().map(|widget| view! {
                     <label class="cluster">
                         <input type="checkbox"

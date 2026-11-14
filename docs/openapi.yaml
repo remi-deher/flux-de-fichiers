@@ -606,7 +606,9 @@ paths:
       summary: État du système pour la page Paramètres
       description: >-
         Administrateur seulement. Version, identifiant et origine (`local` ou `external`) de la clé de
-        chiffrement, taille de la base SQLite et de son journal (`null` pour une base en mémoire).
+        chiffrement, taille de la base SQLite et de son journal (`null` pour une base en mémoire),
+        réseau (adresse d'écoute, TLS direct, origine web, durée de session) et stockage (dossiers,
+        taille maximale d'un fichier, capacité et espace libre du volume de `dataDir`).
       responses:
         '200':
           description: État du système
@@ -614,12 +616,36 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [version, keyId, keySource, databaseBytes]
+                required: [version, keyId, keySource, databaseBytes, network, storage]
                 properties:
                   version: {type: string}
                   keyId: {type: string}
                   keySource: {type: string, enum: [local, external]}
                   databaseBytes: {type: [integer, 'null']}
+                  network:
+                    type: object
+                    required: [bind, tls, webOrigin, sessionTtlSeconds]
+                    properties:
+                      bind: {type: string}
+                      tls: {type: boolean}
+                      webOrigin: {type: [string, 'null']}
+                      sessionTtlSeconds: {type: integer}
+                  storage:
+                    type: object
+                    required: [configDir, dataDir, inputDir, toolsCacheDir, pluginsDir, maxFileBytes, volume]
+                    properties:
+                      configDir: {type: string}
+                      dataDir: {type: string}
+                      inputDir: {type: string}
+                      toolsCacheDir: {type: string}
+                      pluginsDir: {type: [string, 'null']}
+                      maxFileBytes: {type: integer}
+                      volume:
+                        type: [object, 'null']
+                        required: [totalBytes, availableBytes]
+                        properties:
+                          totalBytes: {type: integer}
+                          availableBytes: {type: integer}
         '403': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/accounts:

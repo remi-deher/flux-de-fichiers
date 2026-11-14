@@ -134,8 +134,9 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 - [x] Recherche globale (#115) : tâches, flux, bibliothèques, workers, plugins ; le résultat mène à l'objet (éditeur du flux, ou écran filtré). Les listes sont lues à l'ouverture du champ, sans route dédiée ; les tâches se limitent à la première page de 200.
 - [x] Navigation mobile (#116) : barre latérale en tiroir sous 768 px. Non vérifiée sur un vrai écran.
 - [x] Widgets de la vue d'ensemble : choix des widgets affichés (bouton « Personnaliser »), préférence gardée dans le navigateur.
+- [x] Paramètres : onglets Réseau (écoute, TLS, origine, session) et Stockage (dossiers, taille maximale, espace du volume), lus dans `/api/v1/system/status` ; lecture seule.
 - [ ] Repris de l'ancienne interface : feuille de filtres de la
-      barre du haut, onglets Réseau / Stockage des paramètres, télémétrie matérielle, page Mises à
+      barre du haut, télémétrie matérielle, page Mises à
       jour, simulation dans l'éditeur.
 - [x] Éditeur de flux : glisser-déposer palette → carte et carte → carte (`flows/dnd.rs`, règles de `FlowGraph::connect`, alternative clic/liste conservée) ; confirmation avant de quitter avec des modifications (routeur, retour arrière, `beforeunload`).
 - [x] Tâches : choix du worker à la création (#118) ; pagination au-delà de 200 (#119, bouton « Charger les tâches plus anciennes »).

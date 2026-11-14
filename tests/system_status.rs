@@ -138,6 +138,13 @@ async fn test_admin_reads_the_system_status() -> anyhow::Result<()> {
     assert!(key_id.chars().all(|c| c.is_ascii_hexdigit()));
     // Base en mémoire : pas de fichier, donc pas de taille.
     assert!(body["databaseBytes"].is_null());
+    assert_eq!(body["network"]["bind"], "127.0.0.1:3000");
+    assert_eq!(body["network"]["tls"], false);
+    assert!(body["network"]["webOrigin"].is_null());
+    assert_eq!(body["network"]["sessionTtlSeconds"], 28_800);
+    assert_eq!(body["storage"]["maxFileBytes"], 1024);
+    assert_eq!(body["storage"]["inputDir"], "var/input");
+    assert!(body["storage"]["pluginsDir"].is_null());
     Ok(())
 }
 

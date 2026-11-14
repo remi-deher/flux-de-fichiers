@@ -139,6 +139,31 @@ pub fn decrypt_headers(
     Ok(())
 }
 
+/// Déchiffre tous les en-têtes webhook d'une définition pour qu'un worker distant
+/// puisse exécuter le flux sans la clé du central.
+pub fn decrypt_definition_headers(
+    secrets: &SecretBox,
+    flow_id: &str,
+    definition: &str,
+) -> AppResult<String> {
+    let Ok(mut value) = serde_json::from_str::<Value>(definition) else {
+        return Ok(definition.to_owned());
+    };
+    for node in nodes_of(&mut value) {
+        let id = node_id(node);
+        let Some(headers) = headers_of(node) else {
+            continue;
+        };
+        for (name, header_value) in headers.iter_mut() {
+            let Some(text) = header_value.as_str().filter(|text| is_encrypted(text)) else {
+                continue;
+            };
+            *header_value = Value::String(secrets.decrypt(text, &header_aad(flow_id, &id, name))?);
+        }
+    }
+    Ok(serde_json::to_string(&value).unwrap_or_else(|_| definition.to_owned()))
+}
+
 /// Re-chiffre avec la nouvelle clé les en-têtes d'une définition de flux ; `None` s'il n'y en a pas.
 /// Renvoie la définition réécrite et le nombre de valeurs changées.
 pub fn rotate_definition(
@@ -328,6 +353,20 @@ mod tests {
         decrypt_headers(&secrets, FLOW, "n2", &mut config)?;
         assert_eq!(config.custom_headers["Authorization"], "Bearer SECRET");
         assert_eq!(config.custom_headers["X-Plain"], "tel quel");
+        Ok(())
+    }
+
+    #[test]
+    fn test_decrypt_definition_headers_clears_webhook_secrets_for_workers() -> anyhow::Result<()> {
+        let (_dir, secrets) = secrets()?;
+        let sealed = seal_definition(&secrets, FLOW, &definition("Bearer SECRET"), None)?;
+        assert!(header_of(&sealed).starts_with("enc:"));
+        let clear = decrypt_definition_headers(&secrets, FLOW, &sealed)?;
+        assert_eq!(header_of(&clear), "Bearer SECRET");
+        assert_eq!(
+            decrypt_definition_headers(&secrets, FLOW, "pas du json")?,
+            "pas du json"
+        );
         Ok(())
     }
 

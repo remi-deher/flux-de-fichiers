@@ -11,9 +11,10 @@ l'identité de l'agent est purement déclarative :
 - `POST /api/v1/workers` accepte n'importe quel `name` avec `WORKER_KEY` ;
 - `POST /api/v1/claims` accepte n'importe quel `worker_id` dans le corps JSON
   (`ClaimRequest`) ;
-- `POST /api/v1/jobs/{id}/heartbeat`, `POST /api/v1/jobs/{id}/failure`,
-  `GET /api/v1/jobs/{id}/source` et `PUT /api/v1/jobs/{id}/result` reçoivent
-  `worker_id` dans le corps ou l'en-tête `x-worker-id`.
+- `POST /api/v1/jobs/{id}/heartbeat`, `POST /api/v1/jobs/{id}/progress`,
+  `POST /api/v1/jobs/{id}/failure`, `GET /api/v1/jobs/{id}/source` et
+  `PUT /api/v1/jobs/{id}/result` reçoivent `worker_id` dans le corps ou
+  l'en-tête `x-worker-id`.
 
 Cette architecture présente trois risques de sécurité :
 
@@ -253,8 +254,9 @@ nom, puis s'authentifie avec cette clé sur toutes ses requêtes.
   - `POST /api/v1/workers/{id}/revoke` (sous `AdminKey`) : révoque l'agent et
     libère ses baux actifs (`204 No Content`).
   - `POST /api/v1/claims`, `POST /api/v1/jobs/{id}/heartbeat`,
-    `POST /api/v1/jobs/{id}/failure`, `GET /api/v1/jobs/{id}/source`,
-    `PUT /api/v1/jobs/{id}/result` : l'identité de l'agent est exclusivement
+    `POST /api/v1/jobs/{id}/progress`, `POST /api/v1/jobs/{id}/failure`,
+    `GET /api/v1/jobs/{id}/source`, `PUT /api/v1/jobs/{id}/result` : l'identité
+    de l'agent est exclusivement
     `worker.id` issu de `authorize_worker`. Le champ `worker_id` du corps
     (`ClaimRequest`, `LeaseRequest`, `Failure`) et l'en-tête `x-worker-id` sont
     supprimés (ou rejetés en `401` s'ils divergent).

@@ -289,14 +289,38 @@ async fn jobs_keep_the_flow_version_frozen_at_creation() -> anyhow::Result<()> {
     assert_eq!(job.flow_id.as_deref(), Some("flow.v"));
     assert_eq!(job.flow_version, Some(1));
 
+    let worker = repository::register(&pool, "claim-flow").await?;
+    let claim = repository::claim(&pool, worker.id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("bail avec flux figé"))?;
+    let claimed_flow = claim
+        .frozen_flow
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("le bail doit porter le flux figé"))?;
+    assert_eq!(claimed_flow.id, "flow.v");
+    assert_eq!(claimed_flow.version, 1);
+    assert_eq!(claimed_flow.definition, "{\"a\":1}");
+    assert!(claim.arr.is_none());
+    repository::fail(
+        &pool,
+        job.id,
+        &LeaseRequest {
+            worker_id: worker.id,
+            lease_token: claim.lease_token,
+            telemetry: None,
+        },
+        JobErrorCode::RemuxFailed,
+    )
+    .await?;
+
     let second = repository::save_flow(&pool, "flow.v", &flow_request("V", "{\"a\":2}")).await?;
     assert_eq!(second.version, 2);
     let kept = repository::get_job(&pool, job.id).await?;
     assert_eq!(kept.flow_version, Some(1), "la tâche garde sa version");
     assert_eq!(
         kept.status,
-        JobStatus::Queued,
-        "aucune relance ni modification"
+        JobStatus::Failed,
+        "échec volontaire après le bail"
     );
     let frozen = repository::get_flow_version(&pool, "flow.v", 1).await?;
     assert_eq!(frozen.definition, "{\"a\":1}");

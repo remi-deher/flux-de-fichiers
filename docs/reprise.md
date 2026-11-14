@@ -1,8 +1,8 @@
-# Reprise du chantier — état au 14 nov. 2026
+# Reprise du chantier — état au 14 nov. 2026 (après #105/#106/#108)
 
 Note de passage pour continuer avec un autre agent ou sur une autre machine. Les décisions
-durables sont dans les ADR ; ce document dit où en est le code, ce qui n'est pas vérifié et ce
-qui reste à faire. À mettre à jour (ou supprimer) quand l'état change.
+durables sont dans les ADR ; ce document dit ce qui est **livré**, ce qui n'est pas vérifié et
+ce qui **reste à faire**. À mettre à jour (ou supprimer) quand l'état change.
 
 ## À lire d'abord
 
@@ -16,12 +16,15 @@ qui reste à faire. À mettre à jour (ou supprimer) quand l'état change.
 ## Règles de travail à respecter
 
 - **Aucun test ni build Docker en local** (machine faible) : `cargo check`, `cargo clippy` et
-  `cargo fmt` seulement ; les tests et l'image tournent en CI.
-- Flux Git ([ADR 0002](adr/0002-flux-git.md)) : push direct sur `dev`, PR `dev → test` (CI
-  complète, fusion automatique, image `:test-<sha12>`), PR `test → main` pour une release.
+  `cargo fmt` seulement ; les tests et l'image tournent en CI (`dev` n'a pas de CI ; la CI
+  complète est sur les PR `dev → test`, ADR 0002).
+- Flux Git ([ADR 0002](adr/0002-flux-git.md)) : push / PR feature → `dev` (merge commit), puis
+  PR `dev → test` (CI, fusion auto, image `:test-<sha12>`), PR `test → main` pour une release.
 - **Jamais de ligne `Co-Authored-By` ni de mention d'agent** dans les commits et les PR.
 - La machine locale n'a pas la cible `wasm32-unknown-unknown` (Rust d'Arch, sans rustup) :
   le client se vérifie en natif ici, en WASM seulement en CI et dans l'image.
+- Accès NAS uniquement depuis DELL-LAPTOP : central `truenas_admin@192.168.1.50:18480`,
+  worker `.51:18481`.
 
 ## Décisions prises les 13 et 14 nov.
 
@@ -49,57 +52,84 @@ qui reste à faire. À mettre à jour (ou supprimer) quand l'état change.
 workers, plugins, paramètres. Sur un worker : vue d'ensemble, tâches et plugins (lecture),
 paramètres.
 
-## Non vérifié (à faire en premier)
+## Livré (fusionné sur `dev`)
+
+| Sujet | PR / dépôt | Contenu |
+|---|---|---|
+| Flux figé sur workers distants | [#105](https://github.com/remi-deher/flux-de-fichiers/pull/105) | Le bail porte `frozen_flow` (+ contexte *arr*) ; le worker distant exécute via `FlowEngine` |
+| SSE progression distant | [#106](https://github.com/remi-deher/flux-de-fichiers/pull/106) | `job_progress` via `POST /api/v1/jobs/{id}/progress` puis SSE (même contrat que le worker intégré) |
+| Palette + exécution encode plugins | [#108](https://github.com/remi-deher/flux-de-fichiers/pull/108) | Blocs plugins dans le catalogue (`GET /api/v1/flows/blocks`) ; `video/audio.encode` via FFmpeg (`tool.ffmpeg`, repli `FFMPEG`/PATH) |
+| Défaut `encoder: auto` | `flux-de-fichiers-plugins` `main` | `plugins/video/blocks/video-encode.json` |
+
+## Non vérifié
 
 - Le client compile en WASM (CI et image `test-34f365e9af28`) et affiche son écran de connexion
   en production ; **aucun écran connecté n'a encore été ouvert**.
 - Aucun parcours de bout en bout : connexion, création et relance d'une tâche, édition et
   enregistrement d'un flux, bibliothèques, plugins, comptes.
-- Les tests ajoutés depuis le 13 nov. n'ont tourné qu'en CI (verte sur la PR #102).
+- Essai E2E NAS **non refait** après #105/#106/#108 : déployer une image `:test-<sha>` récente +
+  `index.html` **et** `pkg/`.
+- Les tests des PR récentes n'ont tourné que là où la CI s'applique (`dev → test`) ; les PR
+  feature → `dev` n'ont pas de checks (ADR 0002).
 
-## Limites connues
+## Limites connues / gaps techniques
 
 **Interface**
 
-- Gabarit d'origine repris dans le client (14 nov., après retour de l'utilisateur) : barre
-  latérale repliable par groupes, barre du haut avec recherche contextuelle (filtre les lignes de
-  l'écran) et workers en ligne, porte d'accès `auth-gate`, sous-navigation par écran, registres
-  et tiroirs d'inspection pour les fiches et formulaires (`client/src/ui/`, `client/src/shell.rs`).
-  Non repris : widgets personnalisables de la vue d'ensemble, feuille de filtres de la barre du
-  haut (remplacée par les onglets), onglets Réseau et Stockage, télémétrie matérielle, page Mises
-  à jour, import de flux depuis le catalogue (route inexistante), simulation animée.
+- Gabarit d'origine repris dans le client (14 nov.) : barre latérale, barre du haut (recherche
+  contextuelle), workers en ligne, `auth-gate`, sous-navigation, registres et tiroirs
+  (`client/src/ui/`, `client/src/shell.rs`).
+- Non repris : widgets personnalisables de la vue d'ensemble, feuille de filtres de la barre du
+  haut (remplacée par les onglets), onglets Réseau / Stockage / Intégrations, télémétrie
+  matérielle, page Mises à jour, import de flux depuis le catalogue (route inexistante),
+  simulation animée.
 - Éditeur de flux : pas de glisser-déposer, pas d'avertissement en quittant avec des
-  modifications, pas de consultation ni de restauration des versions ; les blocs des dépôts de
-  plugins apparaissent dans la palette via `GET /api/v1/flows/blocks` ; le remux MP4
-  (MP4Box) n'est pas encore exécuté.
+  modifications, pas de consultation ni de restauration des versions.
 - Tâches : pas de choix du worker à la création ; 200 tâches au plus, sans pagination.
-- Session expirée en cours d'usage : message d'erreur, retour à la connexion seulement en
-  rechargeant la page.
-- Pas d'écran « mot de passe oublié » (`flux-de-fichiers reset-password`) ; rotation de clé en
-  ligne de commande (`rotate-secret`) ; pas de changement de mot de passe sur un worker.
+- Session expirée : message d'erreur ; retour à la connexion seulement en rechargeant.
+- Pas d'écran « mot de passe oublié » ; rotation de clé en CLI ; pas de changement de mot de
+  passe sur un worker.
 - Accessibilité non auditée ; sans JavaScript ni WebAssembly, aucune interface.
 
-**Moteur et produit**
+**Moteur et plugins**
 
-- **Les workers distants ne font qu'un remux et ignorent les flux** ; seul le worker intégré
-  exécute les flux. Priorité produit.
-- Encodage vidéo/audio via FFmpeg distribué (`tool.ffmpeg`, repli `FFMPEG`/PATH) ;
-  remux MP4 (MP4Box) encore traversé ; artefacts FFmpeg du catalogue encore
-  `contract-only` (URL d'exemple).
-- IA et MCP non commencés.
+- `block.video.remux-mp4` (MP4Box) encore traversé, pas exécuté.
+- Artefacts FFmpeg du catalogue encore `contract-only` (besoin de binaires réels ou `FFMPEG`).
+- Pas de fallback GPU → CPU automatique.
+- Pas de runner argv déclaratif générique (mapping kind encore en Rust).
+- Secrets webhook / Arr déchiffrés voyagent dans le bail (à durcir si besoin).
 - Baux sans numéro d'époque (*fencing*) : un ancien worker peut encore répondre tard.
 - Requêtes SQL non vérifiées à la compilation (`query!` non adopté, voir l'audit).
 - `frontend/dist/index.html` est versionné : le régénérer (`cargo run -p flux-frontend`) après
   toute modification du thème ou de la page.
 
-## Suite proposée
+## Suite proposée (TODO)
 
-1. Se connecter à l'essai et parcourir chaque écran ; corriger ce que le WASM révèle.
-2. Exécution des flux par les workers distants (le flux figé doit voyager avec le bail).
-3. ~~Encodage par plugins~~ (palette + exécution vidéo/audio) ; rester : MP4Box, binaires FFmpeg réels.
-4. Numéro d'époque des baux.
-5. Écrans manquants : versions des flux, recherche, navigation mobile.
-6. IA et MCP (ADR à écrire).
+### Produit — à coder (Remi a dit « à faire »)
+
+1. **Écrans UX manquants** (prioriser avec Remi si le scope est trop large)
+   - Versions de flux : consultation / restauration (éditeur)
+   - Recherche globale
+   - Navigation mobile (aujourd'hui barre du haut seulement)
+   - Autres trous listés ci-dessus (widgets overview, onglets paramètres, télémétrie, etc.)
+
+### Produit — à cadrer avec Remi avant de coder
+
+2. **Époque des baux (fencing)** — éviter qu'un ancien worker réponde tard sur une tâche reprise
+3. **IA et MCP** — dans le périmètre ADR 0012, non commencés ; écrire un ADR d'abord
+
+### Hygiene / optionnel
+
+4. Aligner `.cursorrules` / `.cursor/rules` et le début d'ADR 0014 / `developpement.md` sur la
+   stack WASM actuelle (sinon les agents reprennent une fausse base).
+5. Essai NAS après promotion `dev → test` (image `:test-<sha>` + frontend).
+
+## Ordre suggéré pour un autre agent
+
+1. Confirmer que #105, #106, #108 sont bien sur `dev` (et sync local DELL).
+2. Enchaîner **Écrans UX** (sous-tâches claires : versions flux → recherche → mobile).
+3. Ne pas démarrer époque des baux ni IA/MCP sans atelier avec Remi.
+4. Optionnel : PR `dev → test`, essai NAS, hygiene règles Cursor.
 
 ## Production (NAS)
 

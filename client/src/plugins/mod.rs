@@ -6,7 +6,7 @@ use crate::api;
 use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, SubNav, SubTab};
-use flux_shared::plugins::vocab::CatalogItemType;
+use flux_shared::plugins::vocab::{CatalogItemType, CatalogSection};
 use flux_shared::plugins::{
     CatalogEntry, CreateRepositoryRequest, PluginRepository, ToolStatus, ToolStatusSummary,
 };
@@ -208,8 +208,58 @@ fn Tools(can_install: bool) -> impl IntoView {
     }
 }
 
+/// Pièces d'une section, regroupées par sous-titre (seule « Autre » en a) en gardant l'ordre du catalogue.
+fn group_by_subtitle(entries: Vec<CatalogEntry>) -> Vec<(Option<&'static str>, Vec<CatalogEntry>)> {
+    let mut groups: Vec<(Option<&'static str>, Vec<CatalogEntry>)> = Vec::new();
+    for entry in entries {
+        let subtitle = entry.entry_type.subtitle();
+        match groups.iter_mut().find(|(known, _)| *known == subtitle) {
+            Some((_, members)) => members.push(entry),
+            None => groups.push((subtitle, vec![entry])),
+        }
+    }
+    groups
+}
+
 #[component]
-fn Catalog(reload: RwSignal<u32>, can_configure: bool) -> impl IntoView {
+fn CatalogTable(
+    entries: Vec<CatalogEntry>,
+    can_configure: bool,
+    configuring: RwSignal<Option<String>>,
+    settings_open: RwSignal<bool>,
+) -> impl IntoView {
+    view! {
+        <div class="table-wrapper">
+            <table class="data-table" aria-label="Catalogue des dépôts">
+                <thead><tr>
+                    <th scope="col">"Pièce"</th><th scope="col">"Type"</th><th scope="col">"Version"</th>
+                    <th scope="col" class="cell-end">"Action"</th>
+                </tr></thead>
+                <tbody>
+                    {entries.into_iter().map(|entry| {
+                        let id = entry.id.clone();
+                        let configurable = can_configure && entry.entry_type == CatalogItemType::Plugin;
+                        view! {
+                            <tr>
+                                <td class="text-strong">{entry.name.clone()}<div class="text-mono text-xs text-dim">{entry.id.clone()}</div></td>
+                                <td>{entry.entry_type.as_str()}</td>
+                                <td class="text-mono">{entry.version.clone()}</td>
+                                <td class="cell-end">{configurable.then(|| view! {
+                                    <button type="button" class="btn btn-secondary btn-sm"
+                                        on:click=move |_| { configuring.set(Some(id.clone())); settings_open.set(true); }>"Réglages"</button>
+                                })}</td>
+                            </tr>
+                        }
+                    }).collect_view()}
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+/// Une section du catalogue : jamais de blocs (l'API ne les renvoie pas, et `section()` les écarte aussi).
+#[component]
+fn Catalog(section: CatalogSection, reload: RwSignal<u32>, can_configure: bool) -> impl IntoView {
     let catalog = LocalResource::new(move || {
         reload.track();
         api::get::<Vec<CatalogEntry>>(CATALOG_PATH)
@@ -222,33 +272,48 @@ fn Catalog(reload: RwSignal<u32>, can_configure: bool) -> impl IntoView {
             {move || configuring.get().map(|id| view! { <PluginSettings plugin_id=id /> })}
         </Drawer>
         <div class="registre">
-            <div class="table-wrapper">
-                <table class="data-table" aria-label="Catalogue des dépôts">
-                    <thead><tr>
-                        <th scope="col">"Pièce"</th><th scope="col">"Type"</th><th scope="col">"Version"</th>
-                        <th scope="col" class="cell-end">"Action"</th>
-                    </tr></thead>
-                    <tbody>
-                        {move || { let text = query(); catalog.get().and_then(Result::ok).unwrap_or_default().into_iter().filter(|entry| matches(&[&entry.name, &entry.id], &text)).map(|entry| {
-                            let id = entry.id.clone();
-                            let configurable = can_configure && entry.entry_type == CatalogItemType::Plugin;
-                            view! {
-                                <tr>
-                                    <td class="text-strong">{entry.name.clone()}<div class="text-mono text-xs text-dim">{entry.id.clone()}</div></td>
-                                    <td>{entry.entry_type.as_str()}</td>
-                                    <td class="text-mono">{entry.version.clone()}</td>
-                                    <td class="cell-end">{configurable.then(|| view! {
-                                        <button type="button" class="btn btn-secondary btn-sm"
-                                            on:click=move |_| { configuring.set(Some(id.clone())); settings_open.set(true); }>"Réglages"</button>
-                                    })}</td>
-                                </tr>
-                            }
-                        }).collect_view() }}
-                    </tbody>
-                </table>
-            </div>
+            {move || {
+                let text = query();
+                let entries = catalog.get().and_then(Result::ok).unwrap_or_default().into_iter()
+                    .filter(|entry| entry.entry_type.section() == Some(section) && matches(&[&entry.name, &entry.id], &text))
+                    .collect();
+                group_by_subtitle(entries).into_iter().map(|(subtitle, members)| view! {
+                    {subtitle.map(|label| view! { <h3 class="section-subtitle">{label}</h3> })}
+                    <CatalogTable entries=members can_configure=can_configure configuring=configuring settings_open=settings_open />
+                }).collect_view()
+            }}
         </div>
     }
+}
+
+/// Onglets de la page : une section du catalogue, ou les dépôts qui l'alimentent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PluginsTab {
+    Section(CatalogSection),
+    Repositories,
+}
+
+impl PluginsTab {
+    fn sub_tab(self) -> SubTab {
+        match self {
+            Self::Section(section @ CatalogSection::Applications) => {
+                SubTab::new(section.label(), "📦")
+            }
+            Self::Section(section @ CatalogSection::Plugins) => SubTab::new(section.label(), "🧩"),
+            Self::Section(section @ CatalogSection::Flows) => SubTab::new(section.label(), "🔀"),
+            Self::Section(section @ CatalogSection::Other) => SubTab::new(section.label(), "🗂️"),
+            Self::Section(section @ CatalogSection::Packs) => SubTab::new(section.label(), "🎁"),
+            Self::Repositories => SubTab::new("Dépôts", "🌐"),
+        }
+    }
+}
+
+fn visible_tabs(can_manage: bool) -> Vec<PluginsTab> {
+    CatalogSection::ALL
+        .into_iter()
+        .map(PluginsTab::Section)
+        .chain(can_manage.then_some(PluginsTab::Repositories))
+        .collect()
 }
 
 #[component]
@@ -258,19 +323,18 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
     let reload_catalog = RwSignal::new(0_u32);
     let tab = RwSignal::new(0_usize);
     let adding = RwSignal::new(false);
-    let mut tabs = vec![SubTab::new("Catalogue", "🧩"), SubTab::new("Outils", "🛠️")];
-    if can_manage {
-        tabs.push(SubTab::new("Dépôts", "🌐"));
-    }
-    let actions = can_manage.then(|| view! {
-        <button type="button" class="btn btn-primary btn-sm" on:click=move |_| { tab.set(2); adding.set(true); }>"Ajouter un dépôt"</button>
+    let tabs = visible_tabs(can_manage);
+    let sub_tabs = tabs.iter().map(|tab| tab.sub_tab()).collect();
+    let repositories_index = tabs.iter().position(|tab| *tab == PluginsTab::Repositories);
+    let actions = repositories_index.map(|index| view! {
+        <button type="button" class="btn btn-primary btn-sm" on:click=move |_| { tab.set(index); adding.set(true); }>"Ajouter un dépôt"</button>
     }.into_any());
     view! {
         <div class="tab-panel" role="tabpanel">
-            <SubNav aria_label="Sous-navigation des plugins" tabs=tabs selected=tab actions=actions.unwrap_or_else(|| ().into_any()) />
-            {move || match tab.get() {
-                0 => view! { <Catalog reload=reload_catalog can_configure=can_manage /> }.into_any(),
-                1 => view! { <Tools can_install=can_manage /> }.into_any(),
+            <SubNav aria_label="Sous-navigation des plugins" tabs=sub_tabs selected=tab actions=actions.unwrap_or_else(|| ().into_any()) />
+            {move || match tabs.get(tab.get()).copied() {
+                Some(PluginsTab::Section(CatalogSection::Applications)) => view! { <Tools can_install=can_manage /> }.into_any(),
+                Some(PluginsTab::Section(section)) => view! { <Catalog section=section reload=reload_catalog can_configure=can_manage /> }.into_any(),
                 _ => view! { <Repositories reload_catalog=reload_catalog adding=adding /> }.into_any(),
             }}
         </div>
@@ -290,5 +354,49 @@ mod tests {
         ] {
             assert!(!tool_status_label(status).0.is_empty());
         }
+    }
+
+    fn entry(id: &str, entry_type: CatalogItemType) -> CatalogEntry {
+        CatalogEntry {
+            id: id.to_owned(),
+            entry_type,
+            version: "1.0.0".to_owned(),
+            name: id.to_owned(),
+            manifest_path: format!("{id}.json"),
+            capability: None,
+            current_choice: None,
+            distribution: None,
+            category: None,
+            tags: Vec::new(),
+            owner: None,
+        }
+    }
+
+    #[test]
+    fn tabs_follow_the_catalog_sections_and_repositories_need_permission() {
+        let without = visible_tabs(false);
+        assert_eq!(without.len(), CatalogSection::ALL.len());
+        assert!(!without.contains(&PluginsTab::Repositories));
+        let with = visible_tabs(true);
+        assert_eq!(with.last(), Some(&PluginsTab::Repositories));
+        for tab in with {
+            assert!(!tab.sub_tab().label.is_empty());
+        }
+    }
+
+    #[test]
+    fn other_section_is_grouped_under_one_subtitle_per_kind() {
+        let groups = group_by_subtitle(vec![
+            entry("img.a", CatalogItemType::ResourceImage),
+            entry("mus.a", CatalogItemType::ResourceAudio),
+            entry("img.b", CatalogItemType::ResourceImage),
+        ]);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].0, Some("Images"));
+        assert_eq!(groups[0].1.len(), 2);
+        assert_eq!(groups[1].0, Some("Musiques et sons"));
+        let plain = group_by_subtitle(vec![entry("flow.a", CatalogItemType::Flow)]);
+        assert_eq!(plain.len(), 1);
+        assert_eq!(plain[0].0, None);
     }
 }

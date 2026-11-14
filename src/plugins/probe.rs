@@ -53,6 +53,7 @@ mod tests {
             distribution: None,
             category: None,
             tags: Vec::new(),
+            owner: None,
         }
     }
 

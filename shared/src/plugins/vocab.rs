@@ -56,6 +56,90 @@ impl CatalogItemType {
     }
 }
 
+/// Section exposée à l'utilisateur. Les dépôts sont gérés à part (ils portent le catalogue,
+/// ils n'en font pas partie) et les blocs n'ont aucune section : on ne les expose jamais.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CatalogSection {
+    Applications,
+    Plugins,
+    Flows,
+    /// Éléments externes appelables par un flux : image, musique, police, langue, etc.
+    Other,
+    Packs,
+}
+
+impl CatalogSection {
+    pub const ALL: [Self; 5] = [
+        Self::Applications,
+        Self::Plugins,
+        Self::Flows,
+        Self::Other,
+        Self::Packs,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Applications => "Applications",
+            Self::Plugins => "Plugins",
+            Self::Flows => "Flows",
+            Self::Other => "Autre",
+            Self::Packs => "Packs",
+        }
+    }
+}
+
+impl CatalogItemType {
+    /// Section où la pièce s'affiche ; `None` pour un bloc, jamais exposé tel quel.
+    pub fn section(self) -> Option<CatalogSection> {
+        match self {
+            Self::App => Some(CatalogSection::Applications),
+            Self::Plugin => Some(CatalogSection::Plugins),
+            Self::Flow => Some(CatalogSection::Flows),
+            Self::Preset
+            | Self::ResourceFont
+            | Self::ResourceImage
+            | Self::ResourceAudio
+            | Self::ResourceColor
+            | Self::ResourceLanguage
+            | Self::ResourceTemplate => Some(CatalogSection::Other),
+            Self::Pack => Some(CatalogSection::Packs),
+            Self::Block => None,
+        }
+    }
+
+    /// Sous-titre de la section « Autre » ; `None` hors de cette section.
+    pub fn subtitle(self) -> Option<&'static str> {
+        match self {
+            Self::Preset => Some("Préréglages"),
+            Self::ResourceFont => Some("Polices"),
+            Self::ResourceImage => Some("Images"),
+            Self::ResourceAudio => Some("Musiques et sons"),
+            Self::ResourceColor => Some("Couleurs"),
+            Self::ResourceLanguage => Some("Langues"),
+            Self::ResourceTemplate => Some("Modèles"),
+            _ => None,
+        }
+    }
+
+    /// Une pièce peut-elle vivre seule dans un dépôt ? Un bloc appartient à un plugin.
+    pub fn can_stand_alone(self) -> bool {
+        self != Self::Block
+    }
+
+    /// Règle de dépendance : un plugin dépend d'applications, un flow de plugins ou
+    /// d'éléments « Autre », un pack regroupe des pièces autonomes. Applications et
+    /// « Autre » ne dépendent de rien ; un bloc ne dépend que de son plugin propriétaire.
+    pub fn may_depend_on(self, target: Self) -> bool {
+        let target_section = target.section();
+        match self {
+            Self::Plugin => target == Self::App,
+            Self::Flow => target == Self::Plugin || target_section == Some(CatalogSection::Other),
+            Self::Pack => target.can_stand_alone() && target != Self::Pack,
+            _ => false,
+        }
+    }
+}
+
 /// Ce qu'une pièce sait faire.
 ///
 /// Le schéma d'index laisse `capability` libre, et les manifestes d'outils
@@ -232,6 +316,56 @@ mod tests {
         assert!(serde_json::from_str::<CatalogItemType>("\"integration\"").is_err());
         assert!(serde_json::from_str::<CatalogItemType>("\"extension\"").is_err());
         Ok(())
+    }
+
+    const ALL_TYPES: [CatalogItemType; 12] = [
+        CatalogItemType::Plugin,
+        CatalogItemType::App,
+        CatalogItemType::Flow,
+        CatalogItemType::Preset,
+        CatalogItemType::ResourceFont,
+        CatalogItemType::ResourceImage,
+        CatalogItemType::ResourceAudio,
+        CatalogItemType::ResourceColor,
+        CatalogItemType::ResourceLanguage,
+        CatalogItemType::ResourceTemplate,
+        CatalogItemType::Pack,
+        CatalogItemType::Block,
+    ];
+
+    #[test]
+    fn only_blocks_have_no_section_and_cannot_stand_alone() {
+        for kind in ALL_TYPES {
+            let is_block = kind == CatalogItemType::Block;
+            assert_eq!(kind.section().is_none(), is_block, "{kind:?}");
+            assert_eq!(kind.can_stand_alone(), !is_block, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn other_section_has_a_subtitle_for_each_of_its_kinds() {
+        for kind in ALL_TYPES {
+            let in_other = kind.section() == Some(CatalogSection::Other);
+            assert_eq!(kind.subtitle().is_some(), in_other, "{kind:?}");
+        }
+        for section in CatalogSection::ALL {
+            assert!(!section.label().is_empty());
+        }
+    }
+
+    #[test]
+    fn dependency_rules_follow_the_catalog_model() {
+        use CatalogItemType::{App, Block, Flow, Pack, Plugin, ResourceImage};
+        assert!(Plugin.may_depend_on(App));
+        assert!(!Plugin.may_depend_on(Flow));
+        assert!(Flow.may_depend_on(Plugin));
+        assert!(Flow.may_depend_on(ResourceImage));
+        assert!(!Flow.may_depend_on(App));
+        assert!(!App.may_depend_on(Plugin));
+        assert!(!ResourceImage.may_depend_on(App));
+        assert!(Pack.may_depend_on(App) && Pack.may_depend_on(Flow));
+        assert!(!Pack.may_depend_on(Block) && !Pack.may_depend_on(Pack));
+        assert!(!Block.may_depend_on(App));
     }
 
     #[test]

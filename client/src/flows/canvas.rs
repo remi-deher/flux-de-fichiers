@@ -1,5 +1,7 @@
 //! Plan du graphe : cartes disposées en couches et liaisons SVG, recalculées depuis le modèle.
 
+use super::dnd::DragPayload;
+use super::drag::DragItem;
 use super::geometry::{
     CARD_HEIGHT, CARD_WIDTH, board_size, card_origin, input_anchor, link_path, output_anchor,
 };
@@ -58,23 +60,25 @@ pub fn GraphCanvas(editor: Editor) -> impl IntoView {
                 let kind = spec.map_or_else(|| node.kind.as_str().to_owned(), |spec| spec.label.to_owned());
                 let incomplete = spec.is_some_and(|spec| !spec.missing_fields(&node.config).is_empty());
                 let id = node.id.clone();
+                let name = node.name.clone();
                 let selected_id = id.clone();
                 let style = format!(
                     "left:{}px;top:{}px;width:{CARD_WIDTH}px;height:{CARD_HEIGHT}px",
                     origin.x, origin.y
                 );
                 Some(view! {
-                    <button
-                        type="button"
-                        class="flow-graph__card"
-                        class:is-selected=move || editor.selected.get().as_deref() == Some(selected_id.as_str())
-                        class:is-incomplete=incomplete
-                        style=style
-                        on:click=move |_| editor.selected.set(Some(id.clone()))
-                    >
-                        <div class="flow-graph__kind">{kind}</div>
-                        <div class="flow-graph__name">{node.name.clone()}</div>
-                    </button>
+                    <DragItem editor=editor payload=DragPayload::Card(id.clone()) target=id.clone() class="flow-graph__slot" style=style>
+                        <button
+                            type="button"
+                            class="flow-graph__card"
+                            class:is-selected=move || editor.selected.get().as_deref() == Some(selected_id.as_str())
+                            class:is-incomplete=incomplete
+                            on:click=move |_| editor.selected.set(Some(id.clone()))
+                        >
+                            <div class="flow-graph__kind">{kind}</div>
+                            <div class="flow-graph__name">{name}</div>
+                        </button>
+                    </DragItem>
                 })
             })
             .collect_view();
@@ -84,6 +88,7 @@ pub fn GraphCanvas(editor: Editor) -> impl IntoView {
                     <svg class="flow-graph__links" width=size.x height=size.y aria-hidden="true">{links}</svg>
                     {cards}
                 </div>
+                <p class="form-help text-danger" role="status">{move || editor.drop_notice.get()}</p>
             </div>
         }
         .into_any()

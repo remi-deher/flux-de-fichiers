@@ -2,6 +2,7 @@ use super::{
     arr::{ArrAction, ArrBlock, ArrService},
     condition::{ConditionConfig, evaluate_condition},
     encode::EncodePlan,
+    mp4box::{Mp4Plan, mp4_plan},
     tool::{InPlaceEdit, in_place_edit},
     webhook::WebhookBlockConfig,
 };
@@ -15,6 +16,7 @@ pub struct StepDecision {
     pub stop: bool,
     pub transform: bool,
     pub encode: Option<EncodePlan>,
+    pub remux_mp4: Option<Mp4Plan>,
     pub reinpect: bool,
     pub edit: Option<InPlaceEdit>,
     pub notify: Option<WebhookBlockConfig>,
@@ -28,6 +30,7 @@ impl StepDecision {
             stop: false,
             transform: false,
             encode: None,
+            remux_mp4: None,
             reinpect: false,
             edit: None,
             notify: None,
@@ -52,6 +55,13 @@ impl StepDecision {
     fn transform() -> Self {
         Self {
             transform: true,
+            ..Self::pass()
+        }
+    }
+
+    fn remux_mp4(plan: Mp4Plan) -> Self {
+        Self {
+            remux_mp4: Some(plan),
             ..Self::pass()
         }
     }
@@ -127,8 +137,7 @@ pub fn decide_step(
         }
         FlowBlockKind::Mkvpropedit => StepDecision::edit(in_place_edit(config)),
         FlowBlockKind::RemuxMkv => StepDecision::transform(),
-        // MP4 via MP4Box : pas encore d'exécuteur dédié — traverse sans effet.
-        FlowBlockKind::RemuxMp4 => StepDecision::pass(),
+        FlowBlockKind::RemuxMp4 => StepDecision::remux_mp4(mp4_plan(config)),
         FlowBlockKind::VideoEncode => {
             StepDecision::encode(EncodePlan::Video(super::encode::video_plan(config)))
         }
@@ -171,11 +180,9 @@ mod tests {
 
         assert!(decide_step(&FlowBlockKind::FileOutput, &empty, &hevc).stop);
         assert!(decide_step(&FlowBlockKind::MediaInspect, &empty, &hevc).reinpect);
-        assert!(
-            decide_step(&FlowBlockKind::RemuxMp4, &empty, &hevc)
-                .encode
-                .is_none()
-        );
+        let mp4 = decide_step(&FlowBlockKind::RemuxMp4, &empty, &hevc);
+        assert!(mp4.encode.is_none() && !mp4.transform);
+        assert!(mp4.remux_mp4.is_some_and(|plan| plan.faststart));
 
         let matched = decide_step(
             &FlowBlockKind::Condition,

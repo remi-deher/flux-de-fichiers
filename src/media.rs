@@ -1,3 +1,4 @@
+use crate::tool_run::{ExternalTool, ToolRunError, run_with_progress};
 use anyhow::Context;
 use serde_json::Value;
 use std::{path::Path, process::Stdio, time::Duration};
@@ -245,45 +246,22 @@ where
 pub async fn encode_with_progress<F>(
     bin: &Path,
     args: &[String],
-    mut on_progress: F,
-) -> anyhow::Result<()>
+    on_progress: F,
+) -> Result<(), ToolRunError>
 where
     F: FnMut(u32, &str) + Send + 'static,
 {
-    let mut child = Command::new(bin)
-        .args(args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()?;
-    let stderr = child.stderr.take().context("missing stderr")?;
-    let mut reader = tokio::io::BufReader::new(stderr).lines();
-    let read_progress = async {
-        while let Ok(Some(line)) = reader.next_line().await {
-            if let Some(time) = line.split("time=").nth(1) {
-                let stamp = time.split_whitespace().next().unwrap_or("");
-                on_progress(0, stamp);
-            } else if line.contains("frame=") {
-                on_progress(0, &line);
-            }
-        }
-    };
-    let wait_child = async {
-        let status = child.wait().await?;
-        anyhow::Ok(status)
-    };
-    let (status, _) = tokio::time::timeout(TOOL_TIMEOUT, async {
-        tokio::try_join!(wait_child, async {
-            read_progress.await;
-            anyhow::Ok(())
-        })
-    })
-    .await
-    .context("ffmpeg timed out")??;
-    anyhow::ensure!(
-        status.code() == Some(0),
-        "ffmpeg failed with code: {:?}",
-        status.code()
-    );
-    Ok(())
+    run_with_progress(ExternalTool::Ffmpeg, bin, args, on_progress).await
+}
+
+/// Lance MP4Box avec un argv déjà construit (sans l'exécutable) ; progresse via stderr.
+pub async fn mp4box_with_progress<F>(
+    bin: &Path,
+    args: &[String],
+    on_progress: F,
+) -> Result<(), ToolRunError>
+where
+    F: FnMut(u32, &str) + Send + 'static,
+{
+    run_with_progress(ExternalTool::Mp4Box, bin, args, on_progress).await
 }

@@ -19,18 +19,19 @@ const WORKER_START_MAX_POLLS: usize = 30;
 
 /// Champ de formulaire lié à un signal texte.
 #[component]
-fn Field(
+pub fn Field(
     id: &'static str,
     label: &'static str,
     value: RwSignal<String>,
     #[prop(default = "text")] kind: &'static str,
     #[prop(default = "off")] autocomplete: &'static str,
     #[prop(optional)] help: &'static str,
+    #[prop(default = true)] required: bool,
 ) -> impl IntoView {
     view! {
         <div class="form-group">
             <label for=id class="form-label">{label}</label>
-            <input id=id class="form-input" type=kind required=true autocomplete=autocomplete
+            <input id=id class="form-input" type=kind required=required autocomplete=autocomplete
                 prop:value=move || value.get()
                 on:input=move |event| value.set(event_target_value(&event)) />
             {(!help.is_empty()).then(|| view! { <p class="form-help">{help}</p> })}
@@ -80,7 +81,8 @@ pub fn RoleChoice(goto: Callback<Gate>) -> impl IntoView {
 
 #[component]
 pub fn CentralSetupForm(on_open: Callback<Me>, goto: Callback<Gate>) -> impl IntoView {
-    let (name, username, password, confirm) = (
+    let (name, username, password, confirm, email) = (
+        RwSignal::new(String::new()),
         RwSignal::new(String::new()),
         RwSignal::new(String::new()),
         RwSignal::new(String::new()),
@@ -108,12 +110,14 @@ pub fn CentralSetupForm(on_open: Callback<Me>, goto: Callback<Gate>) -> impl Int
                     feedback.set(Some("Les deux mots de passe ne correspondent pas.".into()));
                     return;
                 }
-                submit.dispatch(SetupRequest { name: name.get_untracked(), username: username.get_untracked(), password: password.get_untracked() });
+                let email = email.get_untracked();
+                submit.dispatch(SetupRequest { name: name.get_untracked(), username: username.get_untracked(), password: password.get_untracked(), email: Some(email).filter(|email| !email.trim().is_empty()) });
                 password.set(String::new());
                 confirm.set(String::new());
             }>
                 <Field id="setup-name" label="Nom du central" value=name help="Affiché dans l'interface et dans la liste des workers." />
                 <Field id="setup-username" label="Identifiant administrateur" value=username autocomplete="username" />
+                <Field id="setup-email" label="Adresse e-mail (facultative)" value=email kind="email" autocomplete="email" required=false help="Sert à recevoir un lien si vous oubliez votre mot de passe, une fois l'envoi de courriels configuré." />
                 <Field id="setup-password" label="Mot de passe" value=password kind="password" autocomplete="new-password" help="8 caractères au moins." />
                 <Field id="setup-password-confirm" label="Confirmer le mot de passe" value=confirm kind="password" autocomplete="new-password" />
                 <p class="auth-gate__notice">
@@ -159,6 +163,7 @@ pub fn WorkerSetupForm(goto: Callback<Gate>) -> impl IntoView {
     Effect::new(move |_| match submit.value().get() {
         Some(Ok(Some(name))) => goto.run(Gate::Login {
             instance_name: Some(name),
+            password_reset_enabled: false,
         }),
         Some(Ok(None)) => feedback.set(Some(
             "Enrôlement fait, mais l'installation n'a pas redémarré : rechargez la page.".into(),
@@ -193,7 +198,13 @@ pub fn WorkerSetupForm(goto: Callback<Gate>) -> impl IntoView {
 }
 
 #[component]
-pub fn LoginForm(instance_name: Option<String>, on_open: Callback<Me>) -> impl IntoView {
+pub fn LoginForm(
+    instance_name: Option<String>,
+    password_reset_enabled: bool,
+    on_open: Callback<Me>,
+    goto: Callback<Gate>,
+) -> impl IntoView {
+    let forgot_name = instance_name.clone();
     let (username, password) = (RwSignal::new(String::new()), RwSignal::new(String::new()));
     let feedback = RwSignal::new(None::<String>);
     let submit = Action::new_local(move |request: &LoginRequest| {
@@ -224,6 +235,9 @@ pub fn LoginForm(instance_name: Option<String>, on_open: Callback<Me>) -> impl I
                 <Field id="login-password" label="Mot de passe" value=password kind="password" autocomplete="current-password" />
                 <p class="form-error" role="alert">{move || feedback.get()}</p>
                 <button type="submit" class="btn btn-primary auth-gate__submit" disabled=move || submit.pending().get()>"Se connecter"</button>
+                {password_reset_enabled.then(|| view! {
+                    <button type="button" class="btn btn-secondary auth-gate__submit" on:click=move |_| goto.run(Gate::ForgotPassword { instance_name: forgot_name.clone() })>"Mot de passe oublié"</button>
+                })}
             </form>
         </GateCard>
     }

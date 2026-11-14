@@ -9,15 +9,16 @@ ce qui **reste à faire**. À mettre à jour (ou supprimer) quand l'état change
 - `AGENTS.md` (règles permanentes), puis `docs/developpement.md` (où est le code, quoi vérifier).
 - ADR récents : [0012](adr/0012-perimetre-perte-de-bail-et-versions-de-flows.md) (périmètre,
   perte de bail, versions de flux), [0013](adr/0013-vocabulaire-central-worker.md) (vocabulaire
-  central / worker), [0014](adr/0014-client-leptos-wasm.md) (client Leptos WASM).
+  central / worker), [0014](adr/0014-client-leptos-wasm.md) (client Leptos WASM),
+  [0015](adr/0015-ia-et-mcp.md) (IA et MCP, proposé).
 - Analyse du projet de référence `encoding-central` :
   [audit du 13 nov.](audits/2026-11-13-analyse-encoding-central.md).
 
 ## Règles de travail à respecter
 
-- **Aucun test ni build Docker en local** (machine faible) : `cargo check`, `cargo clippy` et
-  `cargo fmt` seulement ; les tests et l'image tournent en CI (`dev` n'a pas de CI ; la CI
-  complète est sur les PR `dev → test`, ADR 0002).
+- **Ni build Docker ni clippy en local** (machine faible, décision du 14 nov.) : `cargo fmt` et
+  `cargo test` ciblé seulement ; clippy, la suite complète et l'image tournent en CI
+  (`feature.yml` sur les PR vers `dev`, `test.yml` sur les PR `dev → test`, ADR 0002).
 - Flux Git ([ADR 0002](adr/0002-flux-git.md)) : push / PR feature → `dev` (merge commit), puis
   PR `dev → test` (CI, fusion auto, image `:test-<sha12>`), PR `test → main` pour une release.
 - **Jamais de ligne `Co-Authored-By` ni de mention d'agent** dans les commits et les PR.
@@ -72,8 +73,8 @@ paramètres.
   `index.html` **et** `pkg/`.
 - Les tests des PR récentes n'ont tourné que là où la CI s'applique (`dev → test`) ; les PR
   feature → `dev` n'ont pas de checks (ADR 0002). Exemple : #108 a laissé des `expect()` refusés
-  par clippy, corrigés par `cc52dd6` avant la PR `dev → test` #109. Lancer
-  `cargo clippy --workspace --all-targets -- -D warnings` avant de fusionner dans `dev`.
+  par clippy, corrigés par `cc52dd6` avant la PR `dev → test` #109. Depuis #112, `feature.yml`
+  lance clippy sur les PR vers `dev` : attendre son résultat avant de fusionner.
 - Jusqu'à #104, le filtre de chemins de `test.yml` ignorait `client/` et `shared/` : une PR qui
   ne touchait que ces dossiers ne reconstruisait ni ne testait rien (image `test-24aaadc4aebe` =
   ancien WASM). Vérifier qu'une image contient le WASM attendu avant de la déployer.
@@ -89,12 +90,14 @@ paramètres.
   haut (remplacée par les onglets), onglets Réseau / Stockage / Intégrations, télémétrie
   matérielle, page Mises à jour, import de flux depuis le catalogue (route inexistante),
   simulation animée.
-- Éditeur de flux : pas de glisser-déposer, pas d'avertissement en quittant avec des
-  modifications. Restaurer une version garde les en-têtes secrets du flux courant (masqués).
-- Tâches : pas de choix du worker à la création ; 200 tâches au plus, sans pagination.
-- Session expirée : message d'erreur ; retour à la connexion seulement en rechargeant.
-- Pas d'écran « mot de passe oublié » ; rotation de clé en CLI ; pas de changement de mot de
-  passe sur un worker.
+- Éditeur de flux : glisser-déposer sans position libre (mise en page automatique) ; non essayé
+  en réel (HTML5 DnD, `beforeunload`). Restaurer une version garde les en-têtes secrets du flux courant (masqués).
+- Aucun de ces écrans ni leurs correctifs (recherche globale, tiroir mobile, session expirée, choix du worker, pagination) n'a été ouvert en réel : seuls clippy et les tests natifs ont tourné.
+- « Mot de passe oublié » par courriel SMTP (ADR 0015) : écrit et couvert par des tests natifs, jamais
+  essayé contre un vrai relais SMTP ni dans le navigateur. Les comptes existants n'ont pas d'adresse :
+  un administrateur la renseigne (Paramètres > Utilisateurs, bouton « E-mail »). Rotation de clé en CLI ;
+  pas de changement de mot de passe sur un worker (le worker ne propose pas le lien : ses comptes sont
+  une copie du central, il faudrait une route de relais vers le central).
 - Accessibilité non auditée ; sans JavaScript ni WebAssembly, aucune interface.
 
 **Moteur et plugins**
@@ -115,33 +118,35 @@ Chaque point est indépendant sauf mention. Cocher ou retirer au fil de l'eau.
 
 ### 0. En cours
 
-- [ ] PR [#111](https://github.com/remi-deher/flux-de-fichiers/pull/111) `dev → test` (versions de
-      flux, #110) : attendre la CI, puis déployer l'image `:test-<sha12>` produite sur les NAS
-      (procédure dans « Production » ci-dessous ; **vérifier d'abord que le WASM de l'image est le
-      bon**, voir « Non vérifié »).
+- [x] PR [#111](https://github.com/remi-deher/flux-de-fichiers/pull/111) `dev → test` fusionnée
+      (CI verte, image `:test-67cb9cc…` publiée).
+- [ ] Déployer cette image sur les NAS (procédure dans « Production » ci-dessous ; **vérifier
+      d'abord que le WASM de l'image est le bon**, voir « Non vérifié »).
 
-### 1. Vérifier en réel (prioritaire, rien n'a été testé connecté)
+### 1. Vérifier en réel
 
-- [ ] Parcours connecté de chaque écran sur l'essai (`http://192.168.1.50:18480`, identifiants
-      de Remi) : Activité (créer, relancer), Flux (éditeur, liaisons, réglages, enregistrement,
-      versions), Bibliothèques, Workers, Plugins (réglages, dépôts), Paramètres (comptes, clés).
-- [ ] Tâche réelle de bout en bout **sur le worker distant** (flux figé #105 jamais exercé en vrai).
-- [ ] Bloc d'encodage plugin réel (#108) : nécessite un vrai FFmpeg installé (voir 3).
-- [ ] Expliquer les avertissements `slow statement` / `slow acquire` SQLite vus sur le central le
-      14 nov. vers 09:10 (avant déploiement).
+Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera plus tard.
+
+- [ ] Parcours connecté de chaque écran sur l'essai (`http://192.168.1.50:18480`).
+- [ ] Tâche réelle de bout en bout **sur le worker distant** (flux figé #105).
+- [ ] Bloc d'encodage plugin réel (#108) : nécessite un vrai FFmpeg.
+- [ ] Expliquer les avertissements `slow statement` / `slow acquire` SQLite du 14 nov. vers 09:10.
 
 ### 2. Interface (client WASM, `client/src/`)
 
-- [ ] Recherche globale (aujourd'hui la recherche de la barre du haut filtre l'écran courant).
-- [ ] Navigation mobile.
-- [ ] Repris de l'ancienne interface : widgets de la vue d'ensemble, feuille de filtres de la
-      barre du haut, onglets Réseau / Stockage des paramètres, télémétrie matérielle, page Mises à
-      jour, simulation dans l'éditeur.
-- [ ] Éditeur de flux : glisser-déposer ; avertir avant de quitter avec des modifications.
-- [ ] Tâches : choisir le worker à la création ; pagination au-delà de 200.
-- [ ] Session expirée : retour automatique à la connexion (aujourd'hui message + rechargement).
-- [ ] « Mot de passe oublié » à l'écran (aujourd'hui CLI `reset-password`) ; changement de mot de
-      passe sur un worker (route absente).
+- [x] Recherche globale (#115) : tâches, flux, bibliothèques, workers, plugins ; le résultat mène à l'objet (éditeur du flux, ou écran filtré). Les listes sont lues à l'ouverture du champ, sans route dédiée ; les tâches se limitent à la première page de 200.
+- [x] Navigation mobile (#116) : barre latérale en tiroir sous 768 px. Non vérifiée sur un vrai écran.
+- [x] Widgets de la vue d'ensemble : choix des widgets affichés (bouton « Personnaliser »), préférence gardée dans le navigateur.
+- [x] Paramètres : onglets Réseau (écoute, TLS, origine, session) et Stockage (dossiers, taille maximale, espace du volume), lus dans `/api/v1/system/status` ; lecture seule.
+- [x] Télémétrie matérielle du central en vue d'ensemble (processeur, mémoire, disque, GPU ; `GET /api/v1/system/hardware`, relevé à l'ouverture, pas d'historique). Les workers distants n'ont pas de relevé côté central : la télémétrie qu'ils envoient avec leurs échéances n'est pas conservée.
+- [x] Page Mises à jour (onglet des Paramètres) : version du central et de l'interface, procédure. Limite : pas de « version disponible », le central n'appelle aucun service externe (une vérification facultative reste à décider).
+- [x] Feuille de filtres de la barre du haut : période des tâches (Activité) et présence des workers ; remise à zéro au changement d'écran. Les autres écrans n'ont pas de critère propre.
+- [ ] Repris de l'ancienne interface : simulation dans l'éditeur.
+- [x] Éditeur de flux : glisser-déposer palette → carte et carte → carte (`flows/dnd.rs`, règles de `FlowGraph::connect`, alternative clic/liste conservée) ; confirmation avant de quitter avec des modifications (routeur, retour arrière, `beforeunload`).
+- [x] Tâches : choix du worker à la création (#118) ; pagination au-delà de 200 (#119, bouton « Charger les tâches plus anciennes »).
+- [x] Session expirée : un 401 sur session ouverte recharge la page, qui affiche la connexion (#117).
+- [x] « Mot de passe oublié » par courriel SMTP (ADR 0015) ; la CLI `reset-password` reste le recours.
+- [ ] Changement de mot de passe sur un worker (route absente, relais vers le central à cadrer).
 - [ ] Audit d'accessibilité.
 
 ### 3. Moteur et plugins
@@ -156,19 +161,19 @@ Chaque point est indépendant sauf mention. Cocher ou retirer au fil de l'eau.
 ### 4. À cadrer avec Remi avant de coder
 
 - [ ] Époque des baux (*fencing*) : un ancien worker ne doit plus pouvoir répondre sur une tâche
-      reprise.
-- [ ] IA et MCP (dans le périmètre, ADR 0012) : écrire un ADR d'abord.
+      reprise. Reporté (« à voir après », 14 nov.).
+- [x] IA et MCP : [ADR 0015](adr/0015-ia-et-mcp.md) rédigé (proposé), questions ouvertes à trancher
+      (qui génère les suggestions, validation humaine, périmètre « créer un plugin »).
 
 ### 5. Hygiène et process
 
-- [ ] CI sur les PR feature → `dev` (aujourd'hui aucune : #108 est arrivée avec des `expect()`
-      refusés par clippy), ou au minimum `cargo clippy --workspace --all-targets -- -D warnings`
-      obligatoire avant fusion.
-- [ ] Aligner `.cursorrules` / `.cursor/rules` sur la stack actuelle (client Leptos WASM, contrat
-      `flux-shared`).
-- [ ] Release `test → main` : aucune depuis 0.15.0, la production tourne sur des `:test-<sha>`.
-- [ ] `frontend/dist/index.html` versionné : le régénérer à chaque changement du thème ou le
-      sortir du dépôt.
+- [x] CI sur les PR feature → `dev` : `.github/workflows/feature.yml` (fmt, clippy natif et WASM,
+      tests, page générée à jour), ADR 0002 mis à jour. Reste à rendre `fmt-clippy-tests`
+      obligatoire sur `dev` (réglage GitHub, hors dépôt).
+- [x] `.cursorrules` / `.cursor/rules` alignés sur la stack actuelle.
+- [x] Release `test → main` : aucune pour le moment (décision du 14 nov.).
+- [x] `frontend/dist/index.html` reste versionné et régénéré à chaque changement ;
+      `feature.yml` échoue si la page est périmée.
 
 ## Ordre suggéré pour un autre agent
 

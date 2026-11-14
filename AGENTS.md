@@ -11,10 +11,12 @@
   plugins, jamais embarqué dans l'image ; IA et MCP dans le périmètre ; installation
   neuve uniquement (ADR 0012).
 - `npm run dev` doit démarrer sur http://localhost:3000 (bouton de prévisualisation).
-- Builds et tests à distance : ne pas initialiser ni exécuter de builds Docker lourds
-  ou de suites de tests en local (faible puissance de la machine hôte, décision utilisateur
-  du 9 nov. 2026). Les tests et la construction des images s'exécutent à distance sur
-  GitHub CI, et les images sont tirées directement pour la production.
+- Builds et vérifications à distance : ne pas initialiser ni exécuter de builds Docker
+  lourds, ni `cargo clippy` en local (faible puissance de la machine hôte, décisions
+  utilisateur du 9 et du 14 nov. 2026). En local : `cargo fmt` et `cargo test` (ciblé sur
+  le paquet ou le module touché). Clippy, la suite complète et la construction des images
+  s'exécutent sur GitHub CI (`feature.yml`, `test.yml`), et les images sont tirées
+  directement pour la production.
 
 ## Sécurité
 

@@ -3,20 +3,30 @@
 use crate::api;
 use flux_shared::format::format_bytes;
 use flux_shared::jobs::{Job, MediaFile, NewJob};
+use flux_shared::workers::Worker;
 use leptos::prelude::*;
+use uuid::Uuid;
 
 const FILES_PATH: &str = "/api/v1/files";
 const JOBS_PATH: &str = "/api/v1/jobs";
+const WORKERS_PATH: &str = "/api/v1/workers";
+
+/// Worker choisi dans la liste ; vide (ou illisible) : le premier worker disponible.
+fn parse_target(value: &str) -> Option<Uuid> {
+    Uuid::parse_str(value).ok()
+}
 
 #[component]
 pub fn CreateJob(on_created: Callback<Job>) -> impl IntoView {
     let files = LocalResource::new(|| api::get::<Vec<MediaFile>>(FILES_PATH));
+    let workers = LocalResource::new(|| api::get::<Vec<Worker>>(WORKERS_PATH));
     let selected = RwSignal::new(String::new());
+    let target = RwSignal::new(String::new());
     let feedback = RwSignal::new(None::<String>);
     let create = Action::new_local(move |source_name: &String| {
         let request = NewJob {
             source_name: source_name.clone(),
-            target_worker_id: None,
+            target_worker_id: parse_target(&target.get_untracked()),
         };
         async move { api::post::<NewJob, Job>(JOBS_PATH, Some(&request)).await }
     });
@@ -80,6 +90,20 @@ pub fn CreateJob(on_created: Callback<Job>) -> impl IntoView {
                     </p>
                 </div>
                 <div class="form-group">
+                    <label for="create-job-worker" class="form-label">"Worker"</label>
+                    <select
+                        id="create-job-worker"
+                        class="form-select"
+                        on:change=move |event| target.set(event_target_value(&event))
+                        prop:value=move || target.get()
+                    >
+                        <option value="">"Premier worker disponible"</option>
+                        {move || workers.get().and_then(Result::ok).unwrap_or_default().into_iter().map(|worker| {
+                            view! { <option value=worker.id.to_string()>{worker.name}</option> }
+                        }).collect_view()}
+                    </select>
+                </div>
+                <div class="form-group">
                     <button type="submit" class="btn btn-primary" disabled=move || create.pending().get()>
                         "Créer la tâche"
                     </button>
@@ -87,5 +111,21 @@ pub fn CreateJob(on_created: Callback<Job>) -> impl IntoView {
                 </div>
             </form>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_target;
+
+    #[test]
+    fn an_empty_or_invalid_choice_leaves_the_worker_to_the_central() {
+        assert_eq!(parse_target(""), None);
+        assert_eq!(parse_target("pas-un-uuid"), None);
+        let id = "67e55044-10b1-426f-9247-bb680e5fe0c8";
+        assert_eq!(
+            parse_target(id).map(|uuid| uuid.to_string()).as_deref(),
+            Some(id)
+        );
     }
 }

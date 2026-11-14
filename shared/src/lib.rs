@@ -10,6 +10,7 @@ pub mod format;
 pub mod jobs;
 pub mod libraries;
 pub mod plugins;
+pub mod search;
 pub mod session;
 pub mod system;
 pub mod workers;

@@ -3,7 +3,10 @@
 mod account;
 mod accounts;
 mod keys;
+mod network;
+mod storage;
 mod system;
+mod updates;
 
 pub use account::logout;
 
@@ -14,7 +17,10 @@ use flux_shared::session::Me;
 use flux_shared::{InstanceKind, Permission};
 use keys::KeysSection;
 use leptos::prelude::*;
+use network::NetworkSection;
+use storage::StorageSection;
 use system::SystemSection;
+use updates::UpdatesSection;
 
 /// Section de la page Paramètres et condition d'accès.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -23,6 +29,9 @@ enum Section {
     Users,
     Keys,
     System,
+    Network,
+    Storage,
+    Updates,
 }
 
 impl Section {
@@ -32,6 +41,9 @@ impl Section {
             Self::Users => SubTab::new("Utilisateurs", "👥"),
             Self::Keys => SubTab::new("Clés d'API", "🔑"),
             Self::System => SubTab::new("Système", "⚙️"),
+            Self::Network => SubTab::new("Réseau", "🌐"),
+            Self::Storage => SubTab::new("Stockage", "💾"),
+            Self::Updates => SubTab::new("Mises à jour", "⬆️"),
         }
     }
 }
@@ -51,6 +63,18 @@ fn sections(me: &Me) -> Vec<Section> {
         ),
         (
             Section::System,
+            central && me.allows(Permission::ManageSettings),
+        ),
+        (
+            Section::Network,
+            central && me.allows(Permission::ManageSettings),
+        ),
+        (
+            Section::Storage,
+            central && me.allows(Permission::ManageSettings),
+        ),
+        (
+            Section::Updates,
             central && me.allows(Permission::ManageSettings),
         ),
     ]
@@ -73,6 +97,9 @@ pub fn SettingsPage(me: Me) -> impl IntoView {
                 Section::Users => view! { <AccountsSection /> }.into_any(),
                 Section::Keys => view! { <KeysSection /> }.into_any(),
                 Section::System => view! { <SystemSection /> }.into_any(),
+                Section::Network => view! { <NetworkSection /> }.into_any(),
+                Section::Storage => view! { <StorageSection /> }.into_any(),
+                Section::Updates => view! { <UpdatesSection /> }.into_any(),
             }}
         </div>
     }
@@ -101,7 +128,7 @@ mod tests {
             InstanceKind::Central,
             None,
         );
-        assert_eq!(sections(&admin).len(), 4);
+        assert_eq!(sections(&admin).len(), 7);
         let worker = Me::new(
             CallerKind::Account,
             "remi".into(),

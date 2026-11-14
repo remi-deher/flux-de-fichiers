@@ -48,6 +48,9 @@ Un worker distant utilise la même image : `docker run … worker` avec `CENTRAL
 `BIND` (`0.0.0.0:3000`), `CONFIG_DIR` (`/config`), `DATA_DIR`, `INPUT_DIR`, `LOG_DIR`,
 `MAX_FILE_BYTES` (512 Mio), `LOCAL_WORKER` (`true` : worker intégré), `WEB_ORIGIN`,
 `WEB_SESSION_TTL_SECONDS`, `TLS_CERT` et `TLS_KEY` (ensemble), `TOOLS_CACHE_DIR`.
+Mot de passe oublié par courriel (ADR 0015) : `SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS` (`starttls`, `tls`
+ou `none`), `SMTP_USERNAME`, `SMTP_FROM` et `SMTP_PASSWORD` (ou `SMTP_PASSWORD_FILE`), avec `WEB_ORIGIN`
+pour bâtir le lien. Sans eux, seule la ligne de commande `reset-password` reste.
 Plugins : `PLUGINS_DIR` (dossier de catalogue local de développement, prioritaire) et
 `PLUGIN_ALLOW_PRIVATE_HOSTS=1` pour autoriser un dépôt sur un réseau privé.
 

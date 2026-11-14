@@ -27,6 +27,7 @@ fn app() -> anyhow::Result<axum::Router> {
         web_origin: None,
         web_session_ttl_seconds: 28_800,
         tls: None,
+        smtp: None,
     };
     let pool = SqlitePoolOptions::new().connect_lazy(&config.database_url)?;
     let (events_tx, _) = tokio::sync::broadcast::channel(128);
@@ -54,6 +55,7 @@ async fn migrated_app(
         web_origin: web_origin.map(str::to_owned),
         web_session_ttl_seconds: 28_800,
         tls: None,
+        smtp: None,
     };
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
@@ -224,6 +226,7 @@ async fn authorization_header_takes_priority_over_web_session_cookie() -> anyhow
         web_origin: None,
         web_session_ttl_seconds: 28_800,
         tls: None,
+        smtp: None,
     };
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -286,6 +289,7 @@ fn web_cookies_have_scoped_flags_and_secure_on_https() -> anyhow::Result<()> {
         web_origin: Some("https://localhost:3000".into()),
         web_session_ttl_seconds: 600,
         tls: None,
+        smtp: None,
     };
     let session = WebSession {
         token: "opaque-session-token".into(),

@@ -34,6 +34,7 @@ async fn fresh_app(with_known_keys: bool) -> anyhow::Result<axum::Router> {
         web_origin: None,
         web_session_ttl_seconds: 28_800,
         tls: None,
+        smtp: None,
     };
     let pool = SqlitePoolOptions::new()
         .max_connections(1)

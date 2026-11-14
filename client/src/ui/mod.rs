@@ -2,6 +2,8 @@
 
 pub mod drawer;
 pub mod empty_state;
+pub mod filters;
+pub mod global_search;
 pub mod icon;
 pub mod metric_card;
 pub mod registre;

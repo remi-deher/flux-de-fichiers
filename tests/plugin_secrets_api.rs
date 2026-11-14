@@ -63,6 +63,7 @@ async fn harness() -> anyhow::Result<Harness> {
         web_origin: None,
         web_session_ttl_seconds: WEB_SESSION_TTL_SECONDS,
         tls: None,
+        smtp: None,
     };
     let pool = SqlitePoolOptions::new()
         .max_connections(1)

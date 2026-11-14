@@ -787,7 +787,7 @@ dependencies = [
 
 [[package]]
 name = "flux-client"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "chrono",
  "console_error_panic_hook",
@@ -805,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "flux-de-fichiers"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -839,14 +839,14 @@ dependencies = [
 
 [[package]]
 name = "flux-frontend"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "stylist",
 ]
 
 [[package]]
 name = "flux-shared"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "chrono",
  "serde",

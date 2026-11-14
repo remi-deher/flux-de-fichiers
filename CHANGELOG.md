@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.17.0...v0.18.0) (2026-11-14)
+
+
+### Features
+
+* **client:** tableau à onglets attachés, subnav compacte, action dans la recherche ([23b84c9](https://github.com/remi-deher/flux-de-fichiers/commit/23b84c9dd99c03f0c7db98ec9b961aa26542ed79))
+* **client:** tableau à onglets attachés, subnav compacte, action dans la recherche ([c0813c6](https://github.com/remi-deher/flux-de-fichiers/commit/c0813c68097243c3ee6307292f2b5f97bb39ea11))
+
 ## [0.17.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.16.0...v0.17.0) (2026-11-14)
 
 

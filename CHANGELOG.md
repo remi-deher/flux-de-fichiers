@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.18.0...v0.19.0) (2026-11-14)
+
+
+### Features
+
+* **client:** actions dans la recherche, retrait des subnavs ([ceb9dec](https://github.com/remi-deher/flux-de-fichiers/commit/ceb9dec2d98e251d39b6bb047cf35a0b2d8c8935))
+* **client:** actions dans la recherche, retrait des subnavs et de la création de tâche ([110dd77](https://github.com/remi-deher/flux-de-fichiers/commit/110dd77fe545a7f752fe2ddb7daf89aaf83c6818))
+
 ## [0.18.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.17.0...v0.18.0) (2026-11-14)
 
 

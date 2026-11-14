@@ -89,8 +89,8 @@ paramètres.
   haut (remplacée par les onglets), onglets Réseau / Stockage / Intégrations, télémétrie
   matérielle, page Mises à jour, import de flux depuis le catalogue (route inexistante),
   simulation animée.
-- Éditeur de flux : pas de glisser-déposer, pas d'avertissement en quittant avec des
-  modifications. Restaurer une version garde les en-têtes secrets du flux courant (masqués).
+- Éditeur de flux : glisser-déposer sans position libre (mise en page automatique) ; non essayé
+  en réel (HTML5 DnD, `beforeunload`). Restaurer une version garde les en-têtes secrets du flux courant (masqués).
 - Aucun de ces écrans ni leurs correctifs (recherche globale, tiroir mobile, session expirée, choix du worker, pagination) n'a été ouvert en réel : seuls clippy et les tests natifs ont tourné.
 - Pas d'écran « mot de passe oublié » ; rotation de clé en CLI ; pas de changement de mot de
   passe sur un worker.
@@ -136,7 +136,7 @@ Chaque point est indépendant sauf mention. Cocher ou retirer au fil de l'eau.
 - [ ] Repris de l'ancienne interface : widgets de la vue d'ensemble, feuille de filtres de la
       barre du haut, onglets Réseau / Stockage des paramètres, télémétrie matérielle, page Mises à
       jour, simulation dans l'éditeur.
-- [ ] Éditeur de flux : glisser-déposer ; avertir avant de quitter avec des modifications.
+- [x] Éditeur de flux : glisser-déposer palette → carte et carte → carte (`flows/dnd.rs`, règles de `FlowGraph::connect`, alternative clic/liste conservée) ; confirmation avant de quitter avec des modifications (routeur, retour arrière, `beforeunload`).
 - [x] Tâches : choix du worker à la création (#118) ; pagination au-delà de 200 (#119, bouton « Charger les tâches plus anciennes »).
 - [x] Session expirée : un 401 sur session ouverte recharge la page, qui affiche la connexion (#117).
 - [ ] « Mot de passe oublié » à l'écran (aujourd'hui CLI `reset-password`) ; changement de mot de

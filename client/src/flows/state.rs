@@ -1,5 +1,6 @@
 //! État partagé de l'éditeur : graphe édité, bloc sélectionné, modifications non enregistrées.
 
+use super::dnd::{DragPayload, drop_outcome};
 use flux_shared::flows::{FlowGraph, OwnedBlockSpec, find_owned, native_owned_catalog};
 use leptos::prelude::*;
 
@@ -10,6 +11,12 @@ pub struct Editor {
     pub dirty: RwSignal<bool>,
     /// Catalogue natif + blocs des dépôts (chargé via l'API).
     pub catalog: RwSignal<Vec<OwnedBlockSpec>>,
+    /// Ce que l'on glisse en ce moment (palette ou carte).
+    pub drag: RwSignal<Option<DragPayload>>,
+    /// Carte survolée par un glisser.
+    pub drop_target: RwSignal<Option<String>>,
+    /// Raison du dernier dépôt refusé.
+    pub drop_notice: RwSignal<Option<&'static str>>,
 }
 
 impl Editor {
@@ -20,6 +27,9 @@ impl Editor {
             selected: RwSignal::new(selected),
             dirty: RwSignal::new(false),
             catalog: RwSignal::new(native_owned_catalog()),
+            drag: RwSignal::new(None),
+            drop_target: RwSignal::new(None),
+            drop_notice: RwSignal::new(None),
         }
     }
 
@@ -27,6 +37,28 @@ impl Editor {
     pub fn edit(&self, change: impl FnOnce(&mut FlowGraph)) {
         self.graph.update(change);
         self.dirty.set(true);
+    }
+}
+
+impl Editor {
+    /// Fin d'un glisser, abouti ou non.
+    pub fn end_drag(&self) {
+        self.drag.set(None);
+        self.drop_target.set(None);
+    }
+
+    /// Dépose ce qui est glissé sur la carte `target` ; renvoie le message d'un refus.
+    pub fn drop_on(&self, target: &str) -> Result<(), &'static str> {
+        let Some(payload) = self.drag.get_untracked() else {
+            return Ok(());
+        };
+        self.end_drag();
+        let dropped = self
+            .graph
+            .with_untracked(|graph| drop_outcome(graph, &payload, target))?;
+        self.edit(|graph| *graph = dropped.graph);
+        self.selected.set(Some(dropped.node_id));
+        Ok(())
     }
 }
 

@@ -66,8 +66,10 @@ historique et ses vues générées sont supprimés. Sur un worker, le client n'o
 d'ensemble, les tâches (lecture), les plugins (lecture) et les paramètres (compte, thème).
 
 Limites connues : les blocs d'un dépôt de plugins sans exécution native n'apparaissent pas dans
-la palette (ils restent lus et conservés) ; pas de glisser-déposer ni de simulation ; quitter
-l'éditeur ne prévient pas des modifications non enregistrées.
+la palette (ils restent lus et conservés) ; pas de simulation. Le glisser-déposer (palette → carte,
+carte → carte) insère ou déplace un maillon selon `FlowGraph::connect` ; la mise en page reste
+automatique, sans position libre. Quitter l'éditeur avec des modifications demande confirmation
+(changement d'écran, retour arrière, fermeture de l'onglet).
 
 ## Conséquences
 

@@ -60,6 +60,8 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
     let router = use_router();
     let editor = Editor::new(graph);
     let meta = RwSignal::new(record);
+    Effect::new(move |_| router.set_unsaved(editor.dirty.get()));
+    on_cleanup(move || router.set_unsaved(false));
     let versions_open = RwSignal::new(false);
     let feedback = RwSignal::new(None::<String>);
     let blocks = LocalResource::new(|| api::get::<Vec<OwnedBlockSpec>>(BLOCKS_PATH));

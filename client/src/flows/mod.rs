@@ -1,6 +1,8 @@
 //! Flux : liste, création et éditeur (graphe, réglages générés, liaisons) (ADR 0014).
 
 mod canvas;
+mod dnd;
+mod drag;
 mod editor;
 mod fields;
 mod geometry;

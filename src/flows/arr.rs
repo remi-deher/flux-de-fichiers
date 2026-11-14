@@ -91,7 +91,7 @@ pub struct ArrBlock {
 }
 
 /// Réglages de connexion d'un plugin *arr, secret déchiffré.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArrConnection {
     pub url: String,
     pub api_key: String,
@@ -263,6 +263,32 @@ pub struct ArrContext {
     pub connections: HashMap<ArrService, ArrConnection>,
     /// Dossier des médias sources, tel que vu par ce central.
     pub media_root: PathBuf,
+}
+
+/// Contexte *arr sérialisable qui voyage avec le bail vers un worker distant.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArrLeaseContext {
+    pub connections: HashMap<ArrService, ArrConnection>,
+    /// Dossier des médias sources, tel que vu par le central (traduction de chemins).
+    pub media_root: PathBuf,
+}
+
+impl From<&ArrContext> for ArrLeaseContext {
+    fn from(value: &ArrContext) -> Self {
+        Self {
+            connections: value.connections.clone(),
+            media_root: value.media_root.clone(),
+        }
+    }
+}
+
+impl From<ArrLeaseContext> for ArrContext {
+    fn from(value: ArrLeaseContext) -> Self {
+        Self {
+            connections: value.connections,
+            media_root: value.media_root,
+        }
+    }
 }
 
 impl ArrContext {
@@ -514,6 +540,30 @@ mod tests {
             open.remote_path(Path::new("/data/a/b.mkv"))?,
             "/data/a/b.mkv"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn arr_lease_context_roundtrips_through_json() -> Result<(), serde_json::Error> {
+        let mut connections = HashMap::new();
+        connections.insert(
+            ArrService::Sonarr,
+            ArrConnection {
+                url: "http://sonarr".into(),
+                api_key: "cle".into(),
+                path_local: "/media".into(),
+                path_remote: "/tv".into(),
+            },
+        );
+        let lease = ArrLeaseContext {
+            connections,
+            media_root: PathBuf::from("/data/input"),
+        };
+        let context = ArrContext::from(lease.clone());
+        assert_eq!(ArrLeaseContext::from(&context), lease);
+        let encoded = serde_json::to_value(&lease)?;
+        assert_eq!(encoded["connections"]["sonarr"]["api_key"], "cle");
+        assert_eq!(encoded["media_root"], "/data/input");
         Ok(())
     }
 

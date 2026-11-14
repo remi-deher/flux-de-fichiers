@@ -1,6 +1,7 @@
 use super::{
     arr::{ArrAction, ArrBlock, ArrService},
     condition::{ConditionConfig, evaluate_condition},
+    encode::EncodePlan,
     tool::{InPlaceEdit, in_place_edit},
     webhook::WebhookBlockConfig,
 };
@@ -13,6 +14,8 @@ pub struct StepDecision {
     pub port: Option<String>,
     pub stop: bool,
     pub transform: bool,
+    pub encode: Option<EncodePlan>,
+    pub reinpect: bool,
     pub edit: Option<InPlaceEdit>,
     pub notify: Option<WebhookBlockConfig>,
     pub integration: Option<ArrBlock>,
@@ -24,6 +27,8 @@ impl StepDecision {
             port: None,
             stop: false,
             transform: false,
+            encode: None,
+            reinpect: false,
             edit: None,
             notify: None,
             integration: None,
@@ -47,6 +52,20 @@ impl StepDecision {
     fn transform() -> Self {
         Self {
             transform: true,
+            ..Self::pass()
+        }
+    }
+
+    fn encode(plan: EncodePlan) -> Self {
+        Self {
+            encode: Some(plan),
+            ..Self::pass()
+        }
+    }
+
+    fn reinpect() -> Self {
+        Self {
+            reinpect: true,
             ..Self::pass()
         }
     }
@@ -94,6 +113,7 @@ pub fn decide_step(
     match kind {
         FlowBlockKind::FileInput | FlowBlockKind::Other(_) => StepDecision::pass(),
         FlowBlockKind::FileOutput => StepDecision::stop(),
+        FlowBlockKind::MediaInspect => StepDecision::reinpect(),
         FlowBlockKind::Condition => {
             let parsed =
                 serde_json::from_value::<ConditionConfig>(config.clone()).unwrap_or_else(|_| {
@@ -106,7 +126,15 @@ pub fn decide_step(
             StepDecision::branch(evaluate_condition(&parsed, media_info))
         }
         FlowBlockKind::Mkvpropedit => StepDecision::edit(in_place_edit(config)),
-        FlowBlockKind::RemuxMkv | FlowBlockKind::VideoEncode => StepDecision::transform(),
+        FlowBlockKind::RemuxMkv => StepDecision::transform(),
+        // MP4 via MP4Box : pas encore d'exécuteur dédié — traverse sans effet.
+        FlowBlockKind::RemuxMp4 => StepDecision::pass(),
+        FlowBlockKind::VideoEncode => {
+            StepDecision::encode(EncodePlan::Video(super::encode::video_plan(config)))
+        }
+        FlowBlockKind::AudioEncode => {
+            StepDecision::encode(EncodePlan::Audio(super::encode::audio_plan(config)))
+        }
         FlowBlockKind::SonarrRescan => arr_step(ArrService::Sonarr, ArrAction::Rescan, config),
         FlowBlockKind::SonarrRename => arr_step(ArrService::Sonarr, ArrAction::Rename, config),
         FlowBlockKind::RadarrRescan => arr_step(ArrService::Radarr, ArrAction::Rescan, config),
@@ -136,10 +164,18 @@ mod tests {
         );
         assert!(!decide_step(&FlowBlockKind::FileInput, &empty, &hevc).stop);
 
-        let other = decide_step(&FlowBlockKind::Other("remux-mp4".into()), &empty, &hevc);
-        assert!(!other.stop && !other.transform && other.notify.is_none());
+        let other = decide_step(&FlowBlockKind::Other("macro.unknown".into()), &empty, &hevc);
+        assert!(
+            !other.stop && !other.transform && other.encode.is_none() && other.notify.is_none()
+        );
 
         assert!(decide_step(&FlowBlockKind::FileOutput, &empty, &hevc).stop);
+        assert!(decide_step(&FlowBlockKind::MediaInspect, &empty, &hevc).reinpect);
+        assert!(
+            decide_step(&FlowBlockKind::RemuxMp4, &empty, &hevc)
+                .encode
+                .is_none()
+        );
 
         let matched = decide_step(
             &FlowBlockKind::Condition,
@@ -164,7 +200,15 @@ mod tests {
         assert_eq!(edit.map(|value| value.force_subtitles), Some(true));
 
         assert!(decide_step(&FlowBlockKind::RemuxMkv, &empty, &hevc).transform);
-        assert!(decide_step(&FlowBlockKind::VideoEncode, &empty, &hevc).transform);
+        let video = decide_step(&FlowBlockKind::VideoEncode, &empty, &hevc);
+        assert!(matches!(video.encode, Some(EncodePlan::Video(_))));
+        assert!(!video.transform);
+        let audio = decide_step(
+            &FlowBlockKind::AudioEncode,
+            &serde_json::json!({"codec": "aac", "normalize": true}),
+            &hevc,
+        );
+        assert!(matches!(audio.encode, Some(EncodePlan::Audio(plan)) if plan.normalize));
 
         let notify = decide_step(
             &FlowBlockKind::Webhook,

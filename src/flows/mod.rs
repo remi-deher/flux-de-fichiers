@@ -3,17 +3,21 @@
 mod arr;
 mod block;
 mod condition;
+mod encode;
 mod header_secrets;
 mod route;
 mod tool;
 mod webhook;
 
-pub use arr::{ArrAction, ArrBlock, ArrConnection, ArrContext, ArrService, execute_arr_block};
+pub use arr::{
+    ArrAction, ArrBlock, ArrConnection, ArrContext, ArrLeaseContext, ArrService, execute_arr_block,
+};
 pub use block::{FlowBlockKind, StepDecision, decide_step};
 pub use condition::{ConditionConfig, evaluate_condition};
+pub use encode::{EncodePlan, argv_for, audio_plan, video_plan};
 pub use header_secrets::{
-    decrypt_headers, has_webhook_headers, mask_definition, migrate_flow_secrets, rotate_definition,
-    seal_definition,
+    decrypt_definition_headers, decrypt_headers, has_webhook_headers, mask_definition,
+    migrate_flow_secrets, rotate_definition, seal_definition,
 };
 pub use route::next_connection;
 pub use tool::{InPlaceEdit, in_place_edit};
@@ -134,7 +138,7 @@ impl<'a> FlowEngine<'a> {
         let mut current_working_file = source_file.to_path_buf();
         let mut is_in_place = true;
         let mut final_warning = false;
-        let ctx = FlowContext::new(
+        let mut ctx = FlowContext::new(
             job_id,
             source_file
                 .file_name()
@@ -186,6 +190,10 @@ impl<'a> FlowEngine<'a> {
                 .await?;
                 tracing::info!(job_id = %job_id, "in-place mkvpropedit completed directly on working file");
             }
+            if decision.reinpect {
+                ctx.media_info = media::inspect_with(&mkvmerge_bin, &current_working_file).await?;
+                tracing::info!(job_id = %job_id, "media inspect refreshed for working file");
+            }
             if decision.transform {
                 is_in_place = false;
                 let target_output = work_dir.join("output.mkv");
@@ -201,6 +209,28 @@ impl<'a> FlowEngine<'a> {
                 .await?;
                 current_working_file = target_output;
                 tracing::info!(job_id = %job_id, "remux step executed into staging working file");
+            }
+            if let Some(plan) = &decision.encode {
+                is_in_place = false;
+                let ffmpeg_bin = self.cache_mgr.resolve_executable(
+                    crate::plugins::FFMPEG_TOOL_ID,
+                    crate::plugins::FFMPEG_TOOL_VERSION,
+                    "ffmpeg",
+                    "FFMPEG",
+                );
+                let target_output = work_dir.join(match plan {
+                    EncodePlan::Video(_) => "encoded.mkv",
+                    EncodePlan::Audio(_) => "encoded-audio.mkv",
+                });
+                let args = argv_for(plan, &current_working_file, &target_output);
+                let on_p = on_progress.clone();
+                media::encode_with_progress(&ffmpeg_bin, &args, move |pct: u32, line: &str| {
+                    on_p(pct, line);
+                })
+                .await?;
+                current_working_file = target_output;
+                ctx.working_file = current_working_file.clone();
+                tracing::info!(job_id = %job_id, block = %node.kind, "plugin encode step completed");
             }
             if let Some(webhook_cfg) = &decision.notify {
                 let mut webhook_cfg = webhook_cfg.clone();
@@ -271,15 +301,16 @@ mod tests {
     #[test]
     fn flow_graph_keeps_block_types_on_the_wire() -> Result<(), serde_json::Error> {
         let graph: FlowGraph = serde_json::from_str(
-            r#"{"nodes":[{"id":"node-1","type":"file-input","name":"Source"},{"id":"node-2","type":"remux-mp4","name":"MP4"}],"connections":[{"from":"node-1","to":"node-2"}]}"#,
+            r#"{"nodes":[{"id":"node-1","type":"file-input","name":"Source"},{"id":"node-2","type":"block.video.remux-mp4","name":"MP4"},{"id":"node-3","type":"legacy-unknown","name":"X"}],"connections":[{"from":"node-1","to":"node-2"}]}"#,
         )?;
         assert_eq!(graph.nodes[0].kind, FlowBlockKind::FileInput);
+        assert_eq!(graph.nodes[1].kind, FlowBlockKind::RemuxMp4);
         assert_eq!(
-            graph.nodes[1].kind,
-            FlowBlockKind::Other("remux-mp4".into())
+            graph.nodes[2].kind,
+            FlowBlockKind::Other("legacy-unknown".into())
         );
         let encoded = serde_json::to_value(&graph)?;
-        assert_eq!(encoded["nodes"][1]["type"], "remux-mp4");
+        assert_eq!(encoded["nodes"][1]["type"], "block.video.remux-mp4");
         Ok(())
     }
 }

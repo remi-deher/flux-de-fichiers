@@ -59,19 +59,40 @@ pub fn artifact_for_host(distribution: &ToolDistribution) -> Option<&ToolArtifac
 
 /// Contrat de distribution d'un outil, lu dans le premier dossier de catalogue qui le porte.
 pub fn read_distribution(roots: &[PathBuf], tool_id: &str) -> AppResult<serde_json::Value> {
-    let name = tool_id.trim_start_matches("app.");
-    if !super::is_valid_repository_id(name) {
+    let candidates = distribution_lookup_names(tool_id);
+    if candidates.is_empty() {
         return Err(AppError::NotFound);
     }
     for root in roots {
-        let path = distribution_path(root, name);
-        if path.is_file() {
-            let content = std::fs::read_to_string(&path)?;
-            return serde_json::from_str(&content)
-                .map_err(|error| AppError::InvalidManifest(error.to_string()));
+        for name in &candidates {
+            for path in [
+                distribution_path(root, name),
+                tool_distribution_path(root, name),
+            ] {
+                if path.is_file() {
+                    let content = std::fs::read_to_string(&path)?;
+                    return serde_json::from_str(&content)
+                        .map_err(|error| AppError::InvalidManifest(error.to_string()));
+                }
+            }
         }
     }
     Err(AppError::NotFound)
+}
+
+/// Noms de dossier possibles pour un outil (`app.ffmpeg` → `ffmpeg`, `tool.ffmpeg` → `ffmpeg`).
+fn distribution_lookup_names(tool_id: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for stripped in [
+        tool_id.trim_start_matches("app."),
+        tool_id.trim_start_matches("tool."),
+        tool_id,
+    ] {
+        if super::is_valid_repository_id(stripped) && !names.iter().any(|name| name == stripped) {
+            names.push(stripped.to_owned());
+        }
+    }
+    names
 }
 
 /// Télécharge, vérifie (SHA-256) et installe l'artefact de cet hôte. Sans effet si l'outil est déjà prêt.
@@ -146,10 +167,16 @@ pub async fn ensure_job_tools(
     probe: Option<&super::ProbeContract>,
     policy: &SyncPolicy,
 ) {
-    let mut wanted = vec![(
-        super::REMUX_TOOL_ID.to_owned(),
-        super::REMUX_TOOL_VERSION.to_owned(),
-    )];
+    let mut wanted = vec![
+        (
+            super::REMUX_TOOL_ID.to_owned(),
+            super::REMUX_TOOL_VERSION.to_owned(),
+        ),
+        (
+            super::FFMPEG_TOOL_ID.to_owned(),
+            super::FFMPEG_TOOL_VERSION.to_owned(),
+        ),
+    ];
     if let Some(contract) = probe {
         wanted.push((contract.tool_id.clone(), contract.version.clone()));
     }
@@ -166,6 +193,11 @@ pub async fn ensure_job_tools(
 /// Chemin du contrat de distribution d'une application dans un dossier de catalogue.
 fn distribution_path(root: &Path, name: &str) -> PathBuf {
     root.join("apps").join(name).join(DISTRIBUTION_FILE_NAME)
+}
+
+/// Chemin du contrat sous `tools/<name>/` (catalogue plugins ADR 0004).
+fn tool_distribution_path(root: &Path, name: &str) -> PathBuf {
+    root.join("tools").join(name).join(DISTRIBUTION_FILE_NAME)
 }
 
 #[cfg(test)]
@@ -308,6 +340,12 @@ mod tests {
             read_distribution(&roots, "app../../x"),
             Err(AppError::NotFound)
         ));
+
+        let sibling = Path::new(env!("CARGO_MANIFEST_DIR")).join("../flux-de-fichiers-plugins");
+        if sibling.join("tools/ffmpeg/distribution.v1.json").is_file() {
+            let ffmpeg = read_distribution(std::slice::from_ref(&sibling), "tool.ffmpeg")?;
+            assert_eq!(ffmpeg["toolId"], "tool.ffmpeg");
+        }
         Ok(())
     }
 

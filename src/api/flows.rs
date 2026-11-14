@@ -4,13 +4,23 @@ use super::{AdminAuth, AppState, ViewFlowsAuth};
 use crate::{
     domain::UpdateFlowRequest,
     error::{AppError, AppResult},
-    repository,
+    plugins, repository,
 };
 use axum::{
     Json,
     extract::{Path, State},
     http::StatusCode,
 };
+use flux_shared::flows::OwnedBlockSpec;
+
+/// Catalogue des blocs pour la palette : natifs + blocs des dépôts synchronisés.
+pub async fn list_blocks(
+    State(s): State<AppState>,
+    _auth: ViewFlowsAuth,
+) -> AppResult<Json<Vec<OwnedBlockSpec>>> {
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    Ok(Json(plugins::flow_block_catalog(&roots)))
+}
 
 /// Liste l'ensemble des flux configurés en base de données.
 pub async fn list_flows(

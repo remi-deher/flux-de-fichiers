@@ -53,10 +53,8 @@ pub fn CreateJob(on_created: Callback<Job>) -> impl IntoView {
     };
 
     view! {
-        <section class="section-panel" aria-labelledby="create-job-title">
-            <h2 id="create-job-title" class="section-title">"Nouvelle tâche"</h2>
+        <div class="inspection-panel">
             <form
-                class="form-grid-2"
                 on:submit=move |event| {
                     event.prevent_default();
                     let name = selected.get_untracked();
@@ -88,6 +86,6 @@ pub fn CreateJob(on_created: Callback<Job>) -> impl IntoView {
                     <p class="form-help" role="status">{move || feedback.get()}</p>
                 </div>
             </form>
-        </section>
+        </div>
     }
 }

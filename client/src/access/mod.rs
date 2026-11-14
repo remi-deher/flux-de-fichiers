@@ -5,7 +5,7 @@ mod forms;
 use crate::api::{self, ApiError};
 use flux_shared::session::{Me, SessionInfo};
 use flux_shared::system::SetupStatus;
-use forms::{CentralSetupForm, LoginForm, RoleChoice, WorkerSetupForm};
+use forms::{CentralSetupForm, GateCard, LoginForm, RoleChoice, WorkerSetupForm};
 use leptos::prelude::*;
 
 const SETUP_STATUS_PATH: &str = "/api/v1/setup/status";
@@ -67,21 +67,28 @@ pub fn AccessGate(children: ChildrenFn) -> impl IntoView {
     let open = Callback::new(move |me: Me| gate.set(Some(Ok(Gate::Ready(me)))));
     let goto = Callback::new(move |next: Gate| gate.set(Some(Ok(next))));
     let children = StoredValue::new(children);
-    move || {
-        match gate.get() {
-        None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),
+    move || match gate.get() {
+        None => {
+            view! { <GateCard title="Chargement…" subtitle=""><span></span></GateCard> }.into_any()
+        }
         Some(Err(error)) => view! {
-            <div class="empty-state-panel"><p class="empty-state-title">{access_error(&error)}</p></div>
-        }.into_any(),
+            <GateCard title="Central injoignable" subtitle="">
+                <p class="form-error" role="alert">{access_error(&error)}</p>
+            </GateCard>
+        }
+        .into_any(),
         Some(Ok(Gate::Ready(me))) => {
             provide_context(me);
             children.read_value()().into_any()
         }
         Some(Ok(Gate::ChooseRole)) => view! { <RoleChoice goto=goto /> }.into_any(),
-        Some(Ok(Gate::SetupCentral)) => view! { <CentralSetupForm on_open=open goto=goto /> }.into_any(),
+        Some(Ok(Gate::SetupCentral)) => {
+            view! { <CentralSetupForm on_open=open goto=goto /> }.into_any()
+        }
         Some(Ok(Gate::SetupWorker)) => view! { <WorkerSetupForm goto=goto /> }.into_any(),
-        Some(Ok(Gate::Login { instance_name })) => view! { <LoginForm instance_name=instance_name on_open=open /> }.into_any(),
-    }
+        Some(Ok(Gate::Login { instance_name })) => {
+            view! { <LoginForm instance_name=instance_name on_open=open /> }.into_any()
+        }
     }
 }
 

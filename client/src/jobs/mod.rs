@@ -1,19 +1,22 @@
-//! Écran Tâches : liste en direct, filtres, fiche, création et relance (ADR 0012, 0014).
+//! Écran Activité : file en direct, historique et diagnostic, fiche et création dans des tiroirs,
+//! relance manuelle (ADR 0012, 0014).
 
 mod create;
 mod detail;
 mod live;
-
-pub use live::LiveJobs;
 pub mod model;
 mod table;
 
+pub use live::LiveJobs;
+
 use crate::api;
+use crate::ui::search::{matches, query};
+use crate::ui::{Drawer, SubNav};
 use create::CreateJob;
 use detail::JobDetail;
-use flux_shared::Permission;
 use flux_shared::jobs::Job;
 use flux_shared::session::Me;
+use flux_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
 use model::JobFilter;
 use std::collections::HashMap;
@@ -25,7 +28,7 @@ const JOBS_PATH: &str = "/api/v1/jobs?limit=200";
 
 #[component]
 pub fn JobsPage(me: Me) -> impl IntoView {
-    let central = me.instance_kind == flux_shared::InstanceKind::Central;
+    let central = me.instance_kind == InstanceKind::Central;
     let can_manage = central && me.allows(Permission::ManageJobs);
     // Sur le central, la liste suit le flux d'événements de l'application ; sur un worker, non.
     let live = use_context::<LiveJobs>();
@@ -34,62 +37,68 @@ pub fn JobsPage(me: Me) -> impl IntoView {
         || RwSignal::new(HashMap::<Uuid, u32>::new()),
         |live| live.progress,
     );
-    let filter = RwSignal::new(JobFilter::All);
+    let tab = RwSignal::new(0_usize);
     let selected = RwSignal::new(None::<Uuid>);
+    let detail_open = RwSignal::new(false);
+    let create_open = RwSignal::new(false);
     let jobs = LocalResource::new(move || {
         reload.track();
         api::get::<Vec<Job>>(JOBS_PATH)
     });
-
     let refresh = Callback::new(move |job: Job| {
         selected.set(Some(job.id));
+        create_open.set(false);
         reload.update(|count| *count = count.wrapping_add(1));
     });
     let all_jobs = Signal::derive(move || jobs.get().and_then(Result::ok).unwrap_or_default());
-    let filtered = Signal::derive(move || {
-        let current = filter.get();
-        all_jobs
-            .get()
-            .into_iter()
-            .filter(|job| current.accepts(job))
-            .collect::<Vec<_>>()
+    let visible = Signal::derive(move || {
+        let filter = JobFilter::TABS[tab.get()];
+        let text = query();
+        jobs.get().map(|result| {
+            result
+                .map(|list| {
+                    list.into_iter()
+                        .filter(|job| {
+                            filter.accepts(job)
+                                && matches(&[&job.source_name, &job.id.to_string()], &text)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .map_err(|error| error.message())
+        })
     });
-    let selected_job = move || {
+    let selected_job = Signal::derive(move || {
         let id = selected.get()?;
         all_jobs.get().into_iter().find(|job| job.id == id)
-    };
-    let load_error = move || match jobs.get() {
-        Some(Err(error)) => {
-            Some(view! { <p class="settings-alert" role="alert">{error.message()}</p> })
-        }
-        _ => None,
-    };
+    });
+    let open = Callback::new(move |id: Uuid| {
+        selected.set(Some(id));
+        detail_open.set(true);
+    });
+    let title = Signal::derive(move || {
+        selected_job
+            .get()
+            .map(|job| job.source_name)
+            .unwrap_or_default()
+    });
+    let actions = can_manage.then(|| view! {
+        <button type="button" class="btn btn-primary btn-sm" on:click=move |_| create_open.set(true)>"Nouvelle tâche"</button>
+    }.into_any());
 
     view! {
-        <div class="registre">
-            <div class="cluster-spread">
-                <h1 class="section-title">"Tâches"</h1>
-                <div class="theme-segmented" role="group" aria-label="Filtrer par état">
-                    {JobFilter::CHOICES.into_iter().map(|choice| view! {
-                        <button
-                            type="button"
-                            class="theme-segmented__btn"
-                            aria-pressed=move || (filter.get() == choice).to_string()
-                            on:click=move |_| filter.set(choice)
-                        >
-                            {choice.label()}
-                        </button>
-                    }).collect_view()}
-                </div>
+        <div class="tab-panel" role="tabpanel">
+            <SubNav aria_label="Sous-navigation de l'activité"
+                tabs=JobFilter::TABS.iter().map(|filter| filter.tab()).collect()
+                selected=tab actions=actions.unwrap_or_else(|| ().into_any()) />
+            <div class="registre">
+                <JobsTable jobs=visible progress=progress selected=selected on_open=open />
             </div>
-            {load_error}
-            {can_manage.then(|| view! { <CreateJob on_created=refresh /> })}
-            <div class="overview-grid-2col">
-                <JobsTable jobs=filtered progress=progress selected=selected />
-                {move || selected_job().map(|job| view! {
-                    <JobDetail job=job can_manage=can_manage on_changed=refresh />
-                })}
-            </div>
+            <Drawer open=detail_open eyebrow="Tâche" title=title>
+                {move || selected_job.get().map(|job| view! { <JobDetail job=job can_manage=can_manage on_changed=refresh /> })}
+            </Drawer>
+            <Drawer open=create_open eyebrow="Activité" title="Nouvelle tâche".to_owned()>
+                <CreateJob on_created=refresh />
+            </Drawer>
         </div>
     }
 }

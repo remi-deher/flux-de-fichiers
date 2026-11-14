@@ -96,11 +96,8 @@ pub fn LibraryForm(
     let existing_id = draft.get_untracked().id;
 
     view! {
-        <form class="section-panel" on:submit=on_submit aria-labelledby="library-form-title">
-            <h2 id="library-form-title" class="section-title">
-                {if existing_id.is_some() { "Modifier la bibliothèque" } else { "Nouvelle bibliothèque" }}
-            </h2>
-            <div class="form-grid-2">
+        <form class="inspection-panel" on:submit=on_submit>
+            <div>
                 <div class="form-group">
                     <label for="library-name" class="form-label">"Nom"</label>
                     <input id="library-name" class="form-input" maxlength="80"
@@ -123,7 +120,7 @@ pub fn LibraryForm(
                 </div>
             </div>
 
-            <h3 class="section-title">"Workers"</h3>
+            <p class="inspection-panel__title">"Workers"</p>
             <ul class="library-worker-list">
                 {move || {
                     let entries = draft.get().workers;
@@ -144,7 +141,7 @@ pub fn LibraryForm(
                     }).collect_view().into_any()
                 }}
             </ul>
-            <div class="form-grid-2">
+            <div>
                 <div class="form-group">
                     <label for="library-worker" class="form-label">"Worker"</label>
                     <select id="library-worker" class="form-select"
@@ -180,7 +177,7 @@ pub fn LibraryForm(
             </div>
 
             <p class="form-help" role="status">{move || feedback.get()}</p>
-            <div class="inline-actions">
+            <div class="inspection-drawer__actions">
                 <button type="submit" class="btn btn-primary" disabled=move || submit.pending().get()>
                     "Enregistrer"
                 </button>

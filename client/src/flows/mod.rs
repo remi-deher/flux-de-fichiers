@@ -11,6 +11,8 @@ mod state;
 pub use editor::FlowEditor;
 
 use crate::route::{Link, Route, encode_segment};
+use crate::ui::search::{matches, query};
+use crate::ui::{Registre, RegistreMessage, StatusBadge, SubNav, SubTab};
 use crate::{api, format};
 use flux_shared::Permission;
 use flux_shared::flows::{FlowGraph, FlowRecord};
@@ -18,6 +20,15 @@ use flux_shared::session::Me;
 use leptos::prelude::*;
 
 const FLOWS_PATH: &str = "/api/v1/flows";
+
+const HEADERS: [&str; 6] = [
+    "Flux",
+    "Masque",
+    "Composition",
+    "Version",
+    "Modifié",
+    "Action",
+];
 
 #[component]
 fn FlowRow(flow: FlowRecord, can_manage: bool, on_removed: Callback<()>) -> impl IntoView {
@@ -35,17 +46,17 @@ fn FlowRow(flow: FlowRecord, can_manage: bool, on_removed: Callback<()>) -> impl
     });
     let removable = can_manage && !flow.is_default;
     view! {
-        <tr>
+        <tr class="registre-row">
             <td class="text-strong">
                 {flow.name.clone()}
-                {flow.is_default.then(|| view! { " " <span class="status-pill success">"Défaut"</span> })}
+                {flow.is_default.then(|| view! { " " <StatusBadge label="Défaut" variant="success" /> })}
             </td>
             <td class="text-mono">{flow.file_mask.clone()}</td>
-            <td>{format!("{blocks} bloc(s)")}</td>
+            <td>{if blocks == 0 { "Pipeline vide".to_owned() } else { format!("{blocks} blocs") }}</td>
             <td>{format!("v{}", flow.version)}</td>
             <td class="text-dim">{format::datetime(flow.updated_at)}</td>
             <td class="cell-end">
-                <Link to=Route::FlowEditor(flow.id.clone()) class="btn btn-secondary btn-sm">"Ouvrir"</Link>
+                <Link to=Route::FlowEditor(flow.id.clone()) class="btn btn-secondary btn-sm registre-open-btn">"Ouvrir"</Link>
                 {removable.then(|| view! {
                     <button type="button" class="btn btn-sm btn-danger-quiet" disabled=move || remove.pending().get()
                         on:click=move |_| { remove.dispatch(()); }>"Supprimer"</button>
@@ -65,41 +76,41 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
         api::get::<Vec<FlowRecord>>(FLOWS_PATH)
     });
     let on_removed = Callback::new(move |()| reload.update(|count| *count = count.wrapping_add(1)));
-    let rows = move || match flows.get() {
-        None => view! { <tr><td colspan="6" class="text-dim">"Chargement…"</td></tr> }.into_any(),
-        Some(Err(error)) => {
-            view! { <tr><td colspan="6" class="text-danger">{error.message()}</td></tr> }.into_any()
+    let tab = RwSignal::new(0_usize);
+    let rows = move || {
+        let text = query();
+        match flows.get() {
+            None => view! { <RegistreMessage span=HEADERS.len() text="Chargement des flux…" /> }
+                .into_any(),
+            Some(Err(error)) => {
+                view! { <RegistreMessage span=HEADERS.len() text=error.message() /> }.into_any()
+            }
+            Some(Ok(list)) => {
+                let shown: Vec<FlowRecord> = list
+                    .into_iter()
+                    .filter(|flow| matches(&[&flow.name, &flow.id, &flow.file_mask], &text))
+                    .collect();
+                if shown.is_empty() {
+                    return view! { <RegistreMessage span=HEADERS.len() text="Aucun flux installé. Créez-en un." /> }.into_any();
+                }
+                shown
+                    .into_iter()
+                    .map(|flow| view! { <FlowRow flow=flow can_manage=can_manage on_removed=on_removed /> })
+                    .collect_view()
+                    .into_any()
+            }
         }
-        Some(Ok(list)) if list.is_empty() => view! {
-            <tr><td colspan="6" class="text-dim">"Aucun flux : créez-en un."</td></tr>
-        }
-        .into_any(),
-        Some(Ok(list)) => list
-            .into_iter()
-            .map(|flow| view! { <FlowRow flow=flow can_manage=can_manage on_removed=on_removed /> })
-            .collect_view()
-            .into_any(),
     };
+    let actions = can_manage.then(|| {
+        view! { <Link to=Route::NewFlow class="btn btn-primary btn-sm">"Nouveau flux"</Link> }
+            .into_any()
+    });
     view! {
-        <div class="registre">
-            <div class="cluster-spread">
-                <h1 class="section-title">"Flux"</h1>
-                {can_manage.then(|| view! { <Link to=Route::NewFlow class="btn btn-primary">"Nouveau flux"</Link> })}
-            </div>
-            <div class="table-wrapper">
-                <table class="data-table" aria-label="Flux">
-                    <thead>
-                        <tr>
-                            <th scope="col">"Flux"</th>
-                            <th scope="col">"Masque"</th>
-                            <th scope="col">"Composition"</th>
-                            <th scope="col">"Version"</th>
-                            <th scope="col">"Modifié"</th>
-                            <th scope="col" class="cell-end">"Action"</th>
-                        </tr>
-                    </thead>
-                    <tbody>{rows}</tbody>
-                </table>
+        <div class="tab-panel" role="tabpanel">
+            <SubNav aria_label="Sous-navigation des flux" tabs=vec![SubTab::new("Flux installés", "📦")] selected=tab
+                actions=actions.unwrap_or_else(|| ().into_any()) />
+            <div class="registre">
+                <Registre aria_label="Flux" headers=HEADERS.to_vec()>{rows}</Registre>
             </div>
         </div>
     }

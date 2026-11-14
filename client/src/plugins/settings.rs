@@ -23,7 +23,7 @@ fn input_kind(field: &ResolvedSettingsField) -> &'static str {
 }
 
 #[component]
-pub fn PluginSettings(plugin_id: String, on_close: Callback<()>) -> impl IntoView {
+pub fn PluginSettings(plugin_id: String) -> impl IntoView {
     let path = format!("/api/v1/plugins/{}/settings", encode_segment(&plugin_id));
     let load_path = path.clone();
     let view_data = LocalResource::new(move || {
@@ -41,11 +41,7 @@ pub fn PluginSettings(plugin_id: String, on_close: Callback<()>) -> impl IntoVie
         None => {}
     });
     view! {
-        <section class="section-panel" aria-labelledby="plugin-settings-title">
-            <div class="cluster-spread">
-                <h2 id="plugin-settings-title" class="section-title">{format!("Réglages — {plugin_id}")}</h2>
-                <button type="button" class="btn btn-secondary btn-sm" on:click=move |_| on_close.run(())>"Fermer"</button>
-            </div>
+        <div class="inspection-panel">
             {move || match view_data.get() {
                 None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),
                 Some(Err(error)) => view! { <p class="text-danger">{error.message()}</p> }.into_any(),
@@ -81,13 +77,15 @@ pub fn PluginSettings(plugin_id: String, on_close: Callback<()>) -> impl IntoVie
                                     </div>
                                 }
                             }).collect_view()}
-                            <button type="submit" class="btn btn-primary" disabled=move || save.pending().get()>"Enregistrer"</button>
+                            <div class="inspection-drawer__actions">
+                                <button type="submit" class="btn btn-primary" disabled=move || save.pending().get()>"Enregistrer"</button>
+                            </div>
                         </form>
                     }.into_any()
                 }
             }}
             <p class="form-help" role="status">{move || feedback.get()}</p>
-        </section>
+        </div>
     }
 }
 

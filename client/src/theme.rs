@@ -68,7 +68,7 @@ pub fn restore() -> Theme {
 pub fn ThemePicker() -> impl IntoView {
     let current = RwSignal::new(restore());
     view! {
-        <div class="theme-segmented" role="group" aria-label="Thème">
+        <div class="theme-segmented" role="group" aria-label="Thème de couleur">
             {Theme::ALL.into_iter().map(|theme| view! {
                 <button type="button" class="theme-segmented__btn"
                     aria-pressed=move || (current.get() == theme).to_string()

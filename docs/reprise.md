@@ -61,11 +61,13 @@ paramètres.
 
 **Interface**
 
-- Fonctions de l'ancienne interface non reprises : recherche globale, barre latérale et
-  navigation mobile (barre du haut seulement), widgets de la vue d'ensemble, onglets Réseau,
-  Stockage et Intégrations des paramètres, affichage de la télémétrie matérielle, page Mises à
-  jour (elle affichait « Système à jour » sans rien vérifier), import de flux depuis le catalogue
-  (il appelait une route inexistante), simulation animée.
+- Gabarit d'origine repris dans le client (14 nov., après retour de l'utilisateur) : barre
+  latérale repliable par groupes, barre du haut avec recherche contextuelle (filtre les lignes de
+  l'écran) et workers en ligne, porte d'accès `auth-gate`, sous-navigation par écran, registres
+  et tiroirs d'inspection pour les fiches et formulaires (`client/src/ui/`, `client/src/shell.rs`).
+  Non repris : widgets personnalisables de la vue d'ensemble, feuille de filtres de la barre du
+  haut (remplacée par les onglets), onglets Réseau et Stockage, télémétrie matérielle, page Mises
+  à jour, import de flux depuis le catalogue (route inexistante), simulation animée.
 - Éditeur de flux : pas de glisser-déposer, pas d'avertissement en quittant avec des
   modifications, pas de consultation ni de restauration des versions ; les blocs des dépôts de
   plugins n'apparaissent pas dans la palette ; le bloc vidéo n'a pas de réglages d'encodage.

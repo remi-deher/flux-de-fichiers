@@ -102,7 +102,7 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
     };
 
     view! {
-        <div class="registre">
+        <div class="tab-panel" role="tabpanel">
             <div class="cluster-spread">
                 <Link to=Route::Flows class="btn btn-secondary btn-sm">"← Flux"</Link>
                 <span class="text-dim">

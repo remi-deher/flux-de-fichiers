@@ -4,6 +4,8 @@ mod settings;
 
 use crate::api;
 use crate::route::encode_segment;
+use crate::ui::search::{matches, query};
+use crate::ui::{Drawer, SubNav, SubTab};
 use flux_shared::plugins::vocab::CatalogItemType;
 use flux_shared::plugins::{
     CatalogEntry, CreateRepositoryRequest, PluginRepository, ToolStatus, ToolStatusSummary,
@@ -52,7 +54,7 @@ async fn run_repo_action(id: String, action: RepoAction) -> Result<(), api::ApiE
 }
 
 #[component]
-fn Repositories(reload_catalog: RwSignal<u32>) -> impl IntoView {
+fn Repositories(reload_catalog: RwSignal<u32>, adding: RwSignal<bool>) -> impl IntoView {
     let reload = RwSignal::new(0_u32);
     let repositories = LocalResource::new(move || {
         reload.track();
@@ -86,14 +88,14 @@ fn Repositories(reload_catalog: RwSignal<u32>) -> impl IntoView {
         Some(Ok(_)) => {
             name.set(String::new());
             url.set(String::new());
+            adding.set(false);
             bump(reload);
         }
         Some(Err(error)) => feedback.set(Some(error.message())),
         None => {}
     });
     view! {
-        <section class="section-panel" aria-labelledby="repos-title">
-            <h2 id="repos-title" class="section-title">"Dépôts"</h2>
+        <div class="registre">
             <div class="table-wrapper">
                 <table class="data-table" aria-label="Dépôts de plugins">
                     <thead><tr>
@@ -127,7 +129,8 @@ fn Repositories(reload_catalog: RwSignal<u32>) -> impl IntoView {
                     </tbody>
                 </table>
             </div>
-            <form class="form-grid-2" on:submit=move |event| {
+            <Drawer open=adding eyebrow="Plugins" title="Ajouter un dépôt".to_owned()>
+            <form class="inspection-panel" on:submit=move |event| {
                 event.prevent_default();
                 add.dispatch(CreateRepositoryRequest { id: None, name: name.get_untracked(), index_url: url.get_untracked() });
             }>
@@ -141,10 +144,13 @@ fn Repositories(reload_catalog: RwSignal<u32>) -> impl IntoView {
                     <input id="repo-url" class="form-input" type="url" required=true placeholder="https://…/catalogue/index.json"
                         prop:value=move || url.get() on:input=move |event| url.set(event_target_value(&event)) />
                 </div>
-                <button type="submit" class="btn btn-primary" disabled=move || add.pending().get()>"Ajouter le dépôt"</button>
+                <div class="inspection-drawer__actions">
+                    <button type="submit" class="btn btn-primary" disabled=move || add.pending().get()>"Ajouter le dépôt"</button>
+                </div>
             </form>
+            </Drawer>
             <p class="form-help" role="status">{move || feedback.get()}</p>
-        </section>
+        </div>
     }
 }
 
@@ -169,8 +175,7 @@ fn Tools(can_install: bool) -> impl IntoView {
         None => {}
     });
     view! {
-        <section class="section-panel" aria-labelledby="tools-title">
-            <h2 id="tools-title" class="section-title">"Outils"</h2>
+        <div class="registre">
             <div class="table-wrapper">
                 <table class="data-table" aria-label="Outils distribués">
                     <thead><tr>
@@ -178,7 +183,7 @@ fn Tools(can_install: bool) -> impl IntoView {
                         <th scope="col">"État"</th><th scope="col" class="cell-end">"Action"</th>
                     </tr></thead>
                     <tbody>
-                        {move || tools.get().and_then(Result::ok).unwrap_or_default().into_iter().map(|tool| {
+                        {move || { let text = query(); tools.get().and_then(Result::ok).unwrap_or_default().into_iter().filter(|tool| matches(&[&tool.name, &tool.id], &text)).map(|tool| {
                             let (label, class) = tool_status_label(tool.status);
                             let id = tool.id.clone();
                             let installable = can_install && tool.status == ToolStatus::NotInstalled;
@@ -194,12 +199,12 @@ fn Tools(can_install: bool) -> impl IntoView {
                                     })}</td>
                                 </tr>
                             }
-                        }).collect_view()}
+                        }).collect_view() }}
                     </tbody>
                 </table>
             </div>
             <p class="form-help" role="status">{move || feedback.get()}</p>
-        </section>
+        </div>
     }
 }
 
@@ -210,11 +215,13 @@ fn Catalog(reload: RwSignal<u32>, can_configure: bool) -> impl IntoView {
         api::get::<Vec<CatalogEntry>>(CATALOG_PATH)
     });
     let configuring = RwSignal::new(None::<String>);
-    let on_close = Callback::new(move |()| configuring.set(None));
+    let settings_open = RwSignal::new(false);
+    let title = Signal::derive(move || configuring.get().unwrap_or_default());
     view! {
-        {move || configuring.get().map(|id| view! { <PluginSettings plugin_id=id on_close=on_close /> })}
-        <section class="section-panel" aria-labelledby="catalog-title">
-            <h2 id="catalog-title" class="section-title">"Catalogue"</h2>
+        <Drawer open=settings_open eyebrow="Réglages du plugin" title=title>
+            {move || configuring.get().map(|id| view! { <PluginSettings plugin_id=id /> })}
+        </Drawer>
+        <div class="registre">
             <div class="table-wrapper">
                 <table class="data-table" aria-label="Catalogue des dépôts">
                     <thead><tr>
@@ -222,7 +229,7 @@ fn Catalog(reload: RwSignal<u32>, can_configure: bool) -> impl IntoView {
                         <th scope="col" class="cell-end">"Action"</th>
                     </tr></thead>
                     <tbody>
-                        {move || catalog.get().and_then(Result::ok).unwrap_or_default().into_iter().map(|entry| {
+                        {move || { let text = query(); catalog.get().and_then(Result::ok).unwrap_or_default().into_iter().filter(|entry| matches(&[&entry.name, &entry.id], &text)).map(|entry| {
                             let id = entry.id.clone();
                             let configurable = can_configure && entry.entry_type == CatalogItemType::Plugin;
                             view! {
@@ -232,15 +239,15 @@ fn Catalog(reload: RwSignal<u32>, can_configure: bool) -> impl IntoView {
                                     <td class="text-mono">{entry.version.clone()}</td>
                                     <td class="cell-end">{configurable.then(|| view! {
                                         <button type="button" class="btn btn-secondary btn-sm"
-                                            on:click=move |_| configuring.set(Some(id.clone()))>"Réglages"</button>
+                                            on:click=move |_| { configuring.set(Some(id.clone())); settings_open.set(true); }>"Réglages"</button>
                                     })}</td>
                                 </tr>
                             }
-                        }).collect_view()}
+                        }).collect_view() }}
                     </tbody>
                 </table>
             </div>
-        </section>
+        </div>
     }
 }
 
@@ -249,12 +256,23 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
     let central = me.instance_kind == InstanceKind::Central;
     let can_manage = central && me.allows(Permission::ManagePlugins);
     let reload_catalog = RwSignal::new(0_u32);
+    let tab = RwSignal::new(0_usize);
+    let adding = RwSignal::new(false);
+    let mut tabs = vec![SubTab::new("Catalogue", "🧩"), SubTab::new("Outils", "🛠️")];
+    if can_manage {
+        tabs.push(SubTab::new("Dépôts", "🌐"));
+    }
+    let actions = can_manage.then(|| view! {
+        <button type="button" class="btn btn-primary btn-sm" on:click=move |_| { tab.set(2); adding.set(true); }>"Ajouter un dépôt"</button>
+    }.into_any());
     view! {
-        <div class="registre">
-            <h1 class="section-title">"Plugins et outils"</h1>
-            {can_manage.then(|| view! { <Repositories reload_catalog=reload_catalog /> })}
-            <Tools can_install=can_manage />
-            <Catalog reload=reload_catalog can_configure=can_manage />
+        <div class="tab-panel" role="tabpanel">
+            <SubNav aria_label="Sous-navigation des plugins" tabs=tabs selected=tab actions=actions.unwrap_or_else(|| ().into_any()) />
+            {move || match tab.get() {
+                0 => view! { <Catalog reload=reload_catalog can_configure=can_manage /> }.into_any(),
+                1 => view! { <Tools can_install=can_manage /> }.into_any(),
+                _ => view! { <Repositories reload_catalog=reload_catalog adding=adding /> }.into_any(),
+            }}
         </div>
     }
 }

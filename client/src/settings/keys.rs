@@ -2,6 +2,7 @@
 
 use super::account::role_label;
 use crate::api;
+use crate::ui::Drawer;
 use flux_shared::Role;
 use flux_shared::accounts::{ApiKeyRecord, CreateKeyRequest, CreatedKey};
 use leptos::prelude::*;
@@ -19,6 +20,7 @@ pub fn KeysSection() -> impl IntoView {
     });
     let feedback = RwSignal::new(None::<String>);
     let revealed = RwSignal::new(None::<String>);
+    let creating = RwSignal::new(false);
     let (name, role) = (RwSignal::new(String::new()), RwSignal::new(Role::Worker));
     let create = Action::new_local(move |request: &CreateKeyRequest| {
         let request = request.clone();
@@ -31,6 +33,7 @@ pub fn KeysSection() -> impl IntoView {
     let refresh = move || reload.update(|count| *count = count.wrapping_add(1));
     Effect::new(move |_| match create.value().get() {
         Some(Ok(created)) => {
+            creating.set(false);
             revealed.set(Some(created.key));
             name.set(String::new());
             refresh();
@@ -44,8 +47,10 @@ pub fn KeysSection() -> impl IntoView {
         None => {}
     });
     view! {
-        <section class="section-panel" aria-labelledby="keys-title">
-            <h2 id="keys-title" class="section-title">"Clés d'API"</h2>
+        <div class="registre">
+            <div class="cluster-end">
+                <button type="button" class="btn btn-primary btn-sm" on:click=move |_| creating.set(true)>"Créer une clé"</button>
+            </div>
             {move || revealed.get().map(|key| view! {
                 <div class="settings-alert" role="status">
                     <p>"Copiez cette clé maintenant : elle ne sera plus affichée."</p>
@@ -81,7 +86,8 @@ pub fn KeysSection() -> impl IntoView {
                     </tbody>
                 </table>
             </div>
-            <form class="form-grid-2" on:submit=move |event| {
+            <Drawer open=creating eyebrow="Clés d'API" title="Nouvelle clé".to_owned()>
+            <form class="inspection-panel" on:submit=move |event| {
                 event.prevent_default();
                 create.dispatch(CreateKeyRequest { name: name.get_untracked(), role: role.get_untracked().as_str().into() });
             }>
@@ -101,9 +107,12 @@ pub fn KeysSection() -> impl IntoView {
                         }).collect_view()}
                     </select>
                 </div>
-                <button type="submit" class="btn btn-primary" disabled=move || create.pending().get()>"Créer la clé"</button>
+                <div class="inspection-drawer__actions">
+                    <button type="submit" class="btn btn-primary" disabled=move || create.pending().get()>"Créer la clé"</button>
+                </div>
             </form>
+            </Drawer>
             <p class="form-help" role="status">{move || feedback.get()}</p>
-        </section>
+        </div>
     }
 }

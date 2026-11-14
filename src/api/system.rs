@@ -1,14 +1,16 @@
 //! État du système pour la page Paramètres : version, clé de chiffrement, taille de la base.
 
-use super::{AdminAuth, AppState};
+use super::{AdminAuth, AppState, ViewOverviewAuth};
 use crate::{
     config::Config,
     error::AppResult,
     secrets::{KEY_FILE_ENV, SecretBox},
-    telemetry::TelemetryProbe,
+    telemetry::{TelemetryProbe, TelemetrySnapshot},
 };
 use axum::{Json, extract::State};
-pub use flux_shared::system::{KeySource, NetworkStatus, StorageStatus, SystemStatus, VolumeSpace};
+pub use flux_shared::system::{
+    HardwareStatus, KeySource, NetworkStatus, StorageStatus, SystemStatus, VolumeSpace,
+};
 use std::path::{Path, PathBuf};
 
 /// Chemin du fichier SQLite d'une URL de base (`sqlite:///config/flux.db?mode=rwc`) ; `None` en mémoire.
@@ -57,6 +59,29 @@ pub fn storage_status(config: &Config) -> StorageStatus {
             },
         ),
     }
+}
+
+/// Relevé matériel du central ; un volume de capacité nulle est présenté comme illisible.
+pub fn hardware_status(snapshot: TelemetrySnapshot) -> HardwareStatus {
+    HardwareStatus {
+        logical_cores: snapshot.logical_cores,
+        cpu_usage_percent: snapshot.cpu_usage_percent,
+        ram_total_bytes: snapshot.ram_total_bytes,
+        ram_used_bytes: snapshot.ram_used_bytes,
+        gpu_devices: snapshot.gpu_devices,
+        volume: (snapshot.storage_total_bytes > 0).then_some(VolumeSpace {
+            total_bytes: snapshot.storage_total_bytes,
+            available_bytes: snapshot.storage_available_bytes,
+        }),
+    }
+}
+
+pub async fn hardware(
+    State(state): State<AppState>,
+    _auth: ViewOverviewAuth,
+) -> Json<HardwareStatus> {
+    let probe = TelemetryProbe::with_storage_path(&state.config.data_dir);
+    Json(hardware_status(probe.sample()))
 }
 
 pub async fn status(
@@ -113,6 +138,38 @@ mod tests {
             web_session_ttl_seconds: 60,
             tls: None,
         }
+    }
+
+    fn snapshot(storage_total_bytes: u64) -> TelemetrySnapshot {
+        TelemetrySnapshot {
+            timestamp: chrono::Utc::now(),
+            logical_cores: 4,
+            cpu_usage_percent: 25.0,
+            load_average: [1.0, 0.5, 0.25],
+            ram_total_bytes: 8192,
+            ram_available_bytes: 2048,
+            ram_used_bytes: 6144,
+            gpu_detected: true,
+            gpu_devices: vec!["/dev/dri/renderD128".into()],
+            storage_total_bytes,
+            storage_available_bytes: 100,
+        }
+    }
+
+    #[test]
+    fn test_hardware_status_keeps_the_load_and_hides_an_unreadable_volume() {
+        let hardware = hardware_status(snapshot(1000));
+        assert_eq!(hardware.logical_cores, 4);
+        assert_eq!(hardware.ram_used_bytes, 6144);
+        assert_eq!(hardware.gpu_devices, ["/dev/dri/renderD128"]);
+        assert_eq!(
+            hardware.volume,
+            Some(VolumeSpace {
+                total_bytes: 1000,
+                available_bytes: 100
+            })
+        );
+        assert_eq!(hardware_status(snapshot(0)).volume, None);
     }
 
     #[test]

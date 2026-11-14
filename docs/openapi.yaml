@@ -700,6 +700,38 @@ paths:
                           availableBytes: {type: integer}
         '403': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/system/hardware:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Charge matérielle du central (vue d'ensemble)
+      description: >-
+        Droit de consulter la vue d'ensemble. Relevé à la demande : cœurs logiques, charge CPU
+        (charge sur 1 minute rapportée aux cœurs, 0 à 100), mémoire, périphériques GPU détectés,
+        capacité et espace libre du volume de `dataDir` (`null` si illisible). Ne concerne que le
+        central, pas les workers distants.
+      responses:
+        '200':
+          description: Relevé matériel
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [logicalCores, cpuUsagePercent, ramTotalBytes, ramUsedBytes, gpuDevices, volume]
+                properties:
+                  logicalCores: {type: integer}
+                  cpuUsagePercent: {type: number}
+                  ramTotalBytes: {type: integer}
+                  ramUsedBytes: {type: integer}
+                  gpuDevices: {type: array, items: {type: string}}
+                  volume:
+                    type: [object, 'null']
+                    required: [totalBytes, availableBytes]
+                    properties:
+                      totalBytes: {type: integer}
+                      availableBytes: {type: integer}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/accounts:
     get:
       security: [{ApiKey: []}, {WebSession: []}]

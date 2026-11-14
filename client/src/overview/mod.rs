@@ -1,5 +1,6 @@
 //! Vue d'ensemble : chiffres clés, points d'attention et tâches récentes ; sur un worker, ses tâches.
 
+mod hardware;
 mod summary;
 mod widgets;
 
@@ -15,6 +16,7 @@ use flux_shared::jobs::Job;
 use flux_shared::libraries::Library;
 use flux_shared::session::Me;
 use flux_shared::workers::{Worker, WorkerOverview};
+use hardware::HardwareWidget;
 use leptos::prelude::*;
 use summary::{Summary, alerts};
 use widgets::{Widget, WidgetLayout, WidgetPicker};
@@ -97,6 +99,7 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                         <MetricCard label="Bibliothèques prêtes" value=format!("{} / {}", summary.libraries_ready, summary.libraries_total) subtitle="Avec flux et worker" icon=IconName::Libraries />
                     </section>
                     })}
+                    {layout_now.is_visible(Widget::Hardware).then(|| view! { <HardwareWidget /> })}
                     <div class="overview-grid-2col">
                         {layout_now.is_visible(Widget::Attention).then(|| view! {
                         <section class="section-panel">

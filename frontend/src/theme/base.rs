@@ -830,6 +830,31 @@ body[data-filter-sheet] .topbar-search {
   flex-shrink: 0;
 }
 
+/* Choix des widgets de la vue d'ensemble */
+.widget-picker {
+  position: relative;
+}
+
+.widget-picker > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.widget-picker__list {
+  position: absolute;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  padding: var(--space-3);
+  min-width: 200px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
 /* Grille de métriques et KPIs statistiques */
 .metrics-grid {
   display: grid;

@@ -133,7 +133,8 @@ Chaque point est indépendant sauf mention. Cocher ou retirer au fil de l'eau.
 
 - [x] Recherche globale (#115) : tâches, flux, bibliothèques, workers, plugins ; le résultat mène à l'objet (éditeur du flux, ou écran filtré). Les listes sont lues à l'ouverture du champ, sans route dédiée ; les tâches se limitent à la première page de 200.
 - [x] Navigation mobile (#116) : barre latérale en tiroir sous 768 px. Non vérifiée sur un vrai écran.
-- [ ] Repris de l'ancienne interface : widgets de la vue d'ensemble, feuille de filtres de la
+- [x] Widgets de la vue d'ensemble : choix des widgets affichés (bouton « Personnaliser »), préférence gardée dans le navigateur.
+- [ ] Repris de l'ancienne interface : feuille de filtres de la
       barre du haut, onglets Réseau / Stockage des paramètres, télémétrie matérielle, page Mises à
       jour, simulation dans l'éditeur.
 - [ ] Éditeur de flux : glisser-déposer ; avertir avant de quitter avec des modifications.

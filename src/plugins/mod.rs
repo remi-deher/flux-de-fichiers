@@ -48,6 +48,10 @@ pub const REMUX_TOOL_VERSION: &str = "1.0.0";
 pub const FFMPEG_TOOL_ID: &str = "tool.ffmpeg";
 pub const FFMPEG_TOOL_VERSION: &str = "1.0.0";
 
+/// MP4Box (GPAC) distribué par les dépôts de plugins, pour le remuxage MP4.
+pub const MP4BOX_TOOL_ID: &str = "tool.mp4box";
+pub const MP4BOX_TOOL_VERSION: &str = "1.0.0";
+
 /// Conteneur de l'index du catalogue.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]

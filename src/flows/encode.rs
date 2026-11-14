@@ -69,7 +69,7 @@ fn number(config: &Value, key: &str, default: u8) -> u8 {
     }
 }
 
-fn split_custom(config: &Value) -> Vec<String> {
+pub(super) fn split_custom(config: &Value) -> Vec<String> {
     config
         .get("custom_parameters")
         .and_then(Value::as_str)

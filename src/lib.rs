@@ -18,6 +18,7 @@ pub mod secret_rotation;
 pub mod secrets;
 pub mod storage;
 pub mod telemetry;
+pub mod tool_run;
 pub mod tools_cache;
 pub mod web_session;
 pub mod worker;

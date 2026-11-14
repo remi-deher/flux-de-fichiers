@@ -176,6 +176,10 @@ pub async fn ensure_job_tools(
             super::FFMPEG_TOOL_ID.to_owned(),
             super::FFMPEG_TOOL_VERSION.to_owned(),
         ),
+        (
+            super::MP4BOX_TOOL_ID.to_owned(),
+            super::MP4BOX_TOOL_VERSION.to_owned(),
+        ),
     ];
     if let Some(contract) = probe {
         wanted.push((contract.tool_id.clone(), contract.version.clone()));

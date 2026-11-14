@@ -41,11 +41,18 @@ jobs:
           # démarrent seules, sans « Approve workflows to run ».
           token: ${{ secrets.RELEASE_TOKEN }}
       - name: Fusion automatique de la PR de release
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        if: ${{ steps.release.outputs.release_created != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          PR: ${{ fromJSON(steps.release.outputs.pr).number }}
-        run: gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --auto --merge
+        run: |
+          # La sortie `pr` de release-please n'est pas fiable : on cherche la PR par sa branche.
+          number=$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open --json number,headRefName \
+            --jq '[.[] | select(.headRefName | startswith("release-please--"))][0].number // empty')
+          if [ -z "$number" ]; then
+            echo "Aucune PR de release ouverte."
+            exit 0
+          fi
+          gh pr merge "$number" --repo "$GITHUB_REPOSITORY" --auto --merge
 
   promote-image:
     needs: release-please

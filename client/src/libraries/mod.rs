@@ -5,7 +5,8 @@ mod form;
 
 use crate::api;
 use crate::ui::search::{matches, query};
-use crate::ui::{Drawer, Registre, RegistreMessage, StatusBadge, SubNav, SubTab};
+use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
+use crate::ui::{Drawer, Registre, RegistreMessage, StatusBadge};
 use draft::{LibraryDraft, is_ready};
 use flux_shared::Permission;
 use flux_shared::flows::FlowRecord;
@@ -99,16 +100,18 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
         Some(draft) if draft.id.is_some() => draft.name,
         _ => "Nouvelle bibliothèque".to_owned(),
     });
-    let tab = RwSignal::new(0_usize);
-    let actions = can_manage.then(|| view! {
-        <button type="button" class="btn btn-primary btn-sm"
-            on:click=move |_| { editing.set(Some(LibraryDraft::default())); drawer.set(true); }>"Nouvelle bibliothèque"</button>
-    }.into_any());
+    if can_manage {
+        provide_topbar_action(ActionSpec {
+            label: "Nouvelle bibliothèque",
+            on_click: Callback::new(move |()| {
+                editing.set(Some(LibraryDraft::default()));
+                drawer.set(true);
+            }),
+        });
+    }
 
     view! {
         <div class="tab-panel" role="tabpanel">
-            <SubNav aria_label="Sous-navigation des bibliothèques" tabs=vec![SubTab::new("Bibliothèques", "📚")] selected=tab
-                actions=actions.unwrap_or_else(|| ().into_any()) />
             <div class="registre">
                 <Registre aria_label="Bibliothèques déclarées" headers=HEADERS.to_vec()>{rows}</Registre>
             </div>

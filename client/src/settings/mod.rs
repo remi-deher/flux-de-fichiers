@@ -4,6 +4,8 @@ mod account;
 mod accounts;
 mod keys;
 mod network;
+mod network_diagnostics;
+mod network_workers;
 mod system;
 
 pub use account::logout;

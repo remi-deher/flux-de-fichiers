@@ -1,5 +1,6 @@
 mod accounts;
 pub mod auth;
+pub mod diagnostics;
 mod flows;
 mod installation;
 mod jobs;
@@ -183,6 +184,7 @@ fn json_routes() -> Router<AppState> {
         )
         .route("/api/v1/system/status", get(system::status))
         .route("/api/v1/system/hardware", get(system::hardware))
+        .route("/api/v1/system/diagnostics", post(diagnostics::diagnostics))
         .route("/api/v1/accounts/{id}", put(accounts::update))
         .route("/api/v1/api-keys", get(keys::list).post(keys::create))
         .route("/api/v1/api-keys/{id}", axum::routing::delete(keys::revoke))

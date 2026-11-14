@@ -11,6 +11,19 @@ pub const INTEGRATED_WORKER_NAME: &str = "central-local";
 /// Délai sans contact au-delà duquel un worker est présenté hors ligne.
 pub const WORKER_ONLINE_SECONDS: i64 = 120;
 
+/// Silence au-delà duquel un worker distant déclenche une alerte de connectivité.
+pub const WORKER_SILENT_ALERT_SECONDS: i64 = 600;
+
+/// Connectivité d'un worker d'après l'ancienneté de son dernier contact.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Liveness {
+    Online,
+    Offline,
+    /// Silencieux depuis plus de `WORKER_SILENT_ALERT_SECONDS`.
+    Silent,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
 pub struct Worker {
@@ -23,6 +36,22 @@ impl Worker {
     /// Le worker intégré au central, sous son nom par défaut.
     pub fn is_integrated(&self) -> bool {
         self.name == INTEGRATED_WORKER_NAME
+    }
+
+    /// Secondes écoulées depuis le dernier contact (jamais négatif).
+    pub fn silence_seconds(&self, now: DateTime<Utc>) -> i64 {
+        (now - self.last_seen).num_seconds().max(0)
+    }
+
+    pub fn liveness(&self, now: DateTime<Utc>) -> Liveness {
+        let silence = self.silence_seconds(now);
+        if silence >= WORKER_SILENT_ALERT_SECONDS {
+            Liveness::Silent
+        } else if silence >= WORKER_ONLINE_SECONDS {
+            Liveness::Offline
+        } else {
+            Liveness::Online
+        }
     }
 
     /// En ligne si son dernier contact date de moins de `WORKER_ONLINE_SECONDS`.
@@ -84,5 +113,25 @@ mod tests {
         };
         assert!(worker(10).is_online(now));
         assert!(!worker(WORKER_ONLINE_SECONDS).is_online(now));
+    }
+
+    #[test]
+    fn liveness_escalates_from_online_to_silent() {
+        let now = DateTime::<Utc>::UNIX_EPOCH + chrono::Duration::seconds(10_000);
+        let worker = |seconds_ago: i64| Worker {
+            id: Uuid::nil(),
+            name: "nas".into(),
+            last_seen: now - chrono::Duration::seconds(seconds_ago),
+        };
+        assert_eq!(worker(0).liveness(now), Liveness::Online);
+        assert_eq!(
+            worker(WORKER_ONLINE_SECONDS).liveness(now),
+            Liveness::Offline
+        );
+        assert_eq!(
+            worker(WORKER_SILENT_ALERT_SECONDS).liveness(now),
+            Liveness::Silent
+        );
+        assert_eq!(worker(-30).silence_seconds(now), 0);
     }
 }

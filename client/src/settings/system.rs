@@ -118,10 +118,8 @@ pub fn SystemSection() -> impl IntoView {
             <code>"flux-de-fichiers rotate-secret"</code>
             " ; une copie de l'ancienne clé et de la base est rangée dans /config/backups."
         </p>
-        <p class="form-help">
-            "Mises à jour : l'image se met à jour en tirant une nouvelle version publiée ; aucune vérification automatique n'est faite ici."
-        </p>
-    }.into_any();
+    }
+    .into_any();
     view! {
         <StatusSection title="Système" subtitle="Version, clé de chiffrement et base de données."
             rows=system_rows footer=footer />

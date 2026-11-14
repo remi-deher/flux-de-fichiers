@@ -137,6 +137,7 @@ mod tests {
             web_origin: Some("https://flux.example".into()),
             web_session_ttl_seconds: 60,
             tls: None,
+            smtp: None,
         }
     }
 

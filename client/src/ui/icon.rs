@@ -19,6 +19,7 @@ pub enum IconName {
     Close,
     ChevronLeft,
     Logout,
+    Menu,
 }
 
 impl IconName {
@@ -56,6 +57,9 @@ impl IconName {
                 r#"<line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/>"#
             }
             Self::ChevronLeft => r#"<path d="m15 18-6-6 6-6"/>"#,
+            Self::Menu => {
+                r#"<line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/>"#
+            }
             Self::Logout => {
                 r#"<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>"#
             }

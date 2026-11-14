@@ -147,12 +147,19 @@ fn search_placeholder(route: &Route) -> &'static str {
         .map_or("Rechercher…", |entry| entry.search)
 }
 
+/// Tiroir de navigation des écrans étroits : ouvert par la barre du haut, fermé par le voile,
+/// Échap ou le choix d'un écran.
+#[derive(Clone, Copy)]
+struct NavDrawer(RwSignal<bool>);
+
 #[component]
 fn Sidebar(me: Me) -> impl IntoView {
     let router = use_router();
     let collapsed = RwSignal::new(false);
+    let drawer = use_context::<NavDrawer>().map(|drawer| drawer.0);
     view! {
-        <aside class="application-sidebar" class:is-collapsed=move || collapsed.get() aria-label="Navigation principale">
+        <aside class="application-sidebar" class:is-collapsed=move || collapsed.get()
+            class:is-open=move || drawer.is_some_and(|open| open.get()) aria-label="Navigation principale">
             <div class="sidebar-header">
                 <a href="/" class="brand" title="Flux de Fichiers">
                     <span class="brand-mark">"MKV"</span>
@@ -237,6 +244,7 @@ fn WorkersPill() -> impl IntoView {
 fn Topbar(me: Me) -> impl IntoView {
     let router = use_router();
     let search = use_context::<Search>().unwrap_or_else(Search::install);
+    let nav = use_context::<NavDrawer>().map(|drawer| drawer.0);
     let opened = RwSignal::new(0_u32);
     let focused = RwSignal::new(false);
     // Changer d'écran vide la recherche, sauf si un résultat de la recherche globale y mène.
@@ -246,11 +254,19 @@ fn Topbar(me: Me) -> impl IntoView {
             .text
             .set(search.pending.get_untracked().unwrap_or_default());
         search.pending.set(None);
+        if let Some(nav) = nav {
+            nav.set(false);
+        }
     });
     let central = me.instance_kind == InstanceKind::Central && me.allows(Permission::ViewWorkers);
     view! {
         <header class="app-topbar" role="banner">
             <div class="topbar-container">
+                <button type="button" class="topbar-menu-btn" aria-label="Ouvrir la navigation"
+                    aria-expanded=move || nav.is_some_and(|open| open.get()).to_string()
+                    on:click=move |_| if let Some(nav) = nav { nav.update(|open| *open = !*open) }>
+                    <Icon name=IconName::Menu size=20 />
+                </button>
                 <div class="topbar-search-anchor">
                     <div class="topbar-search" role="search">
                         <div class="search-capsule__query">
@@ -278,10 +294,19 @@ fn Topbar(me: Me) -> impl IntoView {
 #[component]
 pub fn Shell(me: Me, children: Children) -> impl IntoView {
     Search::install();
+    let nav = RwSignal::new(false);
+    provide_context(NavDrawer(nav));
+    let _escape = window_event_listener(leptos::ev::keydown, move |event| {
+        if event.key() == "Escape" {
+            nav.set(false);
+        }
+    });
     view! {
         <a href="#main-content" class="skip-link">"Aller au contenu principal"</a>
         <div class="application-shell">
             <div class="application-navigation-layout">
+                <button type="button" class="sidebar-scrim" aria-label="Fermer la navigation"
+                    hidden=move || !nav.get() on:click=move |_| nav.set(false)></button>
                 <Sidebar me=me.clone() />
                 <div class="page-transition-region">
                     <Topbar me=me />

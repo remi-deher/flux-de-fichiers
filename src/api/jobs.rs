@@ -132,6 +132,32 @@ pub async fn heartbeat(
     s.notify_job_event(JobEventType::JobHeartbeat, id, JobStatus::Running, None);
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// Progression éphémère d'un worker distant → bus SSE `job_progress` (même contrat que le local).
+pub async fn progress(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(r): Json<ProgressReport>,
+) -> AppResult<StatusCode> {
+    crate::auth::authorize_worker(&s.pool, &h).await?;
+    if r.progress > 100 {
+        return Err(AppError::Invalid);
+    }
+    repository::active(
+        &s.pool,
+        id,
+        &LeaseRequest {
+            worker_id: r.worker_id,
+            lease_token: r.lease_token,
+            telemetry: None,
+        },
+    )
+    .await?;
+    s.notify_job_progress(id, r.progress, r.message);
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn failure(
     State(s): State<AppState>,
     h: HeaderMap,

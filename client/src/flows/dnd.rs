@@ -191,24 +191,42 @@ mod tests {
 
     #[test]
     fn a_card_moves_behind_another_and_the_chain_closes_up() {
-        let (graph, input, remux) = chain();
+        let (graph, input, first) = chain();
         let end = graph.nodes[2].id.clone();
-        let Ok(dropped) = drop_outcome(&graph, &DragPayload::Card(remux.clone()), &input) else {
-            panic!("déplacement refusé");
-        };
+        let mut longer = graph.clone();
+        longer.remove(&end);
+        let second = longer.append(FlowBlockKind::RemuxMkv, "Remux 2", json!({}));
+        let end = longer.append(FlowBlockKind::FileOutput, "Fin", json!({}));
         // Déjà derrière l'entrée : l'ordre ne change pas.
-        assert_eq!(dropped.graph.connections.len(), 2);
-        let Ok(moved) = drop_outcome(&graph, &DragPayload::Card(input.clone()), &remux) else {
+        let Ok(unchanged) = drop_outcome(&longer, &DragPayload::Card(first.clone()), &input) else {
             panic!("déplacement refusé");
         };
-        assert_eq!(moved.graph.incoming(&input).count(), 1);
+        assert_eq!(unchanged.graph.connections.len(), 3);
+        // Le premier remux passe derrière le second : entrée → second → premier → fin.
+        let Ok(moved) = drop_outcome(&longer, &DragPayload::Card(first.clone()), &second) else {
+            panic!("déplacement refusé");
+        };
+        let chain_ids: Vec<_> = [&input, &second, &first, &end]
+            .windows(2)
+            .map(|pair| {
+                moved
+                    .graph
+                    .outgoing(pair[0])
+                    .any(|edge| &edge.to == pair[1])
+            })
+            .collect();
+        assert_eq!(chain_ids, [true, true, true]);
+        assert_eq!(moved.graph.nodes.len(), 4);
+        assert_eq!(moved.graph.connections.len(), 3);
+    }
+
+    #[test]
+    fn a_block_without_input_cannot_move_behind_another() {
+        let (graph, input, remux) = chain();
         assert_eq!(
-            moved.graph.incoming(&input).next().map(|e| &e.from),
-            Some(&remux)
+            drop_outcome(&graph, &DragPayload::Card(input), &remux),
+            Err(refusal(GraphError::InvalidPort))
         );
-        assert_eq!(moved.graph.incoming(&remux).count(), 0);
-        assert_eq!(moved.graph.nodes.len(), 3);
-        assert!(moved.graph.node(&end).is_some());
     }
 
     #[test]

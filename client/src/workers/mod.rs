@@ -1,5 +1,6 @@
 //! Écran Workers : présence, worker intégré, retrait d'un worker et raccordement (ADR 0014).
 
+use crate::ui::filters::presence;
 use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, Registre, RegistreMessage, StatusBadge, SubNav, SubTab};
 use crate::{api, format};
@@ -115,6 +116,7 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
     });
     let rows = move || {
         let text = query();
+        let presence = presence();
         match workers.get() {
             None => view! { <RegistreMessage span=HEADERS.len() text="Chargement des workers…" /> }
                 .into_any(),
@@ -124,7 +126,10 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
             Some(Ok(all)) => {
                 let shown: Vec<Worker> = all
                     .into_iter()
-                    .filter(|worker| matches(&[&worker.name], &text))
+                    .filter(|worker| {
+                        matches(&[&worker.name], &text)
+                            && presence.accepts(worker.is_online(Utc::now()))
+                    })
                     .collect();
                 if shown.is_empty() {
                     return view! { <RegistreMessage span=HEADERS.len() text="Aucun worker." /> }

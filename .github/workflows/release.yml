@@ -37,6 +37,15 @@ jobs:
           target-branch: main
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          # Un jeton dédié (et non GITHUB_TOKEN) : les vérifications de la PR de release
+          # démarrent seules, sans « Approve workflows to run ».
+          token: ${{ secrets.RELEASE_TOKEN }}
+      - name: Fusion automatique de la PR de release
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          PR: ${{ fromJSON(steps.release.outputs.pr).number }}
+        run: gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --auto --merge
 
   promote-image:
     needs: release-please

@@ -1,0 +1,34 @@
+# Branche dev : à chaque avancée, ouvre (ou laisse ouverte) la PR dev → test.
+# Elle est créée avec RELEASE_TOKEN pour que test.yml démarre ; c'est lui qui la
+# fusionne quand tout est vert, publie l'image et enchaîne vers main.
+name: promote
+
+on:
+  push:
+    branches: [dev]
+
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  open-test-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ouvrir la PR dev → test si elle n'existe pas
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --base test --head dev --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "La PR #$existing est déjà ouverte : elle suit dev."
+            exit 0
+          fi
+          # Sans commit d'avance, gh refuse de créer la PR : rien à promouvoir.
+          gh pr create --repo "$GITHUB_REPOSITORY" --base test --head dev \
+            --title "chore: dev → test" \
+            --body "Promotion automatique de dev vers test." \
+            || echo "Rien à promouvoir."

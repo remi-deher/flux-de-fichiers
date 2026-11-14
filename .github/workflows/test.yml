@@ -1,8 +1,10 @@
-# Branche test : seules les PR depuis dev sont acceptées.
-# Vérifications → image poussée sous pr-<sha> → fusion automatique → l'image
-# validée est renommée :test et :test-<sha du merge>, sans recompiler.
-# La fusion et la publication se font dans ce même workflow : un push effectué
-# avec GITHUB_TOKEN ne déclenche aucun autre workflow.
+# Branche test : seules les PR depuis dev sont acceptées (ouvertes automatiquement
+# par promote.yml). Vérifications et essai du conteneur sans rien publier →
+# fusion automatique → l'image est construite et publiée au moment de la fusion
+# (:test et :test-<sha du merge>), puis la PR test → main est ouverte et se
+# fusionne seule quand elle est verte. Les opérations de fusion et d'ouverture
+# utilisent RELEASE_TOKEN : un push fait avec GITHUB_TOKEN ne déclenche aucun
+# workflow.
 # Les vérifications requises par la protection de branche s'exécutent toujours ;
 # quand la PR ne touche pas au code, leurs étapes lourdes sont simplement sautées.
 name: test
@@ -56,7 +58,7 @@ jobs:
         run: |
           # Chemins qui influencent le binaire, l'image ou les scénarios Docker.
           if git diff --name-only "$BASE_SHA" "$HEAD_SHA" \
-            | grep -qE '^(src/|frontend/|client/|shared/|migrations/|tests/|scripts/|deploy/|Cargo\.toml$|Cargo\.lock$|Dockerfile$|\.dockerignore$|compose\.yaml$|package\.json$|rust-toolchain\.toml$|\.github/workflows/test\.yml$)'; then
+            | grep -qE '^(src/|frontend/|client/|shared/|migrations/|tests/|scripts/|deploy/|Cargo\.toml$|Cargo\.lock$|Dockerfile$|\.dockerignore$|compose\.yaml$|package\.json$|rust-toolchain\.toml$|\.github/workflows/test\.yml$|\.github/actions/)'; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
             echo "code=false" >> "$GITHUB_OUTPUT"
@@ -89,85 +91,43 @@ jobs:
           cargo test -p flux-shared -p flux-client -p flux-frontend --locked
 
   image-build:
+    # Nom stable : destiné aux checks requis du ruleset de test. L'image n'est
+    # pas publiée ici : elle est construite, chargée localement et essayée.
     name: docker-build
     needs: changes
     runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.meta.outputs.tag }}
+    timeout-minutes: 30
     steps:
       - if: needs.changes.outputs.code == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - name: Calculer le tag et la version
-        id: meta
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          echo "tag=pr-${HEAD_SHA:0:12}" >> "$GITHUB_OUTPUT"
-          if [ -f Cargo.toml ]; then
-            echo "version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)" >> "$GITHUB_OUTPUT"
-          fi
       - if: needs.changes.outputs.code == 'true'
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - if: needs.changes.outputs.code == 'true'
-        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        uses: ./.github/actions/build-image
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          sha: ${{ github.event.pull_request.head.sha }}
+          tags: flux-smoke:ci
+          load: "true"
+          cargo-jobs: ${{ env.CARGO_JOBS }}
       - if: needs.changes.outputs.code == 'true'
-        name: Construire et pousser l'image de la PR (pr-<sha>)
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          build-args: |
-            APP_VERSION=${{ steps.meta.outputs.version }}
-            VCS_REF=${{ github.event.pull_request.head.sha }}
-            CARGO_JOBS=${{ env.CARGO_JOBS }}
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
-          cache-from: type=gha,scope=image
-          cache-to: type=gha,scope=image,mode=max
-
-  scenarios:
-    # Nom stable : destiné aux checks requis du ruleset de test.
-    name: docker-scenarios
-    needs: [changes, image-build]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - if: needs.changes.outputs.code == 'true'
-        name: Smoke Test du conteneur Docker
-        env:
-          PR_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ needs.image-build.outputs.tag }}
+        name: Smoke test du conteneur (/health)
         run: |
-          echo "Téléchargement de l'image de la PR : $PR_IMAGE..."
-          docker pull "$PR_IMAGE"
-          echo "Démarrage du conteneur central..."
-          docker run -d --name smoke -p 3000:3000 "$PR_IMAGE" central
-          
-          echo "Vérification de la santé sur http://localhost:3000/health..."
-          for i in $(seq 1 20); do
+          docker run -d --name smoke -p 3000:3000 flux-smoke:ci central
+          for _ in $(seq 1 20); do
             status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health || true)
-            if [ "$status" = "200" ] || [ "$status" = "204" ]; then
-              echo "✅ Conteneur opérationnel (HTTP $status en $i s)"
-              break
-            fi
+            { [ "$status" = "200" ] || [ "$status" = "204" ]; } && break
             sleep 1
           done
-          
           if ! curl -fsS http://localhost:3000/health; then
-            echo "❌ Échec de la sonde /health. Logs du conteneur smoke :"
+            echo "::error::Échec de la sonde /health."
             docker logs smoke
             exit 1
           fi
-          echo "✅ Smoke test réussi avec succès !"
           docker rm -f smoke
 
   merge:
     name: auto-merge
-    needs: [guard, checks, image-build, scenarios]
+    needs: [guard, checks, image-build]
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     permissions:
@@ -175,39 +135,72 @@ jobs:
       pull-requests: write
     outputs:
       sha: ${{ steps.merge.outputs.sha }}
+      short: ${{ steps.merge.outputs.short }}
     steps:
       - name: Fusionner la PR (merge commit)
         id: merge
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --merge --match-head-commit "$HEAD_SHA"
           sha=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json mergeCommit --jq .mergeCommit.oid)
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short=${sha:0:12}" >> "$GITHUB_OUTPUT"
 
   publish:
     name: docker-publish
-    needs: [changes, image-build, merge]
+    needs: [changes, merge]
     runs-on: ubuntu-latest
     steps:
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Renommer l'image validée en :test et :test-<sha du merge>
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.merge.outputs.sha }}
+      - if: needs.changes.outputs.code == 'true'
+        name: Construire et publier l'image du merge (:test et :test-<sha>)
+        uses: ./.github/actions/build-image
+        with:
+          sha: ${{ needs.merge.outputs.sha }}
+          push: "true"
+          cargo-jobs: ${{ env.CARGO_JOBS }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:test
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:test-${{ needs.merge.outputs.short }}
+      - if: needs.changes.outputs.code != 'true'
+        name: Sans changement de code, redonner l'image :test au merge
         env:
-          REPO: ${{ secrets.DOCKERHUB_USERNAME }}/flux-de-fichiers
-          CODE_CHANGED: ${{ needs.changes.outputs.code }}
-          PR_TAG: ${{ needs.image-build.outputs.tag }}
-          MERGE_SHA: ${{ needs.merge.outputs.sha }}
+          REPO: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+          SHORT: ${{ needs.merge.outputs.short }}
         run: |
-          # Sans changement de code, l'image est celle déjà publiée sous :test.
-          if [ "$CODE_CHANGED" = "true" ]; then source="$PR_TAG"; else source="test"; fi
-          docker buildx imagetools inspect "$REPO:$source" > /dev/null \
-            || { echo "::error::Image $REPO:$source introuvable."; exit 1; }
-          docker buildx imagetools create \
-            --tag "$REPO:test" --tag "$REPO:test-${MERGE_SHA:0:12}" \
-            "$REPO:$source"
+          docker buildx imagetools inspect "$REPO:test" > /dev/null \
+            || { echo "::error::Image $REPO:test introuvable."; exit 1; }
+          docker buildx imagetools create --tag "$REPO:test-$SHORT" "$REPO:test"
+
+  main-pr:
+    name: open-main-pr
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ouvrir la PR test → main et activer sa fusion automatique
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          # L'image test-<sha> existe maintenant : main-checks peut la vérifier.
+          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --head test --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            # Fermer puis rouvrir relance main-checks sur la tête de test, image présente.
+            gh pr close "$existing" --repo "$GITHUB_REPOSITORY"
+            gh pr reopen "$existing" --repo "$GITHUB_REPOSITORY"
+            number="$existing"
+          else
+            number=$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head test \
+              --title "chore: test → main" \
+              --body "Promotion automatique de test vers main (image test-<sha> publiée)." | grep -oE '[0-9]+$')
+          fi
+          gh pr merge "$number" --repo "$GITHUB_REPOSITORY" --auto --merge

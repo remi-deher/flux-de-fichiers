@@ -18,13 +18,12 @@ use flux_shared::jobs::Job;
 use flux_shared::session::Me;
 use flux_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
-use model::JobFilter;
+use model::{JOBS_PAGE_SIZE, JobFilter, may_have_more, merge_pages};
 use std::collections::HashMap;
 use table::JobsTable;
 use uuid::Uuid;
 
-/// Tâches lues par page ; le central en sert 200 au plus.
-const JOBS_PATH: &str = "/api/v1/jobs?limit=200";
+const JOBS_PATH: &str = "/api/v1/jobs";
 
 #[component]
 pub fn JobsPage(me: Me) -> impl IntoView {
@@ -41,9 +40,35 @@ pub fn JobsPage(me: Me) -> impl IntoView {
     let selected = RwSignal::new(None::<Uuid>);
     let detail_open = RwSignal::new(false);
     let create_open = RwSignal::new(false);
-    let jobs = LocalResource::new(move || {
+    let first_page = LocalResource::new(move || {
         reload.track();
-        api::get::<Vec<Job>>(JOBS_PATH)
+        let path = format!("{JOBS_PATH}?limit={JOBS_PAGE_SIZE}");
+        async move { api::get::<Vec<Job>>(&path).await }
+    });
+    // Pages plus anciennes, ajoutées à la demande (curseur : dernière tâche chargée).
+    let older = RwSignal::new(Vec::<Job>::new());
+    let exhausted = RwSignal::new(false);
+    let load_older = Action::new_local(move |before: &Uuid| {
+        let path = format!("{JOBS_PATH}?limit={JOBS_PAGE_SIZE}&before={before}");
+        async move {
+            if let Ok(page) = api::get::<Vec<Job>>(&path).await {
+                exhausted.set(!may_have_more(page.len()));
+                older.update(|list| list.extend(page));
+            }
+        }
+    });
+    let jobs = Signal::derive(move || {
+        first_page
+            .get()
+            .map(|result| result.map(|first| merge_pages(first, &older.get())))
+    });
+    let can_load_more = Signal::derive(move || {
+        central
+            && !exhausted.get()
+            && jobs
+                .get()
+                .and_then(Result::ok)
+                .is_some_and(|list| may_have_more(list.len()))
     });
     let refresh = Callback::new(move |job: Job| {
         selected.set(Some(job.id));
@@ -93,6 +118,12 @@ pub fn JobsPage(me: Me) -> impl IntoView {
             <div class="registre">
                 <JobsTable jobs=visible progress=progress selected=selected on_open=open />
             </div>
+            {move || can_load_more.get().then(|| view! {
+                <button type="button" class="btn btn-secondary btn-sm" disabled=move || load_older.pending().get()
+                    on:click=move |_| if let Some(last) = all_jobs.get_untracked().last() { load_older.dispatch(last.id); }>
+                    "Charger les tâches plus anciennes"
+                </button>
+            })}
             <Drawer open=detail_open eyebrow="Tâche" title=title>
                 {move || selected_job.get().map(|job| view! { <JobDetail job=job can_manage=can_manage on_changed=refresh /> })}
             </Drawer>

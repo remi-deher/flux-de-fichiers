@@ -88,9 +88,49 @@ pub const EVENT_NAMES: [JobEventType; 8] = [
     JobEventType::JobRetried,
 ];
 
+/// Tâches lues par page : le maximum que le central sert.
+pub const JOBS_PAGE_SIZE: usize = 200;
+
+/// Première page suivie de pages plus anciennes ; une tâche déjà vue n'apparaît qu'une fois.
+pub fn merge_pages(first: Vec<Job>, older: &[Job]) -> Vec<Job> {
+    let known: std::collections::HashSet<_> = first.iter().map(|job| job.id).collect();
+    let mut merged = first;
+    merged.extend(older.iter().filter(|job| !known.contains(&job.id)).cloned());
+    merged
+}
+
+/// Y a-t-il peut-être d'autres tâches après cette page ? Une page pleine le laisse penser.
+pub fn may_have_more(page_len: usize) -> bool {
+    page_len >= JOBS_PAGE_SIZE
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn job(id: u128) -> Result<Job, serde_json::Error> {
+        serde_json::from_value(serde_json::json!({
+            "id": uuid::Uuid::from_u128(id), "source_name": "a.mkv", "source_sha256": null,
+            "source_bytes": null, "output_sha256": null, "output_bytes": null, "warning": false,
+            "target_worker_id": null, "worker_id": null, "status": "queued", "attempts": 0,
+            "leased_until": null, "output_name": null, "error_code": null, "flow_id": null,
+            "flow_version": null, "created_at": "2026-11-14T10:00:00Z", "updated_at": "2026-11-14T10:00:00Z"
+        }))
+    }
+
+    #[test]
+    fn older_pages_follow_the_first_one_without_duplicates() -> Result<(), serde_json::Error> {
+        let merged = merge_pages(vec![job(1)?, job(2)?], &[job(2)?, job(3)?]);
+        let ids: Vec<_> = merged.iter().map(|job| job.id.as_u128()).collect();
+        assert_eq!(ids, [1, 2, 3]);
+        Ok(())
+    }
+
+    #[test]
+    fn only_a_full_page_suggests_more() {
+        assert!(may_have_more(JOBS_PAGE_SIZE));
+        assert!(!may_have_more(JOBS_PAGE_SIZE - 1));
+    }
 
     #[test]
     fn every_status_appears_in_the_live_queue_or_the_history() -> Result<(), serde_json::Error> {

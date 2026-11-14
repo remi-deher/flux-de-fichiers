@@ -4,6 +4,7 @@
 use crate::route::{Route, use_router};
 use crate::settings::logout;
 use crate::theme::ThemePicker;
+use crate::ui::filters::{FilterSheet, Filters};
 use crate::ui::global_search::SearchResults;
 use crate::ui::search::Search;
 use crate::ui::{Icon, IconName};
@@ -245,6 +246,7 @@ fn Topbar(me: Me) -> impl IntoView {
     let router = use_router();
     let search = use_context::<Search>().unwrap_or_else(Search::install);
     let nav = use_context::<NavDrawer>().map(|drawer| drawer.0);
+    let filters = use_context::<Filters>().unwrap_or_else(Filters::install);
     let opened = RwSignal::new(0_u32);
     let focused = RwSignal::new(false);
     // Changer d'écran vide la recherche, sauf si un résultat de la recherche globale y mène.
@@ -254,6 +256,7 @@ fn Topbar(me: Me) -> impl IntoView {
             .text
             .set(search.pending.get_untracked().unwrap_or_default());
         search.pending.set(None);
+        filters.reset();
         if let Some(nav) = nav {
             nav.set(false);
         }
@@ -283,6 +286,7 @@ fn Topbar(me: Me) -> impl IntoView {
                     <SearchResults me=me.clone() opened=opened focused=focused />
                 </div>
                 <div class="topbar-actions">
+                    <FilterSheet route=Signal::derive(move || router.current()) />
                     {central.then(|| view! { <WorkersPill /> })}
                 </div>
             </div>
@@ -294,6 +298,7 @@ fn Topbar(me: Me) -> impl IntoView {
 #[component]
 pub fn Shell(me: Me, children: Children) -> impl IntoView {
     Search::install();
+    Filters::install();
     let nav = RwSignal::new(false);
     provide_context(NavDrawer(nav));
     let _escape = window_event_listener(leptos::ev::keydown, move |event| {

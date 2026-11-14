@@ -18,8 +18,8 @@ Source de vérité : `AGENTS.md`, `docs/developpement.md`, `docs/reprise.md`. R�
 - Tester toutes les fonctions et routes avec des tests Rust natifs légers.
 
 ## 3. Commandes Locales (Machine hôte légère)
-- Jamais de build Docker ni de suite de tests complète en local (la CI s'en charge).
-- Formater et linter : `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`
+- Jamais de build Docker ni de `cargo clippy` en local (la CI s'en charge : `feature.yml`).
+- En local : `cargo fmt` et `cargo test -p <paquet>` (ciblé, assez rapide).
 - Régénérer `frontend/dist/index.html` après un changement du thème ou de la page : `cargo run -p flux-frontend`
 
 ## 4. Déploiement Test TrueNAS

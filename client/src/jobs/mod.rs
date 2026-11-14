@@ -10,8 +10,10 @@ mod table;
 pub use live::LiveJobs;
 
 use crate::api;
+use crate::ui::filters::period;
 use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, SubNav};
+use chrono::Utc;
 use create::CreateJob;
 use detail::JobDetail;
 use flux_shared::jobs::Job;
@@ -79,12 +81,15 @@ pub fn JobsPage(me: Me) -> impl IntoView {
     let visible = Signal::derive(move || {
         let filter = JobFilter::TABS[tab.get()];
         let text = query();
+        let period = period();
+        let now = Utc::now();
         jobs.get().map(|result| {
             result
                 .map(|list| {
                     list.into_iter()
                         .filter(|job| {
                             filter.accepts(job)
+                                && period.accepts(job.created_at, now)
                                 && matches(&[&job.source_name, &job.id.to_string()], &text)
                         })
                         .collect::<Vec<_>>()

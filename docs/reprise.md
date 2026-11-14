@@ -16,9 +16,9 @@ ce qui **reste à faire**. À mettre à jour (ou supprimer) quand l'état change
 
 ## Règles de travail à respecter
 
-- **Aucun test ni build Docker en local** (machine faible) : `cargo check`, `cargo clippy` et
-  `cargo fmt` seulement ; les tests et l'image tournent en CI (`dev` n'a pas de CI ; la CI
-  complète est sur les PR `dev → test`, ADR 0002).
+- **Ni build Docker ni clippy en local** (machine faible, décision du 14 nov.) : `cargo fmt` et
+  `cargo test` ciblé seulement ; clippy, la suite complète et l'image tournent en CI
+  (`feature.yml` sur les PR vers `dev`, `test.yml` sur les PR `dev → test`, ADR 0002).
 - Flux Git ([ADR 0002](adr/0002-flux-git.md)) : push / PR feature → `dev` (merge commit), puis
   PR `dev → test` (CI, fusion auto, image `:test-<sha12>`), PR `test → main` pour une release.
 - **Jamais de ligne `Co-Authored-By` ni de mention d'agent** dans les commits et les PR.
@@ -73,8 +73,8 @@ paramètres.
   `index.html` **et** `pkg/`.
 - Les tests des PR récentes n'ont tourné que là où la CI s'applique (`dev → test`) ; les PR
   feature → `dev` n'ont pas de checks (ADR 0002). Exemple : #108 a laissé des `expect()` refusés
-  par clippy, corrigés par `cc52dd6` avant la PR `dev → test` #109. Lancer
-  `cargo clippy --workspace --all-targets -- -D warnings` avant de fusionner dans `dev`.
+  par clippy, corrigés par `cc52dd6` avant la PR `dev → test` #109. Depuis #112, `feature.yml`
+  lance clippy sur les PR vers `dev` : attendre son résultat avant de fusionner.
 - Jusqu'à #104, le filtre de chemins de `test.yml` ignorait `client/` et `shared/` : une PR qui
   ne touchait que ces dossiers ne reconstruisait ni ne testait rien (image `test-24aaadc4aebe` =
   ancien WASM). Vérifier qu'une image contient le WASM attendu avant de la déployer.
@@ -140,8 +140,8 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 - [x] Paramètres : onglets Réseau (écoute, TLS, origine, session) et Stockage (dossiers, taille maximale, espace du volume), lus dans `/api/v1/system/status` ; lecture seule.
 - [x] Télémétrie matérielle du central en vue d'ensemble (processeur, mémoire, disque, GPU ; `GET /api/v1/system/hardware`, relevé à l'ouverture, pas d'historique). Les workers distants n'ont pas de relevé côté central : la télémétrie qu'ils envoient avec leurs échéances n'est pas conservée.
 - [x] Page Mises à jour (onglet des Paramètres) : version du central et de l'interface, procédure. Limite : pas de « version disponible », le central n'appelle aucun service externe (une vérification facultative reste à décider).
-- [ ] Repris de l'ancienne interface : feuille de filtres de la
-      barre du haut, simulation dans l'éditeur.
+- [x] Feuille de filtres de la barre du haut : période des tâches (Activité) et présence des workers ; remise à zéro au changement d'écran. Les autres écrans n'ont pas de critère propre.
+- [ ] Repris de l'ancienne interface : simulation dans l'éditeur.
 - [x] Éditeur de flux : glisser-déposer palette → carte et carte → carte (`flows/dnd.rs`, règles de `FlowGraph::connect`, alternative clic/liste conservée) ; confirmation avant de quitter avec des modifications (routeur, retour arrière, `beforeunload`).
 - [x] Tâches : choix du worker à la création (#118) ; pagination au-delà de 200 (#119, bouton « Charger les tâches plus anciennes »).
 - [x] Session expirée : un 401 sur session ouverte recharge la page, qui affiche la connexion (#117).

@@ -9,6 +9,9 @@ pub struct SetupStatus {
     pub needs_setup: bool,
     pub instance_name: Option<String>,
     pub instance_kind: InstanceKind,
+    /// Le central peut-il envoyer un lien de réinitialisation par courriel ?
+    #[serde(default)]
+    pub password_reset_enabled: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -16,6 +19,9 @@ pub struct SetupRequest {
     pub name: String,
     pub username: String,
     pub password: String,
+    /// Adresse de l'administrateur, pour le mot de passe oublié (facultative).
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 /// L'installation est-elle à faire ? Public : l'interface choisit entre assistant et connexion.

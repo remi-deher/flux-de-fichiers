@@ -6,7 +6,7 @@
 use super::{AppState, ManageAccountsAuth};
 use crate::{
     error::{AppError, AppResult},
-    password,
+    password, password_reset,
     repository::{self, Account},
 };
 use axum::{
@@ -40,7 +40,13 @@ pub async fn create(
     let username = password::validate_username(&request.username)?;
     password::validate_password(&request.password)?;
     let hash = password::hash(request.password).await?;
-    let account = repository::create_account(&state.pool, &username, &hash, role).await?;
+    let email = request
+        .email
+        .as_deref()
+        .map(password_reset::validate_email)
+        .transpose()?;
+    let account =
+        repository::create_account(&state.pool, &username, &hash, role, email.as_deref()).await?;
     Ok((StatusCode::CREATED, Json(account)))
 }
 
@@ -51,8 +57,22 @@ pub async fn update(
     Json(request): Json<UpdateAccountRequest>,
 ) -> AppResult<Json<Account>> {
     let role = request.role.as_deref().map(account_role).transpose()?;
-    if role.is_none() && request.disabled.is_none() {
+    let email = request
+        .email
+        .as_deref()
+        .map(password_reset::parse_optional_email)
+        .transpose()?;
+    if role.is_none() && request.disabled.is_none() && email.is_none() {
         return Err(AppError::Invalid);
+    }
+    if let Some(email) = &email {
+        repository::set_account_email(&state.pool, &id, email.as_deref()).await?;
+    }
+    if role.is_none() && request.disabled.is_none() {
+        let (account, _) = repository::get_account(&state.pool, &id)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        return Ok(Json(account));
     }
     Ok(Json(
         repository::update_account(&state.pool, &id, role, request.disabled).await?,

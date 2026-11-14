@@ -1,5 +1,7 @@
 //! Palette : blocs natifs et blocs des dépôts de plugins, par catégorie.
 
+use super::dnd::DragPayload;
+use super::drag::DragItem;
 use super::state::Editor;
 use flux_shared::flows::{FlowBlockKind, OwnedBlockSpec};
 use leptos::prelude::*;
@@ -20,6 +22,7 @@ pub fn Palette(editor: Editor) -> impl IntoView {
     view! {
         <aside class="flow-palette" aria-label="Blocs disponibles">
             <h2 class="section-title">"Blocs"</h2>
+            <p class="form-help">"Cliquez pour ajouter, ou glissez un bloc sur une carte."</p>
             {move || {
                 let catalog = editor.catalog.get();
                 categories(&catalog).into_iter().map(|category| {
@@ -33,7 +36,13 @@ pub fn Palette(editor: Editor) -> impl IntoView {
                                 let description = spec.description.clone();
                                 let defaults = spec.default_config();
                                 let button_label = spec.label.clone();
+                                let payload = DragPayload::Palette {
+                                    kind: kind.clone(),
+                                    label: label.clone(),
+                                    defaults: defaults.clone(),
+                                };
                                 view! {
+                                    <DragItem editor=editor payload=payload>
                                     <button type="button" class="btn btn-secondary btn-sm flow-palette__item" title=description
                                         on:click=move |_| {
                                             let mut added = String::new();
@@ -47,6 +56,7 @@ pub fn Palette(editor: Editor) -> impl IntoView {
                                         }>
                                         {button_label}
                                     </button>
+                                    </DragItem>
                                 }
                             }).collect_view()}
                         </div>

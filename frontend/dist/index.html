@@ -2681,9 +2681,29 @@ path.sim-pulse-line {
   pointer-events: none;
 }
 
-.flow-graph__card {
+.flow-graph__slot {
   position: absolute;
+  border-radius: var(--radius-md);
+}
+
+.is-dragging {
+  opacity: 0.5;
+}
+
+.flow-graph__slot.is-drop-ok {
+  outline: 2px dashed var(--success);
+  outline-offset: 3px;
+}
+
+.flow-graph__slot.is-drop-refused {
+  outline: 2px dashed var(--danger);
+  outline-offset: 3px;
+}
+
+.flow-graph__card {
   box-sizing: border-box;
+  width: 100%;
+  height: 100%;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);

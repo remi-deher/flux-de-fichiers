@@ -13,13 +13,13 @@ use axum::{
 };
 use serde_json::Value;
 
-/// Liste l'ensemble des composants déclarés dans le catalogue.
+/// Liste les pièces du catalogue à exposer ; les blocs, propriété d'un plugin, n'en font pas partie.
 pub async fn catalog(
     State(s): State<AppState>,
     _auth: ViewPluginsAuth,
 ) -> AppResult<Json<Vec<CatalogEntry>>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    Ok(Json(plugins::list_catalog(&roots)))
+    Ok(Json(plugins::exposed_catalog(&roots)))
 }
 
 /// Liste l'état d'installation et de cache des outils distribués.

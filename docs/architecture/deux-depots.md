@@ -28,7 +28,7 @@ passent par l'API authentifiée en TLS et ne se connectent pas à PostgreSQL.
 
 ## Dépôt `flux-de-fichiers-plugins`
 
-Le dépôt séparé accueillera les ressources extensibles : plugins, outils,
+Le dépôt séparé accueille les ressources extensibles : applications, plugins,
 traitements, flux prédéfinis et ressources complémentaires (par exemple polices,
 images ou sons). Sa structure de distribution reste à valider conjointement.
 Le dépôt applicatif ne dépend pas directement de son arborescence ni ne copie ses
@@ -41,6 +41,26 @@ découvrir les ressources disponibles et leur emplacement. Le format, les champs
 obligatoires, les versions de contrat, les signatures, l'installation, les mises
 à jour et la compatibilité restent à concevoir ; aucune API Rust ou sérialisation
 n'est figée dans ce squelette.
+
+## Modèle du catalogue
+
+Le dépôt plugins est la source ; le moteur le lit sans jamais y écrire. L'index unique
+(`catalogue/index.json`) range les pièces en six sections, affichées par la page Plugins :
+
+| Section | Type d'index | Dépend de |
+|---|---|---|
+| Applications | `app` (MKVToolNix, FFmpeg…) | rien |
+| Plugins | `plugin` | applications, **suggérées** (`optional`), jamais imposées : un plugin Sonarr n'en a pas |
+| Flows | `flow` | plugins et/ou éléments « Autre » |
+| Autre | `preset`, `resource.*` (images, musiques, polices, couleurs, langues, modèles) | rien ; peut vivre seul |
+| Packs | `pack` | ensemble d'applications, de plugins, de flows et d'éléments « Autre » |
+| Dépôts | n'est pas une pièce : la source qui porte le catalogue | |
+
+Les blocs ne sont jamais exposés tels quels : un bloc appartient à un plugin, son fichier est rangé
+sous `plugins/<nom>/blocks/` et son entrée d'index porte `owner`. Le moteur écarte un bloc dont le
+propriétaire n'est pas un plugin du même index. Les règles sont codées dans
+`CatalogItemType::section`, `can_stand_alone` et `may_depend_on` (`shared/src/plugins/vocab.rs`) ;
+la vérification des dépendances à la synchronisation n'est pas encore branchée.
 
 ## Frontières et responsabilités futures
 

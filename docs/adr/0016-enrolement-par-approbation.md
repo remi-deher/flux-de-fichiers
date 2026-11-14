@@ -25,10 +25,10 @@ chercher dans les journaux** ; préférence pour une **demande à approuver**.
       page de premier lancement ; l'utilisateur y saisit **l'adresse du central**, une fois, dans
       l'interface (jamais dans le `compose`), et un nom facultatif (hôte par défaut) ;
    2. le worker envoie `POST /api/v1/workers/requests` (nom, version, secret aléatoire dont seul
-      le haché est transmis) et affiche un **code de vérification** à 6 chiffres renvoyé par le
-      central ;
-   3. l'écran Workers du central affiche la demande « en attente » avec le même code, l'adresse
-      source et la version ; l'administrateur compare les codes puis **approuve ou refuse** ;
+      le haché est transmis) et affiche « en attente d'approbation » ;
+   3. l'écran Workers du central affiche la demande « en attente » avec le nom, l'adresse source
+      et la version du worker ; l'administrateur **approuve ou refuse** (pas de code à comparer :
+      la fenêtre de 15 minutes ouverte par lui suffit à ne viser qu'une demande) ;
    4. le worker interroge `GET /api/v1/workers/requests/{id}` avec son secret ; à l'approbation, le
       central crée la clé du nœud et la lui remet **une seule fois** ; le worker la range dans
       `/config` (`worker.key`, 0600) et passe en fonctionnement normal.
@@ -37,7 +37,8 @@ chercher dans les journaux** ; préférence pour une **demande à approuver**.
    d'état. Cela évite qu'un client du réseau remplisse la liste d'attente.
 4. **Garde-fous** : demandes limitées en nombre et en débit par adresse ; expiration d'une demande
    à 15 minutes ; refus ou expiration effacent la demande ; une demande approuvée ne peut être
-   retirée qu'une fois ; le code de vérification protège d'une approbation de la mauvaise demande.
+   retirée qu'une fois ; l'écran d'approbation montre le nom, l'adresse source et la version pour
+   ne pas approuver la mauvaise demande.
 5. **Clés de nœud invisibles.** La clé d'un worker est créée, stockée et révoquée par l'écran
    Workers ; elle n'apparaît plus dans « Clés d'API », réservé aux clés personnelles (ADR 0015).
 6. **Secours** : l'enrôlement par identifiant et mot de passe saisis sur le worker (ADR 0011,
@@ -50,14 +51,15 @@ chercher dans les journaux** ; préférence pour une **demande à approuver**.
 
 - En HTTP simple, la clé remise au worker circule en clair sur le réseau local (comme le mot de
   passe aujourd'hui) : un TLS devant le central reste conseillé.
-- Le code de vérification protège d'une erreur d'approbation, pas d'un attaquant capable d'observer
-  le réseau.
+- Sans code de vérification, la protection contre l'approbation de la mauvaise demande repose sur
+  la fenêtre de 15 minutes et sur le nom, l'adresse et la version affichés ; un attaquant du réseau
+  local qui demande pendant la fenêtre apparaît dans la liste, à refuser.
 - L'adresse du central est encore saisie une fois par worker ; la supprimer demande la découverte
   automatique (point 7).
 
 ## Conséquences
 
-- Nouvelle table `worker_enrollment_requests` (haché du secret, code, nom, adresse source,
+- Nouvelle table `worker_enrollment_requests` (haché du secret, nom, adresse source,
   expiration, statut) et routes côté central et worker, avec tests natifs (expiration, fenêtre
   fermée, limite de débit, remise unique de la clé).
 - L'écran Workers gagne « Demandes en attente » et le bouton « Ajouter un worker » (le bloc

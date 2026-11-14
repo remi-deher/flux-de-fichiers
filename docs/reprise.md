@@ -9,7 +9,8 @@ ce qui **reste à faire**. À mettre à jour (ou supprimer) quand l'état change
 - `AGENTS.md` (règles permanentes), puis `docs/developpement.md` (où est le code, quoi vérifier).
 - ADR récents : [0012](adr/0012-perimetre-perte-de-bail-et-versions-de-flows.md) (périmètre,
   perte de bail, versions de flux), [0013](adr/0013-vocabulaire-central-worker.md) (vocabulaire
-  central / worker), [0014](adr/0014-client-leptos-wasm.md) (client Leptos WASM).
+  central / worker), [0014](adr/0014-client-leptos-wasm.md) (client Leptos WASM),
+  [0015](adr/0015-ia-et-mcp.md) (IA et MCP, proposé).
 - Analyse du projet de référence `encoding-central` :
   [audit du 13 nov.](audits/2026-11-13-analyse-encoding-central.md).
 
@@ -155,8 +156,9 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 ### 4. À cadrer avec Remi avant de coder
 
 - [ ] Époque des baux (*fencing*) : un ancien worker ne doit plus pouvoir répondre sur une tâche
-      reprise.
-- [ ] IA et MCP (dans le périmètre, ADR 0012) : écrire un ADR d'abord.
+      reprise. Reporté (« à voir après », 14 nov.).
+- [x] IA et MCP : [ADR 0015](adr/0015-ia-et-mcp.md) rédigé (proposé), questions ouvertes à trancher
+      (qui génère les suggestions, validation humaine, périmètre « créer un plugin »).
 
 ### 5. Hygiène et process
 

@@ -70,7 +70,7 @@ la console (`console-capture`), bloc (`block`), flow, preset et application. Le 
 | Binaire ou API (FFmpeg, MKVToolNix, Sonarr…) | **Application** | `app`, avec un type `binary` ou `api` |
 | Plugin | **Plugin** | `plugin` |
 | Bloc | **Bloc** | `block` |
-| Paquet qui regroupe applications, plugins et blocs | **Pack** | `pack` |
+| Paquet qui regroupe applications, plugins, flows et éléments « Autre » (jamais des blocs, qui appartiennent à leur plugin) | **Pack** | `pack` |
 
 Dans le dépôt de plugins, `tool` devient `app` (champ `kind`) et l'ancien `app` devient `pack` :
 `tool.ffmpeg` → `app.ffmpeg`, `app.media` → `pack.media`, schémas et documentation renommés. Le

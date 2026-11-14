@@ -26,7 +26,7 @@ Le socle d'exécution concrétise la décision utilisateur du 9 novembre 2026 (*
 │                     FLUX-DE-FICHIERS-PLUGINS (Catalogue)                    │
 │                                                                             │
 │  - Schémas JSON (`tool-distribution.v1`, `macro-block.v1`, `block.v1`)      │
-│  - Manifestes déclaratifs (`tools/mkvtoolnix`, `tools/ffmpeg`)              │
+│  - Manifestes déclaratifs (`apps/mkvtoolnix`, `apps/ffmpeg`)              │
 │  - Fiches de distribution par architecture (x86_64, aarch64) avec SHA-256   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```

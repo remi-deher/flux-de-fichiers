@@ -1,6 +1,7 @@
 //! Vue d'ensemble : chiffres clés, points d'attention et tâches récentes ; sur un worker, ses tâches.
 
 mod summary;
+mod widgets;
 
 use crate::jobs::model::{status_label, status_tone};
 use crate::route::{Link, Route};
@@ -16,6 +17,7 @@ use flux_shared::session::Me;
 use flux_shared::workers::{Worker, WorkerOverview};
 use leptos::prelude::*;
 use summary::{Summary, alerts};
+use widgets::{Widget, WidgetLayout, WidgetPicker};
 
 const JOBS_PATH: &str = "/api/v1/jobs?limit=200";
 const WORKERS_PATH: &str = "/api/v1/workers";
@@ -60,9 +62,11 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
     let workers = LocalResource::new(|| api::get::<Vec<Worker>>(WORKERS_PATH));
     let libraries = LocalResource::new(|| api::get::<Vec<Library>>(LIBRARIES_PATH));
     let instance = me.instance_name.clone().unwrap_or_default();
+    let layout = RwSignal::new(WidgetLayout::restore());
     view! {
         <div class="tab-panel" role="tabpanel">
             {move || {
+                let layout_now = layout.get();
                 let jobs_list = jobs.get().and_then(Result::ok).unwrap_or_default();
                 let workers_list = workers.get().and_then(Result::ok).unwrap_or_default();
                 let libraries_list = libraries.get().and_then(Result::ok).unwrap_or_default();
@@ -78,10 +82,12 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                 let actions = view! {
                     <Link to=Route::Libraries class="btn btn-primary">"Parcourir les bibliothèques"</Link>
                     <Link to=Route::Flows class="btn btn-secondary">"Concepteur de flux"</Link>
+                    <WidgetPicker layout=layout />
                 }.into_any();
                 view! {
                     <Hero tone=tone status=status title=format!("Vue d'ensemble — {instance}")
                         subtitle="Tâches, workers et bibliothèques du central, en direct." actions=actions />
+                    {layout_now.is_visible(Widget::Metrics).then(|| view! {
                     <section class="metrics-grid" aria-label="Statistiques clés">
                         <MetricCard label="Tâches en cours" value=summary.running.to_string() subtitle=format!("{} en attente", summary.queued) icon=IconName::Activity />
                         <MetricCard label="Tâches échouées" value=summary.failed.to_string() subtitle=format!("{} relançable(s)", summary.retryable) icon=IconName::Alert
@@ -90,7 +96,9 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                             tone={if summary.workers_online < summary.workers_total { MetricTone::Warning } else { MetricTone::Success }} />
                         <MetricCard label="Bibliothèques prêtes" value=format!("{} / {}", summary.libraries_ready, summary.libraries_total) subtitle="Avec flux et worker" icon=IconName::Libraries />
                     </section>
+                    })}
                     <div class="overview-grid-2col">
+                        {layout_now.is_visible(Widget::Attention).then(|| view! {
                         <section class="section-panel">
                             <SectionHeader title="À surveiller" />
                             {if attention.is_empty() {
@@ -101,6 +109,8 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                                 }).collect_view().into_any()
                             }}
                         </section>
+                        })}
+                        {layout_now.is_visible(Widget::RecentJobs).then(|| view! {
                         <section class="section-panel">
                             <SectionHeader title="Tâches récentes" actions=view! { <Link to=Route::Jobs class="btn btn-secondary btn-sm">"Toutes les tâches →"</Link> }.into_any() />
                             <Registre aria_label="Tâches récentes" headers=vec!["Fichier", "État", "Créée"]>
@@ -117,6 +127,7 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                                 }}
                             </Registre>
                         </section>
+                        })}
                     </div>
                 }
             }}

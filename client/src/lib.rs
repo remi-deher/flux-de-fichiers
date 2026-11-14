@@ -11,6 +11,7 @@ pub mod jobs;
 pub mod libraries;
 mod overview;
 mod plugins;
+mod prefs;
 pub mod route;
 mod settings;
 mod shell;

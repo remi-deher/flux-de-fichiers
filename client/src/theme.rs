@@ -1,5 +1,6 @@
 //! Thème (Auto, Clair, Sombre) : attribut `data-theme` de la page, choix gardé dans le navigateur.
 
+use crate::prefs;
 use leptos::prelude::*;
 
 /// Clé de stockage partagée avec l'interface historique.
@@ -47,19 +48,12 @@ pub fn apply(theme: Theme) {
             other => root.set_attribute("data-theme", other.as_str()),
         };
     }
-    if let Ok(Some(storage)) = window().local_storage() {
-        let _ = storage.set_item(STORAGE_KEY, theme.as_str());
-    }
+    prefs::store(STORAGE_KEY, theme.as_str());
 }
 
 /// Thème retenu, appliqué au démarrage.
 pub fn restore() -> Theme {
-    let saved = window()
-        .local_storage()
-        .ok()
-        .flatten()
-        .and_then(|storage| storage.get_item(STORAGE_KEY).ok().flatten())
-        .map_or(Theme::System, |value| Theme::parse(&value));
+    let saved = prefs::load(STORAGE_KEY).map_or(Theme::System, |value| Theme::parse(&value));
     apply(saved);
     saved
 }

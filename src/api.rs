@@ -305,6 +305,19 @@ async fn claim(
             claim.probe_tool_id = Some(probe.tool_id);
             claim.probe_version = Some(probe.version);
         }
+        // Worker distant : déchiffrer les en-têtes webhook et joindre les connexions *arr.
+        if let Some(ref mut flow) = claim.frozen_flow
+            && let Ok(secrets) = crate::secrets::SecretBox::open(&s.config.config_dir)
+        {
+            flow.definition =
+                crate::flows::decrypt_definition_headers(&secrets, &flow.id, &flow.definition)?;
+        }
+        let arr =
+            crate::flows::ArrContext::load(&s.pool, &s.config.config_dir, &s.config.input_dir)
+                .await;
+        if !arr.connections.is_empty() {
+            claim.arr = Some((&arr).into());
+        }
         s.notify_job_event(
             JobEventType::JobClaimed,
             claim.job_id,

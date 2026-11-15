@@ -8,7 +8,7 @@ use crate::ui::filters::{FilterSheet, Filters};
 use crate::ui::global_search::SearchResults;
 use crate::ui::search::Search;
 use crate::ui::topbar_action::{TopbarAction, TopbarActionSlot};
-use crate::ui::{Icon, IconName};
+use crate::ui::{CommandPalette, CommandPaletteState, Icon, IconName, ToastViewport, Toasts};
 use chrono::Utc;
 use flux_shared::session::Me;
 use flux_shared::workers::Worker;
@@ -248,6 +248,7 @@ fn Topbar(me: Me) -> impl IntoView {
     let search = use_context::<Search>().unwrap_or_else(Search::install);
     let nav = use_context::<NavDrawer>().map(|drawer| drawer.0);
     let filters = use_context::<Filters>().unwrap_or_else(Filters::install);
+    let palette = use_context::<CommandPaletteState>();
     let opened = RwSignal::new(0_u32);
     let focused = RwSignal::new(false);
     // Changer d'écran vide la recherche, sauf si un résultat de la recherche globale y mène.
@@ -282,6 +283,15 @@ fn Topbar(me: Me) -> impl IntoView {
                                 placeholder=move || search_placeholder(&router.current())
                                 prop:value=move || search.text.get()
                                 on:input=move |event| search.text.set(event_target_value(&event)) />
+                            <button
+                                type="button"
+                                class="kbd-shortcut"
+                                title="Ouvrir la palette de commandes (Ctrl+K)"
+                                aria-label="Ouvrir la palette de commandes"
+                                on:click=move |_| if let Some(palette) = palette { palette.show(); }
+                            >
+                                "Ctrl K"
+                            </button>
                         </div>
                         <TopbarActionSlot />
                     </div>
@@ -302,6 +312,8 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
     Search::install();
     Filters::install();
     TopbarAction::install();
+    Toasts::install();
+    CommandPaletteState::install();
     let nav = RwSignal::new(false);
     provide_context(NavDrawer(nav));
     let _escape = window_event_listener(leptos::ev::keydown, move |event| {
@@ -317,11 +329,13 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
                     hidden=move || !nav.get() on:click=move |_| nav.set(false)></button>
                 <Sidebar me=me.clone() />
                 <div class="page-transition-region">
-                    <Topbar me=me />
+                    <Topbar me=me.clone() />
                     <main id="main-content" class="main-content">{children()}</main>
                 </div>
             </div>
         </div>
+        <CommandPalette me=me />
+        <ToastViewport />
     }
 }
 

@@ -22,6 +22,7 @@ pub const GRAPH_CSS: &str = r#"
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 1rem;
+  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -39,7 +40,8 @@ pub const GRAPH_CSS: &str = r#"
   background-size: 24px 24px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  min-height: 320px;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.14);
+  min-height: 360px;
 }
 
 .flow-graph {
@@ -72,10 +74,15 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .flow-graph__card {
+  position: relative;
   box-sizing: border-box;
   width: 100%;
   height: 100%;
-  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.2rem;
+  background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-card) 100%);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
@@ -83,21 +90,49 @@ pub const GRAPH_CSS: &str = r#"
   text-align: left;
   color: var(--text-main);
   cursor: pointer;
-  overflow: hidden;
+  overflow: visible;
+  transition: transform 0.16s var(--ease-out), box-shadow 0.16s var(--ease-out), border-color 0.16s var(--ease-out);
+}
+
+.flow-graph__card:hover {
+  border-color: var(--border-highlight);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
 }
 
 .flow-graph__card.is-selected {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px var(--primary-bg);
+  box-shadow: var(--shadow-glow);
 }
 
 .flow-graph__card.is-incomplete {
   border-color: var(--warning);
+  box-shadow: 0 0 0 1px var(--warning-bg);
+}
+
+.flow-graph__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
 }
 
 .flow-graph__kind {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
   color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-graph__badge {
+  flex: none;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--warning);
 }
 
 .flow-graph__name {
@@ -107,10 +142,39 @@ pub const GRAPH_CSS: &str = r#"
   text-overflow: ellipsis;
 }
 
+.flow-graph__port-dot {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 2px solid var(--primary);
+  pointer-events: none;
+}
+
+.flow-graph__port-dot.is-in {
+  top: -5px;
+}
+
+.flow-graph__port-dot.is-out {
+  bottom: -5px;
+}
+
+.flow-graph__link-halo {
+  fill: none;
+  stroke: color-mix(in srgb, var(--primary) 16%, transparent);
+  stroke-width: 7;
+  stroke-linecap: round;
+}
+
 .flow-graph__link {
   fill: none;
   stroke: var(--primary);
   stroke-width: 2.5;
+  stroke-linecap: round;
+  transition: stroke 0.2s ease;
 }
 
 .flow-graph__link--true {

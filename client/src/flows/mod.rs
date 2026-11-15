@@ -14,16 +14,22 @@ mod versions;
 pub use editor::FlowEditor;
 
 use crate::route::{Link, Route, encode_segment, use_router};
+use crate::ui::filters::{Filters, FlowFilter, flow_filter};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
-use crate::ui::{EmptyState, Icon, IconName, MetricTone, StatItem, StatStrip, StatusBadge, Toasts};
+use crate::ui::{
+    EmptyState, Icon, IconName, MetricTone, ResourceCard, StatItem, StatStrip, StatusBadge, Tag,
+    TagTone, Toasts,
+};
 use crate::{api, format};
 use flux_shared::Permission;
 use flux_shared::flows::{FlowGraph, FlowRecord};
+use flux_shared::libraries::Library;
 use flux_shared::session::Me;
 use leptos::prelude::*;
 
 const FLOWS_PATH: &str = "/api/v1/flows";
+const LIBRARIES_PATH: &str = "/api/v1/libraries";
 const PIPELINE_PREVIEW_LIMIT: usize = 4;
 
 fn pipeline_preview(graph_json: &str) -> (Vec<String>, usize) {
@@ -54,7 +60,13 @@ pub fn flow_counts(flows: &[FlowRecord]) -> (usize, usize, usize) {
 }
 
 #[component]
-fn FlowCard(flow: FlowRecord, can_manage: bool, on_removed: Callback<()>) -> impl IntoView {
+fn FlowCard(
+    flow: FlowRecord,
+    bound_libraries: usize,
+    can_manage: bool,
+    on_removed: Callback<()>,
+) -> impl IntoView {
+    let router = use_router();
     let (preview, total_blocks) = pipeline_preview(&flow.definition);
     let extra_blocks = total_blocks.saturating_sub(preview.len());
     let feedback = RwSignal::new(None::<String>);
@@ -74,22 +86,45 @@ fn FlowCard(flow: FlowRecord, can_manage: bool, on_removed: Callback<()>) -> imp
     let removable = can_manage && !flow.is_default;
     let updated = format::datetime(flow.updated_at);
     let description = flow.description.filter(|text| !text.trim().is_empty());
+    let editor_id = flow.id.clone();
+    let open_editor = Callback::new(move |()| router.go(Route::FlowEditor(editor_id.clone())));
+    let badge = flow
+        .is_default
+        .then(|| view! { <StatusBadge label="Défaut" variant="success" /> }.into_any());
+    let actions = view! {
+        <Link to=Route::FlowEditor(flow.id) class="btn btn-secondary btn-sm">"Ouvrir l'atelier"</Link>
+        {removable.then(|| view! {
+            <button type="button" class="btn btn-sm btn-danger-quiet" disabled=move || remove.pending().get()
+                on:click=move |_| { remove.dispatch(()); }>"Supprimer"</button>
+        })}
+    }
+    .into_any();
+    let libs_label = match bound_libraries {
+        0 => "Aucune bibliothèque".to_owned(),
+        1 => "1 bibliothèque".to_owned(),
+        count => format!("{count} bibliothèques"),
+    };
 
     view! {
-        <article class="flow-card">
-            <div class="flow-card__head">
-                <div class="flow-card__title-group">
-                    <h2 class="flow-card__title">{flow.name}</h2>
-                    <div class="flow-card__badges">
-                        <span class="badge text-mono">{format!("v{}", flow.version)}</span>
-                        {flow.is_default.then(|| view! { <StatusBadge label="Défaut" variant="success" /> })}
-                        <span class="flow-pattern-tag text-mono">{flow.file_mask}</span>
-                    </div>
-                </div>
+        <ResourceCard
+            title=flow.name
+            subtitle=description
+            icon=IconName::Flows
+            tone=if flow.is_default { MetricTone::Success } else { MetricTone::Neutral }
+            badge=badge
+            on_click=Some(open_editor)
+            footer_meta=format!("{total_blocks} bloc(s) · {updated}")
+            footer_actions=Some(actions)
+        >
+            <div class="cluster">
+                <Tag label=format!("v{}", flow.version) tone=TagTone::Mono />
+                <Tag label=flow.file_mask tone=TagTone::Primary />
+                <Tag
+                    label=libs_label
+                    tone={if bound_libraries > 0 { TagTone::Success } else { TagTone::Neutral }}
+                    icon=Some(IconName::Libraries)
+                />
             </div>
-            {description.map(|desc| view! {
-                <p class="flow-card__desc text-dim">{desc}</p>
-            })}
             <div class="flow-card__pipeline">
                 {if preview.is_empty() {
                     view! { <span class="text-dim text-xs">"Pipeline vide"</span> }.into_any()
@@ -113,30 +148,34 @@ fn FlowCard(flow: FlowRecord, can_manage: bool, on_removed: Callback<()>) -> imp
                     }.into_any()
                 }}
             </div>
-            <div class="flow-card__foot">
-                <span class="text-dim text-xs">{format!("{total_blocks} bloc(s) · {updated}")}</span>
-                <div class="flow-card__actions">
-                    <Link to=Route::FlowEditor(flow.id) class="btn btn-secondary btn-sm">"Ouvrir l'atelier"</Link>
-                    {removable.then(|| view! {
-                        <button type="button" class="btn btn-sm btn-danger-quiet" disabled=move || remove.pending().get()
-                            on:click=move |_| { remove.dispatch(()); }>"Supprimer"</button>
-                    })}
-                </div>
-            </div>
             {move || feedback.get().map(|err| view! {
                 <p class="text-danger text-xs" role="status">{err}</p>
             })}
-        </article>
+        </ResourceCard>
     }
 }
 
 #[component]
 pub fn FlowsPage(me: Me) -> impl IntoView {
     let can_manage = me.allows(Permission::ManageFlows);
+    let can_libraries = me.allows(Permission::ViewLibraries);
+    let filters = use_context::<Filters>();
     let reload = RwSignal::new(0_u32);
     let flows = LocalResource::new(move || {
         reload.track();
         api::get::<Vec<FlowRecord>>(FLOWS_PATH)
+    });
+    let libraries = LocalResource::new(move || {
+        reload.track();
+        async move {
+            if can_libraries {
+                api::get::<Vec<Library>>(LIBRARIES_PATH)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            }
+        }
     });
     let on_removed = Callback::new(move |()| reload.update(|count| *count = count.wrapping_add(1)));
     let router = use_router();
@@ -149,14 +188,28 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
     let stats = Signal::derive(move || {
         let list = flows.get().and_then(Result::ok).unwrap_or_default();
         let (total, defaults, blocks) = flow_counts(&list);
+        let active = flow_filter();
+        let set_filter = move |next: FlowFilter| {
+            Callback::new(move |()| {
+                if let Some(filters) = filters {
+                    filters.flow.set(next);
+                }
+            })
+        };
         vec![
-            StatItem::new("Total", total.to_string(), MetricTone::Neutral),
-            StatItem::new("Par défaut", defaults.to_string(), MetricTone::Success),
+            StatItem::new("Total", total.to_string(), MetricTone::Neutral)
+                .with_filter(active == FlowFilter::All, set_filter(FlowFilter::All)),
+            StatItem::new("Par défaut", defaults.to_string(), MetricTone::Success).with_filter(
+                active == FlowFilter::DefaultOnly,
+                set_filter(FlowFilter::DefaultOnly),
+            ),
             StatItem::new("Blocs configurés", blocks.to_string(), MetricTone::Neutral),
         ]
     });
     let grid = move || {
         let text = query();
+        let active_filter = flow_filter();
+        let libs = libraries.get().unwrap_or_default();
         match flows.get() {
             None => view! {
                 <div class="empty-state-panel">
@@ -173,10 +226,14 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
             Some(Ok(list)) => {
                 let shown: Vec<FlowRecord> = list
                     .into_iter()
-                    .filter(|flow| matches(&[&flow.name, &flow.id, &flow.file_mask], &text))
+                    .filter(|flow| {
+                        active_filter.accepts(flow.is_default)
+                            && matches(&[&flow.name, &flow.id, &flow.file_mask], &text)
+                    })
                     .collect();
                 if shown.is_empty() {
-                    let create_action = (can_manage && text.trim().is_empty())
+                    let unfiltered = text.trim().is_empty() && active_filter == FlowFilter::All;
+                    let create_action = (can_manage && unfiltered)
                         .then(|| {
                             view! {
                                 <Link to=Route::NewFlow class="btn btn-primary">
@@ -189,15 +246,15 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
                     return view! {
                         <div class="empty-state-panel">
                             <EmptyState
-                                title=if text.trim().is_empty() {
+                                title=if unfiltered {
                                     "Aucun flux installé"
                                 } else {
                                     "Aucun flux correspondant"
                                 }
-                                message=if text.trim().is_empty() {
+                                message=if unfiltered {
                                     "Créez un premier pipeline nodal pour automatiser le traitement de vos médias."
                                 } else {
-                                    "Ajustez votre recherche pour afficher un flux."
+                                    "Ajustez vos filtres pour afficher un flux."
                                 }
                                 icon_name=IconName::Flows
                                 action=create_action
@@ -207,10 +264,23 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
                     .into_any();
                 }
                 view! {
-                    <div class="flows-grid">
+                    <div class="resource-grid">
                         {shown
                             .into_iter()
-                            .map(|flow| view! { <FlowCard flow=flow can_manage=can_manage on_removed=on_removed /> })
+                            .map(|flow| {
+                                let bound_libraries = libs
+                                    .iter()
+                                    .filter(|lib| lib.flow_id.as_deref() == Some(flow.id.as_str()))
+                                    .count();
+                                view! {
+                                    <FlowCard
+                                        flow=flow
+                                        bound_libraries=bound_libraries
+                                        can_manage=can_manage
+                                        on_removed=on_removed
+                                    />
+                                }
+                            })
                             .collect_view()}
                     </div>
                 }

@@ -9,13 +9,15 @@ pub mod table;
 pub use live::LiveJobs;
 
 use crate::api;
-use crate::ui::filters::{job_state, period};
+use crate::ui::filters::{Filters, JobStateFilter, job_state, period};
 use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, MetricTone, StatItem, StatStrip};
 use chrono::Utc;
 use detail::JobDetail;
+use flux_shared::flows::FlowRecord;
 use flux_shared::jobs::Job;
 use flux_shared::session::Me;
+use flux_shared::workers::Worker;
 use flux_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
 use model::{JOBS_PAGE_SIZE, may_have_more, merge_pages, summarize_jobs};
@@ -29,6 +31,9 @@ const JOBS_PATH: &str = "/api/v1/jobs";
 pub fn JobsPage(me: Me) -> impl IntoView {
     let central = me.instance_kind == InstanceKind::Central;
     let can_manage = central && me.allows(Permission::ManageJobs);
+    let can_workers = central && me.allows(Permission::ViewWorkers);
+    let can_flows = central && me.allows(Permission::ViewFlows);
+    let filters = use_context::<Filters>();
     // Sur le central, la liste suit le flux d'événements de l'application ; sur un worker, non.
     let live = use_context::<LiveJobs>();
     let reload = live.map_or_else(|| RwSignal::new(0_u32), |live| live.reload);
@@ -42,6 +47,40 @@ pub fn JobsPage(me: Me) -> impl IntoView {
         reload.track();
         let path = format!("{JOBS_PATH}?limit={JOBS_PAGE_SIZE}");
         async move { api::get::<Vec<Job>>(&path).await }
+    });
+    let workers_res = LocalResource::new(move || async move {
+        if can_workers {
+            api::get::<Vec<Worker>>("/api/v1/workers")
+                .await
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    });
+    let flows_res = LocalResource::new(move || async move {
+        if can_flows {
+            api::get::<Vec<FlowRecord>>("/api/v1/flows")
+                .await
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    });
+    let workers_map = Signal::derive(move || {
+        workers_res
+            .get()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|worker| (worker.id, worker.name))
+            .collect::<HashMap<Uuid, String>>()
+    });
+    let flows_map = Signal::derive(move || {
+        flows_res
+            .get()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|flow| (flow.id, flow.name))
+            .collect::<HashMap<String, String>>()
     });
     // Pages plus anciennes, ajoutées à la demande (curseur : dernière tâche chargée).
     let older = RwSignal::new(Vec::<Job>::new());
@@ -109,10 +148,33 @@ pub fn JobsPage(me: Me) -> impl IntoView {
     let stats = Signal::derive(move || {
         let list = all_jobs.get();
         let (running, queued, completed, failed) = summarize_jobs(&list);
+        let active_filter = job_state();
+        let set_state = move |next: JobStateFilter| {
+            Callback::new(move |()| {
+                if let Some(filters) = filters {
+                    filters.job_state.set(next);
+                }
+            })
+        };
         vec![
-            StatItem::new("En cours", running.to_string(), MetricTone::Neutral),
-            StatItem::new("En attente", queued.to_string(), MetricTone::Neutral),
-            StatItem::new("Terminées", completed.to_string(), MetricTone::Success),
+            StatItem::new("Toutes", list.len().to_string(), MetricTone::Neutral).with_filter(
+                active_filter == JobStateFilter::Any,
+                set_state(JobStateFilter::Any),
+            ),
+            StatItem::new(
+                "En cours & file",
+                (running + queued).to_string(),
+                MetricTone::Neutral,
+            )
+            .with_detail(format!("{queued} en attente"))
+            .with_filter(
+                active_filter == JobStateFilter::Active,
+                set_state(JobStateFilter::Active),
+            ),
+            StatItem::new("Terminées", completed.to_string(), MetricTone::Success).with_filter(
+                active_filter == JobStateFilter::Completed,
+                set_state(JobStateFilter::Completed),
+            ),
             StatItem::new(
                 "Échouées",
                 failed.to_string(),
@@ -121,6 +183,10 @@ pub fn JobsPage(me: Me) -> impl IntoView {
                 } else {
                     MetricTone::Neutral
                 },
+            )
+            .with_filter(
+                active_filter == JobStateFilter::Failed,
+                set_state(JobStateFilter::Failed),
             ),
         ]
     });
@@ -128,7 +194,14 @@ pub fn JobsPage(me: Me) -> impl IntoView {
         <div class="tab-panel" role="tabpanel">
             <StatStrip aria_label="Synthèse de l'activité" items=stats />
             <div class="registre">
-                <JobsTable jobs=visible progress=progress selected=selected on_open=open />
+                <JobsTable
+                    jobs=visible
+                    progress=progress
+                    workers=workers_map
+                    flows=flows_map
+                    selected=selected
+                    on_open=open
+                />
             </div>
             {move || can_load_more.get().then(|| view! {
                 <button type="button" class="btn btn-secondary btn-sm" disabled=move || load_older.pending().get()

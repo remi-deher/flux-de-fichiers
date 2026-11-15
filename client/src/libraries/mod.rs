@@ -3,9 +3,13 @@
 mod draft;
 mod form;
 
+use crate::ui::filters::{Filters, LibraryFilter, library_filter};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
-use crate::ui::{Drawer, EmptyState, Icon, IconName, MetricTone, StatItem, StatStrip, StatusBadge};
+use crate::ui::{
+    Drawer, EmptyState, Icon, IconName, MetricTone, ResourceCard, StatItem, StatStrip, StatusBadge,
+    Tag, TagTone,
+};
 use crate::{api, format};
 use draft::{LibraryDraft, access_label, is_ready, library_counts};
 use flux_shared::Permission;
@@ -24,6 +28,7 @@ const PREVIEW_WORKER_PATHS: usize = 2;
 #[component]
 pub fn LibrariesPage(me: Me) -> impl IntoView {
     let can_manage = me.allows(Permission::ManageLibraries);
+    let filters = use_context::<Filters>();
     let reload = RwSignal::new(0_u32);
     let libraries = LocalResource::new(move || {
         reload.track();
@@ -66,16 +71,33 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
     let stats = Signal::derive(move || {
         let list = libraries.get().and_then(Result::ok).unwrap_or_default();
         let (total, ready, bound) = library_counts(&list);
+        let active = library_filter();
+        let set_filter = move |next: LibraryFilter| {
+            Callback::new(move |()| {
+                if let Some(filters) = filters {
+                    filters.library.set(next);
+                }
+            })
+        };
         vec![
-            StatItem::new("Total", total.to_string(), MetricTone::Neutral),
+            StatItem::new("Total", total.to_string(), MetricTone::Neutral)
+                .with_filter(active == LibraryFilter::All, set_filter(LibraryFilter::All)),
             StatItem::new("Prêtes", ready.to_string(), MetricTone::Success)
-                .with_detail("flux + worker"),
-            StatItem::new("Avec flux lié", bound.to_string(), MetricTone::Neutral),
+                .with_detail("flux + worker")
+                .with_filter(
+                    active == LibraryFilter::Ready,
+                    set_filter(LibraryFilter::Ready),
+                ),
+            StatItem::new("Avec flux lié", bound.to_string(), MetricTone::Neutral).with_filter(
+                active == LibraryFilter::Bound,
+                set_filter(LibraryFilter::Bound),
+            ),
         ]
     });
 
     let grid = move || {
         let text = query();
+        let active_filter = library_filter();
         match libraries.get() {
             None => view! {
                 <div class="empty-state-panel">
@@ -92,10 +114,14 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
             Some(Ok(list)) => {
                 let shown: Vec<Library> = list
                     .into_iter()
-                    .filter(|library| matches(&[&library.name], &text))
+                    .filter(|library| {
+                        active_filter.accepts(is_ready(library), library.flow_id.is_some())
+                            && matches(&[&library.name], &text)
+                    })
                     .collect();
                 if shown.is_empty() {
-                    let create_action = (can_manage && text.trim().is_empty())
+                    let unfiltered = text.trim().is_empty() && active_filter == LibraryFilter::All;
+                    let create_action = (can_manage && unfiltered)
                         .then(|| {
                             view! {
                                 <button type="button" class="btn btn-primary" on:click=move |_| open_create.run(())>
@@ -108,15 +134,15 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
                     return view! {
                         <div class="empty-state-panel">
                             <EmptyState
-                                title=if text.trim().is_empty() {
+                                title=if unfiltered {
                                     "Aucune bibliothèque déclarée"
                                 } else {
                                     "Aucune bibliothèque correspondante"
                                 }
-                                message=if text.trim().is_empty() {
+                                message=if unfiltered {
                                     "Déclarez un dossier média pour associer vos workers et lancer vos flux."
                                 } else {
-                                    "Ajustez votre filtre de recherche pour retrouver une bibliothèque."
+                                    "Ajustez vos filtres pour retrouver une bibliothèque."
                                 }
                                 icon_name=IconName::Libraries
                                 action=create_action
@@ -126,9 +152,10 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
                     .into_any();
                 }
                 view! {
-                    <div class="libraries-grid">
+                    <div class="resource-grid">
                         {shown.into_iter().map(|library| {
                             let ready = is_ready(&library);
+                            let has_flow = library.flow_id.is_some();
                             let draft = LibraryDraft::editing(&library);
                             let id = library.id;
                             let worker_count = library.workers.len();
@@ -141,58 +168,59 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
                                 .collect();
                             let bound_flow = flow_name(&library.flow_id);
                             let updated = format::datetime(library.updated_at);
+                            let open_edit = can_manage.then(|| {
+                                let draft = draft.clone();
+                                Callback::new(move |()| {
+                                    editing.set(Some(draft.clone()));
+                                    drawer.set(true);
+                                })
+                            });
+                            let actions = can_manage.then(|| {
+                                let draft = draft.clone();
+                                view! {
+                                    <button type="button" class="btn btn-secondary btn-sm"
+                                        on:click=move |_| { editing.set(Some(draft.clone())); drawer.set(true); }>
+                                        "Configurer"
+                                    </button>
+                                }.into_any()
+                            });
+                            let badge = view! {
+                                <StatusBadge
+                                    label=if ready { "Prête" } else { "À configurer" }
+                                    variant=if ready { "success" } else { "warning" }
+                                />
+                            }.into_any();
                             view! {
-                                <article
-                                    class="library-card"
-                                    class:is-open=move || editing.get().and_then(|d| d.id) == Some(id)
+                                <ResourceCard
+                                    title=library.name
+                                    icon=IconName::Folder
+                                    tone={if ready { MetricTone::Success } else { MetricTone::Warning }}
+                                    badge=Some(badge)
+                                    active=Some(Signal::derive(move || editing.get().and_then(|d| d.id) == Some(id)))
+                                    on_click=open_edit
+                                    footer_meta=format!("{worker_count} worker(s) · {updated}")
+                                    footer_actions=actions
                                 >
-                                    <div class="library-card__head">
-                                        <div class="library-card__title-wrap">
-                                            <span class="library-card__icon" aria-hidden="true">
-                                                <Icon name=IconName::Folder size=17 />
-                                            </span>
-                                            <h2 class="library-card__title">{library.name}</h2>
-                                        </div>
-                                        <StatusBadge
-                                            label=if ready { "Prête" } else { "À configurer" }
-                                            variant=if ready { "success" } else { "warning" }
+                                    <div class="cluster">
+                                        <Tag
+                                            label=bound_flow
+                                            tone={if has_flow { TagTone::Primary } else { TagTone::Neutral }}
+                                            icon=Some(IconName::Flows)
                                         />
+                                        {if paths_preview.is_empty() {
+                                            view! { <Tag label="Aucun chemin configuré" tone=TagTone::Warning /> }.into_any()
+                                        } else {
+                                            view! {
+                                                {paths_preview.into_iter().map(|(path, access)| view! {
+                                                    <Tag label=format!("{path} ({access})") tone=TagTone::Mono />
+                                                }).collect_view()}
+                                                {(extra_workers > 0).then(|| view! {
+                                                    <Tag label=format!("+{extra_workers} worker(s)") tone=TagTone::Neutral />
+                                                })}
+                                            }.into_any()
+                                        }}
                                     </div>
-                                    <div class="library-card__body">
-                                        <div class="flow-binding-pill">
-                                            <Icon name=IconName::Flows size=14 />
-                                            <span>{bound_flow}</span>
-                                        </div>
-                                        <div class="library-card__paths">
-                                            {if paths_preview.is_empty() {
-                                                view! { <span class="text-dim text-xs">"Aucun chemin worker configuré"</span> }.into_any()
-                                            } else {
-                                                view! {
-                                                    <div class="library-card__path-list">
-                                                        {paths_preview.into_iter().map(|(path, access)| view! {
-                                                            <div class="library-card__path-row">
-                                                                <code class="code-badge truncate">{path}</code>
-                                                                <span class="text-dim text-xs">{access}</span>
-                                                            </div>
-                                                        }).collect_view()}
-                                                        {(extra_workers > 0).then(|| view! {
-                                                            <span class="text-dim text-xs">{format!("+ {extra_workers} autre(s) worker(s)")}</span>
-                                                        })}
-                                                    </div>
-                                                }.into_any()
-                                            }}
-                                        </div>
-                                    </div>
-                                    <div class="library-card__foot">
-                                        <span class="text-dim text-xs">{format!("{worker_count} worker(s) · {updated}")}</span>
-                                        {can_manage.then(|| view! {
-                                            <button type="button" class="btn btn-secondary btn-sm"
-                                                on:click=move |_| { editing.set(Some(draft.clone())); drawer.set(true); }>
-                                                "Configurer"
-                                            </button>
-                                        })}
-                                    </div>
-                                </article>
+                                </ResourceCard>
                             }
                         }).collect_view()}
                     </div>

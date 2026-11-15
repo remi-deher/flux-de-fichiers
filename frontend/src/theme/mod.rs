@@ -55,7 +55,7 @@ mod tests {
     fn test_all_styles_contains_tokens_and_base() {
         let styles = get_all_styles();
         assert!(styles.contains(":root {"));
-        assert!(styles.contains("--bg-app: #0d1117;"));
+        assert!(styles.contains("--bg-app: #090b10;"));
         assert!(styles.contains(".application-shell {"));
         assert!(styles.contains(".status-pill {"));
         assert!(styles.contains(".widget-grid {"));
@@ -67,9 +67,11 @@ mod tests {
         assert!(styles.contains(".flow-graph__port-dot {"));
         assert!(styles.contains(".stat-strip {"));
         assert!(styles.contains(".overview-toolbar {"));
-        assert!(styles.contains(".libraries-grid {"));
-        assert!(styles.contains(".workers-grid {"));
-        assert!(styles.contains(".plugins-grid {"));
+        assert!(styles.contains(".page-section {"));
+        assert!(styles.contains(".resource-grid {"));
+        assert!(styles.contains(".resource-card {"));
+        assert!(styles.contains(".ui-tag {"));
+        assert!(styles.contains(".tab-btn-badge {"));
         assert!(styles.contains(".settings-bento-grid {"));
         assert!(styles.contains(".studio-toolbar {"));
         assert!(styles.contains(".auth-role-grid {"));

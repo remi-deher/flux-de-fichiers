@@ -2,21 +2,26 @@
 
 use crate::route::{Link, Route};
 use crate::settings::duration_label;
-use crate::ui::filters::presence;
+use crate::ui::filters::{Filters, Presence, presence};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
-    Drawer, EmptyState, Icon, IconName, MetricTone, StatItem, StatStrip, StatusBadge, Toasts,
+    Drawer, EmptyState, Icon, IconName, MetricTone, ResourceCard, StatItem, StatStrip, StatusBadge,
+    Tag, TagTone, Toasts,
 };
 use crate::{api, format};
 use chrono::{DateTime, Utc};
 use flux_shared::Permission;
+use flux_shared::jobs::{Job, JobStatus};
+use flux_shared::libraries::Library;
 use flux_shared::session::Me;
 use flux_shared::workers::{Liveness, Worker};
 use leptos::prelude::*;
 use uuid::Uuid;
 
 const WORKERS_PATH: &str = "/api/v1/workers";
+const LIBRARIES_PATH: &str = "/api/v1/libraries";
+const JOBS_PATH: &str = "/api/v1/jobs?limit=200";
 
 /// Service `compose` d'un worker distant ; la clé vient d'un fichier, jamais d'une valeur en clair.
 pub fn enroll_compose(origin: &str) -> String {
@@ -42,11 +47,11 @@ pub fn origin() -> String {
     window().location().origin().unwrap_or_default()
 }
 
-fn role_meta(worker: &Worker) -> (&'static str, &'static str) {
+fn role_meta(worker: &Worker) -> (&'static str, TagTone) {
     if worker.is_integrated() {
-        ("Intégré au central", "repo-badge official")
+        ("Intégré au central", TagTone::Primary)
     } else {
-        ("Worker distant", "repo-badge community")
+        ("Worker distant", TagTone::Neutral)
     }
 }
 
@@ -119,7 +124,7 @@ fn WorkerDetail(worker: Worker, can_manage: bool, on_removed: Callback<()>) -> i
     let now = Utc::now();
     let liveness = worker.liveness(now);
     let (badge_label, badge_variant) = liveness_badge(liveness);
-    let (role_label, role_class) = role_meta(&worker);
+    let (role_label, role_tone) = role_meta(&worker);
     let age = contact_age(&worker, now);
     let feedback = RwSignal::new(None::<String>);
     let id = worker.id;
@@ -139,7 +144,7 @@ fn WorkerDetail(worker: Worker, can_manage: bool, on_removed: Callback<()>) -> i
         <div class="inspection-panel">
             <div class="cluster cluster-wrap">
                 <StatusBadge label=badge_label variant=badge_variant pulse=liveness == Liveness::Online />
-                <span class=role_class>{role_label}</span>
+                <Tag label=role_label tone=role_tone />
             </div>
             <div class="detail-grid">
                 <div class="detail-term">"Identifiant"</div><div class="detail-val text-mono">{worker.id.to_string()}</div>
@@ -165,10 +170,42 @@ fn WorkerDetail(worker: Worker, can_manage: bool, on_removed: Callback<()>) -> i
 #[component]
 pub fn WorkersPage(me: Me) -> impl IntoView {
     let can_manage = me.allows(Permission::ManageWorkers);
+    let can_libraries = me.allows(Permission::ViewLibraries);
+    let can_jobs = me.allows(Permission::ViewJobs);
+    let filters = use_context::<Filters>();
+    let live_reload = use_context::<crate::jobs::LiveJobs>().map(|live| live.reload);
     let reload = RwSignal::new(0_u32);
     let workers = LocalResource::new(move || {
         reload.track();
+        if let Some(live) = live_reload {
+            live.track();
+        }
         api::get::<Vec<Worker>>(WORKERS_PATH)
+    });
+    let libraries = LocalResource::new(move || {
+        reload.track();
+        async move {
+            if can_libraries {
+                api::get::<Vec<Library>>(LIBRARIES_PATH)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            }
+        }
+    });
+    let jobs = LocalResource::new(move || {
+        reload.track();
+        if let Some(live) = live_reload {
+            live.track();
+        }
+        async move {
+            if can_jobs {
+                api::get::<Vec<Job>>(JOBS_PATH).await.unwrap_or_default()
+            } else {
+                Vec::new()
+            }
+        }
     });
     let selected = RwSignal::new(None::<Uuid>);
     let detail_open = RwSignal::new(false);
@@ -200,6 +237,14 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
     let stats = Signal::derive(move || {
         let all = list.get();
         let summary = summarize_workers(&all, Utc::now());
+        let active = presence();
+        let set_presence = move |next: Presence| {
+            Callback::new(move |()| {
+                if let Some(filters) = filters {
+                    filters.presence.set(next);
+                }
+            })
+        };
         let inactive = summary.offline + summary.silent;
         let inactive_tone = if summary.silent > 0 {
             MetricTone::Danger
@@ -212,7 +257,8 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
             "Hors ligne / Silencieux",
             inactive.to_string(),
             inactive_tone,
-        );
+        )
+        .with_filter(active == Presence::Offline, set_presence(Presence::Offline));
         if summary.silent > 0 {
             inactive_pill = inactive_pill.with_detail(format!("{} silencieux", summary.silent));
         }
@@ -222,7 +268,8 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                 summary.total.to_string(),
                 MetricTone::Neutral,
             )
-            .with_detail("central inclus"),
+            .with_detail("central inclus")
+            .with_filter(active == Presence::Any, set_presence(Presence::Any)),
             StatItem::new(
                 "En ligne",
                 summary.online.to_string(),
@@ -231,7 +278,8 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                 } else {
                     MetricTone::Neutral
                 },
-            ),
+            )
+            .with_filter(active == Presence::Online, set_presence(Presence::Online)),
             StatItem::new(
                 "Nœuds distants",
                 summary.remote.to_string(),
@@ -247,6 +295,8 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
     let grid = move || {
         let text = query();
         let online_filter = presence();
+        let libs = libraries.get().unwrap_or_default();
+        let jobs_list = jobs.get().unwrap_or_default();
         match workers.get() {
             None => view! {
                 <div class="empty-state-panel">
@@ -264,7 +314,8 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                 let now = Utc::now();
                 let shown = filter_workers(all, &text, online_filter, now);
                 if shown.is_empty() {
-                    let empty_action = (can_manage && text.trim().is_empty())
+                    let unfiltered = text.trim().is_empty() && online_filter == Presence::Any;
+                    let empty_action = (can_manage && unfiltered)
                         .then(|| {
                             view! {
                                 <button type="button" class="btn btn-primary" on:click=move |_| enroll_open.set(true)>
@@ -277,12 +328,12 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                     return view! {
                         <div class="empty-state-panel">
                             <EmptyState
-                                title=if text.trim().is_empty() {
+                                title=if unfiltered {
                                     "Aucun worker disponible"
                                 } else {
                                     "Aucun worker correspondant"
                                 }
-                                message=if text.trim().is_empty() {
+                                message=if unfiltered {
                                     "Enrôlez un nœud distant ou activez le worker intégré pour exécuter vos flux."
                                 } else {
                                     "Ajustez votre recherche ou le filtre de présence pour retrouver un nœud."
@@ -295,73 +346,100 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                     .into_any();
                 }
                 view! {
-                    <div class="workers-grid">
+                    <div class="resource-grid">
                         {shown.into_iter().map(|worker| {
                             let id = worker.id;
                             let liveness = worker.liveness(now);
                             let (badge_label, badge_variant) = liveness_badge(liveness);
-                            let (role_label, role_class) = role_meta(&worker);
+                            let (role_label, role_tone) = role_meta(&worker);
                             let age = contact_age(&worker, now);
                             let last_contact = format::datetime(worker.last_seen);
                             let removable = can_manage && liveness != Liveness::Online && !worker.is_integrated();
                             let footer_hint = if worker.is_integrated() {
                                 "Rattaché au central"
                             } else {
-                                "Connecté au central"
+                                "Nœud distant"
                             };
+                            let mounted_libs = libs
+                                .iter()
+                                .filter(|lib| lib.workers.iter().any(|entry| entry.worker_id == id))
+                                .count();
+                            let active_jobs = jobs_list
+                                .iter()
+                                .filter(|job| {
+                                    job.worker_id == Some(id)
+                                        && matches!(job.status, JobStatus::Running | JobStatus::Queued)
+                                })
+                                .count();
+                            let libs_label = match mounted_libs {
+                                0 => "0 bibliothèque".to_owned(),
+                                1 => "1 bibliothèque".to_owned(),
+                                count => format!("{count} bibliothèques"),
+                            };
+                            let jobs_label = match active_jobs {
+                                0 => "Inactif".to_owned(),
+                                1 => "1 tâche active".to_owned(),
+                                count => format!("{count} tâches actives"),
+                            };
+                            let short_id: String = id.to_string().chars().take(8).collect();
+                            let tone = match liveness {
+                                Liveness::Online => MetricTone::Success,
+                                Liveness::Offline => MetricTone::Warning,
+                                Liveness::Silent => MetricTone::Danger,
+                            };
+                            let badge = view! {
+                                <StatusBadge
+                                    label=badge_label
+                                    variant=badge_variant
+                                    pulse=liveness == Liveness::Online
+                                />
+                            }
+                            .into_any();
+                            let open_detail = Callback::new(move |()| {
+                                selected.set(Some(id));
+                                detail_open.set(true);
+                            });
+                            let actions = view! {
+                                {removable.then(|| view! {
+                                    <button type="button" class="btn btn-sm btn-danger-quiet"
+                                        disabled=move || remove_worker.pending().get()
+                                        on:click=move |_| { remove_worker.dispatch(id); }>
+                                        "Retirer"
+                                    </button>
+                                })}
+                                <button type="button" class="btn btn-secondary btn-sm"
+                                    on:click=move |_| { selected.set(Some(id)); detail_open.set(true); }>
+                                    "Inspecter"
+                                </button>
+                            }
+                            .into_any();
                             view! {
-                                <article
-                                    class="worker-card"
-                                    class:is-open=move || selected.get() == Some(id)
+                                <ResourceCard
+                                    title=worker.name
+                                    subtitle=Some(format!("Dernier signal : {age}"))
+                                    icon=IconName::Workers
+                                    tone=tone
+                                    badge=Some(badge)
+                                    active=Some(Signal::derive(move || selected.get() == Some(id)))
+                                    on_click=Some(open_detail)
+                                    footer_meta=format!("{footer_hint} · {last_contact}")
+                                    footer_actions=Some(actions)
                                 >
-                                    <div class="worker-card__head">
-                                        <div class="worker-card__title-wrap">
-                                            <span class="worker-card__icon" aria-hidden="true">
-                                                <Icon name=IconName::Workers size=17 />
-                                            </span>
-                                            <div class="worker-card__heading">
-                                                <h2 class="worker-card__title">{worker.name}</h2>
-                                                <span class=role_class>{role_label}</span>
-                                            </div>
-                                        </div>
-                                        <StatusBadge
-                                            label=badge_label
-                                            variant=badge_variant
-                                            pulse=liveness == Liveness::Online
+                                    <div class="cluster">
+                                        <Tag label=role_label tone=role_tone />
+                                        <Tag
+                                            label=libs_label
+                                            tone={if mounted_libs > 0 { TagTone::Success } else { TagTone::Warning }}
+                                            icon=Some(IconName::Libraries)
                                         />
+                                        <Tag
+                                            label=jobs_label
+                                            tone={if active_jobs > 0 { TagTone::Primary } else { TagTone::Neutral }}
+                                            icon=Some(IconName::Activity)
+                                        />
+                                        <Tag label=short_id tone=TagTone::Mono />
                                     </div>
-                                    <div class="worker-card__body">
-                                        <div class="worker-card__meta-row">
-                                            <span class="worker-card__meta-label">"Identifiant"</span>
-                                            <code class="code-badge truncate">{id.to_string()}</code>
-                                        </div>
-                                        <div class="worker-card__meta-row">
-                                            <span class="worker-card__meta-label">"Dernier contact"</span>
-                                            <span class="text-sm">{last_contact}</span>
-                                        </div>
-                                        <div class="worker-card__meta-row">
-                                            <span class="worker-card__meta-label">"Ancienneté"</span>
-                                            <span class="text-sm" class:text-danger=liveness == Liveness::Silent>{age}</span>
-                                        </div>
-                                    </div>
-                                    <div class="worker-card__foot">
-                                        {if removable {
-                                            view! {
-                                                <button type="button" class="btn btn-sm btn-danger-quiet"
-                                                    disabled=move || remove_worker.pending().get()
-                                                    on:click=move |_| { remove_worker.dispatch(id); }>
-                                                    "Retirer"
-                                                </button>
-                                            }.into_any()
-                                        } else {
-                                            view! { <span class="text-dim text-xs">{footer_hint}</span> }.into_any()
-                                        }}
-                                        <button type="button" class="btn btn-secondary btn-sm"
-                                            on:click=move |_| { selected.set(Some(id)); detail_open.set(true); }>
-                                            "Inspecter"
-                                        </button>
-                                    </div>
-                                </article>
+                                </ResourceCard>
                             }
                         }).collect_view()}
                     </div>

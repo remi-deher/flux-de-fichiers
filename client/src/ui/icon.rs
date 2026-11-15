@@ -29,6 +29,12 @@ pub enum IconName {
     Package,
     Layers,
     Folder,
+    Undo,
+    Redo,
+    Copy,
+    Trash,
+    Layout,
+    Pin,
 }
 
 impl IconName {
@@ -97,6 +103,24 @@ impl IconName {
             Self::Folder => {
                 r#"<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>"#
             }
+            Self::Undo => {
+                r#"<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>"#
+            }
+            Self::Redo => {
+                r#"<path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/>"#
+            }
+            Self::Copy => {
+                r#"<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>"#
+            }
+            Self::Trash => {
+                r#"<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>"#
+            }
+            Self::Layout => {
+                r#"<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>"#
+            }
+            Self::Pin => {
+                r#"<line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/>"#
+            }
         }
     }
 }
@@ -137,7 +161,7 @@ pub fn Icon(
 mod tests {
     use super::*;
 
-    const ALL_ICONS: [IconName; 24] = [
+    const ALL_ICONS: [IconName; 30] = [
         IconName::Dashboard,
         IconName::Libraries,
         IconName::Flows,
@@ -162,6 +186,12 @@ mod tests {
         IconName::Package,
         IconName::Layers,
         IconName::Folder,
+        IconName::Undo,
+        IconName::Redo,
+        IconName::Copy,
+        IconName::Trash,
+        IconName::Layout,
+        IconName::Pin,
     ];
 
     #[test]

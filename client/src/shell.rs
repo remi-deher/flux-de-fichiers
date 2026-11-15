@@ -434,6 +434,7 @@ fn Topbar(me: Me, workers: Signal<Option<Vec<Worker>>>) -> impl IntoView {
 /// Gabarit complet : barre latérale, barre du haut et contenu.
 #[component]
 pub fn Shell(me: Me, children: Children) -> impl IntoView {
+    let router = use_router();
     Search::install();
     Filters::install();
     TopbarAction::install();
@@ -489,7 +490,13 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
                 <Sidebar me=me.clone() jobs=jobs_list workers=workers_list />
                 <div class="page-transition-region">
                     <Topbar me=me.clone() workers=workers_opt />
-                    <main id="main-content" class="main-content">{children()}</main>
+                    <main
+                        id="main-content"
+                        class="main-content"
+                        class:is-workbench=move || matches!(router.current(), Route::FlowEditor(_) | Route::NewFlow)
+                    >
+                        {children()}
+                    </main>
                 </div>
             </div>
         </div>

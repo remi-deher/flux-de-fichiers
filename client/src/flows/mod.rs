@@ -303,214 +303,204 @@ pub(super) mod test_support {
     use flux_shared::flows::{OwnedBlockSpec, OwnedFieldKind, OwnedFieldSpec};
     use serde_json::json;
 
-    pub(super) fn spec(
-        kind: &str,
-        alias: &str,
-        label: &str,
-        category: &str,
-        domain: &str,
-        has_input: bool,
-        ports: &[(&str, &str)],
-        terminal: bool,
-        fields: Vec<OwnedFieldSpec>,
-        suggested_next: &[&str],
-    ) -> OwnedBlockSpec {
-        OwnedBlockSpec {
-            kind: kind.into(),
-            aliases: (!alias.is_empty())
-                .then(|| vec![alias.into()])
-                .unwrap_or_default(),
-            label: label.into(),
-            category: category.into(),
-            domain: Some(domain.into()),
-            description: String::new(),
-            has_input,
-            ports: ports
+    struct BlockBuilder(OwnedBlockSpec);
+
+    impl BlockBuilder {
+        fn new(kind: &str, alias: &str, label: &str, category: &str, domain: &str) -> Self {
+            Self(OwnedBlockSpec {
+                kind: kind.into(),
+                aliases: if alias.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![alias.into()]
+                },
+                label: label.into(),
+                category: category.into(),
+                domain: Some(domain.into()),
+                description: String::new(),
+                has_input: true,
+                ports: Vec::new(),
+                terminal: false,
+                fields: Vec::new(),
+                suggested_next: Vec::new(),
+                from_plugin: true,
+                operation_id: None,
+            })
+        }
+
+        fn no_input(mut self) -> Self {
+            self.0.has_input = false;
+            self
+        }
+
+        fn ports(mut self, ports: &[(&str, &str)]) -> Self {
+            self.0.ports = ports
                 .iter()
                 .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
-                .collect(),
-            terminal,
-            fields,
-            suggested_next: suggested_next.iter().map(|s| (*s).to_owned()).collect(),
-            from_plugin: true,
-            operation_id: None,
+                .collect();
+            self
+        }
+
+        fn terminal(mut self) -> Self {
+            self.0.terminal = true;
+            self
+        }
+
+        fn fields(mut self, fields: Vec<OwnedFieldSpec>) -> Self {
+            self.0.fields = fields;
+            self
+        }
+
+        fn suggest(mut self, next: &[&str]) -> Self {
+            self.0.suggested_next = next.iter().map(|s| (*s).to_owned()).collect();
+            self
+        }
+
+        fn build(self) -> OwnedBlockSpec {
+            self.0
         }
     }
 
     pub(super) fn test_catalog() -> Vec<OwnedBlockSpec> {
         vec![
-            spec(
+            BlockBuilder::new(
                 "block.core.file-input",
                 "file-input",
                 "Fichier source",
                 "Entrée",
                 "input",
-                false,
-                &[],
-                false,
-                Vec::new(),
-                &["block.core.condition", "block.video.remux-mkv"],
-            ),
-            spec(
+            )
+            .no_input()
+            .suggest(&["block.core.condition", "block.video.remux-mkv"])
+            .build(),
+            BlockBuilder::new(
                 "block.core.condition",
                 "condition",
                 "Condition",
                 "Logique",
                 "logic",
-                true,
-                &[("true", "✓ Vrai"), ("false", "✗ Faux")],
-                false,
-                vec![OwnedFieldSpec {
-                    name: "target".into(),
-                    label: "Valeur".into(),
-                    kind: OwnedFieldKind::Text,
-                    required: true,
-                    help: String::new(),
-                    default: None,
-                }],
-                &["block.video.encode", "block.video.remux-mkv"],
-            ),
-            spec(
+            )
+            .ports(&[("true", "✓ Vrai"), ("false", "✗ Faux")])
+            .fields(vec![OwnedFieldSpec {
+                name: "target".into(),
+                label: "Valeur".into(),
+                kind: OwnedFieldKind::Text,
+                required: true,
+                help: String::new(),
+                default: None,
+            }])
+            .suggest(&["block.video.encode", "block.video.remux-mkv"])
+            .build(),
+            BlockBuilder::new(
                 "block.media.inspect",
                 "media-inspect",
                 "Inspection média",
                 "Média",
                 "inspect",
-                true,
-                &[],
-                false,
-                Vec::new(),
-                &[],
-            ),
-            spec(
+            )
+            .build(),
+            BlockBuilder::new(
                 "block.metadata.mkvpropedit",
                 "mkvpropedit",
                 "Édition des en-têtes",
                 "MKVToolNix",
                 "mkv",
-                true,
-                &[],
-                false,
-                Vec::new(),
-                &[],
-            ),
-            spec(
+            )
+            .build(),
+            BlockBuilder::new(
                 "block.video.remux-mkv",
                 "remux-mkv",
                 "Remuxage Matroska",
                 "MKVToolNix",
                 "mkv",
-                true,
-                &[],
-                false,
-                Vec::new(),
-                &["block.core.file-output"],
-            ),
-            spec(
+            )
+            .suggest(&["block.core.file-output"])
+            .build(),
+            BlockBuilder::new(
                 "block.video.encode",
                 "video-encode",
                 "Encodage vidéo",
                 "Média",
                 "video",
-                true,
-                &[],
-                false,
-                Vec::new(),
-                &["block.video.remux-mkv"],
-            ),
-            spec(
+            )
+            .suggest(&["block.video.remux-mkv"])
+            .build(),
+            BlockBuilder::new(
                 "block.audio.encode",
                 "audio-encode",
                 "Encodage audio",
                 "Média",
                 "audio",
-                true,
-                &[],
-                false,
-                Vec::new(),
-                &[],
-            ),
-            spec(
+            )
+            .build(),
+            BlockBuilder::new(
                 "block.sonarr.rescan",
                 "sonarr-rescan",
                 "Sonarr : réanalyser",
                 "Intégrations",
                 "integration",
-                true,
-                &[],
-                false,
-                Vec::new(),
-                &[],
-            ),
-            spec(
+            )
+            .build(),
+            BlockBuilder::new(
                 "block.sonarr.rename",
                 "sonarr-rename",
                 "Sonarr : renommer",
                 "Intégrations",
                 "integration",
-                true,
-                &[],
-                false,
-                Vec::new(),
-                &[],
-            ),
-            spec(
+            )
+            .build(),
+            BlockBuilder::new(
                 "block.core.webhook",
                 "webhook",
                 "Webhook",
                 "Notification",
                 "integration",
-                true,
-                &[],
-                false,
-                vec![
-                    OwnedFieldSpec {
-                        name: "url".into(),
-                        label: "URL".into(),
-                        kind: OwnedFieldKind::Text,
-                        required: true,
-                        help: String::new(),
-                        default: None,
-                    },
-                    OwnedFieldSpec {
-                        name: "method".into(),
-                        label: "Méthode".into(),
-                        kind: OwnedFieldKind::Select(vec![("POST".into(), "POST".into())]),
-                        required: false,
-                        help: String::new(),
-                        default: Some(json!("POST")),
-                    },
-                    OwnedFieldSpec {
-                        name: "custom_headers".into(),
-                        label: "En-têtes".into(),
-                        kind: OwnedFieldKind::Headers,
-                        required: false,
-                        help: String::new(),
-                        default: Some(json!({})),
-                    },
-                    OwnedFieldSpec {
-                        name: "fail_on_error".into(),
-                        label: "Échec bloquant".into(),
-                        kind: OwnedFieldKind::Bool,
-                        required: false,
-                        help: String::new(),
-                        default: Some(json!(false)),
-                    },
-                ],
-                &["block.core.file-output"],
-            ),
-            spec(
+            )
+            .fields(vec![
+                OwnedFieldSpec {
+                    name: "url".into(),
+                    label: "URL".into(),
+                    kind: OwnedFieldKind::Text,
+                    required: true,
+                    help: String::new(),
+                    default: None,
+                },
+                OwnedFieldSpec {
+                    name: "method".into(),
+                    label: "Méthode".into(),
+                    kind: OwnedFieldKind::Select(vec![("POST".into(), "POST".into())]),
+                    required: false,
+                    help: String::new(),
+                    default: Some(json!("POST")),
+                },
+                OwnedFieldSpec {
+                    name: "custom_headers".into(),
+                    label: "En-têtes".into(),
+                    kind: OwnedFieldKind::Headers,
+                    required: false,
+                    help: String::new(),
+                    default: Some(json!({})),
+                },
+                OwnedFieldSpec {
+                    name: "fail_on_error".into(),
+                    label: "Échec bloquant".into(),
+                    kind: OwnedFieldKind::Bool,
+                    required: false,
+                    help: String::new(),
+                    default: Some(json!(false)),
+                },
+            ])
+            .suggest(&["block.core.file-output"])
+            .build(),
+            BlockBuilder::new(
                 "block.core.file-output",
                 "file-output",
                 "Fin du flux",
                 "Sortie",
                 "output",
-                true,
-                &[],
-                true,
-                Vec::new(),
-                &[],
-            ),
+            )
+            .terminal()
+            .build(),
         ]
     }
 }

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.23.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.22.0...v0.23.0) (2026-11-15)
+
+
+### Features
+
+* **flows:** refondre l'éditeur de flux en atelier nodal interactif ([c12b140](https://github.com/remi-deher/flux-de-fichiers/commit/c12b140b4261139be6c126520f78e1589f66a817))
+* **flows:** refondre l'éditeur de flux en atelier nodal interactif ([8e78cb8](https://github.com/remi-deher/flux-de-fichiers/commit/8e78cb873ee09669d0ca2b705b489dd8afa6c602))
+
+
+### Bug Fixes
+
+* **flows:** corriger deux comparaisons Clippy dans les tests DnD ([912cf08](https://github.com/remi-deher/flux-de-fichiers/commit/912cf08f3e1c10df5ad6621e7b57c6e4ff24eb61))
+
 ## [0.22.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.21.1...v0.22.0) (2026-11-15)
 
 

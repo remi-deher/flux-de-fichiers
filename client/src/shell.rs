@@ -1,17 +1,18 @@
-//! Coque de l'application : barre latérale (marque, navigation par groupes, thème, déconnexion)
-//! et barre du haut (recherche globale et filtre de l'écran, workers en ligne), sur le gabarit du thème.
+//! Coque de l'application : barre latérale (marque, navigation par groupes, compteurs live, thème, déconnexion)
+//! et barre du haut (filtre instantané, période, workers en ligne et action contextuelle).
 
-use crate::route::{Route, use_router};
+use crate::route::{Link, Route, use_router};
 use crate::settings::{logout, role_label};
 use crate::theme::ThemePicker;
 use crate::ui::filters::{FilterSheet, Filters};
-use crate::ui::global_search::SearchResults;
 use crate::ui::search::Search;
 use crate::ui::topbar_action::{TopbarAction, TopbarActionSlot};
 use crate::ui::{
-    CommandPalette, CommandPaletteState, Icon, IconName, ToastViewport, Toasts, breadcrumb_for,
+    CommandPalette, CommandPaletteState, Icon, IconName, TagTone, ToastViewport, Toasts,
+    breadcrumb_for,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
+use flux_shared::jobs::{Job, JobStatus};
 use flux_shared::session::Me;
 use flux_shared::workers::Worker;
 use flux_shared::{InstanceKind, Permission};
@@ -185,8 +186,52 @@ pub const fn instance_role_badge(kind: InstanceKind) -> &'static str {
     }
 }
 
+/// Compteur affiché dans la navigation latérale sur l'onglet Activité.
+pub fn activity_badge(jobs: &[Job]) -> Option<(usize, TagTone)> {
+    let active = jobs
+        .iter()
+        .filter(|job| matches!(job.status, JobStatus::Running | JobStatus::Queued))
+        .count();
+    if active > 0 {
+        return Some((active, TagTone::Primary));
+    }
+    let failed = jobs
+        .iter()
+        .filter(|job| job.status == JobStatus::Failed)
+        .count();
+    (failed > 0).then_some((failed, TagTone::Danger))
+}
+
+/// Compteur d'alerte affiché dans la navigation latérale lorsque des workers sont hors ligne.
+pub fn workers_alert_badge(workers: &[Worker], now: DateTime<Utc>) -> Option<(usize, TagTone)> {
+    let offline = workers
+        .iter()
+        .filter(|worker| !worker.is_online(now))
+        .count();
+    if offline == 0 {
+        None
+    } else if offline == workers.len() {
+        Some((offline, TagTone::Danger))
+    } else {
+        Some((offline, TagTone::Warning))
+    }
+}
+
+fn screen_badge(
+    route: &Route,
+    jobs: &[Job],
+    workers: &[Worker],
+    now: DateTime<Utc>,
+) -> Option<(usize, TagTone)> {
+    match route {
+        Route::Jobs => activity_badge(jobs),
+        Route::Workers => workers_alert_badge(workers, now),
+        _ => None,
+    }
+}
+
 #[component]
-fn Sidebar(me: Me) -> impl IntoView {
+fn Sidebar(me: Me, jobs: Signal<Vec<Job>>, workers: Signal<Vec<Worker>>) -> impl IntoView {
     let router = use_router();
     let collapsed = RwSignal::new(false);
     let drawer = use_context::<NavDrawer>().map(|drawer| drawer.0);
@@ -232,12 +277,24 @@ fn Sidebar(me: Me) -> impl IntoView {
                             {visible.into_iter().map(|entry| {
                                 let section = entry.route.clone();
                                 let target = entry.route.clone();
+                                let badge_slot = matches!(entry.route, Route::Jobs | Route::Workers).then(|| {
+                                    let badge_route = entry.route.clone();
+                                    move || {
+                                        let badge = workers.with(|workers| {
+                                            jobs.with(|jobs| screen_badge(&badge_route, jobs, workers, Utc::now()))
+                                        });
+                                        badge.map(|(count, tone)| view! {
+                                            <span class="tab-btn-badge" data-tone=tone.as_attr()>{count}</span>
+                                        })
+                                    }
+                                });
                                 view! {
                                     <button type="button" role="tab" class="tab-btn" title=entry.label
                                         aria-selected=move || (router.current().section() == section).to_string()
                                         on:click=move |_| router.go(target.clone())>
                                         <Icon name=entry.icon size=18 class="tab-role-icon" />
                                         <span class="tab-btn-label">{entry.label}</span>
+                                        {badge_slot}
                                     </button>
                                 }
                             }).collect_view()}
@@ -271,18 +328,11 @@ fn Sidebar(me: Me) -> impl IntoView {
     }
 }
 
-/// Indicateur des workers en ligne (central seulement), relu à chaque changement d'état des tâches.
+/// Indicateur cliquable des workers en ligne (central seulement), relu à chaque événement SSE.
 #[component]
-fn WorkersPill() -> impl IntoView {
-    let reload = use_context::<crate::jobs::LiveJobs>().map(|live| live.reload);
-    let workers = LocalResource::new(move || {
-        if let Some(reload) = reload {
-            reload.track();
-        }
-        crate::api::get::<Vec<Worker>>("/api/v1/workers")
-    });
+fn WorkersPill(workers: Signal<Option<Vec<Worker>>>) -> impl IntoView {
     move || {
-        let list = workers.get().and_then(Result::ok)?;
+        let list = workers.get()?;
         let online = list
             .iter()
             .filter(|worker| worker.is_online(Utc::now()))
@@ -293,31 +343,27 @@ fn WorkersPill() -> impl IntoView {
             count => ("status-pill online", format!("{count} workers en ligne")),
         };
         Some(view! {
-            <div class=class aria-live="polite" title="Workers actifs (central inclus)">
-                <span class="status-dot"></span>
-                <span>{text}</span>
-            </div>
+            <Link to=Route::Workers class="status-pill-link">
+                <span class=class aria-live="polite" title="Ouvrir les workers (central inclus)">
+                    <span class="status-dot"></span>
+                    <span>{text}</span>
+                </span>
+            </Link>
         })
     }
 }
 
 #[component]
-fn Topbar(me: Me) -> impl IntoView {
+fn Topbar(me: Me, workers: Signal<Option<Vec<Worker>>>) -> impl IntoView {
     let router = use_router();
     let search = use_context::<Search>().unwrap_or_else(Search::install);
     let nav = use_context::<NavDrawer>().map(|drawer| drawer.0);
     let filters = use_context::<Filters>().unwrap_or_else(Filters::install);
     let palette = use_context::<CommandPaletteState>();
-    let opened = RwSignal::new(0_u32);
-    let focused = RwSignal::new(false);
-    // Changer d'écran vide la recherche, sauf si un résultat de la recherche globale y mène.
     Effect::new(move |_| {
         router.current();
-        search
-            .text
-            .set(search.pending.get_untracked().unwrap_or_default());
-        search.pending.set(None);
-        filters.reset();
+        search.text.set(String::new());
+        filters.apply_route_change();
         if let Some(nav) = nav {
             nav.set(false);
         }
@@ -348,12 +394,21 @@ fn Topbar(me: Me) -> impl IntoView {
                         <div class="search-capsule__query">
                             <Icon name=IconName::Search size=15 class="search-icon" />
                             <input type="search" class="topbar-search-input" autocomplete="off" spellcheck="false"
-                                enterkeyhint="search" aria-label="Recherche globale"
-                                on:focus=move |_| { opened.update(|count| *count += 1); focused.set(true); }
-                                on:blur=move |_| focused.set(false)
+                                enterkeyhint="search" aria-label="Filtrer l'écran actif"
                                 placeholder=move || search_placeholder(&router.current())
                                 prop:value=move || search.text.get()
                                 on:input=move |event| search.text.set(event_target_value(&event)) />
+                            {move || (!search.text.get().is_empty()).then(|| view! {
+                                <button
+                                    type="button"
+                                    class="topbar-search-clear"
+                                    aria-label="Effacer le filtre"
+                                    title="Effacer le filtre"
+                                    on:click=move |_| search.text.set(String::new())
+                                >
+                                    <Icon name=IconName::Close size=13 />
+                                </button>
+                            })}
                             <button
                                 type="button"
                                 class="kbd-shortcut"
@@ -364,13 +419,12 @@ fn Topbar(me: Me) -> impl IntoView {
                                 "Ctrl K"
                             </button>
                         </div>
-                        <TopbarActionSlot />
                     </div>
-                    <SearchResults me=me.clone() opened=opened focused=focused />
                 </div>
                 <div class="topbar-actions">
                     <FilterSheet route=Signal::derive(move || router.current()) />
-                    {central.then(|| view! { <WorkersPill /> })}
+                    {central.then(|| view! { <WorkersPill workers=workers /> })}
+                    <TopbarActionSlot />
                 </div>
             </div>
         </header>
@@ -385,6 +439,40 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
     TopbarAction::install();
     Toasts::install();
     CommandPaletteState::install();
+    let reload = use_context::<crate::jobs::LiveJobs>().map(|live| live.reload);
+    let can_central_workers =
+        me.instance_kind == InstanceKind::Central && me.allows(Permission::ViewWorkers);
+    let can_central_jobs =
+        me.instance_kind == InstanceKind::Central && me.allows(Permission::ViewJobs);
+    let central_workers = LocalResource::new(move || {
+        if let Some(reload) = reload {
+            reload.track();
+        }
+        async move {
+            if can_central_workers {
+                crate::api::get::<Vec<Worker>>("/api/v1/workers").await.ok()
+            } else {
+                None
+            }
+        }
+    });
+    let central_jobs = LocalResource::new(move || {
+        if let Some(reload) = reload {
+            reload.track();
+        }
+        async move {
+            if can_central_jobs {
+                crate::api::get::<Vec<Job>>("/api/v1/jobs?limit=200")
+                    .await
+                    .ok()
+            } else {
+                None
+            }
+        }
+    });
+    let workers_opt = Signal::derive(move || central_workers.get().flatten());
+    let workers_list = Signal::derive(move || workers_opt.get().unwrap_or_default());
+    let jobs_list = Signal::derive(move || central_jobs.get().flatten().unwrap_or_default());
     let nav = RwSignal::new(false);
     provide_context(NavDrawer(nav));
     let _escape = window_event_listener(leptos::ev::keydown, move |event| {
@@ -398,9 +486,9 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
             <div class="application-navigation-layout">
                 <button type="button" class="sidebar-scrim" aria-label="Fermer la navigation"
                     hidden=move || !nav.get() on:click=move |_| nav.set(false)></button>
-                <Sidebar me=me.clone() />
+                <Sidebar me=me.clone() jobs=jobs_list workers=workers_list />
                 <div class="page-transition-region">
-                    <Topbar me=me.clone() />
+                    <Topbar me=me.clone() workers=workers_opt />
                     <main id="main-content" class="main-content">{children()}</main>
                 </div>
             </div>
@@ -458,5 +546,63 @@ mod tests {
         assert_eq!(user_initials(" "), "?");
         assert_eq!(instance_role_badge(InstanceKind::Central), "Central");
         assert_eq!(instance_role_badge(InstanceKind::Worker), "Worker");
+    }
+
+    fn job_with_status(id: u128, status: JobStatus) -> Result<Job, serde_json::Error> {
+        let mut job: Job = serde_json::from_value(serde_json::json!({
+            "id": uuid::Uuid::from_u128(id), "source_name": "a.mkv", "source_sha256": null,
+            "source_bytes": null, "output_sha256": null, "output_bytes": null, "warning": false,
+            "target_worker_id": null, "worker_id": null, "status": "queued", "attempts": 0,
+            "leased_until": null, "output_name": null, "error_code": null, "flow_id": null,
+            "flow_version": null, "created_at": "2026-11-14T10:00:00Z", "updated_at": "2026-11-14T10:00:00Z"
+        }))?;
+        job.status = status;
+        Ok(job)
+    }
+
+    #[test]
+    fn activity_badge_prefers_active_then_failed() -> Result<(), serde_json::Error> {
+        let done = job_with_status(1, JobStatus::Succeeded)?;
+        assert_eq!(activity_badge(&[]), None);
+        assert_eq!(activity_badge(&[done.clone()]), None);
+
+        let failed = job_with_status(2, JobStatus::Failed)?;
+        assert_eq!(
+            activity_badge(&[done.clone(), failed.clone()]),
+            Some((1, TagTone::Danger))
+        );
+
+        let running = job_with_status(3, JobStatus::Running)?;
+        let queued = job_with_status(4, JobStatus::Queued)?;
+        assert_eq!(
+            activity_badge(&[done, failed, running, queued]),
+            Some((2, TagTone::Primary))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn workers_alert_badge_reflects_offline_count() {
+        let now = Utc::now();
+        let online = Worker {
+            id: uuid::Uuid::from_u128(1),
+            name: "w1".into(),
+            last_seen: now,
+        };
+        let offline = Worker {
+            id: uuid::Uuid::from_u128(2),
+            name: "w2".into(),
+            last_seen: now - chrono::Duration::minutes(10),
+        };
+        assert_eq!(workers_alert_badge(&[], now), None);
+        assert_eq!(workers_alert_badge(&[online.clone()], now), None);
+        assert_eq!(
+            workers_alert_badge(&[online, offline.clone()], now),
+            Some((1, TagTone::Warning))
+        );
+        assert_eq!(
+            workers_alert_badge(&[offline], now),
+            Some((1, TagTone::Danger))
+        );
     }
 }

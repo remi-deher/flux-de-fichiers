@@ -127,6 +127,7 @@ html, body {{
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
@@ -181,12 +182,13 @@ mod tests {
         assert!(res.contains("--space-3: 1.5rem;"));
         assert!(res.contains(":focus-visible {"));
         assert!(res.contains("@media (prefers-reduced-motion: reduce)"));
-        assert!(res.contains("--bg-app: #0d1117;"));
-        assert!(res.contains("--bg-elevated: #1c2129;"));
+        assert!(res.contains("--bg-app: #090b10;"));
+        assert!(res.contains("--bg-elevated: #0e1117;"));
         assert!(res.contains("--shadow-glow:"));
         assert!(res.contains("--ease-out:"));
-        assert!(res.contains("--primary: #58a6ff;"));
-        assert!(res.contains("--danger-text: #ff7b72;"));
-        assert!(res.contains("--danger-text: #a40e26;"));
+        assert!(res.contains("--primary: #6366f1;"));
+        assert!(res.contains("--danger-text: #f87171;"));
+        assert!(res.contains("--danger-text: #b91c1c;"));
+        assert!(res.contains("font-variant-numeric: tabular-nums;"));
     }
 }

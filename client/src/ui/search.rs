@@ -1,19 +1,16 @@
-//! Recherche contextuelle de la barre du haut : chaque écran filtre ses lignes avec ce texte.
+//! Filtrage textuel local de la barre du haut : chaque écran filtre ses éléments avec ce texte.
 
 use leptos::prelude::*;
 
 #[derive(Clone, Copy)]
 pub struct Search {
     pub text: RwSignal<String>,
-    /// Texte à appliquer au prochain changement d'écran (résultat de la recherche globale).
-    pub pending: RwSignal<Option<String>>,
 }
 
 impl Search {
     pub fn install() -> Self {
         let search = Self {
             text: RwSignal::new(String::new()),
-            pending: RwSignal::new(None),
         };
         provide_context(search);
         search

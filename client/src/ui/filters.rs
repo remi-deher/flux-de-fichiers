@@ -1,4 +1,4 @@
-//! Feuille de filtres de la barre du haut : critères propres à l'écran, en plus du texte recherché.
+//! Critères de filtrage des écrans : pilotage en 1 clic par `StatStrip` + feuille de période sur Activité.
 
 use crate::route::Route;
 use chrono::{DateTime, Duration, Utc};
@@ -63,19 +63,6 @@ pub enum JobStateFilter {
     Failed,
 }
 
-impl FilterChoice for JobStateFilter {
-    const ALL: &'static [Self] = &[Self::Any, Self::Active, Self::Completed, Self::Failed];
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Any => "Toutes",
-            Self::Active => "En file & en cours",
-            Self::Completed => "Terminées",
-            Self::Failed => "Échouées",
-        }
-    }
-}
-
 impl JobStateFilter {
     pub fn accepts(self, job: &Job) -> bool {
         match self {
@@ -96,18 +83,6 @@ pub enum Presence {
     Offline,
 }
 
-impl FilterChoice for Presence {
-    const ALL: &'static [Self] = &[Self::Any, Self::Online, Self::Offline];
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Any => "En ligne ou non",
-            Self::Online => "En ligne",
-            Self::Offline => "Hors ligne",
-        }
-    }
-}
-
 impl Presence {
     pub fn accepts(self, online: bool) -> bool {
         match self {
@@ -126,27 +101,6 @@ pub enum PluginKindFilter {
     Plugins,
     Flows,
     Packs,
-    Other,
-}
-
-impl FilterChoice for PluginKindFilter {
-    const ALL: &'static [Self] = &[
-        Self::Any,
-        Self::Plugins,
-        Self::Flows,
-        Self::Packs,
-        Self::Other,
-    ];
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Any => "Toutes",
-            Self::Plugins => "Plugins",
-            Self::Flows => "Flows",
-            Self::Packs => "Packs",
-            Self::Other => "Autre",
-        }
-    }
 }
 
 impl PluginKindFilter {
@@ -159,18 +113,57 @@ impl PluginKindFilter {
             Self::Plugins => entry.entry_type.section() == Some(CatalogSection::Plugins),
             Self::Flows => entry.entry_type.section() == Some(CatalogSection::Flows),
             Self::Packs => entry.entry_type.section() == Some(CatalogSection::Packs),
-            Self::Other => entry.entry_type.section() == Some(CatalogSection::Other),
         }
     }
 }
 
-/// Critères actifs, partagés entre la barre du haut et les écrans.
+/// Filtre 1-clic des bibliothèques via leur `StatStrip`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LibraryFilter {
+    #[default]
+    All,
+    Ready,
+    Bound,
+}
+
+impl LibraryFilter {
+    pub fn accepts(self, ready: bool, has_flow: bool) -> bool {
+        match self {
+            Self::All => true,
+            Self::Ready => ready,
+            Self::Bound => has_flow,
+        }
+    }
+}
+
+/// Filtre 1-clic des flux via leur `StatStrip`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FlowFilter {
+    #[default]
+    All,
+    DefaultOnly,
+}
+
+impl FlowFilter {
+    pub fn accepts(self, is_default: bool) -> bool {
+        match self {
+            Self::All => true,
+            Self::DefaultOnly => is_default,
+        }
+    }
+}
+
+/// Critères actifs, partagés entre les bandeaux `StatStrip`, la barre du haut et les écrans.
 #[derive(Clone, Copy)]
 pub struct Filters {
     pub period: RwSignal<Period>,
     pub job_state: RwSignal<JobStateFilter>,
     pub presence: RwSignal<Presence>,
     pub plugin_kind: RwSignal<PluginKindFilter>,
+    pub library: RwSignal<LibraryFilter>,
+    pub flow: RwSignal<FlowFilter>,
+    /// Pré-filtre à appliquer juste après une redirection (ex. depuis la vue d'ensemble).
+    pub pending_job_state: RwSignal<Option<JobStateFilter>>,
 }
 
 impl Filters {
@@ -180,17 +173,31 @@ impl Filters {
             job_state: RwSignal::new(JobStateFilter::default()),
             presence: RwSignal::new(Presence::default()),
             plugin_kind: RwSignal::new(PluginKindFilter::default()),
+            library: RwSignal::new(LibraryFilter::default()),
+            flow: RwSignal::new(FlowFilter::default()),
+            pending_job_state: RwSignal::new(None),
         };
         provide_context(filters);
         filters
     }
 
-    /// Remet tous les critères à zéro (changement d'écran).
+    /// Remet tous les critères à zéro.
     pub fn reset(&self) {
         self.period.set(Period::default());
         self.job_state.set(JobStateFilter::default());
         self.presence.set(Presence::default());
         self.plugin_kind.set(PluginKindFilter::default());
+        self.library.set(LibraryFilter::default());
+        self.flow.set(FlowFilter::default());
+    }
+
+    /// Réinitialise les filtres au changement d'écran puis applique un éventuel pré-filtre différé.
+    pub fn apply_route_change(&self) {
+        self.reset();
+        if let Some(pending) = self.pending_job_state.get_untracked() {
+            self.pending_job_state.set(None);
+            self.job_state.set(pending);
+        }
     }
 }
 
@@ -216,12 +223,19 @@ pub fn plugin_kind() -> PluginKindFilter {
     })
 }
 
-/// Un écran sans critère propre n'affiche pas la feuille.
+/// Critère des bibliothèques en cours (toutes hors contexte).
+pub fn library_filter() -> LibraryFilter {
+    use_context::<Filters>().map_or_else(LibraryFilter::default, |filters| filters.library.get())
+}
+
+/// Critère des flux en cours (tous hors contexte).
+pub fn flow_filter() -> FlowFilter {
+    use_context::<Filters>().map_or_else(FlowFilter::default, |filters| filters.flow.get())
+}
+
+/// Seul l'écran Activité expose le menu de période temporelle dans la barre du haut.
 fn has_filters(route: &Route) -> bool {
-    matches!(
-        route.section(),
-        Route::Jobs | Route::Workers | Route::Plugins
-    )
+    route.section() == Route::Jobs
 }
 
 #[component]
@@ -243,24 +257,18 @@ fn ChoiceSelect<T: FilterChoice>(label: &'static str, value: RwSignal<T>) -> imp
     }
 }
 
-/// Bouton « Filtres » et son panneau, selon l'écran affiché.
+/// Bouton « Période » et son panneau pour l'écran Activité.
 #[component]
 pub fn FilterSheet(route: Signal<Route>) -> impl IntoView {
     let filters = use_context::<Filters>().unwrap_or_else(Filters::install);
     view! {
         {move || has_filters(&route.get()).then(|| {
-            let section = route.get().section();
             view! {
                 <details class="popover">
-                    <summary class="btn btn-secondary btn-sm">"Filtres"</summary>
+                    <summary class="btn btn-secondary btn-sm">"Période"</summary>
                     <div class="popover__panel">
-                        {(section == Route::Jobs).then(|| view! {
-                            <ChoiceSelect label="État" value=filters.job_state />
-                            <ChoiceSelect label="Créée" value=filters.period />
-                        })}
-                        {(section == Route::Workers).then(|| view! { <ChoiceSelect label="Présence" value=filters.presence /> })}
-                        {(section == Route::Plugins).then(|| view! { <ChoiceSelect label="Catégorie" value=filters.plugin_kind /> })}
-                        <button type="button" class="btn btn-secondary btn-sm" on:click=move |_| filters.reset()>"Réinitialiser"</button>
+                        <ChoiceSelect label="Créée" value=filters.period />
+                        <button type="button" class="btn btn-secondary btn-sm" on:click=move |_| filters.period.set(Period::Any)>"Réinitialiser"</button>
                     </div>
                 </details>
             }
@@ -363,22 +371,50 @@ mod tests {
         assert!(!PluginKindFilter::Plugins.accepts(&flow));
         assert!(PluginKindFilter::Flows.accepts(&flow));
         assert!(PluginKindFilter::Packs.accepts(&pack));
-        assert!(PluginKindFilter::Other.accepts(&preset));
+        assert!(PluginKindFilter::Any.accepts(&preset));
+        assert!(!PluginKindFilter::Packs.accepts(&preset));
     }
 
     #[test]
-    fn presence_splits_online_and_offline_workers() {
+    fn presence_and_resource_filters_accept_matching_states() {
         assert!(Presence::Any.accepts(true) && Presence::Any.accepts(false));
         assert!(Presence::Online.accepts(true) && !Presence::Online.accepts(false));
         assert!(Presence::Offline.accepts(false) && !Presence::Offline.accepts(true));
+
+        assert!(LibraryFilter::All.accepts(false, false));
+        assert!(LibraryFilter::Ready.accepts(true, true));
+        assert!(!LibraryFilter::Ready.accepts(false, true));
+        assert!(LibraryFilter::Bound.accepts(false, true));
+        assert!(!LibraryFilter::Bound.accepts(false, false));
+
+        assert!(FlowFilter::All.accepts(false));
+        assert!(FlowFilter::DefaultOnly.accepts(true));
+        assert!(!FlowFilter::DefaultOnly.accepts(false));
     }
 
     #[test]
-    fn jobs_workers_and_plugins_have_filters() {
+    fn only_jobs_keeps_period_filter_sheet_and_route_change_applies_pending_filter() {
         assert!(has_filters(&Route::Jobs));
-        assert!(has_filters(&Route::Workers));
-        assert!(has_filters(&Route::Plugins));
+        assert!(!has_filters(&Route::Workers));
+        assert!(!has_filters(&Route::Plugins));
         assert!(!has_filters(&Route::Flows));
         assert!(!has_filters(&Route::Overview));
+
+        let filters = Filters {
+            period: RwSignal::new(Period::Day),
+            job_state: RwSignal::new(JobStateFilter::Completed),
+            presence: RwSignal::new(Presence::Online),
+            plugin_kind: RwSignal::new(PluginKindFilter::Plugins),
+            library: RwSignal::new(LibraryFilter::Ready),
+            flow: RwSignal::new(FlowFilter::DefaultOnly),
+            pending_job_state: RwSignal::new(Some(JobStateFilter::Failed)),
+        };
+        filters.apply_route_change();
+        assert_eq!(filters.period.get_untracked(), Period::Any);
+        assert_eq!(filters.presence.get_untracked(), Presence::Any);
+        assert_eq!(filters.library.get_untracked(), LibraryFilter::All);
+        assert_eq!(filters.flow.get_untracked(), FlowFilter::All);
+        assert_eq!(filters.job_state.get_untracked(), JobStateFilter::Failed);
+        assert_eq!(filters.pending_job_state.get_untracked(), None);
     }
 }

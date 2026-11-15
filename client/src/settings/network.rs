@@ -73,21 +73,27 @@ fn trimmed_optional(raw: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
-fn build_settings_request(
-    web_origin: &str,
-    session_ttl: &str,
+#[derive(Default)]
+struct SettingsFormInput<'a> {
+    web_origin: &'a str,
+    session_ttl: &'a str,
     smtp_enabled: bool,
-    smtp_host: &str,
-    smtp_port: &str,
-    smtp_tls: &str,
-    smtp_username: &str,
-    smtp_password: &str,
+    smtp_host: &'a str,
+    smtp_port: &'a str,
+    smtp_tls: &'a str,
+    smtp_username: &'a str,
+    smtp_password: &'a str,
     clear_smtp_password: bool,
-    smtp_from: &str,
+    smtp_from: &'a str,
     allow_private_plugin_hosts: bool,
     block_private_integration_hosts: bool,
+}
+
+fn build_settings_request(
+    input: &SettingsFormInput<'_>,
 ) -> Result<flux_shared::system::UpdateSystemSettingsRequest, String> {
-    let ttl: i64 = session_ttl
+    let ttl: i64 = input
+        .session_ttl
         .trim()
         .parse()
         .map_err(|_| "La durée de session doit être un nombre entier (secondes).".to_owned())?;
@@ -96,7 +102,7 @@ fn build_settings_request(
             "La durée de session doit être comprise entre {MIN_SESSION_TTL_SECONDS} et {MAX_SESSION_TTL_SECONDS} secondes."
         ));
     }
-    let parsed_port = match trimmed_optional(smtp_port) {
+    let parsed_port = match trimmed_optional(input.smtp_port) {
         Some(raw) => {
             let port: u16 = raw
                 .parse()
@@ -108,25 +114,25 @@ fn build_settings_request(
         }
         None => None,
     };
-    let password = if clear_smtp_password {
+    let password = if input.clear_smtp_password {
         Some(String::new())
-    } else if smtp_password.is_empty() {
+    } else if input.smtp_password.is_empty() {
         None
     } else {
-        Some(smtp_password.to_owned())
+        Some(input.smtp_password.to_owned())
     };
     Ok(flux_shared::system::UpdateSystemSettingsRequest {
-        web_origin: trimmed_optional(web_origin),
+        web_origin: trimmed_optional(input.web_origin),
         session_ttl_seconds: ttl,
-        smtp_enabled,
-        smtp_host: trimmed_optional(smtp_host),
+        smtp_enabled: input.smtp_enabled,
+        smtp_host: trimmed_optional(input.smtp_host),
         smtp_port: parsed_port,
-        smtp_tls: parse_tls_mode(smtp_tls),
-        smtp_username: trimmed_optional(smtp_username),
+        smtp_tls: parse_tls_mode(input.smtp_tls),
+        smtp_username: trimmed_optional(input.smtp_username),
         smtp_password: password,
-        smtp_from: trimmed_optional(smtp_from),
-        allow_private_plugin_hosts,
-        block_private_integration_hosts,
+        smtp_from: trimmed_optional(input.smtp_from),
+        allow_private_plugin_hosts: input.allow_private_plugin_hosts,
+        block_private_integration_hosts: input.block_private_integration_hosts,
     })
 }
 
@@ -172,20 +178,20 @@ fn SettingsRuntimeForm(initial: SystemStatus, on_saved: Callback<()>) -> impl In
     view! {
         <form class="stack" on:submit=move |event| {
             event.prevent_default();
-            match build_settings_request(
-                &web_origin.get_untracked(),
-                &session_ttl.get_untracked(),
-                smtp_enabled.get_untracked(),
-                &smtp_host.get_untracked(),
-                &smtp_port.get_untracked(),
-                &smtp_tls.get_untracked(),
-                &smtp_username.get_untracked(),
-                &smtp_password.get_untracked(),
-                clear_smtp_password.get_untracked(),
-                &smtp_from.get_untracked(),
-                allow_private_plugin_hosts.get_untracked(),
-                block_private_integration_hosts.get_untracked(),
-            ) {
+            match build_settings_request(&SettingsFormInput {
+                web_origin: &web_origin.get_untracked(),
+                session_ttl: &session_ttl.get_untracked(),
+                smtp_enabled: smtp_enabled.get_untracked(),
+                smtp_host: &smtp_host.get_untracked(),
+                smtp_port: &smtp_port.get_untracked(),
+                smtp_tls: &smtp_tls.get_untracked(),
+                smtp_username: &smtp_username.get_untracked(),
+                smtp_password: &smtp_password.get_untracked(),
+                clear_smtp_password: clear_smtp_password.get_untracked(),
+                smtp_from: &smtp_from.get_untracked(),
+                allow_private_plugin_hosts: allow_private_plugin_hosts.get_untracked(),
+                block_private_integration_hosts: block_private_integration_hosts.get_untracked(),
+            }) {
                 Ok(req) => {
                     feedback.set(None);
                     save.dispatch(req);
@@ -362,35 +368,38 @@ mod tests {
     }
 
     #[test]
-    fn build_settings_request_validates_bounds_and_password_handling() {
+    fn build_settings_request_validates_bounds_and_password_handling() -> Result<(), String> {
         assert!(
-            build_settings_request(
-                "", "10", false, "", "", "none", "", "", false, "", false, false
-            )
+            build_settings_request(&SettingsFormInput {
+                session_ttl: "10",
+                ..Default::default()
+            })
             .is_err()
         );
         assert!(
-            build_settings_request(
-                "", "3600", true, "smtp.ex", "0", "starttls", "", "", false, "", false, false
-            )
+            build_settings_request(&SettingsFormInput {
+                session_ttl: "3600",
+                smtp_enabled: true,
+                smtp_host: "smtp.ex",
+                smtp_port: "0",
+                smtp_tls: "starttls",
+                ..Default::default()
+            })
             .is_err()
         );
 
-        let kept = build_settings_request(
-            " https://flux.ex ",
-            "7200",
-            true,
-            " smtp.ex ",
-            "587",
-            "starttls",
-            " user ",
-            "",
-            false,
-            " Flux <a@flux.ex> ",
-            true,
-            false,
-        )
-        .expect("valide");
+        let kept = build_settings_request(&SettingsFormInput {
+            web_origin: " https://flux.ex ",
+            session_ttl: "7200",
+            smtp_enabled: true,
+            smtp_host: " smtp.ex ",
+            smtp_port: "587",
+            smtp_tls: "starttls",
+            smtp_username: " user ",
+            smtp_from: " Flux <a@flux.ex> ",
+            allow_private_plugin_hosts: true,
+            ..Default::default()
+        })?;
         assert_eq!(kept.web_origin.as_deref(), Some("https://flux.ex"));
         assert_eq!(kept.session_ttl_seconds, 7200);
         assert_eq!(kept.smtp_port, Some(587));
@@ -399,12 +408,17 @@ mod tests {
         assert!(kept.allow_private_plugin_hosts);
         assert!(!kept.block_private_integration_hosts);
 
-        let cleared = build_settings_request(
-            "", "3600", false, "", "", "tls", "", "ignored", true, "", false, true,
-        )
-        .expect("valide");
+        let cleared = build_settings_request(&SettingsFormInput {
+            session_ttl: "3600",
+            smtp_tls: "tls",
+            smtp_password: "ignored",
+            clear_smtp_password: true,
+            block_private_integration_hosts: true,
+            ..Default::default()
+        })?;
         assert_eq!(cleared.smtp_password, Some(String::new()));
         assert_eq!(cleared.smtp_tls, flux_shared::system::SmtpTls::Tls);
         assert!(cleared.block_private_integration_hosts);
+        Ok(())
     }
 }

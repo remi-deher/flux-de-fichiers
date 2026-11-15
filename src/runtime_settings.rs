@@ -63,7 +63,6 @@ impl EffectiveRuntimeSettings {
     pub fn sync_policy(&self) -> SyncPolicy {
         SyncPolicy {
             allow_private_hosts: self.outbound.allow_private_plugin_hosts,
-            ..SyncPolicy::from_env()
         }
     }
 

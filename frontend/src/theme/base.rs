@@ -225,8 +225,6 @@ pub const BASE_CSS: &str = r#"
   background: var(--bg-card);
   color: var(--text-muted);
 }
-  color: var(--text-dim);
-}
 
 /* Groupes et boutons de navigation */
 .tab-navigation {
@@ -444,14 +442,7 @@ pub const BASE_CSS: &str = r#"
   color: var(--text-main);
 }
 
-.subnav-tab[hidden] {
-  display: none;
-}
-
 /* --- Zone de transition & contenu principal --- */
-.page-transition-region {
-  flex: 1;
-  display: flex;
 .page-transition-region {
   flex: 1;
   display: flex;
@@ -642,15 +633,20 @@ pub const BASE_CSS: &str = r#"
 .topbar-search {
   display: flex;
   align-items: stretch;
-  min-height: 40px;
+  min-height: 36px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
   color: var(--text-dim);
   box-sizing: border-box;
-  transition: color 0.2s ease;
+  transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
 }
 
 .topbar-search:focus-within,
 body[data-filter-sheet] .topbar-search {
   color: var(--text-main);
+  border-color: var(--primary);
+  background: var(--bg-card);
 }
 
 .search-capsule__query {
@@ -841,15 +837,12 @@ body[data-filter-sheet] .topbar-search {
   gap: 0.4rem;
 }
 
-/* Actions et statuts de la TopBar : ils flottent à droite pour que la capsule reste au centre. */
+/* Actions et statuts de la TopBar alignés à droite dans le flux flex. */
 .topbar-actions {
-  position: absolute;
-  right: 0.85rem;
-  top: 50%;
-  transform: translateY(-50%);
   display: flex;
   align-items: center;
   gap: 0.65rem;
+  flex-shrink: 0;
 }
 
 .header-icon-btn {
@@ -925,75 +918,7 @@ body[data-filter-sheet] .topbar-search {
   animation: pageFadeIn 0.22s var(--ease-out);
 }
 
-/* --- En-têtes d'écran & bandeau de KPIs (PageHeader & StatStrip) --- */
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-  margin-bottom: 1.25rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.page-header__lead {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.85rem;
-  min-width: 0;
-}
-
-.page-header__icon {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-md);
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  color: var(--primary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.page-header__copy {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  min-width: 0;
-}
-
-.page-header__eyebrow {
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--primary);
-}
-
-.page-header__title {
-  margin: 0;
-  font-size: 1.45rem;
-  font-weight: 700;
-  line-height: 1.2;
-  color: var(--text-main);
-}
-
-.page-header__subtitle {
-  margin: 0;
-  font-size: 0.875rem;
-  color: var(--text-dim);
-  line-height: 1.45;
-}
-
-.page-header__actions {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-}
-
+/* --- Bandeau de KPIs (StatStrip) --- */
 .stat-strip {
   display: flex;
   flex-wrap: wrap;
@@ -1079,27 +1004,21 @@ body[data-filter-sheet] .topbar-search {
   background: var(--bg-elevated);
 }
 
-/* --- Hub d'accueil : Vue d'ensemble & Statistiques --- */
-.overview-hero-card {
+/* --- Barre d'état compacte : Vue d'ensemble --- */
+.overview-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--space-4);
-  padding: var(--space-4) calc(var(--space-4) + 0.25rem);
-  margin-bottom: var(--space-4);
-  background: radial-gradient(circle at top right, color-mix(in srgb, var(--primary) 16%, transparent), transparent 60%), linear-gradient(135deg, var(--bg-card) 0%, var(--bg-elevated) 100%);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  box-sizing: border-box;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 
-.hero-content {
+.overview-toolbar__actions {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
 }
 
 .hero-badge {
@@ -1122,33 +1041,16 @@ body[data-filter-sheet] .topbar-search {
   border-color: color-mix(in srgb, var(--success) 35%, transparent);
 }
 
+.hero-badge[data-tone="warning"] {
+  background-color: var(--warning-bg);
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+}
+
 .hero-badge[data-tone="danger"] {
   background-color: var(--danger-bg);
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 35%, transparent);
-}
-
-.hero-title {
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--text-main);
-  margin: 0.25rem 0 0;
-  letter-spacing: -0.02em;
-}
-
-.hero-subtitle {
-  font-size: 0.9375rem;
-  color: var(--text-dim);
-  margin: 0;
-  max-width: 640px;
-  line-height: 1.5;
-}
-
-.hero-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  flex-shrink: 0;
 }
 
 /* Panneau repliable de la barre d'actions (widgets, filtres) */
@@ -1310,186 +1212,11 @@ body[data-filter-sheet] .topbar-search {
   background-color: var(--bg-card);
 }
 
-/* --- Gabarit partagé de sous-navigation horizontale (ADR 0020) --- */
-.page-subnav {
-  position: sticky;
-  top: max(60px, calc(var(--sat, 0px) + 54px));
-  z-index: 15;
-  display: block;
-  margin-bottom: 0.75rem;
-  background: transparent;
-  pointer-events: none;
-  transition: opacity 0.2s cubic-bezier(0.2, 0, 0, 1), transform 0.2s cubic-bezier(0.2, 0, 0, 1);
-}
-
-.page-subnav.is-hidden:not(:focus-within) {
-  opacity: 0;
-  transform: translateY(calc(-100% - 20px));
-  pointer-events: none;
-}
-
-.subnav-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  position: relative;
-  width: 100%;
-  min-width: 0;
-  min-height: 0;
-  pointer-events: none;
-}
-
-.subnav-container > * {
-  pointer-events: auto;
-}
-
-
-.subnav-actions:empty {
-  display: none;
-}
-
-
-.app-subnav {
-  position: relative;
-  box-sizing: border-box;
-  width: max-content;
-  min-width: 0;
-  max-width: 100%;
-  padding: 2px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg, 12px);
-  background: transparent;
-  box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
-}
-
-.app-subnav:hover {
-  border-color: color-mix(in srgb, var(--primary) 30%, var(--border-color));
-}
-
-.app-subnav__scroller {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  width: max-content;
-  min-width: 0;
-  max-width: 100%;
-  padding: 0;
-  overflow-x: auto;
-  border: 0;
-  scrollbar-width: none;
-  overscroll-behavior-x: contain;
-}
-
-.app-subnav__scroller::-webkit-scrollbar {
-  display: none;
-}
-
-.app-subnav__item,
-.subnav-tab {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  min-height: 28px;
-  padding: 0 9px;
-  border: 0;
-  border-radius: calc(var(--radius-lg, 12px) - 2px);
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  white-space: nowrap;
-  text-decoration: none;
-  cursor: pointer;
-  scroll-snap-align: start;
-  transition: color 0.15s ease, background-color 0.15s ease;
-}
-
-.app-subnav__item:hover,
-.subnav-tab:hover {
-  color: var(--text-main);
-  background: var(--bg-subtle);
-}
-
-.app-subnav__item:focus-visible,
-.subnav-tab:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: -2px;
-}
-
-.app-subnav__item.active,
-.app-subnav__item[aria-selected="true"],
-.subnav-tab.active {
-  color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 14%, var(--bg-card));
-  font-weight: 700;
-}
-
-.app-subnav__icon,
-.subnav-tab-icon {
-  display: inline-flex;
-  align-items: center;
-  font-size: 0.95rem;
-}
-
-.subnav-tab__badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.2rem;
-  height: 1.2rem;
-  padding: 0 0.35rem;
-  border-radius: var(--radius-pill);
-  background: var(--bg-subtle);
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: 0.6875rem;
-  font-weight: 700;
-}
-
-.app-subnav__item.active .subnav-tab__badge,
-.app-subnav__item[aria-selected="true"] .subnav-tab__badge,
-.subnav-tab.active .subnav-tab__badge {
-  background: color-mix(in srgb, var(--primary) 22%, transparent);
-  color: var(--primary);
-}
-
-
-.subnav-actions {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
 /* --- Adaptations Responsives Mobile (< 768px) --- */
 @media (max-width: 768px) {
   html, body {
     overflow-x: hidden;
     max-width: 100vw;
-  }
-
-  .subnav-container {
-    gap: 0.5rem;
-  }
-
-  .app-subnav,
-  .app-subnav__scroller,
-  .subnav-tabs {
-    width: max-content;
-    max-width: 100%;
-  }
-
-
-  .subnav-actions {
-    flex-wrap: wrap;
   }
 
   .application-shell {

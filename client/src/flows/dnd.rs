@@ -2,10 +2,10 @@
 
 use super::presentation::node_output_ports;
 use flux_shared::flows::{
-    FlowBlockKind, FlowGraph, FlowNode, GraphError, OwnedBlockSpec, find_owned,
+    FlowBlockKind, FlowConnection, FlowGraph, FlowNode, GraphError, OwnedBlockSpec, find_owned,
 };
 use serde_json::{Map, Value};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const NO_FREE_OUTPUT: &str = "Toutes les sorties de ce bloc sont déjà reliées.";
 const BRANCHING_BLOCK: &str = "Ce bloc a plusieurs liaisons : déliez-le avant de le déplacer.";
@@ -282,23 +282,59 @@ pub fn insert_on_branch(
     Ok(new_id)
 }
 
+fn clone_node_with_id(source: &FlowNode, new_id: String) -> FlowNode {
+    FlowNode {
+        id: new_id,
+        kind: source.kind.clone(),
+        name: format!("{} (copie)", source.name),
+        config: source.config.clone(),
+        extra: Map::new(),
+    }
+}
+
 /// Duplique un bloc existant (nom suffixé « (copie) ») sans copier ses liaisons.
 pub fn duplicate_node(graph: &mut FlowGraph, node_id: &str) -> Option<String> {
     let source = graph.node(node_id)?.clone();
     let new_id = next_node_id(graph);
-    let duplicated = FlowNode {
-        id: new_id.clone(),
-        kind: source.kind,
-        name: format!("{} (copie)", source.name),
-        config: source.config,
-        extra: Map::new(),
-    };
+    let duplicated = clone_node_with_id(&source, new_id.clone());
     if let Some(pos) = graph.nodes.iter().position(|node| node.id == node_id) {
         graph.nodes.insert(pos + 1, duplicated);
     } else {
         graph.nodes.push(duplicated);
     }
     Some(new_id)
+}
+
+/// Duplique un sous-graphe (`ids`) en conservant uniquement les liaisons internes au groupe.
+pub fn duplicate_subgraph(graph: &mut FlowGraph, ids: &HashSet<String>) -> HashMap<String, String> {
+    let mut id_map = HashMap::new();
+    let sources: Vec<FlowNode> = graph
+        .nodes
+        .iter()
+        .filter(|node| ids.contains(&node.id))
+        .cloned()
+        .collect();
+    for source in sources {
+        let new_id = next_node_id(graph);
+        let cloned = clone_node_with_id(&source, new_id.clone());
+        graph.nodes.push(cloned);
+        id_map.insert(source.id, new_id);
+    }
+    let internal_edges: Vec<FlowConnection> = graph
+        .connections
+        .iter()
+        .filter_map(|edge| {
+            let new_from = id_map.get(&edge.from)?;
+            let new_to = id_map.get(&edge.to)?;
+            Some(FlowConnection {
+                from: new_from.clone(),
+                to: new_to.clone(),
+                port: edge.port.clone(),
+            })
+        })
+        .collect();
+    graph.connections.extend(internal_edges);
+    id_map
 }
 
 #[cfg(test)]
@@ -481,5 +517,22 @@ mod tests {
         );
         disconnect_edge(&mut graph, &remux, &None, &copy_id);
         assert_eq!(graph.outgoing(&remux).count(), 0);
+    }
+
+    #[test]
+    fn duplicate_subgraph_preserves_internal_edges_only() {
+        let (mut graph, input, remux) = chain();
+        let Some(output) = graph.outgoing(&remux).next().map(|edge| edge.to.clone()) else {
+            panic!("fin absente de la chaîne");
+        };
+        let selected: HashSet<String> = [remux.clone(), output.clone()].into_iter().collect();
+
+        let id_map = duplicate_subgraph(&mut graph, &selected);
+        assert_eq!(id_map.len(), 2);
+        let new_remux = &id_map[&remux];
+        let new_output = &id_map[&output];
+
+        assert!(graph.outgoing(new_remux).any(|edge| edge.to == *new_output));
+        assert!(!graph.incoming(new_remux).any(|edge| edge.from == input));
     }
 }

@@ -79,10 +79,10 @@ pub const FLOWS_CSS: &str = r#"
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem 1rem;
+  gap: 0.5rem 0.85rem;
   flex-wrap: wrap;
-  min-height: 56px;
-  padding: 0.55rem 1rem;
+  min-height: 46px;
+  padding: 0.35rem 0.75rem;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
   box-shadow: var(--shadow-sm);
@@ -93,16 +93,18 @@ pub const FLOWS_CSS: &str = r#"
 .flow-command-bar__lead {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
+  gap: 0.55rem;
   min-width: 0;
-  flex: 1 1 20rem;
+  flex: 1 1 18rem;
 }
 
 .flow-command-bar__identity {
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.55rem;
   min-width: 0;
+  flex-wrap: wrap;
 }
 
 .flow-command-bar__title-row {
@@ -277,14 +279,25 @@ pub const FLOWS_CSS: &str = r#"
   cursor: pointer;
 }
 
-/* --- Bandeau inférieur Diagnostics & Validation --- */
+/* --- Bandeau inférieur Diagnostics & Validation (flottant sans compresser le canevas) --- */
 .flow-diagnostics-tray {
-  background: var(--bg-card);
-  border-top: 1px solid var(--border-color);
-  max-height: 220px;
+  position: absolute;
+  left: 64px;
+  right: 196px;
+  bottom: 14px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  max-height: 200px;
   overflow-y: auto;
-  flex-shrink: 0;
   z-index: 18;
+}
+
+.flow-workspace-body.is-panel-open .flow-diagnostics-tray {
+  right: 342px;
 }
 
 .flow-diagnostics-tray.is-closed {
@@ -392,6 +405,12 @@ pub const FLOWS_CSS: &str = r#"
     bottom: 0;
     width: min(340px, 100%);
     box-shadow: var(--shadow-lg);
+  }
+  .flow-diagnostics-tray,
+  .flow-workspace-body.is-panel-open .flow-diagnostics-tray {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
   }
 }
 "#;

@@ -230,10 +230,28 @@ fn screen_badge(
     }
 }
 
+/// La route courante appartient-elle à l'atelier plein écran de création/édition de flux ?
+pub fn is_workbench_route(route: &Route) -> bool {
+    matches!(route, Route::FlowEditor(_) | Route::NewFlow)
+}
+
 #[component]
 fn Sidebar(me: Me, jobs: Signal<Vec<Job>>, workers: Signal<Vec<Worker>>) -> impl IntoView {
     let router = use_router();
     let collapsed = RwSignal::new(false);
+    let saved_collapsed = RwSignal::new(false);
+    let was_workbench = RwSignal::new(false);
+    Effect::new(move |_| {
+        let in_workbench = is_workbench_route(&router.current());
+        let prev = was_workbench.get_untracked();
+        if in_workbench && !prev {
+            saved_collapsed.set(collapsed.get_untracked());
+            collapsed.set(true);
+        } else if !in_workbench && prev {
+            collapsed.set(saved_collapsed.get_untracked());
+        }
+        was_workbench.set(in_workbench);
+    });
     let drawer = use_context::<NavDrawer>().map(|drawer| drawer.0);
     let palette = use_context::<CommandPaletteState>();
     let user_name = me.name.clone();
@@ -481,9 +499,10 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
             nav.set(false);
         }
     });
+    let is_workbench = Signal::derive(move || is_workbench_route(&router.current()));
     view! {
         <a href="#main-content" class="skip-link">"Aller au contenu principal"</a>
-        <div class="application-shell">
+        <div class="application-shell" class:is-workbench=is_workbench>
             <div class="application-navigation-layout">
                 <button type="button" class="sidebar-scrim" aria-label="Fermer la navigation"
                     hidden=move || !nav.get() on:click=move |_| nav.set(false)></button>
@@ -493,7 +512,7 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
                     <main
                         id="main-content"
                         class="main-content"
-                        class:is-workbench=move || matches!(router.current(), Route::FlowEditor(_) | Route::NewFlow)
+                        class:is-workbench=is_workbench
                     >
                         {children()}
                     </main>
@@ -543,6 +562,14 @@ mod tests {
             search_placeholder(&Route::FlowEditor("f".into())),
             "Filtrer les flux…"
         );
+    }
+
+    #[test]
+    fn workbench_route_detection_matches_editor_screens_only() {
+        assert!(is_workbench_route(&Route::NewFlow));
+        assert!(is_workbench_route(&Route::FlowEditor("flow.1".into())));
+        assert!(!is_workbench_route(&Route::Flows));
+        assert!(!is_workbench_route(&Route::Overview));
     }
 
     #[test]

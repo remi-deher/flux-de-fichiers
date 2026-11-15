@@ -299,6 +299,213 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
 }
 
 #[cfg(test)]
+pub(super) mod test_support {
+    use flux_shared::flows::{OwnedBlockSpec, OwnedFieldKind, OwnedFieldSpec};
+    use serde_json::json;
+
+    struct BlockBuilder(OwnedBlockSpec);
+
+    impl BlockBuilder {
+        fn new(kind: &str, alias: &str, label: &str, category: &str, domain: &str) -> Self {
+            Self(OwnedBlockSpec {
+                kind: kind.into(),
+                aliases: if alias.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![alias.into()]
+                },
+                label: label.into(),
+                category: category.into(),
+                domain: Some(domain.into()),
+                description: String::new(),
+                has_input: true,
+                ports: Vec::new(),
+                terminal: false,
+                fields: Vec::new(),
+                suggested_next: Vec::new(),
+                from_plugin: true,
+                operation_id: None,
+            })
+        }
+
+        fn no_input(mut self) -> Self {
+            self.0.has_input = false;
+            self
+        }
+
+        fn ports(mut self, ports: &[(&str, &str)]) -> Self {
+            self.0.ports = ports
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect();
+            self
+        }
+
+        fn terminal(mut self) -> Self {
+            self.0.terminal = true;
+            self
+        }
+
+        fn fields(mut self, fields: Vec<OwnedFieldSpec>) -> Self {
+            self.0.fields = fields;
+            self
+        }
+
+        fn suggest(mut self, next: &[&str]) -> Self {
+            self.0.suggested_next = next.iter().map(|s| (*s).to_owned()).collect();
+            self
+        }
+
+        fn build(self) -> OwnedBlockSpec {
+            self.0
+        }
+    }
+
+    pub(super) fn test_catalog() -> Vec<OwnedBlockSpec> {
+        vec![
+            BlockBuilder::new(
+                "block.core.file-input",
+                "file-input",
+                "Fichier source",
+                "Entrée",
+                "input",
+            )
+            .no_input()
+            .suggest(&["block.core.condition", "block.video.remux-mkv"])
+            .build(),
+            BlockBuilder::new(
+                "block.core.condition",
+                "condition",
+                "Condition",
+                "Logique",
+                "logic",
+            )
+            .ports(&[("true", "✓ Vrai"), ("false", "✗ Faux")])
+            .fields(vec![OwnedFieldSpec {
+                name: "target".into(),
+                label: "Valeur".into(),
+                kind: OwnedFieldKind::Text,
+                required: true,
+                help: String::new(),
+                default: None,
+            }])
+            .suggest(&["block.video.encode", "block.video.remux-mkv"])
+            .build(),
+            BlockBuilder::new(
+                "block.media.inspect",
+                "media-inspect",
+                "Inspection média",
+                "Média",
+                "inspect",
+            )
+            .build(),
+            BlockBuilder::new(
+                "block.metadata.mkvpropedit",
+                "mkvpropedit",
+                "Édition des en-têtes",
+                "MKVToolNix",
+                "mkv",
+            )
+            .build(),
+            BlockBuilder::new(
+                "block.video.remux-mkv",
+                "remux-mkv",
+                "Remuxage Matroska",
+                "MKVToolNix",
+                "mkv",
+            )
+            .suggest(&["block.core.file-output"])
+            .build(),
+            BlockBuilder::new(
+                "block.video.encode",
+                "video-encode",
+                "Encodage vidéo",
+                "Média",
+                "video",
+            )
+            .suggest(&["block.video.remux-mkv"])
+            .build(),
+            BlockBuilder::new(
+                "block.audio.encode",
+                "audio-encode",
+                "Encodage audio",
+                "Média",
+                "audio",
+            )
+            .build(),
+            BlockBuilder::new(
+                "block.sonarr.rescan",
+                "sonarr-rescan",
+                "Sonarr : réanalyser",
+                "Intégrations",
+                "integration",
+            )
+            .build(),
+            BlockBuilder::new(
+                "block.sonarr.rename",
+                "sonarr-rename",
+                "Sonarr : renommer",
+                "Intégrations",
+                "integration",
+            )
+            .build(),
+            BlockBuilder::new(
+                "block.core.webhook",
+                "webhook",
+                "Webhook",
+                "Notification",
+                "integration",
+            )
+            .fields(vec![
+                OwnedFieldSpec {
+                    name: "url".into(),
+                    label: "URL".into(),
+                    kind: OwnedFieldKind::Text,
+                    required: true,
+                    help: String::new(),
+                    default: None,
+                },
+                OwnedFieldSpec {
+                    name: "method".into(),
+                    label: "Méthode".into(),
+                    kind: OwnedFieldKind::Select(vec![("POST".into(), "POST".into())]),
+                    required: false,
+                    help: String::new(),
+                    default: Some(json!("POST")),
+                },
+                OwnedFieldSpec {
+                    name: "custom_headers".into(),
+                    label: "En-têtes".into(),
+                    kind: OwnedFieldKind::Headers,
+                    required: false,
+                    help: String::new(),
+                    default: Some(json!({})),
+                },
+                OwnedFieldSpec {
+                    name: "fail_on_error".into(),
+                    label: "Échec bloquant".into(),
+                    kind: OwnedFieldKind::Bool,
+                    required: false,
+                    help: String::new(),
+                    default: Some(json!(false)),
+                },
+            ])
+            .suggest(&["block.core.file-output"])
+            .build(),
+            BlockBuilder::new(
+                "block.core.file-output",
+                "file-output",
+                "Fin du flux",
+                "Sortie",
+                "output",
+            )
+            .terminal()
+            .build(),
+        ]
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use chrono::Utc;
@@ -306,12 +513,14 @@ mod tests {
 
     #[test]
     fn pipeline_preview_labels_limits_steps_and_handles_invalid_json() {
+        let catalog = test_support::test_catalog();
         let mut graph = FlowGraph::default();
         for idx in 1..=5 {
             graph.append(
-                FlowBlockKind::FileInput,
+                FlowBlockKind::parse("block.core.file-input"),
                 &format!("Étape {idx}"),
                 serde_json::json!({}),
+                &catalog,
             );
         }
         let json = serde_json::to_string(&graph).unwrap_or_default();
@@ -324,8 +533,14 @@ mod tests {
 
     #[test]
     fn flow_counts_aggregates_defaults_and_blocks() {
+        let catalog = test_support::test_catalog();
         let mut graph = FlowGraph::default();
-        graph.append(FlowBlockKind::FileInput, "Entrée", serde_json::json!({}));
+        graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            serde_json::json!({}),
+            &catalog,
+        );
         let def = serde_json::to_string(&graph).unwrap_or_default();
         let now = Utc::now();
         let flows = [

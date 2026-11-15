@@ -8,9 +8,13 @@ use super::{ArrContext, ArrLeaseContext, ArrService, FlowBlockKind, FlowGraph};
 use std::collections::HashSet;
 
 fn service_of(kind: &FlowBlockKind) -> Option<ArrService> {
-    match kind {
-        FlowBlockKind::SonarrRescan | FlowBlockKind::SonarrRename => Some(ArrService::Sonarr),
-        FlowBlockKind::RadarrRescan | FlowBlockKind::RadarrRename => Some(ArrService::Radarr),
+    match kind.as_str() {
+        "sonarr-rescan" | "sonarr-rename" | "block.sonarr.rescan" | "block.sonarr.rename" => {
+            Some(ArrService::Sonarr)
+        }
+        "radarr-rescan" | "radarr-rename" | "block.radarr.rescan" | "block.radarr.rename" => {
+            Some(ArrService::Radarr)
+        }
         _ => None,
     }
 }
@@ -79,6 +83,11 @@ mod tests {
     fn services_come_from_the_blocks_of_the_flow() {
         let used = arr_services_in(&definition(&["sonarr-rescan", "file-output"]));
         assert_eq!(used, HashSet::from([ArrService::Sonarr]));
+        let plugin_used = arr_services_in(&definition(&[
+            "block.sonarr.rename",
+            "block.core.file-output",
+        ]));
+        assert_eq!(plugin_used, HashSet::from([ArrService::Sonarr]));
         assert!(arr_services_in("pas du json").is_empty());
     }
 

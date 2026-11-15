@@ -9,9 +9,7 @@ use super::geometry::{
 };
 #[cfg(not(test))]
 use crate::prefs;
-use flux_shared::flows::{
-    FlowConnection, FlowGraph, GraphError, OwnedBlockSpec, find_owned, native_owned_catalog,
-};
+use flux_shared::flows::{FlowConnection, FlowGraph, GraphError, OwnedBlockSpec, find_owned};
 use leptos::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -143,8 +141,10 @@ pub struct Editor {
     pub selected: RwSignal<Option<String>>,
     pub selected_ids: RwSignal<HashSet<String>>,
     pub dirty: RwSignal<bool>,
-    /// Catalogue natif + blocs des dépôts (chargé via l'API).
+    /// Catalogue des blocs fourni par les dépôts de plugins (chargé via l'API).
     pub catalog: RwSignal<Vec<OwnedBlockSpec>>,
+    /// Indique si le chargement initial du catalogue depuis l'API est terminé.
+    pub catalog_loaded: RwSignal<bool>,
     /// Ce que l'on glisse en ce moment (palette ou carte).
     pub drag: RwSignal<Option<DragPayload>>,
     /// Carte survolée par un glisser.
@@ -186,7 +186,8 @@ impl Editor {
             selected: RwSignal::new(None),
             selected_ids: RwSignal::new(HashSet::new()),
             dirty: RwSignal::new(false),
-            catalog: RwSignal::new(native_owned_catalog()),
+            catalog: RwSignal::new(Vec::new()),
+            catalog_loaded: RwSignal::new(false),
             drag: RwSignal::new(None),
             drop_target: RwSignal::new(None),
             drop_notice: RwSignal::new(None),
@@ -206,6 +207,15 @@ impl Editor {
             snap_to_grid: RwSignal::new(true),
             history: RwSignal::new(history),
         }
+    }
+
+    /// Initialise un graphe vierge (historique et empreinte sauvegardée compris) sans marquer modifié.
+    pub fn seed_initial_graph(&self, graph: FlowGraph) {
+        let saved_json = serde_json::to_string(&graph).unwrap_or_default();
+        self.saved_json.set(saved_json);
+        self.history.set(HistoryStack::new(graph.clone()));
+        self.graph.set(graph);
+        self.dirty.set(false);
     }
 
     /// Modifie le graphe, enregistre l'instantané pour Undo/Redo et marque modifié.
@@ -442,11 +452,12 @@ impl Editor {
             return Err(GraphError::UnknownNode);
         };
         let defaults = spec.default_config();
+        let catalog = self.catalog.get_untracked();
         let new_id = if let Some(branch) = state.branch {
             let src_point = self.node_point(&branch.source_id);
             let mut outcome = Err(GraphError::UnknownNode);
             self.mutate_graph(|graph| {
-                outcome = insert_on_branch(graph, &branch, spec, defaults);
+                outcome = insert_on_branch(graph, &branch, spec, defaults, &catalog);
             });
             let created = outcome?;
             let target_pos = state.board_pos.unwrap_or(Point {
@@ -460,7 +471,7 @@ impl Editor {
             let kind = spec.kind_enum();
             let label = spec.label.clone();
             self.mutate_graph(|graph| {
-                created = graph.append(kind, &label, defaults);
+                created = graph.append(kind, &label, defaults, &catalog);
             });
             let target_pos = state.board_pos.or_else(|| {
                 self.graph
@@ -535,12 +546,13 @@ impl Editor {
     /// Ajoute un bloc depuis la palette, ou l'insère sur la branche ciblée si active.
     pub fn add_or_insert_block(&self, spec: &OwnedBlockSpec) -> Result<String, GraphError> {
         let defaults = spec.default_config();
+        let catalog = self.catalog.get_untracked();
         let target = self.branch_target.get_untracked();
         let new_id = if let Some(branch) = target {
             let src_point = self.node_point(&branch.source_id);
             let mut outcome = Err(GraphError::UnknownNode);
             self.mutate_graph(|graph| {
-                outcome = insert_on_branch(graph, &branch, spec, defaults);
+                outcome = insert_on_branch(graph, &branch, spec, defaults, &catalog);
             });
             let created = outcome?;
             self.set_node_position(
@@ -557,7 +569,7 @@ impl Editor {
             let kind = spec.kind_enum();
             let label = spec.label.clone();
             self.mutate_graph(|graph| {
-                created = graph.append(kind, &label, defaults);
+                created = graph.append(kind, &label, defaults, &catalog);
             });
             let pos = self
                 .graph
@@ -727,9 +739,10 @@ impl Editor {
             return Ok(());
         };
         self.end_drag();
+        let catalog = self.catalog.get_untracked();
         let dropped = self
             .graph
-            .with_untracked(|graph| drop_outcome(graph, &payload, target))?;
+            .with_untracked(|graph| drop_outcome(graph, &payload, target, &catalog))?;
         let target_pt = self.node_point(target);
         self.mutate_graph(|graph| *graph = dropped.graph);
         if matches!(payload, DragPayload::Palette { .. }) {
@@ -767,13 +780,37 @@ mod tests {
     use flux_shared::flows::FlowBlockKind;
     use serde_json::json;
 
+    use super::super::test_support::test_catalog;
+
+    #[test]
+    fn editor_starts_with_empty_plugin_catalog_until_loaded() {
+        let editor = Editor::for_flow(None, FlowGraph::default());
+        assert!(editor.catalog.get_untracked().is_empty());
+        assert!(!editor.catalog_loaded.get_untracked());
+    }
+
     #[test]
     fn only_blocks_with_empty_required_fields_are_reported() {
-        let catalog = native_owned_catalog();
+        let catalog = test_catalog();
         let mut graph = FlowGraph::default();
-        graph.append(FlowBlockKind::FileInput, "Entrée", json!({}));
-        graph.append(FlowBlockKind::Webhook, "Hook", json!({"url": ""}));
-        graph.append(FlowBlockKind::parse("macro.unknown"), "Inconnu", json!({}));
+        graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            &catalog,
+        );
+        graph.append(
+            FlowBlockKind::parse("block.core.webhook"),
+            "Hook",
+            json!({"url": ""}),
+            &catalog,
+        );
+        graph.append(
+            FlowBlockKind::parse("macro.unknown"),
+            "Inconnu",
+            json!({}),
+            &catalog,
+        );
         assert_eq!(
             incomplete_blocks(&graph, &catalog),
             vec![("Hook".to_owned(), vec!["URL".to_owned()])]
@@ -782,8 +819,14 @@ mod tests {
 
     #[test]
     fn history_stack_supports_undo_redo_and_truncates_future_on_edit() {
+        let catalog = test_catalog();
         let mut g1 = FlowGraph::default();
-        g1.append(FlowBlockKind::FileInput, "Entrée", json!({}));
+        g1.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            &catalog,
+        );
         let mut history = HistoryStack::new(g1.clone());
         assert!(!history.can_undo());
         assert!(!history.can_redo());
@@ -793,12 +836,22 @@ mod tests {
         assert!(!history.can_undo());
 
         let mut g2 = g1.clone();
-        g2.append(FlowBlockKind::RemuxMkv, "Remux", json!({}));
+        g2.append(
+            FlowBlockKind::parse("block.video.remux-mkv"),
+            "Remux",
+            json!({}),
+            &catalog,
+        );
         history.push(g2.clone());
         assert!(history.can_undo());
 
         let mut g3 = g2.clone();
-        g3.append(FlowBlockKind::FileOutput, "Fin", json!({}));
+        g3.append(
+            FlowBlockKind::parse("block.core.file-output"),
+            "Fin",
+            json!({}),
+            &catalog,
+        );
         history.push(g3.clone());
 
         assert_eq!(history.undo(), Some(g2.clone()));
@@ -808,7 +861,12 @@ mod tests {
         assert_eq!(history.redo(), Some(g2.clone()));
 
         let mut alt = g2;
-        alt.append(FlowBlockKind::Webhook, "Hook", json!({}));
+        alt.append(
+            FlowBlockKind::parse("block.core.webhook"),
+            "Hook",
+            json!({}),
+            &catalog,
+        );
         history.push(alt.clone());
         assert!(!history.can_redo());
         assert_eq!(history.entries.last(), Some(&alt));
@@ -816,15 +874,19 @@ mod tests {
 
     #[test]
     fn editor_mutations_undo_duplicate_and_auto_layout_behave_consistently() {
+        let catalog = test_catalog();
         let mut graph = FlowGraph::default();
-        let input = graph.append(FlowBlockKind::FileInput, "Entrée", json!({}));
+        let input = graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            &catalog,
+        );
         let editor = Editor::for_flow(Some("flow.test".into()), graph);
+        editor.catalog.set(catalog.clone());
 
-        let Some(webhook) = native_owned_catalog()
-            .into_iter()
-            .find(|s| s.kind == "webhook")
-        else {
-            panic!("webhook absent du catalogue natif");
+        let Some(webhook) = catalog.into_iter().find(|s| s.matches_kind("webhook")) else {
+            panic!("webhook absent du catalogue de test");
         };
         let Ok(added_id) = editor.add_or_insert_block(&webhook) else {
             panic!("ajout du webhook refusé");
@@ -871,8 +933,14 @@ mod tests {
 
     #[test]
     fn right_dock_tabs_are_mutually_exclusive() {
+        let catalog = test_catalog();
         let mut graph = FlowGraph::default();
-        let input = graph.append(FlowBlockKind::FileInput, "Entrée", json!({}));
+        let input = graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            &catalog,
+        );
         let editor = Editor::for_flow(Some("flow.dock".into()), graph);
 
         assert!(editor.palette_open.get_untracked());
@@ -901,14 +969,18 @@ mod tests {
 
     #[test]
     fn quick_add_places_and_connects_in_unbounded_coordinates() {
+        let catalog = test_catalog();
         let mut graph = FlowGraph::default();
-        let input = graph.append(FlowBlockKind::FileInput, "Entrée", json!({}));
+        let input = graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            &catalog,
+        );
         let editor = Editor::for_flow(Some("flow.qa".into()), graph);
-        let Some(encode) = native_owned_catalog()
-            .into_iter()
-            .find(|s| s.kind == "block.video.encode")
-        else {
-            panic!("encode absent du catalogue natif");
+        editor.catalog.set(catalog.clone());
+        let Some(encode) = catalog.into_iter().find(|s| s.kind == "block.video.encode") else {
+            panic!("encode absent du catalogue de test");
         };
 
         editor.open_quick_add(QuickAddState {
@@ -943,10 +1015,26 @@ mod tests {
 
     #[test]
     fn multi_selection_duplicates_subgraph_and_removes_batch_in_one_undo_step() {
+        let catalog = test_catalog();
         let mut graph = FlowGraph::default();
-        let input = graph.append(FlowBlockKind::FileInput, "Entrée", json!({}));
-        let remux = graph.append(FlowBlockKind::RemuxMkv, "Remux", json!({}));
-        let output = graph.append(FlowBlockKind::FileOutput, "Sortie", json!({}));
+        let input = graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            &catalog,
+        );
+        let remux = graph.append(
+            FlowBlockKind::parse("block.video.remux-mkv"),
+            "Remux",
+            json!({}),
+            &catalog,
+        );
+        let output = graph.append(
+            FlowBlockKind::parse("block.core.file-output"),
+            "Sortie",
+            json!({}),
+            &catalog,
+        );
         let editor = Editor::for_flow(Some("flow.batch".into()), graph);
 
         editor.select_node(Some(remux.clone()), false);

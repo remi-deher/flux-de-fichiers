@@ -1,6 +1,6 @@
-//! Fiches de blocs sérialisables : catalogue natif + blocs lus dans les dépôts de plugins.
+//! Fiches de blocs sérialisables : chargées exclusivement depuis les dépôts de plugins.
 
-use super::{BlockSpec, FieldKind, FieldSpec, FlowBlockKind, block_catalog};
+use super::FlowBlockKind;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -15,22 +15,6 @@ pub enum OwnedFieldKind {
     Headers,
 }
 
-impl OwnedFieldKind {
-    fn from_static(kind: FieldKind) -> Self {
-        match kind {
-            FieldKind::Text => Self::Text,
-            FieldKind::Bool => Self::Bool,
-            FieldKind::Headers => Self::Headers,
-            FieldKind::Select(options) => Self::Select(
-                options
-                    .iter()
-                    .map(|(value, label)| ((*value).to_owned(), (*label).to_owned()))
-                    .collect(),
-            ),
-        }
-    }
-}
-
 /// Réglage d'un bloc, version détenue.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,32 +25,28 @@ pub struct OwnedFieldSpec {
     pub required: bool,
     #[serde(default)]
     pub help: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<Value>,
 }
 
-impl OwnedFieldSpec {
-    pub fn from_static(field: &FieldSpec) -> Self {
-        Self {
-            name: field.name.to_owned(),
-            label: field.label.to_owned(),
-            kind: OwnedFieldKind::from_static(field.kind),
-            required: field.required,
-            help: field.help.to_owned(),
-        }
-    }
-}
-
-/// Fiche d'un bloc exécutable ou découvert dans un dépôt, version détenue.
+/// Fiche d'un bloc découvert dans un dépôt de plugins, version détenue.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OwnedBlockSpec {
     pub kind: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
     pub label: String,
     pub category: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
     pub description: String,
     pub has_input: bool,
     pub ports: Vec<(String, String)>,
     pub terminal: bool,
     pub fields: Vec<OwnedFieldSpec>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suggested_next: Vec<String>,
     /// Bloc issu d'un dépôt de plugins (`type: block` dans le catalogue).
     #[serde(default)]
     pub from_plugin: bool,
@@ -76,50 +56,30 @@ pub struct OwnedBlockSpec {
 }
 
 impl OwnedBlockSpec {
-    pub fn from_static(spec: &BlockSpec) -> Self {
-        Self {
-            kind: spec.kind.to_owned(),
-            label: spec.label.to_owned(),
-            category: spec.category.to_owned(),
-            description: spec.description.to_owned(),
-            has_input: spec.has_input,
-            ports: spec
-                .ports
-                .iter()
-                .map(|(name, label)| ((*name).to_owned(), (*label).to_owned()))
-                .collect(),
-            terminal: spec.terminal,
-            fields: spec
-                .fields
-                .iter()
-                .map(OwnedFieldSpec::from_static)
-                .collect(),
-            from_plugin: false,
-            operation_id: None,
-        }
-    }
-
-    /// Réglages initiaux : défauts sains pour chaque champ.
+    /// Réglages initiaux : défauts déclarés par le manifeste, sinon valeur neutre du type de champ.
     pub fn default_config(&self) -> Value {
         let mut config = serde_json::Map::new();
         for field in &self.fields {
-            let value = match &field.kind {
-                OwnedFieldKind::Bool => json!(matches!(
-                    field.name.as_str(),
-                    "disable_track_stats" | "faststart"
-                )),
-                OwnedFieldKind::Headers => json!({}),
-                OwnedFieldKind::Select(options) => {
-                    json!(options.first().map_or("", |(value, _)| value.as_str()))
-                }
-                OwnedFieldKind::Text => match field.name.as_str() {
-                    "audio_languages" | "subtitle_languages" => json!("all"),
-                    _ => json!(""),
-                },
-            };
+            let value = field
+                .default
+                .as_ref()
+                .map(|declared| normalize_default(&field.kind, declared))
+                .unwrap_or_else(|| match &field.kind {
+                    OwnedFieldKind::Bool => json!(false),
+                    OwnedFieldKind::Headers => json!({}),
+                    OwnedFieldKind::Select(options) => {
+                        json!(options.first().map_or("", |(value, _)| value.as_str()))
+                    }
+                    OwnedFieldKind::Text => json!(""),
+                });
             config.insert(field.name.clone(), value);
         }
         Value::Object(config)
+    }
+
+    /// Indique si cette fiche correspond à `kind` (identifiant canonique ou alias historique).
+    pub fn matches_kind(&self, kind: &str) -> bool {
+        self.kind == kind || self.aliases.iter().any(|alias| alias == kind)
     }
 
     /// Champs obligatoires restés vides.
@@ -142,56 +102,97 @@ impl OwnedBlockSpec {
     }
 }
 
-/// Catalogue natif, en fiches détenues (sans les blocs des dépôts).
-pub fn native_owned_catalog() -> Vec<OwnedBlockSpec> {
-    block_catalog()
-        .iter()
-        .map(OwnedBlockSpec::from_static)
-        .collect()
+fn normalize_default(kind: &OwnedFieldKind, declared: &Value) -> Value {
+    match (kind, declared) {
+        (OwnedFieldKind::Select(_), Value::Number(number)) => Value::String(number.to_string()),
+        (OwnedFieldKind::Select(_), Value::Bool(flag)) => Value::String(flag.to_string()),
+        _ => declared.clone(),
+    }
 }
 
-/// Cherche une fiche dans une liste détenue.
+/// Cherche une fiche dans un catalogue par identifiant exact ou alias.
 pub fn find_owned<'a>(
     catalog: &'a [OwnedBlockSpec],
     kind: &FlowBlockKind,
 ) -> Option<&'a OwnedBlockSpec> {
     let key = kind.as_str();
-    catalog.iter().find(|spec| spec.kind == key).or_else(|| {
-        // Anciens identifiants courts encore présents dans des graphes enregistrés.
-        catalog.iter().find(|spec| {
-            FlowBlockKind::parse(&spec.kind) == *kind && !matches!(kind, FlowBlockKind::Other(_))
-        })
-    })
+    catalog
+        .iter()
+        .find(|spec| spec.kind == key)
+        .or_else(|| catalog.iter().find(|spec| spec.matches_kind(key)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn native_owned_catalog_roundtrips_kinds() {
-        let owned = native_owned_catalog();
-        assert!(!owned.is_empty());
-        for spec in &owned {
-            let kind = FlowBlockKind::parse(&spec.kind);
-            assert!(!matches!(kind, FlowBlockKind::Other(_)), "{}", spec.kind);
-            assert_eq!(
-                find_owned(&owned, &kind).map(|found| found.kind.as_str()),
-                Some(spec.kind.as_str())
-            );
+    fn sample_webhook() -> OwnedBlockSpec {
+        OwnedBlockSpec {
+            kind: "block.core.webhook".into(),
+            aliases: vec!["webhook".into()],
+            label: "Webhook".into(),
+            category: "Notification".into(),
+            domain: Some("integration".into()),
+            description: "Appelle une URL.".into(),
+            has_input: true,
+            ports: Vec::new(),
+            terminal: false,
+            fields: vec![
+                OwnedFieldSpec {
+                    name: "url".into(),
+                    label: "URL".into(),
+                    kind: OwnedFieldKind::Text,
+                    required: true,
+                    help: String::new(),
+                    default: None,
+                },
+                OwnedFieldSpec {
+                    name: "method".into(),
+                    label: "Méthode".into(),
+                    kind: OwnedFieldKind::Select(vec![
+                        ("GET".into(), "GET".into()),
+                        ("POST".into(), "POST".into()),
+                    ]),
+                    required: false,
+                    help: String::new(),
+                    default: Some(json!("POST")),
+                },
+                OwnedFieldSpec {
+                    name: "fail_on_error".into(),
+                    label: "Échec bloquant".into(),
+                    kind: OwnedFieldKind::Bool,
+                    required: false,
+                    help: String::new(),
+                    default: Some(json!(false)),
+                },
+            ],
+            suggested_next: Vec::new(),
+            from_plugin: true,
+            operation_id: Some("operation.core.webhook".into()),
         }
     }
 
     #[test]
-    fn default_config_fills_select_defaults() {
-        let Some(webhook) = native_owned_catalog()
-            .into_iter()
-            .find(|spec| spec.kind == "webhook")
-        else {
-            panic!("le catalogue natif doit contenir le bloc webhook");
-        };
+    fn find_owned_resolves_canonical_and_alias() {
+        let catalog = vec![sample_webhook()];
+        assert_eq!(
+            find_owned(&catalog, &FlowBlockKind::parse("block.core.webhook"))
+                .map(|s| s.kind.as_str()),
+            Some("block.core.webhook")
+        );
+        assert_eq!(
+            find_owned(&catalog, &FlowBlockKind::parse("webhook")).map(|s| s.kind.as_str()),
+            Some("block.core.webhook")
+        );
+        assert!(find_owned(&catalog, &FlowBlockKind::parse("macro.unknown")).is_none());
+    }
+
+    #[test]
+    fn default_config_uses_declared_defaults_and_reports_required_fields() {
+        let webhook = sample_webhook();
         let config = webhook.default_config();
         assert_eq!(config["method"], "POST");
+        assert_eq!(config["fail_on_error"], false);
         assert_eq!(webhook.missing_fields(&config), vec!["URL".to_owned()]);
     }
 }

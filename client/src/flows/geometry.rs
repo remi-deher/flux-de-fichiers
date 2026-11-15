@@ -367,20 +367,42 @@ pub fn snap_point(pt: Point, step: f64) -> Point {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::test_catalog;
     use super::*;
     use flux_shared::flows::FlowBlockKind;
     use serde_json::json;
 
     #[test]
     fn default_positions_centers_ranks_horizontally() {
+        let catalog = test_catalog();
         let mut graph = FlowGraph::default();
-        let input = graph.append(FlowBlockKind::FileInput, "Entrée", json!({}));
-        let cond = graph.append(FlowBlockKind::Condition, "Si", json!({}));
-        let yes = graph.append(FlowBlockKind::RemuxMkv, "Oui", json!({}));
-        let no = graph.append(FlowBlockKind::Webhook, "Non", json!({}));
+        let input = graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            &catalog,
+        );
+        let cond = graph.append(
+            FlowBlockKind::parse("block.core.condition"),
+            "Si",
+            json!({}),
+            &catalog,
+        );
+        let yes = graph.append(
+            FlowBlockKind::parse("block.video.remux-mkv"),
+            "Oui",
+            json!({}),
+            &catalog,
+        );
+        let no = graph.append(
+            FlowBlockKind::parse("block.core.webhook"),
+            "Non",
+            json!({}),
+            &catalog,
+        );
         graph.disconnect(&yes, &None);
-        let _ = graph.connect(&cond, Some("true".into()), &yes);
-        let _ = graph.connect(&cond, Some("false".into()), &no);
+        let _ = graph.connect(&cond, Some("true".into()), &yes, &catalog);
+        let _ = graph.connect(&cond, Some("false".into()), &no, &catalog);
 
         let positions = default_positions(&graph);
         let mid_branch = (positions[&yes].x + positions[&no].x) / 2.0;
@@ -392,8 +414,14 @@ mod tests {
 
     #[test]
     fn ports_and_custom_positions_resolve_cleanly() {
+        let catalog = test_catalog();
         let mut graph = FlowGraph::default();
-        let n1 = graph.append(FlowBlockKind::FileInput, "Entrée", json!({}));
+        let n1 = graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            &catalog,
+        );
         let mut custom = HashMap::new();
         custom.insert(n1.clone(), Point { x: 400.0, y: 220.0 });
         let placed = place_with_positions(&graph, &custom);

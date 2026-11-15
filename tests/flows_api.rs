@@ -37,12 +37,7 @@ async fn test_app_with_plugins(
         .await?;
     sqlx::migrate!().run(&pool).await?;
     common::install_keys(&pool).await?;
-    let (events_tx, _) = tokio::sync::broadcast::channel(128);
-    Ok(router(AppState {
-        pool,
-        config: Arc::new(config),
-        events_tx,
-    }))
+    Ok(router(AppState::new(pool, Arc::new(config))))
 }
 
 async fn test_app() -> anyhow::Result<axum::Router> {
@@ -303,12 +298,7 @@ async fn secrets_app() -> anyhow::Result<(axum::Router, sqlx::SqlitePool, tempfi
         .await?;
     sqlx::migrate!().run(&pool).await?;
     common::install_keys(&pool).await?;
-    let (events_tx, _) = tokio::sync::broadcast::channel(128);
-    let app = router(AppState {
-        pool: pool.clone(),
-        config: Arc::new(config),
-        events_tx,
-    });
+    let app = router(AppState::new(pool.clone(), Arc::new(config)));
     Ok((app, pool, config_dir))
 }
 

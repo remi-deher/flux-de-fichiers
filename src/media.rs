@@ -1,4 +1,6 @@
-use crate::tool_run::{ExternalTool, ToolRunError, run_with_progress};
+use crate::tool_run::{
+    ExternalTool, ToolRunError, ToolRunOutcome, run_with_duration, run_with_progress,
+};
 use anyhow::Context;
 use serde_json::Value;
 use std::{path::Path, process::Stdio, time::Duration};
@@ -9,6 +11,39 @@ use tokio::{
 
 const TOOL_TIMEOUT: Duration = Duration::from_secs(3600);
 const MAX_IDENTIFICATION_BYTES: u64 = 8 * 1024 * 1024;
+const NANOSECONDS_PER_SECOND: f64 = 1_000_000_000.0;
+const MP4_MIN_HEADER_BYTES: usize = 8;
+
+/// Profil de validation d'un fichier de sortie selon les opérations du flux exécuté.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputProfile {
+    /// Remuxage Matroska sans perte : pistes, chapitres, tags et pièces jointes identiques.
+    StrictMkvRemux,
+    /// Édition d'en-têtes in-place (`mkvpropedit`) : même nombre et codecs de pistes, flags/langues modifiables.
+    MkvMetadataEdit,
+    /// Transcodage vidéo ou audio vers MKV : conteneur Matroska valide avec pistes présentes.
+    TranscodedMkv,
+    /// Remuxage vers MP4 (`MP4Box`) : fichier non vide portant une boîte ISO BMFF `ftyp`.
+    Mp4Container,
+}
+
+impl OutputProfile {
+    pub const fn extension(self) -> &'static str {
+        match self {
+            Self::Mp4Container => "mp4",
+            Self::StrictMkvRemux | Self::MkvMetadataEdit | Self::TranscodedMkv => "mkv",
+        }
+    }
+
+    pub const fn content_type(self) -> &'static str {
+        match self {
+            Self::Mp4Container => "video/mp4",
+            Self::StrictMkvRemux | Self::MkvMetadataEdit | Self::TranscodedMkv => {
+                "video/x-matroska"
+            }
+        }
+    }
+}
 
 pub fn executable() -> String {
     std::env::var("MKVMERGE").unwrap_or_else(|_| "mkvmerge".into())
@@ -132,6 +167,134 @@ fn track_signature(data: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+/// Extrait la durée totale en secondes depuis `mkvmerge -J` ou MediaInfo JSON, si disponible.
+pub fn media_duration_secs(info: &Value) -> Option<f64> {
+    if let Some(ns) = info
+        .pointer("/container/properties/duration")
+        .and_then(Value::as_u64)
+        && ns > 0
+    {
+        return Some(ns as f64 / NANOSECONDS_PER_SECOND);
+    }
+    if let Some(tracks) = info
+        .pointer("/mediainfo/media/track")
+        .and_then(Value::as_array)
+    {
+        for track in tracks {
+            if let Some(raw) = track.get("Duration").and_then(Value::as_str)
+                && let Ok(secs) = raw.parse::<f64>()
+                && secs > 0.0
+            {
+                return Some(secs);
+            }
+            if let Some(secs) = track.get("Duration").and_then(Value::as_f64)
+                && secs > 0.0
+            {
+                return Some(secs);
+            }
+        }
+    }
+    None
+}
+
+/// Interroge `mediainfo --Output=JSON` pour enrichir l'arbre technique du flux.
+pub async fn inspect_mediainfo(bin: &Path, path: &Path) -> anyhow::Result<Value> {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut child = Command::new(bin)
+            .arg("--Output=JSON")
+            .arg(path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()?;
+        let mut bytes = Vec::new();
+        child
+            .stdout
+            .take()
+            .context("missing mediainfo stdout")?
+            .take(MAX_IDENTIFICATION_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .await?;
+        anyhow::ensure!(
+            bytes.len() as u64 <= MAX_IDENTIFICATION_BYTES,
+            "mediainfo output too large"
+        );
+        let status = child.wait().await?;
+        anyhow::ensure!(status.success(), "mediainfo failed");
+        let parsed: Value = serde_json::from_slice(&bytes)?;
+        Ok(parsed)
+    })
+    .await
+    .context("mediainfo timed out")?
+}
+
+/// Fusionne la sortie `mediainfo --Output=JSON` dans l'arbre `mkvmerge -J` sous `/mediainfo`.
+pub fn attach_mediainfo(mut mkv_info: Value, mediainfo: Value) -> Value {
+    if let Some(object) = mkv_info.as_object_mut() {
+        object.insert("mediainfo".to_owned(), mediainfo);
+    }
+    mkv_info
+}
+
+fn track_codecs(data: &Value) -> Vec<(Option<&str>, Option<&str>)> {
+    data["tracks"]
+        .as_array()
+        .map(|tracks| {
+            tracks
+                .iter()
+                .map(|t| (t["type"].as_str(), t["codec"].as_str()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub async fn validate_output(
+    profile: OutputProfile,
+    source: &Path,
+    output: &Path,
+) -> anyhow::Result<()> {
+    validate_output_with(Path::new(&executable()), profile, source, output).await
+}
+
+/// Valide la sortie produite selon le profil attendu par le flux.
+pub async fn validate_output_with(
+    mkvmerge_bin: &Path,
+    profile: OutputProfile,
+    source: &Path,
+    output: &Path,
+) -> anyhow::Result<()> {
+    match profile {
+        OutputProfile::StrictMkvRemux => validate_remux_with(mkvmerge_bin, source, output).await,
+        OutputProfile::MkvMetadataEdit => {
+            let before = inspect_with(mkvmerge_bin, source).await?;
+            let after = inspect_with(mkvmerge_bin, output).await?;
+            anyhow::ensure!(
+                track_codecs(&before) == track_codecs(&after),
+                "track layout mismatch after metadata edit"
+            );
+            Ok(())
+        }
+        OutputProfile::TranscodedMkv => {
+            let meta = tokio::fs::metadata(output).await?;
+            anyhow::ensure!(meta.len() > 0, "empty transcoded output");
+            let _ = inspect_with(mkvmerge_bin, output).await?;
+            Ok(())
+        }
+        OutputProfile::Mp4Container => validate_mp4_header(output).await,
+    }
+}
+
+async fn validate_mp4_header(output: &Path) -> anyhow::Result<()> {
+    let mut file = tokio::fs::File::open(output).await?;
+    let size = file.metadata().await?.len();
+    anyhow::ensure!(size >= MP4_MIN_HEADER_BYTES as u64, "mp4 output too small");
+    let mut header = [0u8; 16];
+    let read = file.read(&mut header).await?;
+    anyhow::ensure!(read >= MP4_MIN_HEADER_BYTES, "incomplete mp4 header");
+    anyhow::ensure!(&header[4..8] == b"ftyp", "missing ISO BMFF ftyp box");
+    Ok(())
+}
+
 pub async fn validate_remux(source: &Path, output: &Path) -> anyhow::Result<()> {
     validate_remux_with(Path::new(&executable()), source, output).await
 }
@@ -247,11 +410,24 @@ pub async fn encode_with_progress<F>(
     bin: &Path,
     args: &[String],
     on_progress: F,
-) -> Result<(), ToolRunError>
+) -> Result<ToolRunOutcome, ToolRunError>
 where
     F: FnMut(u32, &str) + Send + 'static,
 {
     run_with_progress(ExternalTool::Ffmpeg, bin, args, on_progress).await
+}
+
+/// Lance FFmpeg avec calcul de pourcentage basé sur `duration_secs` si connue.
+pub async fn encode_with_duration<F>(
+    bin: &Path,
+    args: &[String],
+    duration_secs: Option<f64>,
+    on_progress: F,
+) -> Result<ToolRunOutcome, ToolRunError>
+where
+    F: FnMut(u32, &str) + Send + 'static,
+{
+    run_with_duration(ExternalTool::Ffmpeg, bin, args, duration_secs, on_progress).await
 }
 
 /// Lance MP4Box avec un argv déjà construit (sans l'exécutable) ; progresse via stderr.
@@ -259,9 +435,74 @@ pub async fn mp4box_with_progress<F>(
     bin: &Path,
     args: &[String],
     on_progress: F,
-) -> Result<(), ToolRunError>
+) -> Result<ToolRunOutcome, ToolRunError>
 where
     F: FnMut(u32, &str) + Send + 'static,
 {
     run_with_progress(ExternalTool::Mp4Box, bin, args, on_progress).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tool_run::test_support::fake_tool;
+
+    #[test]
+    fn media_duration_reads_mkvmerge_nanoseconds_or_mediainfo_seconds() {
+        let mkv = serde_json::json!({
+            "container": {"properties": {"duration": 120_500_000_000u64}}
+        });
+        assert_eq!(media_duration_secs(&mkv), Some(120.5));
+
+        let mi = serde_json::json!({
+            "mediainfo": {"media": {"track": [{"@type": "General", "Duration": "95.250"}]}}
+        });
+        assert_eq!(media_duration_secs(&mi), Some(95.25));
+    }
+
+    #[tokio::test]
+    async fn validate_mp4_header_accepts_ftyp_and_rejects_garbage()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
+        let valid = dir.path().join("ok.mp4");
+        tokio::fs::write(&valid, b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00").await?;
+        validate_output(OutputProfile::Mp4Container, &valid, &valid).await?;
+
+        let invalid = dir.path().join("bad.mp4");
+        tokio::fs::write(&invalid, b"not-an-mp4-file").await?;
+        assert!(
+            validate_output(OutputProfile::Mp4Container, &valid, &invalid)
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn validate_output_with_distinguishes_metadata_edit_and_transcode()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
+        let src = dir.path().join("src.mkv");
+        let dst = dir.path().join("dst.mkv");
+        tokio::fs::write(&src, b"src").await?;
+        tokio::fs::write(&dst, b"dst").await?;
+
+        let bin = fake_tool(
+            dir.path(),
+            "mkvmerge",
+            r#"for a; do last=$a; done
+case "$last" in
+  *src.mkv) echo '{"container":{"recognized":true,"supported":true},"tracks":[{"type":"video","codec":"AVC","properties":{"language":"und"}}]}';;
+  *dst.mkv) echo '{"container":{"recognized":true,"supported":true},"tracks":[{"type":"video","codec":"AVC","properties":{"language":"fre"}}]}';;
+esac"#,
+        )?;
+        assert!(
+            validate_output_with(&bin, OutputProfile::StrictMkvRemux, &src, &dst)
+                .await
+                .is_err()
+        );
+        validate_output_with(&bin, OutputProfile::MkvMetadataEdit, &src, &dst).await?;
+        validate_output_with(&bin, OutputProfile::TranscodedMkv, &src, &dst).await?;
+        Ok(())
+    }
 }

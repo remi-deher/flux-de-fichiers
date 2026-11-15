@@ -56,6 +56,9 @@ pub struct CatalogEntry {
     /// Plugin propriétaire. Obligatoire pour un bloc, qui ne vit jamais seul dans un dépôt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
+    /// Empreinte SHA-256 optionnelle du manifeste pour vérification à la synchronisation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
 }
 
 /// État d'un outil dans le cache local.

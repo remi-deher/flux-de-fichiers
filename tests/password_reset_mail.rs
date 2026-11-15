@@ -294,12 +294,7 @@ fn config(smtp: bool) -> anyhow::Result<Config> {
 async fn app(smtp: bool) -> anyhow::Result<(axum::Router, SqlitePool)> {
     let pool = pool_with_account().await?;
     common::install_keys(&pool).await?;
-    let (events_tx, _) = tokio::sync::broadcast::channel(8);
-    let state = AppState {
-        pool: pool.clone(),
-        config: Arc::new(config(smtp)?),
-        events_tx,
-    };
+    let state = AppState::new(pool.clone(), Arc::new(config(smtp)?));
     Ok((router(state), pool))
 }
 

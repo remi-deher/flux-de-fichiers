@@ -14,7 +14,6 @@ use std::sync::Arc;
 use tower::ServiceExt;
 
 const TEST_ADMIN_KEY: &str = "fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef";
-const BROADCAST_CAPACITY: usize = 128;
 const MAX_TEST_FILE_BYTES: u64 = 1024;
 const WEB_SESSION_TTL_SECONDS: i64 = 28_800;
 
@@ -40,12 +39,7 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         .await?;
     sqlx::migrate!().run(&pool).await?;
     common::install_keys(&pool).await?;
-    let (events_tx, _) = tokio::sync::broadcast::channel(BROADCAST_CAPACITY);
-    Ok(router(AppState {
-        pool,
-        config: Arc::new(config),
-        events_tx,
-    }))
+    Ok(router(AppState::new(pool, Arc::new(config))))
 }
 
 #[tokio::test]

@@ -218,6 +218,12 @@ pub async fn execute_arr_block(
     local_file: &Path,
     client: &Client,
 ) -> anyhow::Result<()> {
+    let _ = crate::net_policy::validate_outbound_url(
+        &connection.url,
+        crate::net_policy::OutboundPolicy::integration_from_env(),
+    )
+    .await
+    .context("URL *arr refusée par la politique réseau")?;
     let service = block.service;
     let remote = connection.remote_path(local_file)?;
     let id = find_item_id(service, client, connection, &remote).await?;

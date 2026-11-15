@@ -40,6 +40,14 @@ pub struct ArtifactPermissions {
     pub executable_bit: Option<bool>,
 }
 
+/// Politique d'installation déclarée dans `distribution.v1.json`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolInstallPolicy {
+    #[serde(default, alias = "executable_allowlist")]
+    pub executable_allowlist: Vec<String>,
+}
+
 /// Fiche déclarative de distribution d'un outil (Option B).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -50,9 +58,13 @@ pub struct ToolDistribution {
     pub tool_id: String,
     #[serde(alias = "tool_version")]
     pub tool_version: String,
+    #[serde(default, alias = "release_status")]
+    pub release_status: Option<String>,
     #[serde(default = "default_distribution_mode", alias = "distribution_mode")]
     pub distribution_mode: String,
     pub artifacts: Vec<ToolArtifact>,
+    #[serde(default, alias = "install_policy")]
+    pub install_policy: Option<ToolInstallPolicy>,
 }
 
 fn default_distribution_mode() -> String {
@@ -93,6 +105,21 @@ impl ToolCacheManager {
         dir.join(".ready").is_file()
     }
 
+    /// Normalise un chemin relatif de binaire (`bin/foo` ou `foo`) par rapport au dossier `bin/`.
+    pub fn resolve_bin_candidate(bin_dir: &Path, binary_relative_path: &str) -> PathBuf {
+        let direct = bin_dir.join(binary_relative_path);
+        if direct.is_file() {
+            return direct;
+        }
+        if let Some(stripped) = binary_relative_path.strip_prefix("bin/") {
+            let trimmed = bin_dir.join(stripped);
+            if trimmed.is_file() {
+                return trimmed;
+            }
+        }
+        direct
+    }
+
     /// Vérifie et retourne le chemin d'un binaire déjà en cache chaud.
     pub fn verify_cached_binary(
         &self,
@@ -109,7 +136,7 @@ impl ToolCacheManager {
             )));
         }
 
-        let binary_path = dir.join("bin").join(binary_relative_path);
+        let binary_path = Self::resolve_bin_candidate(&dir.join("bin"), binary_relative_path);
         if !binary_path.is_file() {
             return Err(AppError::NotFound);
         }
@@ -161,9 +188,24 @@ impl ToolCacheManager {
         artifact: &ToolArtifact,
         archive_bytes: &[u8],
     ) -> AppResult<PathBuf> {
+        self.extract_and_install_with_allowlist(tool_id, tool_version, artifact, archive_bytes, &[])
+    }
+
+    /// Variante d'`extract_and_install` appliquant également `installPolicy.executableAllowlist`.
+    pub fn extract_and_install_with_allowlist(
+        &self,
+        tool_id: &str,
+        tool_version: &str,
+        artifact: &ToolArtifact,
+        archive_bytes: &[u8],
+        executable_allowlist: &[String],
+    ) -> AppResult<PathBuf> {
         let target_dir = self.tool_dir(tool_id, tool_version, &artifact.arch);
         if target_dir.join(".ready").is_file() {
-            let binary_path = target_dir.join("bin").join(&artifact.binary_relative_path);
+            let binary_path = Self::resolve_bin_candidate(
+                &target_dir.join("bin"),
+                &artifact.binary_relative_path,
+            );
             if binary_path.is_file() {
                 return Ok(binary_path);
             }
@@ -179,7 +221,7 @@ impl ToolCacheManager {
         ));
         fs::create_dir_all(&tmp_dir)?;
 
-        match self.do_extract_and_install(&tmp_dir, artifact, archive_bytes) {
+        match self.do_extract_and_install(&tmp_dir, artifact, archive_bytes, executable_allowlist) {
             Ok(_) => {
                 if target_dir.exists() {
                     let _ = fs::remove_dir_all(&target_dir);
@@ -188,7 +230,10 @@ impl ToolCacheManager {
                     let _ = fs::remove_dir_all(&tmp_dir);
                     return Err(AppError::Storage(e));
                 }
-                let binary_path = target_dir.join("bin").join(&artifact.binary_relative_path);
+                let binary_path = Self::resolve_bin_candidate(
+                    &target_dir.join("bin"),
+                    &artifact.binary_relative_path,
+                );
                 Ok(binary_path)
             }
             Err(e) => {
@@ -203,6 +248,7 @@ impl ToolCacheManager {
         target_dir: &Path,
         artifact: &ToolArtifact,
         archive_bytes: &[u8],
+        executable_allowlist: &[String],
     ) -> AppResult<PathBuf> {
         // 1. Validation de l'empreinte de l'archive
         let actual_archive_sha256 = Self::compute_sha256(archive_bytes);
@@ -262,7 +308,14 @@ impl ToolCacheManager {
             }
         }
 
-        let binary_path = bin_dir.join(&artifact.binary_relative_path);
+        if !Self::is_safe_relative_path(Path::new(&artifact.binary_relative_path)) {
+            return Err(AppError::InvalidManifest(format!(
+                "unsafe binary_relative_path: {}",
+                artifact.binary_relative_path
+            )));
+        }
+
+        let binary_path = Self::resolve_bin_candidate(&bin_dir, &artifact.binary_relative_path);
         if !binary_path.is_file() {
             return Err(AppError::NotFound);
         }
@@ -272,6 +325,18 @@ impl ToolCacheManager {
             &binary_path,
             fs::Permissions::from_mode(EXECUTABLE_UNIX_MODE),
         )?;
+        for extra in executable_allowlist {
+            if !Self::is_safe_relative_path(Path::new(extra)) {
+                continue;
+            }
+            let extra_path = Self::resolve_bin_candidate(&bin_dir, extra);
+            if extra_path.is_file() {
+                fs::set_permissions(
+                    &extra_path,
+                    fs::Permissions::from_mode(EXECUTABLE_UNIX_MODE),
+                )?;
+            }
+        }
 
         // 4. Validation de l'empreinte du binaire extrait (si renseignée)
         let actual_binary_sha256 = Self::compute_file_sha256(&binary_path)?;
@@ -517,5 +582,86 @@ mod tests {
         assert!(!ToolCacheManager::is_safe_relative_path(Path::new(
             "foo/../../bar"
         )));
+    }
+
+    #[test]
+    fn test_bin_prefix_normalization_and_allowlist_chmod() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let tmp = tempdir()?;
+        let manager = ToolCacheManager::new(tmp.path());
+
+        let mut tar_builder = tar::Builder::new(Vec::new());
+        for (name, body) in [
+            ("mkvmerge", b"#!/bin/sh\n".as_slice()),
+            ("mkvpropedit", b"#!/bin/sh\n".as_slice()),
+        ] {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tar_builder.append_data(&mut header, name, body)?;
+        }
+        let tar_bytes = tar_builder.into_inner()?;
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        std::io::Write::write_all(&mut encoder, &tar_bytes)?;
+        let archive_bytes = encoder.finish()?;
+
+        let artifact = ToolArtifact {
+            arch: "x86_64".into(),
+            archive_url: "https://example.local/mkv.tar.gz".into(),
+            archive_format: "tar.gz".into(),
+            archive_sha256: ToolCacheManager::compute_sha256(&archive_bytes),
+            binary_relative_path: "bin/mkvmerge".into(),
+            binary_sha256: None,
+            permissions: None,
+        };
+        let allowlist = vec!["bin/mkvmerge".into(), "bin/mkvpropedit".into()];
+        let installed = manager.extract_and_install_with_allowlist(
+            "app.mkvtoolnix",
+            "1.0.0",
+            &artifact,
+            &archive_bytes,
+            &allowlist,
+        )?;
+        assert!(installed.is_file());
+        let propedit = manager
+            .tool_dir("app.mkvtoolnix", "1.0.0", "x86_64")
+            .join("bin/mkvpropedit");
+        assert!(propedit.is_file());
+        assert_eq!(
+            fs::metadata(&propedit)?.permissions().mode() & 0o777,
+            EXECUTABLE_UNIX_MODE
+        );
+        let verified = manager.verify_cached_binary(
+            "app.mkvtoolnix",
+            "1.0.0",
+            "x86_64",
+            "bin/mkvmerge",
+            None,
+        )?;
+        assert_eq!(verified, installed);
+        Ok(())
+    }
+
+    #[test]
+    fn test_distribution_deserializes_release_status_and_install_policy()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let raw = r#"{
+            "toolId": "app.demo",
+            "toolVersion": "2.0.0",
+            "releaseStatus": "contract-only",
+            "installPolicy": { "executableAllowlist": ["bin/demo"] },
+            "artifacts": []
+        }"#;
+        let parsed: ToolDistribution = serde_json::from_str(raw)?;
+        assert_eq!(parsed.release_status.as_deref(), Some("contract-only"));
+        assert_eq!(
+            parsed
+                .install_policy
+                .as_ref()
+                .map(|p| p.executable_allowlist.as_slice()),
+            Some(["bin/demo".to_string()].as_slice())
+        );
+        Ok(())
     }
 }

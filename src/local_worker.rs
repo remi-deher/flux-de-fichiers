@@ -1,7 +1,8 @@
 use crate::{
     api::{self, AppState},
     domain::{JobErrorCode, LeaseRequest},
-    media, repository, storage,
+    job_runner::{self, JobRunError},
+    repository, storage,
 };
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -65,18 +66,17 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
         }
     };
     let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
-    let catalog = crate::plugins::list_catalog(&roots);
-    let probe = crate::plugins::required_probe(&catalog);
     let cache = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
-    crate::plugins::ensure_job_tools(
+    let wanted = job_runner::collect_wanted_tools(&claim);
+    crate::plugins::ensure_tools_for_requirements(
         &roots,
         &cache,
-        probe.as_ref(),
+        &wanted,
         &crate::plugins::SyncPolicy::from_env(),
     )
     .await;
-    if !crate::plugins::file_job_may_start(&cache, probe.as_ref()) {
-        report_failure(state, claim.job_id, &lease, JobErrorCode::ProbeUnavailable).await;
+    if let Err(err) = job_runner::ensure_probe_ready(&cache, &claim) {
+        report_failure(state, claim.job_id, &lease, err.code).await;
         tracing::warn!(
             job_id = %claim.job_id,
             "probe contract is not ready on the local worker"
@@ -101,7 +101,6 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
             return;
         }
     };
-    let output = work_dir.join("output.mkv");
     let source_snapshot = work_dir.join("source.mkv");
     let mut heartbeat = tokio::spawn(heartbeat_loop(
         state.pool.clone(),
@@ -117,9 +116,24 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
             claim.source_bytes,
         )
         .await?;
-        let cache_mgr = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
-        // Version figée portée par le bail (même contrat que les workers distants).
-        let frozen_flow = claim.frozen_flow.clone();
+
+        let arr = if claim.frozen_flow.is_some() {
+            let mut ctx = crate::flows::ArrContext::load(
+                &state.pool,
+                &state.config.config_dir,
+                &state.config.input_dir,
+            )
+            .await;
+            if let Some(lib_id) = claim.library_id
+                && let Ok(Some(local_path)) =
+                    repository::library_worker_local_path(&state.pool, lib_id, worker_id).await
+            {
+                ctx.media_root = local_path.into();
+            }
+            Some(ctx)
+        } else {
+            None
+        };
 
         let state_progress = state.clone();
         let job_id = claim.job_id;
@@ -127,41 +141,24 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
             state_progress.notify_job_progress(job_id, pct, Some(line.to_string()));
         });
 
-        let http_client = reqwest::Client::new();
-        let (final_output, warning) = if let Some(flow) = frozen_flow.as_ref() {
-            let arr = crate::flows::ArrContext::load(
-                &state.pool,
-                &state.config.config_dir,
-                &state.config.input_dir,
-            )
-            .await;
-            let engine = crate::flows::FlowEngine::new(&cache_mgr, &http_client)
-                .with_secrets_dir(&state.config.config_dir)
-                .with_arr(&arr);
-            let outcome = engine
-                .execute_flow(flow, job_id, &source_snapshot, &work_dir, progress_cb)
-                .await
-                .map_err(|error| anyhow::anyhow!("flow_execution_failed: {error}"))?;
-            (outcome.working_file, outcome.warning)
-        } else {
-            let mkvmerge_bin = cache_mgr.resolve_executable(
-                crate::plugins::REMUX_TOOL_ID,
-                crate::plugins::REMUX_TOOL_VERSION,
-                "mkvmerge",
-                "MKVMERGE",
-            );
-            let warning = media::remux_with_progress(
-                &mkvmerge_bin,
-                &source_snapshot,
-                &output,
-                move |pct, line| {
-                    progress_cb(pct, line);
-                },
-            )
-            .await
-            .map_err(|error| anyhow::anyhow!("remux_failed: {error}"))?;
-            (output, warning)
-        };
+        let execution = job_runner::execute_claim_processing(
+            &claim,
+            &cache,
+            &state.http_client,
+            Some(&state.config.config_dir),
+            arr.as_ref(),
+            &source_snapshot,
+            &work_dir,
+            progress_cb,
+        )
+        .await?;
+
+        if !execution.steps.is_empty()
+            && let Err(error) =
+                repository::save_job_steps(&state.pool, claim.job_id, &execution.steps).await
+        {
+            tracing::warn!(job_id = %claim.job_id, error = %error, "failed to persist job steps");
+        }
 
         crate::api::transfers::publish_staged(
             state,
@@ -169,8 +166,9 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
             &lease,
             &job,
             &source_snapshot,
-            &final_output,
-            warning,
+            &execution.working_file,
+            execution.warning,
+            execution.output_profile,
         )
         .await?;
         anyhow::Ok(())
@@ -187,14 +185,13 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
         }
     };
     if let Err(error) = outcome {
-        let code = if error.to_string().contains("probe_unavailable") {
-            JobErrorCode::ProbeUnavailable
+        let code = if let Some(run_err) = error.downcast_ref::<JobRunError>() {
+            if !run_err.steps.is_empty() {
+                let _ = repository::save_job_steps(&state.pool, claim.job_id, &run_err.steps).await;
+            }
+            run_err.code
         } else if error.to_string().contains("source_integrity") {
             JobErrorCode::SourceIntegrity
-        } else if error.to_string().contains("remux_failed")
-            || error.to_string().contains("flow_execution_failed")
-        {
-            JobErrorCode::RemuxFailed
         } else {
             JobErrorCode::TransferFailed
         };

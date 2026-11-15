@@ -1,6 +1,5 @@
-//! Système : versions et mise à jour, clé de chiffrement, base de données, limites et espace disque ; socle de la section Réseau.
+//! Système : versions et mise à jour, clé de chiffrement, base de données, limites et espace disque ; socle du tableau de bord Paramètres.
 
-use crate::api;
 use crate::ui::{ProgressBar, SectionHeader};
 use flux_shared::format::format_bytes;
 use flux_shared::system::{KeySource, SystemStatus, VolumeSpace};
@@ -8,7 +7,6 @@ use leptos::prelude::*;
 
 /// Version de l'interface WASM actuellement chargée dans le navigateur.
 const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-const STATUS_PATH: &str = "/api/v1/system/status";
 const SECONDS_PER_MINUTE: i64 = 60;
 const SECONDS_PER_HOUR: i64 = 60 * SECONDS_PER_MINUTE;
 const SECONDS_PER_DAY: i64 = 24 * SECONDS_PER_HOUR;
@@ -18,6 +16,10 @@ pub fn key_source_label(source: KeySource) -> &'static str {
         KeySource::Local => "Fichier local (/config/secret_key)",
         KeySource::External => "Fichier fourni (SECRET_KEY_FILE)",
     }
+}
+
+pub fn is_version_coherent(status: &SystemStatus) -> bool {
+    status.version == CLIENT_VERSION
 }
 
 /// Ligne d'une grille de détails : terme et valeur, la valeur éventuellement en chasse fixe.
@@ -62,24 +64,25 @@ pub fn DetailGrid(rows: Vec<DetailRow>) -> impl IntoView {
 pub fn StatusSection(
     title: &'static str,
     subtitle: &'static str,
+    status: Signal<Option<Result<SystemStatus, String>>>,
+    hidden: Signal<bool>,
     rows: fn(&SystemStatus) -> Vec<DetailRow>,
     #[prop(optional)] extra: Option<fn(&SystemStatus) -> AnyView>,
     #[prop(optional)] footer: Option<AnyView>,
 ) -> impl IntoView {
-    let status = LocalResource::new(|| api::get::<SystemStatus>(STATUS_PATH));
     view! {
-        <div class="settings-section section-panel">
+        <section class="settings-section section-panel" hidden=move || hidden.get()>
             <SectionHeader title=title subtitle=subtitle />
             {move || match status.get() {
                 None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),
-                Some(Err(error)) => view! { <p class="text-danger">{error.message()}</p> }.into_any(),
+                Some(Err(message)) => view! { <p class="text-danger">{message}</p> }.into_any(),
                 Some(Ok(status)) => view! {
                     <DetailGrid rows=rows(&status) />
                     {extra.map(|render| render(&status))}
                 }.into_any(),
             }}
             {footer}
-        </div>
+        </section>
     }
 }
 
@@ -176,24 +179,34 @@ fn system_rows(status: &SystemStatus) -> Vec<DetailRow> {
 }
 
 #[component]
-pub fn SystemSection() -> impl IntoView {
+pub fn SystemSection(
+    status: Signal<Option<Result<SystemStatus, String>>>,
+    hidden: Signal<bool>,
+) -> impl IntoView {
     let footer = view! {
-        <p class="form-help">
-            "Rotation de la clé : arrêter le central, puis lancer "
-            <code>"flux-de-fichiers rotate-secret"</code>
-            " ; une copie de l'ancienne clé et de la base est rangée dans /config/backups."
-        </p>
-        <p class="form-help">
-            "Version disponible : le central ne contacte aucun service externe, il ne peut donc pas la connaître. Les versions publiées se consultent sur le dépôt de l'image."
-        </p>
-        <p class="form-help">
-            "Mettre à jour : sauvegarder /config, tirer la nouvelle image puis redémarrer le conteneur du central, ensuite celui de chaque worker. Les migrations de la base s'appliquent au démarrage."
-        </p>
+        <details class="settings-help-details">
+            <summary class="settings-help-details__summary">
+                "Procédures de maintenance (clé de chiffrement & mise à jour)"
+            </summary>
+            <div class="settings-help-details__body">
+                <p class="form-help">
+                    "Rotation de la clé : arrêter le central, puis lancer "
+                    <code>"flux-de-fichiers rotate-secret"</code>
+                    " ; une copie de l'ancienne clé et de la base est rangée dans /config/backups."
+                </p>
+                <p class="form-help">
+                    "Version disponible : le central ne contacte aucun service externe, il ne peut donc pas la connaître. Les versions publiées se consultent sur le dépôt de l'image."
+                </p>
+                <p class="form-help">
+                    "Mettre à jour : sauvegarder /config, tirer la nouvelle image puis redémarrer le conteneur du central, ensuite celui de chaque worker. Les migrations de la base s'appliquent au démarrage."
+                </p>
+            </div>
+        </details>
     }
     .into_any();
     view! {
-        <StatusSection title="Système" subtitle="Versions, mise à jour, clé de chiffrement, base de données et espace disque."
-            rows=system_rows extra=volume_meter footer=footer />
+        <StatusSection title="Système & Stockage" subtitle="Versions, clé de chiffrement, base de données et espace disque."
+            status=status hidden=hidden rows=system_rows extra=volume_meter footer=footer />
     }
 }
 

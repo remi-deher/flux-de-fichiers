@@ -33,7 +33,7 @@ fn CheckRow(check: DiagnosticCheck) -> impl IntoView {
 }
 
 #[component]
-pub fn DiagnosticsCard() -> impl IntoView {
+pub fn DiagnosticsCard(hidden: Signal<bool>) -> impl IntoView {
     let run = Action::new_local(|_: &()| async move {
         api::post::<_, DiagnosticsReport>(
             DIAGNOSTICS_PATH,
@@ -49,8 +49,8 @@ pub fn DiagnosticsCard() -> impl IntoView {
     }
     .into_any();
     view! {
-        <div class="settings-section">
-            <SectionHeader title="Diagnostic"
+        <section class="section-panel settings-section" hidden=move || hidden.get()>
+            <SectionHeader title="Diagnostic de l'installation"
                 subtitle="Cohérence de l'adresse publique, TLS, proxy, workers et courriel." actions=actions />
             {move || match run.value().get() {
                 None => view! { <p class="text-dim">"Lancez la vérification pour contrôler cette installation."</p> }.into_any(),
@@ -58,7 +58,7 @@ pub fn DiagnosticsCard() -> impl IntoView {
                 Some(Ok(report)) => report.checks.into_iter()
                     .map(|check| view! { <CheckRow check=check /> }).collect_view().into_any(),
             }}
-        </div>
+        </section>
     }
 }
 

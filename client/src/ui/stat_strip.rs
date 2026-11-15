@@ -28,7 +28,7 @@ impl StatItem {
     }
 }
 
-/// Rangée compacte de pilules statistiques sous un `PageHeader`.
+/// Rangée compacte de pilules statistiques en tête d'écran.
 #[component]
 pub fn StatStrip(
     aria_label: &'static str,

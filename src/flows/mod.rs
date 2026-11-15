@@ -155,11 +155,11 @@ impl<'a> FlowEngine<'a> {
         let input_node = graph
             .nodes
             .iter()
-            .find(|node| node.kind == FlowBlockKind::FileInput)
+            .find(|node| block::is_entry_block(&node.kind))
             .cloned()
             .unwrap_or_else(|| FlowNode {
                 id: "node-1".into(),
-                kind: FlowBlockKind::FileInput,
+                kind: FlowBlockKind::parse("block.core.file-input"),
                 name: "Fichier source".into(),
                 config: serde_json::Value::Null,
                 extra: serde_json::Map::new(),
@@ -333,12 +333,12 @@ mod tests {
         let graph: FlowGraph = serde_json::from_str(
             r#"{"nodes":[{"id":"node-1","type":"file-input","name":"Source"},{"id":"node-2","type":"block.video.remux-mp4","name":"MP4"},{"id":"node-3","type":"legacy-unknown","name":"X"}],"connections":[{"from":"node-1","to":"node-2"}]}"#,
         )?;
-        assert_eq!(graph.nodes[0].kind, FlowBlockKind::FileInput);
-        assert_eq!(graph.nodes[1].kind, FlowBlockKind::RemuxMp4);
+        assert_eq!(graph.nodes[0].kind, FlowBlockKind::parse("file-input"));
         assert_eq!(
-            graph.nodes[2].kind,
-            FlowBlockKind::Other("legacy-unknown".into())
+            graph.nodes[1].kind,
+            FlowBlockKind::parse("block.video.remux-mp4")
         );
+        assert_eq!(graph.nodes[2].kind, FlowBlockKind::parse("legacy-unknown"));
         let encoded = serde_json::to_value(&graph)?;
         assert_eq!(encoded["nodes"][1]["type"], "block.video.remux-mp4");
         Ok(())

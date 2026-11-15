@@ -14,12 +14,13 @@ use serde_json::{Map, Value};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 
-const WEBHOOK_NODE_TYPE: &str = "webhook";
+const WEBHOOK_NODE_TYPES: [&str; 2] = ["webhook", "block.core.webhook"];
 const HEADERS_KEY: &str = "custom_headers";
 
 /// En-têtes du bloc si c'est un webhook qui en déclare.
 fn headers_of(node: &mut Value) -> Option<&mut Map<String, Value>> {
-    if node.get("type").and_then(Value::as_str) != Some(WEBHOOK_NODE_TYPE) {
+    let kind = node.get("type").and_then(Value::as_str)?;
+    if !WEBHOOK_NODE_TYPES.contains(&kind) {
         return None;
     }
     node.get_mut("config")?

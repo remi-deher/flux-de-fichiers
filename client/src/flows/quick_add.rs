@@ -5,7 +5,7 @@ use super::presentation::NodeDomain;
 use super::state::Editor;
 use crate::ui::search::matches;
 use crate::ui::{Icon, IconName, Toasts};
-use flux_shared::flows::{FlowBlockKind, OwnedBlockSpec};
+use flux_shared::flows::{OwnedBlockSpec, find_owned};
 use leptos::prelude::*;
 
 const POPOVER_WIDTH: f64 = 280.0;
@@ -13,45 +13,6 @@ const POPOVER_HEIGHT: f64 = 340.0;
 const POPOVER_MARGIN: f64 = 12.0;
 const ITEM_ICON_SIZE: u32 = 14;
 const SEARCH_ICON_SIZE: u32 = 14;
-
-/// Suites logiques recommandées selon le type de bloc source.
-pub fn suggested_next_kinds(source: Option<&FlowBlockKind>) -> &'static [&'static str] {
-    match source {
-        Some(FlowBlockKind::FileInput) => &[
-            "condition",
-            "block.media.inspect",
-            "block.video.remux-mkv",
-            "block.video.encode",
-        ],
-        Some(FlowBlockKind::Condition) => &[
-            "block.video.encode",
-            "block.audio.encode",
-            "block.video.remux-mkv",
-            "file-output",
-        ],
-        Some(FlowBlockKind::MediaInspect) => {
-            &["condition", "block.video.encode", "block.video.remux-mkv"]
-        }
-        Some(FlowBlockKind::VideoEncode | FlowBlockKind::AudioEncode) => &[
-            "block.video.remux-mkv",
-            "mkvpropedit",
-            "sonarr-rescan",
-            "radarr-rescan",
-            "file-output",
-        ],
-        Some(FlowBlockKind::Mkvpropedit | FlowBlockKind::RemuxMkv | FlowBlockKind::RemuxMp4) => {
-            &["sonarr-rescan", "radarr-rescan", "webhook", "file-output"]
-        }
-        Some(FlowBlockKind::SonarrRescan) => &["sonarr-rename", "webhook", "file-output"],
-        Some(FlowBlockKind::RadarrRescan) => &["radarr-rename", "webhook", "file-output"],
-        _ => &[
-            "condition",
-            "block.video.encode",
-            "block.video.remux-mkv",
-            "file-output",
-        ],
-    }
-}
 
 /// Résultats partitionnés du menu Quick-Add.
 #[derive(Clone, Debug, PartialEq)]
@@ -74,12 +35,12 @@ pub fn quick_add_candidates(
     catalog: &[OwnedBlockSpec],
     query: &str,
     requires_input: bool,
-    source: Option<&FlowBlockKind>,
+    source: Option<&OwnedBlockSpec>,
 ) -> QuickAddResults {
     let trimmed = query.trim();
     let eligible: Vec<OwnedBlockSpec> = catalog
         .iter()
-        .filter(|spec| !requires_input || (spec.has_input && spec.kind != "file-input"))
+        .filter(|spec| !requires_input || spec.has_input)
         .filter(|spec| {
             trimmed.is_empty()
                 || matches(
@@ -97,10 +58,10 @@ pub fn quick_add_candidates(
         };
     }
 
-    let preferred = suggested_next_kinds(source);
+    let preferred = source.map_or(&[][..], |spec| spec.suggested_next.as_slice());
     let mut suggested = Vec::new();
     for kind in preferred {
-        if let Some(spec) = eligible.iter().find(|s| s.kind == *kind) {
+        if let Some(spec) = eligible.iter().find(|s| s.matches_kind(kind)) {
             suggested.push(spec.clone());
         }
     }
@@ -127,7 +88,7 @@ fn render_quick_add_item(
     index: usize,
     active_idx: RwSignal<usize>,
 ) -> impl IntoView {
-    let domain = NodeDomain::from_block(&spec.kind_enum(), &spec.category);
+    let domain = NodeDomain::from_spec(Some(&spec), &spec.category);
     let accent_style = format!("--component-accent: {}", domain.accent_var());
     let category = spec.category.clone();
     let label = spec.label.clone();
@@ -186,7 +147,10 @@ pub fn QuickAddPopover(editor: Editor, board_ref: NodeRef<leptos::html::Div>) ->
         });
         let results = Memo::new(move |_| {
             editor.catalog.with(|catalog| {
-                quick_add_candidates(catalog, &query.get(), requires_input, source_kind.as_ref())
+                let source_spec = source_kind
+                    .as_ref()
+                    .and_then(|kind| find_owned(catalog, kind));
+                quick_add_candidates(catalog, &query.get(), requires_input, source_spec)
             })
         });
 
@@ -253,8 +217,13 @@ pub fn QuickAddPopover(editor: Editor, board_ref: NodeRef<leptos::html::Div>) ->
                         let res = results.get();
                         let sug_len = res.suggested.len();
                         if res.suggested.is_empty() && res.others.is_empty() {
+                            let empty_msg = if editor.catalog.with(|c| c.is_empty()) {
+                                "Aucun bloc disponible — synchronisez un dépôt dans Plugins."
+                            } else {
+                                "Aucun composant trouvé."
+                            };
                             return view! {
-                                <p class="flow-quick-add__empty">"Aucun composant trouvé."</p>
+                                <p class="flow-quick-add__empty">{empty_msg}</p>
                             }
                             .into_any();
                         }
@@ -290,16 +259,18 @@ pub fn QuickAddPopover(editor: Editor, board_ref: NodeRef<leptos::html::Div>) ->
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::test_catalog;
     use super::*;
-    use flux_shared::flows::native_owned_catalog;
+    use flux_shared::flows::FlowBlockKind;
 
     #[test]
     fn quick_add_suggests_contextual_blocks_and_filters_inputless_on_branch() {
-        let catalog = native_owned_catalog();
-        let res = quick_add_candidates(&catalog, "", true, Some(&FlowBlockKind::FileInput));
+        let catalog = test_catalog();
+        let entry = find_owned(&catalog, &FlowBlockKind::parse("block.core.file-input"));
+        let res = quick_add_candidates(&catalog, "", true, entry);
         assert!(!res.suggested.is_empty());
-        assert_eq!(res.suggested[0].kind, "condition");
-        assert!(res.ordered().iter().all(|s| s.kind != "file-input"));
+        assert_eq!(res.suggested[0].kind, "block.core.condition");
+        assert!(res.ordered().iter().all(|s| s.has_input));
 
         let filtered = quick_add_candidates(&catalog, "sonarr", true, None);
         assert!(filtered.suggested.is_empty());

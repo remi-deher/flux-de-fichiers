@@ -36,16 +36,23 @@ fn refusal(error: GraphError) -> &'static str {
 
 /// Relie `node` à la suite de `target` : première sortie libre, sinon insertion dans la
 /// liaison simple existante (l'ancienne suite passe derrière `node`).
-fn attach_after(graph: &mut FlowGraph, target: &str, node: &str) -> Result<(), &'static str> {
+fn attach_after(
+    graph: &mut FlowGraph,
+    target: &str,
+    node: &str,
+    catalog: &[OwnedBlockSpec],
+) -> Result<(), &'static str> {
     let ports = graph
         .node(target)
-        .map(|source| graph.output_ports(source))
+        .map(|source| graph.output_ports(source, catalog))
         .ok_or(refusal(GraphError::UnknownNode))?;
     if let Some(free) = ports
         .iter()
         .find(|port| graph.outgoing(target).all(|edge| &edge.port != *port))
     {
-        return graph.connect(target, free.clone(), node).map_err(refusal);
+        return graph
+            .connect(target, free.clone(), node, catalog)
+            .map_err(refusal);
     }
     let Some(next) = graph
         .outgoing(target)
@@ -55,8 +62,10 @@ fn attach_after(graph: &mut FlowGraph, target: &str, node: &str) -> Result<(), &
         return Err(NO_FREE_OUTPUT);
     };
     graph.disconnect(target, &None);
-    graph.connect(target, None, node).map_err(refusal)?;
-    graph.connect(node, None, &next).map_err(refusal)
+    graph
+        .connect(target, None, node, catalog)
+        .map_err(refusal)?;
+    graph.connect(node, None, &next, catalog).map_err(refusal)
 }
 
 /// Dépôt d'un bloc de la palette sur la carte `target`.
@@ -66,9 +75,10 @@ fn drop_new(
     kind: &str,
     label: &str,
     defaults: &Value,
+    catalog: &[OwnedBlockSpec],
 ) -> Result<Dropped, &'static str> {
     let mut next = graph.clone();
-    let node_id = next.append(FlowBlockKind::parse(kind), label, defaults.clone());
+    let node_id = next.append(FlowBlockKind::parse(kind), label, defaults.clone(), catalog);
     // `append` relie d'office au dernier bloc libre ; ici c'est la cible qui décide.
     let automatic: Vec<_> = next
         .incoming(&node_id)
@@ -77,7 +87,7 @@ fn drop_new(
     for (from, port) in automatic {
         next.disconnect(&from, &port);
     }
-    attach_after(&mut next, target, &node_id)?;
+    attach_after(&mut next, target, &node_id, catalog)?;
     Ok(Dropped {
         graph: next,
         node_id,
@@ -85,7 +95,12 @@ fn drop_new(
 }
 
 /// Dépôt de la carte `moved` derrière la carte `target` ; seul un maillon simple se déplace.
-fn drop_move(graph: &FlowGraph, target: &str, moved: &str) -> Result<Dropped, &'static str> {
+fn drop_move(
+    graph: &FlowGraph,
+    target: &str,
+    moved: &str,
+    catalog: &[OwnedBlockSpec],
+) -> Result<Dropped, &'static str> {
     if target == moved {
         return Err(refusal(GraphError::SelfLink));
     }
@@ -105,7 +120,7 @@ fn drop_move(graph: &FlowGraph, target: &str, moved: &str) -> Result<Dropped, &'
     let mut next = graph.clone();
     next.remove(moved);
     next.nodes.insert(index, node);
-    attach_after(&mut next, target, moved)?;
+    attach_after(&mut next, target, moved, catalog)?;
     Ok(Dropped {
         graph: next,
         node_id: moved.to_owned(),
@@ -117,14 +132,15 @@ pub fn drop_outcome(
     graph: &FlowGraph,
     payload: &DragPayload,
     target: &str,
+    catalog: &[OwnedBlockSpec],
 ) -> Result<Dropped, &'static str> {
     match payload {
         DragPayload::Palette {
             kind,
             label,
             defaults,
-        } => drop_new(graph, target, kind, label, defaults),
-        DragPayload::Card(moved) => drop_move(graph, target, moved),
+        } => drop_new(graph, target, kind, label, defaults, catalog),
+        DragPayload::Card(moved) => drop_move(graph, target, moved, catalog),
     }
 }
 
@@ -172,8 +188,7 @@ pub fn can_connect(
     let (Some(source), Some(target)) = (graph.node(from), graph.node(to)) else {
         return false;
     };
-    let target_has_input = target.kind != FlowBlockKind::FileInput
-        && find_owned(catalog, &target.kind).is_none_or(|spec| spec.has_input);
+    let target_has_input = find_owned(catalog, &target.kind).is_none_or(|spec| spec.has_input);
     if !target_has_input {
         return false;
     }
@@ -231,15 +246,16 @@ pub fn insert_on_branch(
     target: &BranchTarget,
     spec: &OwnedBlockSpec,
     defaults: Value,
+    catalog: &[OwnedBlockSpec],
 ) -> Result<String, GraphError> {
     let Some(source) = graph.node(&target.source_id) else {
         return Err(GraphError::UnknownNode);
     };
     let kind = spec.kind_enum();
-    if !spec.has_input || kind == FlowBlockKind::FileInput {
+    if !spec.has_input {
         return Err(GraphError::InvalidPort);
     }
-    let source_has_outputs = source.kind != FlowBlockKind::FileOutput;
+    let source_has_outputs = !node_output_ports(graph, source, catalog).is_empty();
     if !source_has_outputs {
         return Err(GraphError::InvalidPort);
     }
@@ -339,20 +355,36 @@ pub fn duplicate_subgraph(graph: &mut FlowGraph, ids: &HashSet<String>) -> HashM
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::test_catalog;
     use super::*;
     use serde_json::json;
 
-    fn chain() -> (FlowGraph, String, String) {
+    fn chain(catalog: &[OwnedBlockSpec]) -> (FlowGraph, String, String) {
         let mut graph = FlowGraph::default();
-        let input = graph.append(FlowBlockKind::FileInput, "Entrée", json!({}));
-        let remux = graph.append(FlowBlockKind::RemuxMkv, "Remux", json!({}));
-        graph.append(FlowBlockKind::FileOutput, "Fin", json!({}));
+        let input = graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            catalog,
+        );
+        let remux = graph.append(
+            FlowBlockKind::parse("block.video.remux-mkv"),
+            "Remux",
+            json!({}),
+            catalog,
+        );
+        graph.append(
+            FlowBlockKind::parse("block.core.file-output"),
+            "Fin",
+            json!({}),
+            catalog,
+        );
         (graph, input, remux)
     }
 
-    fn palette(kind: &FlowBlockKind) -> DragPayload {
+    fn palette(kind: &str) -> DragPayload {
         DragPayload::Palette {
-            kind: kind.as_str().to_owned(),
+            kind: kind.to_owned(),
             label: "Nouveau".into(),
             defaults: json!({}),
         }
@@ -360,8 +392,9 @@ mod tests {
 
     #[test]
     fn a_palette_block_is_inserted_into_the_simple_link() {
-        let (graph, input, remux) = chain();
-        let dropped = drop_outcome(&graph, &palette(&FlowBlockKind::Webhook), &input);
+        let catalog = test_catalog();
+        let (graph, input, remux) = chain(&catalog);
+        let dropped = drop_outcome(&graph, &palette("block.core.webhook"), &input, &catalog);
         let Ok(dropped) = dropped else {
             panic!("dépôt refusé");
         };
@@ -379,40 +412,56 @@ mod tests {
 
     #[test]
     fn a_free_output_is_used_before_inserting() {
+        let catalog = test_catalog();
         let mut graph = FlowGraph::default();
-        let input = graph.append(FlowBlockKind::FileInput, "Entrée", json!({}));
-        let dropped = drop_outcome(&graph, &palette(&FlowBlockKind::RemuxMkv), &input);
+        let input = graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            &catalog,
+        );
+        let dropped = drop_outcome(&graph, &palette("block.video.remux-mkv"), &input, &catalog);
         assert_eq!(dropped.map(|d| d.graph.connections.len()), Ok(1));
     }
 
     #[test]
     fn a_block_without_input_is_refused_and_leaves_the_graph_alone() {
-        let (graph, input, _) = chain();
-        let refused = drop_outcome(&graph, &palette(&FlowBlockKind::FileInput), &input);
+        let catalog = test_catalog();
+        let (graph, input, _) = chain(&catalog);
+        let refused = drop_outcome(&graph, &palette("block.core.file-input"), &input, &catalog);
         assert!(refused.is_err());
     }
 
     #[test]
     fn a_terminal_target_has_no_free_output() {
-        let (graph, _, _) = chain();
+        let catalog = test_catalog();
+        let (graph, _, _) = chain(&catalog);
         let end = graph.nodes[2].id.clone();
         assert_eq!(
-            drop_outcome(&graph, &palette(&FlowBlockKind::Webhook), &end),
+            drop_outcome(&graph, &palette("block.core.webhook"), &end, &catalog),
             Err(NO_FREE_OUTPUT)
         );
     }
 
     #[test]
     fn a_card_moves_behind_another_and_the_chain_closes_up() {
-        let (mut graph, input, remux) = chain();
-        let hook = graph.append(FlowBlockKind::Webhook, "Hook", json!({}));
+        let catalog = test_catalog();
+        let (mut graph, input, remux) = chain(&catalog);
+        let hook = graph.append(
+            FlowBlockKind::parse("block.core.webhook"),
+            "Hook",
+            json!({}),
+            &catalog,
+        );
         let end = graph.nodes[2].id.clone();
         // Fin est terminal : Hook reste non relié, puis s'insère derrière l'entrée.
-        let Ok(moved) = drop_outcome(&graph, &DragPayload::Card(remux.clone()), &input) else {
+        let Ok(moved) = drop_outcome(&graph, &DragPayload::Card(remux.clone()), &input, &catalog)
+        else {
             panic!("déplacement refusé");
         };
         assert_eq!(moved.graph.connections.len(), graph.connections.len());
-        let Ok(moved) = drop_outcome(&graph, &DragPayload::Card(hook.clone()), &input) else {
+        let Ok(moved) = drop_outcome(&graph, &DragPayload::Card(hook.clone()), &input, &catalog)
+        else {
             panic!("déplacement refusé");
         };
         assert_eq!(
@@ -429,33 +478,55 @@ mod tests {
 
     #[test]
     fn the_entry_block_cannot_move_behind_another() {
-        let (graph, input, remux) = chain();
-        assert!(drop_outcome(&graph, &DragPayload::Card(input), &remux).is_err());
+        let catalog = test_catalog();
+        let (graph, input, remux) = chain(&catalog);
+        assert!(drop_outcome(&graph, &DragPayload::Card(input), &remux, &catalog).is_err());
     }
 
     #[test]
     fn a_card_cannot_be_dropped_on_itself_or_move_while_branching() {
-        let (graph, input, _) = chain();
-        assert!(drop_outcome(&graph, &DragPayload::Card(input.clone()), &input).is_err());
+        let catalog = test_catalog();
+        let (graph, input, _) = chain(&catalog);
+        assert!(drop_outcome(&graph, &DragPayload::Card(input.clone()), &input, &catalog).is_err());
         let mut branching = FlowGraph::default();
-        branching.append(FlowBlockKind::FileInput, "Entrée", json!({}));
-        let cond = branching.append(FlowBlockKind::Condition, "Si", json!({}));
-        let yes = branching.append(FlowBlockKind::RemuxMkv, "Oui", json!({}));
-        let no = branching.append(FlowBlockKind::RemuxMkv, "Non", json!({}));
-        let _ = branching.connect(&cond, Some("true".into()), &yes);
-        let _ = branching.connect(&cond, Some("false".into()), &no);
+        branching.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            &catalog,
+        );
+        let cond = branching.append(
+            FlowBlockKind::parse("block.core.condition"),
+            "Si",
+            json!({}),
+            &catalog,
+        );
+        let yes = branching.append(
+            FlowBlockKind::parse("block.video.remux-mkv"),
+            "Oui",
+            json!({}),
+            &catalog,
+        );
+        let no = branching.append(
+            FlowBlockKind::parse("block.video.remux-mkv"),
+            "Non",
+            json!({}),
+            &catalog,
+        );
+        let _ = branching.connect(&cond, Some("true".into()), &yes, &catalog);
+        let _ = branching.connect(&cond, Some("false".into()), &no, &catalog);
         let other = yes;
         assert_eq!(
-            drop_outcome(&branching, &DragPayload::Card(cond), &other),
+            drop_outcome(&branching, &DragPayload::Card(cond), &other, &catalog),
             Err(BRANCHING_BLOCK)
         );
     }
 
     #[test]
     fn insert_on_branch_bridges_existing_edge_and_rejects_file_input() {
-        let catalog = flux_shared::flows::native_owned_catalog();
-        let (mut graph, input, remux) = chain();
-        let webhook_spec = catalog.iter().find(|s| s.kind == "webhook").cloned();
+        let catalog = test_catalog();
+        let (mut graph, input, remux) = chain(&catalog);
+        let webhook_spec = catalog.iter().find(|s| s.matches_kind("webhook")).cloned();
         let Some(webhook_spec) = webhook_spec else {
             panic!("webhook spec missing");
         };
@@ -469,6 +540,7 @@ mod tests {
             &target,
             &webhook_spec,
             json!({"url": "https://a"}),
+            &catalog,
         );
         let Ok(new_id) = inserted else {
             panic!("insertion refusée");
@@ -482,20 +554,23 @@ mod tests {
             Some(remux.as_str())
         );
 
-        let input_spec = catalog.iter().find(|s| s.kind == "file-input").cloned();
+        let input_spec = catalog
+            .iter()
+            .find(|s| s.matches_kind("file-input"))
+            .cloned();
         let Some(input_spec) = input_spec else {
             panic!("file-input spec missing");
         };
         assert_eq!(
-            insert_on_branch(&mut graph, &target, &input_spec, json!({})),
+            insert_on_branch(&mut graph, &target, &input_spec, json!({}), &catalog),
             Err(GraphError::InvalidPort)
         );
     }
 
     #[test]
     fn duplicate_node_clones_config_and_connect_checked_guards_cycles() {
-        let catalog = flux_shared::flows::native_owned_catalog();
-        let (mut graph, input, remux) = chain();
+        let catalog = test_catalog();
+        let (mut graph, input, remux) = chain(&catalog);
         let copy_id = duplicate_node(&mut graph, &remux);
         let Some(copy_id) = copy_id else {
             panic!("duplicate failed");
@@ -521,7 +596,8 @@ mod tests {
 
     #[test]
     fn duplicate_subgraph_preserves_internal_edges_only() {
-        let (mut graph, input, remux) = chain();
+        let catalog = test_catalog();
+        let (mut graph, input, remux) = chain(&catalog);
         let Some(output) = graph.outgoing(&remux).next().map(|edge| edge.to.clone()) else {
             panic!("fin absente de la chaîne");
         };

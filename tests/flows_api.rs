@@ -13,7 +13,9 @@ use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::Arc;
 use tower::ServiceExt;
 
-async fn test_app() -> anyhow::Result<axum::Router> {
+async fn test_app_with_plugins(
+    plugins_dir: Option<std::path::PathBuf>,
+) -> anyhow::Result<axum::Router> {
     let config = Config {
         bind: "127.0.0.1:3000".parse()?,
         database_url: "sqlite::memory:".into(),
@@ -21,7 +23,7 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         input_dir: "var/input".into(),
         config_dir: "var/config".into(),
         tools_cache_dir: "var/tools-cache".into(),
-        plugins_dir: None,
+        plugins_dir,
         static_dir: "frontend/dist".into(),
         max_file_bytes: 1024,
         local_worker: false,
@@ -41,6 +43,10 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         config: Arc::new(config),
         events_tx,
     }))
+}
+
+async fn test_app() -> anyhow::Result<axum::Router> {
+    test_app_with_plugins(None).await
 }
 
 #[test]
@@ -409,7 +415,7 @@ async fn test_resaving_a_masked_flow_keeps_the_stored_header() -> anyhow::Result
 }
 
 #[tokio::test]
-async fn test_flow_blocks_catalog_includes_native_encode_blocks() -> anyhow::Result<()> {
+async fn test_flow_blocks_catalog_is_empty_without_plugins() -> anyhow::Result<()> {
     let app = test_app().await?;
     let req = Request::builder()
         .uri("/api/v1/flows/blocks")
@@ -418,26 +424,118 @@ async fn test_flow_blocks_catalog_includes_native_encode_blocks() -> anyhow::Res
             "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
         )
         .body(Body::empty())?;
-    let resp = app.clone().oneshot(req).await?;
+    let resp = app.oneshot(req).await?;
     assert_eq!(resp.status(), StatusCode::OK);
     let bytes = to_bytes(resp.into_body(), 64 * 1024).await?;
     let blocks: Vec<serde_json::Value> = serde_json::from_slice(&bytes)?;
+    assert!(blocks.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_flow_blocks_catalog_loads_from_plugins_directory() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    std::fs::create_dir_all(dir.path().join("catalogue"))?;
+    std::fs::create_dir_all(dir.path().join("plugins/core/blocks"))?;
+    std::fs::create_dir_all(dir.path().join("plugins/video/blocks"))?;
+    std::fs::write(
+        dir.path().join("catalogue/index.json"),
+        serde_json::json!({
+            "schemaVersion": "1.0.0",
+            "entries": [
+                {
+                    "id": "plugin.core",
+                    "type": "plugin",
+                    "version": "1.0.0",
+                    "name": "Noyau",
+                    "manifestPath": "plugins/core/manifest.json",
+                    "capability": "other"
+                },
+                {
+                    "id": "plugin.video",
+                    "type": "plugin",
+                    "version": "1.0.0",
+                    "name": "Vidéo",
+                    "manifestPath": "plugins/video/manifest.json",
+                    "capability": "video"
+                },
+                {
+                    "id": "block.core.file-input",
+                    "type": "block",
+                    "owner": "plugin.core",
+                    "version": "1.0.0",
+                    "name": "Fichier source",
+                    "manifestPath": "plugins/core/blocks/file-input.json"
+                },
+                {
+                    "id": "block.video.encode",
+                    "type": "block",
+                    "owner": "plugin.video",
+                    "version": "1.0.0",
+                    "name": "Encodage Vidéo",
+                    "manifestPath": "plugins/video/blocks/video-encode.json"
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+    std::fs::write(
+        dir.path().join("plugins/core/manifest.json"),
+        r#"{"schemaVersion":"1.1.0","id":"plugin.core","type":"plugin","version":"1.0.0","name":"Noyau"}"#,
+    )?;
+    std::fs::write(
+        dir.path().join("plugins/video/manifest.json"),
+        r#"{"schemaVersion":"1.1.0","id":"plugin.video","type":"plugin","version":"1.0.0","name":"Vidéo"}"#,
+    )?;
+    std::fs::write(
+        dir.path().join("plugins/core/blocks/file-input.json"),
+        serde_json::json!({
+            "schemaVersion": "1.1.0",
+            "id": "block.core.file-input",
+            "aliases": ["file-input"],
+            "version": "1.0.0",
+            "name": "Fichier source",
+            "category": "io",
+            "ui": { "category": "Entrée", "hasInput": false, "fields": [] }
+        })
+        .to_string(),
+    )?;
+    std::fs::write(
+        dir.path().join("plugins/video/blocks/video-encode.json"),
+        serde_json::json!({
+            "schemaVersion": "1.1.0",
+            "id": "block.video.encode",
+            "version": "1.0.0",
+            "name": "Encodage Vidéo",
+            "category": "media",
+            "ui": {
+                "fields": [
+                    { "name": "codec", "label": "Codec", "type": "string", "default": "h265" }
+                ]
+            }
+        })
+        .to_string(),
+    )?;
+
+    let app = test_app_with_plugins(Some(dir.path().to_path_buf())).await?;
+    let req = Request::builder()
+        .uri("/api/v1/flows/blocks")
+        .header(
+            "authorization",
+            "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        .body(Body::empty())?;
+    let resp = app.oneshot(req).await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = to_bytes(resp.into_body(), 64 * 1024).await?;
+    let blocks: Vec<serde_json::Value> = serde_json::from_slice(&bytes)?;
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0]["kind"], "block.core.file-input");
+    assert_eq!(blocks[0]["hasInput"], false);
+    assert_eq!(blocks[0]["fromPlugin"], true);
+    assert_eq!(blocks[1]["kind"], "block.video.encode");
     assert!(
-        blocks
-            .iter()
-            .any(|block| block["kind"] == "block.video.encode")
-    );
-    assert!(
-        blocks
-            .iter()
-            .any(|block| block["kind"] == "block.audio.encode")
-    );
-    let encode = blocks
-        .iter()
-        .find(|block| block["kind"] == "block.video.encode")
-        .ok_or_else(|| anyhow::anyhow!("bloc d'encodage vidéo absent"))?;
-    assert!(
-        encode["fields"]
+        blocks[1]["fields"]
             .as_array()
             .is_some_and(|fields| fields.iter().any(|field| field["name"] == "codec"))
     );

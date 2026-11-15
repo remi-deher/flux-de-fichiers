@@ -36,11 +36,12 @@ pub fn relink(
     from: &str,
     port: &Option<String>,
     target: &str,
+    catalog: &[OwnedBlockSpec],
 ) -> Result<FlowGraph, &'static str> {
     let mut next = graph.clone();
     next.disconnect(from, port);
     if !target.is_empty() {
-        next.connect(from, port.clone(), target)
+        next.connect(from, port.clone(), target, catalog)
             .map_err(|error| error.message())?;
     }
     Ok(next)
@@ -112,7 +113,11 @@ fn Outputs(editor: Editor, node_id: String, can_manage: bool) -> impl IntoView {
                                 prop:value=current.clone()
                                 on:change=move |event| {
                                     let target = event_target_value(&event);
-                                    match editor.graph.with_untracked(|graph| relink(graph, &from, &port, &target)) {
+                                    let catalog = editor.catalog.get_untracked();
+                                    match editor
+                                        .graph
+                                        .with_untracked(|graph| relink(graph, &from, &port, &target, &catalog))
+                                    {
                                         Ok(next) => {
                                             editor.mutate_graph(|graph| *graph = next);
                                             feedback.set(None);
@@ -155,7 +160,7 @@ pub fn NodeInspector(editor: Editor, can_manage: bool) -> impl IntoView {
                     .as_ref()
                     .map(|s| s.label.clone())
                     .unwrap_or_else(|| node.kind.as_str().to_owned());
-                let domain = NodeDomain::from_block(&node.kind, category);
+                let domain = NodeDomain::from_spec(spec.as_ref(), category);
                 let description = spec.as_ref().map(|s| s.description.clone());
                 let from_plugin = spec.as_ref().is_some_and(|s| s.from_plugin);
                 let fields = spec
@@ -251,17 +256,29 @@ pub fn NodeInspector(editor: Editor, can_manage: bool) -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::test_catalog;
     use super::*;
     use flux_shared::flows::FlowBlockKind;
     use serde_json::json;
 
     #[test]
     fn a_refused_link_leaves_the_graph_unchanged() {
+        let catalog = test_catalog();
         let mut graph = FlowGraph::default();
-        let input = graph.append(FlowBlockKind::FileInput, "Entrée", json!({}));
-        let end = graph.append(FlowBlockKind::FileOutput, "Fin", json!({}));
-        assert!(relink(&graph, &end, &None, &input).is_err());
-        let unlinked = relink(&graph, &input, &None, "");
+        let input = graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            &catalog,
+        );
+        let end = graph.append(
+            FlowBlockKind::parse("block.core.file-output"),
+            "Fin",
+            json!({}),
+            &catalog,
+        );
+        assert!(relink(&graph, &end, &None, &input, &catalog).is_err());
+        let unlinked = relink(&graph, &input, &None, "", &catalog);
         assert_eq!(unlinked.map(|next| next.connections.len()), Ok(0));
         assert_eq!(port_label(&[], &graph, &input, &None), "Suite");
     }

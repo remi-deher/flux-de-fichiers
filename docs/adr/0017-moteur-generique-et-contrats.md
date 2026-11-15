@@ -86,3 +86,10 @@ fois (précédent : ADR 0013).
 2. Contrats API ; Sonarr, Radarr et webhook en plugins ; sonde par contrat.
 3. `FlowBlockKind` ouvert et migration des identifiants.
 4. Écran Plugins : installer ou configurer à la main, état des besoins d'un flux.
+
+## Amendement (décision utilisateur, 15 nov. 2026)
+
+Le moteur **n'embarque aucun bloc** dans son binaire (`CATALOG` et `native_owned_catalog` supprimés) :
+même les primitives de flux (`file-input`, `condition`, `webhook`, `file-output`) vivent en fiches
+JSON dans le dépôt de plugins (`plugin.core`) et alimentent l'API `/api/v1/flows/blocks` via
+`aliases` pour la rétrocompatibilité des graphes enregistrés.

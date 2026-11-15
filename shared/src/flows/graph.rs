@@ -1,6 +1,6 @@
 //! Opérations d'édition du graphe et disposition en couches pour l'affichage.
 
-use super::{FlowBlockKind, FlowConnection, FlowGraph, FlowNode, block_spec};
+use super::{FlowBlockKind, FlowConnection, FlowGraph, FlowNode, OwnedBlockSpec, find_owned};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -53,16 +53,16 @@ impl FlowGraph {
         self.connections.iter().filter(move |edge| edge.to == id)
     }
 
-    /// Sorties d'un bloc : celles de sa fiche, sinon une sortie simple (`None`),
+    /// Sorties d'un bloc : celles de sa fiche plugin, sinon une sortie simple (`None`),
     /// plus toute sortie nommée déjà utilisée par une liaison enregistrée.
-    pub fn output_ports(&self, node: &FlowNode) -> Vec<Option<String>> {
-        let spec = block_spec(&node.kind);
+    pub fn output_ports(&self, node: &FlowNode, catalog: &[OwnedBlockSpec]) -> Vec<Option<String>> {
+        let spec = find_owned(catalog, &node.kind);
         let mut ports: Vec<Option<String>> = match spec {
             Some(spec) if spec.terminal => Vec::new(),
             Some(spec) if !spec.ports.is_empty() => spec
                 .ports
                 .iter()
-                .map(|(port, _)| Some((*port).to_owned()))
+                .map(|(port, _)| Some(port.clone()))
                 .collect(),
             _ => vec![None],
         };
@@ -83,17 +83,24 @@ impl FlowGraph {
     }
 
     /// Ajoute un bloc et le relie au dernier bloc qui a encore une sortie simple libre.
-    pub fn append(&mut self, kind: FlowBlockKind, name: &str, config: Value) -> String {
+    pub fn append(
+        &mut self,
+        kind: FlowBlockKind,
+        name: &str,
+        config: Value,
+        catalog: &[OwnedBlockSpec],
+    ) -> String {
         let id = self.next_id();
         let tail = self
             .nodes
             .iter()
             .rev()
             .find(|node| {
-                self.output_ports(node).contains(&None) && self.outgoing(&node.id).next().is_none()
+                self.output_ports(node, catalog).contains(&None)
+                    && self.outgoing(&node.id).next().is_none()
             })
             .map(|node| node.id.clone());
-        let accepts_input = block_spec(&kind).is_none_or(|spec| spec.has_input);
+        let accepts_input = find_owned(catalog, &kind).is_none_or(|spec| spec.has_input);
         self.nodes.push(FlowNode {
             id: id.clone(),
             kind,
@@ -149,6 +156,7 @@ impl FlowGraph {
         from: &str,
         port: Option<String>,
         to: &str,
+        catalog: &[OwnedBlockSpec],
     ) -> Result<(), GraphError> {
         let (Some(source), Some(target)) = (self.node(from), self.node(to)) else {
             return Err(GraphError::UnknownNode);
@@ -156,8 +164,8 @@ impl FlowGraph {
         if from == to {
             return Err(GraphError::SelfLink);
         }
-        let target_has_input = block_spec(&target.kind).is_none_or(|spec| spec.has_input);
-        if !self.output_ports(source).contains(&port) || !target_has_input {
+        let target_has_input = find_owned(catalog, &target.kind).is_none_or(|spec| spec.has_input);
+        if !self.output_ports(source, catalog).contains(&port) || !target_has_input {
             return Err(GraphError::InvalidPort);
         }
         if self.outgoing(from).any(|edge| edge.port == port) {
@@ -230,16 +238,48 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn chain() -> FlowGraph {
+    fn spec(kind: &str, has_input: bool, ports: &[&str], terminal: bool) -> OwnedBlockSpec {
+        OwnedBlockSpec {
+            kind: kind.into(),
+            aliases: Vec::new(),
+            label: kind.into(),
+            category: "Test".into(),
+            domain: None,
+            description: String::new(),
+            has_input,
+            ports: ports
+                .iter()
+                .map(|port| ((*port).to_owned(), (*port).to_owned()))
+                .collect(),
+            terminal,
+            fields: Vec::new(),
+            suggested_next: Vec::new(),
+            from_plugin: true,
+            operation_id: None,
+        }
+    }
+
+    fn test_catalog() -> Vec<OwnedBlockSpec> {
+        vec![
+            spec("block.core.file-input", false, &[], false),
+            spec("block.core.condition", true, &["true", "false"], false),
+            spec("block.video.remux-mkv", true, &[], false),
+            spec("block.core.webhook", true, &[], false),
+            spec("block.core.file-output", true, &[], true),
+        ]
+    }
+
+    fn chain(catalog: &[OwnedBlockSpec]) -> FlowGraph {
         let mut graph = FlowGraph::default();
-        graph.append(FlowBlockKind::FileInput, "Entrée", json!({}));
-        graph.append(FlowBlockKind::Condition, "HEVC ?", json!({}));
+        graph.append("block.core.file-input".into(), "Entrée", json!({}), catalog);
+        graph.append("block.core.condition".into(), "HEVC ?", json!({}), catalog);
         graph
     }
 
     #[test]
     fn append_links_to_the_last_free_simple_output() {
-        let mut graph = chain();
+        let catalog = test_catalog();
+        let mut graph = chain(&catalog);
         assert_eq!(
             graph.connections,
             vec![FlowConnection {
@@ -249,53 +289,73 @@ mod tests {
             }]
         );
         // La condition n'a que des sorties nommées : le bloc suivant n'est pas relié d'office.
-        let after = graph.append(FlowBlockKind::RemuxMkv, "Remux", json!({}));
+        let after = graph.append("block.video.remux-mkv".into(), "Remux", json!({}), &catalog);
         assert_eq!(graph.incoming(&after).count(), 0);
         assert_eq!(after, "node-3");
     }
 
     #[test]
     fn connect_checks_ports_duplicates_and_cycles() {
-        let mut graph = chain();
-        let yes = graph.append(FlowBlockKind::RemuxMkv, "Oui", json!({}));
-        let no = graph.append(FlowBlockKind::FileOutput, "Fin", json!({}));
-        assert_eq!(graph.connect("node-2", Some("true".into()), &yes), Ok(()));
+        let catalog = test_catalog();
+        let mut graph = chain(&catalog);
+        let yes = graph.append("block.video.remux-mkv".into(), "Oui", json!({}), &catalog);
+        let no = graph.append("block.core.file-output".into(), "Fin", json!({}), &catalog);
         assert_eq!(
-            graph.connect("node-2", Some("true".into()), &no),
+            graph.connect("node-2", Some("true".into()), &yes, &catalog),
+            Ok(())
+        );
+        assert_eq!(
+            graph.connect("node-2", Some("true".into()), &no, &catalog),
             Err(GraphError::PortTaken)
         );
         assert_eq!(
-            graph.connect("node-2", None, &no),
+            graph.connect("node-2", None, &no, &catalog),
             Err(GraphError::InvalidPort)
         );
         assert_eq!(
-            graph.connect(&yes, None, "node-1"),
+            graph.connect(&yes, None, "node-1", &catalog),
             Err(GraphError::InvalidPort)
         );
-        assert_eq!(graph.connect(&yes, None, &yes), Err(GraphError::SelfLink));
         assert_eq!(
-            graph.connect(&yes, None, "absent"),
+            graph.connect(&yes, None, &yes, &catalog),
+            Err(GraphError::SelfLink)
+        );
+        assert_eq!(
+            graph.connect(&yes, None, "absent", &catalog),
             Err(GraphError::UnknownNode)
         );
-        assert_eq!(graph.connect(&no, None, &yes), Err(GraphError::InvalidPort));
-        let mut looped = chain();
-        let a = looped.append(FlowBlockKind::RemuxMkv, "A", json!({}));
-        assert_eq!(looped.connect("node-2", Some("false".into()), &a), Ok(()));
-        let b = looped.append(FlowBlockKind::RemuxMkv, "B", json!({}));
-        assert_eq!(looped.connect(&b, None, "node-2"), Err(GraphError::Cycle));
+        assert_eq!(
+            graph.connect(&no, None, &yes, &catalog),
+            Err(GraphError::InvalidPort)
+        );
+        let mut looped = chain(&catalog);
+        let a = looped.append("block.video.remux-mkv".into(), "A", json!({}), &catalog);
+        assert_eq!(
+            looped.connect("node-2", Some("false".into()), &a, &catalog),
+            Ok(())
+        );
+        let b = looped.append("block.video.remux-mkv".into(), "B", json!({}), &catalog);
+        assert_eq!(
+            looped.connect(&b, None, "node-2", &catalog),
+            Err(GraphError::Cycle)
+        );
         graph.disconnect("node-2", &Some("true".into()));
-        assert_eq!(graph.connect("node-2", Some("true".into()), &no), Ok(()));
+        assert_eq!(
+            graph.connect("node-2", Some("true".into()), &no, &catalog),
+            Ok(())
+        );
     }
 
     #[test]
     fn remove_bridges_a_simple_link_and_keeps_the_port() {
-        let mut graph = chain();
-        let middle = graph.append(FlowBlockKind::RemuxMkv, "Remux", json!({}));
+        let catalog = test_catalog();
+        let mut graph = chain(&catalog);
+        let middle = graph.append("block.video.remux-mkv".into(), "Remux", json!({}), &catalog);
         assert_eq!(
-            graph.connect("node-2", Some("false".into()), &middle),
+            graph.connect("node-2", Some("false".into()), &middle, &catalog),
             Ok(())
         );
-        let end = graph.append(FlowBlockKind::FileOutput, "Fin", json!({}));
+        let end = graph.append("block.core.file-output".into(), "Fin", json!({}), &catalog);
         graph.remove(&middle);
         assert_eq!(
             graph
@@ -317,13 +377,14 @@ mod tests {
 
     #[test]
     fn layout_places_blocks_by_longest_path() {
-        let mut graph = chain();
+        let catalog = test_catalog();
+        let mut graph = chain(&catalog);
         for (kind, name) in [
-            (FlowBlockKind::RemuxMkv, "Oui"),
-            (FlowBlockKind::Webhook, "Non"),
-            (FlowBlockKind::FileOutput, "Fin"),
+            ("block.video.remux-mkv", "Oui"),
+            ("block.core.webhook", "Non"),
+            ("block.core.file-output", "Fin"),
         ] {
-            graph.append(kind, name, json!({}));
+            graph.append(kind.into(), name, json!({}), &catalog);
         }
         graph.connections = vec![
             edge("node-1", None, "node-2"),
@@ -342,19 +403,22 @@ mod tests {
 
     #[test]
     fn output_ports_follow_the_spec_and_keep_stored_ones() {
-        let graph = chain();
+        let catalog = test_catalog();
+        let graph = chain(&catalog);
         let condition = graph.node("node-2");
         assert_eq!(
-            condition.map(|node| graph.output_ports(node)),
+            condition.map(|node| graph.output_ports(node, &catalog)),
             Some(vec![Some("true".into()), Some("false".into())])
         );
-        let mut legacy = chain();
+        let mut legacy = chain(&catalog);
         legacy.connections.push(FlowConnection {
             from: "node-2".into(),
             to: "node-1".into(),
             port: Some("fallback".into()),
         });
-        let ports = legacy.node("node-2").map(|node| legacy.output_ports(node));
+        let ports = legacy
+            .node("node-2")
+            .map(|node| legacy.output_ports(node, &catalog));
         assert_eq!(ports.map(|ports| ports.len()), Some(3));
     }
 }

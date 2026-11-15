@@ -12,6 +12,7 @@ use super::presentation::{
 };
 use super::quick_add::QuickAddPopover;
 use super::state::{Editor, PendingWire, QuickAddState};
+use crate::route::{Link, Route};
 use crate::ui::{Icon, IconName, Toasts};
 use flux_shared::flows::{FlowBlockKind, FlowConnection, find_owned};
 use leptos::prelude::*;
@@ -703,9 +704,15 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                     };
                     event.prevent_default();
                     editor.end_drag();
+                    let catalog = editor.catalog.get_untracked();
                     let mut created = String::new();
                     editor.mutate_graph(|graph| {
-                        created = graph.append(FlowBlockKind::parse(&kind), &label, defaults);
+                        created = graph.append(
+                            FlowBlockKind::parse(&kind),
+                            &label,
+                            defaults,
+                            &catalog,
+                        );
                     });
                     let drop_pt = board_ref.get().map(|board| {
                         let local = board_local_point(&board, event.client_x(), event.client_y());
@@ -723,14 +730,29 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
             >
                 {move || {
                     if editor.graph.with(|graph| graph.nodes.is_empty()) {
+                        let catalog_empty = editor.catalog_loaded.get()
+                            && editor.catalog.with(|c| c.is_empty());
                         return view! {
                             <div class="flow-canvas__empty empty-state-panel">
                                 <p class="empty-state-title">
-                                    "Aucun bloc dans ce flux."
+                                    {if catalog_empty {
+                                        "Aucun bloc de flux disponible."
+                                    } else {
+                                        "Aucun bloc dans ce flux."
+                                    }}
                                 </p>
                                 <p class="form-help">
-                                    "Ouvrez « + Composants » ou glissez une étape sur le canevas pour démarrer."
+                                    {if catalog_empty {
+                                        "Le moteur n'embarque aucun bloc : synchronisez un dépôt de plugins pour peupler la palette."
+                                    } else {
+                                        "Ouvrez « + Composants » ou glissez une étape sur le canevas pour démarrer."
+                                    }}
                                 </p>
+                                {catalog_empty.then(|| view! {
+                                    <Link to=Route::Plugins class="btn btn-primary btn-sm">
+                                        "Ouvrir Plugins"
+                                    </Link>
+                                })}
                             </div>
                         }
                         .into_any();
@@ -846,12 +868,11 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                     || node.kind.as_str().to_owned(),
                                     |s| s.label.clone(),
                                 );
-                                let domain = NodeDomain::from_block(&node.kind, category);
+                                let domain = NodeDomain::from_spec(spec, category);
                                 let incomplete =
                                     spec.is_some_and(|s| !s.missing_fields(&node.config).is_empty());
                                 let summary = node_summary(node, spec);
-                                let has_input = node.kind != FlowBlockKind::FileInput
-                                    && spec.is_none_or(|s| s.has_input);
+                                let has_input = spec.is_none_or(|s| s.has_input);
                                 let ports = node_output_ports(&graph, node, &catalog);
                                 let port_count = ports.len();
 

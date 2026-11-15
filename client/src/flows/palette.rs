@@ -4,6 +4,7 @@ use super::dnd::DragPayload;
 use super::drag::DragItem;
 use super::presentation::{NodeDomain, output_presentation};
 use super::state::Editor;
+use crate::route::{Link, Route};
 use crate::ui::search::{matches, query as global_query};
 use crate::ui::{Icon, IconName, Toasts};
 use flux_shared::flows::OwnedBlockSpec;
@@ -153,6 +154,23 @@ pub fn Palette(editor: Editor) -> impl IntoView {
                 {move || {
                     let list = groups.get();
                     if list.is_empty() {
+                        if !editor.catalog_loaded.get() {
+                            return view! {
+                                <p class="flow-palette__empty">"Chargement des blocs…"</p>
+                            }
+                            .into_any();
+                        }
+                        if editor.catalog.with(|c| c.is_empty()) {
+                            return view! {
+                                <div class="flow-palette__empty">
+                                    <p>"Catalogue de blocs vide : synchronisez un dépôt depuis Plugins."</p>
+                                    <Link to=Route::Plugins class="btn btn-secondary btn-sm">
+                                        "Ouvrir Plugins"
+                                    </Link>
+                                </div>
+                            }
+                            .into_any();
+                        }
                         return view! {
                             <p class="flow-palette__empty">
                                 "Aucun composant ne correspond à cette recherche."
@@ -177,12 +195,11 @@ pub fn Palette(editor: Editor) -> impl IntoView {
                                                 let label = spec.label.clone();
                                                 let description = spec.description.clone();
                                                 let defaults = spec.default_config();
-                                                let domain = NodeDomain::from_block(
-                                                    &spec.kind_enum(),
+                                                let domain = NodeDomain::from_spec(
+                                                    Some(&spec),
                                                     &spec.category,
                                                 );
-                                                let plugin_label =
-                                                    if spec.from_plugin { "Plugin" } else { "Natif" };
+                                                let plugin_label = "Plugin";
                                                 let accent_style =
                                                     format!("--component-accent: {}", domain.accent_var());
                                                 let payload = DragPayload::Palette {
@@ -231,12 +248,12 @@ pub fn Palette(editor: Editor) -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::test_catalog;
     use super::*;
-    use flux_shared::flows::native_owned_catalog;
 
     #[test]
     fn every_block_belongs_to_a_listed_category() {
-        let catalog = native_owned_catalog();
+        let catalog = test_catalog();
         let listed = categories(&catalog);
         assert!(catalog.iter().all(|spec| listed.contains(&spec.category)));
         assert_eq!(listed.first().map(String::as_str), Some("Entrée"));
@@ -245,7 +262,7 @@ mod tests {
 
     #[test]
     fn filter_specs_and_grouped_specs_narrow_results_preserving_category_order() {
-        let catalog = native_owned_catalog();
+        let catalog = test_catalog();
         let grouped = grouped_specs(&catalog, "sonarr");
         assert_eq!(grouped.len(), 1);
         assert_eq!(grouped[0].0, "Intégrations");

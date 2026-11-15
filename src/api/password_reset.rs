@@ -20,9 +20,12 @@ pub async fn forgot(
     headers: HeaderMap,
     Json(request): Json<ForgotPasswordRequest>,
 ) -> AppResult<StatusCode> {
-    web_session::validate_origin(&headers, &state.config)?;
-    let (Some(smtp), Some(origin)) = (state.config.smtp.clone(), state.config.web_origin.clone())
-    else {
+    let effective = crate::runtime_settings::load_effective(&state.pool, &state.config).await;
+    web_session::validate_origin(&headers, &effective.config)?;
+    let (Some(smtp), Some(origin)) = (
+        effective.config.smtp.clone(),
+        effective.config.web_origin.clone(),
+    ) else {
         return Err(AppError::NotFound);
     };
     let email = password_reset::admit_request(&request.email)?;
@@ -42,7 +45,8 @@ pub async fn reset(
     headers: HeaderMap,
     Json(request): Json<ResetPasswordRequest>,
 ) -> AppResult<StatusCode> {
-    web_session::validate_origin(&headers, &state.config)?;
+    let effective = crate::runtime_settings::load_effective(&state.pool, &state.config).await;
+    web_session::validate_origin(&headers, &effective.config)?;
     password_reset::confirm_reset(&state.pool, &request.token, &request.new_password).await?;
     Ok(StatusCode::NO_CONTENT)
 }

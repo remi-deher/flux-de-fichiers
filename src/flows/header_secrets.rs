@@ -159,6 +159,63 @@ pub fn decrypt_definition_headers(
     Ok(serde_json::to_string(&value).unwrap_or_else(|_| definition.to_owned()))
 }
 
+/// Extrait les en-têtes webhook en clair d'une définition et renvoie la définition masquée associée.
+pub fn extract_and_mask_definition_headers(
+    definition: &str,
+) -> (String, HashMap<String, HashMap<String, String>>) {
+    let mut extracted: HashMap<String, HashMap<String, String>> = HashMap::new();
+    let Ok(mut value) = serde_json::from_str::<Value>(definition) else {
+        return (definition.to_owned(), extracted);
+    };
+    for node in nodes_of(&mut value) {
+        let id = node_id(node);
+        let Some(headers) = headers_of(node) else {
+            continue;
+        };
+        let mut by_header = HashMap::new();
+        for (name, header_value) in headers.iter_mut() {
+            if let Some(text) = header_value.as_str()
+                && !text.is_empty()
+            {
+                by_header.insert(name.clone(), text.to_owned());
+            }
+            *header_value = Value::String(String::new());
+        }
+        if !by_header.is_empty() {
+            extracted.insert(id, by_header);
+        }
+    }
+    let masked = serde_json::to_string(&value).unwrap_or_else(|_| definition.to_owned());
+    (masked, extracted)
+}
+
+/// Réinjecte des en-têtes webhook déchiffrés dans une définition de flux avant exécution.
+pub fn inject_definition_headers(
+    definition: &str,
+    headers_by_node: &HashMap<String, HashMap<String, String>>,
+) -> String {
+    if headers_by_node.is_empty() {
+        return definition.to_owned();
+    }
+    let Ok(mut value) = serde_json::from_str::<Value>(definition) else {
+        return definition.to_owned();
+    };
+    for node in nodes_of(&mut value) {
+        let id = node_id(node);
+        let Some(node_headers) = headers_by_node.get(&id) else {
+            continue;
+        };
+        if let Some(headers) = headers_of(node) {
+            for (name, clear_val) in node_headers {
+                if headers.contains_key(name) {
+                    headers.insert(name.clone(), Value::String(clear_val.clone()));
+                }
+            }
+        }
+    }
+    serde_json::to_string(&value).unwrap_or_else(|_| definition.to_owned())
+}
+
 /// Re-chiffre avec la nouvelle clé les en-têtes d'une définition de flux ; `None` s'il n'y en a pas.
 /// Renvoie la définition réécrite et le nombre de valeurs changées.
 pub fn rotate_definition(

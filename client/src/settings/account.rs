@@ -3,7 +3,6 @@
 use crate::api;
 use crate::shell::instance_role_badge;
 use crate::ui::{Drawer, SectionHeader, Toasts};
-use flux_shared::InstanceKind;
 use flux_shared::accounts::ChangePasswordRequest;
 use flux_shared::session::Me;
 use leptos::prelude::*;
@@ -50,8 +49,7 @@ pub fn AccountSection(me: Me, hidden: Signal<bool>) -> impl IntoView {
         Some(Err(error)) => feedback.set(Some(error.message())),
         None => {}
     });
-    let can_change = me.instance_kind == InstanceKind::Central
-        && me.kind == flux_shared::session::CallerKind::Account;
+    let can_change = me.kind == flux_shared::session::CallerKind::Account;
     view! {
         <section class="section-panel settings-section" hidden=move || hidden.get()>
             <SectionHeader

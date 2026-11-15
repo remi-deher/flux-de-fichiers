@@ -21,8 +21,9 @@ use axum::{
     extract::{Request, State},
     http::{HeaderMap, Method, StatusCode},
     response::Response,
-    routing::{get, post},
+    routing::{get, post, put},
 };
+use flux_shared::accounts::ChangePasswordRequest;
 use flux_shared::system::SetupStatus;
 use flux_shared::{InstanceKind, Permission};
 use serde::Serialize;
@@ -276,6 +277,33 @@ async fn interface(State(web): Web, request: Request) -> Response {
     api::serve_spa(&web.config.static_dir, request).await
 }
 
+/// Relaye le changement de mot de passe de l'utilisateur connecté vers le central, puis resynchronise la copie locale.
+async fn change_password(
+    State(web): Web,
+    headers: HeaderMap,
+    Json(request): Json<ChangePasswordRequest>,
+) -> AppResult<StatusCode> {
+    let account = web.authorize(&headers, &Method::PUT, Permission::ViewOverview)?;
+    match web
+        .central
+        .change_password(
+            &account.username,
+            &request.current_password,
+            &request.new_password,
+        )
+        .await
+    {
+        Ok(()) => {
+            let _ = web.sync_accounts().await;
+            Ok(StatusCode::NO_CONTENT)
+        }
+        Err(CentralError::Rejected(StatusCode::UNAUTHORIZED)) => Err(AppError::Unauthorized),
+        Err(CentralError::Rejected(StatusCode::TOO_MANY_REQUESTS)) => Err(AppError::RateLimited),
+        Err(CentralError::Rejected(_)) => Err(AppError::Invalid),
+        Err(CentralError::Unreachable) => Err(AppError::CentralUnavailable),
+    }
+}
+
 pub fn router(web: Arc<WorkerWeb>) -> Router {
     Router::new()
         .route("/health", get(health))
@@ -285,6 +313,7 @@ pub fn router(web: Arc<WorkerWeb>) -> Router {
         .route("/api/v1/auth/session", get(current_session))
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/me", get(me))
+        .route("/api/v1/account/password", put(change_password))
         .route(crate::worker_view::OVERVIEW_PATH, get(overview))
         .route("/api/v1/jobs", get(jobs))
         .route("/api/v1/plugins", get(catalog))

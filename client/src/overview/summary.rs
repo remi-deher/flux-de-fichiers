@@ -97,6 +97,9 @@ mod tests {
             id: Uuid::nil(),
             name: name.into(),
             last_seen: now - chrono::Duration::seconds(seconds_ago),
+            version: None,
+            remote_addr: None,
+            telemetry: None,
         }
     }
 

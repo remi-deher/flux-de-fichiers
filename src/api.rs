@@ -20,7 +20,7 @@ pub use auth::{
 };
 use axum::{
     Router,
-    extract::State,
+    extract::{ConnectInfo, Extension, State},
     http::{HeaderMap, StatusCode},
     routing::{get, post, put},
 };
@@ -274,6 +274,10 @@ fn json_routes() -> Router<AppState> {
             crate::worker_view::ACCOUNTS_PATH,
             get(worker_view::accounts),
         )
+        .route(
+            crate::worker_view::CHANGE_PASSWORD_PATH,
+            put(worker_view::change_password),
+        )
         .route("/api/v1/me", get(session::me))
         .route("/api/v1/account/password", put(session::change_password))
         .route(
@@ -281,6 +285,7 @@ fn json_routes() -> Router<AppState> {
             get(accounts::list).post(accounts::create),
         )
         .route("/api/v1/system/status", get(system::status))
+        .route("/api/v1/system/settings", put(system::update_settings))
         .route("/api/v1/system/hardware", get(system::hardware))
         .route("/api/v1/system/diagnostics", post(diagnostics::diagnostics))
         .route("/api/v1/accounts/{id}", put(accounts::update))
@@ -398,16 +403,55 @@ async fn health(State(s): State<AppState>) -> AppResult<StatusCode> {
     repository::ping(&s.pool).await?;
     Ok(StatusCode::NO_CONTENT)
 }
+const SQLITE_BUSY_TIMEOUT_SECS: u64 = 15;
+const SQLITE_ACQUIRE_TIMEOUT_SECS: u64 = 15;
+const SQLITE_MAX_CONNECTIONS: u32 = 16;
+
+fn client_remote_addr(
+    headers: &HeaderMap,
+    connect_info: Option<Extension<ConnectInfo<std::net::SocketAddr>>>,
+) -> Option<String> {
+    if let Some(forwarded) = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|raw| raw.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Some(forwarded.to_owned());
+    }
+    if let Some(real_ip) = headers
+        .get("x-real-ip")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Some(real_ip.to_owned());
+    }
+    connect_info.map(|Extension(ConnectInfo(addr))| addr.ip().to_string())
+}
+
 async fn register(
     State(s): State<AppState>,
     h: HeaderMap,
+    connect_info: Option<Extension<ConnectInfo<std::net::SocketAddr>>>,
     axum::Json(r): axum::Json<Register>,
 ) -> AppResult<axum::Json<Worker>> {
     crate::auth::authorize_worker(&s.pool, &h).await?;
     if !crate::worker_settings::is_valid_worker_name(&r.name) {
         return Err(crate::error::AppError::Invalid);
     }
-    Ok(axum::Json(repository::register(&s.pool, &r.name).await?))
+    let remote_addr = client_remote_addr(&h, connect_info);
+    Ok(axum::Json(
+        repository::register_with_metadata(
+            &s.pool,
+            &r.name,
+            r.version.as_deref(),
+            remote_addr.as_deref(),
+            r.telemetry.as_ref(),
+        )
+        .await?,
+    ))
 }
 /// Enrichit un bail (`Claim`) avec les contrats d'opérations, outils requis et réglages nécessaires.
 pub(crate) async fn populate_claim_contracts(
@@ -440,6 +484,9 @@ pub(crate) async fn populate_claim_contracts(
     claim.operations = operations;
     claim.block_operations = block_operations;
 
+    let effective = crate::runtime_settings::load_effective(pool, config).await;
+    claim.allow_private_integrations = Some(effective.integration_policy().allow_private_hosts);
+
     if let Some(ref mut flow) = claim.frozen_flow
         && let Ok(secrets) = crate::secrets::SecretBox::open(&config.config_dir)
     {
@@ -467,12 +514,26 @@ pub(crate) async fn populate_claim_contracts(
 async fn claim(
     State(s): State<AppState>,
     h: HeaderMap,
+    connect_info: Option<Extension<ConnectInfo<std::net::SocketAddr>>>,
     axum::Json(r): axum::Json<ClaimRequest>,
 ) -> AppResult<axum::Json<Option<Claim>>> {
     crate::auth::authorize_worker(&s.pool, &h).await?;
+    let remote_addr = client_remote_addr(&h, connect_info);
     let mut claim_res = repository::claim(&s.pool, r.worker_id).await?;
+    if remote_addr.is_some() || r.telemetry.is_some() {
+        let _ = repository::touch_worker_telemetry(
+            &s.pool,
+            r.worker_id,
+            remote_addr.as_deref(),
+            r.telemetry.as_ref(),
+        )
+        .await;
+    }
     if let Some(ref mut claim) = claim_res {
         populate_claim_contracts(&s.pool, &s.config, &s.catalog_cache, r.worker_id, claim).await?;
+        if let Some(worker_key) = crate::auth::bearer_token(&h) {
+            crate::flows::seal_claim_secrets_for_worker(claim, worker_key)?;
+        }
         s.notify_job_event(
             JobEventType::JobClaimed,
             claim.job_id,
@@ -506,11 +567,14 @@ pub async fn connect_database(config: &Config) -> anyhow::Result<SqlitePool> {
     .journal_mode(SqliteJournalMode::Wal)
     .synchronous(SqliteSynchronous::Normal)
     .foreign_keys(true)
-    .busy_timeout(Duration::from_secs(5));
+    .busy_timeout(Duration::from_secs(SQLITE_BUSY_TIMEOUT_SECS))
+    .pragma("temp_store", "MEMORY")
+    .pragma("cache_size", "-16000")
+    .pragma("wal_autocheckpoint", "1000");
 
     let pool = SqlitePoolOptions::new()
-        .max_connections(5)
-        .acquire_timeout(Duration::from_secs(5))
+        .max_connections(SQLITE_MAX_CONNECTIONS)
+        .acquire_timeout(Duration::from_secs(SQLITE_ACQUIRE_TIMEOUT_SECS))
         .connect_with(connect_options)
         .await?;
 
@@ -556,14 +620,17 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         });
         let result = axum_server::bind_rustls(addr, tls)
             .handle(handle)
-            .serve(app.into_make_service())
+            .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
             .await;
         signal.abort();
         result?;
     } else {
-        axum::serve(tokio::net::TcpListener::bind(addr).await?, app)
-            .with_graceful_shutdown(shutdown_signal())
-            .await?;
+        axum::serve(
+            tokio::net::TcpListener::bind(addr).await?,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
     }
     plugin_sync.abort();
     pool.close().await;

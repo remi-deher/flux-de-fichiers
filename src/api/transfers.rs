@@ -22,9 +22,15 @@ fn lease(h: &HeaderMap) -> AppResult<LeaseRequest> {
             .and_then(|v| v.parse().ok())
             .ok_or(AppError::Invalid)
     };
+    let lease_epoch = h
+        .get("x-lease-epoch")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<i64>().ok())
+        .ok_or(AppError::Invalid)?;
     Ok(LeaseRequest {
         worker_id: uuid("x-worker-id")?,
         lease_token: uuid("x-lease-token")?,
+        lease_epoch,
         telemetry: None,
     })
 }

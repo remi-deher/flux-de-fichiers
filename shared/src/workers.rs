@@ -24,12 +24,32 @@ pub enum Liveness {
     Silent,
 }
 
+/// Télémétrie matérielle synthétique remontée par un worker (sans dépendance OS).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerTelemetry {
+    pub timestamp: DateTime<Utc>,
+    pub logical_cores: u32,
+    pub cpu_usage_percent: f32,
+    pub ram_total_bytes: u64,
+    pub ram_used_bytes: u64,
+    pub storage_total_bytes: u64,
+    pub storage_available_bytes: u64,
+    #[serde(default)]
+    pub gpu_devices: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Worker {
     pub id: Uuid,
     pub name: String,
     pub last_seen: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_addr: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<WorkerTelemetry>,
 }
 
 impl Worker {
@@ -110,6 +130,9 @@ mod tests {
             id: Uuid::nil(),
             name: "nas".into(),
             last_seen: now - chrono::Duration::seconds(seconds_ago),
+            version: None,
+            remote_addr: None,
+            telemetry: None,
         };
         assert!(worker(10).is_online(now));
         assert!(!worker(WORKER_ONLINE_SECONDS).is_online(now));
@@ -122,6 +145,9 @@ mod tests {
             id: Uuid::nil(),
             name: "nas".into(),
             last_seen: now - chrono::Duration::seconds(seconds_ago),
+            version: None,
+            remote_addr: None,
+            telemetry: None,
         };
         assert_eq!(worker(0).liveness(now), Liveness::Online);
         assert_eq!(

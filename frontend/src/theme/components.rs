@@ -1437,4 +1437,60 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   width: auto;
   min-width: 14rem;
 }
+
+.settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+
+.settings-fieldset {
+  margin: 0;
+  padding: 0.85rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.settings-fieldset__legend {
+  padding: 0 0.35rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.worker-card-telemetry {
+  margin-top: 0.35rem;
+}
+
+.worker-telemetry-card {
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.worker-telemetry-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.worker-telemetry-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.worker-telemetry-metric__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.inspection-drawer__panel:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
 "#;

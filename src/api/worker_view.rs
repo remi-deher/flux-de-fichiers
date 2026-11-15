@@ -5,14 +5,19 @@ use crate::{
     auth::{self, Principal},
     domain::{Job, Worker},
     error::AppResult,
+    password,
     plugins::{self, CatalogEntry},
     repository,
     worker_view::{
         AccountSnapshot, JobCounts, VerifiedAccount, VerifyLoginRequest, WORKER_JOBS_LIMIT,
-        WorkerOverview,
+        WorkerChangePasswordRequest, WorkerOverview,
     },
 };
-use axum::{Json, extract::State, http::HeaderMap};
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+};
 
 /// Le worker qui appelle : sa clé donne son nom, et son nom retrouve sa ligne de worker.
 async fn calling_worker(
@@ -91,4 +96,20 @@ pub async fn accounts(
     Ok(Json(AccountSnapshot {
         accounts: repository::list_account_copies(&state.pool).await?,
     }))
+}
+
+/// Changement de mot de passe relayé par un worker authentifié par sa clé vers le central.
+pub async fn change_password(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<WorkerChangePasswordRequest>,
+) -> AppResult<StatusCode> {
+    calling_worker(&state, &headers).await?;
+    let account =
+        session::verify_credentials(&state.pool, &request.username, request.current_password)
+            .await?;
+    password::validate_password(&request.new_password)?;
+    let new_hash = password::hash(request.new_password).await?;
+    repository::update_password(&state.pool, &account.id, &new_hash, None).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

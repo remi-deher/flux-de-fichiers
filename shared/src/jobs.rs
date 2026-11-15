@@ -222,6 +222,8 @@ pub struct Job {
     pub worker_id: Option<Uuid>,
     pub status: JobStatus,
     pub attempts: i32,
+    #[serde(default)]
+    pub lease_epoch: i64,
     #[serde(skip_serializing)]
     pub lease_token: Option<Uuid>,
     pub leased_until: Option<DateTime<Utc>>,
@@ -294,6 +296,7 @@ mod tests {
             worker_id: None,
             status,
             attempts,
+            lease_epoch: 0,
             lease_token: None,
             leased_until: None,
             output_name: None,

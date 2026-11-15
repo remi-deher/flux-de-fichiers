@@ -40,6 +40,34 @@ pub async fn execute_http_operation(
     secrets_dir: Option<&Path>,
     client: &Client,
 ) -> Result<HttpStepOutcome, HttpStepError> {
+    let policy = crate::net_policy::OutboundPolicy::integration_from_env();
+    execute_http_operation_with_policy(
+        rt,
+        flow_id,
+        node_id,
+        node_config,
+        plugin_configs,
+        ctx,
+        secrets_dir,
+        client,
+        policy,
+    )
+    .await
+}
+
+/// Variante de `execute_http_operation` avec politique réseau sortante explicite.
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_http_operation_with_policy(
+    rt: &HttpRuntime,
+    flow_id: &str,
+    node_id: &str,
+    node_config: &Value,
+    plugin_configs: &HashMap<String, Value>,
+    ctx: &FlowContext,
+    secrets_dir: Option<&Path>,
+    client: &Client,
+    outbound_policy: crate::net_policy::OutboundPolicy,
+) -> Result<HttpStepOutcome, HttpStepError> {
     let error_code = rt.error_code.unwrap_or(JobErrorCode::IntegrationFailed);
     let fail_on_error = rt
         .fail_on_error_param
@@ -115,6 +143,7 @@ pub async fn execute_http_operation(
             &custom_headers,
             client,
             timeout,
+            outbound_policy,
         )
         .await
         {
@@ -153,17 +182,15 @@ async fn run_single_step(
     custom_headers: &HashMap<String, String>,
     client: &Client,
     timeout: Duration,
+    outbound_policy: crate::net_policy::OutboundPolicy,
 ) -> Result<StepResult, String> {
     let url_raw = render_string_template(&step.url, node_config, settings, vars, ctx)?;
     if url_raw.trim().is_empty() {
         return Err("URL cible vide".to_owned());
     }
-    let validated = crate::net_policy::validate_outbound_url(
-        &url_raw,
-        crate::net_policy::OutboundPolicy::integration_from_env(),
-    )
-    .await
-    .map_err(|err| format!("URL refusée par la politique réseau : {err}"))?;
+    let validated = crate::net_policy::validate_outbound_url(&url_raw, outbound_policy)
+        .await
+        .map_err(|err| format!("URL refusée par la politique réseau : {err}"))?;
 
     let method_str = render_string_template(&step.method, node_config, settings, vars, ctx)?;
     let method = Method::from_bytes(method_str.trim().to_ascii_uppercase().as_bytes())

@@ -4,8 +4,9 @@
 use crate::{
     plugins::CatalogEntry,
     worker_view::{
-        ACCOUNTS_PATH, AccountSnapshot, JOBS_PATH, LOGIN_PATH, OVERVIEW_PATH, PLUGINS_PATH,
-        VerifiedAccount, VerifyLoginRequest, WorkerOverview,
+        ACCOUNTS_PATH, AccountSnapshot, CHANGE_PASSWORD_PATH, JOBS_PATH, LOGIN_PATH, OVERVIEW_PATH,
+        PLUGINS_PATH, VerifiedAccount, VerifyLoginRequest, WorkerChangePasswordRequest,
+        WorkerOverview,
     },
 };
 use reqwest::{Client, StatusCode, Url};
@@ -104,6 +105,36 @@ impl CentralClient {
             .send()
             .await;
         Self::decode(response).await
+    }
+
+    /// Relaie un changement de mot de passe utilisateur vers le central.
+    pub async fn change_password(
+        &self,
+        username: &str,
+        current_password: &str,
+        new_password: &str,
+    ) -> Result<(), CentralError> {
+        let response = self
+            .client
+            .put(self.url(CHANGE_PASSWORD_PATH)?)
+            .bearer_auth(&self.key)
+            .timeout(REQUEST_TIMEOUT)
+            .json(&WorkerChangePasswordRequest {
+                username: username.to_owned(),
+                current_password: current_password.to_owned(),
+                new_password: new_password.to_owned(),
+            })
+            .send()
+            .await
+            .map_err(|_| CentralError::Unreachable)?;
+        let status = response.status();
+        if status.is_client_error() {
+            return Err(CentralError::Rejected(status));
+        }
+        if !status.is_success() {
+            return Err(CentralError::Unreachable);
+        }
+        Ok(())
     }
 }
 

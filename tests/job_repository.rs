@@ -58,6 +58,7 @@ async fn job_lease_publication_and_flow_queries() -> anyhow::Result<()> {
     let lease = LeaseRequest {
         worker_id: worker.id,
         lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
         telemetry: None,
     };
     repository::heartbeat(&pool, job.id, &lease).await?;
@@ -123,11 +124,13 @@ async fn job_lease_publication_and_flow_queries() -> anyhow::Result<()> {
     let lease = LeaseRequest {
         worker_id: worker.id,
         lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
         telemetry: None,
     };
     let stale = LeaseRequest {
         worker_id: worker.id,
         lease_token: renewed.lease_token,
+        lease_epoch: renewed.lease_epoch,
         telemetry: None,
     };
     assert!(matches!(
@@ -190,6 +193,7 @@ async fn job_lease_publication_and_flow_queries() -> anyhow::Result<()> {
     let lease = LeaseRequest {
         worker_id: worker.id,
         lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
         telemetry: None,
     };
     repository::fail(&pool, third.id, &lease, JobErrorCode::RemuxFailed).await?;
@@ -318,6 +322,7 @@ async fn jobs_keep_the_flow_version_frozen_at_creation() -> anyhow::Result<()> {
         &LeaseRequest {
             worker_id: worker.id,
             lease_token: claim.lease_token,
+            lease_epoch: claim.lease_epoch,
             telemetry: None,
         },
         JobErrorCode::RemuxFailed,
@@ -440,6 +445,7 @@ async fn jobs_freeze_library_flow_record_steps_and_clear_output_explicitly() -> 
     let lease = LeaseRequest {
         worker_id: worker.id,
         lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
         telemetry: None,
     };
 

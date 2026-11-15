@@ -67,9 +67,18 @@ pub struct Claim {
     /// que workers distants et intégré exécutent la même définition.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frozen_flow: Option<FlowRecord>,
-    /// Connexions *arr déchiffrées pour les blocs Sonarr/Radarr sur un worker distant.
+    /// Contrats d'opérations JSON nécessaires au worker pour exécuter le flux sans logique figée.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub operations: std::collections::HashMap<String, serde_json::Value>,
+    /// Table de correspondance bloc / alias -> `operationId` pour ce bail.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub block_operations: std::collections::HashMap<String, String>,
+    /// Réglages de plugins déchiffrés pour les seules opérations HTTP du flux figé.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub plugin_configs: std::collections::HashMap<String, serde_json::Value>,
+    /// Dossier source tel que vu par le central (pour les traductions de chemins d'intégration).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub arr: Option<crate::flows::ArrLeaseContext>,
+    pub media_root: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -202,7 +211,8 @@ mod tests {
             r#"{"job_id":"00000000-0000-0000-0000-000000000001","lease_token":"00000000-0000-0000-0000-000000000002","source_name":"a.mkv","source_sha256":"ab","source_bytes":1}"#,
         )?;
         assert!(bare.frozen_flow.is_none());
-        assert!(bare.arr.is_none());
+        assert!(bare.operations.is_empty());
+        assert!(bare.plugin_configs.is_empty());
         let with_flow = Claim {
             job_id: Uuid::nil(),
             lease_token: Uuid::nil(),
@@ -224,12 +234,16 @@ mod tests {
                 created_at: chrono::DateTime::UNIX_EPOCH,
                 updated_at: chrono::DateTime::UNIX_EPOCH,
             }),
-            arr: None,
+            operations: std::collections::HashMap::new(),
+            block_operations: std::collections::HashMap::new(),
+            plugin_configs: std::collections::HashMap::new(),
+            media_root: None,
         };
         let encoded = serde_json::to_value(&with_flow)?;
         assert_eq!(encoded["frozen_flow"]["id"], "flow.x");
         assert_eq!(encoded["frozen_flow"]["version"], 3);
-        assert!(encoded.get("arr").is_none());
+        assert!(encoded.get("operations").is_none());
+        assert!(encoded.get("plugin_configs").is_none());
         Ok(())
     }
 

@@ -253,14 +253,13 @@ impl WorkerLoop {
             );
         }
 
-        let arr = claim.arr.clone().map(crate::flows::ArrContext::from);
         let progress_cb = self.progress_callback(claim, worker);
         let outcome = job_runner::execute_claim_processing(
             claim,
             &cache_mgr,
             &self.client,
             None,
-            arr.as_ref(),
+            None,
             &input,
             dir,
             progress_cb,

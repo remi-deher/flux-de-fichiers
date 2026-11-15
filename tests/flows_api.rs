@@ -225,7 +225,10 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn webhook_block_honors_fail_on_error() -> anyhow::Result<()> {
-    use flux_de_fichiers::flows::{self, WebhookBlockConfig};
+    use flux_de_fichiers::flows::{
+        self, contract::HttpRuntime, http_runner::execute_http_operation,
+    };
+    use std::collections::HashMap;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -239,6 +242,17 @@ async fn webhook_block_honors_fail_on_error() -> anyhow::Result<()> {
                 .await;
         }
     });
+    let rt: HttpRuntime = serde_json::from_value(serde_json::json!({
+        "errorCode": "webhook_failed",
+        "failOnErrorParam": "fail_on_error",
+        "timeoutSeconds": 5,
+        "steps": [{
+            "url": "{$config.url}",
+            "method": "{$config.method|POST}",
+            "mergeCustomHeaders": true,
+            "body": { "job_id": "{$context.jobId}" }
+        }]
+    }))?;
     let ctx = flows::FlowContext::new(
         uuid::Uuid::nil(),
         "film.mkv".into(),
@@ -246,30 +260,66 @@ async fn webhook_block_honors_fail_on_error() -> anyhow::Result<()> {
         serde_json::json!({}),
     );
     let client = reqwest::Client::new();
-    let mut config = WebhookBlockConfig {
-        url: format!("http://{addr}/hook"),
-        method: "POST".into(),
-        custom_headers: std::collections::HashMap::new(),
-        fail_on_error: true,
-    };
+    let plugin_configs = HashMap::new();
+
+    let strict_cfg = serde_json::json!({
+        "url": format!("http://{addr}/hook"),
+        "method": "POST",
+        "fail_on_error": true
+    });
     assert!(
-        flows::execute_webhook_block(&config, &ctx, &client)
-            .await
-            .is_err()
+        execute_http_operation(
+            &rt,
+            "flow.test",
+            "n1",
+            &strict_cfg,
+            &plugin_configs,
+            &ctx,
+            None,
+            &client,
+        )
+        .await
+        .is_err()
     );
 
-    config.fail_on_error = false;
-    config.url = "http://127.0.0.1:9/hook".into();
+    let tolerant_cfg = serde_json::json!({
+        "url": "http://127.0.0.1:9/hook",
+        "method": "POST",
+        "fail_on_error": false
+    });
     assert!(
-        flows::execute_webhook_block(&config, &ctx, &client)
-            .await
-            .is_ok()
+        execute_http_operation(
+            &rt,
+            "flow.test",
+            "n1",
+            &tolerant_cfg,
+            &plugin_configs,
+            &ctx,
+            None,
+            &client,
+        )
+        .await
+        .is_ok()
     );
-    config.fail_on_error = true;
+
+    let unreachable_strict = serde_json::json!({
+        "url": "http://127.0.0.1:9/hook",
+        "method": "POST",
+        "fail_on_error": true
+    });
     assert!(
-        flows::execute_webhook_block(&config, &ctx, &client)
-            .await
-            .is_err()
+        execute_http_operation(
+            &rt,
+            "flow.test",
+            "n1",
+            &unreachable_strict,
+            &plugin_configs,
+            &ctx,
+            None,
+            &client,
+        )
+        .await
+        .is_err()
     );
     Ok(())
 }

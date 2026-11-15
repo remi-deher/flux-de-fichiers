@@ -21,8 +21,8 @@ mod sync;
 pub use blocks::{flow_block_catalog, plugin_default_config};
 pub use cache::CatalogCache;
 pub use install::{
-    ensure_job_tools, ensure_tool_installed, ensure_tools_for_requirements,
-    install_from_distribution, is_installing, parse_distribution, read_distribution,
+    ensure_tool_installed, ensure_tools_for_requirements, install_from_distribution, is_installing,
+    parse_distribution, read_distribution,
 };
 pub use packs::{PackInstallResult, PackInstallation, install_pack, read_pack_installation};
 pub use probe::{ProbeContract, file_job_may_start, probe_is_ready, required_probe};
@@ -44,33 +44,6 @@ pub use settings::{
     resolve_settings_fields,
 };
 
-/// Outil de remuxage requis par les jobs, installé dans le cache local depuis les dépôts.
-pub const REMUX_TOOL_ID: &str = "app.mkvtoolnix";
-pub const REMUX_TOOL_VERSION: &str = "1.0.0";
-
-/// FFmpeg distribué par les dépôts de plugins (jamais embarqué dans l'image).
-pub const FFMPEG_TOOL_ID: &str = "app.ffmpeg";
-pub const FFMPEG_TOOL_VERSION: &str = "1.0.0";
-
-/// MP4Box (GPAC) distribué par les dépôts de plugins, pour le remuxage MP4.
-pub const MP4BOX_TOOL_ID: &str = "app.mp4box";
-pub const MP4BOX_TOOL_VERSION: &str = "1.0.0";
-
-/// MediaInfo distribué par les dépôts de plugins, pour l'enrichissement technique des médias.
-pub const MEDIAINFO_TOOL_ID: &str = "app.mediainfo";
-pub const MEDIAINFO_TOOL_VERSION: &str = "1.0.0";
-
-/// Version par défaut d'un outil lorsque le catalogue local n'en fournit pas encore.
-pub fn default_tool_version(tool_id: &str) -> &'static str {
-    match tool_id {
-        REMUX_TOOL_ID => REMUX_TOOL_VERSION,
-        FFMPEG_TOOL_ID => FFMPEG_TOOL_VERSION,
-        MP4BOX_TOOL_ID => MP4BOX_TOOL_VERSION,
-        MEDIAINFO_TOOL_ID => MEDIAINFO_TOOL_VERSION,
-        _ => "1.0.0",
-    }
-}
-
 /// Résout dynamiquement la version d'un outil depuis `distribution.v1.json`, sinon le catalogue.
 pub fn resolve_tool_version(roots: &[PathBuf], tool_id: &str) -> String {
     if let Ok(value) = read_distribution(roots, tool_id)
@@ -84,7 +57,7 @@ pub fn resolve_tool_version(roots: &[PathBuf], tool_id: &str) -> String {
         .find(|(_, entry)| entry.id == tool_id)
         .map(|(_, entry)| entry.version)
         .filter(|version| !version.trim().is_empty())
-        .unwrap_or_else(|| default_tool_version(tool_id).to_owned())
+        .unwrap_or_else(|| "1.0.0".to_owned())
 }
 
 /// Conteneur de l'index du catalogue.
@@ -95,6 +68,17 @@ pub struct CatalogIndex {
     #[serde(default)]
     pub generated_for: Option<String>,
     pub entries: Vec<CatalogEntry>,
+}
+
+/// Fichier déclaré dans `files[]` d'un manifeste.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestFileEntry {
+    pub path: String,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub media_type: Option<String>,
 }
 
 /// Manifeste individuel d'un composant (`manifest.json`).
@@ -117,6 +101,8 @@ pub struct PluginManifest {
     pub tool: Option<ManifestToolDetails>,
     #[serde(default)]
     pub settings_schema: Option<SettingsSchema>,
+    #[serde(default)]
+    pub files: Vec<ManifestFileEntry>,
     #[serde(
         default,
         deserialize_with = "vocab::deserialize_optional_category",

@@ -170,33 +170,6 @@ pub async fn ensure_tool_installed(
     install_from_distribution(cache, &distribution, policy).await
 }
 
-/// Installe les outils d'un job : la sonde du catalogue et les outils requis avec résolution dynamique de version.
-pub async fn ensure_job_tools(
-    roots: &[PathBuf],
-    cache: &ToolCacheManager,
-    probe: Option<&super::ProbeContract>,
-    policy: &SyncPolicy,
-) {
-    let mut wanted: Vec<crate::domain::ToolRequirement> = [
-        super::REMUX_TOOL_ID,
-        super::FFMPEG_TOOL_ID,
-        super::MP4BOX_TOOL_ID,
-    ]
-    .into_iter()
-    .map(|tool_id| crate::domain::ToolRequirement {
-        tool_id: tool_id.to_owned(),
-        version: super::resolve_tool_version(roots, tool_id),
-    })
-    .collect();
-    if let Some(contract) = probe {
-        wanted.push(crate::domain::ToolRequirement {
-            tool_id: contract.tool_id.clone(),
-            version: contract.version.clone(),
-        });
-    }
-    ensure_tools_for_requirements(roots, cache, &wanted, policy).await;
-}
-
 /// Installe uniquement la liste explicite d'outils requis par le graphe ou la sonde du job.
 pub async fn ensure_tools_for_requirements(
     roots: &[PathBuf],
@@ -439,16 +412,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_ensure_job_tools_without_any_repository_is_a_harmless_no_op() -> anyhow::Result<()>
-    {
+    async fn test_ensure_tools_for_requirements_without_repo_is_a_harmless_no_op()
+    -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         let cache = ToolCacheManager::new(dir.path());
-        ensure_job_tools(&[], &cache, None, &SyncPolicy::default()).await;
-        assert!(!cache.is_ready(
-            super::super::REMUX_TOOL_ID,
-            super::super::REMUX_TOOL_VERSION,
-            host_arch()
-        ));
+        let wanted = [crate::domain::ToolRequirement {
+            tool_id: "app.example".into(),
+            version: "1.0.0".into(),
+        }];
+        ensure_tools_for_requirements(&[], &cache, &wanted, &SyncPolicy::default()).await;
+        assert!(!cache.is_ready("app.example", "1.0.0", host_arch()));
         Ok(())
     }
 }

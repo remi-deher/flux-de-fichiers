@@ -1,10 +1,9 @@
-//! En-têtes des blocs webhook : chiffrés dans la définition d'un flux, jamais renvoyés par l'API.
+//! En-têtes HTTP : chiffrés dans la définition d'un flux, jamais renvoyés en clair par l'API.
 //!
 //! Un en-tête (par exemple `Authorization`) est un secret. À l'enregistrement, les valeurs en clair
 //! sont chiffrées ; une valeur laissée vide conserve celle déjà enregistrée pour le même bloc.
 //! L'API renvoie les noms d'en-têtes avec une valeur vide ; le moteur déchiffre à l'exécution.
 
-use super::webhook::WebhookBlockConfig;
 use crate::{
     error::{AppError, AppResult},
     repository::DEFINITION_STORES,
@@ -14,15 +13,10 @@ use serde_json::{Map, Value};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 
-const WEBHOOK_NODE_TYPES: [&str; 2] = ["webhook", "block.core.webhook"];
 const HEADERS_KEY: &str = "custom_headers";
 
-/// En-têtes du bloc si c'est un webhook qui en déclare.
+/// En-têtes d'un bloc s'il déclare un objet `config.custom_headers`.
 fn headers_of(node: &mut Value) -> Option<&mut Map<String, Value>> {
-    let kind = node.get("type").and_then(Value::as_str)?;
-    if !WEBHOOK_NODE_TYPES.contains(&kind) {
-        return None;
-    }
     node.get_mut("config")?
         .get_mut(HEADERS_KEY)?
         .as_object_mut()
@@ -130,9 +124,9 @@ pub fn decrypt_headers(
     secrets: &SecretBox,
     flow_id: &str,
     node_id: &str,
-    config: &mut WebhookBlockConfig,
+    headers: &mut HashMap<String, String>,
 ) -> AppResult<()> {
-    for (name, value) in config.custom_headers.iter_mut() {
+    for (name, value) in headers.iter_mut() {
         if is_encrypted(value) {
             *value = secrets.decrypt(value, &header_aad(flow_id, node_id, name))?;
         }
@@ -339,21 +333,16 @@ mod tests {
     #[test]
     fn test_decrypt_headers_restores_clear_values_only_for_encrypted_ones() -> anyhow::Result<()> {
         let (_dir, secrets) = secrets()?;
-        let mut config = WebhookBlockConfig {
-            url: "https://hook.example".into(),
-            method: "POST".into(),
-            custom_headers: HashMap::from([
-                (
-                    "Authorization".to_owned(),
-                    secrets.encrypt("Bearer SECRET", &header_aad(FLOW, "n2", "Authorization"))?,
-                ),
-                ("X-Plain".to_owned(), "tel quel".to_owned()),
-            ]),
-            fail_on_error: false,
-        };
-        decrypt_headers(&secrets, FLOW, "n2", &mut config)?;
-        assert_eq!(config.custom_headers["Authorization"], "Bearer SECRET");
-        assert_eq!(config.custom_headers["X-Plain"], "tel quel");
+        let mut headers = HashMap::from([
+            (
+                "Authorization".to_owned(),
+                secrets.encrypt("Bearer SECRET", &header_aad(FLOW, "n2", "Authorization"))?,
+            ),
+            ("X-Plain".to_owned(), "tel quel".to_owned()),
+        ]);
+        decrypt_headers(&secrets, FLOW, "n2", &mut headers)?;
+        assert_eq!(headers["Authorization"], "Bearer SECRET");
+        assert_eq!(headers["X-Plain"], "tel quel");
         Ok(())
     }
 

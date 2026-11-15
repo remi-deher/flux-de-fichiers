@@ -1,16 +1,16 @@
 //! Exécuteur partagé d'un bail de tâche entre worker local et worker distant.
 
 use crate::{
-    domain::{Claim, JobErrorCode, JobStepEntry, JobStepStatus, ToolRequirement},
-    flows::{self, ArrContext, FlowEngine, FlowProgressCallback},
-    media::{self, OutputProfile},
-    plugins::{self, ProbeContract, default_tool_version},
+    domain::{Claim, JobErrorCode, JobStepEntry, ToolRequirement},
+    flows::{FlowEngine, FlowProgressCallback, OperationRegistry},
+    media::OutputProfile,
+    plugins::{self, ProbeContract},
     tools_cache::ToolCacheManager,
 };
 use std::{
+    collections::HashMap,
     fmt,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
 /// Résultat unifié du traitement d'un fichier sur un worker.
@@ -61,23 +61,23 @@ pub fn probe_from_claim(claim: &Claim) -> Option<ProbeContract> {
     }
 }
 
-/// Liste dédupliquée des outils nécessaires pour exécuter ce bail (`required_tools` ou déduction du flow).
+/// Liste dédupliquée des outils nécessaires pour exécuter ce bail (`required_tools` ou contrats du bail).
 pub fn collect_wanted_tools(claim: &Claim) -> Vec<ToolRequirement> {
     let mut wanted = if !claim.required_tools.is_empty() {
         claim.required_tools.clone()
-    } else if let Some(flow) = claim.frozen_flow.as_ref() {
-        flows::required_tool_ids(&flow.definition)
+    } else if !claim.operations.is_empty() {
+        let registry =
+            OperationRegistry::from_raw(claim.operations.clone(), claim.block_operations.clone());
+        registry
+            .required_tool_refs_for_flow(claim.frozen_flow.as_ref())
             .into_iter()
-            .map(|tool_id| ToolRequirement {
-                version: default_tool_version(tool_id).to_owned(),
-                tool_id: tool_id.to_owned(),
+            .map(|tool| ToolRequirement {
+                tool_id: tool.id,
+                version: tool.version,
             })
             .collect()
     } else {
-        vec![ToolRequirement {
-            tool_id: plugins::REMUX_TOOL_ID.to_owned(),
-            version: plugins::REMUX_TOOL_VERSION.to_owned(),
-        }]
+        Vec::new()
     };
 
     if let Some(probe) = probe_from_claim(claim)
@@ -89,16 +89,6 @@ pub fn collect_wanted_tools(claim: &Claim) -> Vec<ToolRequirement> {
         });
     }
     wanted
-}
-
-/// Version de l'outil de remuxage annoncée dans le bail (ou version par défaut).
-pub fn remux_tool_version(claim: &Claim) -> &str {
-    claim
-        .required_tools
-        .iter()
-        .find(|req| req.tool_id == plugins::REMUX_TOOL_ID)
-        .map(|req| req.version.as_str())
-        .unwrap_or(plugins::REMUX_TOOL_VERSION)
 }
 
 /// Vérifie que la sonde requise par le catalogue est prête sur le worker.
@@ -113,93 +103,77 @@ pub fn ensure_probe_ready(cache: &ToolCacheManager, claim: &Claim) -> Result<(),
     Ok(())
 }
 
-/// Exécute le flow figé du bail ou, à défaut, le remuxage MKV standard.
+/// Exécute le flow figé du bail ou, à défaut, l'opération `defaultFallback` déclarée dans les contrats.
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_claim_processing(
     claim: &Claim,
     cache_mgr: &ToolCacheManager,
     http_client: &reqwest::Client,
     secrets_dir: Option<&Path>,
-    arr: Option<&ArrContext>,
+    registry_override: Option<&OperationRegistry>,
     source_snapshot: &Path,
     work_dir: &Path,
     progress_cb: FlowProgressCallback,
 ) -> Result<JobExecutionResult, JobRunError> {
-    if let Some(flow) = claim.frozen_flow.as_ref() {
-        let mut engine = FlowEngine::new(cache_mgr, http_client);
-        if let Some(dir) = secrets_dir {
-            engine = engine.with_secrets_dir(dir);
+    let claim_registry;
+    let registry = match registry_override {
+        Some(reg) if claim.operations.is_empty() => reg,
+        _ => {
+            claim_registry = OperationRegistry::from_raw(
+                claim.operations.clone(),
+                claim.block_operations.clone(),
+            );
+            &claim_registry
         }
-        if let Some(arr_ctx) = arr {
-            engine = engine.with_arr(arr_ctx);
-        }
-        return engine
-            .execute_flow(flow, claim.job_id, source_snapshot, work_dir, progress_cb)
-            .await
-            .map(|outcome| JobExecutionResult {
-                working_file: outcome.working_file,
-                warning: outcome.warning,
-                output_profile: outcome.output_profile,
-                steps: outcome.steps,
-            })
-            .map_err(|error| JobRunError {
-                code: error.code,
-                message: error.message,
-                steps: error.steps,
-            });
-    }
+    };
+    let tool_versions: HashMap<String, String> = claim
+        .required_tools
+        .iter()
+        .map(|req| (req.tool_id.clone(), req.version.clone()))
+        .collect();
 
-    let output = work_dir.join("output.mkv");
-    let mkvmerge_bin = cache_mgr.resolve_executable(
-        plugins::REMUX_TOOL_ID,
-        remux_tool_version(claim),
-        "mkvmerge",
-        "MKVMERGE",
-    );
-    let cb = Arc::clone(&progress_cb);
-    match media::remux_with_progress(&mkvmerge_bin, source_snapshot, &output, move |pct, line| {
-        cb(pct, line);
-    })
-    .await
-    {
-        Ok(warning) => Ok(JobExecutionResult {
-            working_file: output,
-            warning,
-            output_profile: OutputProfile::StrictMkvRemux,
-            steps: vec![JobStepEntry {
-                step_index: 0,
-                node_id: "default-remux".into(),
-                block_kind: "remux-mkv".into(),
-                operation_id: Some("mkvtoolnix.remux".into()),
-                status: JobStepStatus::Succeeded,
-                message: Some(if warning {
-                    "Remux MKV terminé avec avertissement".into()
-                } else {
-                    "Remux MKV terminé".into()
-                }),
-                output_excerpt: None,
-            }],
-        }),
-        Err(error) => Err(JobRunError {
-            code: JobErrorCode::RemuxFailed,
-            message: format!("remux_failed: {error}"),
-            steps: vec![JobStepEntry {
-                step_index: 0,
-                node_id: "default-remux".into(),
-                block_kind: "remux-mkv".into(),
-                operation_id: Some("mkvtoolnix.remux".into()),
-                status: JobStepStatus::Failed,
-                message: Some(error.to_string()),
-                output_excerpt: None,
-            }],
-        }),
-    }
+    let engine = FlowEngine {
+        registry,
+        cache_mgr,
+        http_client,
+        secrets_dir,
+        plugin_configs: &claim.plugin_configs,
+        tool_versions: &tool_versions,
+        media_root: claim.media_root.as_deref(),
+    };
+
+    let outcome = match claim.frozen_flow.as_ref() {
+        Some(flow) => {
+            engine
+                .execute_flow(claim.job_id, flow, source_snapshot, work_dir, progress_cb)
+                .await
+        }
+        None => {
+            engine
+                .execute_default(source_snapshot, work_dir, progress_cb)
+                .await
+        }
+    };
+
+    outcome
+        .map(|res| JobExecutionResult {
+            working_file: res.final_file,
+            warning: res.warning,
+            output_profile: res.output_profile,
+            steps: res.steps,
+        })
+        .map_err(|error| JobRunError {
+            code: error.code,
+            message: error.message,
+            steps: error.steps,
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use flux_shared::flows::FlowRecord;
+    use serde_json::json;
     use uuid::Uuid;
 
     fn sample_claim(flow: Option<FlowRecord>, required_tools: Vec<ToolRequirement>) -> Claim {
@@ -214,7 +188,10 @@ mod tests {
             probe_version: None,
             required_tools,
             frozen_flow: flow,
-            arr: None,
+            operations: HashMap::new(),
+            block_operations: HashMap::new(),
+            plugin_configs: HashMap::new(),
+            media_root: None,
         }
     }
 
@@ -223,22 +200,22 @@ mod tests {
         let mut claim = sample_claim(
             None,
             vec![ToolRequirement {
-                tool_id: plugins::FFMPEG_TOOL_ID.into(),
+                tool_id: "app.ffmpeg".into(),
                 version: "2.0.0".into(),
             }],
         );
-        claim.probe_tool_id = Some(plugins::MEDIAINFO_TOOL_ID.into());
+        claim.probe_tool_id = Some("app.mediainfo".into());
         claim.probe_version = Some("1.2.3".into());
         let wanted = collect_wanted_tools(&claim);
         assert_eq!(wanted.len(), 2);
-        assert_eq!(wanted[0].tool_id, plugins::FFMPEG_TOOL_ID);
+        assert_eq!(wanted[0].tool_id, "app.ffmpeg");
         assert_eq!(wanted[0].version, "2.0.0");
-        assert_eq!(wanted[1].tool_id, plugins::MEDIAINFO_TOOL_ID);
+        assert_eq!(wanted[1].tool_id, "app.mediainfo");
         assert_eq!(wanted[1].version, "1.2.3");
     }
 
     #[test]
-    fn collect_wanted_tools_infers_flow_tools_when_server_omits_list() {
+    fn collect_wanted_tools_extracts_tools_from_claim_operations() {
         let flow = FlowRecord {
             id: "flow.test".into(),
             name: "Test".into(),
@@ -246,10 +223,9 @@ mod tests {
             file_mask: "*.mkv".into(),
             version: 1,
             is_default: false,
-            definition: serde_json::json!({
+            definition: json!({
                 "nodes": [
-                    {"id": "1", "type": "block.video.encode", "name": "Encode"},
-                    {"id": "2", "type": "block.video.remux-mp4", "name": "MP4"}
+                    {"id": "1", "type": "block.custom.encode", "name": "Encode"}
                 ],
                 "connections": []
             })
@@ -257,15 +233,52 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        let wanted = collect_wanted_tools(&sample_claim(Some(flow), Vec::new()));
-        let ids: Vec<_> = wanted.into_iter().map(|req| req.tool_id).collect();
-        assert_eq!(
-            ids,
-            vec![
-                plugins::REMUX_TOOL_ID.to_owned(),
-                plugins::FFMPEG_TOOL_ID.to_owned(),
-                plugins::MP4BOX_TOOL_ID.to_owned()
-            ]
+        let mut claim = sample_claim(Some(flow), Vec::new());
+        claim.operations.insert(
+            "op.probe".into(),
+            json!({
+                "schemaVersion": "1.1.0",
+                "id": "op.probe",
+                "version": "1.0.0",
+                "name": "Probe",
+                "providerId": "plugin.custom",
+                "providerKind": "plugin",
+                "capability": "probe",
+                "status": "validated",
+                "runtime": {
+                    "kind": "binary",
+                    "tool": { "id": "app.probe", "version": "1.0.0" },
+                    "executable": "probe",
+                    "executionMode": "probe-primary",
+                    "argv": [{ "param": "source", "as": "filePath" }]
+                }
+            }),
         );
+        claim.operations.insert(
+            "op.custom.encode".into(),
+            json!({
+                "schemaVersion": "1.1.0",
+                "id": "op.custom.encode",
+                "version": "1.0.0",
+                "name": "Custom",
+                "providerId": "plugin.custom",
+                "providerKind": "plugin",
+                "capability": "encode",
+                "status": "validated",
+                "runtime": {
+                    "kind": "binary",
+                    "tool": { "id": "app.custom", "version": "3.1.0" },
+                    "executable": "custom",
+                    "executionMode": "staged-output",
+                    "argv": [{ "param": "source", "as": "filePath" }]
+                }
+            }),
+        );
+        claim
+            .block_operations
+            .insert("block.custom.encode".into(), "op.custom.encode".into());
+        let wanted = collect_wanted_tools(&claim);
+        let ids: Vec<_> = wanted.into_iter().map(|req| req.tool_id).collect();
+        assert_eq!(ids, vec!["app.probe".to_owned(), "app.custom".to_owned()]);
     }
 }

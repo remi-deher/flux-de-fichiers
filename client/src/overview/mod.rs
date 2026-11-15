@@ -36,38 +36,34 @@ fn plain_http() -> bool {
         .is_ok_and(|protocol| protocol == "http:")
 }
 
-/// Carte d'accueil : état général, titre et raccourcis.
+/// Bandeau d'état général compact et actions rapides de la vue d'ensemble.
 #[component]
 fn Hero(
     tone: &'static str,
     status: String,
-    title: String,
-    subtitle: &'static str,
     #[prop(optional)] actions: Option<AnyView>,
 ) -> impl IntoView {
     view! {
-        <div class="overview-hero-card">
-            <div class="hero-content">
-                <div class="hero-badge" data-tone=tone>
-                    <span class="status-dot status-dot--pulse"></span>
-                    <span>{status}</span>
-                </div>
-                <h1 class="hero-title">{title}</h1>
-                <p class="hero-subtitle">{subtitle}</p>
+        <div class="overview-toolbar">
+            <div class="hero-badge" data-tone=tone>
+                <span class="status-dot status-dot--pulse"></span>
+                <span>{status}</span>
             </div>
-            <div class="hero-actions">{actions}</div>
+            {actions.map(|content| view! {
+                <div class="overview-toolbar__actions">{content}</div>
+            })}
         </div>
     }
 }
 
 #[component]
 pub fn CentralOverview(me: Me) -> impl IntoView {
+    let _ = me;
     let router = use_router();
     let live_progress = use_context::<LiveJobs>().map(|live| live.progress);
     let jobs = LocalResource::new(|| api::get::<Vec<Job>>(JOBS_PATH));
     let workers = LocalResource::new(|| api::get::<Vec<Worker>>(WORKERS_PATH));
     let libraries = LocalResource::new(|| api::get::<Vec<Library>>(LIBRARIES_PATH));
-    let instance = me.instance_name.clone().unwrap_or_default();
     let layout = RwSignal::new(WidgetLayout::restore());
     view! {
         <div class="tab-panel" role="tabpanel">
@@ -85,20 +81,9 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                     ("warning", format!("{} point(s) à surveiller", attention.len()))
                 };
                 let recent: Vec<Job> = jobs_list.into_iter().take(RECENT_JOBS).collect();
-                let actions = view! {
-                    <Link to=Route::NewFlow class="btn btn-primary">
-                        <Icon name=IconName::Plus size=15 />
-                        <span>"Nouveau flux"</span>
-                    </Link>
-                    <Link to=Route::Libraries class="btn btn-secondary">
-                        <Icon name=IconName::Libraries size=15 />
-                        <span>"Bibliothèques"</span>
-                    </Link>
-                    <WidgetPicker layout=layout />
-                }.into_any();
+                let actions = view! { <WidgetPicker layout=layout /> }.into_any();
                 view! {
-                    <Hero tone=tone status=status title=format!("Vue d'ensemble — {instance}")
-                        subtitle="Tâches, workers et bibliothèques du central, en direct." actions=actions />
+                    <Hero tone=tone status=status actions=actions />
                     {layout_now.is_visible(Widget::Metrics).then(|| view! {
                     <section class="metrics-grid" aria-label="Statistiques clés">
                         <MetricCard label="Tâches en cours" value=summary.running.to_string() subtitle=format!("{} en attente", summary.queued) icon=IconName::Activity />
@@ -162,27 +147,17 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
 
 #[component]
 pub fn WorkerOverviewPage(me: Me) -> impl IntoView {
+    let _ = me;
     let overview = LocalResource::new(|| api::get::<WorkerOverview>(WORKER_OVERVIEW_PATH));
-    let name = me.instance_name.clone().unwrap_or_default();
     view! {
         <div class="tab-panel" role="tabpanel">
             {move || match overview.get() {
-                None => view! { <Hero tone="neutral" status="Vérification du central…".to_owned() title=format!("Worker « {name} »") subtitle="Tâches traitées par ce worker, relayées par le central." /> }.into_any(),
-                Some(Err(error)) => view! { <Hero tone="danger" status=format!("Central injoignable : {}", error.message()) title=format!("Worker « {name} »") subtitle="Tâches traitées par ce worker, relayées par le central." /> }.into_any(),
+                None => view! { <Hero tone="neutral" status="Vérification du central…".to_owned() /> }.into_any(),
+                Some(Err(error)) => view! { <Hero tone="danger" status=format!("Central injoignable : {}", error.message()) /> }.into_any(),
                 Some(Ok(view)) => {
                     let contact = view.last_seen.map_or_else(|| "aucune activité enregistrée".to_owned(), |at| format!("dernière activité {}", format::datetime(at)));
-                    let actions = view! {
-                        <Link to=Route::Jobs class="btn btn-secondary">
-                            <Icon name=IconName::Activity size=15 />
-                            <span>"Activité"</span>
-                        </Link>
-                        <Link to=Route::Plugins class="btn btn-secondary">
-                            <Icon name=IconName::Plugins size=15 />
-                            <span>"Plugins"</span>
-                        </Link>
-                    }.into_any();
                     view! {
-                        <Hero tone="success" status=format!("Central joignable • {contact}") title=format!("Worker « {name} »") subtitle="Tâches traitées par ce worker, relayées par le central." actions=actions />
+                        <Hero tone="success" status=format!("Central joignable • {contact}") />
                         <section class="metrics-grid" aria-label="Tâches de ce worker">
                             <MetricCard label="En attente" value=view.jobs.queued.to_string() subtitle="Tâches en file pour ce worker" icon=IconName::Activity />
                             <MetricCard label="En cours" value=view.jobs.running.to_string() subtitle="Traitements actifs" icon=IconName::Refresh />

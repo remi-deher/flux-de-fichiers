@@ -6,8 +6,9 @@ use super::palette::Palette;
 use super::state::{Editor, incomplete_blocks};
 use super::versions::FlowVersions;
 use crate::api;
-use crate::route::{Link, Route, encode_segment, use_router};
-use crate::ui::{Drawer, Icon, IconName, Toasts};
+use crate::route::{Route, encode_segment, use_router};
+use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
+use crate::ui::{Drawer, Toasts};
 use chrono::{DateTime, Utc};
 use flux_shared::Permission;
 use flux_shared::flows::{
@@ -117,14 +118,15 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
         }
     };
 
+    provide_topbar_action(ActionSpec {
+        label: "Retour aux flux",
+        on_click: Callback::new(move |()| router.go(Route::Flows)),
+    });
+
     view! {
         <div class="tab-panel" role="tabpanel">
             <div class="studio-toolbar">
                 <div class="studio-toolbar__top">
-                    <Link to=Route::Flows class="btn btn-secondary btn-sm">
-                        <Icon name=IconName::ChevronLeft size=15 />
-                        <span>"Flux"</span>
-                    </Link>
                     <div class="studio-toolbar__meta">
                         <div class="studio-toolbar__field">
                             <label for="flow-name" class="form-label">"Nom"</label>

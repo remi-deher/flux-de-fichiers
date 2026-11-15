@@ -5,9 +5,7 @@ mod form;
 
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
-use crate::ui::{
-    Drawer, EmptyState, Icon, IconName, MetricTone, PageHeader, StatItem, StatStrip, StatusBadge,
-};
+use crate::ui::{Drawer, EmptyState, Icon, IconName, MetricTone, StatItem, StatStrip, StatusBadge};
 use crate::{api, format};
 use draft::{LibraryDraft, access_label, is_ready, library_counts};
 use flux_shared::Permission;
@@ -219,26 +217,9 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
             on_click: open_create,
         });
     }
-    let header_actions = can_manage
-        .then(|| {
-            view! {
-                <button type="button" class="btn btn-primary" on:click=move |_| open_create.run(())>
-                    <Icon name=IconName::Plus size=15 />
-                    <span>"Nouvelle bibliothèque"</span>
-                </button>
-            }
-        })
-        .into_any();
 
     view! {
         <div class="tab-panel" role="tabpanel">
-            <PageHeader
-                eyebrow="Médias"
-                title="Bibliothèques"
-                subtitle="Répertoires surveillés, accès worker et flux de traitement associés."
-                icon=IconName::Libraries
-                actions=header_actions
-            />
             <StatStrip aria_label="Synthèse des bibliothèques" items=stats />
             {grid}
             <Drawer open=drawer eyebrow="Bibliothèque" title=title>{form}</Drawer>

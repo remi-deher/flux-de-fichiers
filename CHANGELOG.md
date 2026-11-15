@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.24.0...v0.25.0) (2026-11-15)
+
+
+### Features
+
+* **flows:** zéro bloc embarqué dans le moteur ([c68c00f](https://github.com/remi-deher/flux-de-fichiers/commit/c68c00fe807bafd39aa3501dd918355e9ce5635b))
+* **flows:** zéro bloc embarqué dans le moteur ([65b6c52](https://github.com/remi-deher/flux-de-fichiers/commit/65b6c52cb3342778969e13e9fb6f4cd40089fa13))
+
 ## [0.24.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.23.0...v0.24.0) (2026-11-15)
 
 

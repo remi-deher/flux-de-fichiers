@@ -809,6 +809,11 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                             .collect();
                         let selected_id = editor.selected.get();
                         let selected_wire = editor.selected_wire.get();
+                        let sim_step = editor.sim_step.get();
+                        let sim_rep = editor.simulation_open.get().then(|| {
+                            let media = editor.sim_media.get();
+                            super::simulation::simulate_flow(&graph, &catalog, &media)
+                        });
 
                         graph
                             .connections
@@ -825,10 +830,15 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                 let pres =
                                     output_presentation(edge.port.as_deref().unwrap_or("default"));
                                 let is_selected_wire = selected_wire.as_ref() == Some(edge);
+                                let sim_active = sim_rep
+                                    .as_ref()
+                                    .is_some_and(|rep| rep.edge_is_active(edge, sim_step));
                                 let is_highlighted = is_selected_wire
+                                    || sim_active
                                     || selected_id.as_deref() == Some(edge.from.as_str())
                                     || selected_id.as_deref() == Some(edge.to.as_str());
-                                let is_muted = selected_id.is_some() && !is_highlighted;
+                                let is_muted = (selected_id.is_some() || sim_rep.is_some())
+                                    && !is_highlighted;
                                 let click_edge = FlowConnection {
                                     from: edge.from.clone(),
                                     to: edge.to.clone(),
@@ -870,6 +880,7 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                     <path
                                         class="flow-wire"
                                         class:is-highlighted=is_highlighted
+                                        class:is-sim-path=sim_active
                                         class:is-muted=is_muted
                                         data-tone=pres.tone.as_attr()
                                         d=d
@@ -898,6 +909,17 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                     let cards_view = move || {
                         let graph = editor.graph.get();
                         let catalog = editor.catalog.get();
+                        let sim_step = editor.sim_step.get();
+                        let sim_rep = editor.simulation_open.get().then(|| {
+                            let media = editor.sim_media.get();
+                            super::simulation::simulate_flow(&graph, &catalog, &media)
+                        });
+                        let sim_visited = sim_rep
+                            .as_ref()
+                            .map(|rep| rep.visited_nodes(sim_step));
+                        let sim_active_id = sim_rep
+                            .as_ref()
+                            .and_then(|rep| rep.active_node(sim_step).map(str::to_owned));
 
                         graph
                             .nodes
@@ -948,6 +970,10 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                 let remove_id = id.clone();
                                 let selected_check = id.clone();
                                 let dragging_check = id.clone();
+                                let is_sim_visited = sim_visited
+                                    .as_ref()
+                                    .is_some_and(|set| set.contains(&id));
+                                let is_sim_active = sim_active_id.as_deref() == Some(id.as_str());
                                 let domain_icon = domain.icon();
                                 let accent_var = domain.accent_var();
                                 let slot_style = Signal::derive(move || {
@@ -976,6 +1002,8 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                             class="canvas-node"
                                             class:is-selected=move || editor.is_selected(&selected_check)
                                             class:is-incomplete=incomplete
+                                            class:is-sim-visited=is_sim_visited
+                                            class:is-sim-active=is_sim_active
                                             class:is-dragging=move || dragging_node.with(|d| {
                                                 d.as_ref().is_some_and(|s| {
                                                     s.moved

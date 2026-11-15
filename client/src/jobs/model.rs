@@ -1,6 +1,66 @@
 //! Règles d'affichage des tâches, sans DOM : libellés et mise à jour en direct.
 
-use flux_shared::jobs::{Job, JobErrorCode, JobEvent, JobEventType, JobStatus};
+use flux_shared::jobs::{Job, JobErrorCode, JobEvent, JobEventType, JobStatus, JobStepStatus};
+use std::collections::HashMap;
+use uuid::Uuid;
+
+const DIGEST_PREVIEW_CHARS: usize = 12;
+const SHORT_UUID_CHARS: usize = 8;
+
+pub fn step_status_label(status: JobStepStatus) -> &'static str {
+    match status {
+        JobStepStatus::Succeeded => "Réussie",
+        JobStepStatus::Failed => "Échouée",
+        JobStepStatus::Skipped => "Ignorée",
+    }
+}
+
+pub fn step_status_tone(status: JobStepStatus) -> &'static str {
+    match status {
+        JobStepStatus::Succeeded => "success",
+        JobStepStatus::Failed => "danger",
+        JobStepStatus::Skipped => "warning",
+    }
+}
+
+///Variation relative entre taille source et taille produite (ex. `-42 %`).
+pub fn format_size_delta(source_bytes: Option<i64>, output_bytes: Option<i64>) -> Option<String> {
+    let src = source_bytes.filter(|&v| v > 0)?;
+    let out = output_bytes.filter(|&v| v > 0)?;
+    let pct = ((out as f64 - src as f64) / src as f64) * 100.0;
+    let rounded = pct.round() as i64;
+    if rounded > 0 {
+        Some(format!("+{rounded} %"))
+    } else {
+        Some(format!("{rounded} %"))
+    }
+}
+
+/// Raccourcit une empreinte SHA-256 pour l'affichage tabulaire.
+pub fn short_digest(digest: Option<&str>) -> String {
+    match digest.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(value) if value.len() > DIGEST_PREVIEW_CHARS => {
+            let prefix: String = value.chars().take(DIGEST_PREVIEW_CHARS).collect();
+            format!("{prefix}…")
+        }
+        Some(value) => value.to_owned(),
+        None => "—".to_owned(),
+    }
+}
+
+/// Résout le nom d'une bibliothèque liée, avec repli sur l'identifiant court.
+pub fn resolve_library_label(
+    library_id: Option<Uuid>,
+    libraries: &HashMap<Uuid, String>,
+) -> Option<String> {
+    let id = library_id?;
+    Some(
+        libraries
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| id.to_string().chars().take(SHORT_UUID_CHARS).collect()),
+    )
+}
 
 pub fn status_label(status: JobStatus) -> &'static str {
     match status {
@@ -197,5 +257,40 @@ mod tests {
         );
         assert_eq!(summarize_jobs(&[]), (0, 0, 0, 0));
         Ok(())
+    }
+
+    #[test]
+    fn size_delta_and_digest_and_library_helpers_format_cleanly() {
+        assert_eq!(
+            format_size_delta(Some(1000), Some(600)).as_deref(),
+            Some("-40 %")
+        );
+        assert_eq!(
+            format_size_delta(Some(1000), Some(1150)).as_deref(),
+            Some("+15 %")
+        );
+        assert_eq!(format_size_delta(Some(0), Some(500)), None);
+        assert_eq!(format_size_delta(None, Some(500)), None);
+
+        assert_eq!(
+            short_digest(Some("0123456789abcdef0123456789")),
+            "0123456789ab…"
+        );
+        assert_eq!(short_digest(Some("")), "—");
+        assert_eq!(short_digest(None), "—");
+
+        let lib_id = Uuid::from_u128(0xabcd_ef01);
+        let mut libs = HashMap::new();
+        assert_eq!(
+            resolve_library_label(Some(lib_id), &libs).as_deref(),
+            Some("00000000")
+        );
+        libs.insert(lib_id, "Séries UHD".into());
+        assert_eq!(
+            resolve_library_label(Some(lib_id), &libs).as_deref(),
+            Some("Séries UHD")
+        );
+        assert_eq!(resolve_library_label(None, &libs), None);
+        assert_eq!(step_status_tone(JobStepStatus::Skipped), "warning");
     }
 }

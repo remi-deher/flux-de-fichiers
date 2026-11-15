@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Configuration d'une condition d'aiguillage (ADR 0008).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConditionConfig {
     #[serde(default)]
     pub property: String,

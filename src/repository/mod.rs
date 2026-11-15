@@ -19,7 +19,8 @@ pub use jobs::{
     PublishedOutput, active, claim, clear_job_output_name, count_jobs_for_worker, delete_worker,
     fail, find_worker_by_name, get_job, heartbeat, insert_job, insert_job_with_options,
     list_job_steps, list_jobs, list_jobs_for_worker, list_workers, ping, publish_succeeded,
-    register, retry_job, save_job_steps, succeeded_output_name, worker_exists,
+    register, register_with_metadata, retry_job, save_job_steps, succeeded_output_name,
+    touch_worker_telemetry, worker_exists,
 };
 pub use libraries::{
     delete_library, get_library, insert_library, library_worker_local_path, list_libraries,

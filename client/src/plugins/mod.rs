@@ -1,5 +1,6 @@
 //! Plugins : catalogue d'extensions, outils distribués, dépôts synchronisés et réglages (ADR 0010, 0014).
 
+mod pack_detail;
 mod settings;
 
 use crate::api;
@@ -18,6 +19,7 @@ use flux_shared::plugins::{
 use flux_shared::session::Me;
 use flux_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
+use pack_detail::PackDetail;
 use serde_json::Value;
 use settings::PluginSettings;
 
@@ -120,7 +122,7 @@ fn section_icon(entry_type: CatalogItemType) -> IconName {
     }
 }
 
-fn section_badge_label(entry_type: CatalogItemType) -> &'static str {
+pub(super) fn section_badge_label(entry_type: CatalogItemType) -> &'static str {
     if let Some(sub) = entry_type.subtitle() {
         return sub;
     }
@@ -380,17 +382,53 @@ fn ToolsSection(
     }
 }
 
+#[derive(Clone, PartialEq, Eq)]
+enum CatalogDrawer {
+    PluginSettings(String),
+    PackDetails(String),
+}
+
+impl CatalogDrawer {
+    fn id(&self) -> &str {
+        match self {
+            Self::PluginSettings(id) | Self::PackDetails(id) => id,
+        }
+    }
+}
+
 #[component]
 fn CatalogSectionView(
     catalog: LocalResource<Result<Vec<CatalogEntry>, api::ApiError>>,
+    reload_tools: RwSignal<u32>,
     can_configure: bool,
 ) -> impl IntoView {
-    let configuring = RwSignal::new(None::<String>);
-    let settings_open = RwSignal::new(false);
-    let title = Signal::derive(move || configuring.get().unwrap_or_default());
+    let inspecting = RwSignal::new(None::<CatalogDrawer>);
+    let drawer_open = RwSignal::new(false);
+    let title = Signal::derive(move || {
+        inspecting
+            .get()
+            .map(|target| target.id().to_owned())
+            .unwrap_or_default()
+    });
+    let on_pack_installed = Callback::new(move |()| bump(reload_tools));
     view! {
-        <Drawer open=settings_open eyebrow="Réglages du plugin" title=title>
-            {move || configuring.get().map(|id| view! { <PluginSettings plugin_id=id /> })}
+        <Drawer open=drawer_open eyebrow="Catalogue" title=title>
+            {move || match inspecting.get() {
+                Some(CatalogDrawer::PluginSettings(id)) => {
+                    view! { <PluginSettings plugin_id=id /> }.into_any()
+                }
+                Some(CatalogDrawer::PackDetails(id)) => {
+                    view! {
+                        <PackDetail
+                            pack_id=id
+                            can_install=can_configure
+                            on_installed=on_pack_installed
+                        />
+                    }
+                    .into_any()
+                }
+                None => ().into_any(),
+            }}
         </Drawer>
         <section class="page-section">
             <SectionHeader
@@ -440,7 +478,16 @@ fn CatalogSectionView(
                                 {shown.into_iter().map(|entry| {
                                     let id = entry.id.clone();
                                     let active_id = id.clone();
-                                    let configurable = can_configure && entry.entry_type == CatalogItemType::Plugin;
+                                    let target = match entry.entry_type {
+                                        CatalogItemType::Plugin if can_configure => {
+                                            Some((CatalogDrawer::PluginSettings(id.clone()), "Réglages"))
+                                        }
+                                        CatalogItemType::Pack => Some((
+                                            CatalogDrawer::PackDetails(id.clone()),
+                                            if can_configure { "Installer le pack" } else { "Détails" },
+                                        )),
+                                        _ => None,
+                                    };
                                     let badge_label = section_badge_label(entry.entry_type);
                                     let fallback_desc = section_fallback_desc(entry.entry_type);
                                     let subtitle = entry
@@ -460,19 +507,23 @@ fn CatalogSectionView(
                                         </div>
                                     }
                                     .into_any();
-                                    let open_settings = configurable.then(|| {
-                                        let id = id.clone();
+                                    let open_drawer = target.as_ref().map(|(dest, _)| {
+                                        let dest = dest.clone();
                                         Callback::new(move |()| {
-                                            configuring.set(Some(id.clone()));
-                                            settings_open.set(true);
+                                            inspecting.set(Some(dest.clone()));
+                                            drawer_open.set(true);
                                         })
                                     });
-                                    let actions = configurable.then(|| {
-                                        let id = id.clone();
+                                    let actions = target.as_ref().map(|(dest, label)| {
+                                        let dest = dest.clone();
+                                        let label = *label;
                                         view! {
                                             <button type="button" class="btn btn-secondary btn-sm"
-                                                on:click=move |_| { configuring.set(Some(id.clone())); settings_open.set(true); }>
-                                                "Réglages"
+                                                on:click=move |_| {
+                                                    inspecting.set(Some(dest.clone()));
+                                                    drawer_open.set(true);
+                                                }>
+                                                {label}
                                             </button>
                                         }
                                         .into_any()
@@ -489,10 +540,12 @@ fn CatalogSectionView(
                                             tone=tone
                                             badge=Some(badge)
                                             active=Some(Signal::derive(move || {
-                                                settings_open.get()
-                                                    && configuring.get().as_deref() == Some(active_id.as_str())
+                                                drawer_open.get()
+                                                    && inspecting
+                                                        .get()
+                                                        .is_some_and(|item| item.id() == active_id)
                                             }))
-                                            on_click=open_settings
+                                            on_click=open_drawer
                                             footer_meta=id
                                             footer_actions=actions
                                         >
@@ -642,7 +695,7 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
     view! {
         <div class="tab-panel" role="tabpanel">
             <StatStrip aria_label="Synthèse des plugins et dépôts" items=stats />
-            <CatalogSectionView catalog=catalog can_configure=can_manage />
+            <CatalogSectionView catalog=catalog reload_tools=reload_tools can_configure=can_manage />
             <ToolsSection tools=tools reload_tools=reload_tools can_install=can_manage />
             {repositories.map(|repos| view! {
                 <ReposSection

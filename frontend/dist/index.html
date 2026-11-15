@@ -2893,6 +2893,138 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   gap: 0.45rem;
 }
 
+/* --- Packs déclaratifs & étapes d'exécution --- */
+.pack-components {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.step-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.step-item {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  padding: 0.65rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.step-item__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.step-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.step-item__msg {
+  margin: 0;
+  color: var(--text-main);
+}
+
+.step-excerpt {
+  margin: 0.25rem 0 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  overflow-x: auto;
+  max-height: 10rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.jobs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.jobs-toolbar .form-label {
+  margin-bottom: 0;
+}
+
+.jobs-library-select {
+  width: auto;
+  min-width: 14rem;
+}
+
+.settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+
+.settings-fieldset {
+  margin: 0;
+  padding: 0.85rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.settings-fieldset__legend {
+  padding: 0 0.35rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.worker-card-telemetry {
+  margin-top: 0.35rem;
+}
+
+.worker-telemetry-card {
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.worker-telemetry-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.worker-telemetry-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.worker-telemetry-metric__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.inspection-drawer__panel:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
 
 /* --- Étiquettes de statut de dépôt --- */
 .repo-badge {
@@ -4550,6 +4682,99 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   width: 10px;
   height: 10px;
   border-radius: 50%;
+}
+
+/* --- Simulation interactive du parcours dans l'éditeur --- */
+.canvas-node.is-sim-visited {
+  border-color: var(--success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 24%, transparent);
+}
+
+.canvas-node.is-sim-active {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+
+.flow-wire.is-sim-path {
+  stroke: var(--success);
+  stroke-width: 3px;
+  opacity: 1;
+}
+
+.flow-sim__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.flow-sim__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.flow-sim__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.flow-sim__warnings {
+  margin: 0;
+  padding: 0.55rem 0.75rem 0.55rem 1.4rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: var(--text-main);
+  font-size: 0.8rem;
+}
+
+.flow-sim__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.flow-sim__step-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--text-main);
+  text-align: left;
+  cursor: pointer;
+}
+
+.flow-sim__step-btn:hover {
+  border-color: var(--border-highlight);
+}
+
+.flow-sim__step-btn.is-active {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+
+.flow-sim__step-num {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.flow-sim__step-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.8rem;
 }
 
 @media (max-width: 960px) {

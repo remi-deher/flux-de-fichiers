@@ -2,10 +2,10 @@
 
 use super::{
     CatalogEntry, CatalogItemType, SettingsField, ToolStatusSummary, catalog_with_roots,
-    default_tool_version, flow_block_catalog, load_manifest, parse_distribution, read_distribution,
+    flow_block_catalog, load_manifest, parse_distribution, read_distribution,
     settings_fields as load_settings_fields, summarize_tool,
 };
-use crate::tools_cache::ToolCacheManager;
+use crate::{flows::OperationRegistry, tools_cache::ToolCacheManager};
 use flux_shared::flows::OwnedBlockSpec;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::RwLock;
@@ -15,6 +15,7 @@ struct CachedSnapshot {
     roots: Vec<PathBuf>,
     entries: Vec<(PathBuf, CatalogEntry)>,
     blocks: Vec<OwnedBlockSpec>,
+    operations: OperationRegistry,
     tool_descriptions: Vec<(CatalogEntry, String)>,
 }
 
@@ -65,6 +66,10 @@ impl CatalogCache {
 
     pub async fn blocks(&self, roots: &[PathBuf]) -> Vec<OwnedBlockSpec> {
         self.snapshot(roots).await.blocks
+    }
+
+    pub async fn operations(&self, roots: &[PathBuf]) -> OperationRegistry {
+        self.snapshot(roots).await.operations
     }
 
     pub async fn tools_status(
@@ -118,13 +123,14 @@ impl CatalogCache {
             .find(|(_, entry)| entry.id == tool_id)
             .map(|(_, entry)| entry.version.clone())
             .filter(|version| !version.trim().is_empty())
-            .unwrap_or_else(|| default_tool_version(tool_id).to_owned())
+            .unwrap_or_else(|| "1.0.0".to_owned())
     }
 }
 
 fn build_snapshot(roots: Vec<PathBuf>) -> CachedSnapshot {
     let entries = catalog_with_roots(&roots);
     let blocks = flow_block_catalog(&roots);
+    let operations = OperationRegistry::load_from_roots(&roots);
     let tool_descriptions = entries
         .iter()
         .filter(|(_, entry)| entry.entry_type == CatalogItemType::App)
@@ -140,6 +146,7 @@ fn build_snapshot(roots: Vec<PathBuf>) -> CachedSnapshot {
         roots,
         entries,
         blocks,
+        operations,
         tool_descriptions,
     }
 }

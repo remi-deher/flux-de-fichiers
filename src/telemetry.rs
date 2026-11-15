@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use flux_shared::workers::WorkerTelemetry;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -22,6 +23,22 @@ pub struct TelemetrySnapshot {
     pub gpu_devices: Vec<String>,
     pub storage_total_bytes: u64,
     pub storage_available_bytes: u64,
+}
+
+impl TelemetrySnapshot {
+    /// Convertit l'instantané détaillé en synthèse sérialisable sur la fiche du worker.
+    pub fn to_worker_telemetry(&self) -> WorkerTelemetry {
+        WorkerTelemetry {
+            timestamp: self.timestamp,
+            logical_cores: self.logical_cores,
+            cpu_usage_percent: self.cpu_usage_percent,
+            ram_total_bytes: self.ram_total_bytes,
+            ram_used_bytes: self.ram_used_bytes,
+            storage_total_bytes: self.storage_total_bytes,
+            storage_available_bytes: self.storage_available_bytes,
+            gpu_devices: self.gpu_devices.clone(),
+        }
+    }
 }
 
 /// Sonde système in-process interrogeant `/proc`, `/sys`, `/dev/dri` et `statvfs`.

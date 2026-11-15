@@ -14,7 +14,17 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 pub async fn run(state: AppState) {
     let worker_name = std::env::var("LOCAL_WORKER_NAME")
         .unwrap_or_else(|_| flux_shared::workers::INTEGRATED_WORKER_NAME.into());
-    let worker = match repository::register(&state.pool, &worker_name).await {
+    let probe = crate::telemetry::TelemetryProbe::with_storage_path(&state.config.data_dir);
+    let initial_snapshot = probe.sample();
+    let worker = match repository::register_with_metadata(
+        &state.pool,
+        &worker_name,
+        Some(env!("CARGO_PKG_VERSION")),
+        Some("local"),
+        Some(&initial_snapshot),
+    )
+    .await
+    {
         Ok(worker) => worker,
         Err(error) => {
             tracing::error!(error=%error, "local worker registration failed");
@@ -52,10 +62,11 @@ pub async fn run(state: AppState) {
     }
 }
 
-async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim) {
+async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Claim) {
     let lease = LeaseRequest {
         worker_id,
         lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
         telemetry: None,
     };
     let job = match repository::active(&state.pool, claim.job_id, &lease).await {
@@ -65,6 +76,19 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
             return;
         }
     };
+    if let Err(error) = crate::api::populate_claim_contracts(
+        &state.pool,
+        &state.config,
+        &state.catalog_cache,
+        worker_id,
+        &mut claim,
+    )
+    .await
+    {
+        report_failure(state, claim.job_id, &lease, JobErrorCode::RemuxFailed).await;
+        tracing::warn!(job_id=%claim.job_id, error=?error, "local claim contract preparation failed");
+        return;
+    }
     let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
     let cache = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
     let wanted = job_runner::collect_wanted_tools(&claim);
@@ -104,6 +128,7 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
     let source_snapshot = work_dir.join("source.mkv");
     let mut heartbeat = tokio::spawn(heartbeat_loop(
         state.pool.clone(),
+        state.config.data_dir.clone(),
         claim.job_id,
         lease.clone(),
     ));
@@ -117,36 +142,19 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
         )
         .await?;
 
-        let arr = if claim.frozen_flow.is_some() {
-            let mut ctx = crate::flows::ArrContext::load(
-                &state.pool,
-                &state.config.config_dir,
-                &state.config.input_dir,
-            )
-            .await;
-            if let Some(lib_id) = claim.library_id
-                && let Ok(Some(local_path)) =
-                    repository::library_worker_local_path(&state.pool, lib_id, worker_id).await
-            {
-                ctx.media_root = local_path.into();
-            }
-            Some(ctx)
-        } else {
-            None
-        };
-
         let state_progress = state.clone();
         let job_id = claim.job_id;
         let progress_cb = std::sync::Arc::new(move |pct: u32, line: &str| {
             state_progress.notify_job_progress(job_id, pct, Some(line.to_string()));
         });
+        let registry = state.catalog_cache.operations(&roots).await;
 
         let execution = job_runner::execute_claim_processing(
             &claim,
             &cache,
             &state.http_client,
             Some(&state.config.config_dir),
-            arr.as_ref(),
+            Some(&registry),
             &source_snapshot,
             &work_dir,
             progress_cb,
@@ -203,12 +211,16 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
 
 async fn heartbeat_loop(
     pool: sqlx::SqlitePool,
+    data_dir: std::path::PathBuf,
     job: Uuid,
     lease: LeaseRequest,
 ) -> anyhow::Result<()> {
+    let probe = crate::telemetry::TelemetryProbe::with_storage_path(&data_dir);
     loop {
         tokio::time::sleep(HEARTBEAT_INTERVAL).await;
-        repository::heartbeat(&pool, job, &lease).await?;
+        let mut tick = lease.clone();
+        tick.telemetry = Some(probe.sample());
+        repository::heartbeat(&pool, job, &tick).await?;
     }
 }
 

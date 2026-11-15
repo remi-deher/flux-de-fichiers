@@ -622,11 +622,17 @@ mod tests {
             id: uuid::Uuid::from_u128(1),
             name: "w1".into(),
             last_seen: now,
+            version: None,
+            remote_addr: None,
+            telemetry: None,
         };
         let offline = Worker {
             id: uuid::Uuid::from_u128(2),
             name: "w2".into(),
             last_seen: now - chrono::Duration::minutes(10),
+            version: None,
+            remote_addr: None,
+            telemetry: None,
         };
         assert_eq!(workers_alert_badge(&[], now), None);
         assert_eq!(

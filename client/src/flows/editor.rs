@@ -105,6 +105,14 @@ fn FlowCommandBar(
         }
     };
 
+    let toggle_simulation = move || {
+        if editor.simulation_open.get_untracked() {
+            editor.close_right_panel();
+        } else {
+            editor.open_simulation();
+        }
+    };
+
     view! {
         <header class="flow-command-bar" role="toolbar" aria-label="Commandes de l'atelier">
             <div class="flow-command-bar__lead">
@@ -246,6 +254,17 @@ fn FlowCommandBar(
                             })}
                         }
                     }}
+                </button>
+
+                <button
+                    type="button"
+                    class="btn btn-secondary btn-sm flow-cmd-btn"
+                    aria-pressed=move || editor.simulation_open.get().to_string()
+                    title="Simuler l'exécution sur un média type"
+                    on:click=move |_| toggle_simulation()
+                >
+                    <Icon name=IconName::Activity size=CMD_ICON_SIZE />
+                    <span>"Simuler"</span>
                 </button>
 
                 <button
@@ -430,6 +449,15 @@ fn RightDock(
                     >
                         "Réglages"
                     </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        class="flow-right-dock__tab"
+                        aria-selected=move || editor.simulation_open.get().to_string()
+                        on:click=move |_| editor.open_simulation()
+                    >
+                        "Simuler"
+                    </button>
                 </div>
                 <button
                     type="button"
@@ -457,6 +485,8 @@ fn RightDock(
                             />
                         }
                         .into_any()
+                    } else if editor.simulation_open.get() {
+                        view! { <super::simulation::FlowSimulationPanel editor=editor /> }.into_any()
                     } else {
                         ().into_any()
                     }
@@ -592,14 +622,23 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
     let save = Action::new_local(move |(id, body): &(String, UpdateFlowRequest)| {
         let path = format!("{FLOWS_PATH}/{}", encode_segment(id));
         let body = body.clone();
-        async move { api::put::<UpdateFlowRequest, FlowRecord>(&path, &body).await }
+        async move {
+            api::put_with_header::<UpdateFlowRequest, FlowRecord>(&path, &body, "x-flux-warnings")
+                .await
+        }
     });
     Effect::new(move |_| match save.value().get() {
-        Some(Ok(saved)) => {
+        Some(Ok((saved, warnings))) => {
             let created = meta.get_untracked().id.is_empty();
             let msg = format!("Enregistré : version {}.", saved.version);
             Toasts::notify_success(msg.clone());
-            feedback.set(Some(msg));
+            if let Some(warnings) = warnings {
+                let warn_msg = format!("Avertissements de préparation : {warnings}");
+                Toasts::notify_info(warn_msg.clone());
+                feedback.set(Some(format!("{msg} — {warn_msg}")));
+            } else {
+                feedback.set(Some(msg));
+            }
             editor.mark_saved(Some(saved.id.clone()));
             if created {
                 router.go(Route::FlowEditor(saved.id.clone()));
@@ -714,6 +753,7 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
             } else if editor.palette_open.get_untracked()
                 || editor.inspector_open.get_untracked()
                 || editor.settings_open.get_untracked()
+                || editor.simulation_open.get_untracked()
             {
                 editor.close_right_panel();
             } else if editor.diagnostics_open.get_untracked() {

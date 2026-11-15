@@ -5,7 +5,7 @@ mod accounts;
 mod keys;
 mod network;
 mod network_diagnostics;
-mod system;
+pub mod system;
 
 pub use account::{logout, role_label};
 pub use system::duration_label;
@@ -109,8 +109,15 @@ pub fn SettingsPage(me: Me) -> impl IntoView {
     let can_keys = visible.contains(&Section::Keys);
     let can_settings = visible.contains(&Section::System);
 
-    let status_resource =
-        can_settings.then(|| LocalResource::new(|| api::get::<SystemStatus>(STATUS_PATH)));
+    let status_reload = RwSignal::new(0u64);
+    let status_resource = can_settings.then(|| {
+        LocalResource::new(move || {
+            let _ = status_reload.get();
+            api::get::<SystemStatus>(STATUS_PATH)
+        })
+    });
+    let on_settings_saved =
+        Callback::new(move |()| status_reload.update(|n| *n = n.wrapping_add(1)));
     let status_signal = status_resource.map(|res| {
         Signal::derive(move || res.get().map(|result| result.map_err(|err| err.message())))
     });
@@ -190,7 +197,7 @@ pub fn SettingsPage(me: Me) -> impl IntoView {
                 <AccountSection me=me hidden=account_hidden />
                 {status_signal.map(|status| view! {
                     <SystemSection status=status hidden=system_hidden />
-                    <ConfigurationCard status=status hidden=network_hidden />
+                    <ConfigurationCard status=status hidden=network_hidden on_saved=on_settings_saved />
                     <DiagnosticsCard hidden=network_hidden />
                 })}
             </div>

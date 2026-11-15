@@ -122,6 +122,7 @@ async fn test_job_and_worker_workflow() -> anyhow::Result<()> {
     let heartbeat_payload = LeaseRequest {
         worker_id: worker.id,
         lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
         telemetry: None,
     };
     let req = Request::builder()
@@ -141,6 +142,7 @@ async fn test_job_and_worker_workflow() -> anyhow::Result<()> {
     let failure_payload = Failure {
         worker_id: worker.id,
         lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
         error_code: "source_integrity".into(),
     };
     let req = Request::builder()
@@ -375,11 +377,14 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
     std::fs::create_dir_all(&repos_dir)?;
     std::fs::create_dir_all(repos_dir.join("catalogue"))?;
     std::fs::create_dir_all(repos_dir.join("packs/demo"))?;
+    std::fs::create_dir_all(repos_dir.join("plugins/video/operations"))?;
     std::fs::write(input_dir.join("film.mkv"), vec![0u8; 512])?;
     std::fs::write(
         repos_dir.join("catalogue/index.json"),
         r#"{"schemaVersion":"1.0.0","entries":[
-            {"id":"pack.demo","type":"pack","version":"1.0.0","name":"Demo","manifestPath":"packs/demo/manifest.json"}
+            {"id":"pack.demo","type":"pack","version":"1.0.0","name":"Demo","manifestPath":"packs/demo/manifest.json"},
+            {"id":"plugin.video","type":"plugin","version":"1.0.0","name":"Video","manifestPath":"plugins/video/manifest.json"},
+            {"id":"app.mkvtoolnix","type":"app","version":"1.0.0","name":"MKVToolNix","manifestPath":"apps/mkvtoolnix/manifest.json"}
         ]}"#,
     )?;
     std::fs::write(
@@ -389,6 +394,14 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
     std::fs::write(
         repos_dir.join("packs/demo/installation.json"),
         r#"{"schemaVersion":"1.0.0","packId":"pack.demo","packVersion":"1.0.0","kind":"declarative-bundle","components":[]}"#,
+    )?;
+    std::fs::write(
+        repos_dir.join("plugins/video/manifest.json"),
+        r#"{"schemaVersion":"1.1.0","id":"plugin.video","type":"plugin","version":"1.0.0","name":"Video","files":[{"path":"operations/probe.json","role":"operation","mediaType":"application/json"}]}"#,
+    )?;
+    std::fs::write(
+        repos_dir.join("plugins/video/operations/probe.json"),
+        r#"{"schemaVersion":"1.1.0","id":"operation.mkvtoolnix.probe","version":"1.0.0","name":"Probe","providerId":"plugin.video","providerKind":"plugin","capability":"probe","status":"validated","runtime":{"kind":"binary","tool":{"id":"app.mkvtoolnix","version":"1.0.0"},"executable":"mkvmerge","executionMode":"probe-primary","probeFormat":"mkvmerge-json","argv":[{"param":"source","as":"filePath"}]}}"#,
     )?;
 
     let config = Config {
@@ -581,6 +594,7 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
                     serde_json::json!({
                         "worker_id": worker.id,
                         "lease_token": claim.lease_token,
+                        "lease_epoch": claim.lease_epoch,
                         "steps": [{
                             "step_index": 0,
                             "node_id": "n1",
@@ -620,6 +634,7 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
         &LeaseRequest {
             worker_id: worker.id,
             lease_token: claim.lease_token,
+            lease_epoch: claim.lease_epoch,
             telemetry: None,
         },
         flux_de_fichiers::repository::PublishedOutput {

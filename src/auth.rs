@@ -46,7 +46,7 @@ pub fn require(principal: &Principal, permission: Permission) -> AppResult<()> {
     }
 }
 
-fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(header::AUTHORIZATION)?
         .to_str()

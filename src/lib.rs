@@ -18,6 +18,7 @@ pub mod password;
 pub mod password_reset;
 pub mod plugins;
 pub mod repository;
+pub mod runtime_settings;
 pub mod secret_rotation;
 pub mod secrets;
 pub mod storage;

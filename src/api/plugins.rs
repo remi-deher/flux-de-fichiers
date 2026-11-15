@@ -65,14 +65,11 @@ pub async fn install_tool(
         .find(|entry| entry.id == id)
         .ok_or(AppError::NotFound)?;
     let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
-    plugins::ensure_tool_installed(
-        &roots,
-        &cache_mgr,
-        &entry.id,
-        &entry.version,
-        &plugins::SyncPolicy::from_env(),
-    )
-    .await?;
+    let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
+        .await
+        .sync_policy();
+    plugins::ensure_tool_installed(&roots, &cache_mgr, &entry.id, &entry.version, &sync_policy)
+        .await?;
     Ok(Json(serde_json::json!({
         "id": entry.id,
         "version": entry.version,
@@ -237,13 +234,12 @@ pub async fn sync_repository(
     _auth: AdminAuth,
 ) -> AppResult<Json<Value>> {
     let repo = crate::repository::get_plugin_repository(&s.pool, &id).await?;
-    let report = plugins::sync_repository(
-        &repo,
-        &s.config.plugin_repos_dir(),
-        &plugins::SyncPolicy::from_env(),
-    )
-    .await
-    .map_err(|error| AppError::RepositoryUnavailable(error.to_string()))?;
+    let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
+        .await
+        .sync_policy();
+    let report = plugins::sync_repository(&repo, &s.config.plugin_repos_dir(), &sync_policy)
+        .await
+        .map_err(|error| AppError::RepositoryUnavailable(error.to_string()))?;
     crate::repository::touch_plugin_repository_sync(&s.pool, &id).await?;
     s.catalog_cache.invalidate().await;
     Ok(Json(serde_json::json!({
@@ -272,7 +268,9 @@ pub async fn install_pack(
 ) -> AppResult<Json<plugins::PackInstallResult>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
-    let result =
-        plugins::install_pack(&roots, &cache_mgr, &plugins::SyncPolicy::from_env(), &id).await?;
+    let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
+        .await
+        .sync_policy();
+    let result = plugins::install_pack(&roots, &cache_mgr, &sync_policy, &id).await?;
     Ok(Json(result))
 }

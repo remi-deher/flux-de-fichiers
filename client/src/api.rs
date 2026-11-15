@@ -168,6 +168,21 @@ pub async fn put<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> Res
         .map_err(|_| ApiError::Network)
 }
 
+/// `PUT` d'un corps JSON ; renvoie aussi la valeur éventuelle d'un en-tête de réponse.
+pub async fn put_with_header<B: Serialize, T: DeserializeOwned>(
+    path: &str,
+    body: &B,
+    header_name: &str,
+) -> Result<(T, Option<String>), ApiError> {
+    let response = send_write(Write::Put, path, Some(body)).await?;
+    let header_val = response
+        .headers()
+        .get(header_name)
+        .filter(|val| !val.trim().is_empty());
+    let data = response.json().await.map_err(|_| ApiError::Network)?;
+    Ok((data, header_val))
+}
+
 /// `POST` ou `PUT` dont la réponse n'a pas de corps (204).
 pub async fn post_empty<B: Serialize>(path: &str, body: Option<&B>) -> Result<(), ApiError> {
     send_write(Write::Post, path, body).await.map(|_| ())

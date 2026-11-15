@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.21.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.20.0...v0.21.0) (2026-11-15)
+
+
+### Features
+
+* **ui:** refondre le shell et l'ensemble des écrans en Rust ([26a0412](https://github.com/remi-deher/flux-de-fichiers/commit/26a04127ac4d0ae7f30ab64db82df97095666a80))
+* **ui:** refondre le shell et l'ensemble des écrans en Rust ([76847db](https://github.com/remi-deher/flux-de-fichiers/commit/76847db97e1e4a8553605b78f8770621d6b3d6d1))
+
 ## [0.20.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.19.0...v0.20.0) (2026-11-15)
 
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.28.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.27.0...v0.28.0) (2026-11-15)
+
+
+### Features
+
+* durcissement backend et fin du backlog interface wasm ([b3cd93a](https://github.com/remi-deher/flux-de-fichiers/commit/b3cd93a20aed1521a3cbcc470775f0fed7b31d39))
+* durcissement backend et fin du backlog interface wasm ([df101ac](https://github.com/remi-deher/flux-de-fichiers/commit/df101ac55ad27434b110ccaa5af59e3e1cfe62a0))
+* moteur déclaratif par contrats et écrans WASM ([a703d6e](https://github.com/remi-deher/flux-de-fichiers/commit/a703d6e3c2278a5c17c17e55b37f615253917f4f))
+* moteur declaratif par contrats et ecrans wasm associes ([e9afafb](https://github.com/remi-deher/flux-de-fichiers/commit/e9afafb3be9e3450293362a700be71e9d6628b6c))
+
+
+### Bug Fixes
+
+* **clippy:** corrections lints runtime settings et client wasm ([940d017](https://github.com/remi-deher/flux-de-fichiers/commit/940d0170311ae6e540f91f6b4fa4293bb9633289))
+* **clippy:** corrections lints sur moteur declaratif ([6cc341d](https://github.com/remi-deher/flux-de-fichiers/commit/6cc341d87c4daff5d3626ffc0d1eb5302ff51970))
+* **clippy:** utilisation de sort_by_key sur la liste des bibliotheques ([4a0ed5f](https://github.com/remi-deher/flux-de-fichiers/commit/4a0ed5fbeca7a48772c6907e06a7b758aeda3c6f))
+
 ## [0.27.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.26.0...v0.27.0) (2026-11-15)
 
 

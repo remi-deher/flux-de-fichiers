@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.22.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.21.1...v0.22.0) (2026-11-15)
+
+
+### Features
+
+* **ui:** unifie le système de design, les grilles et la barre supérieure ([8e14e83](https://github.com/remi-deher/flux-de-fichiers/commit/8e14e83209238741b9e06e69b5f1068a4dc4cf17))
+* **ui:** unifie le système de design, les grilles et la barre supérieure ([eb91ab9](https://github.com/remi-deher/flux-de-fichiers/commit/eb91ab9b70186b67b759e275aebdd9dfe78308c8))
+
+
+### Bug Fixes
+
+* **ui:** retire les clones inutiles signalés par clippy ([461bc7c](https://github.com/remi-deher/flux-de-fichiers/commit/461bc7c1eefea7ab8de12ac5449022df650ca390))
+
 ## [0.21.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.21.0...v0.21.1) (2026-11-15)
 
 

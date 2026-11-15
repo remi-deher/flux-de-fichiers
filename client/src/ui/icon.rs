@@ -18,8 +18,13 @@ pub enum IconName {
     Alert,
     Close,
     ChevronLeft,
+    ChevronRight,
     Logout,
     Menu,
+    Command,
+    Plus,
+    Download,
+    Sliders,
 }
 
 impl IconName {
@@ -57,11 +62,24 @@ impl IconName {
                 r#"<line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/>"#
             }
             Self::ChevronLeft => r#"<path d="m15 18-6-6 6-6"/>"#,
+            Self::ChevronRight => r#"<path d="m9 18 6-6-6-6"/>"#,
             Self::Menu => {
                 r#"<line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/>"#
             }
             Self::Logout => {
                 r#"<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>"#
+            }
+            Self::Command => {
+                r#"<path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>"#
+            }
+            Self::Plus => {
+                r#"<line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/>"#
+            }
+            Self::Download => {
+                r#"<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>"#
+            }
+            Self::Sliders => {
+                r#"<line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="2" x2="6" y1="14" y2="14"/><line x1="10" x2="14" y1="8" y2="8"/><line x1="18" x2="22" y1="16" y2="16"/>"#
             }
         }
     }
@@ -96,5 +114,42 @@ pub fn Icon(
             aria-hidden="true"
             inner_html=inner
         />
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ALL_ICONS: [IconName; 20] = [
+        IconName::Dashboard,
+        IconName::Libraries,
+        IconName::Flows,
+        IconName::Activity,
+        IconName::Workers,
+        IconName::Plugins,
+        IconName::Settings,
+        IconName::Search,
+        IconName::Refresh,
+        IconName::Check,
+        IconName::Alert,
+        IconName::Close,
+        IconName::ChevronLeft,
+        IconName::ChevronRight,
+        IconName::Logout,
+        IconName::Menu,
+        IconName::Command,
+        IconName::Plus,
+        IconName::Download,
+        IconName::Sliders,
+    ];
+
+    #[test]
+    fn every_icon_provides_valid_svg_markup() {
+        for icon in ALL_ICONS {
+            let svg = icon.inner_svg();
+            assert!(!svg.is_empty());
+            assert!(svg.contains('<'));
+        }
     }
 }

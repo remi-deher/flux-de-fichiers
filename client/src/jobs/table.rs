@@ -2,7 +2,7 @@
 
 use super::model::{status_label, status_tone};
 use crate::format;
-use crate::ui::{Registre, RegistreMessage, StatusBadge};
+use crate::ui::{ProgressBar, Registre, RegistreMessage, StatusBadge};
 use flux_shared::jobs::{Job, JobStatus};
 use leptos::prelude::*;
 use std::collections::HashMap;
@@ -17,13 +17,6 @@ pub fn JobsTable(
     selected: RwSignal<Option<Uuid>>,
     on_open: Callback<Uuid>,
 ) -> impl IntoView {
-    let progress_label = move |job: &Job| match job.status {
-        JobStatus::Running => progress
-            .get()
-            .get(&job.id)
-            .map_or_else(|| "En cours".to_owned(), |pct| format!("{pct} %")),
-        _ => String::new(),
-    };
     view! {
         <Registre aria_label="Tâches" headers=HEADERS.to_vec()>
             {move || match jobs.get() {
@@ -32,12 +25,24 @@ pub fn JobsTable(
                 Some(Ok(list)) if list.is_empty() => view! { <RegistreMessage span=HEADERS.len() text="Aucune tâche dans cette vue." /> }.into_any(),
                 Some(Ok(list)) => list.into_iter().map(|job| {
                     let id = job.id;
-                    let label = progress_label(&job);
+                    let status = job.status;
+                    let progress_cell = move || match status {
+                        JobStatus::Running => match progress.get().get(&id).copied() {
+                            Some(pct) => {
+                                view! { <ProgressBar percent=pct label=format!("{pct} %") /> }.into_any()
+                            }
+                            None => view! { <ProgressBar label="En cours" /> }.into_any(),
+                        },
+                        JobStatus::Succeeded => {
+                            view! { <span class="text-mono text-xs text-dim">"100 %"</span> }.into_any()
+                        }
+                        _ => view! { <span class="text-dim">"—"</span> }.into_any(),
+                    };
                     view! {
                         <tr class="registre-row" class:is-open=move || selected.get() == Some(id)>
                             <td class="text-strong truncate">{job.source_name.clone()}</td>
                             <td><StatusBadge label=status_label(job.status) variant=status_tone(job.status) /></td>
-                            <td class="text-mono">{label}</td>
+                            <td>{progress_cell}</td>
                             <td class="text-dim">{format::datetime(job.created_at)}</td>
                             <td class="cell-end">
                                 <button type="button" class="btn btn-secondary btn-sm registre-open-btn" on:click=move |_| on_open.run(id)>"Ouvrir"</button>

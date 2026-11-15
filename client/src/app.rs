@@ -51,6 +51,6 @@ fn Session() -> impl IntoView {
 #[component]
 pub fn App() -> impl IntoView {
     Router::install();
-    crate::theme::restore();
+    crate::theme::install();
     view! { <AccessGate><Session /></AccessGate> }
 }

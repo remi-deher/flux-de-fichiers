@@ -1,14 +1,32 @@
 //! Registre des tâches filtrées, avec la progression reçue en direct.
 
-use super::model::{status_label, status_tone};
+use super::model::{error_label, status_label, status_tone};
 use crate::format;
-use crate::ui::{ProgressBar, Registre, RegistreMessage, StatusBadge};
+use crate::ui::{ProgressBar, Registre, RegistreMessage, StatusBadge, Tag, TagTone};
 use flux_shared::jobs::{Job, JobStatus};
 use leptos::prelude::*;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-const HEADERS: [&str; 5] = ["Fichier", "État", "Progression", "Créée", "Action"];
+const HEADERS: [&str; 6] = ["Fichier", "Flux", "Worker", "État", "Progression", "Créée"];
+
+fn resolve_flow_label(flow_id: Option<&str>, flows: &HashMap<String, String>) -> Option<String> {
+    let id = flow_id?;
+    Some(flows.get(id).cloned().unwrap_or_else(|| id.to_owned()))
+}
+
+fn resolve_worker_label(
+    worker_id: Option<Uuid>,
+    workers: &HashMap<Uuid, String>,
+) -> Option<String> {
+    let id = worker_id?;
+    Some(
+        workers
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| id.to_string().chars().take(8).collect()),
+    )
+}
 
 /// Cellule de progression partagée entre l'écran Activité et les tâches récentes de la Vue d'ensemble.
 pub fn job_progress_cell(
@@ -33,6 +51,8 @@ pub fn job_progress_cell(
 pub fn JobsTable(
     jobs: Signal<Option<Result<Vec<Job>, String>>>,
     progress: RwSignal<HashMap<Uuid, u32>>,
+    workers: Signal<HashMap<Uuid, String>>,
+    flows: Signal<HashMap<String, String>>,
     selected: RwSignal<Option<Uuid>>,
     on_open: Callback<Uuid>,
 ) -> impl IntoView {
@@ -42,24 +62,78 @@ pub fn JobsTable(
                 None => view! { <RegistreMessage span=HEADERS.len() text="Chargement des tâches…" /> }.into_any(),
                 Some(Err(message)) => view! { <RegistreMessage span=HEADERS.len() text=message /> }.into_any(),
                 Some(Ok(list)) if list.is_empty() => view! { <RegistreMessage span=HEADERS.len() text="Aucune tâche dans cette vue." /> }.into_any(),
-                Some(Ok(list)) => list.into_iter().map(|job| {
-                    let id = job.id;
-                    let status = job.status;
-                    view! {
-                        <tr class="registre-row is-clickable" class:is-open=move || selected.get() == Some(id)
-                            on:click=move |_| on_open.run(id)>
-                            <td class="text-strong truncate">{job.source_name.clone()}</td>
-                            <td><StatusBadge label=status_label(job.status) variant=status_tone(job.status) /></td>
-                            <td>{job_progress_cell(id, status, Some(progress))}</td>
-                            <td class="text-dim">{format::datetime(job.created_at)}</td>
-                            <td class="cell-end">
-                                <button type="button" class="btn btn-secondary btn-sm registre-open-btn"
-                                    on:click=move |event| { event.stop_propagation(); on_open.run(id); }>"Ouvrir"</button>
-                            </td>
-                        </tr>
-                    }
-                }).collect_view().into_any(),
+                Some(Ok(list)) => {
+                    let workers_map = workers.get();
+                    let flows_map = flows.get();
+                    list.into_iter().map(|job| {
+                        let id = job.id;
+                        let status = job.status;
+                        let flow_label = resolve_flow_label(job.flow_id.as_deref(), &flows_map);
+                        let worker_label = resolve_worker_label(job.worker_id, &workers_map);
+                        view! {
+                            <tr class="registre-row is-clickable" class:is-open=move || selected.get() == Some(id)
+                                on:click=move |_| on_open.run(id)>
+                                <td class="text-strong truncate">{job.source_name.clone()}</td>
+                                <td>
+                                    {match flow_label {
+                                        Some(label) => view! { <Tag label=label tone=TagTone::Mono /> }.into_any(),
+                                        None => view! { <span class="text-dim">"—"</span> }.into_any(),
+                                    }}
+                                </td>
+                                <td>
+                                    {match worker_label {
+                                        Some(label) => view! { <Tag label=label tone=TagTone::Neutral /> }.into_any(),
+                                        None => view! { <span class="text-dim">"—"</span> }.into_any(),
+                                    }}
+                                </td>
+                                <td>
+                                    <div class="cluster">
+                                        <StatusBadge label=status_label(job.status) variant=status_tone(job.status) />
+                                        {job.error_code.map(|code| view! {
+                                            <Tag label=error_label(code) tone=TagTone::Danger />
+                                        })}
+                                    </div>
+                                </td>
+                                <td>{job_progress_cell(id, status, Some(progress))}</td>
+                                <td class="text-dim">{format::datetime(job.created_at)}</td>
+                            </tr>
+                        }
+                    }).collect_view().into_any()
+                }
             }}
         </Registre>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_flow_and_worker_labels_fall_back_gracefully() {
+        let mut flows = HashMap::new();
+        flows.insert("remux".into(), "Remux MKV".into());
+        assert_eq!(
+            resolve_flow_label(Some("remux"), &flows).as_deref(),
+            Some("Remux MKV")
+        );
+        assert_eq!(
+            resolve_flow_label(Some("custom"), &flows).as_deref(),
+            Some("custom")
+        );
+        assert_eq!(resolve_flow_label(None, &flows), None);
+
+        let worker_id = Uuid::from_u128(0x1234_5678_9abc_def0);
+        let mut workers = HashMap::new();
+        assert_eq!(
+            resolve_worker_label(Some(worker_id), &workers).as_deref(),
+            Some("00000000")
+        );
+        workers.insert(worker_id, "truenas-worker".into());
+        assert_eq!(
+            resolve_worker_label(Some(worker_id), &workers).as_deref(),
+            Some("truenas-worker")
+        );
+        assert_eq!(resolve_worker_label(None, &workers), None);
     }
 }

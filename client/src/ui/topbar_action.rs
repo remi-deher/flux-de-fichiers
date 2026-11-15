@@ -1,5 +1,6 @@
-//! Action contextuelle d'un écran, affichée dans la capsule de recherche de la barre du haut.
+//! Action contextuelle d'un écran, affichée à droite de la barre du haut.
 
+use super::icon::{Icon, IconName};
 use leptos::prelude::*;
 
 /// Bouton proposé par l'écran affiché : libellé et réaction au clic.
@@ -51,19 +52,25 @@ pub fn provide_topbar_action(spec: ActionSpec) {
     on_cleanup(move || slot.clear_if(spec.label));
 }
 
-/// Zone d'actions de la capsule de recherche ; masquée par le thème quand elle est vide.
+/// Bouton d'action primaire (ou retour) affiché à droite de la barre du haut.
 #[component]
 pub fn TopbarActionSlot() -> impl IntoView {
     let slot = use_context::<TopbarAction>().unwrap_or_else(TopbarAction::install);
-    view! {
-        <div class="search-capsule__tools">
-            <div class="search-capsule__actions">
-                {move || slot.current().map(|spec| view! {
-                    <button type="button" class="search-capsule__action search-capsule__action--primary"
-                        on:click=move |_| spec.on_click.run(())>{spec.label}</button>
-                })}
-            </div>
-        </div>
+    move || {
+        slot.current().map(|spec| {
+            let is_back = spec.label.starts_with("Retour");
+            let class = if is_back {
+                "btn btn-secondary btn-sm"
+            } else {
+                "btn btn-primary btn-sm"
+            };
+            view! {
+                <button type="button" class=class on:click=move |_| spec.on_click.run(())>
+                    {(!is_back).then(|| view! { <Icon name=IconName::Plus size=14 /> })}
+                    <span>{spec.label}</span>
+                </button>
+            }
+        })
     }
 }
 

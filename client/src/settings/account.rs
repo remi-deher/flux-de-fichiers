@@ -2,7 +2,7 @@
 
 use crate::api;
 use crate::shell::instance_role_badge;
-use crate::ui::SectionHeader;
+use crate::ui::{Drawer, SectionHeader, Toasts};
 use flux_shared::InstanceKind;
 use flux_shared::accounts::ChangePasswordRequest;
 use flux_shared::session::Me;
@@ -32,15 +32,18 @@ pub fn AccountSection(me: Me, hidden: Signal<bool>) -> impl IntoView {
         RwSignal::new(String::new()),
         RwSignal::new(String::new()),
     );
+    let changing_password = RwSignal::new(false);
     let feedback = RwSignal::new(None::<String>);
     let change = Action::new_local(move |request: &ChangePasswordRequest| {
         let request = request.clone();
         async move { api::put_empty(PASSWORD_PATH, &request).await }
     });
     Effect::new(move |_| match change.value().get() {
-        Some(Ok(())) => feedback.set(Some(
-            "Mot de passe changé ; vos autres sessions sont fermées.".into(),
-        )),
+        Some(Ok(())) => {
+            changing_password.set(false);
+            feedback.set(None);
+            Toasts::notify_success("Mot de passe changé ; vos autres sessions sont fermées.");
+        }
         Some(Err(api::ApiError::Unauthorized)) => {
             feedback.set(Some("Mot de passe actuel incorrect.".into()))
         }
@@ -53,30 +56,49 @@ pub fn AccountSection(me: Me, hidden: Signal<bool>) -> impl IntoView {
         <section class="section-panel settings-section" hidden=move || hidden.get()>
             <SectionHeader
                 title="Mon compte"
-                subtitle="Identité active et mot de passe de connexion."
+                subtitle="Identité active et sécurité de connexion."
                 actions=view! {
-                    <button type="button" class="btn btn-secondary btn-sm"
-                        on:click=move |_| leptos::task::spawn_local(logout())>"Se déconnecter"</button>
+                    <div class="cluster">
+                        {can_change.then(|| view! {
+                            <button type="button" class="btn btn-secondary btn-sm"
+                                on:click=move |_| { feedback.set(None); changing_password.set(true); }>
+                                "Mot de passe"
+                            </button>
+                        })}
+                        <button type="button" class="btn btn-secondary btn-sm"
+                            on:click=move |_| leptos::task::spawn_local(logout())>
+                            "Se déconnecter"
+                        </button>
+                    </div>
                 }.into_any()
             />
             <div class="detail-grid">
-                <div class="detail-term">"Identifiant"</div><div class="detail-val">{me.name.clone()}</div>
-                <div class="detail-term">"Rôle"</div><div class="detail-val">{role_label(me.role)}</div>
-                <div class="detail-term">"Nœud"</div><div class="detail-val">{instance_role_badge(me.instance_kind)}</div>
+                <div class="detail-row">
+                    <span class="detail-term">"Identifiant"</span>
+                    <span class="detail-val">{me.name.clone()}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-term">"Rôle"</span>
+                    <span class="detail-val">{role_label(me.role)}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-term">"Nœud"</span>
+                    <span class="detail-val">{instance_role_badge(me.instance_kind)}</span>
+                </div>
             </div>
             {can_change.then(|| view! {
-                <form class="settings-password-form" on:submit=move |event| {
-                    event.prevent_default();
-                    if next.get_untracked() != confirm.get_untracked() {
-                        feedback.set(Some("Les deux mots de passe ne correspondent pas.".into()));
-                        return;
-                    }
-                    change.dispatch(ChangePasswordRequest { current_password: current.get_untracked(), new_password: next.get_untracked() });
-                    current.set(String::new());
-                    next.set(String::new());
-                    confirm.set(String::new());
-                }>
-                    <div class="form-grid-2">
+                <Drawer open=changing_password eyebrow="Sécurité" title="Changer le mot de passe".to_owned()>
+                    <form class="stack-form" on:submit=move |event| {
+                        event.prevent_default();
+                        if next.get_untracked() != confirm.get_untracked() {
+                            feedback.set(Some("Les deux mots de passe ne correspondent pas.".into()));
+                            return;
+                        }
+                        change.dispatch(ChangePasswordRequest { current_password: current.get_untracked(), new_password: next.get_untracked() });
+                        current.set(String::new());
+                        next.set(String::new());
+                        confirm.set(String::new());
+                    }>
                         {[("password-current", "Mot de passe actuel", current, "current-password"),
                           ("password-new", "Nouveau mot de passe", next, "new-password"),
                           ("password-confirm", "Confirmation", confirm, "new-password")]
@@ -87,13 +109,17 @@ pub fn AccountSection(me: Me, hidden: Signal<bool>) -> impl IntoView {
                                         prop:value=move || value.get() on:input=move |event| value.set(event_target_value(&event)) />
                                 </div>
                             }).collect_view()}
-                        <div class="settings-password-form__submit">
-                            <button type="submit" class="btn btn-primary" disabled=move || change.pending().get()>"Changer le mot de passe"</button>
+                        {move || feedback.get().map(|err| view! {
+                            <p class="form-error" role="status">{err}</p>
+                        })}
+                        <div class="cluster-end">
+                            <button type="submit" class="btn btn-primary" disabled=move || change.pending().get()>
+                                "Changer le mot de passe"
+                            </button>
                         </div>
-                    </div>
-                </form>
+                    </form>
+                </Drawer>
             })}
-            <p class="form-help" role="status">{move || feedback.get()}</p>
         </section>
     }
 }

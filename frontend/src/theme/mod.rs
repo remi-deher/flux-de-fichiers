@@ -72,4 +72,82 @@ mod tests {
         assert!(styles.contains(".auth-role-grid {"));
         assert!(styles.contains(".diagnostic-box {"));
     }
+
+    /// Vérifie qu'une feuille CSS a ses accolades équilibrées et aucune imbrication hors `@media`/`@keyframes`.
+    fn assert_balanced_css(name: &str, css: &str) {
+        let mut depth: usize = 0;
+        let mut in_at_block = false;
+        let mut prelude = String::new();
+        let mut chars = css.char_indices().peekable();
+        let mut in_comment = false;
+
+        while let Some((_idx, ch)) = chars.next() {
+            if in_comment {
+                if ch == '*' && chars.peek().is_some_and(|(_, next)| *next == '/') {
+                    chars.next();
+                    in_comment = false;
+                }
+                continue;
+            }
+            if ch == '/' && chars.peek().is_some_and(|(_, next)| *next == '*') {
+                chars.next();
+                in_comment = true;
+                continue;
+            }
+            match ch {
+                '{' => {
+                    if depth == 0 {
+                        let trimmed = prelude.trim_start();
+                        in_at_block =
+                            trimmed.starts_with("@media") || trimmed.starts_with("@keyframes");
+                    } else if depth == 1 && !in_at_block {
+                        panic!(
+                            "{name}: imbrication CSS accidentelle détectée près de `{}`",
+                            prelude.trim()
+                        );
+                    } else if depth >= 2 {
+                        panic!(
+                            "{name}: profondeur d'accolades excessive ({depth}) près de `{}`",
+                            prelude.trim()
+                        );
+                    }
+                    depth += 1;
+                    prelude.clear();
+                }
+                '}' => {
+                    assert!(
+                        depth > 0,
+                        "{name}: accolade fermante orpheline détectée après `{}`",
+                        prelude.trim()
+                    );
+                    depth -= 1;
+                    if depth == 0 {
+                        in_at_block = false;
+                    }
+                    prelude.clear();
+                }
+                ';' if depth == 0 => prelude.clear(),
+                _ => prelude.push(ch),
+            }
+        }
+        assert_eq!(depth, 0, "{name}: accolades non refermées en fin de CSS");
+    }
+
+    #[test]
+    fn test_all_styles_has_balanced_braces_and_no_accidental_nesting() {
+        let tokens_css = styles::generate_global_tokens_css();
+        for (name, css) in [
+            ("tokens", tokens_css.as_str()),
+            ("BASE_CSS", BASE_CSS),
+            ("COMPONENTS_CSS", COMPONENTS_CSS),
+            ("PLUGINS_CSS", PLUGINS_CSS),
+            ("FLOWS_CSS", FLOWS_CSS),
+            ("GRAPH_CSS", GRAPH_CSS),
+            ("WIDGETS_CSS", WIDGETS_CSS),
+            ("AUTH_CSS", AUTH_CSS),
+            ("ALL_STYLES", get_all_styles()),
+        ] {
+            assert_balanced_css(name, css);
+        }
+    }
 }

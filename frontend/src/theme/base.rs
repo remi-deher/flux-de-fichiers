@@ -225,8 +225,6 @@ pub const BASE_CSS: &str = r#"
   background: var(--bg-card);
   color: var(--text-muted);
 }
-  color: var(--text-dim);
-}
 
 /* Groupes et boutons de navigation */
 .tab-navigation {
@@ -452,9 +450,6 @@ pub const BASE_CSS: &str = r#"
 .page-transition-region {
   flex: 1;
   display: flex;
-.page-transition-region {
-  flex: 1;
-  display: flex;
   flex-direction: column;
   min-width: 0;
   background-color: var(--bg-elevated);
@@ -642,15 +637,20 @@ pub const BASE_CSS: &str = r#"
 .topbar-search {
   display: flex;
   align-items: stretch;
-  min-height: 40px;
+  min-height: 36px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
   color: var(--text-dim);
   box-sizing: border-box;
-  transition: color 0.2s ease;
+  transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
 }
 
 .topbar-search:focus-within,
 body[data-filter-sheet] .topbar-search {
   color: var(--text-main);
+  border-color: var(--primary);
+  background: var(--bg-card);
 }
 
 .search-capsule__query {
@@ -841,15 +841,12 @@ body[data-filter-sheet] .topbar-search {
   gap: 0.4rem;
 }
 
-/* Actions et statuts de la TopBar : ils flottent à droite pour que la capsule reste au centre. */
+/* Actions et statuts de la TopBar alignés à droite dans le flux flex. */
 .topbar-actions {
-  position: absolute;
-  right: 0.85rem;
-  top: 50%;
-  transform: translateY(-50%);
   display: flex;
   align-items: center;
   gap: 0.65rem;
+  flex-shrink: 0;
 }
 
 .header-icon-btn {

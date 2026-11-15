@@ -1,20 +1,22 @@
 //! État partagé de l'éditeur : graphe édité, historique annuler/rétablir, coordonnées 2D et tiroirs.
 
 use super::dnd::{
-    BranchTarget, DragPayload, drop_outcome, duplicate_node as clone_node, insert_on_branch,
+    BranchTarget, DragPayload, disconnect_edge, drop_outcome, duplicate_node as clone_node,
+    duplicate_subgraph, insert_on_branch,
 };
-use super::geometry::{Point, ROW_STRIDE, default_positions, place_with_positions};
+use super::geometry::{
+    GRID_STEP, Point, ROW_STRIDE, Viewport, default_positions, place_with_positions, snap_point,
+};
 #[cfg(not(test))]
 use crate::prefs;
 use flux_shared::flows::{
     FlowConnection, FlowGraph, GraphError, OwnedBlockSpec, find_owned, native_owned_catalog,
 };
 use leptos::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const HISTORY_MAX_LEN: usize = 60;
 const DUPLICATE_OFFSET: f64 = 36.0;
-const MIN_NODE_COORD: f64 = 16.0;
 const LAYOUT_STORAGE_PREFIX: &str = "flux.flow-layout.";
 
 /// Pile bornée d'instantanés du graphe pour Annuler (`Ctrl+Z`) / Rétablir (`Ctrl+Maj+Z`).
@@ -125,12 +127,21 @@ pub struct PendingWire {
     pub cursor: Point,
 }
 
+/// État du pop-over Quick-Add contextuel ouvert sur le canevas.
+#[derive(Clone, Debug, PartialEq)]
+pub struct QuickAddState {
+    pub anchor: Point,
+    pub board_pos: Option<Point>,
+    pub branch: Option<BranchTarget>,
+}
+
 #[derive(Clone, Copy)]
 pub struct Editor {
     pub flow_id: RwSignal<Option<String>>,
     pub graph: RwSignal<FlowGraph>,
     pub saved_json: RwSignal<String>,
     pub selected: RwSignal<Option<String>>,
+    pub selected_ids: RwSignal<HashSet<String>>,
     pub dirty: RwSignal<bool>,
     /// Catalogue natif + blocs des dépôts (chargé via l'API).
     pub catalog: RwSignal<Vec<OwnedBlockSpec>>,
@@ -144,15 +155,22 @@ pub struct Editor {
     pub inspector_open: RwSignal<bool>,
     pub palette_open: RwSignal<bool>,
     pub palette_pinned: RwSignal<bool>,
+    pub palette_focus_tick: RwSignal<u64>,
     pub diagnostics_open: RwSignal<bool>,
     pub settings_open: RwSignal<bool>,
     pub branch_target: RwSignal<Option<BranchTarget>>,
+    pub quick_add: RwSignal<Option<QuickAddState>>,
     pub selected_wire: RwSignal<Option<FlowConnection>>,
     pub pending_wire: RwSignal<Option<PendingWire>>,
     pub positions: RwSignal<HashMap<String, Point>>,
     pub previous_positions: RwSignal<Option<HashMap<String, Point>>>,
-    pub zoom: RwSignal<f64>,
+    pub viewport: RwSignal<Viewport>,
+    pub snap_to_grid: RwSignal<bool>,
     pub history: RwSignal<HistoryStack>,
+}
+
+fn maybe_snap(pt: Point, snap: bool) -> Point {
+    if snap { snap_point(pt, GRID_STEP) } else { pt }
 }
 
 impl Editor {
@@ -166,6 +184,7 @@ impl Editor {
             graph: RwSignal::new(graph),
             saved_json: RwSignal::new(saved_json),
             selected: RwSignal::new(None),
+            selected_ids: RwSignal::new(HashSet::new()),
             dirty: RwSignal::new(false),
             catalog: RwSignal::new(native_owned_catalog()),
             drag: RwSignal::new(None),
@@ -173,15 +192,18 @@ impl Editor {
             drop_notice: RwSignal::new(None),
             inspector_open: RwSignal::new(false),
             palette_open: RwSignal::new(palette_initially_open),
-            palette_pinned: RwSignal::new(true),
+            palette_pinned: RwSignal::new(false),
+            palette_focus_tick: RwSignal::new(0),
             diagnostics_open: RwSignal::new(false),
             settings_open: RwSignal::new(false),
             branch_target: RwSignal::new(None),
+            quick_add: RwSignal::new(None),
             selected_wire: RwSignal::new(None),
             pending_wire: RwSignal::new(None),
             positions: RwSignal::new(initial_positions),
             previous_positions: RwSignal::new(None),
-            zoom: RwSignal::new(1.0),
+            viewport: RwSignal::new(Viewport::default()),
+            snap_to_grid: RwSignal::new(true),
             history: RwSignal::new(history),
         }
     }
@@ -231,30 +253,151 @@ impl Editor {
     }
 
     fn apply_history_snapshot(&self, snapshot: FlowGraph) {
-        let selected_valid = self
-            .selected
+        let mut next_ids: HashSet<String> = self
+            .selected_ids
             .get_untracked()
-            .is_some_and(|id| snapshot.node(&id).is_some());
-        if !selected_valid {
+            .into_iter()
+            .filter(|id| snapshot.node(id).is_some())
+            .collect();
+        if next_ids.is_empty()
+            && let Some(sel) = self.selected.get_untracked()
+            && snapshot.node(&sel).is_some()
+        {
+            next_ids.insert(sel);
+        }
+        if next_ids.len() == 1 {
+            self.selected.set(next_ids.iter().next().cloned());
+        } else {
             self.selected.set(None);
             self.inspector_open.set(false);
         }
+        self.selected_ids.set(next_ids);
         self.pending_wire.set(None);
         self.selected_wire.set(None);
         self.branch_target.set(None);
+        self.quick_add.set(None);
         self.graph.set(snapshot);
         self.dirty.set(true);
+    }
+
+    /// Ouvre l'onglet Composants dans le tiroir droit unifié.
+    pub fn open_palette(&self) {
+        self.inspector_open.set(false);
+        self.settings_open.set(false);
+        self.palette_open.set(true);
+    }
+
+    /// Ouvre l'onglet Composants et demande le focus sur la recherche.
+    pub fn focus_palette_search(&self) {
+        self.open_palette();
+        self.palette_focus_tick.update(|n| *n = n.wrapping_add(1));
+    }
+
+    /// Ouvre l'inspecteur du bloc sélectionné dans le tiroir droit unifié.
+    pub fn open_inspector(&self) {
+        if self.selected.get_untracked().is_none() {
+            return;
+        }
+        self.palette_open.set(false);
+        self.settings_open.set(false);
+        self.inspector_open.set(true);
+    }
+
+    /// Ouvre les réglages du flux dans le tiroir droit unifié.
+    pub fn open_settings(&self) {
+        self.palette_open.set(false);
+        self.inspector_open.set(false);
+        self.settings_open.set(true);
+    }
+
+    /// Ferme le tiroir droit unifié quel que soit l'onglet actif.
+    pub fn close_right_panel(&self) {
+        self.palette_open.set(false);
+        self.inspector_open.set(false);
+        self.settings_open.set(false);
+    }
+
+    /// Indique de façon réactive si un onglet du tiroir droit est ouvert.
+    pub fn any_right_panel_open(&self) -> bool {
+        self.palette_open.get()
+            || (self.inspector_open.get() && self.selected.get().is_some())
+            || self.settings_open.get()
+    }
+
+    /// Indique de façon réactive si un bloc donné est sélectionné (simple ou multiple).
+    pub fn is_selected(&self, id: &str) -> bool {
+        self.selected.get().as_deref() == Some(id) || self.selected_ids.with(|ids| ids.contains(id))
+    }
+
+    fn active_selection_ids(&self) -> HashSet<String> {
+        let mut ids = self.selected_ids.get_untracked();
+        if ids.is_empty()
+            && let Some(id) = self.selected.get_untracked()
+        {
+            ids.insert(id);
+        }
+        ids
+    }
+
+    /// Aimante un point sur la grille si l'option `snap_to_grid` est active.
+    pub fn snap_if_enabled(&self, pt: Point) -> Point {
+        maybe_snap(pt, self.snap_to_grid.get_untracked())
     }
 
     pub fn select_node(&self, id: Option<String>, open_inspector: bool) {
         self.selected_wire.set(None);
         self.selected.set(id.clone());
+        let mut ids = HashSet::new();
+        if let Some(ref single) = id {
+            ids.insert(single.clone());
+        }
+        self.selected_ids.set(ids);
         if id.is_some() && open_inspector {
-            self.settings_open.set(false);
-            self.inspector_open.set(true);
+            self.open_inspector();
         } else if id.is_none() {
             self.inspector_open.set(false);
         }
+    }
+
+    /// Remplace la sélection active par un ensemble arbitraire d'identifiants.
+    pub fn set_selection(&self, ids: HashSet<String>) {
+        self.selected_wire.set(None);
+        if ids.len() == 1 {
+            self.selected.set(ids.iter().next().cloned());
+            self.selected_ids.set(ids);
+            return;
+        }
+        self.selected.set(None);
+        self.inspector_open.set(false);
+        self.selected_ids.set(ids);
+    }
+
+    /// Ajoute ou retire un bloc de la sélection multiple (`Ctrl+Clic` / `Maj+Clic`).
+    pub fn toggle_node_selection(&self, id: &str) {
+        let mut ids = self.active_selection_ids();
+        if !ids.remove(id) {
+            ids.insert(id.to_owned());
+        }
+        if ids.len() == 1 {
+            let only = ids.iter().next().cloned();
+            let keep_open = self.inspector_open.get_untracked();
+            self.select_node(only, keep_open);
+        } else {
+            self.set_selection(ids);
+        }
+    }
+
+    /// Sélectionne tous les blocs présents dans le graphe (`Ctrl+A`).
+    pub fn select_all_nodes(&self) {
+        let ids: HashSet<String> = self
+            .graph
+            .with_untracked(|g| g.nodes.iter().map(|n| n.id.clone()).collect());
+        self.set_selection(ids);
+    }
+
+    /// Efface toute sélection de bloc(s).
+    pub fn clear_selection(&self) {
+        self.select_node(None, false);
     }
 
     pub fn mark_saved(&self, new_flow_id: Option<String>) {
@@ -285,13 +428,66 @@ impl Editor {
             .unwrap_or(Point { x: 72.0, y: 64.0 })
     }
 
-    pub fn set_node_position_live(&self, id: &str, pt: Point) {
-        let clamped = Point {
-            x: pt.x.max(MIN_NODE_COORD),
-            y: pt.y.max(MIN_NODE_COORD),
+    /// Ouvre le pop-over Quick-Add contextuel sur le canevas.
+    pub fn open_quick_add(&self, state: QuickAddState) {
+        self.pending_wire.set(None);
+        self.selected_wire.set(None);
+        self.branch_target.set(None);
+        self.quick_add.set(Some(state));
+    }
+
+    /// Crée et place le bloc choisi depuis Quick-Add, en raccordant la branche éventuelle.
+    pub fn complete_quick_add(&self, spec: &OwnedBlockSpec) -> Result<String, GraphError> {
+        let Some(state) = self.quick_add.get_untracked() else {
+            return Err(GraphError::UnknownNode);
         };
+        let defaults = spec.default_config();
+        let new_id = if let Some(branch) = state.branch {
+            let src_point = self.node_point(&branch.source_id);
+            let mut outcome = Err(GraphError::UnknownNode);
+            self.mutate_graph(|graph| {
+                outcome = insert_on_branch(graph, &branch, spec, defaults);
+            });
+            let created = outcome?;
+            let target_pos = state.board_pos.unwrap_or(Point {
+                x: src_point.x,
+                y: src_point.y + ROW_STRIDE,
+            });
+            self.set_node_position(&created, target_pos);
+            created
+        } else {
+            let mut created = String::new();
+            let kind = spec.kind_enum();
+            let label = spec.label.clone();
+            self.mutate_graph(|graph| {
+                created = graph.append(kind, &label, defaults);
+            });
+            let target_pos = state.board_pos.or_else(|| {
+                self.graph
+                    .with_untracked(|graph| default_positions(graph).get(&created).copied())
+            });
+            if let Some(pt) = target_pos {
+                self.set_node_position(&created, pt);
+            }
+            created
+        };
+        self.quick_add.set(None);
+        self.select_node(Some(new_id.clone()), true);
+        Ok(new_id)
+    }
+
+    pub fn set_node_position_live(&self, id: &str, pt: Point) {
+        self.move_nodes_live(&[(id.to_owned(), pt)], false);
+    }
+
+    /// Met à jour les coordonnées d'un ou plusieurs blocs pendant un glissement, avec snap optionnel.
+    pub fn move_nodes_live(&self, updates: &[(String, Point)], snap: bool) {
         self.positions.update(|map| {
-            map.insert(id.to_owned(), clamped);
+            for (id, pt) in updates {
+                if pt.x.is_finite() && pt.y.is_finite() {
+                    map.insert(id.clone(), maybe_snap(*pt, snap));
+                }
+            }
         });
     }
 
@@ -372,9 +568,10 @@ impl Editor {
             created
         };
 
-        self.select_node(Some(new_id.clone()), true);
-        if !self.palette_pinned.get_untracked() {
-            self.palette_open.set(false);
+        let stay_on_palette = self.palette_pinned.get_untracked();
+        self.select_node(Some(new_id.clone()), !stay_on_palette);
+        if stay_on_palette {
+            self.open_palette();
         }
         Ok(new_id)
     }
@@ -399,31 +596,123 @@ impl Editor {
         created
     }
 
-    /// Retire un bloc du graphe et nettoie les sélections ou cibles associées.
-    pub fn remove_node(&self, id: &str) {
-        self.mutate_graph(|graph| graph.remove(id));
+    /// Duplique la sélection courante (un bloc ou un sous-graphe en conservant ses liaisons internes).
+    pub fn duplicate_selected(&self) -> Vec<String> {
+        let targets = self.active_selection_ids();
+        if targets.is_empty() {
+            return Vec::new();
+        }
+        if targets.len() == 1
+            && let Some(only) = targets.iter().next()
+        {
+            return self.duplicate_node(only).into_iter().collect();
+        }
+        let orig_points: HashMap<String, Point> = targets
+            .iter()
+            .map(|id| (id.clone(), self.node_point(id)))
+            .collect();
+        let mut id_map = HashMap::new();
+        self.mutate_graph(|graph| {
+            id_map = duplicate_subgraph(graph, &targets);
+        });
+        if id_map.is_empty() {
+            return Vec::new();
+        }
+        let snap = self.snap_to_grid.get_untracked();
+        let moves: Vec<(String, Point)> = id_map
+            .iter()
+            .filter_map(|(old_id, new_id)| {
+                let orig = orig_points.get(old_id)?;
+                Some((
+                    new_id.clone(),
+                    Point {
+                        x: orig.x + DUPLICATE_OFFSET,
+                        y: orig.y + DUPLICATE_OFFSET,
+                    },
+                ))
+            })
+            .collect();
+        self.move_nodes_live(&moves, snap);
+        self.commit_positions();
+        let new_ids: HashSet<String> = id_map.values().cloned().collect();
+        let created: Vec<String> = new_ids.iter().cloned().collect();
+        self.set_selection(new_ids);
+        created
+    }
+
+    fn remove_node_ids(&self, targets: &HashSet<String>) -> usize {
+        if targets.is_empty() {
+            return 0;
+        }
+        let count = targets.len();
+        self.mutate_graph(|graph| {
+            for id in targets {
+                graph.remove(id);
+            }
+        });
         self.positions.update(|map| {
-            map.remove(id);
+            for id in targets {
+                map.remove(id);
+            }
         });
         self.persist_layout();
-        if self.selected.get_untracked().as_deref() == Some(id) {
+        self.selected_ids.update(|ids| {
+            for id in targets {
+                ids.remove(id);
+            }
+        });
+        let remaining = self.selected_ids.get_untracked();
+        if remaining.len() == 1 {
+            self.selected.set(remaining.iter().next().cloned());
+        } else if self
+            .selected
+            .get_untracked()
+            .is_some_and(|id| targets.contains(&id))
+            || remaining.len() > 1
+        {
             self.selected.set(None);
             self.inspector_open.set(false);
         }
-        if self
-            .branch_target
-            .get_untracked()
-            .is_some_and(|b| b.source_id == id || b.replace_to.as_deref() == Some(id))
-        {
+        if self.branch_target.get_untracked().is_some_and(|b| {
+            targets.contains(&b.source_id)
+                || b.replace_to
+                    .as_deref()
+                    .is_some_and(|to| targets.contains(to))
+        }) {
             self.branch_target.set(None);
         }
         if self
             .pending_wire
             .get_untracked()
-            .is_some_and(|wire| wire.from_id == id)
+            .is_some_and(|wire| targets.contains(&wire.from_id))
         {
             self.pending_wire.set(None);
         }
+        count
+    }
+
+    /// Retire tous les blocs actuellement sélectionnés en une seule étape d'historique.
+    pub fn remove_selected_nodes(&self) -> usize {
+        let targets = self.active_selection_ids();
+        self.remove_node_ids(&targets)
+    }
+
+    /// Retire la liaison actuellement sélectionnée, si présente.
+    pub fn disconnect_selected_wire(&self) -> bool {
+        let Some(conn) = self.selected_wire.get_untracked() else {
+            return false;
+        };
+        self.mutate_graph(|graph| {
+            disconnect_edge(graph, &conn.from, &conn.port, &conn.to);
+        });
+        self.selected_wire.set(None);
+        true
+    }
+
+    /// Retire un bloc du graphe et nettoie les sélections ou cibles associées.
+    pub fn remove_node(&self, id: &str) {
+        let targets: HashSet<String> = [id.to_owned()].into_iter().collect();
+        let _ = self.remove_node_ids(&targets);
     }
 
     /// Fin d'un glisser, abouti ou non.
@@ -578,5 +867,110 @@ mod tests {
         };
         assert_eq!(parse_layout(&raw), stored);
         assert!(parse_layout("{invalide").is_empty());
+    }
+
+    #[test]
+    fn right_dock_tabs_are_mutually_exclusive() {
+        let mut graph = FlowGraph::default();
+        let input = graph.append(FlowBlockKind::FileInput, "Entrée", json!({}));
+        let editor = Editor::for_flow(Some("flow.dock".into()), graph);
+
+        assert!(editor.palette_open.get_untracked());
+        assert!(!editor.inspector_open.get_untracked());
+        assert!(!editor.settings_open.get_untracked());
+
+        editor.open_settings();
+        assert!(editor.settings_open.get_untracked());
+        assert!(!editor.palette_open.get_untracked());
+
+        editor.select_node(Some(input), true);
+        assert!(editor.inspector_open.get_untracked());
+        assert!(!editor.settings_open.get_untracked());
+        assert!(!editor.palette_open.get_untracked());
+
+        editor.focus_palette_search();
+        assert!(editor.palette_open.get_untracked());
+        assert!(!editor.inspector_open.get_untracked());
+        assert_eq!(editor.palette_focus_tick.get_untracked(), 1);
+
+        editor.close_right_panel();
+        assert!(!editor.palette_open.get_untracked());
+        assert!(!editor.inspector_open.get_untracked());
+        assert!(!editor.settings_open.get_untracked());
+    }
+
+    #[test]
+    fn quick_add_places_and_connects_in_unbounded_coordinates() {
+        let mut graph = FlowGraph::default();
+        let input = graph.append(FlowBlockKind::FileInput, "Entrée", json!({}));
+        let editor = Editor::for_flow(Some("flow.qa".into()), graph);
+        let Some(encode) = native_owned_catalog()
+            .into_iter()
+            .find(|s| s.kind == "block.video.encode")
+        else {
+            panic!("encode absent du catalogue natif");
+        };
+
+        editor.open_quick_add(QuickAddState {
+            anchor: Point { x: 200.0, y: 180.0 },
+            board_pos: Some(Point {
+                x: -180.0,
+                y: -120.0,
+            }),
+            branch: Some(BranchTarget {
+                source_id: input.clone(),
+                port: None,
+                replace_to: None,
+            }),
+        });
+        let Ok(new_id) = editor.complete_quick_add(&encode) else {
+            panic!("quick_add aurait dû créer le bloc");
+        };
+        assert!(editor.quick_add.get_untracked().is_none());
+        assert_eq!(
+            editor.node_point(&new_id),
+            Point {
+                x: -180.0,
+                y: -120.0
+            }
+        );
+        assert!(
+            editor
+                .graph
+                .with_untracked(|g| g.outgoing(&input).any(|e| e.to == new_id))
+        );
+    }
+
+    #[test]
+    fn multi_selection_duplicates_subgraph_and_removes_batch_in_one_undo_step() {
+        let mut graph = FlowGraph::default();
+        let input = graph.append(FlowBlockKind::FileInput, "Entrée", json!({}));
+        let remux = graph.append(FlowBlockKind::RemuxMkv, "Remux", json!({}));
+        let output = graph.append(FlowBlockKind::FileOutput, "Sortie", json!({}));
+        let editor = Editor::for_flow(Some("flow.batch".into()), graph);
+
+        editor.select_node(Some(remux.clone()), false);
+        editor.toggle_node_selection(&output);
+        assert_eq!(editor.selected_ids.get_untracked().len(), 2);
+        assert_eq!(editor.selected.get_untracked(), None);
+
+        let copies = editor.duplicate_selected();
+        assert_eq!(copies.len(), 2);
+        assert_eq!(editor.graph.get_untracked().nodes.len(), 5);
+        assert_eq!(editor.selected_ids.get_untracked().len(), 2);
+
+        let removed = editor.remove_selected_nodes();
+        assert_eq!(removed, 2);
+        assert_eq!(editor.graph.get_untracked().nodes.len(), 3);
+        assert!(editor.selected_ids.get_untracked().is_empty());
+
+        editor.undo();
+        assert_eq!(editor.graph.get_untracked().nodes.len(), 5);
+
+        editor.select_all_nodes();
+        assert_eq!(editor.selected_ids.get_untracked().len(), 5);
+        editor.clear_selection();
+        assert!(editor.selected_ids.get_untracked().is_empty());
+        assert!(!editor.is_selected(&input));
     }
 }

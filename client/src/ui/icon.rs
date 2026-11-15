@@ -35,6 +35,9 @@ pub enum IconName {
     Trash,
     Layout,
     Pin,
+    Minus,
+    Maximize,
+    Magnet,
 }
 
 impl IconName {
@@ -121,6 +124,13 @@ impl IconName {
             Self::Pin => {
                 r#"<line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/>"#
             }
+            Self::Minus => r#"<line x1="5" x2="19" y1="12" y2="12"/>"#,
+            Self::Maximize => {
+                r#"<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>"#
+            }
+            Self::Magnet => {
+                r#"<path d="m6 15-4-4 6.75-6.77a7.79 7.79 0 0 1 11 11L13 22l-4-4 6.39-6.36a2.14 2.14 0 0 0-3-3L6 15"/><path d="m5 8 4 4"/><path d="m12 15 4 4"/>"#
+            }
         }
     }
 }
@@ -161,7 +171,7 @@ pub fn Icon(
 mod tests {
     use super::*;
 
-    const ALL_ICONS: [IconName; 30] = [
+    const ALL_ICONS: [IconName; 33] = [
         IconName::Dashboard,
         IconName::Libraries,
         IconName::Flows,
@@ -192,6 +202,9 @@ mod tests {
         IconName::Trash,
         IconName::Layout,
         IconName::Pin,
+        IconName::Minus,
+        IconName::Maximize,
+        IconName::Magnet,
     ];
 
     #[test]

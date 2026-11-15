@@ -9,6 +9,7 @@ mod geometry;
 mod inspector;
 mod palette;
 mod presentation;
+mod quick_add;
 mod state;
 mod versions;
 

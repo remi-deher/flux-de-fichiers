@@ -1,19 +1,21 @@
 //! Plan interactif 2D du graphe : cartes librement déplaçables, zoom/pan, ports et minimap.
 
-use super::dnd::{BranchTarget, DragPayload, can_connect, connect_checked, disconnect_edge};
+use super::dnd::{BranchTarget, DragPayload, can_connect, connect_checked};
 use super::drag::DragItem;
 use super::geometry::{
-    CARD_HEIGHT, CARD_WIDTH, ORIGIN_X, ORIGIN_Y, PlacedNode, Point, ZOOM_STEP, board_size,
-    clamp_zoom, default_positions, link_midpoint, link_path, place_with_positions,
+    Bounds, CARD_HEIGHT, CARD_WIDTH, GRID_STEP, ORIGIN_X, ORIGIN_Y, PlacedNode, Point, ZOOM_STEP,
+    board_to_screen, center_viewport_on, fit_viewport, link_midpoint, link_path, minimap_bounds,
+    place_with_positions, rects_intersect, screen_to_board, visible_board_rect, zoom_around,
 };
 use super::presentation::{
     NodeDomain, PortPresentation, node_output_ports, node_summary, output_presentation,
 };
-use super::state::{Editor, PendingWire};
+use super::quick_add::QuickAddPopover;
+use super::state::{Editor, PendingWire, QuickAddState};
 use crate::ui::{Icon, IconName, Toasts};
 use flux_shared::flows::{FlowBlockKind, FlowConnection, find_owned};
 use leptos::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const NODE_ICON_SIZE: u32 = 16;
 const ACTION_ICON_SIZE: u32 = 14;
@@ -28,18 +30,41 @@ const WIRE_DRAG_THRESHOLD: f64 = 8.0;
 
 #[derive(Clone, Debug)]
 struct DragNodeState {
-    node_id: String,
+    primary_id: String,
     start_x: f64,
     start_y: f64,
-    origin: Point,
+    origins: Vec<(String, Point)>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MarqueeState {
+    start: Point,
+    current: Point,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct PanBoardState {
     start_x: f64,
     start_y: f64,
-    scroll_left: i32,
-    scroll_top: i32,
+    origin_pan_x: f64,
+    origin_pan_y: f64,
+}
+
+fn board_local_point(board: &web_sys::HtmlDivElement, client_x: i32, client_y: i32) -> Point {
+    let rect = board.get_bounding_client_rect();
+    Point {
+        x: f64::from(client_x) - rect.left(),
+        y: f64::from(client_y) - rect.top(),
+    }
+}
+
+fn board_dimensions(board_ref: NodeRef<leptos::html::Div>) -> (f64, f64) {
+    board_ref.get().map_or((960.0, 640.0), |el| {
+        (
+            f64::from(el.client_width()).max(1.0),
+            f64::from(el.client_height()).max(1.0),
+        )
+    })
 }
 
 struct OutputSlotData {
@@ -59,9 +84,9 @@ fn CanvasToolbar(editor: Editor, can_manage: bool) -> impl IntoView {
     move || {
         let can_undo_layout = editor.previous_positions.get().is_some();
         let pending = editor.pending_wire.get();
-        let selected_wire = editor.selected_wire.get();
+        let multi_count = editor.selected_ids.with(HashSet::len);
         let notice = editor.drop_notice.get();
-        if !can_undo_layout && pending.is_none() && selected_wire.is_none() && notice.is_none() {
+        if !can_undo_layout && pending.is_none() && multi_count <= 1 && notice.is_none() {
             return None;
         }
         Some(view! {
@@ -88,52 +113,43 @@ fn CanvasToolbar(editor: Editor, can_manage: bool) -> impl IntoView {
                         </button>
                     </div>
                 })}
-                {selected_wire.map(|conn| {
-                    let insert_conn = conn.clone();
-                    let delete_conn = conn.clone();
-                    view! {
-                        <div class="flow-canvas__banner">
-                            <span>"Liaison sélectionnée"</span>
-                            {can_manage.then(|| view! {
-                                <>
-                                    <button
-                                        type="button"
-                                        class="btn btn-secondary btn-sm"
-                                        on:click=move |_| {
-                                            editor.branch_target.set(Some(BranchTarget {
-                                                source_id: insert_conn.from.clone(),
-                                                port: insert_conn.port.clone(),
-                                                replace_to: Some(insert_conn.to.clone()),
-                                            }));
-                                            editor.selected_wire.set(None);
-                                            editor.palette_open.set(true);
-                                        }
-                                    >
-                                        <Icon name=IconName::Plus size=TOOLBAR_ICON_SIZE />
-                                        <span>"Insérer une étape"</span>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="btn btn-danger-quiet btn-sm"
-                                        on:click=move |_| {
-                                            editor.mutate_graph(|graph| {
-                                                disconnect_edge(
-                                                    graph,
-                                                    &delete_conn.from,
-                                                    &delete_conn.port,
-                                                    &delete_conn.to,
-                                                );
-                                            });
-                                            editor.selected_wire.set(None);
-                                        }
-                                    >
-                                        <Icon name=IconName::Trash size=TOOLBAR_ICON_SIZE />
-                                        <span>"Supprimer la liaison"</span>
-                                    </button>
-                                </>
-                            })}
-                        </div>
-                    }
+                {(multi_count > 1).then(|| view! {
+                    <div class="flow-canvas__banner">
+                        <span>{format!("{multi_count} blocs sélectionnés")}</span>
+                        {can_manage.then(|| view! {
+                            <>
+                                <button
+                                    type="button"
+                                    class="btn btn-secondary btn-sm"
+                                    title="Dupliquer la sélection (Ctrl+D)"
+                                    on:click=move |_| {
+                                        let _ = editor.duplicate_selected();
+                                    }
+                                >
+                                    <Icon name=IconName::Copy size=TOOLBAR_ICON_SIZE />
+                                    <span>"Dupliquer"</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-danger-quiet btn-sm"
+                                    title="Supprimer la sélection (Suppr)"
+                                    on:click=move |_| {
+                                        let _ = editor.remove_selected_nodes();
+                                    }
+                                >
+                                    <Icon name=IconName::Trash size=TOOLBAR_ICON_SIZE />
+                                    <span>"Supprimer"</span>
+                                </button>
+                            </>
+                        })}
+                        <button
+                            type="button"
+                            class="btn btn-secondary btn-sm"
+                            on:click=move |_| editor.clear_selection()
+                        >
+                            "Désélectionner"
+                        </button>
+                    </div>
                 })}
                 {notice.map(|message| view! {
                     <div class="flow-canvas__banner is-error">
@@ -154,43 +170,196 @@ fn CanvasToolbar(editor: Editor, can_manage: bool) -> impl IntoView {
 }
 
 #[component]
+fn WireActionPopover(
+    editor: Editor,
+    placed: Memo<Vec<PlacedNode>>,
+    can_manage: bool,
+) -> impl IntoView {
+    move || {
+        if !can_manage {
+            return None;
+        }
+        let conn = editor.selected_wire.get()?;
+        let vp = editor.viewport.get();
+        let mid_board = placed.with(|nodes| {
+            let from_node = editor.graph.with(|g| g.node(&conn.from).cloned())?;
+            let from_placed = nodes.iter().find(|n| n.id == conn.from)?;
+            let to_placed = nodes.iter().find(|n| n.id == conn.to)?;
+            let ports = editor
+                .catalog
+                .with(|cat| editor.graph.with(|g| node_output_ports(g, &from_node, cat)));
+            let start = from_placed.out_port_for(conn.port.as_deref(), &ports);
+            Some(link_midpoint(start, to_placed.in_port()))
+        })?;
+        let screen = board_to_screen(vp, mid_board);
+        let insert_conn = conn.clone();
+        Some(view! {
+            <div
+                class="flow-wire__popover"
+                role="toolbar"
+                aria-label="Actions sur la liaison sélectionnée"
+                style=format!("left:{:.1}px;top:{:.1}px;", screen.x, screen.y)
+                on:mousedown=move |event| event.stop_propagation()
+                on:click=move |event| event.stop_propagation()
+            >
+                <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    title="Insérer une étape sur cette liaison"
+                    on:click=move |_| {
+                        editor.open_quick_add(QuickAddState {
+                            anchor: screen,
+                            board_pos: None,
+                            branch: Some(BranchTarget {
+                                source_id: insert_conn.from.clone(),
+                                port: insert_conn.port.clone(),
+                                replace_to: Some(insert_conn.to.clone()),
+                            }),
+                        });
+                    }
+                >
+                    <Icon name=IconName::Plus size=TOOLBAR_ICON_SIZE />
+                    <span>"Insérer"</span>
+                </button>
+                <button
+                    type="button"
+                    class="btn btn-danger-quiet btn-sm"
+                    title="Supprimer cette liaison (Suppr)"
+                    aria-label="Supprimer cette liaison"
+                    on:click=move |_| {
+                        let _ = editor.disconnect_selected_wire();
+                    }
+                >
+                    <Icon name=IconName::Trash size=TOOLBAR_ICON_SIZE />
+                </button>
+            </div>
+        })
+    }
+}
+
+#[component]
+fn CanvasControlsBar(
+    editor: Editor,
+    placed: Memo<Vec<PlacedNode>>,
+    board_ref: NodeRef<leptos::html::Div>,
+    can_manage: bool,
+) -> impl IntoView {
+    let zoom_center = move |target_zoom: Option<f64>, delta: f64| {
+        let (vw, vh) = board_dimensions(board_ref);
+        let center = Point {
+            x: vw / 2.0,
+            y: vh / 2.0,
+        };
+        editor.viewport.update(|vp| {
+            let next = target_zoom.unwrap_or(vp.zoom + delta);
+            *vp = zoom_around(*vp, center, next);
+        });
+    };
+
+    let fit_all = move |_| {
+        let (vw, vh) = board_dimensions(board_ref);
+        if let Some(next_vp) = placed.with_untracked(|nodes| fit_viewport(nodes, vw, vh)) {
+            editor.viewport.set(next_vp);
+        }
+    };
+
+    view! {
+        <div class="flow-canvas-controls" role="toolbar" aria-label="Contrôles du canevas">
+            <button
+                type="button"
+                class="flow-control-btn"
+                title="Zoomer"
+                aria-label="Zoomer"
+                on:click=move |_| zoom_center(None, ZOOM_STEP)
+            >
+                <Icon name=IconName::Plus size=TOOLBAR_ICON_SIZE />
+            </button>
+            <button
+                type="button"
+                class="flow-control-btn"
+                title="Dézoomer"
+                aria-label="Dézoomer"
+                on:click=move |_| zoom_center(None, -ZOOM_STEP)
+            >
+                <Icon name=IconName::Minus size=TOOLBAR_ICON_SIZE />
+            </button>
+            <button
+                type="button"
+                class="flow-control-btn flow-control-btn--pct"
+                title="Réinitialiser le zoom à 100 %"
+                aria-label="Réinitialiser le zoom à 100 %"
+                on:click=move |_| zoom_center(Some(DEFAULT_ZOOM), 0.0)
+            >
+                {move || format!("{}%", (editor.viewport.get().zoom * ZOOM_PERCENT_SCALE).round())}
+            </button>
+            <button
+                type="button"
+                class="flow-control-btn"
+                title="Adapter tout le flux à l'écran"
+                aria-label="Adapter tout le flux à l'écran"
+                on:click=fit_all
+            >
+                <Icon name=IconName::Maximize size=TOOLBAR_ICON_SIZE />
+            </button>
+
+            {can_manage.then(|| view! {
+                <>
+                    <span class="flow-controls-sep" aria-hidden="true"></span>
+                    <button
+                        type="button"
+                        class="flow-control-btn"
+                        class:is-active=move || editor.snap_to_grid.get()
+                        aria-pressed=move || editor.snap_to_grid.get().to_string()
+                        title="Aimantation sur la grille 24 px (Alt pour ignorer)"
+                        aria-label="Activer ou désactiver l'aimantation sur la grille"
+                        on:click=move |_| editor.snap_to_grid.update(|snap| *snap = !*snap)
+                    >
+                        <Icon name=IconName::Magnet size=TOOLBAR_ICON_SIZE />
+                    </button>
+                    <button
+                        type="button"
+                        class="flow-control-btn"
+                        title="Réorganiser automatiquement les blocs"
+                        aria-label="Réorganiser automatiquement les blocs"
+                        on:click=move |_| editor.auto_layout()
+                    >
+                        <Icon name=IconName::Layout size=TOOLBAR_ICON_SIZE />
+                    </button>
+                    <button
+                        type="button"
+                        class="flow-control-btn"
+                        title="Annuler (Ctrl+Z)"
+                        aria-label="Annuler la dernière modification"
+                        disabled=move || !editor.can_undo()
+                        on:click=move |_| editor.undo()
+                    >
+                        <Icon name=IconName::Undo size=TOOLBAR_ICON_SIZE />
+                    </button>
+                    <button
+                        type="button"
+                        class="flow-control-btn"
+                        title="Rétablir (Ctrl+Maj+Z)"
+                        aria-label="Rétablir la modification"
+                        disabled=move || !editor.can_redo()
+                        on:click=move |_| editor.redo()
+                    >
+                        <Icon name=IconName::Redo size=TOOLBAR_ICON_SIZE />
+                    </button>
+                </>
+            })}
+        </div>
+    }
+}
+
+#[component]
 fn MinimapPanel(
     editor: Editor,
     placed: Memo<Vec<PlacedNode>>,
-    board_dims: Memo<(f64, f64)>,
     board_ref: NodeRef<leptos::html::Div>,
 ) -> impl IntoView {
     let minimap_ref = NodeRef::<leptos::html::Div>::new();
     view! {
         <div class="flow-minimap-panel">
-            <div class="flow-minimap__tools">
-                <button
-                    type="button"
-                    class="header-icon-btn"
-                    title="Dézoomer"
-                    aria-label="Dézoomer"
-                    on:click=move |_| editor.zoom.update(|z| *z = clamp_zoom(*z - ZOOM_STEP))
-                >
-                    "-"
-                </button>
-                <button
-                    type="button"
-                    class="flow-minimap__zoom-reset"
-                    title="Réinitialiser le zoom à 100 %"
-                    on:click=move |_| editor.zoom.set(DEFAULT_ZOOM)
-                >
-                    {move || format!("{} %", (editor.zoom.get() * ZOOM_PERCENT_SCALE).round())}
-                </button>
-                <button
-                    type="button"
-                    class="header-icon-btn"
-                    title="Zoomer"
-                    aria-label="Zoomer"
-                    on:click=move |_| editor.zoom.update(|z| *z = clamp_zoom(*z + ZOOM_STEP))
-                >
-                    "+"
-                </button>
-            </div>
             <div
                 node_ref=minimap_ref
                 style="cursor:pointer;"
@@ -199,31 +368,28 @@ fn MinimapPanel(
                     let Some(mini) = minimap_ref.get() else {
                         return;
                     };
-                    let Some(board) = board_ref.get() else {
-                        return;
-                    };
+                    let (vw, vh) = board_dimensions(board_ref);
+                    let vp = editor.viewport.get_untracked();
+                    let bounds = placed.with_untracked(|nodes| minimap_bounds(nodes, vp, vw, vh));
                     let mini_w = f64::from(mini.client_width()).max(1.0);
                     let mini_h = f64::from(mini.client_height()).max(1.0);
-                    let (bw, bh) = board_dims.get_untracked();
-                    let scale = (mini_w / bw.max(1.0)).min(mini_h / bh.max(1.0)).max(f64::EPSILON);
-                    let pad_x = (mini_w - bw * scale) / 2.0;
-                    let pad_y = (mini_h - bh * scale) / 2.0;
-                    let board_x = ((f64::from(event.offset_x()) - pad_x) / scale).clamp(0.0, bw);
-                    let board_y = ((f64::from(event.offset_y()) - pad_y) / scale).clamp(0.0, bh);
-                    let zoom = editor.zoom.get_untracked();
-                    let target_x = board_x * zoom - f64::from(board.client_width()) / 2.0;
-                    let target_y = board_y * zoom - f64::from(board.client_height()) / 2.0;
-                    let max_left = (board.scroll_width() - board.client_width()).max(0);
-                    let max_top = (board.scroll_height() - board.client_height()).max(0);
-                    board.set_scroll_left((target_x.round() as i32).clamp(0, max_left));
-                    board.set_scroll_top((target_y.round() as i32).clamp(0, max_top));
+                    let scale = (mini_w / bounds.width).min(mini_h / bounds.height).max(f64::EPSILON);
+                    let pad_x = (mini_w - bounds.width * scale) / 2.0;
+                    let pad_y = (mini_h - bounds.height * scale) / 2.0;
+                    let target = Point {
+                        x: bounds.min_x + (f64::from(event.offset_x()) - pad_x) / scale,
+                        y: bounds.min_y + (f64::from(event.offset_y()) - pad_y) / scale,
+                    };
+                    editor.viewport.set(center_viewport_on(vp, target, vw, vh));
                 }
             >
                 {move || {
-                    let (bw, bh) = board_dims.get();
+                    let (vw, vh) = board_dimensions(board_ref);
+                    let vp = editor.viewport.get();
                     let nodes = placed.get();
+                    let bounds = minimap_bounds(&nodes, vp, vw, vh);
+                    let vis = visible_board_rect(vp, vw, vh);
                     let graph = editor.graph.get();
-                    let selected_id = editor.selected.get();
                     let map_by_id: HashMap<&str, &PlacedNode> =
                         nodes.iter().map(|p| (p.id.as_str(), p)).collect();
                     let lines = graph
@@ -245,7 +411,7 @@ fn MinimapPanel(
                     let rects = nodes
                         .iter()
                         .map(|node| {
-                            let is_selected = selected_id.as_deref() == Some(node.id.as_str());
+                            let is_selected = editor.is_selected(&node.id);
                             view! {
                                 <rect
                                     class="mini-node"
@@ -263,11 +429,19 @@ fn MinimapPanel(
                         <svg
                             class="flow-minimap__svg"
                             style="pointer-events:none;"
-                            viewBox=format!("0 0 {bw} {bh}")
+                            viewBox=format!("{} {} {} {}", bounds.min_x, bounds.min_y, bounds.width, bounds.height)
                             aria-hidden="true"
                         >
                             {lines}
                             {rects}
+                            <rect
+                                class="mini-viewport"
+                                x=vis.min_x
+                                y=vis.min_y
+                                width=vis.width
+                                height=vis.height
+                                rx=MINI_NODE_RX
+                            />
                         </svg>
                     }
                 }}
@@ -280,6 +454,7 @@ fn MinimapPanel(
 pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
     let board_ref = NodeRef::<leptos::html::Div>::new();
     let dragging_node = RwSignal::new(None::<DragNodeState>);
+    let marquee = RwSignal::new(None::<MarqueeState>);
     let panning = RwSignal::new(None::<PanBoardState>);
     let wire_opened_on_press = RwSignal::new(false);
     let ignore_click_for_node = RwSignal::new(None::<String>);
@@ -291,7 +466,6 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                 .with(|custom| place_with_positions(graph, custom))
         })
     });
-    let board_dims = Memo::new(move |_| placed.with(|nodes| board_size(nodes)));
 
     let connect_to_node = move |target_id: String| {
         if !can_manage {
@@ -319,6 +493,14 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                 node_ref=board_ref
                 class="flow-graph-board"
                 class:is-panning=move || panning.get().is_some()
+                style=move || {
+                    let vp = editor.viewport.get();
+                    let step = GRID_STEP * vp.zoom;
+                    format!(
+                        "background-size:{step:.2}px {step:.2}px;background-position:{:.2}px {:.2}px;",
+                        vp.pan_x, vp.pan_y
+                    )
+                }
                 on:mousedown=move |event| {
                     if event.button() != 0 {
                         return;
@@ -329,38 +511,98 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                     editor.selected_wire.set(None);
                     editor.pending_wire.set(None);
                     editor.branch_target.set(None);
-                    if let Some(board) = board_ref.get() {
-                        panning.set(Some(PanBoardState {
-                            start_x: f64::from(event.client_x()),
-                            start_y: f64::from(event.client_y()),
-                            scroll_left: board.scroll_left(),
-                            scroll_top: board.scroll_top(),
+                    editor.quick_add.set(None);
+                    let vp = editor.viewport.get_untracked();
+                    if event.shift_key()
+                        && let Some(board) = board_ref.get()
+                    {
+                        event.prevent_default();
+                        editor.clear_selection();
+                        let local = board_local_point(&board, event.client_x(), event.client_y());
+                        let board_pt = screen_to_board(vp, local);
+                        marquee.set(Some(MarqueeState {
+                            start: board_pt,
+                            current: board_pt,
                         }));
+                        return;
                     }
+                    panning.set(Some(PanBoardState {
+                        start_x: f64::from(event.client_x()),
+                        start_y: f64::from(event.client_y()),
+                        origin_pan_x: vp.pan_x,
+                        origin_pan_y: vp.pan_y,
+                    }));
+                }
+                on:dblclick=move |event| {
+                    if !can_manage {
+                        return;
+                    }
+                    let Some(board) = board_ref.get() else {
+                        return;
+                    };
+                    let anchor = board_local_point(&board, event.client_x(), event.client_y());
+                    let board_pt = screen_to_board(editor.viewport.get_untracked(), anchor);
+                    let snapped = editor.snap_if_enabled(Point {
+                        x: board_pt.x - CARD_WIDTH / 2.0,
+                        y: board_pt.y - CARD_HEIGHT / 2.0,
+                    });
+                    editor.open_quick_add(QuickAddState {
+                        anchor,
+                        board_pos: Some(snapped),
+                        branch: None,
+                    });
                 }
                 on:mousemove=move |event| {
                     let cx = f64::from(event.client_x());
                     let cy = f64::from(event.client_y());
                     if let Some(drag) = dragging_node.get_untracked() {
-                        let zoom = editor.zoom.get_untracked().max(f64::EPSILON);
-                        editor.set_node_position_live(
-                            &drag.node_id,
-                            Point {
-                                x: drag.origin.x + (cx - drag.start_x) / zoom,
-                                y: drag.origin.y + (cy - drag.start_y) / zoom,
-                            },
-                        );
+                        let zoom = editor.viewport.get_untracked().zoom.max(f64::EPSILON);
+                        let dx = (cx - drag.start_x) / zoom;
+                        let dy = (cy - drag.start_y) / zoom;
+                        let snap = editor.snap_to_grid.get_untracked() ^ event.alt_key();
+                        let updates: Vec<(String, Point)> = drag
+                            .origins
+                            .iter()
+                            .map(|(id, origin)| {
+                                (
+                                    id.clone(),
+                                    Point {
+                                        x: origin.x + dx,
+                                        y: origin.y + dy,
+                                    },
+                                )
+                            })
+                            .collect();
+                        editor.move_nodes_live(&updates, snap);
                         return;
                     }
-                    if let Some(pan) = panning.get_untracked()
+                    if let Some(mut box_sel) = marquee.get_untracked()
                         && let Some(board) = board_ref.get()
                     {
-                        board.set_scroll_left(pan.scroll_left - (cx - pan.start_x).round() as i32);
-                        board.set_scroll_top(pan.scroll_top - (cy - pan.start_y).round() as i32);
+                        let local = board_local_point(&board, event.client_x(), event.client_y());
+                        let board_pt = screen_to_board(editor.viewport.get_untracked(), local);
+                        box_sel.current = board_pt;
+                        marquee.set(Some(box_sel));
+                        let sel_rect = Bounds::from_points(box_sel.start, box_sel.current);
+                        let hits: HashSet<String> = placed.with_untracked(|nodes| {
+                            nodes
+                                .iter()
+                                .filter(|node| rects_intersect(sel_rect, node.bounds()))
+                                .map(|node| node.id.clone())
+                                .collect()
+                        });
+                        editor.set_selection(hits);
+                        return;
+                    }
+                    if let Some(pan) = panning.get_untracked() {
+                        editor.viewport.update(|vp| {
+                            vp.pan_x = pan.origin_pan_x + (cx - pan.start_x);
+                            vp.pan_y = pan.origin_pan_y + (cy - pan.start_y);
+                        });
                         return;
                     }
                     if editor.pending_wire.get_untracked().is_some() {
-                        let zoom = editor.zoom.get_untracked().max(f64::EPSILON);
+                        let zoom = editor.viewport.get_untracked().zoom.max(f64::EPSILON);
                         editor.pending_wire.update(|wire| {
                             if let Some(w) = wire.as_mut() {
                                 w.cursor = Point {
@@ -371,17 +613,45 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                         });
                     }
                 }
-                on:mouseup=move |_| {
+                on:mouseup=move |event| {
                     if dragging_node.get_untracked().is_some() {
                         dragging_node.set(None);
                         editor.commit_positions();
                     }
+                    marquee.set(None);
                     panning.set(None);
                     if let Some(wire) = editor.pending_wire.get_untracked() {
                         let moved = (wire.cursor.x - wire.start_anchor.x).abs() > WIRE_DRAG_THRESHOLD
                             || (wire.cursor.y - wire.start_anchor.y).abs() > WIRE_DRAG_THRESHOLD;
                         if moved {
-                            editor.pending_wire.set(None);
+                            if can_manage {
+                                let anchor = board_ref
+                                    .get()
+                                    .map(|b| board_local_point(&b, event.client_x(), event.client_y()))
+                                    .unwrap_or_else(|| {
+                                        board_to_screen(editor.viewport.get_untracked(), wire.cursor)
+                                    });
+                                let existing_to = editor.graph.with_untracked(|graph| {
+                                    graph
+                                        .outgoing(&wire.from_id)
+                                        .find(|edge| edge.port == wire.port)
+                                        .map(|edge| edge.to.clone())
+                                });
+                                editor.open_quick_add(QuickAddState {
+                                    anchor,
+                                    board_pos: Some(editor.snap_if_enabled(Point {
+                                        x: wire.cursor.x - CARD_WIDTH / 2.0,
+                                        y: wire.cursor.y,
+                                    })),
+                                    branch: Some(BranchTarget {
+                                        source_id: wire.from_id,
+                                        port: wire.port,
+                                        replace_to: existing_to,
+                                    }),
+                                });
+                            } else {
+                                editor.pending_wire.set(None);
+                            }
                         }
                     }
                 }
@@ -390,19 +660,23 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                         dragging_node.set(None);
                         editor.commit_positions();
                     }
+                    marquee.set(None);
                     panning.set(None);
                 }
                 on:wheel=move |event| {
-                    if !(event.ctrl_key() || event.meta_key()) {
-                        return;
-                    }
                     event.prevent_default();
+                    let Some(board) = board_ref.get() else {
+                        return;
+                    };
+                    let cursor_local = board_local_point(&board, event.client_x(), event.client_y());
                     let delta = if event.delta_y() < 0.0 {
                         ZOOM_STEP
                     } else {
                         -ZOOM_STEP
                     };
-                    editor.zoom.update(|z| *z = clamp_zoom(*z + delta));
+                    editor.viewport.update(|vp| {
+                        *vp = zoom_around(*vp, cursor_local, vp.zoom + delta);
+                    });
                 }
                 on:dragover=move |event| {
                     if !can_manage {
@@ -433,10 +707,15 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                     editor.mutate_graph(|graph| {
                         created = graph.append(FlowBlockKind::parse(&kind), &label, defaults);
                     });
-                    let pos = editor
-                        .graph
-                        .with_untracked(|graph| default_positions(graph).get(&created).copied());
-                    if let Some(pt) = pos {
+                    let drop_pt = board_ref.get().map(|board| {
+                        let local = board_local_point(&board, event.client_x(), event.client_y());
+                        let board_pt = screen_to_board(editor.viewport.get_untracked(), local);
+                        editor.snap_if_enabled(Point {
+                            x: board_pt.x - CARD_WIDTH / 2.0,
+                            y: board_pt.y - CARD_HEIGHT / 2.0,
+                        })
+                    });
+                    if let Some(pt) = drop_pt {
                         editor.set_node_position(&created, pt);
                     }
                     editor.select_node(Some(created), true);
@@ -633,9 +912,14 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                     >
                                         <article
                                             class="canvas-node"
-                                            class:is-selected=move || editor.selected.get().as_deref() == Some(selected_check.as_str())
+                                            class:is-selected=move || editor.is_selected(&selected_check)
                                             class:is-incomplete=incomplete
-                                            class:is-dragging=move || dragging_node.get().is_some_and(|d| d.node_id == dragging_check)
+                                            class:is-dragging=move || dragging_node.with(|d| {
+                                                d.as_ref().is_some_and(|s| {
+                                                    s.primary_id == dragging_check
+                                                        || s.origins.iter().any(|(id, _)| id == &dragging_check)
+                                                })
+                                            })
                                         >
                                             {has_input.then(move || {
                                                 let up_target_id = input_id.clone();
@@ -691,12 +975,23 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                         }
                                                         event.stop_propagation();
                                                         event.prevent_default();
-                                                        let origin = editor.node_point(&drag_id);
+                                                        let mut active = editor.selected_ids.get_untracked();
+                                                        if !active.contains(&drag_id) {
+                                                            active.clear();
+                                                            active.insert(drag_id.clone());
+                                                        }
+                                                        let origins: Vec<(String, Point)> = active
+                                                            .into_iter()
+                                                            .map(|id| {
+                                                                let pt = editor.node_point(&id);
+                                                                (id, pt)
+                                                            })
+                                                            .collect();
                                                         dragging_node.set(Some(DragNodeState {
-                                                            node_id: drag_id.clone(),
+                                                            primary_id: drag_id.clone(),
                                                             start_x: f64::from(event.client_x()),
                                                             start_y: f64::from(event.client_y()),
-                                                            origin,
+                                                            origins,
                                                         }));
                                                     }
                                                 >
@@ -725,6 +1020,11 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                         }
                                                         if editor.pending_wire.get_untracked().is_some() {
                                                             connect_to_node(click_main_id.clone());
+                                                        } else if event.ctrl_key()
+                                                            || event.meta_key()
+                                                            || event.shift_key()
+                                                        {
+                                                            editor.toggle_node_selection(&click_main_id);
                                                         } else {
                                                             editor.select_node(Some(click_main_id.clone()), true);
                                                         }
@@ -857,13 +1157,54 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                                         on:mousedown=move |event| event.stop_propagation()
                                                                         on:click=move |event| {
                                                                             event.stop_propagation();
-                                                                            editor.pending_wire.set(None);
-                                                                            editor.branch_target.set(Some(BranchTarget {
-                                                                                source_id: insert_from.clone(),
-                                                                                port: insert_port.clone(),
-                                                                                replace_to: existing_to.clone(),
-                                                                            }));
-                                                                            editor.palette_open.set(true);
+                                                                            let anchor = placed
+                                                                                .with_untracked(|nodes| {
+                                                                                    nodes
+                                                                                        .iter()
+                                                                                        .find(|p| p.id == insert_from)
+                                                                                        .map(|p| {
+                                                                                            let pt = p.out_port(
+                                                                                                port_idx,
+                                                                                                port_count,
+                                                                                            );
+                                                                                            board_to_screen(
+                                                                                                editor
+                                                                                                    .viewport
+                                                                                                    .get_untracked(),
+                                                                                                Point {
+                                                                                                    x: pt.x,
+                                                                                                    y: pt.y + 12.0,
+                                                                                                },
+                                                                                            )
+                                                                                        })
+                                                                                })
+                                                                                .unwrap_or_else(|| {
+                                                                                    board_ref
+                                                                                        .get()
+                                                                                        .map(|b| {
+                                                                                            board_local_point(
+                                                                                                &b,
+                                                                                                event.client_x(),
+                                                                                                event.client_y(),
+                                                                                            )
+                                                                                        })
+                                                                                        .unwrap_or(Point {
+                                                                                            x: 160.0,
+                                                                                            y: 160.0,
+                                                                                        })
+                                                                                });
+                                                                            editor.open_quick_add(QuickAddState {
+                                                                                anchor,
+                                                                                board_pos: None,
+                                                                                branch: Some(BranchTarget {
+                                                                                    source_id: insert_from
+                                                                                        .clone(),
+                                                                                    port: insert_port
+                                                                                        .clone(),
+                                                                                    replace_to: existing_to
+                                                                                        .clone(),
+                                                                                }),
+                                                                            });
                                                                         }
                                                                     >
                                                                         "+"
@@ -883,40 +1224,51 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
 
                     view! {
                         <div
-                            class="flow-graph-sizer"
+                            class="flow-graph-stage"
                             style=move || {
-                                let zoom = editor.zoom.get();
-                                let (bw, bh) = board_dims.get();
-                                format!("width:{}px;height:{}px;", bw * zoom, bh * zoom)
+                                let vp = editor.viewport.get();
+                                format!(
+                                    "transform:translate({:.2}px,{:.2}px) scale({:.4});transform-origin:0 0;",
+                                    vp.pan_x, vp.pan_y, vp.zoom
+                                )
                             }
                         >
-                            <div
-                                class="flow-graph-stage"
-                                style=move || {
-                                    let zoom = editor.zoom.get();
-                                    let (bw, bh) = board_dims.get();
-                                    format!(
-                                        "width:{bw}px;height:{bh}px;transform:scale({zoom});transform-origin:0 0;"
-                                    )
-                                }
+                            <svg
+                                class="flow-canvas__wires"
+                                width="1"
+                                height="1"
+                                aria-hidden="true"
                             >
-                                <svg
-                                    class="flow-canvas__wires"
-                                    attr:width=move || board_dims.get().0
-                                    attr:height=move || board_dims.get().1
-                                    aria-hidden="true"
-                                >
-                                    {wires_view}
-                                    {ghost_wire_view}
-                                </svg>
-                                {cards_view}
-                            </div>
+                                {wires_view}
+                                {ghost_wire_view}
+                            </svg>
+                            {cards_view}
+                            {move || marquee.get().map(|box_sel| {
+                                let rect = Bounds::from_points(box_sel.start, box_sel.current);
+                                view! {
+                                    <div
+                                        class="flow-canvas__marquee"
+                                        style=format!(
+                                            "left:{:.1}px;top:{:.1}px;width:{:.1}px;height:{:.1}px;",
+                                            rect.min_x, rect.min_y, rect.width, rect.height
+                                        )
+                                    />
+                                }
+                            })}
                         </div>
                     }
                     .into_any()
                 }}
             </div>
-            <MinimapPanel editor=editor placed=placed board_dims=board_dims board_ref=board_ref />
+            <WireActionPopover editor=editor placed=placed can_manage=can_manage />
+            <QuickAddPopover editor=editor board_ref=board_ref />
+            <CanvasControlsBar
+                editor=editor
+                placed=placed
+                board_ref=board_ref
+                can_manage=can_manage
+            />
+            <MinimapPanel editor=editor placed=placed board_ref=board_ref />
         </section>
     }
 }

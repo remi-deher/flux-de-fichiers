@@ -826,6 +826,16 @@ body[data-filter-sheet] .topbar-search {
   box-sizing: border-box;
 }
 
+.main-content.is-workbench {
+  padding: 0;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: calc(100dvh - 52px - 1rem);
+  min-height: 540px;
+}
+
 @keyframes pageFadeIn {
   from {
     opacity: 0;

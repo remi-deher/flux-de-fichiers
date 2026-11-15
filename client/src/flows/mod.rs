@@ -8,6 +8,7 @@ mod fields;
 mod geometry;
 mod inspector;
 mod palette;
+mod presentation;
 mod state;
 mod versions;
 

@@ -1,9 +1,7 @@
 //! Présentation métier de l'éditeur : domaines visuels, ports sémantiques, résumés et diagnostics.
 
 use crate::ui::IconName;
-use flux_shared::flows::{
-    FlowBlockKind, FlowGraph, FlowNode, OwnedBlockSpec, OwnedFieldKind, find_owned,
-};
+use flux_shared::flows::{FlowGraph, FlowNode, OwnedBlockSpec, OwnedFieldKind, find_owned};
 use serde_json::Value;
 
 const SUMMARY_MAX_CHARS: usize = 42;
@@ -24,22 +22,18 @@ pub enum NodeDomain {
 }
 
 impl NodeDomain {
-    /// Déduit le domaine à partir du type de bloc et de la catégorie de sa fiche.
-    pub fn from_block(kind: &FlowBlockKind, category: &str) -> Self {
-        match kind {
-            FlowBlockKind::FileInput => Self::Input,
-            FlowBlockKind::Condition => Self::Logic,
-            FlowBlockKind::Mkvpropedit | FlowBlockKind::RemuxMkv => Self::Mkv,
-            FlowBlockKind::RemuxMp4 | FlowBlockKind::VideoEncode => Self::Video,
-            FlowBlockKind::AudioEncode => Self::Audio,
-            FlowBlockKind::MediaInspect => Self::Inspect,
-            FlowBlockKind::Webhook
-            | FlowBlockKind::SonarrRescan
-            | FlowBlockKind::SonarrRename
-            | FlowBlockKind::RadarrRescan
-            | FlowBlockKind::RadarrRename => Self::Integration,
-            FlowBlockKind::FileOutput => Self::Output,
-            FlowBlockKind::Other(_) => Self::from_category(category),
+    /// Déduit le domaine depuis la fiche du bloc (`domain`) ou, à défaut, sa catégorie.
+    pub fn from_spec(spec: Option<&OwnedBlockSpec>, category: &str) -> Self {
+        match spec.and_then(|s| s.domain.as_deref()) {
+            Some("input") => Self::Input,
+            Some("logic") => Self::Logic,
+            Some("mkv") => Self::Mkv,
+            Some("video") => Self::Video,
+            Some("audio") => Self::Audio,
+            Some("inspect") => Self::Inspect,
+            Some("integration") => Self::Integration,
+            Some("output") => Self::Output,
+            _ => Self::from_category(category),
         }
     }
 
@@ -53,6 +47,8 @@ impl NodeDomain {
             Self::Logic
         } else if lower.contains("mkv") {
             Self::Mkv
+        } else if lower.contains("inspect") {
+            Self::Inspect
         } else if lower.contains("entrée") || lower.contains("entree") {
             Self::Input
         } else if lower.contains("sortie") {
@@ -145,33 +141,13 @@ pub fn output_presentation(port: &str) -> PortPresentation {
     }
 }
 
-/// Sorties connues d'un bloc : celles du graphe plus celles éventuelles du catalogue plugins.
+/// Sorties connues d'un bloc d'après le catalogue plugins et ses liaisons existantes.
 pub fn node_output_ports(
     graph: &FlowGraph,
     node: &FlowNode,
     catalog: &[OwnedBlockSpec],
 ) -> Vec<Option<String>> {
-    let mut ports = graph.output_ports(node);
-    if let Some(spec) = find_owned(catalog, &node.kind) {
-        if spec.terminal {
-            return Vec::new();
-        }
-        if !spec.ports.is_empty() {
-            ports.clear();
-            for (name, _) in &spec.ports {
-                let candidate = Some(name.clone());
-                if !ports.contains(&candidate) {
-                    ports.push(candidate);
-                }
-            }
-            for edge in graph.outgoing(&node.id) {
-                if !ports.contains(&edge.port) {
-                    ports.push(edge.port.clone());
-                }
-            }
-        }
-    }
-    ports
+    graph.output_ports(node, catalog)
 }
 
 fn is_hidden_field(name: &str, spec: Option<&OwnedBlockSpec>) -> bool {
@@ -210,21 +186,24 @@ fn scalar_summary_part(key: &str, value: &Value) -> Option<String> {
 /// Résumé compact de configuration affiché sur une carte du canevas.
 pub fn node_summary(node: &FlowNode, spec: Option<&OwnedBlockSpec>) -> Option<String> {
     let obj = node.config.as_object()?;
-    if node.kind == FlowBlockKind::Condition {
+    let is_condition = spec.is_some_and(|s| !s.ports.is_empty())
+        || (obj.contains_key("property")
+            && obj.contains_key("operator")
+            && obj.contains_key("target"));
+    if is_condition {
         let property = obj.get("property").and_then(Value::as_str).map(str::trim)?;
         let target = obj.get("target").and_then(Value::as_str).map(str::trim)?;
-        if property.is_empty() || target.is_empty() {
-            return None;
+        if !property.is_empty() && !target.is_empty() {
+            let op = match obj.get("operator").and_then(Value::as_str).unwrap_or("eq") {
+                "eq" => "=",
+                "neq" => "!=",
+                "contains" => "~",
+                "gt" => ">",
+                "lt" => "<",
+                other => other,
+            };
+            return Some(truncate_summary(format!("{property} {op} {target}")));
         }
-        let op = match obj.get("operator").and_then(Value::as_str).unwrap_or("eq") {
-            "eq" => "=",
-            "neq" => "!=",
-            "contains" => "~",
-            "gt" => ">",
-            "lt" => "<",
-            other => other,
-        };
-        return Some(truncate_summary(format!("{property} {op} {target}")));
     }
 
     let mut parts = Vec::new();
@@ -296,28 +275,30 @@ pub fn diagnose_graph(graph: &FlowGraph, catalog: &[OwnedBlockSpec]) -> Vec<Flow
         return diagnostics;
     }
 
-    if !graph
-        .nodes
-        .iter()
-        .any(|node| node.kind == FlowBlockKind::FileInput)
-    {
-        diagnostics.push(FlowDiagnostic {
-            level: DiagnosticLevel::Warning,
-            message: "Aucune entrée de fichier (FileInput) définie.".to_owned(),
-            node_id: None,
-        });
-    }
+    if !catalog.is_empty() {
+        let has_entry = graph
+            .nodes
+            .iter()
+            .any(|node| find_owned(catalog, &node.kind).is_some_and(|spec| !spec.has_input));
+        if !has_entry {
+            diagnostics.push(FlowDiagnostic {
+                level: DiagnosticLevel::Warning,
+                message: "Aucun bloc d'entrée défini dans le flux.".to_owned(),
+                node_id: None,
+            });
+        }
 
-    if !graph
-        .nodes
-        .iter()
-        .any(|node| node.kind == FlowBlockKind::FileOutput)
-    {
-        diagnostics.push(FlowDiagnostic {
-            level: DiagnosticLevel::Warning,
-            message: "Aucune sortie de fichier (FileOutput) définie.".to_owned(),
-            node_id: None,
-        });
+        let has_terminal = graph
+            .nodes
+            .iter()
+            .any(|node| find_owned(catalog, &node.kind).is_some_and(|spec| spec.terminal));
+        if !has_terminal {
+            diagnostics.push(FlowDiagnostic {
+                level: DiagnosticLevel::Warning,
+                message: "Aucun bloc de sortie final défini dans le flux.".to_owned(),
+                node_id: None,
+            });
+        }
     }
 
     for node in &graph.nodes {
@@ -353,8 +334,10 @@ pub fn diagnose_graph(graph: &FlowGraph, catalog: &[OwnedBlockSpec]) -> Vec<Flow
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::flows::{FlowNode, native_owned_catalog};
+    use flux_shared::flows::{FlowBlockKind, FlowNode};
     use serde_json::{Map, json};
+
+    use super::super::test_support::test_catalog;
 
     fn make_node(kind: FlowBlockKind, name: &str, config: Value) -> FlowNode {
         FlowNode {
@@ -368,38 +351,24 @@ mod tests {
 
     #[test]
     fn node_domain_maps_known_kinds_and_unknown_categories() {
-        assert_eq!(
-            NodeDomain::from_block(&FlowBlockKind::FileInput, "Entrée"),
-            NodeDomain::Input
+        let catalog = test_catalog();
+        let entry = find_owned(&catalog, &FlowBlockKind::parse("block.core.file-input"));
+        assert_eq!(NodeDomain::from_spec(entry, "Entrée"), NodeDomain::Input);
+        let cond = find_owned(&catalog, &FlowBlockKind::parse("block.core.condition"));
+        assert_eq!(NodeDomain::from_spec(cond, "Logique"), NodeDomain::Logic);
+        let video = find_owned(&catalog, &FlowBlockKind::parse("block.video.encode"));
+        assert_eq!(NodeDomain::from_spec(video, "Média"), NodeDomain::Video);
+        let audio = find_owned(&catalog, &FlowBlockKind::parse("block.audio.encode"));
+        assert_eq!(NodeDomain::from_spec(audio, "Média"), NodeDomain::Audio);
+        let mkv = find_owned(
+            &catalog,
+            &FlowBlockKind::parse("block.metadata.mkvpropedit"),
         );
-        assert_eq!(
-            NodeDomain::from_block(&FlowBlockKind::Condition, "Logique"),
-            NodeDomain::Logic
-        );
-        assert_eq!(
-            NodeDomain::from_block(&FlowBlockKind::VideoEncode, "Média"),
-            NodeDomain::Video
-        );
-        assert_eq!(
-            NodeDomain::from_block(&FlowBlockKind::AudioEncode, "Média"),
-            NodeDomain::Audio
-        );
-        assert_eq!(
-            NodeDomain::from_block(&FlowBlockKind::Mkvpropedit, "MKVToolNix"),
-            NodeDomain::Mkv
-        );
-        assert_eq!(
-            NodeDomain::from_block(&FlowBlockKind::parse("plugin.video"), "Vidéo"),
-            NodeDomain::Video
-        );
-        assert_eq!(
-            NodeDomain::from_block(&FlowBlockKind::parse("plugin.audio"), "Audio"),
-            NodeDomain::Audio
-        );
-        assert_eq!(
-            NodeDomain::from_block(&FlowBlockKind::FileOutput, "Sortie"),
-            NodeDomain::Output
-        );
+        assert_eq!(NodeDomain::from_spec(mkv, "MKVToolNix"), NodeDomain::Mkv);
+        assert_eq!(NodeDomain::from_spec(None, "Vidéo"), NodeDomain::Video);
+        assert_eq!(NodeDomain::from_spec(None, "Audio"), NodeDomain::Audio);
+        let output = find_owned(&catalog, &FlowBlockKind::parse("block.core.file-output"));
+        assert_eq!(NodeDomain::from_spec(output, "Sortie"), NodeDomain::Output);
     }
 
     #[test]
@@ -422,9 +391,9 @@ mod tests {
 
     #[test]
     fn node_summary_formats_condition_and_ignores_secrets() {
-        let catalog = native_owned_catalog();
+        let catalog = test_catalog();
         let cond = make_node(
-            FlowBlockKind::Condition,
+            FlowBlockKind::parse("block.core.condition"),
             "HEVC ?",
             json!({"property": "video.codec", "operator": "eq", "target": "hevc"}),
         );
@@ -434,7 +403,7 @@ mod tests {
         );
 
         let hook = make_node(
-            FlowBlockKind::Webhook,
+            FlowBlockKind::parse("block.core.webhook"),
             "Hook",
             json!({
                 "url": "https://hook.test",
@@ -451,7 +420,7 @@ mod tests {
         );
 
         let long_hook = make_node(
-            FlowBlockKind::Webhook,
+            FlowBlockKind::parse("block.core.webhook"),
             "Hook long",
             json!({
                 "url": "https://example.test/very/long/webhook/endpoint/path",
@@ -475,18 +444,28 @@ mod tests {
 
     #[test]
     fn diagnose_graph_detects_missing_input_output_fields_and_orphans() {
-        let catalog = native_owned_catalog();
+        let catalog = test_catalog();
         let empty = FlowGraph::default();
         let empty_diags = diagnose_graph(&empty, &catalog);
         assert_eq!(empty_diags.len(), 1);
         assert_eq!(empty_diags[0].level, DiagnosticLevel::Warning);
 
         let mut graph = FlowGraph::default();
-        let cond = graph.append(FlowBlockKind::Condition, "Condition vide", json!({}));
-        let orphan = graph.append(FlowBlockKind::MediaInspect, "Orphelin", json!({}));
+        let cond = graph.append(
+            FlowBlockKind::parse("block.core.condition"),
+            "Condition vide",
+            json!({}),
+            &catalog,
+        );
+        let orphan = graph.append(
+            FlowBlockKind::parse("block.media.inspect"),
+            "Orphelin",
+            json!({}),
+            &catalog,
+        );
         let diags = diagnose_graph(&graph, &catalog);
-        assert!(diags.iter().any(|d| d.message.contains("FileInput")));
-        assert!(diags.iter().any(|d| d.message.contains("FileOutput")));
+        assert!(diags.iter().any(|d| d.message.contains("bloc d'entrée")));
+        assert!(diags.iter().any(|d| d.message.contains("bloc de sortie")));
         assert!(
             diags.iter().any(|d| d.level == DiagnosticLevel::Error
                 && d.node_id.as_deref() == Some(cond.as_str()))

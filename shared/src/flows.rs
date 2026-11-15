@@ -4,17 +4,15 @@
 //! celui que le moteur lit, et un graphe relu puis renvoyé ne perd aucune clé inconnue.
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize, de::Deserializer, ser::Serializer};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::fmt;
 
-mod catalog;
 mod graph;
 mod owned;
 
-pub use catalog::{BlockSpec, FieldKind, FieldSpec, block_catalog, block_spec};
 pub use graph::{GraphError, GraphPosition, layout};
-pub use owned::{OwnedBlockSpec, OwnedFieldKind, OwnedFieldSpec, find_owned, native_owned_catalog};
+pub use owned::{OwnedBlockSpec, OwnedFieldKind, OwnedFieldSpec, find_owned};
 
 /// Flux enregistré, tel que l'API le renvoie (définition JSON en texte, secrets masqués).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -96,84 +94,38 @@ pub fn new_flow_id(name: &str, suffix: &str) -> String {
     format!("flow.{readable}-{suffix}")
 }
 
-/// Type de bloc d'un graphe de flux. Les valeurs inconnues restent traversables.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum FlowBlockKind {
-    FileInput,
-    Condition,
-    Mkvpropedit,
-    RemuxMkv,
-    RemuxMp4,
-    VideoEncode,
-    AudioEncode,
-    MediaInspect,
-    Webhook,
-    SonarrRescan,
-    SonarrRename,
-    RadarrRescan,
-    RadarrRename,
-    FileOutput,
-    Other(String),
-}
+/// Identifiant ouvert d'un bloc d'un graphe de flux.
+///
+/// Aucun bloc n'est embarqué côté moteur : la définition des blocs vient des dépôts de plugins.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct FlowBlockKind(String);
 
 impl FlowBlockKind {
     pub fn parse(value: &str) -> Self {
-        match value {
-            "file-input" => Self::FileInput,
-            "condition" => Self::Condition,
-            "mkvpropedit" => Self::Mkvpropedit,
-            // Identifiants plugins (ADR 0006) et alias historiques de l'éditeur natif.
-            "remux-mkv" | "block.video.remux-mkv" => Self::RemuxMkv,
-            "remux-mp4" | "block.video.remux-mp4" => Self::RemuxMp4,
-            "video-encode" | "block.video.encode" => Self::VideoEncode,
-            "audio-encode" | "block.audio.encode" => Self::AudioEncode,
-            "media-inspect" | "block.media.inspect" => Self::MediaInspect,
-            "webhook" => Self::Webhook,
-            "sonarr-rescan" => Self::SonarrRescan,
-            "sonarr-rename" => Self::SonarrRename,
-            "radarr-rescan" => Self::RadarrRescan,
-            "radarr-rename" => Self::RadarrRename,
-            "file-output" => Self::FileOutput,
-            other => Self::Other(other.to_owned()),
-        }
+        Self(value.to_owned())
     }
 
     pub fn as_str(&self) -> &str {
-        match self {
-            Self::FileInput => "file-input",
-            Self::Condition => "condition",
-            Self::Mkvpropedit => "mkvpropedit",
-            Self::RemuxMkv => "block.video.remux-mkv",
-            Self::RemuxMp4 => "block.video.remux-mp4",
-            Self::VideoEncode => "block.video.encode",
-            Self::AudioEncode => "block.audio.encode",
-            Self::MediaInspect => "block.media.inspect",
-            Self::Webhook => "webhook",
-            Self::SonarrRescan => "sonarr-rescan",
-            Self::SonarrRename => "sonarr-rename",
-            Self::RadarrRescan => "radarr-rescan",
-            Self::RadarrRename => "radarr-rename",
-            Self::FileOutput => "file-output",
-            Self::Other(value) => value,
-        }
+        &self.0
+    }
+}
+
+impl From<&str> for FlowBlockKind {
+    fn from(value: &str) -> Self {
+        Self::parse(value)
+    }
+}
+
+impl From<String> for FlowBlockKind {
+    fn from(value: String) -> Self {
+        Self(value)
     }
 }
 
 impl fmt::Display for FlowBlockKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
-    }
-}
-
-impl Serialize for FlowBlockKind {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for FlowBlockKind {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Self::parse(&String::deserialize(deserializer)?))
     }
 }
 
@@ -224,37 +176,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn kind_roundtrip_keeps_unknown_blocks() -> Result<(), serde_json::Error> {
-        for (stored, canonical) in [
-            ("file-input", "file-input"),
-            ("condition", "condition"),
-            ("mkvpropedit", "mkvpropedit"),
-            ("remux-mkv", "block.video.remux-mkv"),
-            ("block.video.remux-mkv", "block.video.remux-mkv"),
-            ("video-encode", "block.video.encode"),
-            ("block.video.encode", "block.video.encode"),
-            ("audio-encode", "block.audio.encode"),
-            ("block.audio.encode", "block.audio.encode"),
-            ("block.media.inspect", "block.media.inspect"),
-            ("block.video.remux-mp4", "block.video.remux-mp4"),
-            ("webhook", "webhook"),
-            ("sonarr-rescan", "sonarr-rescan"),
-            ("sonarr-rename", "sonarr-rename"),
-            ("radarr-rescan", "radarr-rescan"),
-            ("radarr-rename", "radarr-rename"),
-            ("file-output", "file-output"),
+    fn kind_roundtrip_preserves_any_identifier() -> Result<(), serde_json::Error> {
+        for stored in [
+            "file-input",
+            "block.core.file-input",
+            "block.video.encode",
+            "macro.unknown",
         ] {
             let kind = FlowBlockKind::parse(stored);
-            assert_eq!(kind.as_str(), canonical);
+            assert_eq!(kind.as_str(), stored);
             assert_eq!(
                 serde_json::from_str::<FlowBlockKind>(&serde_json::to_string(&kind)?)?,
                 kind
             );
         }
-        assert!(matches!(
-            FlowBlockKind::parse("macro.unknown"),
-            FlowBlockKind::Other(_)
-        ));
         Ok(())
     }
 

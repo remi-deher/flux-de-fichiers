@@ -13,7 +13,7 @@ use axum::{
 };
 use flux_shared::flows::OwnedBlockSpec;
 
-/// Catalogue des blocs pour la palette : natifs + blocs des dépôts synchronisés.
+/// Catalogue des blocs pour la palette : issu exclusivement des dépôts de plugins synchronisés.
 pub async fn list_blocks(
     State(s): State<AppState>,
     _auth: ViewFlowsAuth,

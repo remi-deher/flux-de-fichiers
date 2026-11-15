@@ -299,6 +299,223 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
 }
 
 #[cfg(test)]
+pub(super) mod test_support {
+    use flux_shared::flows::{OwnedBlockSpec, OwnedFieldKind, OwnedFieldSpec};
+    use serde_json::json;
+
+    pub(super) fn spec(
+        kind: &str,
+        alias: &str,
+        label: &str,
+        category: &str,
+        domain: &str,
+        has_input: bool,
+        ports: &[(&str, &str)],
+        terminal: bool,
+        fields: Vec<OwnedFieldSpec>,
+        suggested_next: &[&str],
+    ) -> OwnedBlockSpec {
+        OwnedBlockSpec {
+            kind: kind.into(),
+            aliases: (!alias.is_empty())
+                .then(|| vec![alias.into()])
+                .unwrap_or_default(),
+            label: label.into(),
+            category: category.into(),
+            domain: Some(domain.into()),
+            description: String::new(),
+            has_input,
+            ports: ports
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+            terminal,
+            fields,
+            suggested_next: suggested_next.iter().map(|s| (*s).to_owned()).collect(),
+            from_plugin: true,
+            operation_id: None,
+        }
+    }
+
+    pub(super) fn test_catalog() -> Vec<OwnedBlockSpec> {
+        vec![
+            spec(
+                "block.core.file-input",
+                "file-input",
+                "Fichier source",
+                "Entrée",
+                "input",
+                false,
+                &[],
+                false,
+                Vec::new(),
+                &["block.core.condition", "block.video.remux-mkv"],
+            ),
+            spec(
+                "block.core.condition",
+                "condition",
+                "Condition",
+                "Logique",
+                "logic",
+                true,
+                &[("true", "✓ Vrai"), ("false", "✗ Faux")],
+                false,
+                vec![OwnedFieldSpec {
+                    name: "target".into(),
+                    label: "Valeur".into(),
+                    kind: OwnedFieldKind::Text,
+                    required: true,
+                    help: String::new(),
+                    default: None,
+                }],
+                &["block.video.encode", "block.video.remux-mkv"],
+            ),
+            spec(
+                "block.media.inspect",
+                "media-inspect",
+                "Inspection média",
+                "Média",
+                "inspect",
+                true,
+                &[],
+                false,
+                Vec::new(),
+                &[],
+            ),
+            spec(
+                "block.metadata.mkvpropedit",
+                "mkvpropedit",
+                "Édition des en-têtes",
+                "MKVToolNix",
+                "mkv",
+                true,
+                &[],
+                false,
+                Vec::new(),
+                &[],
+            ),
+            spec(
+                "block.video.remux-mkv",
+                "remux-mkv",
+                "Remuxage Matroska",
+                "MKVToolNix",
+                "mkv",
+                true,
+                &[],
+                false,
+                Vec::new(),
+                &["block.core.file-output"],
+            ),
+            spec(
+                "block.video.encode",
+                "video-encode",
+                "Encodage vidéo",
+                "Média",
+                "video",
+                true,
+                &[],
+                false,
+                Vec::new(),
+                &["block.video.remux-mkv"],
+            ),
+            spec(
+                "block.audio.encode",
+                "audio-encode",
+                "Encodage audio",
+                "Média",
+                "audio",
+                true,
+                &[],
+                false,
+                Vec::new(),
+                &[],
+            ),
+            spec(
+                "block.sonarr.rescan",
+                "sonarr-rescan",
+                "Sonarr : réanalyser",
+                "Intégrations",
+                "integration",
+                true,
+                &[],
+                false,
+                Vec::new(),
+                &[],
+            ),
+            spec(
+                "block.sonarr.rename",
+                "sonarr-rename",
+                "Sonarr : renommer",
+                "Intégrations",
+                "integration",
+                true,
+                &[],
+                false,
+                Vec::new(),
+                &[],
+            ),
+            spec(
+                "block.core.webhook",
+                "webhook",
+                "Webhook",
+                "Notification",
+                "integration",
+                true,
+                &[],
+                false,
+                vec![
+                    OwnedFieldSpec {
+                        name: "url".into(),
+                        label: "URL".into(),
+                        kind: OwnedFieldKind::Text,
+                        required: true,
+                        help: String::new(),
+                        default: None,
+                    },
+                    OwnedFieldSpec {
+                        name: "method".into(),
+                        label: "Méthode".into(),
+                        kind: OwnedFieldKind::Select(vec![("POST".into(), "POST".into())]),
+                        required: false,
+                        help: String::new(),
+                        default: Some(json!("POST")),
+                    },
+                    OwnedFieldSpec {
+                        name: "custom_headers".into(),
+                        label: "En-têtes".into(),
+                        kind: OwnedFieldKind::Headers,
+                        required: false,
+                        help: String::new(),
+                        default: Some(json!({})),
+                    },
+                    OwnedFieldSpec {
+                        name: "fail_on_error".into(),
+                        label: "Échec bloquant".into(),
+                        kind: OwnedFieldKind::Bool,
+                        required: false,
+                        help: String::new(),
+                        default: Some(json!(false)),
+                    },
+                ],
+                &["block.core.file-output"],
+            ),
+            spec(
+                "block.core.file-output",
+                "file-output",
+                "Fin du flux",
+                "Sortie",
+                "output",
+                true,
+                &[],
+                true,
+                Vec::new(),
+                &[],
+            ),
+        ]
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use chrono::Utc;
@@ -306,12 +523,14 @@ mod tests {
 
     #[test]
     fn pipeline_preview_labels_limits_steps_and_handles_invalid_json() {
+        let catalog = test_support::test_catalog();
         let mut graph = FlowGraph::default();
         for idx in 1..=5 {
             graph.append(
-                FlowBlockKind::FileInput,
+                FlowBlockKind::parse("block.core.file-input"),
                 &format!("Étape {idx}"),
                 serde_json::json!({}),
+                &catalog,
             );
         }
         let json = serde_json::to_string(&graph).unwrap_or_default();
@@ -324,8 +543,14 @@ mod tests {
 
     #[test]
     fn flow_counts_aggregates_defaults_and_blocks() {
+        let catalog = test_support::test_catalog();
         let mut graph = FlowGraph::default();
-        graph.append(FlowBlockKind::FileInput, "Entrée", serde_json::json!({}));
+        graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            serde_json::json!({}),
+            &catalog,
+        );
         let def = serde_json::to_string(&graph).unwrap_or_default();
         let now = Utc::now();
         let flows = [

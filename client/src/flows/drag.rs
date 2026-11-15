@@ -31,11 +31,11 @@ pub fn DragItem(
             return None;
         }
         let payload = editor.drag.get()?;
-        Some(
+        Some(editor.graph.with(|graph| {
             editor
-                .graph
-                .with(|graph| drop_outcome(graph, &payload, id).is_ok()),
-        )
+                .catalog
+                .with(|catalog| drop_outcome(graph, &payload, id, catalog).is_ok())
+        }))
     };
     let accepting = drop_state.clone();
     let draggable_attr = if draggable { "true" } else { "false" };

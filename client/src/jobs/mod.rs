@@ -109,7 +109,7 @@ pub fn JobsPage(me: Me) -> impl IntoView {
             .into_iter()
             .map(|library| (library.id, library.name))
             .collect();
-        list.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+        list.sort_by_key(|a| a.1.to_lowercase());
         list
     });
     // Pages plus anciennes, ajoutées à la demande (curseur : dernière tâche chargée).

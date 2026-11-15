@@ -8,7 +8,6 @@ use crate::ui::{Icon, IconName};
 use flux_shared::flows::{FlowGraph, OwnedBlockSpec, find_owned};
 use leptos::prelude::*;
 
-const HEADER_ICON_SIZE: u32 = 16;
 const ACTION_ICON_SIZE: u32 = 14;
 
 /// Libellé d'une sortie : celui de la fiche, sinon la présentation sémantique du port.
@@ -98,7 +97,7 @@ fn Outputs(editor: Editor, node_id: String, can_manage: bool) -> impl IntoView {
                                                 port: branch_port.clone(),
                                                 replace_to: existing_to.clone(),
                                             }));
-                                            editor.palette_open.set(true);
+                                            editor.focus_palette_search();
                                         }
                                     >
                                         <Icon name=IconName::Plus size=12 />
@@ -139,14 +138,8 @@ fn Outputs(editor: Editor, node_id: String, can_manage: bool) -> impl IntoView {
 
 #[component]
 pub fn NodeInspector(editor: Editor, can_manage: bool) -> impl IntoView {
-    let is_open = move || editor.inspector_open.get() && editor.selected.get().is_some();
-
     view! {
-        <aside
-            class="flow-inspector-drawer"
-            class:is-closed=move || !is_open()
-            aria-label="Inspecteur du bloc"
-        >
+        <div class="flow-dock-pane flow-inspector-pane" aria-label="Inspecteur du bloc">
             {move || {
                 let node_id = editor.selected.get()?;
                 if !editor.inspector_open.get() {
@@ -186,15 +179,6 @@ pub fn NodeInspector(editor: Editor, can_manage: bool) -> impl IntoView {
                                 </span>
                                 <h2 class="flow-inspector__title">{node.name.clone()}</h2>
                             </div>
-                            <button
-                                type="button"
-                                class="header-icon-btn"
-                                aria-label="Fermer l'inspecteur"
-                                title="Fermer l'inspecteur"
-                                on:click=move |_| editor.inspector_open.set(false)
-                            >
-                                <Icon name=IconName::Close size=HEADER_ICON_SIZE />
-                            </button>
                         </header>
 
                         <div class="flow-inspector__body">
@@ -261,7 +245,7 @@ pub fn NodeInspector(editor: Editor, can_manage: bool) -> impl IntoView {
                     </div>
                 })
             }}
-        </aside>
+        </div>
     }
 }
 

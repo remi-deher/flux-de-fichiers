@@ -11,14 +11,58 @@ pub const COL_STRIDE: f64 = 296.0;
 pub const ROW_STRIDE: f64 = 148.0;
 pub const ORIGIN_X: f64 = 72.0;
 pub const ORIGIN_Y: f64 = 64.0;
+#[cfg(test)]
 pub const BOARD_PAD: f64 = 120.0;
 pub const ZOOM_MIN: f64 = 0.25;
 pub const ZOOM_MAX: f64 = 1.75;
 pub const ZOOM_STEP: f64 = 0.15;
+pub const GRID_STEP: f64 = 24.0;
 
 const LINK_CURVE_MIN: f64 = 42.0;
 const MIN_BOARD_WIDTH: f64 = 520.0;
 const MIN_BOARD_HEIGHT: f64 = 380.0;
+const FIT_PADDING: f64 = 48.0;
+const FIT_MAX_ZOOM: f64 = 1.0;
+const MINIMAP_PAD: f64 = 80.0;
+
+/// Caméra 2D du canevas infini : décalage en pixels écran et facteur de zoom.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Viewport {
+    pub pan_x: f64,
+    pub pan_y: f64,
+    pub zoom: f64,
+}
+
+impl Default for Viewport {
+    fn default() -> Self {
+        Self {
+            pan_x: 0.0,
+            pan_y: 0.0,
+            zoom: 1.0,
+        }
+    }
+}
+
+/// Rectangle englobant en coordonnées graphe.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bounds {
+    pub min_x: f64,
+    pub min_y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl Bounds {
+    /// Construit un rectangle normalisé entre deux sommets quelconques (4 quadrants).
+    pub fn from_points(a: Point, b: Point) -> Self {
+        Self {
+            min_x: a.x.min(b.x),
+            min_y: a.y.min(b.y),
+            width: (a.x - b.x).abs(),
+            height: (a.y - b.y).abs(),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Point {
@@ -36,6 +80,16 @@ pub struct PlacedNode {
 }
 
 impl PlacedNode {
+    /// Boîte englobante de la carte sur le plan.
+    pub fn bounds(&self) -> Bounds {
+        Bounds {
+            min_x: self.x,
+            min_y: self.y,
+            width: self.width,
+            height: self.height,
+        }
+    }
+
     /// Point d'entrée centré sur le bord supérieur de la carte.
     pub fn in_port(&self) -> Point {
         Point {
@@ -97,7 +151,7 @@ fn extra_position(extra: &serde_json::Map<String, Value>) -> Option<Point> {
     let pos = extra.get("position")?.as_object()?;
     let x = pos.get("x")?.as_f64()?;
     let y = pos.get("y")?.as_f64()?;
-    (x.is_finite() && y.is_finite() && x >= 0.0 && y >= 0.0).then_some(Point { x, y })
+    (x.is_finite() && y.is_finite()).then_some(Point { x, y })
 }
 
 /// Place chaque bloc en priorisant les positions personnalisées, puis `extra.position`, puis le layout.
@@ -134,6 +188,7 @@ pub fn place(graph: &FlowGraph) -> Vec<PlacedNode> {
 }
 
 /// Dimensions englobantes `(largeur, hauteur)` du plan de travail.
+#[cfg(test)]
 pub fn board_size(placed: &[PlacedNode]) -> (f64, f64) {
     let max_x = placed
         .iter()
@@ -176,6 +231,138 @@ pub fn clamp_zoom(zoom: f64) -> f64 {
         return 1.0;
     }
     zoom.clamp(ZOOM_MIN, ZOOM_MAX)
+}
+
+/// Convertit un point local dans le conteneur canevas vers les coordonnées du graphe.
+pub fn screen_to_board(vp: Viewport, local: Point) -> Point {
+    let zoom = vp.zoom.max(f64::EPSILON);
+    Point {
+        x: (local.x - vp.pan_x) / zoom,
+        y: (local.y - vp.pan_y) / zoom,
+    }
+}
+
+/// Convertit un point du graphe vers les coordonnées locales dans le conteneur canevas.
+pub fn board_to_screen(vp: Viewport, board: Point) -> Point {
+    Point {
+        x: board.x * vp.zoom + vp.pan_x,
+        y: board.y * vp.zoom + vp.pan_y,
+    }
+}
+
+/// Applique `next_zoom` en maintenant immobile le point du graphe situé sous `cursor_local`.
+pub fn zoom_around(vp: Viewport, cursor_local: Point, next_zoom: f64) -> Viewport {
+    let zoom = clamp_zoom(next_zoom);
+    let anchor = screen_to_board(vp, cursor_local);
+    Viewport {
+        pan_x: cursor_local.x - anchor.x * zoom,
+        pan_y: cursor_local.y - anchor.y * zoom,
+        zoom,
+    }
+}
+
+/// Centre la caméra courante sur `board_target` dans un canevas de taille `(viewport_w, viewport_h)`.
+pub fn center_viewport_on(
+    vp: Viewport,
+    board_target: Point,
+    viewport_w: f64,
+    viewport_h: f64,
+) -> Viewport {
+    Viewport {
+        pan_x: viewport_w / 2.0 - board_target.x * vp.zoom,
+        pan_y: viewport_h / 2.0 - board_target.y * vp.zoom,
+        zoom: vp.zoom,
+    }
+}
+
+/// Calcule le `Viewport` (zoom <= 1.0 et pan) centrant tous les blocs dans la vue.
+pub fn fit_viewport(placed: &[PlacedNode], viewport_w: f64, viewport_h: f64) -> Option<Viewport> {
+    if placed.is_empty() || viewport_w <= 0.0 || viewport_h <= 0.0 {
+        return None;
+    }
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for node in placed {
+        min_x = min_x.min(node.x);
+        min_y = min_y.min(node.y);
+        max_x = max_x.max(node.x + node.width);
+        max_y = max_y.max(node.y + node.height);
+    }
+    let content_w = (max_x - min_x).max(1.0);
+    let content_h = (max_y - min_y).max(1.0);
+    let avail_w = (viewport_w - 2.0 * FIT_PADDING).max(1.0);
+    let avail_h = (viewport_h - 2.0 * FIT_PADDING).max(1.0);
+    let zoom = clamp_zoom(
+        (avail_w / content_w)
+            .min(avail_h / content_h)
+            .min(FIT_MAX_ZOOM),
+    );
+    let center_x = (min_x + max_x) / 2.0;
+    let center_y = (min_y + max_y) / 2.0;
+    Some(Viewport {
+        pan_x: viewport_w / 2.0 - center_x * zoom,
+        pan_y: viewport_h / 2.0 - center_y * zoom,
+        zoom,
+    })
+}
+
+/// Rectangle actuellement visible à l'écran exprimé en coordonnées du graphe.
+pub fn visible_board_rect(vp: Viewport, viewport_w: f64, viewport_h: f64) -> Bounds {
+    let top_left = screen_to_board(vp, Point { x: 0.0, y: 0.0 });
+    let zoom = vp.zoom.max(f64::EPSILON);
+    Bounds {
+        min_x: top_left.x,
+        min_y: top_left.y,
+        width: (viewport_w / zoom).max(1.0),
+        height: (viewport_h / zoom).max(1.0),
+    }
+}
+
+/// Boîte englobante dynamique de la minimap (tous les blocs + la zone visible courante).
+pub fn minimap_bounds(
+    placed: &[PlacedNode],
+    vp: Viewport,
+    viewport_w: f64,
+    viewport_h: f64,
+) -> Bounds {
+    let vis = visible_board_rect(vp, viewport_w.max(1.0), viewport_h.max(1.0));
+    let mut min_x = vis.min_x;
+    let mut min_y = vis.min_y;
+    let mut max_x = vis.min_x + vis.width;
+    let mut max_y = vis.min_y + vis.height;
+    for node in placed {
+        min_x = min_x.min(node.x - MINIMAP_PAD);
+        min_y = min_y.min(node.y - MINIMAP_PAD);
+        max_x = max_x.max(node.x + node.width + MINIMAP_PAD);
+        max_y = max_y.max(node.y + node.height + MINIMAP_PAD);
+    }
+    Bounds {
+        min_x,
+        min_y,
+        width: (max_x - min_x).max(MIN_BOARD_WIDTH),
+        height: (max_y - min_y).max(MIN_BOARD_HEIGHT),
+    }
+}
+
+/// Indique si deux rectangles englobants s'intersectent.
+pub fn rects_intersect(a: Bounds, b: Bounds) -> bool {
+    a.min_x <= b.min_x + b.width
+        && a.min_x + a.width >= b.min_x
+        && a.min_y <= b.min_y + b.height
+        && a.min_y + a.height >= b.min_y
+}
+
+/// Aimante une coordonnée graphe sur le pas de grille le plus proche.
+pub fn snap_point(pt: Point, step: f64) -> Point {
+    if !step.is_finite() || step <= 0.0 || !pt.x.is_finite() || !pt.y.is_finite() {
+        return pt;
+    }
+    Point {
+        x: (pt.x / step).round() * step,
+        y: (pt.y / step).round() * step,
+    }
 }
 
 #[cfg(test)]
@@ -240,5 +427,123 @@ mod tests {
         assert_eq!(clamp_zoom(0.05), ZOOM_MIN);
         assert_eq!(clamp_zoom(3.0), ZOOM_MAX);
         assert_eq!(clamp_zoom(f64::NAN), 1.0);
+    }
+
+    #[test]
+    fn fit_viewport_centers_and_scales_graph() {
+        assert_eq!(fit_viewport(&[], 800.0, 600.0), None);
+        let small = vec![PlacedNode {
+            id: "n1".into(),
+            x: 100.0,
+            y: 100.0,
+            width: CARD_WIDTH,
+            height: CARD_HEIGHT,
+        }];
+        let Some(vp_small) = fit_viewport(&small, 1000.0, 800.0) else {
+            panic!("fit_viewport aurait dû calculer un cadrage");
+        };
+        assert_eq!(vp_small.zoom, 1.0);
+        let center_screen = board_to_screen(
+            vp_small,
+            Point {
+                x: 100.0 + CARD_WIDTH / 2.0,
+                y: 100.0 + CARD_HEIGHT / 2.0,
+            },
+        );
+        assert!((center_screen.x - 500.0).abs() < 0.01);
+        assert!((center_screen.y - 400.0).abs() < 0.01);
+
+        let wide = vec![
+            PlacedNode {
+                id: "n1".into(),
+                x: -400.0,
+                y: -250.0,
+                width: CARD_WIDTH,
+                height: CARD_HEIGHT,
+            },
+            PlacedNode {
+                id: "n2".into(),
+                x: 2000.0,
+                y: 1200.0,
+                width: CARD_WIDTH,
+                height: CARD_HEIGHT,
+            },
+        ];
+        let Some(vp_wide) = fit_viewport(&wide, 800.0, 600.0) else {
+            panic!("fit_viewport aurait dû dézoomer un grand graphe");
+        };
+        assert!(vp_wide.zoom < 1.0 && vp_wide.zoom >= ZOOM_MIN);
+    }
+
+    #[test]
+    fn viewport_conversions_and_zoom_around_preserve_cursor_anchor() {
+        let vp = Viewport {
+            pan_x: 120.0,
+            pan_y: -45.0,
+            zoom: 1.25,
+        };
+        let cursor = Point { x: 420.0, y: 310.0 };
+        let board_before = screen_to_board(vp, cursor);
+        let back = board_to_screen(vp, board_before);
+        assert!((back.x - cursor.x).abs() < 1e-6);
+        assert!((back.y - cursor.y).abs() < 1e-6);
+
+        let zoomed = zoom_around(vp, cursor, 0.75);
+        let board_after = screen_to_board(zoomed, cursor);
+        assert!((board_after.x - board_before.x).abs() < 1e-6);
+        assert!((board_after.y - board_before.y).abs() < 1e-6);
+
+        let neg = [PlacedNode {
+            id: "n".into(),
+            x: -320.0,
+            y: -180.0,
+            width: CARD_WIDTH,
+            height: CARD_HEIGHT,
+        }];
+        let bounds = minimap_bounds(&neg, Viewport::default(), 800.0, 600.0);
+        assert!(bounds.min_x <= -320.0 - MINIMAP_PAD);
+        assert!(bounds.min_y <= -180.0 - MINIMAP_PAD);
+    }
+
+    #[test]
+    fn bounds_from_points_intersection_and_snap_work_across_quadrants() {
+        let marquee = Bounds::from_points(
+            Point { x: 120.0, y: 80.0 },
+            Point {
+                x: -150.0,
+                y: -120.0,
+            },
+        );
+        assert_eq!(
+            marquee,
+            Bounds {
+                min_x: -150.0,
+                min_y: -120.0,
+                width: 270.0,
+                height: 200.0,
+            }
+        );
+
+        let inside = PlacedNode {
+            id: "in".into(),
+            x: -200.0,
+            y: -150.0,
+            width: CARD_WIDTH,
+            height: CARD_HEIGHT,
+        };
+        let outside = PlacedNode {
+            id: "out".into(),
+            x: 300.0,
+            y: 200.0,
+            width: CARD_WIDTH,
+            height: CARD_HEIGHT,
+        };
+        assert!(rects_intersect(marquee, inside.bounds()));
+        assert!(!rects_intersect(marquee, outside.bounds()));
+
+        assert_eq!(
+            snap_point(Point { x: 35.0, y: -38.0 }, GRID_STEP),
+            Point { x: 24.0, y: -48.0 }
+        );
     }
 }

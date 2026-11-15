@@ -1,7 +1,111 @@
 //! Styles du plan interactif nodal, du dock palette, des cartes, des liaisons et de la minimap.
 
 pub const GRAPH_CSS: &str = r#"
-/* --- Dock Palette latéral --- */
+/* --- Tiroir droit unifié et flottant (Composants / Bloc / Réglages) --- */
+.flow-right-dock {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  bottom: 10px;
+  width: 320px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-glass);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  transition: transform 0.2s var(--ease-out), opacity 0.2s var(--ease-out);
+  z-index: 16;
+}
+
+.flow-right-dock.is-closed {
+  transform: translateX(calc(100% + 18px));
+  opacity: 0;
+  pointer-events: none;
+}
+
+.flow-right-dock__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  flex-shrink: 0;
+}
+
+.flow-right-dock__tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.flow-right-dock__tab {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.flow-right-dock__tab:hover:not(:disabled) {
+  color: var(--text-main);
+  background: var(--bg-subtle);
+}
+
+.flow-right-dock__tab[aria-selected="true"] {
+  background: var(--primary-bg);
+  color: var(--primary);
+  border-color: var(--border-highlight);
+}
+
+.flow-right-dock__tab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.flow-right-dock__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.flow-dock-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.flow-palette__subbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem 0;
+}
+
+/* --- Dock Palette latéral (conservé pour compatibilité) --- */
 .flow-palette-dock {
   width: 300px;
   flex-shrink: 0;
@@ -273,7 +377,7 @@ pub const GRAPH_CSS: &str = r#"
 
 .flow-graph-board {
   flex: 1;
-  overflow: auto;
+  overflow: hidden;
   background-color: var(--bg-app);
   background-image: radial-gradient(circle, var(--border-color) 1px, transparent 1px);
   background-size: 24px 24px;
@@ -287,17 +391,21 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .flow-canvas__empty {
+  position: relative;
+  z-index: 2;
   margin: 3rem auto;
   max-width: 440px;
   text-align: center;
 }
 
-.flow-graph-sizer {
-  position: relative;
-}
-
 .flow-graph-stage {
-  position: relative;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  transform-origin: 0 0;
 }
 
 .flow-canvas__wires {
@@ -659,20 +767,94 @@ pub const GRAPH_CSS: &str = r#"
   fill: var(--warning);
 }
 
-/* --- Panneau Minimap & Zoom flottant --- */
-.flow-minimap-panel {
+/* --- Barre verticale flottante bas-gauche (Zoom, Fit, Layout, Undo/Redo) --- */
+.flow-canvas-controls {
   position: absolute;
-  right: 16px;
-  bottom: 16px;
-  width: 210px;
-  padding: 0.5rem;
+  left: 14px;
+  bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.3rem;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   background: var(--bg-glass);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   box-shadow: var(--shadow-md);
+  z-index: 11;
+}
+
+.flow-control-btn {
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-main);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 700;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.flow-control-btn:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--border-color);
+}
+
+.flow-control-btn.is-active {
+  background: var(--primary-bg);
+  border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+  color: var(--primary);
+}
+
+.flow-control-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.flow-control-btn--pct {
+  height: 24px;
+  font-size: 0.66rem;
+  color: var(--text-dim);
+}
+
+.flow-controls-sep {
+  width: 20px;
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 0.1rem 0;
+}
+
+/* --- Panneau Minimap flottant allégé --- */
+.flow-minimap-panel {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: 168px;
+  padding: 0.32rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-md);
+  opacity: 0.84;
+  transition: right 0.2s var(--ease-out), opacity 0.15s ease;
   z-index: 10;
+}
+
+.flow-minimap-panel:hover {
+  opacity: 1;
+}
+
+.flow-workspace-body.is-panel-open .flow-minimap-panel {
+  right: 342px;
 }
 
 .flow-minimap__tools {
@@ -717,6 +899,154 @@ pub const GRAPH_CSS: &str = r#"
 .mini-node.is-selected {
   fill: var(--primary);
   opacity: 1;
+}
+
+.mini-viewport {
+  fill: color-mix(in srgb, var(--primary) 14%, transparent);
+  stroke: var(--primary);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.flow-quick-add {
+  position: absolute;
+  z-index: 19;
+  width: 280px;
+  max-height: 340px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-glass);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.flow-quick-add__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.flow-quick-add__search-icon {
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.flow-quick-add__input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text-main);
+  font-size: 13px;
+  outline: none;
+}
+
+.flow-quick-add__input::placeholder {
+  color: var(--text-muted);
+}
+
+.flow-quick-add__list {
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.flow-quick-add__group-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 8px 3px;
+}
+
+.flow-quick-add__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-main);
+  cursor: pointer;
+  text-align: left;
+}
+
+.flow-quick-add__item:hover,
+.flow-quick-add__item.is-active {
+  background: var(--primary-bg);
+  border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+}
+
+.flow-quick-add__icon {
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.flow-quick-add__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.flow-quick-add__label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.flow-quick-add__cat {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.flow-quick-add__empty {
+  padding: 14px 10px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.flow-canvas__marquee {
+  position: absolute;
+  pointer-events: none;
+  z-index: 6;
+  border: 1.5px solid var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+.flow-wire__popover {
+  position: absolute;
+  z-index: 16;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-glass);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-md);
 }
 
 /* --- Tiroir Inspecteur latéral --- */
@@ -845,6 +1175,16 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 @media (max-width: 960px) {
+  .flow-right-dock {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(340px, 100%);
+    border-radius: 0;
+  }
+  .flow-workspace-body.is-panel-open .flow-minimap-panel {
+    right: 14px;
+  }
   .flow-palette-dock {
     position: absolute;
     left: 0;
@@ -865,8 +1205,12 @@ pub const GRAPH_CSS: &str = r#"
 
 @media (max-width: 680px) {
   .flow-minimap-panel {
-    width: 168px;
+    width: 140px;
     right: 10px;
+    bottom: 10px;
+  }
+  .flow-canvas-controls {
+    left: 10px;
     bottom: 10px;
   }
 }

@@ -826,13 +826,17 @@ body[data-filter-sheet] .topbar-search {
   box-sizing: border-box;
 }
 
+.application-shell.is-workbench .app-topbar {
+  display: none;
+}
+
 .main-content.is-workbench {
   padding: 0;
   max-width: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  height: calc(100dvh - 52px - 1rem);
+  height: calc(100dvh - 1rem);
   min-height: 540px;
 }
 
@@ -1310,6 +1314,11 @@ body[data-filter-sheet] .topbar-search {
     padding: 1rem;
     max-width: 100vw;
     box-sizing: border-box;
+  }
+
+  .main-content.is-workbench {
+    padding: 0;
+    height: 100dvh;
   }
 }
 "#;

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.19.0...v0.20.0) (2026-11-15)
+
+
+### Features
+
+* **ui:** moderniser l'interface 100 % Rust ([9a34d7a](https://github.com/remi-deher/flux-de-fichiers/commit/9a34d7a6225c04ec9bdd87b3551ec6481c4ca0ec))
+* **ui:** moderniser le thème, la palette de commandes et les composants réactifs ([7cf5f98](https://github.com/remi-deher/flux-de-fichiers/commit/7cf5f988a673db0e58e4e350e71ac7fb2a9b9156))
+
 ## [0.19.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.18.0...v0.19.0) (2026-11-14)
 
 

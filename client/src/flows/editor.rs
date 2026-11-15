@@ -11,10 +11,7 @@ use crate::route::{Link, Route, encode_segment, use_router};
 use crate::ui::{Icon, IconName, Toasts};
 use chrono::{DateTime, Utc};
 use flux_shared::Permission;
-use flux_shared::flows::{
-    FlowBlockKind, FlowGraph, FlowRecord, OwnedBlockSpec, UpdateFlowRequest, block_spec,
-    new_flow_id,
-};
+use flux_shared::flows::{FlowGraph, FlowRecord, OwnedBlockSpec, UpdateFlowRequest, new_flow_id};
 use flux_shared::session::Me;
 use leptos::ev;
 use leptos::prelude::*;
@@ -26,12 +23,9 @@ const DEFAULT_FILE_MASK: &str = "*.mkv";
 const CMD_ICON_SIZE: u32 = 15;
 const CHEVRON_ICON_SIZE: u32 = 18;
 
-/// Flux encore jamais enregistré : une entrée, pas d'identifiant.
+/// Flux encore jamais enregistré : graphe initialement vide en attendant le catalogue des plugins.
 fn blank_flow() -> (FlowRecord, FlowGraph) {
-    let mut graph = FlowGraph::default();
-    let input = FlowBlockKind::FileInput;
-    let label = block_spec(&input).map_or("Fichier source", |spec| spec.label);
-    graph.append(input, label, serde_json::json!({}));
+    let graph = FlowGraph::default();
     let record = FlowRecord {
         id: String::new(),
         name: "Nouveau flux".into(),
@@ -566,10 +560,27 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
 
     let feedback = RwSignal::new(None::<String>);
     let blocks = LocalResource::new(|| api::get::<Vec<OwnedBlockSpec>>(BLOCKS_PATH));
-    Effect::new(move |_| {
-        if let Some(Ok(catalog)) = blocks.get() {
+    Effect::new(move |_| match blocks.get() {
+        Some(Ok(catalog)) => {
+            let should_seed = meta.with_untracked(|m| m.id.is_empty())
+                && editor.graph.with_untracked(|g| g.nodes.is_empty());
+            if should_seed && let Some(entry) = catalog.iter().find(|s| !s.has_input) {
+                let mut seeded = FlowGraph::default();
+                seeded.append(
+                    entry.kind_enum(),
+                    &entry.label,
+                    entry.default_config(),
+                    &catalog,
+                );
+                editor.seed_initial_graph(seeded);
+            }
             editor.catalog.set(catalog);
+            editor.catalog_loaded.set(true);
         }
+        Some(Err(_)) => {
+            editor.catalog_loaded.set(true);
+        }
+        None => {}
     });
 
     let diagnostics = Memo::new(move |_| {
@@ -783,22 +794,28 @@ pub fn FlowEditor(me: Me, flow_id: Option<String>) -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::test_catalog;
     use super::*;
+    use flux_shared::flows::FlowBlockKind;
     use serde_json::json;
 
     #[test]
-    fn a_blank_flow_starts_with_its_input_and_no_id() {
+    fn a_blank_flow_starts_empty_and_has_no_id() {
         let (record, graph) = blank_flow();
         assert!(record.id.is_empty());
-        assert_eq!(graph.nodes.len(), 1);
-        assert_eq!(graph.nodes[0].kind, FlowBlockKind::FileInput);
+        assert!(graph.nodes.is_empty());
     }
 
     #[test]
     fn saving_is_blocked_by_an_empty_required_field() {
-        let catalog = flux_shared::flows::native_owned_catalog();
+        let catalog = test_catalog();
         let mut graph = FlowGraph::default();
-        graph.append(FlowBlockKind::Webhook, "Hook", json!({}));
+        graph.append(
+            FlowBlockKind::parse("block.core.webhook"),
+            "Hook",
+            json!({}),
+            &catalog,
+        );
         assert!(
             save_blocker(&graph, &catalog).is_some_and(|message| message.contains("Hook (URL)"))
         );

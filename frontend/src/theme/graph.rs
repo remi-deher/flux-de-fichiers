@@ -291,8 +291,18 @@ pub const GRAPH_CSS: &str = r#"
   background: var(--bg-elevated);
   color: var(--text-main);
   text-align: left;
-  cursor: pointer;
+  cursor: grab;
+  user-select: none;
   transition: transform 0.14s var(--ease-out), border-color 0.14s var(--ease-out), background-color 0.14s var(--ease-out);
+}
+
+.flow-palette__card:active {
+  cursor: grabbing;
+}
+
+.flow-palette__card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .flow-palette__card:hover {
@@ -404,6 +414,7 @@ pub const GRAPH_CSS: &str = r#"
   top: 0;
   width: 0;
   height: 0;
+  z-index: 2;
   overflow: visible;
   transform-origin: 0 0;
 }
@@ -411,6 +422,9 @@ pub const GRAPH_CSS: &str = r#"
 .flow-canvas__wires {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
   overflow: visible;
   pointer-events: none;
 }
@@ -419,6 +433,42 @@ pub const GRAPH_CSS: &str = r#"
 .canvas-node-slot {
   position: absolute;
   z-index: 2;
+}
+
+.canvas-node-slot:has(.canvas-node.is-dragging) {
+  z-index: 6;
+}
+
+.canvas-drop-ghost {
+  position: absolute;
+  z-index: 3;
+  box-sizing: border-box;
+  pointer-events: none;
+  border: 2px dashed var(--primary);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary) 10%, var(--bg-elevated));
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.2rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.canvas-drop-ghost__badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--primary);
+  letter-spacing: 0.02em;
+}
+
+.canvas-drop-ghost__title {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .canvas-node-slot.is-drop-ok .canvas-node {
@@ -446,6 +496,7 @@ pub const GRAPH_CSS: &str = r#"
   box-shadow: var(--shadow-sm);
   padding: 0.6rem 0.7rem 0.75rem;
   color: var(--text-main);
+  cursor: grab;
   transition: box-shadow 0.16s var(--ease-out), border-color 0.16s var(--ease-out);
 }
 
@@ -464,8 +515,10 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .canvas-node.is-dragging {
-  opacity: 0.9;
+  opacity: 0.92;
+  border-color: var(--primary);
   box-shadow: var(--shadow-lg);
+  cursor: grabbing;
 }
 
 .canvas-node__heading {
@@ -484,13 +537,8 @@ pub const GRAPH_CSS: &str = r#"
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--node-accent, var(--primary)) 14%, transparent);
   color: var(--node-accent, var(--primary));
-  cursor: grab;
   padding: 0;
   margin-top: 0.1rem;
-}
-
-.canvas-node__icon:active {
-  cursor: grabbing;
 }
 
 .canvas-node__main {
@@ -501,7 +549,7 @@ pub const GRAPH_CSS: &str = r#"
   padding: 0;
   text-align: left;
   color: inherit;
-  cursor: pointer;
+  cursor: inherit;
   display: flex;
   flex-direction: column;
   gap: 0.12rem;

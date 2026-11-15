@@ -1,6 +1,6 @@
 //! Géométrie du graphe affiché : placement libre 2D, centrage topologique, ports et courbes SVG.
 
-use flux_shared::flows::{FlowGraph, layout};
+use flux_shared::flows::{FlowGraph, FlowNode, layout};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -154,6 +154,21 @@ fn extra_position(extra: &serde_json::Map<String, Value>) -> Option<Point> {
     (x.is_finite() && y.is_finite()).then_some(Point { x, y })
 }
 
+/// Résout l'origine 2D d'un bloc : position personnalisée, puis `extra.position`, puis le layout automatique.
+pub fn resolve_node_origin(
+    node: Option<&FlowNode>,
+    custom: Option<Point>,
+    default: Option<Point>,
+) -> Point {
+    custom
+        .or_else(|| node.and_then(|n| extra_position(&n.extra)))
+        .or(default)
+        .unwrap_or(Point {
+            x: ORIGIN_X,
+            y: ORIGIN_Y,
+        })
+}
+
 /// Place chaque bloc en priorisant les positions personnalisées, puis `extra.position`, puis le layout.
 pub fn place_with_positions(graph: &FlowGraph, custom: &HashMap<String, Point>) -> Vec<PlacedNode> {
     let defaults = default_positions(graph);
@@ -161,15 +176,11 @@ pub fn place_with_positions(graph: &FlowGraph, custom: &HashMap<String, Point>) 
         .nodes
         .iter()
         .map(|node| {
-            let origin = custom
-                .get(&node.id)
-                .copied()
-                .or_else(|| extra_position(&node.extra))
-                .or_else(|| defaults.get(&node.id).copied())
-                .unwrap_or(Point {
-                    x: ORIGIN_X,
-                    y: ORIGIN_Y,
-                });
+            let origin = resolve_node_origin(
+                Some(node),
+                custom.get(&node.id).copied(),
+                defaults.get(&node.id).copied(),
+            );
             PlacedNode {
                 id: node.id.clone(),
                 x: origin.x,
@@ -275,6 +286,22 @@ pub fn center_viewport_on(
     }
 }
 
+/// Formate la transformation CSS appliquée à la scène HTML du graphe.
+pub fn viewport_css_transform(vp: Viewport) -> String {
+    format!(
+        "transform:translate({:.2}px,{:.2}px) scale({:.4});transform-origin:0 0;",
+        vp.pan_x, vp.pan_y, vp.zoom
+    )
+}
+
+/// Formate l'attribut `transform` SVG appliqué au calque de liaisons pour rester aligné avec la scène.
+pub fn viewport_svg_transform(vp: Viewport) -> String {
+    format!(
+        "translate({:.2} {:.2}) scale({:.4})",
+        vp.pan_x, vp.pan_y, vp.zoom
+    )
+}
+
 /// Calcule le `Viewport` (zoom <= 1.0 et pan) centrant tous les blocs dans la vue.
 pub fn fit_viewport(placed: &[PlacedNode], viewport_w: f64, viewport_h: f64) -> Option<Viewport> {
     if placed.is_empty() || viewport_w <= 0.0 || viewport_h <= 0.0 {
@@ -363,6 +390,30 @@ pub fn snap_point(pt: Point, step: f64) -> Point {
         x: (pt.x / step).round() * step,
         y: (pt.y / step).round() * step,
     }
+}
+
+/// Calcule le coin haut-gauche d'une carte centrée sur `board_pt`, aimanté à la grille si `snap` vaut `true`.
+pub fn centered_card_origin(board_pt: Point, snap: bool) -> Point {
+    let origin = Point {
+        x: board_pt.x - CARD_WIDTH / 2.0,
+        y: board_pt.y - CARD_HEIGHT / 2.0,
+    };
+    if snap {
+        snap_point(origin, GRID_STEP)
+    } else {
+        origin
+    }
+}
+
+/// Indique si le pointeur a franchi le seuil de glissement depuis `(start_x, start_y)`.
+pub fn drag_moved_beyond_threshold(
+    start_x: f64,
+    start_y: f64,
+    cur_x: f64,
+    cur_y: f64,
+    threshold: f64,
+) -> bool {
+    (cur_x - start_x).hypot(cur_y - start_y) >= threshold
 }
 
 #[cfg(test)]
@@ -572,6 +623,79 @@ mod tests {
         assert_eq!(
             snap_point(Point { x: 35.0, y: -38.0 }, GRID_STEP),
             Point { x: 24.0, y: -48.0 }
+        );
+    }
+
+    #[test]
+    fn resolve_node_origin_prioritizes_custom_then_extra_then_default() {
+        let catalog = test_catalog();
+        let mut graph = FlowGraph::default();
+        let id = graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            &catalog,
+        );
+        if let Some(node) = graph.node_mut(&id) {
+            node.extra
+                .insert("position".into(), json!({ "x": 312.0, "y": 168.0 }));
+        }
+        let default = Point { x: 72.0, y: 64.0 };
+        let node = graph.node(&id);
+
+        assert_eq!(
+            resolve_node_origin(node, None, Some(default)),
+            Point { x: 312.0, y: 168.0 }
+        );
+        assert_eq!(
+            resolve_node_origin(node, Some(Point { x: 480.0, y: 240.0 }), Some(default)),
+            Point { x: 480.0, y: 240.0 }
+        );
+        assert_eq!(resolve_node_origin(None, None, Some(default)), default);
+        assert_eq!(
+            resolve_node_origin(None, None, None),
+            Point {
+                x: ORIGIN_X,
+                y: ORIGIN_Y
+            }
+        );
+    }
+
+    #[test]
+    fn centered_card_origin_and_drag_threshold_behave_accurately() {
+        let target = Point { x: 300.0, y: 200.0 };
+        let free = centered_card_origin(target, false);
+        assert_eq!(
+            free,
+            Point {
+                x: 300.0 - CARD_WIDTH / 2.0,
+                y: 200.0 - CARD_HEIGHT / 2.0
+            }
+        );
+
+        let snapped = centered_card_origin(target, true);
+        assert_eq!(snapped.x % GRID_STEP, 0.0);
+        assert_eq!(snapped.y % GRID_STEP, 0.0);
+
+        assert!(!drag_moved_beyond_threshold(10.0, 20.0, 12.0, 22.0, 4.0));
+        assert!(drag_moved_beyond_threshold(10.0, 20.0, 14.0, 20.0, 4.0));
+        assert!(drag_moved_beyond_threshold(10.0, 20.0, 13.0, 23.0, 4.0));
+    }
+
+    #[test]
+    fn viewport_transform_strings_share_exact_coordinates_and_zoom() {
+        let vp = Viewport {
+            pan_x: -120.5,
+            pan_y: 84.25,
+            zoom: 1.3,
+        };
+        assert_eq!(
+            viewport_css_transform(vp),
+            "transform:translate(-120.50px,84.25px) scale(1.3000);transform-origin:0 0;"
+        );
+        assert_eq!(
+            viewport_svg_transform(vp),
+            "translate(-120.50 84.25) scale(1.3000)"
         );
     }
 }

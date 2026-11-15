@@ -1,11 +1,13 @@
 //! Plan interactif 2D du graphe : cartes librement déplaçables, zoom/pan, ports et minimap.
 
 use super::dnd::{BranchTarget, DragPayload, can_connect, connect_checked};
-use super::drag::DragItem;
+use super::drag::{DragItem, is_related_inside_current_target};
 use super::geometry::{
     Bounds, CARD_HEIGHT, CARD_WIDTH, GRID_STEP, ORIGIN_X, ORIGIN_Y, PlacedNode, Point, ZOOM_STEP,
-    board_to_screen, center_viewport_on, fit_viewport, link_midpoint, link_path, minimap_bounds,
-    place_with_positions, rects_intersect, screen_to_board, visible_board_rect, zoom_around,
+    board_to_screen, center_viewport_on, centered_card_origin, drag_moved_beyond_threshold,
+    fit_viewport, link_midpoint, link_path, minimap_bounds, place_with_positions, rects_intersect,
+    screen_to_board, viewport_css_transform, viewport_svg_transform, visible_board_rect,
+    zoom_around,
 };
 use super::presentation::{
     NodeDomain, PortPresentation, node_output_ports, node_summary, output_presentation,
@@ -27,6 +29,7 @@ const WIRE_BADGE_RX: f64 = 10.0;
 const ZOOM_PERCENT_SCALE: f64 = 100.0;
 const MINI_NODE_RX: f64 = 8.0;
 const DEFAULT_ZOOM: f64 = 1.0;
+const NODE_DRAG_THRESHOLD: f64 = 4.0;
 const WIRE_DRAG_THRESHOLD: f64 = 8.0;
 
 #[derive(Clone, Debug)]
@@ -35,6 +38,13 @@ struct DragNodeState {
     start_x: f64,
     start_y: f64,
     origins: Vec<(String, Point)>,
+    moved: bool,
+}
+
+#[derive(Clone, Debug)]
+struct DropPreviewState {
+    label: String,
+    pos: Point,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -457,6 +467,7 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
     let dragging_node = RwSignal::new(None::<DragNodeState>);
     let marquee = RwSignal::new(None::<MarqueeState>);
     let panning = RwSignal::new(None::<PanBoardState>);
+    let drop_preview = RwSignal::new(None::<DropPreviewState>);
     let wire_opened_on_press = RwSignal::new(false);
     let ignore_click_for_node = RwSignal::new(None::<String>);
 
@@ -466,6 +477,132 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                 .positions
                 .with(|custom| place_with_positions(graph, custom))
         })
+    });
+
+    let _window_move = window_event_listener(leptos::ev::mousemove, move |event| {
+        let cx = f64::from(event.client_x());
+        let cy = f64::from(event.client_y());
+        if let Some(mut drag) = dragging_node.get_untracked() {
+            if !drag.moved
+                && !drag_moved_beyond_threshold(
+                    drag.start_x,
+                    drag.start_y,
+                    cx,
+                    cy,
+                    NODE_DRAG_THRESHOLD,
+                )
+            {
+                return;
+            }
+            if !drag.moved {
+                drag.moved = true;
+                if !editor.is_selected(&drag.primary_id) {
+                    editor.select_node(Some(drag.primary_id.clone()), false);
+                }
+                dragging_node.set(Some(drag.clone()));
+            }
+            let zoom = editor.viewport.get_untracked().zoom.max(f64::EPSILON);
+            let dx = (cx - drag.start_x) / zoom;
+            let dy = (cy - drag.start_y) / zoom;
+            let snap = editor.snap_to_grid.get_untracked() ^ event.alt_key();
+            let updates: Vec<(String, Point)> = drag
+                .origins
+                .iter()
+                .map(|(id, origin)| {
+                    (
+                        id.clone(),
+                        Point {
+                            x: origin.x + dx,
+                            y: origin.y + dy,
+                        },
+                    )
+                })
+                .collect();
+            editor.move_nodes_live(&updates, snap);
+            return;
+        }
+        if let Some(mut box_sel) = marquee.get_untracked()
+            && let Some(board) = board_ref.get()
+        {
+            let local = board_local_point(&board, event.client_x(), event.client_y());
+            let board_pt = screen_to_board(editor.viewport.get_untracked(), local);
+            box_sel.current = board_pt;
+            marquee.set(Some(box_sel));
+            let sel_rect = Bounds::from_points(box_sel.start, box_sel.current);
+            let hits: HashSet<String> = placed.with_untracked(|nodes| {
+                nodes
+                    .iter()
+                    .filter(|node| rects_intersect(sel_rect, node.bounds()))
+                    .map(|node| node.id.clone())
+                    .collect()
+            });
+            editor.set_selection(hits);
+            return;
+        }
+        if let Some(pan) = panning.get_untracked() {
+            editor.viewport.update(|vp| {
+                vp.pan_x = pan.origin_pan_x + (cx - pan.start_x);
+                vp.pan_y = pan.origin_pan_y + (cy - pan.start_y);
+            });
+            return;
+        }
+        if editor.pending_wire.get_untracked().is_some() {
+            let zoom = editor.viewport.get_untracked().zoom.max(f64::EPSILON);
+            editor.pending_wire.update(|wire| {
+                if let Some(w) = wire.as_mut() {
+                    w.cursor = Point {
+                        x: w.start_anchor.x + (cx - w.start_client_x) / zoom,
+                        y: w.start_anchor.y + (cy - w.start_client_y) / zoom,
+                    };
+                }
+            });
+        }
+    });
+
+    let _window_up = window_event_listener(leptos::ev::mouseup, move |event| {
+        if let Some(drag) = dragging_node.get_untracked() {
+            dragging_node.set(None);
+            if drag.moved {
+                editor.commit_positions();
+                ignore_click_for_node.set(Some(drag.primary_id));
+            }
+        }
+        marquee.set(None);
+        panning.set(None);
+        if let Some(wire) = editor.pending_wire.get_untracked() {
+            let moved = (wire.cursor.x - wire.start_anchor.x).abs() > WIRE_DRAG_THRESHOLD
+                || (wire.cursor.y - wire.start_anchor.y).abs() > WIRE_DRAG_THRESHOLD;
+            if moved {
+                if can_manage {
+                    let anchor = board_ref
+                        .get()
+                        .map(|b| board_local_point(&b, event.client_x(), event.client_y()))
+                        .unwrap_or_else(|| {
+                            board_to_screen(editor.viewport.get_untracked(), wire.cursor)
+                        });
+                    let existing_to = editor.graph.with_untracked(|graph| {
+                        graph
+                            .outgoing(&wire.from_id)
+                            .find(|edge| edge.port == wire.port)
+                            .map(|edge| edge.to.clone())
+                    });
+                    editor.open_quick_add(QuickAddState {
+                        anchor,
+                        board_pos: Some(editor.snap_if_enabled(Point {
+                            x: wire.cursor.x - CARD_WIDTH / 2.0,
+                            y: wire.cursor.y,
+                        })),
+                        branch: Some(BranchTarget {
+                            source_id: wire.from_id,
+                            port: wire.port,
+                            replace_to: existing_to,
+                        }),
+                    });
+                } else {
+                    editor.pending_wire.set(None);
+                }
+            }
+        }
     });
 
     let connect_to_node = move |target_id: String| {
@@ -503,6 +640,7 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                     )
                 }
                 on:mousedown=move |event| {
+                    ignore_click_for_node.set(None);
                     if event.button() != 0 {
                         return;
                     }
@@ -543,126 +681,13 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                     };
                     let anchor = board_local_point(&board, event.client_x(), event.client_y());
                     let board_pt = screen_to_board(editor.viewport.get_untracked(), anchor);
-                    let snapped = editor.snap_if_enabled(Point {
-                        x: board_pt.x - CARD_WIDTH / 2.0,
-                        y: board_pt.y - CARD_HEIGHT / 2.0,
-                    });
+                    let snap = editor.snap_to_grid.get_untracked() ^ event.alt_key();
+                    let snapped = centered_card_origin(board_pt, snap);
                     editor.open_quick_add(QuickAddState {
                         anchor,
                         board_pos: Some(snapped),
                         branch: None,
                     });
-                }
-                on:mousemove=move |event| {
-                    let cx = f64::from(event.client_x());
-                    let cy = f64::from(event.client_y());
-                    if let Some(drag) = dragging_node.get_untracked() {
-                        let zoom = editor.viewport.get_untracked().zoom.max(f64::EPSILON);
-                        let dx = (cx - drag.start_x) / zoom;
-                        let dy = (cy - drag.start_y) / zoom;
-                        let snap = editor.snap_to_grid.get_untracked() ^ event.alt_key();
-                        let updates: Vec<(String, Point)> = drag
-                            .origins
-                            .iter()
-                            .map(|(id, origin)| {
-                                (
-                                    id.clone(),
-                                    Point {
-                                        x: origin.x + dx,
-                                        y: origin.y + dy,
-                                    },
-                                )
-                            })
-                            .collect();
-                        editor.move_nodes_live(&updates, snap);
-                        return;
-                    }
-                    if let Some(mut box_sel) = marquee.get_untracked()
-                        && let Some(board) = board_ref.get()
-                    {
-                        let local = board_local_point(&board, event.client_x(), event.client_y());
-                        let board_pt = screen_to_board(editor.viewport.get_untracked(), local);
-                        box_sel.current = board_pt;
-                        marquee.set(Some(box_sel));
-                        let sel_rect = Bounds::from_points(box_sel.start, box_sel.current);
-                        let hits: HashSet<String> = placed.with_untracked(|nodes| {
-                            nodes
-                                .iter()
-                                .filter(|node| rects_intersect(sel_rect, node.bounds()))
-                                .map(|node| node.id.clone())
-                                .collect()
-                        });
-                        editor.set_selection(hits);
-                        return;
-                    }
-                    if let Some(pan) = panning.get_untracked() {
-                        editor.viewport.update(|vp| {
-                            vp.pan_x = pan.origin_pan_x + (cx - pan.start_x);
-                            vp.pan_y = pan.origin_pan_y + (cy - pan.start_y);
-                        });
-                        return;
-                    }
-                    if editor.pending_wire.get_untracked().is_some() {
-                        let zoom = editor.viewport.get_untracked().zoom.max(f64::EPSILON);
-                        editor.pending_wire.update(|wire| {
-                            if let Some(w) = wire.as_mut() {
-                                w.cursor = Point {
-                                    x: w.start_anchor.x + (cx - w.start_client_x) / zoom,
-                                    y: w.start_anchor.y + (cy - w.start_client_y) / zoom,
-                                };
-                            }
-                        });
-                    }
-                }
-                on:mouseup=move |event| {
-                    if dragging_node.get_untracked().is_some() {
-                        dragging_node.set(None);
-                        editor.commit_positions();
-                    }
-                    marquee.set(None);
-                    panning.set(None);
-                    if let Some(wire) = editor.pending_wire.get_untracked() {
-                        let moved = (wire.cursor.x - wire.start_anchor.x).abs() > WIRE_DRAG_THRESHOLD
-                            || (wire.cursor.y - wire.start_anchor.y).abs() > WIRE_DRAG_THRESHOLD;
-                        if moved {
-                            if can_manage {
-                                let anchor = board_ref
-                                    .get()
-                                    .map(|b| board_local_point(&b, event.client_x(), event.client_y()))
-                                    .unwrap_or_else(|| {
-                                        board_to_screen(editor.viewport.get_untracked(), wire.cursor)
-                                    });
-                                let existing_to = editor.graph.with_untracked(|graph| {
-                                    graph
-                                        .outgoing(&wire.from_id)
-                                        .find(|edge| edge.port == wire.port)
-                                        .map(|edge| edge.to.clone())
-                                });
-                                editor.open_quick_add(QuickAddState {
-                                    anchor,
-                                    board_pos: Some(editor.snap_if_enabled(Point {
-                                        x: wire.cursor.x - CARD_WIDTH / 2.0,
-                                        y: wire.cursor.y,
-                                    })),
-                                    branch: Some(BranchTarget {
-                                        source_id: wire.from_id,
-                                        port: wire.port,
-                                        replace_to: existing_to,
-                                    }),
-                                });
-                            } else {
-                                editor.pending_wire.set(None);
-                            }
-                        }
-                    }
-                }
-                on:mouseleave=move |_| {
-                    if dragging_node.get_untracked().is_some() {
-                        dragging_node.set(None);
-                        editor.commit_positions();
-                    }
-                    marquee.set(None);
-                    panning.set(None);
                 }
                 on:wheel=move |event| {
                     event.prevent_default();
@@ -683,14 +708,32 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                     if !can_manage {
                         return;
                     }
-                    if matches!(
-                        editor.drag.get_untracked(),
-                        Some(DragPayload::Palette { .. })
-                    ) {
-                        event.prevent_default();
+                    let Some(DragPayload::Palette { label, .. }) = editor.drag.get_untracked() else {
+                        drop_preview.set(None);
+                        return;
+                    };
+                    event.prevent_default();
+                    if let Some(transfer) = event.data_transfer() {
+                        transfer.set_drop_effect("copy");
+                    }
+                    let Some(board) = board_ref.get() else {
+                        return;
+                    };
+                    let local = board_local_point(&board, event.client_x(), event.client_y());
+                    let board_pt = screen_to_board(editor.viewport.get_untracked(), local);
+                    let snap = editor.snap_to_grid.get_untracked() ^ event.alt_key();
+                    drop_preview.set(Some(DropPreviewState {
+                        label,
+                        pos: centered_card_origin(board_pt, snap),
+                    }));
+                }
+                on:dragleave=move |event| {
+                    if !is_related_inside_current_target(&event) {
+                        drop_preview.set(None);
                     }
                 }
                 on:drop=move |event| {
+                    drop_preview.set(None);
                     if !can_manage {
                         return;
                     }
@@ -714,13 +757,11 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                             &catalog,
                         );
                     });
+                    let snap = editor.snap_to_grid.get_untracked() ^ event.alt_key();
                     let drop_pt = board_ref.get().map(|board| {
                         let local = board_local_point(&board, event.client_x(), event.client_y());
                         let board_pt = screen_to_board(editor.viewport.get_untracked(), local);
-                        editor.snap_if_enabled(Point {
-                            x: board_pt.x - CARD_WIDTH / 2.0,
-                            y: board_pt.y - CARD_HEIGHT / 2.0,
-                        })
+                        centered_card_origin(board_pt, snap)
                     });
                     if let Some(pt) = drop_pt {
                         editor.set_node_position(&created, pt);
@@ -729,10 +770,10 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                 }
             >
                 {move || {
-                    if editor.graph.with(|graph| graph.nodes.is_empty()) {
+                    editor.graph.with(|graph| graph.nodes.is_empty()).then(|| {
                         let catalog_empty = editor.catalog_loaded.get()
                             && editor.catalog.with(|c| c.is_empty());
-                        return view! {
+                        view! {
                             <div class="flow-canvas__empty empty-state-panel">
                                 <p class="empty-state-title">
                                     {if catalog_empty {
@@ -755,9 +796,9 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                 })}
                             </div>
                         }
-                        .into_any();
-                    }
-
+                    })
+                }}
+                {{
                     let wires_view = move || {
                         let graph = editor.graph.get();
                         let catalog = editor.catalog.get();
@@ -937,10 +978,71 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                             class:is-incomplete=incomplete
                                             class:is-dragging=move || dragging_node.with(|d| {
                                                 d.as_ref().is_some_and(|s| {
-                                                    s.primary_id == dragging_check
-                                                        || s.origins.iter().any(|(id, _)| id == &dragging_check)
+                                                    s.moved
+                                                        && (s.primary_id == dragging_check
+                                                            || s.origins.iter().any(|(id, _)| id == &dragging_check))
                                                 })
                                             })
+                                            on:mousedown=move |event| {
+                                                if event.button() != 0 {
+                                                    return;
+                                                }
+                                                event.stop_propagation();
+                                                ignore_click_for_node.set(None);
+                                                if !can_manage || editor.pending_wire.get_untracked().is_some() {
+                                                    return;
+                                                }
+                                                event.prevent_default();
+                                                let mut active = editor.selected_ids.get_untracked();
+                                                if !active.contains(&drag_id) {
+                                                    active.clear();
+                                                    active.insert(drag_id.clone());
+                                                }
+                                                let origins: Vec<(String, Point)> = active
+                                                    .into_iter()
+                                                    .map(|id| {
+                                                        let pt = editor.node_point(&id);
+                                                        (id, pt)
+                                                    })
+                                                    .collect();
+                                                dragging_node.set(Some(DragNodeState {
+                                                    primary_id: drag_id.clone(),
+                                                    start_x: f64::from(event.client_x()),
+                                                    start_y: f64::from(event.client_y()),
+                                                    origins,
+                                                    moved: false,
+                                                }));
+                                            }
+                                            on:mouseup=move |event| {
+                                                if editor.pending_wire.get_untracked().is_some()
+                                                    && dragging_node.get_untracked().is_none()
+                                                {
+                                                    event.stop_propagation();
+                                                    ignore_click_for_node.set(Some(up_main_id.clone()));
+                                                    connect_to_node(up_main_id.clone());
+                                                }
+                                            }
+                                            on:click=move |event| {
+                                                event.stop_propagation();
+                                                if ignore_click_for_node
+                                                    .get_untracked()
+                                                    .as_deref()
+                                                    == Some(click_main_id.as_str())
+                                                {
+                                                    ignore_click_for_node.set(None);
+                                                    return;
+                                                }
+                                                if editor.pending_wire.get_untracked().is_some() {
+                                                    connect_to_node(click_main_id.clone());
+                                                } else if event.ctrl_key()
+                                                    || event.meta_key()
+                                                    || event.shift_key()
+                                                {
+                                                    editor.toggle_node_selection(&click_main_id);
+                                                } else {
+                                                    editor.select_node(Some(click_main_id.clone()), true);
+                                                }
+                                            }
                                         >
                                             {has_input.then(move || {
                                                 let up_target_id = input_id.clone();
@@ -985,71 +1087,12 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                             })}
 
                                             <div class="canvas-node__heading">
-                                                <button
-                                                    type="button"
-                                                    class="canvas-node__icon"
-                                                    title="Glisser pour déplacer le bloc"
-                                                    aria-label="Déplacer le bloc sur le canevas"
-                                                    on:mousedown=move |event| {
-                                                        if !can_manage || event.button() != 0 {
-                                                            return;
-                                                        }
-                                                        event.stop_propagation();
-                                                        event.prevent_default();
-                                                        let mut active = editor.selected_ids.get_untracked();
-                                                        if !active.contains(&drag_id) {
-                                                            active.clear();
-                                                            active.insert(drag_id.clone());
-                                                        }
-                                                        let origins: Vec<(String, Point)> = active
-                                                            .into_iter()
-                                                            .map(|id| {
-                                                                let pt = editor.node_point(&id);
-                                                                (id, pt)
-                                                            })
-                                                            .collect();
-                                                        dragging_node.set(Some(DragNodeState {
-                                                            primary_id: drag_id.clone(),
-                                                            start_x: f64::from(event.client_x()),
-                                                            start_y: f64::from(event.client_y()),
-                                                            origins,
-                                                        }));
-                                                    }
-                                                >
+                                                <span class="canvas-node__icon" aria-hidden="true">
                                                     <Icon name=domain_icon size=NODE_ICON_SIZE />
-                                                </button>
+                                                </span>
                                                 <button
                                                     type="button"
                                                     class="canvas-node__main"
-                                                    on:mousedown=move |event| event.stop_propagation()
-                                                    on:mouseup=move |event| {
-                                                        if editor.pending_wire.get_untracked().is_some() {
-                                                            event.stop_propagation();
-                                                            ignore_click_for_node.set(Some(up_main_id.clone()));
-                                                            connect_to_node(up_main_id.clone());
-                                                        }
-                                                    }
-                                                    on:click=move |event| {
-                                                        event.stop_propagation();
-                                                        if ignore_click_for_node
-                                                            .get_untracked()
-                                                            .as_deref()
-                                                            == Some(click_main_id.as_str())
-                                                        {
-                                                            ignore_click_for_node.set(None);
-                                                            return;
-                                                        }
-                                                        if editor.pending_wire.get_untracked().is_some() {
-                                                            connect_to_node(click_main_id.clone());
-                                                        } else if event.ctrl_key()
-                                                            || event.meta_key()
-                                                            || event.shift_key()
-                                                        {
-                                                            editor.toggle_node_selection(&click_main_id);
-                                                        } else {
-                                                            editor.select_node(Some(click_main_id.clone()), true);
-                                                        }
-                                                    }
                                                 >
                                                     <span class="canvas-node__title-row">
                                                         <span class="canvas-node__title">{node_name}</span>
@@ -1244,25 +1287,21 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                     };
 
                     view! {
-                        <div
-                            class="flow-graph-stage"
-                            style=move || {
-                                let vp = editor.viewport.get();
-                                format!(
-                                    "transform:translate({:.2}px,{:.2}px) scale({:.4});transform-origin:0 0;",
-                                    vp.pan_x, vp.pan_y, vp.zoom
-                                )
-                            }
+                        <svg
+                            class="flow-canvas__wires"
+                            width="100%"
+                            height="100%"
+                            aria-hidden="true"
                         >
-                            <svg
-                                class="flow-canvas__wires"
-                                width="1"
-                                height="1"
-                                aria-hidden="true"
-                            >
+                            <g attr:transform=move || viewport_svg_transform(editor.viewport.get())>
                                 {wires_view}
                                 {ghost_wire_view}
-                            </svg>
+                            </g>
+                        </svg>
+                        <div
+                            class="flow-graph-stage"
+                            style=move || viewport_css_transform(editor.viewport.get())
+                        >
                             {cards_view}
                             {move || marquee.get().map(|box_sel| {
                                 let rect = Bounds::from_points(box_sel.start, box_sel.current);
@@ -1276,9 +1315,25 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                     />
                                 }
                             })}
+                            {move || {
+                                if editor.drop_target.get().is_some() || editor.drag.get().is_none() {
+                                    return None;
+                                }
+                                drop_preview.get().map(|preview| view! {
+                                    <div
+                                        class="canvas-drop-ghost"
+                                        style=format!(
+                                            "left:{:.1}px;top:{:.1}px;width:{CARD_WIDTH}px;min-height:{CARD_HEIGHT}px;",
+                                            preview.pos.x, preview.pos.y
+                                        )
+                                    >
+                                        <span class="canvas-drop-ghost__badge">"+ Déposer sur la grille"</span>
+                                        <span class="canvas-drop-ghost__title">{preview.label}</span>
+                                    </div>
+                                })
+                            }}
                         </div>
                     }
-                    .into_any()
                 }}
             </div>
             <WireActionPopover editor=editor placed=placed can_manage=can_manage />

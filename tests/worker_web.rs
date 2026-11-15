@@ -404,3 +404,62 @@ async fn test_health_and_status_stay_public_on_a_worker() -> anyhow::Result<()> 
     assert_eq!(setup.body["instanceKind"], "worker");
     Ok(())
 }
+
+#[tokio::test]
+async fn test_worker_relays_password_change_to_central() -> anyhow::Result<()> {
+    let admin = "admin-pw-relay";
+    let fixture = fixture(admin).await?;
+    let dir = tempfile::tempdir()?;
+    let worker = worker_router(worker_web(
+        dir.path(),
+        &fixture.central_url,
+        &fixture.worker_key,
+    )?);
+
+    let cookies = Cookies::from_headers(&login(&worker, admin, PASSWORD).await?.headers);
+    assert!(!cookies.session.is_empty());
+
+    let new_password = "nouveau-mot-de-passe-solide";
+    let reply = send(
+        &worker,
+        Request::builder()
+            .method("PUT")
+            .uri("/api/v1/account/password")
+            .header("host", HOST)
+            .header("origin", ORIGIN)
+            .header("cookie", cookies.header())
+            .header("x-csrf-token", cookies.csrf.clone())
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&serde_json::json!({
+                "current_password": PASSWORD,
+                "new_password": new_password
+            }))?))?,
+    )
+    .await?;
+    assert_eq!(reply.status, StatusCode::NO_CONTENT);
+
+    // Le central accepte désormais uniquement le nouveau mot de passe.
+    assert_eq!(
+        login(&fixture.central_app, admin, PASSWORD).await?.status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        login(&fixture.central_app, admin, new_password)
+            .await?
+            .status,
+        StatusCode::OK
+    );
+
+    // Relais hors ligne -> 502 Bad Gateway.
+    let offline_dir = tempfile::tempdir()?;
+    let offline_worker = worker_router(worker_web(
+        offline_dir.path(),
+        DEAD_CENTRAL,
+        &fixture.worker_key,
+    )?);
+    let offline_cookies =
+        Cookies::from_headers(&login(&offline_worker, admin, PASSWORD).await?.headers);
+    assert!(offline_cookies.session.is_empty());
+    fixture.server.abort();
+    Ok(())
+}

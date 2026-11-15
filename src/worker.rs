@@ -92,6 +92,7 @@ impl WorkerLoop {
         self.request(method, &format!("/api/v1/jobs/{}/{action}", claim.job_id))
             .header("x-worker-id", worker.to_string())
             .header("x-lease-token", claim.lease_token.to_string())
+            .header("x-lease-epoch", claim.lease_epoch.to_string())
     }
     async fn heartbeat(&self, claim: &Claim, worker: Uuid) -> anyhow::Result<()> {
         let probe = crate::telemetry::TelemetryProbe::with_storage_path(&self.config.work_dir);
@@ -105,6 +106,7 @@ impl WorkerLoop {
             .json(&LeaseRequest {
                 worker_id: worker,
                 lease_token: claim.lease_token,
+                lease_epoch: claim.lease_epoch,
                 telemetry: Some(probe.sample()),
             })
             .send()
@@ -121,6 +123,7 @@ impl WorkerLoop {
         let key = self.config.key.clone();
         let job_id = claim.job_id;
         let lease_token = claim.lease_token;
+        let lease_epoch = claim.lease_epoch;
         let last_pct = Arc::new(AtomicU32::new(u32::MAX));
         Arc::new(move |pct: u32, line: &str| {
             let pct = pct.min(100);
@@ -139,6 +142,7 @@ impl WorkerLoop {
                     .json(&ProgressReport {
                         worker_id: worker,
                         lease_token,
+                        lease_epoch,
                         progress: pct,
                         message,
                     })
@@ -192,6 +196,7 @@ impl WorkerLoop {
             .json(&StepsReport {
                 worker_id: worker,
                 lease_token: claim.lease_token,
+                lease_epoch: claim.lease_epoch,
                 steps: steps.to_vec(),
             })
             .send()
@@ -318,6 +323,7 @@ impl WorkerLoop {
                 .json(&Failure {
                     worker_id: worker,
                     lease_token: claim.lease_token,
+                    lease_epoch: claim.lease_epoch,
                     error_code: code.into(),
                 })
                 .send()
@@ -395,6 +401,7 @@ impl WorkerLoop {
     /// Enregistre le worker puis réclame des tâches jusqu'à l'arrêt.
     async fn work(&self) -> anyhow::Result<()> {
         let runner = self;
+        let probe = crate::telemetry::TelemetryProbe::with_storage_path(&runner.config.work_dir);
         let worker = loop {
             let attempt = async {
                 runner
@@ -402,6 +409,8 @@ impl WorkerLoop {
                     .timeout(Duration::from_secs(10))
                     .json(&Register {
                         name: runner.config.name.clone(),
+                        version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+                        telemetry: Some(probe.sample()),
                     })
                     .send()
                     .await?
@@ -420,13 +429,21 @@ impl WorkerLoop {
         runner.status.mark_central_reachable(true);
         runner.purge_orphaned_work_artifacts().await;
         let mut was_disconnected = false;
+        let mut idle_polls: u32 = 0;
         loop {
+            let telemetry = if idle_polls.is_multiple_of(30) {
+                Some(probe.sample())
+            } else {
+                None
+            };
+            idle_polls = idle_polls.wrapping_add(1);
             let attempt = async {
                 let claim = runner
                     .request(reqwest::Method::POST, "/api/v1/claims")
                     .timeout(Duration::from_secs(10))
                     .json(&ClaimRequest {
                         worker_id: worker.id,
+                        telemetry,
                     })
                     .send()
                     .await?
@@ -438,12 +455,33 @@ impl WorkerLoop {
             let claim = tokio::select! { result=attempt=>result, _=crate::api::shutdown_signal()=>return Ok(()) };
             runner.status.mark_central_reachable(claim.is_ok());
             match claim {
-                Ok(Some(claim)) => {
+                Ok(Some(mut claim)) => {
                     if was_disconnected {
                         runner.purge_orphaned_work_artifacts().await;
                         was_disconnected = false;
                     }
-                    runner.execute(claim, worker.id).await?;
+                    if let Err(error) = crate::flows::unseal_claim_secrets_for_worker(
+                        &mut claim,
+                        &runner.config.key,
+                    ) {
+                        tracing::error!(job_id = %claim.job_id, error = %error, "impossible de déchiffrer les secrets du bail");
+                        let _ = runner
+                            .request(
+                                reqwest::Method::POST,
+                                &format!("/api/v1/jobs/{}/failure", claim.job_id),
+                            )
+                            .timeout(Duration::from_secs(10))
+                            .json(&Failure {
+                                worker_id: worker.id,
+                                lease_token: claim.lease_token,
+                                lease_epoch: claim.lease_epoch,
+                                error_code: JobErrorCode::TransferFailed.as_str().to_owned(),
+                            })
+                            .send()
+                            .await;
+                    } else {
+                        runner.execute(claim, worker.id).await?;
+                    }
                 }
                 Ok(None) => {
                     if was_disconnected {

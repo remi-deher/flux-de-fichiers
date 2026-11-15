@@ -144,35 +144,33 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 - [x] Recherche globale (#115) : tâches, flux, bibliothèques, workers, plugins ; le résultat mène à l'objet (éditeur du flux, ou écran filtré). Les listes sont lues à l'ouverture du champ, sans route dédiée ; les tâches se limitent à la première page de 200.
 - [x] Navigation mobile (#116) : barre latérale en tiroir sous 768 px. Non vérifiée sur un vrai écran.
 - [x] Widgets de la vue d'ensemble : choix des widgets affichés (bouton « Personnaliser »), préférence gardée dans le navigateur.
-- [x] Paramètres : onglets Réseau (écoute, TLS, origine, session) et Stockage (dossiers, taille maximale, espace du volume), lus dans `/api/v1/system/status` ; lecture seule.
-- [x] Réseau, lot A : carte Configuration (lecture seule, bloc d'environnement), connectivité des workers (dernier contact, ancienneté, alerte au-delà de `WORKER_SILENT_ALERT_SECONDS`, « Ajouter un worker » avec bloc `compose`) et diagnostic `POST /api/v1/system/diagnostics` (`CheckStatus`, six contrôles purs). Non fait : version et adresse vue par le central de chaque worker (rien ne les transmet ni ne les stocke aujourd'hui ; demande un en-tête ou un champ de heartbeat, donc un stockage). Reste lot B (adresse publique, sessions, SMTP modifiables en base) et lot C (proxy sortant).
-- [x] Télémétrie matérielle du central en vue d'ensemble (processeur, mémoire, disque, GPU ; `GET /api/v1/system/hardware`, relevé à l'ouverture, pas d'historique). Les workers distants n'ont pas de relevé côté central : la télémétrie qu'ils envoient avec leurs échéances n'est pas conservée.
+- [x] Paramètres : onglets Réseau (écoute, TLS, origine, session) et Stockage (dossiers, taille maximale, espace du volume), lus dans `/api/v1/system/status`.
+- [x] Réseau, lots A, B et C : carte Configuration éditable (`PUT /api/v1/system/settings` pour origine publique `WEB_ORIGIN`, TTL des sessions web, messagerie SMTP avec mot de passe chiffré en base et politique de proxy/requêtes sortantes privées), connectivité des workers (dernier contact, ancienneté, version, adresse réseau vue par le central, télémétrie CPU/RAM/stockage/GPU, alerte au-delà de `WORKER_SILENT_ALERT_SECONDS`) et diagnostic `POST /api/v1/system/diagnostics`.
+- [x] Télémétrie matérielle du central (`GET /api/v1/system/hardware`) et des workers distants (persistée à l'enregistrement, sur heartbeat et en attente de bail, affichée dans les fiches et détails worker).
 - [x] Paramètres (14 nov.) : onglet « Stockage » retiré (taille maximale d'un fichier et espace libre déplacés dans « Système ») ; « Mises à jour » fusionné dans « Système ». Ancienne page Mises à jour : version du central et de l'interface, procédure. Limite : pas de « version disponible », le central n'appelle aucun service externe (une vérification facultative reste à décider).
 - [x] Feuille de filtres de la barre du haut : période des tâches (Activité) et présence des workers ; remise à zéro au changement d'écran. Les autres écrans n'ont pas de critère propre.
-- [ ] Repris de l'ancienne interface : simulation dans l'éditeur.
+- [x] Simulation à sec dans l'éditeur (`client/src/flows/simulation.rs`) : évaluation locale fidèle des conditions (`video.codec`, `audio.language`, etc.), profils de média et navigation pas à pas sur le graphe.
 - [x] Éditeur de flux : glisser-déposer palette → carte et carte → carte (`flows/dnd.rs`, règles de `FlowGraph::connect`, alternative clic/liste conservée) ; confirmation avant de quitter avec des modifications (routeur, retour arrière, `beforeunload`).
-- [x] Tâches : choix du worker à la création (#118) ; pagination au-delà de 200 (#119, bouton « Charger les tâches plus anciennes »).
+- [x] Tâches : choix du worker à la création (#118) ; pagination au-delà de 200 (#119) ; filtrage par bibliothèque, métadonnées entrée/sortie et journal des étapes.
 - [x] Session expirée : un 401 sur session ouverte recharge la page, qui affiche la connexion (#117).
 - [x] « Mot de passe oublié » par courriel SMTP (ADR 0015) ; la CLI `reset-password` reste le recours.
-- [ ] Changement de mot de passe sur un worker (route absente, relais vers le central à cadrer).
-- [ ] Audit d'accessibilité.
+- [x] Changement de mot de passe depuis un worker (`PUT /api/v1/account/password` relayé vers `PUT /api/v1/worker/account/password` sur le central).
+- [x] Passe d'accessibilité (`Drawer` modal avec `aria-modal`, `aria-labelledby`, focus automatique et fermeture `Échap`, étiquettes ARIA et styles `:focus-visible`).
 
 ### 3. Moteur et plugins
 
 - [x] Exécuter `block.video.remux-mp4` (MP4Box) (#114).
-- [ ] Artefacts FFmpeg réels dans le catalogue (aujourd'hui `contract-only`, repli `FFMPEG`/PATH).
+- [x] Artefacts `ffmpeg` / `ffprobe` / `MP4Box` / `mkvtoolnix` / `mediainfo` intégrés dans `.github/workflows/build-tools.yml` (côté `flux-de-fichiers-plugins`).
 - [x] Repli automatique GPU → CPU quand l'encodeur matériel échoue (#133).
-- [ ] Moteur générique, tout par contrats ([ADR 0017](adr/0017-moteur-generique-et-contrats.md), proposé) : runner déclaratif, besoins d'un flux installés à la demande, plus rien en dur.
-- [x] Limiter les secrets du bail à ceux du flux figé (#134). Reste : chiffrement par clé de worker (à cadrer).
-- [ ] Requêtes SQL vérifiées à la compilation (`sqlx::query!` + `.sqlx`, voir l'audit).
+- [x] Moteur 100 % déclaratif par contrats ([ADR 0017](adr/0017-moteur-generique-et-contrats.md)) : `OperationRegistry`, exécuteurs génériques `binary_runner` / `http_runner`, installation déclarative de packs.
+- [x] Chiffrement par clé de worker et par bail des secrets transmis sur `/api/v1/claims` (`Claim.sealed_secrets`, dérivation `SecretBox::for_worker_lease` liée à `(job_id, lease_epoch)`).
+- [ ] Requêtes SQL vérifiées à la compilation (`sqlx::query!` + `.sqlx`) : non activé car `sqlx-cli` est absent localement et le `Dockerfile` construit sans base active ni cache `.sqlx/` (`SQLX_OFFLINE`) ; le durcissement du pool SQLite (`busy_timeout` / `acquire_timeout` 15 s, `max_connections` 16, `temp_store = MEMORY`, `cache_size = -16000`, `wal_autocheckpoint = 1000`) et les index (`jobs_worker_recent_idx`, `jobs_flow_idx`) ont été appliqués dans `src/api.rs` et `migrations/0016_hardening_and_settings.sql`.
 
 ### 4. À cadrer avec Remi avant de coder
 
-- [ ] Enrôlement par demande à approuver : [ADR 0016](adr/0016-enrolement-par-approbation.md) (proposé, orientation validée le 14 nov.) ; à implémenter.
-- [ ] Époque des baux (*fencing*) : un ancien worker ne doit plus pouvoir répondre sur une tâche
-      reprise. Reporté (« à voir après », 14 nov.).
-- [x] IA et MCP : [ADR 0015](adr/0015-ia-et-mcp.md) rédigé (proposé), questions ouvertes à trancher
-      (qui génère les suggestions, validation humaine, périmètre « créer un plugin »).
+- [ ] Enrôlement par demande à approuver : [ADR 0016](adr/0016-enrolement-par-approbation.md) (proposé, simplifiable via jeton/identifiants sans manipulation) ; en attente de validation finale.
+- [x] Époque des baux (*fencing*) : `jobs.lease_epoch` vérifié sur `/heartbeat`, `/progress`, `/steps`, `/failure`, `/source` et `/result` (`409 Conflict` si incohérent).
+- [ ] IA et MCP : [ADR 0015](adr/0015-ia-et-mcp.md) rédigé (proposé), mis de côté pour le moment.
 
 ### 5. Hygiène et process
 

@@ -14,7 +14,17 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 pub async fn run(state: AppState) {
     let worker_name = std::env::var("LOCAL_WORKER_NAME")
         .unwrap_or_else(|_| flux_shared::workers::INTEGRATED_WORKER_NAME.into());
-    let worker = match repository::register(&state.pool, &worker_name).await {
+    let probe = crate::telemetry::TelemetryProbe::with_storage_path(&state.config.data_dir);
+    let initial_snapshot = probe.sample();
+    let worker = match repository::register_with_metadata(
+        &state.pool,
+        &worker_name,
+        Some(env!("CARGO_PKG_VERSION")),
+        Some("local"),
+        Some(&initial_snapshot),
+    )
+    .await
+    {
         Ok(worker) => worker,
         Err(error) => {
             tracing::error!(error=%error, "local worker registration failed");
@@ -56,6 +66,7 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
     let lease = LeaseRequest {
         worker_id,
         lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
         telemetry: None,
     };
     let job = match repository::active(&state.pool, claim.job_id, &lease).await {
@@ -117,6 +128,7 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
     let source_snapshot = work_dir.join("source.mkv");
     let mut heartbeat = tokio::spawn(heartbeat_loop(
         state.pool.clone(),
+        state.config.data_dir.clone(),
         claim.job_id,
         lease.clone(),
     ));
@@ -199,12 +211,16 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
 
 async fn heartbeat_loop(
     pool: sqlx::SqlitePool,
+    data_dir: std::path::PathBuf,
     job: Uuid,
     lease: LeaseRequest,
 ) -> anyhow::Result<()> {
+    let probe = crate::telemetry::TelemetryProbe::with_storage_path(&data_dir);
     loop {
         tokio::time::sleep(HEARTBEAT_INTERVAL).await;
-        repository::heartbeat(&pool, job, &lease).await?;
+        let mut tick = lease.clone();
+        tick.telemetry = Some(probe.sample());
+        repository::heartbeat(&pool, job, &tick).await?;
     }
 }
 

@@ -122,6 +122,7 @@ async fn test_job_and_worker_workflow() -> anyhow::Result<()> {
     let heartbeat_payload = LeaseRequest {
         worker_id: worker.id,
         lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
         telemetry: None,
     };
     let req = Request::builder()
@@ -141,6 +142,7 @@ async fn test_job_and_worker_workflow() -> anyhow::Result<()> {
     let failure_payload = Failure {
         worker_id: worker.id,
         lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
         error_code: "source_integrity".into(),
     };
     let req = Request::builder()
@@ -592,6 +594,7 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
                     serde_json::json!({
                         "worker_id": worker.id,
                         "lease_token": claim.lease_token,
+                        "lease_epoch": claim.lease_epoch,
                         "steps": [{
                             "step_index": 0,
                             "node_id": "n1",
@@ -631,6 +634,7 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
         &LeaseRequest {
             worker_id: worker.id,
             lease_token: claim.lease_token,
+            lease_epoch: claim.lease_epoch,
             telemetry: None,
         },
         flux_de_fichiers::repository::PublishedOutput {

@@ -1,6 +1,6 @@
 //! Vue d'ensemble : chiffres clés, points d'attention et tâches récentes ; sur un worker, ses tâches.
 
-mod hardware;
+pub mod hardware;
 mod summary;
 mod widgets;
 

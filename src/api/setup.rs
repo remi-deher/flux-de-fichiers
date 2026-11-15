@@ -12,11 +12,12 @@ use flux_shared::{InstanceKind, Role};
 const INSTANCE_NAME_MAX_LEN: usize = 80;
 
 pub async fn status(State(state): State<AppState>) -> AppResult<Json<SetupStatus>> {
+    let effective = crate::runtime_settings::load_effective(&state.pool, &state.config).await;
     Ok(Json(SetupStatus {
         needs_setup: repository::account_count(&state.pool).await? == 0,
         instance_name: repository::get_setting(&state.pool, repository::INSTANCE_NAME_KEY).await?,
         instance_kind: InstanceKind::Central,
-        password_reset_enabled: state.config.password_reset_enabled(),
+        password_reset_enabled: effective.config.password_reset_enabled(),
     }))
 }
 
@@ -37,7 +38,8 @@ pub async fn setup_central(
     headers: HeaderMap,
     Json(request): Json<SetupRequest>,
 ) -> AppResult<Response> {
-    web_session::validate_origin(&headers, &state.config)?;
+    let effective = crate::runtime_settings::load_effective(&state.pool, &state.config).await;
+    web_session::validate_origin(&headers, &effective.config)?;
     if repository::account_count(&state.pool).await? > 0 {
         return Err(AppError::AlreadyConfigured);
     }

@@ -105,6 +105,14 @@ fn FlowCommandBar(
         }
     };
 
+    let toggle_simulation = move || {
+        if editor.simulation_open.get_untracked() {
+            editor.close_right_panel();
+        } else {
+            editor.open_simulation();
+        }
+    };
+
     view! {
         <header class="flow-command-bar" role="toolbar" aria-label="Commandes de l'atelier">
             <div class="flow-command-bar__lead">
@@ -246,6 +254,17 @@ fn FlowCommandBar(
                             })}
                         }
                     }}
+                </button>
+
+                <button
+                    type="button"
+                    class="btn btn-secondary btn-sm flow-cmd-btn"
+                    aria-pressed=move || editor.simulation_open.get().to_string()
+                    title="Simuler l'exécution sur un média type"
+                    on:click=move |_| toggle_simulation()
+                >
+                    <Icon name=IconName::Activity size=CMD_ICON_SIZE />
+                    <span>"Simuler"</span>
                 </button>
 
                 <button
@@ -430,6 +449,15 @@ fn RightDock(
                     >
                         "Réglages"
                     </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        class="flow-right-dock__tab"
+                        aria-selected=move || editor.simulation_open.get().to_string()
+                        on:click=move |_| editor.open_simulation()
+                    >
+                        "Simuler"
+                    </button>
                 </div>
                 <button
                     type="button"
@@ -457,6 +485,8 @@ fn RightDock(
                             />
                         }
                         .into_any()
+                    } else if editor.simulation_open.get() {
+                        view! { <super::simulation::FlowSimulationPanel editor=editor /> }.into_any()
                     } else {
                         ().into_any()
                     }
@@ -723,6 +753,7 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
             } else if editor.palette_open.get_untracked()
                 || editor.inspector_open.get_untracked()
                 || editor.settings_open.get_untracked()
+                || editor.simulation_open.get_untracked()
             {
                 editor.close_right_panel();
             } else if editor.diagnostics_open.get_untracked() {

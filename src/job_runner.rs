@@ -140,6 +140,7 @@ pub async fn execute_claim_processing(
         plugin_configs: &claim.plugin_configs,
         tool_versions: &tool_versions,
         media_root: claim.media_root.as_deref(),
+        allow_private_integrations: claim.allow_private_integrations,
     };
 
     let outcome = match claim.frozen_flow.as_ref() {
@@ -180,6 +181,7 @@ mod tests {
         Claim {
             job_id: Uuid::new_v4(),
             lease_token: Uuid::new_v4(),
+            lease_epoch: 1,
             source_name: "film.mkv".into(),
             source_sha256: "ab".repeat(32),
             source_bytes: 100,
@@ -191,6 +193,8 @@ mod tests {
             operations: HashMap::new(),
             block_operations: HashMap::new(),
             plugin_configs: HashMap::new(),
+            sealed_secrets: None,
+            allow_private_integrations: None,
             media_root: None,
         }
     }

@@ -320,7 +320,8 @@ pub async fn diagnostics(
 ) -> AppResult<Json<DiagnosticsReport>> {
     let workers = repository::list_workers(&state.pool).await?;
     let proxy = ProxyHints::from_headers(&headers);
-    let config = &state.config;
+    let effective = crate::runtime_settings::load_effective(&state.pool, &state.config).await;
+    let config = &effective.config;
     Ok(Json(run_checks(&DiagnosticInput {
         web_origin: config.web_origin.as_deref(),
         browser_origin: &request.browser_origin,
@@ -347,6 +348,9 @@ mod tests {
             id: Uuid::nil(),
             name: name.into(),
             last_seen: now - Duration::seconds(seconds_ago),
+            version: None,
+            remote_addr: None,
+            telemetry: None,
         }
     }
 

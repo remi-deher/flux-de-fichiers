@@ -1,16 +1,14 @@
-use serde::{Deserialize, Serialize};
+pub use flux_shared::system::SmtpTls;
 use std::{
     env,
     net::SocketAddr,
     path::{Path, PathBuf},
 };
 
-const SMTP_STARTTLS_PORT: u16 = 587;
-const SMTP_TLS_PORT: u16 = 465;
-const SMTP_PLAIN_PORT: u16 = 25;
 const DEFAULT_BIND_ADDRESS: &str = "0.0.0.0:3000";
 const DEFAULT_WEB_SESSION_TTL_SECONDS: i64 = 28_800;
-const MAX_WEB_SESSION_TTL_SECONDS: i64 = 2_592_000;
+pub const MIN_WEB_SESSION_TTL_SECONDS: i64 = 60;
+pub const MAX_WEB_SESSION_TTL_SECONDS: i64 = 2_592_000;
 
 #[derive(Clone)]
 pub struct Config {
@@ -31,33 +29,28 @@ pub struct Config {
     pub smtp: Option<SmtpConfig>,
 }
 
-/// Chiffrement de la connexion au relais SMTP (`SMTP_TLS`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SmtpTls {
-    /// Connexion en clair puis passage en TLS (port 587 par défaut).
-    #[serde(rename = "starttls")]
-    StartTls,
-    /// TLS dès la connexion (port 465 par défaut).
-    Tls,
-    /// Aucun chiffrement (port 25 par défaut) : à réserver à un relais local.
-    None,
+fn parse_smtp_tls(raw: &str) -> anyhow::Result<SmtpTls> {
+    Ok(serde_json::from_value(serde_json::Value::String(
+        raw.trim().to_lowercase(),
+    ))?)
 }
 
-impl SmtpTls {
-    pub const fn default_port(self) -> u16 {
-        match self {
-            Self::StartTls => SMTP_STARTTLS_PORT,
-            Self::Tls => SMTP_TLS_PORT,
-            Self::None => SMTP_PLAIN_PORT,
-        }
-    }
-
-    fn parse(raw: &str) -> anyhow::Result<Self> {
-        Ok(serde_json::from_value(serde_json::Value::String(
-            raw.trim().to_lowercase(),
-        ))?)
-    }
+/// Valide une origine web canonique sans chemin ni identifiants (`https://flux.exemple`).
+pub fn parse_canonical_web_origin(raw: &str) -> anyhow::Result<String> {
+    let trimmed = raw.trim();
+    let parsed_origin = reqwest::Url::parse(trimmed)?;
+    anyhow::ensure!(
+        (parsed_origin.scheme() == "https" || parsed_origin.scheme() == "http")
+            && parsed_origin.host_str().is_some()
+            && parsed_origin.path() == "/"
+            && parsed_origin.query().is_none()
+            && parsed_origin.fragment().is_none()
+            && parsed_origin.username().is_empty()
+            && parsed_origin.password().is_none()
+            && parsed_origin.origin().ascii_serialization() == trimmed,
+        "WEB_ORIGIN must be a canonical origin without path or credentials"
+    );
+    Ok(trimmed.to_owned())
 }
 
 /// Réglages SMTP. Le mot de passe vient d'un fichier ou de l'environnement, jamais de la base.
@@ -91,7 +84,7 @@ impl SmtpConfig {
             return Ok(None);
         };
         let tls = variable("SMTP_TLS")
-            .map(|raw| SmtpTls::parse(&raw))
+            .map(|raw| parse_smtp_tls(&raw))
             .transpose()?
             .unwrap_or(SmtpTls::StartTls);
         let port = variable("SMTP_PORT")
@@ -196,19 +189,7 @@ impl Config {
         );
 
         let web_origin = if let Ok(val) = env::var("WEB_ORIGIN") {
-            let parsed_origin = reqwest::Url::parse(&val)?;
-            anyhow::ensure!(
-                (parsed_origin.scheme() == "https" || parsed_origin.scheme() == "http")
-                    && parsed_origin.host_str().is_some()
-                    && parsed_origin.path() == "/"
-                    && parsed_origin.query().is_none()
-                    && parsed_origin.fragment().is_none()
-                    && parsed_origin.username().is_empty()
-                    && parsed_origin.password().is_none()
-                    && parsed_origin.origin().ascii_serialization() == val,
-                "WEB_ORIGIN must be a canonical origin without path or credentials"
-            );
-            Some(val)
+            Some(parse_canonical_web_origin(&val)?)
         } else {
             None
         };
@@ -217,7 +198,8 @@ impl Config {
             .unwrap_or_else(|_| DEFAULT_WEB_SESSION_TTL_SECONDS.to_string())
             .parse()?;
         anyhow::ensure!(
-            (60..=MAX_WEB_SESSION_TTL_SECONDS).contains(&web_session_ttl_seconds),
+            (MIN_WEB_SESSION_TTL_SECONDS..=MAX_WEB_SESSION_TTL_SECONDS)
+                .contains(&web_session_ttl_seconds),
             "WEB_SESSION_TTL_SECONDS must be between 60 and 2592000"
         );
 

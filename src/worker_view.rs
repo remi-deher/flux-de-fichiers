@@ -12,6 +12,7 @@ pub const JOBS_PATH: &str = "/api/v1/worker/jobs";
 pub const PLUGINS_PATH: &str = "/api/v1/worker/plugins";
 pub const LOGIN_PATH: &str = "/api/v1/worker/login";
 pub const ACCOUNTS_PATH: &str = "/api/v1/worker/accounts";
+pub const CHANGE_PASSWORD_PATH: &str = "/api/v1/worker/account/password";
 /// Nombre de tâches renvoyées pour un worker.
 pub const WORKER_JOBS_LIMIT: i64 = 100;
 
@@ -19,6 +20,13 @@ pub const WORKER_JOBS_LIMIT: i64 = 100;
 pub struct VerifyLoginRequest {
     pub username: String,
     pub password: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WorkerChangePasswordRequest {
+    pub username: String,
+    pub current_password: String,
+    pub new_password: String,
 }
 
 /// Compte dont le central a vérifié le mot de passe.

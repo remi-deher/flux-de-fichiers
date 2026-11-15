@@ -3,6 +3,9 @@
 use super::icon::{Icon, IconName};
 use leptos::ev;
 use leptos::prelude::*;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static DRAWER_SEQ: AtomicU64 = AtomicU64::new(1);
 
 /// Tiroir latéral d'un dossier (fiche, formulaire). `tabs` vide : un seul volet, sans onglets.
 #[component]
@@ -17,21 +20,41 @@ pub fn Drawer(
     children: ChildrenFn,
 ) -> impl IntoView {
     let tab = tab.unwrap_or_else(|| RwSignal::new(0));
+    let panel_ref = NodeRef::<leptos::html::Div>::new();
+    let title_id = format!(
+        "drawer-title-{}",
+        DRAWER_SEQ.fetch_add(1, Ordering::Relaxed)
+    );
+    let label_id = title_id.clone();
     let close = move || open.set(false);
     let _escape = window_event_listener(ev::keydown, move |event| {
         if event.key() == "Escape" && open.get_untracked() {
             close();
         }
     });
+    Effect::new(move |_| {
+        if open.get()
+            && let Some(panel) = panel_ref.get()
+        {
+            let _ = panel.focus();
+        }
+    });
     let has_tabs = tabs.len() > 1;
     view! {
         <aside class="inspection-drawer" class:is-open=move || open.get() aria-hidden=move || (!open.get()).to_string()>
             <button type="button" class="inspection-drawer__scrim" aria-label="Fermer le tiroir" on:click=move |_| close()></button>
-            <div class="inspection-drawer__panel" role="dialog" aria-modal="false" tabindex="-1">
+            <div
+                node_ref=panel_ref
+                class="inspection-drawer__panel"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby=label_id
+                tabindex="-1"
+            >
                 <header class="inspection-drawer__header">
                     <div class="inspection-drawer__identity">
                         <p class="inspection-drawer__eyebrow">{eyebrow}</p>
-                        <p class="inspection-panel__title">{move || title.get()}</p>
+                        <p id=title_id class="inspection-panel__title">{move || title.get()}</p>
                     </div>
                     {actions}
                     <button type="button" class="header-icon-btn" aria-label="Fermer le tiroir" on:click=move |_| close()>

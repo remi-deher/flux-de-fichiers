@@ -238,6 +238,7 @@ async fn remux_mp4_contract_runs_mp4box_and_reports_progress()
         plugin_configs: &HashMap::new(),
         tool_versions: &HashMap::new(),
         media_root: None,
+        allow_private_integrations: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -300,6 +301,7 @@ exit 2
         plugin_configs: &HashMap::new(),
         tool_versions: &HashMap::new(),
         media_root: None,
+        allow_private_integrations: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -388,6 +390,7 @@ exit 9
         plugin_configs: &HashMap::new(),
         tool_versions: &HashMap::new(),
         media_root: None,
+        allow_private_integrations: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -425,6 +428,7 @@ async fn mkvpropedit_skips_when_unchanged_and_fails_cleanly_on_error()
         plugin_configs: &HashMap::new(),
         tool_versions: &HashMap::new(),
         media_root: None,
+        allow_private_integrations: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, dir.path(), progress)
     .await

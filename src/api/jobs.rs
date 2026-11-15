@@ -144,6 +144,7 @@ pub async fn report_steps(
         &LeaseRequest {
             worker_id: r.worker_id,
             lease_token: r.lease_token,
+            lease_epoch: r.lease_epoch,
             telemetry: None,
         },
     )
@@ -213,6 +214,7 @@ pub async fn progress(
         &LeaseRequest {
             worker_id: r.worker_id,
             lease_token: r.lease_token,
+            lease_epoch: r.lease_epoch,
             telemetry: None,
         },
     )
@@ -238,6 +240,7 @@ pub async fn failure(
         &LeaseRequest {
             worker_id: r.worker_id,
             lease_token: r.lease_token,
+            lease_epoch: r.lease_epoch,
             telemetry: None,
         },
         error_code,

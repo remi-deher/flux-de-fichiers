@@ -30,10 +30,14 @@ pub use contract::{
 pub use custom_args::{CustomArgsError, parse_custom_args, safe_custom_args};
 pub use flux_shared::flows::{FlowBlockKind, FlowConnection, FlowGraph, FlowNode, FlowRecord};
 pub use header_secrets::{
-    decrypt_definition_headers, has_webhook_headers, mask_definition, migrate_flow_secrets,
-    rotate_definition, seal_definition,
+    decrypt_definition_headers, extract_and_mask_definition_headers, has_webhook_headers,
+    inject_definition_headers, mask_definition, migrate_flow_secrets, rotate_definition,
+    seal_definition,
 };
-pub use lease_secrets::{decrypt_plugin_settings_value, load_flow_plugin_configs};
+pub use lease_secrets::{
+    decrypt_plugin_settings_value, load_flow_plugin_configs, seal_claim_secrets_for_worker,
+    unseal_claim_secrets_for_worker,
+};
 
 const MAX_FLOW_STEPS: usize = 32;
 
@@ -100,6 +104,7 @@ pub struct FlowEngine<'a> {
     pub plugin_configs: &'a HashMap<String, Value>,
     pub tool_versions: &'a HashMap<String, String>,
     pub media_root: Option<&'a Path>,
+    pub allow_private_integrations: Option<bool>,
 }
 
 impl<'a> FlowEngine<'a> {
@@ -341,7 +346,14 @@ impl<'a> FlowEngine<'a> {
                     }
                 }
                 OperationRuntime::Http(http_rt) => {
-                    match http_runner::execute_http_operation(
+                    let outbound_policy = crate::net_policy::OutboundPolicy {
+                        allow_private_hosts: self.allow_private_integrations.unwrap_or_else(|| {
+                            crate::net_policy::OutboundPolicy::integration_from_env()
+                                .allow_private_hosts
+                        }),
+                        require_https: false,
+                    };
+                    match http_runner::execute_http_operation_with_policy(
                         http_rt,
                         &flow.id,
                         &node.id,
@@ -350,6 +362,7 @@ impl<'a> FlowEngine<'a> {
                         &step_ctx,
                         self.secrets_dir,
                         self.http_client,
+                        outbound_policy,
                     )
                     .await
                     {

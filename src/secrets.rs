@@ -97,6 +97,30 @@ impl SecretBox {
         encode_hex(&ChaCha20Poly1305::generate_key(&mut OsRng))
     }
 
+    /// Boîte dérivée du secret d'un worker pour protéger les secrets d'un bail `(job_id, lease_epoch)`.
+    pub fn for_worker_lease(
+        worker_bearer_key: &str,
+        job_id: uuid::Uuid,
+        lease_epoch: i64,
+    ) -> AppResult<Self> {
+        let trimmed = worker_bearer_key.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::Unauthorized);
+        }
+        let mut hasher = Sha256::new();
+        hasher.update(b"flux-lease-secrets-v1:");
+        hasher.update(trimmed.as_bytes());
+        hasher.update(b":");
+        hasher.update(job_id.as_bytes());
+        hasher.update(b":");
+        hasher.update(lease_epoch.to_be_bytes());
+        let key_bytes = hasher.finalize();
+        Ok(Self {
+            cipher: ChaCha20Poly1305::new(Key::from_slice(&key_bytes)),
+            key_id: key_id_of(&key_bytes),
+        })
+    }
+
     /// Fichier de la clé locale dans le dossier de configuration.
     pub fn local_key_path(config_dir: &Path) -> std::path::PathBuf {
         config_dir.join(KEY_FILE_NAME)

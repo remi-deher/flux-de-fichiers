@@ -4,12 +4,14 @@ use super::{AdminAuth, AppState, ViewOverviewAuth};
 use crate::{
     config::Config,
     error::AppResult,
+    runtime_settings::{self, EffectiveRuntimeSettings},
     secrets::{KEY_FILE_ENV, SecretBox},
     telemetry::{TelemetryProbe, TelemetrySnapshot},
 };
 use axum::{Json, extract::State};
 pub use flux_shared::system::{
-    HardwareStatus, KeySource, NetworkStatus, StorageStatus, SystemStatus, VolumeSpace,
+    HardwareStatus, KeySource, NetworkStatus, StorageStatus, SystemStatus,
+    UpdateSystemSettingsRequest, VolumeSpace,
 };
 use std::path::{Path, PathBuf};
 
@@ -84,12 +86,8 @@ pub async fn hardware(
     Json(hardware_status(probe.sample()))
 }
 
-pub async fn status(
-    State(state): State<AppState>,
-    _auth: AdminAuth,
-) -> AppResult<Json<SystemStatus>> {
-    let secrets = SecretBox::open(&state.config.config_dir)?;
-    Ok(Json(SystemStatus {
+fn build_system_status(effective: &EffectiveRuntimeSettings, secrets: &SecretBox) -> SystemStatus {
+    SystemStatus {
         version: env!("CARGO_PKG_VERSION").to_owned(),
         key_id: secrets.key_id().to_owned(),
         key_source: if std::env::var(KEY_FILE_ENV).is_ok() {
@@ -97,10 +95,32 @@ pub async fn status(
         } else {
             KeySource::Local
         },
-        database_bytes: database_size(&state.config.database_url),
-        network: network_status(&state.config),
-        storage: storage_status(&state.config),
-    }))
+        database_bytes: database_size(&effective.config.database_url),
+        network: network_status(&effective.config),
+        storage: storage_status(&effective.config),
+        smtp: effective.smtp_status.clone(),
+        outbound: effective.outbound,
+    }
+}
+
+pub async fn status(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+) -> AppResult<Json<SystemStatus>> {
+    let secrets = SecretBox::open(&state.config.config_dir)?;
+    let effective = runtime_settings::load_effective(&state.pool, &state.config).await;
+    Ok(Json(build_system_status(&effective, &secrets)))
+}
+
+/// Met à jour les réglages réseau, session, SMTP et politique sortante (Lots B & C).
+pub async fn update_settings(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Json(request): Json<UpdateSystemSettingsRequest>,
+) -> AppResult<Json<SystemStatus>> {
+    let secrets = SecretBox::open(&state.config.config_dir)?;
+    let effective = runtime_settings::update(&state.pool, &state.config, request).await?;
+    Ok(Json(build_system_status(&effective, &secrets)))
 }
 
 #[cfg(test)]

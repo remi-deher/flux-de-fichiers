@@ -5,7 +5,8 @@ use super::dnd::{
     duplicate_subgraph, insert_on_branch,
 };
 use super::geometry::{
-    GRID_STEP, Point, ROW_STRIDE, Viewport, default_positions, place_with_positions, snap_point,
+    GRID_STEP, Point, ROW_STRIDE, Viewport, default_positions, place_with_positions,
+    resolve_node_origin, snap_point,
 };
 #[cfg(not(test))]
 use crate::prefs;
@@ -429,13 +430,13 @@ impl Editor {
     }
 
     pub fn node_point(&self, id: &str) -> Point {
-        self.positions
-            .with_untracked(|custom| custom.get(id).copied())
-            .or_else(|| {
-                self.graph
-                    .with_untracked(|graph| default_positions(graph).get(id).copied())
-            })
-            .unwrap_or(Point { x: 72.0, y: 64.0 })
+        if let Some(custom) = self.positions.with_untracked(|map| map.get(id).copied()) {
+            return custom;
+        }
+        self.graph.with_untracked(|graph| {
+            let default = default_positions(graph).get(id).copied();
+            resolve_node_origin(graph.node(id), None, default)
+        })
     }
 
     /// Ouvre le pop-over Quick-Add contextuel sur le canevas.
@@ -1060,5 +1061,26 @@ mod tests {
         editor.clear_selection();
         assert!(editor.selected_ids.get_untracked().is_empty());
         assert!(!editor.is_selected(&input));
+    }
+
+    #[test]
+    fn node_point_respects_extra_position_before_custom_override() {
+        let catalog = test_catalog();
+        let mut graph = FlowGraph::default();
+        let id = graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            &catalog,
+        );
+        if let Some(node) = graph.node_mut(&id) {
+            node.extra
+                .insert("position".into(), json!({ "x": 360.0, "y": 192.0 }));
+        }
+        let editor = Editor::for_flow(None, graph);
+        assert_eq!(editor.node_point(&id), Point { x: 360.0, y: 192.0 });
+
+        editor.set_node_position(&id, Point { x: 432.0, y: 264.0 });
+        assert_eq!(editor.node_point(&id), Point { x: 432.0, y: 264.0 });
     }
 }

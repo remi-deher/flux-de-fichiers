@@ -208,16 +208,26 @@ pub fn Palette(editor: Editor) -> impl IntoView {
                                                     defaults,
                                                 };
                                                 let click_spec = spec.clone();
+                                                let key_spec = spec;
+                                                let add_block = move |chosen: &OwnedBlockSpec| {
+                                                    if let Err(err) = editor.add_or_insert_block(chosen) {
+                                                        Toasts::notify_error(err.message());
+                                                    }
+                                                };
                                                 view! {
                                                     <DragItem editor=editor payload=payload class="flow-palette__drag">
-                                                        <button
-                                                            type="button"
+                                                        <div
+                                                            role="button"
+                                                            tabindex="0"
                                                             class="flow-palette__card"
                                                             style=accent_style
                                                             title=description
-                                                            on:click=move |_| {
-                                                                if let Err(err) = editor.add_or_insert_block(&click_spec) {
-                                                                    Toasts::notify_error(err.message());
+                                                            on:click=move |_| add_block(&click_spec)
+                                                            on:keydown=move |event| {
+                                                                let key = event.key();
+                                                                if key == "Enter" || key == " " {
+                                                                    event.prevent_default();
+                                                                    add_block(&key_spec);
                                                                 }
                                                             }
                                                         >
@@ -229,7 +239,7 @@ pub fn Palette(editor: Editor) -> impl IntoView {
                                                                 <span class="flow-palette__card-meta">{plugin_label}</span>
                                                             </span>
                                                             <span class="flow-palette__card-plus" aria-hidden="true">"+"</span>
-                                                        </button>
+                                                        </div>
                                                     </DragItem>
                                                 }
                                             })

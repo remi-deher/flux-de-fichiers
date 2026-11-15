@@ -1,35 +1,6 @@
-//! Règles d'affichage des tâches, sans DOM : libellés, filtres et mise à jour en direct.
+//! Règles d'affichage des tâches, sans DOM : libellés et mise à jour en direct.
 
-use crate::ui::{IconName, SubTab};
 use flux_shared::jobs::{Job, JobErrorCode, JobEvent, JobEventType, JobStatus};
-
-/// Onglet de l'écran Activité : la file en direct, l'historique ou les échecs à diagnostiquer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum JobFilter {
-    Live,
-    History,
-    Diagnostic,
-}
-
-impl JobFilter {
-    pub const TABS: [Self; 3] = [Self::Live, Self::History, Self::Diagnostic];
-
-    pub fn tab(self) -> SubTab {
-        match self {
-            Self::Live => SubTab::new("File en direct", IconName::Activity),
-            Self::History => SubTab::new("Historique", IconName::Clock),
-            Self::Diagnostic => SubTab::new("Diagnostic", IconName::Shield),
-        }
-    }
-
-    pub fn accepts(self, job: &Job) -> bool {
-        match self {
-            Self::Live => matches!(job.status, JobStatus::Queued | JobStatus::Running),
-            Self::History => matches!(job.status, JobStatus::Succeeded | JobStatus::Failed),
-            Self::Diagnostic => job.status == JobStatus::Failed,
-        }
-    }
-}
 
 pub fn status_label(status: JobStatus) -> &'static str {
     match status {
@@ -105,23 +76,21 @@ pub fn may_have_more(page_len: usize) -> bool {
     page_len >= JOBS_PAGE_SIZE
 }
 
-/// Synthèse `(en_cours, terminées, échouées, diagnostic)` des tâches chargées.
+/// Synthèse `(en_cours, en_attente, terminées, échouées)` des tâches chargées.
 pub fn summarize_jobs(jobs: &[Job]) -> (usize, usize, usize, usize) {
-    let mut active = 0_usize;
+    let mut running = 0_usize;
+    let mut queued = 0_usize;
     let mut completed = 0_usize;
     let mut failed = 0_usize;
     for job in jobs {
         match job.status {
-            JobStatus::Queued | JobStatus::Running => active += 1,
+            JobStatus::Running => running += 1,
+            JobStatus::Queued => queued += 1,
             JobStatus::Succeeded => completed += 1,
             JobStatus::Failed => failed += 1,
         }
     }
-    let diagnostic = jobs
-        .iter()
-        .filter(|job| JobFilter::Diagnostic.accepts(job))
-        .count();
-    (active, completed, failed, diagnostic)
+    (running, queued, completed, failed)
 }
 
 #[cfg(test)]
@@ -150,22 +119,6 @@ mod tests {
     fn only_a_full_page_suggests_more() {
         assert!(may_have_more(JOBS_PAGE_SIZE));
         assert!(!may_have_more(JOBS_PAGE_SIZE - 1));
-    }
-
-    #[test]
-    fn every_status_appears_in_the_live_queue_or_the_history() -> Result<(), serde_json::Error> {
-        use flux_shared::jobs::{Job, MAX_ATTEMPTS};
-        let job: Job = serde_json::from_value(serde_json::json!({
-            "id": "00000000-0000-0000-0000-000000000001", "source_name": "a.mkv", "source_sha256": null,
-            "source_bytes": null, "output_sha256": null, "output_bytes": null, "warning": false,
-            "target_worker_id": null, "worker_id": null, "status": "failed", "attempts": MAX_ATTEMPTS,
-            "leased_until": null, "output_name": null, "error_code": null, "flow_id": null,
-            "flow_version": null, "created_at": "2026-11-14T10:00:00Z", "updated_at": "2026-11-14T10:00:00Z"
-        }))?;
-        assert!(JobFilter::History.accepts(&job) && JobFilter::Diagnostic.accepts(&job));
-        assert!(!JobFilter::Live.accepts(&job));
-        assert_eq!(JobFilter::TABS.len(), 3);
-        Ok(())
     }
 
     #[test]
@@ -217,8 +170,8 @@ mod tests {
     }
 
     #[test]
-    fn summarize_jobs_counts_active_completed_failed_and_diagnostic()
-    -> Result<(), serde_json::Error> {
+    fn summarize_jobs_counts_running_queued_completed_and_failed() -> Result<(), serde_json::Error>
+    {
         let queued = job(1)?;
         let running = Job {
             status: JobStatus::Running,
@@ -234,7 +187,7 @@ mod tests {
         };
         assert_eq!(
             summarize_jobs(&[queued, running, succeeded, failed]),
-            (2, 1, 1, 1)
+            (1, 1, 1, 1)
         );
         assert_eq!(summarize_jobs(&[]), (0, 0, 0, 0));
         Ok(())

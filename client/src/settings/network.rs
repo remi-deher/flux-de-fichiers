@@ -1,14 +1,9 @@
-//! Onglet Réseau : configuration du central, connectivité des workers et diagnostic.
+//! Configuration réseau du central (lecture seule).
 
-use super::network_diagnostics::DiagnosticsCard;
-use super::network_workers::WorkersConnectivityCard;
 use super::system::{DetailGrid, DetailRow, duration_label};
-use crate::api;
 use crate::ui::SectionHeader;
 use flux_shared::system::{NetworkStatus, SystemStatus};
 use leptos::prelude::*;
-
-const STATUS_PATH: &str = "/api/v1/system/status";
 
 fn tls_label(direct: bool) -> &'static str {
     if direct {
@@ -54,14 +49,16 @@ fn environment_block(network: &NetworkStatus) -> String {
 }
 
 #[component]
-fn ConfigurationCard() -> impl IntoView {
-    let status = LocalResource::new(|| api::get::<SystemStatus>(STATUS_PATH));
+pub fn ConfigurationCard(
+    status: Signal<Option<Result<SystemStatus, String>>>,
+    hidden: Signal<bool>,
+) -> impl IntoView {
     view! {
-        <div class="settings-section">
-            <SectionHeader title="Configuration" subtitle="Port HTTP unique, TLS et sessions web (lecture seule)." />
+        <section class="section-panel settings-section" hidden=move || hidden.get()>
+            <SectionHeader title="Configuration réseau" subtitle="Port HTTP unique, TLS et sessions web (lecture seule)." />
             {move || match status.get() {
                 None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),
-                Some(Err(error)) => view! { <p class="text-danger">{error.message()}</p> }.into_any(),
+                Some(Err(message)) => view! { <p class="text-danger">{message}</p> }.into_any(),
                 Some(Ok(status)) => view! {
                     <DetailGrid rows=network_rows(&status.network) />
                     <pre class="code-block-wrapper"><code>{environment_block(&status.network)}</code></pre>
@@ -70,16 +67,7 @@ fn ConfigurationCard() -> impl IntoView {
             <p class="form-help">
                 "Ces réglages viennent de l'environnement du central ; les changer demande de redémarrer le conteneur."
             </p>
-        </div>
-    }
-}
-
-#[component]
-pub fn NetworkSection() -> impl IntoView {
-    view! {
-        <ConfigurationCard />
-        <WorkersConnectivityCard />
-        <DiagnosticsCard />
+        </section>
     }
 }
 

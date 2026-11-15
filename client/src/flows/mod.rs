@@ -16,9 +16,7 @@ pub use editor::FlowEditor;
 use crate::route::{Link, Route, encode_segment, use_router};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
-use crate::ui::{
-    EmptyState, Icon, IconName, MetricTone, PageHeader, StatItem, StatStrip, StatusBadge, Toasts,
-};
+use crate::ui::{EmptyState, Icon, IconName, MetricTone, StatItem, StatStrip, StatusBadge, Toasts};
 use crate::{api, format};
 use flux_shared::Permission;
 use flux_shared::flows::{FlowGraph, FlowRecord};
@@ -220,25 +218,8 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
             }
         }
     };
-    let header_actions = can_manage
-        .then(|| {
-            view! {
-                <Link to=Route::NewFlow class="btn btn-primary">
-                    <Icon name=IconName::Plus size=15 />
-                    <span>"Nouveau flux"</span>
-                </Link>
-            }
-        })
-        .into_any();
     view! {
         <div class="tab-panel" role="tabpanel">
-            <PageHeader
-                eyebrow="Traitements"
-                title="Flows"
-                subtitle="Pipelines nodaux d'analyse, de filtrage et de remuxing MKV."
-                icon=IconName::Flows
-                actions=header_actions
-            />
             <StatStrip aria_label="Synthèse des flows" items=stats />
             {grid}
         </div>

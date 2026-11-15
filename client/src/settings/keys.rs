@@ -2,6 +2,7 @@
 
 use super::account::role_label;
 use crate::api;
+use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, Icon, IconName, SectionHeader, Toasts};
 use flux_shared::Role;
 use flux_shared::accounts::{ApiKeyRecord, CreateKeyRequest, CreatedKey};
@@ -59,8 +60,41 @@ pub fn KeysSection() -> impl IntoView {
         </button>
     }
     .into_any();
+    let visible_rows = Signal::derive(move || {
+        let text = query();
+        let list = keys.get().and_then(Result::ok).unwrap_or_default();
+        let section_hit = !text.trim().is_empty()
+            && matches(
+                &[
+                    "clés d'api",
+                    "cles d'api",
+                    "api",
+                    "jeton",
+                    "token",
+                    "worker",
+                ],
+                &text,
+            );
+        if text.trim().is_empty() || section_hit {
+            (true, list)
+        } else {
+            let filtered: Vec<ApiKeyRecord> = list
+                .into_iter()
+                .filter(|key| {
+                    let role = match Role::parse(&key.role) {
+                        Some(r) => role_label(r),
+                        None => key.role.as_str(),
+                    };
+                    matches(&[&key.name, role, &key.role], &text)
+                })
+                .collect();
+            (!filtered.is_empty(), filtered)
+        }
+    });
     view! {
-        <section class="section-panel">
+        <section class="section-panel settings-section" hidden=move || {
+            keys.get().is_some() && !visible_rows.get().0
+        }>
             <SectionHeader
                 title="Clés d'API"
                 subtitle="Jetons d'authentification des workers et accès automatisés."
@@ -81,7 +115,7 @@ pub fn KeysSection() -> impl IntoView {
                         <th scope="col">"État"</th><th scope="col" class="cell-end">"Action"</th>
                     </tr></thead>
                     <tbody>
-                        {move || keys.get().and_then(Result::ok).unwrap_or_default().into_iter().map(|key| {
+                        {move || visible_rows.get().1.into_iter().map(|key| {
                             let id = key.id.clone();
                             let revoked = key.revoked_at.is_some();
                             let role = Role::parse(&key.role).map_or(key.role.clone(), |role| role_label(role).to_owned());

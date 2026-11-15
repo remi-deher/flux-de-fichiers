@@ -1,5 +1,5 @@
-//! Écran Activité : file en direct, historique et diagnostic, fiche et création dans des tiroirs,
-//! relance manuelle (ADR 0012, 0014).
+//! Écran Activité : registre unifié, filtrage par état/période, fiche détaillée et diagnostic
+//! dans un tiroir, relance manuelle (ADR 0012, 0014).
 
 mod detail;
 mod live;
@@ -9,16 +9,16 @@ pub mod table;
 pub use live::LiveJobs;
 
 use crate::api;
-use crate::ui::filters::period;
+use crate::ui::filters::{job_state, period};
 use crate::ui::search::{matches, query};
-use crate::ui::{Drawer, IconName, MetricTone, PageHeader, StatItem, StatStrip, SubNav, SubTab};
+use crate::ui::{Drawer, MetricTone, StatItem, StatStrip};
 use chrono::Utc;
 use detail::JobDetail;
 use flux_shared::jobs::Job;
 use flux_shared::session::Me;
 use flux_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
-use model::{JOBS_PAGE_SIZE, JobFilter, may_have_more, merge_pages, summarize_jobs};
+use model::{JOBS_PAGE_SIZE, may_have_more, merge_pages, summarize_jobs};
 use std::collections::HashMap;
 use table::JobsTable;
 use uuid::Uuid;
@@ -36,7 +36,6 @@ pub fn JobsPage(me: Me) -> impl IntoView {
         || RwSignal::new(HashMap::<Uuid, u32>::new()),
         |live| live.progress,
     );
-    let tab = RwSignal::new(0_usize);
     let selected = RwSignal::new(None::<Uuid>);
     let detail_open = RwSignal::new(false);
     let first_page = LocalResource::new(move || {
@@ -75,7 +74,7 @@ pub fn JobsPage(me: Me) -> impl IntoView {
     });
     let all_jobs = Signal::derive(move || jobs.get().and_then(Result::ok).unwrap_or_default());
     let visible = Signal::derive(move || {
-        let filter = JobFilter::TABS[tab.get()];
+        let state = job_state();
         let text = query();
         let period = period();
         let now = Utc::now();
@@ -84,7 +83,7 @@ pub fn JobsPage(me: Me) -> impl IntoView {
                 .map(|list| {
                     list.into_iter()
                         .filter(|job| {
-                            filter.accepts(job)
+                            state.accepts(job)
                                 && period.accepts(job.created_at, now)
                                 && matches(&[&job.source_name, &job.id.to_string()], &text)
                         })
@@ -109,9 +108,10 @@ pub fn JobsPage(me: Me) -> impl IntoView {
     });
     let stats = Signal::derive(move || {
         let list = all_jobs.get();
-        let (active, completed, failed, diagnostic) = summarize_jobs(&list);
+        let (running, queued, completed, failed) = summarize_jobs(&list);
         vec![
-            StatItem::new("En cours", active.to_string(), MetricTone::Neutral),
+            StatItem::new("En cours", running.to_string(), MetricTone::Neutral),
+            StatItem::new("En attente", queued.to_string(), MetricTone::Neutral),
             StatItem::new("Terminées", completed.to_string(), MetricTone::Success),
             StatItem::new(
                 "Échouées",
@@ -122,40 +122,11 @@ pub fn JobsPage(me: Me) -> impl IntoView {
                     MetricTone::Neutral
                 },
             ),
-            StatItem::new(
-                "Diagnostic",
-                diagnostic.to_string(),
-                if diagnostic > 0 {
-                    MetricTone::Warning
-                } else {
-                    MetricTone::Neutral
-                },
-            )
-            .with_detail("à analyser"),
-        ]
-    });
-    let tabs: Signal<Vec<SubTab>> = Signal::derive(move || {
-        let list = all_jobs.get();
-        let (active, completed, failed, diagnostic) = summarize_jobs(&list);
-        let history = completed + failed;
-        vec![
-            JobFilter::Live.tab().with_badge(active),
-            JobFilter::History.tab().with_badge(history),
-            JobFilter::Diagnostic.tab().with_badge(diagnostic),
         ]
     });
     view! {
         <div class="tab-panel" role="tabpanel">
-            <PageHeader
-                eyebrow="Traitements"
-                title="Activité"
-                subtitle="File d'exécution en temps réel, historique et diagnostic des tâches."
-                icon=IconName::Activity
-            />
             <StatStrip aria_label="Synthèse de l'activité" items=stats />
-            <SubNav aria_label="Sous-navigation de l'activité"
-                tabs=tabs
-                selected=tab />
             <div class="registre">
                 <JobsTable jobs=visible progress=progress selected=selected on_open=open />
             </div>

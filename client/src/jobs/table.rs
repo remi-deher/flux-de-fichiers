@@ -46,13 +46,15 @@ pub fn JobsTable(
                     let id = job.id;
                     let status = job.status;
                     view! {
-                        <tr class="registre-row" class:is-open=move || selected.get() == Some(id)>
+                        <tr class="registre-row is-clickable" class:is-open=move || selected.get() == Some(id)
+                            on:click=move |_| on_open.run(id)>
                             <td class="text-strong truncate">{job.source_name.clone()}</td>
                             <td><StatusBadge label=status_label(job.status) variant=status_tone(job.status) /></td>
                             <td>{job_progress_cell(id, status, Some(progress))}</td>
                             <td class="text-dim">{format::datetime(job.created_at)}</td>
                             <td class="cell-end">
-                                <button type="button" class="btn btn-secondary btn-sm registre-open-btn" on:click=move |_| on_open.run(id)>"Ouvrir"</button>
+                                <button type="button" class="btn btn-secondary btn-sm registre-open-btn"
+                                    on:click=move |event| { event.stop_propagation(); on_open.run(id); }>"Ouvrir"</button>
                             </td>
                         </tr>
                     }

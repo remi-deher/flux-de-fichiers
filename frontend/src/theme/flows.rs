@@ -1,4 +1,4 @@
-//! Styles du concepteur de flux visuel (Flows) en Rust typé.
+//! Styles de l'atelier de flux (liste des flux, barre de commande, réglages et validation).
 
 pub const FLOWS_CSS: &str = r#"
 /* --- Concepteur et Gestionnaire de Flux (Flows) --- */
@@ -9,22 +9,11 @@ pub const FLOWS_CSS: &str = r#"
   resize: vertical;
 }
 
-.canvas-empty-hint {
-  color: var(--text-dim);
-  text-align: center;
-  padding: 2rem 1rem;
-}
-
 .flow-card__pipeline {
   padding: 0.65rem 0.75rem;
   background: var(--bg-subtle);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-}
-
-.flow-pipeline-container {
-  overflow-x: auto;
-  padding: 0.75rem 0;
 }
 
 .flow-pipeline {
@@ -59,364 +48,350 @@ pub const FLOWS_CSS: &str = r#"
   user-select: none;
 }
 
-.pipeline-step-node.in-place {
-  border-color: var(--success);
-  background: var(--success-bg);
-}
-
-.pipeline-step-node.working-file {
-  border-color: var(--info);
-  background: var(--info-bg);
-}
-
-.pipeline-arrow {
-  color: var(--text-muted);
-  font-size: 1rem;
-}
-
-/* --- Canvas Visuel No-Code (Zapier / FileFlows style) --- */
-.canvas-header-bar {
+/* --- Atelier plein écran (Workbench) --- */
+.flow-workbench {
+  flex: 1;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.875rem 1.25rem;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
-  border-bottom: none;
-  box-shadow: var(--shadow-sm);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-.canvas-header-bar__identity {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.canvas-header-bar__title {
-  margin: 0;
-  font-size: 1.25rem;
-}
-
-.canvas-workspace-layout {
-  display: flex;
-  min-height: calc(100vh - 220px);
-  height: calc(100vh - 220px);
-  max-height: 85vh;
-  border: 1px solid var(--border-color);
-  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
   overflow: hidden;
+  background: var(--bg-app);
+}
+
+.flow-workbench__readonly,
+.flow-workbench__feedback {
+  margin: 0;
+  padding: 0.45rem 1rem;
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-card);
-  box-shadow: var(--shadow-sm);
-}
-
-.canvas-blocks-sidebar {
-  width: 260px;
-  background: var(--bg-subtle);
-  border-right: 1px solid var(--border-color);
-  padding: 1rem;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.sidebar-block-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.sidebar-group-title {
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
   color: var(--text-dim);
-  letter-spacing: 0.05em;
 }
 
-.draggable-block-item {
+.flow-workbench__readonly {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+/* --- Barre de commande de l'atelier --- */
+.flow-command-bar {
   display: flex;
   align-items: center;
-  gap: 0.625rem;
-  padding: 0.625rem 0.75rem;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  flex-wrap: wrap;
+  min-height: 56px;
+  padding: 0.55rem 1rem;
   background: var(--bg-card);
-  border: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  z-index: 20;
+  flex-shrink: 0;
+}
+
+.flow-command-bar__lead {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  flex: 1 1 20rem;
+}
+
+.flow-command-bar__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.flow-command-bar__title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.flow-title-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-main);
+  font-size: 1rem;
+  font-weight: 700;
+  padding: 0.12rem 0.45rem;
+  margin-left: -0.45rem;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.2s ease;
-  user-select: none;
+  text-align: left;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-.draggable-block-item:hover {
-  border-color: var(--primary);
-  background: var(--info-bg);
+.flow-title-btn:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--border-color);
 }
 
-.draggable-block-item.addable .block-add-plus {
-  margin-left: auto;
-  font-weight: bold;
-  font-size: 1.1rem;
-  color: var(--primary);
+.flow-title-btn:disabled {
+  cursor: default;
 }
 
-.block-drag-icon {
-  font-size: 1.25rem;
-}
-
-.block-drag-info {
-  display: flex;
-  flex-direction: column;
-  font-size: 0.8125rem;
-}
-
-.block-drag-info strong {
-  color: var(--text-main);
-}
-
-.block-drag-info span {
-  font-size: 0.6875rem;
-  color: var(--text-dim);
-}
-
-.canvas-board-wrapper {
-  flex: 1;
-  position: relative;
-  background-color: var(--bg-app);
-  background-image: radial-gradient(circle, var(--border-color) 1px, transparent 1px);
-  background-size: 24px 24px;
-  overflow-y: auto;
-  padding: 2.5rem 1.5rem;
-  display: flex;
-  justify-content: center;
-}
-
-.canvas-connections-svg {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 1;
-}
-
-.canvas-nodes-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2.5rem;
-  width: 100%;
-  max-width: 520px;
-  position: relative;
-  z-index: 2;
-}
-
-.canvas-node {
-  width: 100%;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 1rem;
-  box-shadow: var(--shadow-sm);
-  position: relative;
-  transition: all 0.2s ease;
-  cursor: pointer;
-}
-
-.canvas-node:hover,
-.canvas-node.selected {
-  border-color: var(--primary);
-  box-shadow: 0 4px 16px rgba(88, 166, 255, 0.15);
-}
-
-.node-header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.node-icon {
-  font-size: 1.5rem;
-}
-
-.node-title-box {
-  flex: 1;
-}
-
-.node-kind {
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-  color: var(--text-dim);
+.flow-title-input {
+  font-size: 1rem;
   font-weight: 700;
-  letter-spacing: 0.05em;
-}
-
-.node-name {
-  font-size: 0.9375rem;
-  font-weight: 600;
+  padding: 0.18rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--primary);
+  background: var(--bg-elevated);
   color: var(--text-main);
-  margin: 0;
+  min-width: 220px;
+  max-width: 340px;
 }
 
-.node-summary {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border-color);
-  font-size: 0.8125rem;
+.flow-command-bar__pills {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.flow-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.12rem 0.5rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid var(--border-color);
+  background: var(--bg-subtle);
   color: var(--text-dim);
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
-/* Connecteurs de nœuds */
-.node-connector {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 12px;
-  height: 12px;
+.flow-pill--mask {
+  cursor: pointer;
+  color: var(--primary);
+  background: var(--primary-bg);
+  border-color: var(--border-highlight);
+}
+
+.flow-pill--mask:hover {
+  filter: brightness(1.08);
+}
+
+.flow-pill--default {
+  color: var(--success);
+  background: var(--success-bg);
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
+}
+
+.flow-pill--state.is-saved {
+  color: var(--success);
+  background: var(--success-bg);
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
+}
+
+.flow-pill--state.is-unsaved {
+  color: var(--warning);
+  background: var(--warning-bg);
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+}
+
+.flow-pill--state .status-dot {
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--bg-card);
-  border: 2px solid var(--primary);
+  background: currentColor;
 }
 
-.connector-in {
-  top: -6px;
+.flow-command-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
 }
 
-.connector-out {
-  bottom: -6px;
+.flow-cmd-btn[aria-pressed="true"] {
+  background: var(--primary-bg);
+  color: var(--primary);
+  border-color: var(--border-highlight);
 }
 
-/* Tiroir inspecteur latéral */
-.canvas-inspector-drawer {
+.flow-cmd-btn__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.32rem;
+  border-radius: var(--radius-pill);
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.flow-cmd-btn__count.is-error {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+/* --- Zone centrale de travail (Palette + Canevas + Inspecteur/Réglages) --- */
+.flow-workspace-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+/* --- Tiroir latéral Réglages & Versions --- */
+.flow-settings-drawer {
   width: 340px;
+  flex-shrink: 0;
   background: var(--bg-card);
   border-left: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  transition: width 0.2s ease, transform 0.2s ease;
+  min-height: 0;
+  transition: width 0.2s var(--ease-out);
+  z-index: 15;
 }
 
-.canvas-inspector-drawer.closed {
+.flow-settings-drawer.is-closed {
   width: 0;
   border-left: none;
   overflow: hidden;
 }
 
-.inspector-header {
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid var(--border-color);
-  display: flex;
-  justify-content: space-between;
+.flow-settings__toggle {
+  display: inline-flex;
   align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-main);
+  cursor: pointer;
 }
 
-.inspector-body {
-  padding: 1.25rem;
+/* --- Bandeau inférieur Diagnostics & Validation --- */
+.flow-diagnostics-tray {
+  background: var(--bg-card);
+  border-top: 1px solid var(--border-color);
+  max-height: 220px;
   overflow-y: auto;
-  flex: 1;
+  flex-shrink: 0;
+  z-index: 18;
+}
+
+.flow-diagnostics-tray.is-closed {
+  display: none;
+}
+
+.flow-diagnostics__inner {
+  padding: 0.75rem 1rem;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 0.6rem;
 }
 
-/* Lignes de connexion SVG */
-path.sim-base-line {
-  stroke: var(--border-color);
-  stroke-width: 2px;
-  fill: none;
+.flow-diagnostics__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
-path.sim-pulse-line {
-  stroke: var(--primary);
-  stroke-width: 3px;
-  stroke-dasharray: 6 6;
-  fill: none;
-  animation: pulseFlow 1s linear infinite;
+.flow-diagnostics__title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 
-@keyframes pulseFlow {
-  from {
-    stroke-dashoffset: 24;
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
+.flow-diagnostics__title {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-main);
 }
 
-/* --- Barre d'outils compacte de l'atelier nodal --- */
+.flow-diagnostics__count {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.flow-diagnostics__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.flow-diagnostic-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+  font-size: 0.8125rem;
+  color: var(--text-main);
+}
+
+.flow-diagnostic-item[data-level="error"] {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: var(--danger-bg);
+}
+
+.flow-diagnostic-item[data-level="warning"] {
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+  background: var(--warning-bg);
+}
+
+.flow-diagnostic-item[data-level="ok"] {
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.flow-diagnostic-item__level {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.flow-diagnostic-item__msg {
+  flex: 1;
+  min-width: 0;
+}
+
+.flow-headers__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Sélecteur historique conservé pour compatibilité des tests de thème. */
 .studio-toolbar {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 0.75rem 0.9rem;
-  margin-bottom: 0.75rem;
-  box-shadow: var(--shadow-sm);
 }
 
-.studio-toolbar__top {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.85rem;
-  flex-wrap: wrap;
-}
-
-.studio-toolbar__meta {
-  flex: 1 1 28rem;
-  display: flex;
-  align-items: flex-end;
-  gap: 0.65rem;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
-.studio-toolbar__field {
-  flex: 1 1 11rem;
-  min-width: 0;
-}
-
-.studio-toolbar__field--mask {
-  flex: 0 1 8.5rem;
-}
-
-.studio-toolbar__field--desc {
-  flex: 1.5 1 14rem;
-}
-
-.studio-toolbar__field .form-label {
-  font-size: 0.72rem;
-  margin-bottom: 0.25rem;
-}
-
-.studio-toolbar__field .form-input {
-  padding: 0.4rem 0.6rem;
-  font-size: 0.8125rem;
-}
-
-.studio-toolbar__actions {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-  margin-left: auto;
-}
-
-.studio-toolbar__status {
-  font-size: 0.75rem;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-
-.studio-toolbar__toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.8rem;
-  color: var(--text-dim);
-  cursor: pointer;
+@media (max-width: 960px) {
+  .flow-settings-drawer {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: min(340px, 100%);
+    box-shadow: var(--shadow-lg);
+  }
 }
 "#;

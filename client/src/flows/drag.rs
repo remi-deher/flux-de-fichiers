@@ -15,8 +15,9 @@ pub fn DragItem(
     /// Identifiant de la carte, si l'élément accepte aussi un dépôt.
     #[prop(optional, into)]
     target: Option<String>,
+    #[prop(optional, default = true)] draggable: bool,
     #[prop(optional)] class: &'static str,
-    #[prop(optional, into)] style: String,
+    #[prop(optional, into)] style: Signal<String>,
     children: Children,
 ) -> impl IntoView {
     let class_payload = payload.clone();
@@ -37,15 +38,20 @@ pub fn DragItem(
         )
     };
     let accepting = drop_state.clone();
+    let draggable_attr = if draggable { "true" } else { "false" };
     view! {
         <div
             class=class
             class:is-dragging=move || editor.drag.get().as_ref() == Some(&class_payload)
             class:is-drop-ok=move || drop_state() == Some(true)
             class:is-drop-refused=move || accepting() == Some(false)
-            style=style
-            draggable="true"
+            style=move || style.get()
+            draggable=draggable_attr
             on:dragstart=move |event| {
+                if !draggable {
+                    event.prevent_default();
+                    return;
+                }
                 editor.drop_notice.set(None);
                 editor.drag.set(Some(start_payload.clone()));
                 if let Some(transfer) = event.data_transfer() {
@@ -58,6 +64,7 @@ pub fn DragItem(
                 let Some(id) = over_target.clone() else { return };
                 if editor.drag.get_untracked().is_some() {
                     event.prevent_default();
+                    event.stop_propagation();
                     if editor.drop_target.get_untracked().as_deref() != Some(id.as_str()) {
                         editor.drop_target.set(Some(id));
                     }
@@ -77,6 +84,7 @@ pub fn DragItem(
             on:drop=move |event| {
                 let Some(id) = drop_target.clone() else { return };
                 event.prevent_default();
+                event.stop_propagation();
                 editor.drop_notice.set(editor.drop_on(&id).err());
             }
         >

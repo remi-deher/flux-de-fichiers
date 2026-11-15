@@ -4,8 +4,12 @@ pub struct ThemeTokens {
     // Surfaces
     pub bg_app: &'static str,
     pub bg_card: &'static str,
+    pub bg_elevated: &'static str,
     pub bg_subtle: &'static str,
+    pub bg_glass: &'static str,
     pub border_color: &'static str,
+    pub border_subtle: &'static str,
+    pub border_highlight: &'static str,
 
     // Typographie
     pub text_main: &'static str,
@@ -38,13 +42,19 @@ pub struct ThemeTokens {
     // Ombres
     pub shadow_sm: &'static str,
     pub shadow_md: &'static str,
+    pub shadow_lg: &'static str,
+    pub shadow_glow: &'static str,
 }
 
 pub const DARK_THEME: ThemeTokens = ThemeTokens {
     bg_app: "#0d1117",
     bg_card: "#161b22",
+    bg_elevated: "#1c2129",
     bg_subtle: "#21262d",
+    bg_glass: "rgba(22, 27, 34, 0.78)",
     border_color: "#30363d",
+    border_subtle: "rgba(240, 246, 252, 0.08)",
+    border_highlight: "rgba(88, 166, 255, 0.45)",
 
     text_main: "#f0f6fc",
     text_dim: "#8b949e",
@@ -70,15 +80,21 @@ pub const DARK_THEME: ThemeTokens = ThemeTokens {
     radius_lg: "16px",
     radius_pill: "9999px",
 
-    shadow_sm: "0 1px 2px rgba(0, 0, 0, 0.2)",
-    shadow_md: "0 4px 12px rgba(0, 0, 0, 0.3)",
+    shadow_sm: "0 1px 2px rgba(0, 0, 0, 0.24)",
+    shadow_md: "0 6px 18px rgba(0, 0, 0, 0.36)",
+    shadow_lg: "0 16px 40px rgba(0, 0, 0, 0.55)",
+    shadow_glow: "0 0 0 1px rgba(88, 166, 255, 0.3), 0 8px 24px rgba(56, 139, 253, 0.18)",
 };
 
 pub const LIGHT_THEME: ThemeTokens = ThemeTokens {
     bg_app: "#f6f8fa",
     bg_card: "#ffffff",
+    bg_elevated: "#ffffff",
     bg_subtle: "#f3f4f6",
+    bg_glass: "rgba(255, 255, 255, 0.85)",
     border_color: "#d0d7de",
+    border_subtle: "rgba(31, 35, 40, 0.08)",
+    border_highlight: "rgba(9, 105, 218, 0.4)",
 
     text_main: "#1f2328",
     text_dim: "#656d76",
@@ -105,5 +121,7 @@ pub const LIGHT_THEME: ThemeTokens = ThemeTokens {
     radius_pill: "9999px",
 
     shadow_sm: "0 1px 2px rgba(0, 0, 0, 0.05)",
-    shadow_md: "0 4px 12px rgba(0, 0, 0, 0.08)",
+    shadow_md: "0 6px 16px rgba(15, 23, 42, 0.08)",
+    shadow_lg: "0 16px 36px rgba(15, 23, 42, 0.12)",
+    shadow_glow: "0 0 0 1px rgba(9, 105, 218, 0.25), 0 8px 20px rgba(9, 105, 218, 0.12)",
 };

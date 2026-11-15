@@ -7,7 +7,7 @@ use super::state::{Editor, incomplete_blocks};
 use super::versions::FlowVersions;
 use crate::api;
 use crate::route::{Link, Route, encode_segment, use_router};
-use crate::ui::Drawer;
+use crate::ui::{Drawer, Toasts};
 use chrono::{DateTime, Utc};
 use flux_shared::Permission;
 use flux_shared::flows::{
@@ -78,21 +78,21 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
     Effect::new(move |_| match save.value().get() {
         Some(Ok(saved)) => {
             let created = meta.get_untracked().id.is_empty();
-            feedback.set(Some(format!("Enregistré : version {}.", saved.version)));
+            Toasts::set_success(feedback, format!("Enregistré : version {}.", saved.version));
             editor.dirty.set(false);
             if created {
                 router.go(Route::FlowEditor(saved.id.clone()));
             }
             meta.set(saved);
         }
-        Some(Err(error)) => feedback.set(Some(error.message())),
+        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
     });
     let on_save = move |_| {
         let graph = editor.graph.get_untracked();
         let catalog = editor.catalog.get_untracked();
         if let Some(message) = save_blocker(&graph, &catalog) {
-            feedback.set(Some(message));
+            Toasts::set_error(feedback, message);
             return;
         }
         let record = meta.get_untracked();
@@ -106,12 +106,14 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
         };
         match UpdateFlowRequest::keeping(&record, &graph) {
             Ok(body) if body.name.trim().is_empty() => {
-                feedback.set(Some("Donnez un nom au flux.".into()))
+                Toasts::set_error(feedback, "Donnez un nom au flux.");
             }
             Ok(body) => {
                 save.dispatch((id, body));
             }
-            Err(_) => feedback.set(Some("Graphe illisible : rien n'a été enregistré.".into())),
+            Err(_) => {
+                Toasts::set_error(feedback, "Graphe illisible : rien n'a été enregistré.");
+            }
         }
     };
 
@@ -144,7 +146,11 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
                         <FlowVersions flow_id=record.id current=record.version editor=editor meta=meta
                             on_restored=Callback::new(move |version: i64| {
                                 versions_open.set(false);
-                                feedback.set(Some(format!("Version {version} chargée : enregistrez pour la publier.")));
+                                let msg = format!(
+                                    "Version {version} chargée : enregistrez pour la publier."
+                                );
+                                Toasts::notify_info(msg.clone());
+                                feedback.set(Some(msg));
                             }) />
                     }
                 }}

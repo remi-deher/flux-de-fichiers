@@ -1,9 +1,73 @@
 //! Générateur de styles globaux et design tokens CSS en Rust typé.
 
-use super::tokens::{DARK_THEME, LIGHT_THEME};
+use super::tokens::{DARK_THEME, LIGHT_THEME, ThemeTokens};
+
+/// Déclarations de variables CSS pour un jeu de jetons (clair ou sombre).
+fn theme_vars_css(theme: &ThemeTokens) -> String {
+    format!(
+        r#"  --bg-app: {bg_app};
+  --bg-card: {bg_card};
+  --bg-elevated: {bg_elevated};
+  --bg-subtle: {bg_subtle};
+  --bg-glass: {bg_glass};
+  --border-color: {border_color};
+  --border-subtle: {border_subtle};
+  --border-highlight: {border_highlight};
+  --text-main: {text_main};
+  --text-dim: {text_dim};
+  --text-muted: {text_muted};
+  --primary: {primary};
+  --primary-contrast: {primary_contrast};
+  --primary-bg: {primary_bg};
+  --accent: {accent};
+  --success: {success};
+  --success-bg: {success_bg};
+  --warning: {warning};
+  --warning-bg: {warning_bg};
+  --danger: {danger};
+  --danger-bg: {danger_bg};
+  --danger-text: {danger_text};
+  --info: {info};
+  --info-bg: {info_bg};
+  --shadow-sm: {shadow_sm};
+  --shadow-md: {shadow_md};
+  --shadow-lg: {shadow_lg};
+  --shadow-glow: {shadow_glow};"#,
+        bg_app = theme.bg_app,
+        bg_card = theme.bg_card,
+        bg_elevated = theme.bg_elevated,
+        bg_subtle = theme.bg_subtle,
+        bg_glass = theme.bg_glass,
+        border_color = theme.border_color,
+        border_subtle = theme.border_subtle,
+        border_highlight = theme.border_highlight,
+        text_main = theme.text_main,
+        text_dim = theme.text_dim,
+        text_muted = theme.text_muted,
+        primary = theme.primary,
+        primary_contrast = theme.primary_contrast,
+        primary_bg = theme.primary_bg,
+        accent = theme.accent,
+        success = theme.success,
+        success_bg = theme.success_bg,
+        warning = theme.warning,
+        warning_bg = theme.warning_bg,
+        danger = theme.danger,
+        danger_bg = theme.danger_bg,
+        danger_text = theme.danger_text,
+        info = theme.info,
+        info_bg = theme.info_bg,
+        shadow_sm = theme.shadow_sm,
+        shadow_md = theme.shadow_md,
+        shadow_lg = theme.shadow_lg,
+        shadow_glow = theme.shadow_glow,
+    )
+}
 
 /// Génère la feuille de style globale contenant les variables de design tokens et les resets racine.
 pub fn generate_global_tokens_css() -> String {
+    let dark_vars = theme_vars_css(&DARK_THEME);
+    let light_vars = theme_vars_css(&LIGHT_THEME);
     format!(
         r#"
 :root {{
@@ -23,106 +87,31 @@ pub fn generate_global_tokens_css() -> String {
   --space-3: 1.5rem;
   --space-4: 2rem;
 
-  /* --- Surfaces & Couleurs Thème Sombre --- */
-  --bg-app: {dark_bg_app};
-  --bg-card: {dark_bg_card};
-  --bg-subtle: {dark_bg_subtle};
-  --border-color: {dark_border};
-  --text-main: {dark_text};
-  --text-dim: {dark_text_dim};
-  --text-muted: {dark_text_muted};
-  --primary: {dark_primary};
-  --primary-contrast: {dark_primary_contrast};
-  --primary-bg: {dark_primary_bg};
-  --accent: {dark_accent};
-  --success: {dark_success};
-  --success-bg: {dark_success_bg};
-  --warning: {dark_warning};
-  --warning-bg: {dark_warning_bg};
-  --danger: {dark_danger};
-  --danger-bg: {dark_danger_bg};
-  --danger-text: {dark_danger_text};
-  --info: {dark_info};
-  --info-bg: {dark_info_bg};
+  /* --- Rayons, courbes et typographie --- */
   --radius-sm: {radius_sm};
   --radius-md: {radius_md};
   --radius-lg: {radius_lg};
   --radius-pill: {radius_pill};
-  --shadow-sm: {shadow_sm};
-  --shadow-md: {shadow_md};
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* --- Surfaces & Couleurs Thème Sombre --- */
+{dark_vars}
 }}
 
 @media (prefers-color-scheme: light) {{
   :root:not([data-theme="dark"]) {{
-    --bg-app: {light_bg_app};
-    --bg-card: {light_bg_card};
-    --bg-subtle: {light_bg_subtle};
-    --border-color: {light_border};
-    --text-main: {light_text};
-    --text-dim: {light_text_dim};
-    --text-muted: {light_text_muted};
-    --primary: {light_primary};
-    --primary-contrast: {light_primary_contrast};
-    --primary-bg: {light_primary_bg};
-    --accent: {light_accent};
-    --success: {light_success};
-    --success-bg: {light_success_bg};
-    --warning: {light_warning};
-    --warning-bg: {light_warning_bg};
-    --danger: {light_danger};
-    --danger-bg: {light_danger_bg};
-    --danger-text: {light_danger_text};
-    --info: {light_info};
-    --info-bg: {light_info_bg};
+{light_vars}
   }}
 }}
 
 [data-theme="light"] {{
-  --bg-app: {light_bg_app};
-  --bg-card: {light_bg_card};
-  --bg-subtle: {light_bg_subtle};
-  --border-color: {light_border};
-  --text-main: {light_text};
-  --text-dim: {light_text_dim};
-  --text-muted: {light_text_muted};
-  --primary: {light_primary};
-  --primary-contrast: {light_primary_contrast};
-  --primary-bg: {light_primary_bg};
-  --accent: {light_accent};
-  --success: {light_success};
-  --success-bg: {light_success_bg};
-  --warning: {light_warning};
-  --warning-bg: {light_warning_bg};
-  --danger: {light_danger};
-  --danger-bg: {light_danger_bg};
-  --danger-text: {light_danger_text};
-  --info: {light_info};
-  --info-bg: {light_info_bg};
+{light_vars}
 }}
 
 [data-theme="dark"] {{
-  --bg-app: {dark_bg_app};
-  --bg-card: {dark_bg_card};
-  --bg-subtle: {dark_bg_subtle};
-  --border-color: {dark_border};
-  --text-main: {dark_text};
-  --text-dim: {dark_text_dim};
-  --text-muted: {dark_text_muted};
-  --primary: {dark_primary};
-  --primary-contrast: {dark_primary_contrast};
-  --primary-bg: {dark_primary_bg};
-  --accent: {dark_accent};
-  --success: {dark_success};
-  --success-bg: {dark_success_bg};
-  --warning: {dark_warning};
-  --warning-bg: {dark_warning_bg};
-  --danger: {dark_danger};
-  --danger-bg: {dark_danger_bg};
-  --danger-text: {dark_danger_text};
-  --info: {dark_info};
-  --info-bg: {dark_info_bg};
+{dark_vars}
 }}
 
 
@@ -166,52 +155,10 @@ button, a, select, input {{
   }}
 }}
 "#,
-        dark_bg_app = DARK_THEME.bg_app,
-        dark_bg_card = DARK_THEME.bg_card,
-        dark_bg_subtle = DARK_THEME.bg_subtle,
-        dark_border = DARK_THEME.border_color,
-        dark_text = DARK_THEME.text_main,
-        dark_text_dim = DARK_THEME.text_dim,
-        dark_text_muted = DARK_THEME.text_muted,
-        dark_primary = DARK_THEME.primary,
-        dark_primary_contrast = DARK_THEME.primary_contrast,
-        dark_primary_bg = DARK_THEME.primary_bg,
-        dark_accent = DARK_THEME.accent,
-        dark_success = DARK_THEME.success,
-        dark_success_bg = DARK_THEME.success_bg,
-        dark_warning = DARK_THEME.warning,
-        dark_warning_bg = DARK_THEME.warning_bg,
-        dark_danger = DARK_THEME.danger,
-        dark_danger_bg = DARK_THEME.danger_bg,
-        dark_danger_text = DARK_THEME.danger_text,
-        dark_info = DARK_THEME.info,
-        dark_info_bg = DARK_THEME.info_bg,
-        light_bg_app = LIGHT_THEME.bg_app,
-        light_bg_card = LIGHT_THEME.bg_card,
-        light_bg_subtle = LIGHT_THEME.bg_subtle,
-        light_border = LIGHT_THEME.border_color,
-        light_text = LIGHT_THEME.text_main,
-        light_text_dim = LIGHT_THEME.text_dim,
-        light_text_muted = LIGHT_THEME.text_muted,
-        light_primary = LIGHT_THEME.primary,
-        light_primary_contrast = LIGHT_THEME.primary_contrast,
-        light_primary_bg = LIGHT_THEME.primary_bg,
-        light_accent = LIGHT_THEME.accent,
-        light_success = LIGHT_THEME.success,
-        light_success_bg = LIGHT_THEME.success_bg,
-        light_warning = LIGHT_THEME.warning,
-        light_warning_bg = LIGHT_THEME.warning_bg,
-        light_danger = LIGHT_THEME.danger,
-        light_danger_bg = LIGHT_THEME.danger_bg,
-        light_danger_text = LIGHT_THEME.danger_text,
-        light_info = LIGHT_THEME.info,
-        light_info_bg = LIGHT_THEME.info_bg,
         radius_sm = DARK_THEME.radius_sm,
         radius_md = DARK_THEME.radius_md,
         radius_lg = DARK_THEME.radius_lg,
         radius_pill = DARK_THEME.radius_pill,
-        shadow_sm = DARK_THEME.shadow_sm,
-        shadow_md = DARK_THEME.shadow_md,
     )
 }
 
@@ -235,6 +182,9 @@ mod tests {
         assert!(res.contains(":focus-visible {"));
         assert!(res.contains("@media (prefers-reduced-motion: reduce)"));
         assert!(res.contains("--bg-app: #0d1117;"));
+        assert!(res.contains("--bg-elevated: #1c2129;"));
+        assert!(res.contains("--shadow-glow:"));
+        assert!(res.contains("--ease-out:"));
         assert!(res.contains("--primary: #58a6ff;"));
         assert!(res.contains("--danger-text: #ff7b72;"));
         assert!(res.contains("--danger-text: #a40e26;"));

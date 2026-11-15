@@ -49,7 +49,7 @@ fn gpu_label(devices: &[String]) -> String {
 
 fn tile(label: &'static str, percent: f32, subtitle: String, icon: IconName) -> impl IntoView {
     view! {
-        <MetricCard label=label value=format!("{percent:.0} %") subtitle=subtitle icon=icon tone=usage_tone(percent) />
+        <MetricCard label=label value=format!("{percent:.0} %") subtitle=subtitle icon=icon tone=usage_tone(percent) progress=percent />
     }
 }
 

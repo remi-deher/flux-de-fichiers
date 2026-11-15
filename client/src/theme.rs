@@ -58,15 +58,36 @@ pub fn restore() -> Theme {
     saved
 }
 
+/// Signal de thème partagé dans toute l'interface.
+#[derive(Clone, Copy)]
+pub struct ThemeState(pub RwSignal<Theme>);
+
+/// Restaure le thème et installe son signal partagé dans le contexte.
+pub fn install() -> Theme {
+    let saved = restore();
+    provide_context(ThemeState(RwSignal::new(saved)));
+    saved
+}
+
+/// Applique un nouveau thème et synchronise les sélecteurs ouverts.
+pub fn set_theme(theme: Theme) {
+    apply(theme);
+    if let Some(state) = use_context::<ThemeState>() {
+        state.0.set(theme);
+    }
+}
+
 #[component]
 pub fn ThemePicker() -> impl IntoView {
-    let current = RwSignal::new(restore());
+    let current = use_context::<ThemeState>()
+        .map(|state| state.0)
+        .unwrap_or_else(|| RwSignal::new(restore()));
     view! {
         <div class="theme-segmented" role="group" aria-label="Thème de couleur">
             {Theme::ALL.into_iter().map(|theme| view! {
                 <button type="button" class="theme-segmented__btn"
                     aria-pressed=move || (current.get() == theme).to_string()
-                    on:click=move |_| { apply(theme); current.set(theme); }>
+                    on:click=move |_| { current.set(theme); set_theme(theme); }>
                     {theme.label()}
                 </button>
             }).collect_view()}

@@ -8,6 +8,19 @@ use wasm_bindgen::JsCast;
 /// Type MIME posé sur le glisser : Firefox exige une donnée pour démarrer.
 const DRAG_MIME: &str = "text/plain";
 
+/// Indique si le `related_target` d'un `dragleave` reste contenu dans la cible courante.
+pub fn is_related_inside_current_target(event: &web_sys::DragEvent) -> bool {
+    event
+        .related_target()
+        .and_then(|node| node.dyn_into::<web_sys::Node>().ok())
+        .zip(
+            event
+                .current_target()
+                .and_then(|node| node.dyn_into::<web_sys::Node>().ok()),
+        )
+        .is_some_and(|(related, container)| container.contains(Some(&related)))
+}
+
 #[component]
 pub fn DragItem(
     editor: Editor,
@@ -56,7 +69,7 @@ pub fn DragItem(
                 editor.drag.set(Some(start_payload.clone()));
                 if let Some(transfer) = event.data_transfer() {
                     let _ = transfer.set_data(DRAG_MIME, "flux");
-                    transfer.set_effect_allowed("move");
+                    transfer.set_effect_allowed("copyMove");
                 }
             }
             on:dragend=move |_| editor.end_drag()
@@ -72,12 +85,7 @@ pub fn DragItem(
             }
             on:dragleave=move |event| {
                 // Sortir vers un enfant de la carte ne compte pas comme sortir de la carte.
-                let inside = event
-                    .related_target()
-                    .and_then(|node| node.dyn_into::<web_sys::Node>().ok())
-                    .zip(event.current_target().and_then(|node| node.dyn_into::<web_sys::Node>().ok()))
-                    .is_some_and(|(related, card)| card.contains(Some(&related)));
-                if !inside {
+                if !is_related_inside_current_target(&event) {
                     editor.drop_target.set(None);
                 }
             }

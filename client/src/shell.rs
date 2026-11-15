@@ -564,7 +564,7 @@ mod tests {
     fn activity_badge_prefers_active_then_failed() -> Result<(), serde_json::Error> {
         let done = job_with_status(1, JobStatus::Succeeded)?;
         assert_eq!(activity_badge(&[]), None);
-        assert_eq!(activity_badge(&[done.clone()]), None);
+        assert_eq!(activity_badge(std::slice::from_ref(&done)), None);
 
         let failed = job_with_status(2, JobStatus::Failed)?;
         assert_eq!(
@@ -595,7 +595,10 @@ mod tests {
             last_seen: now - chrono::Duration::minutes(10),
         };
         assert_eq!(workers_alert_badge(&[], now), None);
-        assert_eq!(workers_alert_badge(&[online.clone()], now), None);
+        assert_eq!(
+            workers_alert_badge(std::slice::from_ref(&online), now),
+            None
+        );
         assert_eq!(
             workers_alert_badge(&[online, offline.clone()], now),
             Some((1, TagTone::Warning))

@@ -98,22 +98,14 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                 view! {
                     <Hero tone=tone status=status actions=actions />
                     {layout_now.is_visible(Widget::Metrics).then(|| {
-                        let go_active = Callback::new({
-                            let router = router.clone();
-                            move |()| open_jobs_filtered(router.clone(), filters, JobStateFilter::Active)
+                        let go_active = Callback::new(move |()| {
+                            open_jobs_filtered(router, filters, JobStateFilter::Active)
                         });
-                        let go_failed = Callback::new({
-                            let router = router.clone();
-                            move |()| open_jobs_filtered(router.clone(), filters, JobStateFilter::Failed)
+                        let go_failed = Callback::new(move |()| {
+                            open_jobs_filtered(router, filters, JobStateFilter::Failed)
                         });
-                        let go_workers = Callback::new({
-                            let router = router.clone();
-                            move |()| router.go(Route::Workers)
-                        });
-                        let go_libraries = Callback::new({
-                            let router = router.clone();
-                            move |()| router.go(Route::Libraries)
-                        });
+                        let go_workers = Callback::new(move |()| router.go(Route::Workers));
+                        let go_libraries = Callback::new(move |()| router.go(Route::Libraries));
                         let kpis = vec![
                             StatItem::new("Tâches en cours", summary.running.to_string(), MetricTone::Neutral)
                                 .with_detail(format!("{} en attente", summary.queued))
@@ -230,12 +222,14 @@ pub fn WorkerOverviewPage(me: Me) -> impl IntoView {
                             JobStateFilter::Failed,
                         ];
                         for (item, state) in items.iter_mut().zip(states) {
-                            let router = router.clone();
                             *item = std::mem::replace(
                                 item,
                                 StatItem::new("", "", MetricTone::Neutral),
                             )
-                            .with_filter(false, Callback::new(move |()| open_jobs_filtered(router.clone(), filters, state)));
+                            .with_filter(
+                                false,
+                                Callback::new(move |()| open_jobs_filtered(router, filters, state)),
+                            );
                         }
                     }
                     view! {

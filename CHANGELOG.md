@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.27.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.26.0...v0.27.0) (2026-11-15)
+
+
+### Features
+
+* 10 ameliorations backend, plugins et securite ([ec959e6](https://github.com/remi-deher/flux-de-fichiers/commit/ec959e6a8f092526f06a0fbdf9de4822b655e78b))
+* 10 ameliorations backend, plugins, securite et observabilite ([a91e111](https://github.com/remi-deher/flux-de-fichiers/commit/a91e1118e45f3cbd7788badf8ffac558b81105e5))
+
+
+### Bug Fixes
+
+* **clippy:** reutiliser FlowProgressCallback dans job_runner ([b45ba96](https://github.com/remi-deher/flux-de-fichiers/commit/b45ba961acb50b334fbdf5f4d9bea3091e377791))
+
 ## [0.26.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.25.0...v0.26.0) (2026-11-15)
 
 

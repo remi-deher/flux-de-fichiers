@@ -164,6 +164,9 @@ fn error_code_for_op(op: &OperationContract, fallback: JobErrorCode) -> JobError
     }
 }
 
+/// Callback de progression émis pendant l'exécution d'une opération binaire.
+pub type ProgressCallback = Arc<dyn Fn(u32, &str) + Send + Sync>;
+
 /// Contexte d'exécution passé à `execute_binary_operation`.
 pub struct BinaryExecContext<'a> {
     pub registry: &'a OperationRegistry,
@@ -173,7 +176,7 @@ pub struct BinaryExecContext<'a> {
     pub working_file: &'a Path,
     pub media_info: &'a Value,
     pub step_index: i32,
-    pub on_progress: Arc<dyn Fn(u32, &str) + Send + Sync>,
+    pub on_progress: ProgressCallback,
 }
 
 /// Exécute une opération binaire déclarative (`ProbeEnrich`, `InPlace` ou `StagedOutput`).

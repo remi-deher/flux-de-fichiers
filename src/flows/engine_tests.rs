@@ -162,7 +162,9 @@ fn base_registry() -> OperationRegistry {
             }
         }),
     ] {
-        reg.register_json(op).expect("valid fixture operation");
+        if let Err(err) = reg.register_json(op) {
+            panic!("valid fixture operation: {err}");
+        }
     }
     for (block, op) in [
         ("file-input", "operation.core.file-input"),

@@ -95,12 +95,20 @@ fn FlowCommandBar(
         editing_title.set(false);
     };
 
-    let open_settings = move || {
-        let next = !editor.settings_open.get_untracked();
-        if next {
-            editor.inspector_open.set(false);
+    let toggle_palette = move || {
+        if editor.palette_open.get_untracked() {
+            editor.close_right_panel();
+        } else {
+            editor.focus_palette_search();
         }
-        editor.settings_open.set(next);
+    };
+
+    let toggle_settings = move || {
+        if editor.settings_open.get_untracked() {
+            editor.close_right_panel();
+        } else {
+            editor.open_settings();
+        }
     };
 
     view! {
@@ -169,7 +177,7 @@ fn FlowCommandBar(
                             type="button"
                             class="flow-pill flow-pill--mask text-mono"
                             title="Modifier le masque de fichiers et les réglages"
-                            on:click=move |_| open_settings()
+                            on:click=move |_| toggle_settings()
                         >
                             {move || meta.get().file_mask}
                         </button>
@@ -207,47 +215,16 @@ fn FlowCommandBar(
 
             <div class="flow-command-bar__actions">
                 {can_manage.then(|| view! {
-                    <>
-                        <button
-                            type="button"
-                            class="header-icon-btn"
-                            title="Annuler (Ctrl+Z)"
-                            aria-label="Annuler la dernière modification"
-                            disabled=move || !editor.can_undo()
-                            on:click=move |_| editor.undo()
-                        >
-                            <Icon name=IconName::Undo size=CMD_ICON_SIZE />
-                        </button>
-                        <button
-                            type="button"
-                            class="header-icon-btn"
-                            title="Rétablir (Ctrl+Maj+Z)"
-                            aria-label="Rétablir la modification"
-                            disabled=move || !editor.can_redo()
-                            on:click=move |_| editor.redo()
-                        >
-                            <Icon name=IconName::Redo size=CMD_ICON_SIZE />
-                        </button>
-                        <button
-                            type="button"
-                            class="btn btn-secondary btn-sm flow-cmd-btn"
-                            aria-pressed=move || editor.palette_open.get().to_string()
-                            title="Afficher / masquer la palette des composants (Ctrl+B)"
-                            on:click=move |_| editor.palette_open.update(|open| *open = !*open)
-                        >
-                            <Icon name=IconName::Plus size=CMD_ICON_SIZE />
-                            <span>"Composants"</span>
-                        </button>
-                        <button
-                            type="button"
-                            class="btn btn-secondary btn-sm flow-cmd-btn"
-                            title="Réorganiser automatiquement les blocs"
-                            on:click=move |_| editor.auto_layout()
-                        >
-                            <Icon name=IconName::Layout size=CMD_ICON_SIZE />
-                            <span>"Disposition auto"</span>
-                        </button>
-                    </>
+                    <button
+                        type="button"
+                        class="btn btn-secondary btn-sm flow-cmd-btn"
+                        aria-pressed=move || editor.palette_open.get().to_string()
+                        title="Afficher / masquer les composants (Ctrl+B ou /)"
+                        on:click=move |_| toggle_palette()
+                    >
+                        <Icon name=IconName::Plus size=CMD_ICON_SIZE />
+                        <span>"Composants"</span>
+                    </button>
                 })}
 
                 <button
@@ -282,10 +259,10 @@ fn FlowCommandBar(
                     class="btn btn-secondary btn-sm flow-cmd-btn"
                     aria-pressed=move || editor.settings_open.get().to_string()
                     title="Réglages généraux et historique des versions"
-                    on:click=move |_| open_settings()
+                    on:click=move |_| toggle_settings()
                 >
                     <Icon name=IconName::Sliders size=CMD_ICON_SIZE />
-                    <span>"Réglages & Versions"</span>
+                    <span>"Réglages"</span>
                 </button>
 
                 {can_manage.then(|| view! {
@@ -305,18 +282,14 @@ fn FlowCommandBar(
 }
 
 #[component]
-fn FlowSettingsDrawer(
+fn FlowSettingsPane(
     editor: Editor,
     meta: RwSignal<FlowRecord>,
     feedback: RwSignal<Option<String>>,
     can_manage: bool,
 ) -> impl IntoView {
     view! {
-        <aside
-            class="flow-settings-drawer"
-            class:is-closed=move || !editor.settings_open.get()
-            aria-label="Réglages et versions du flux"
-        >
+        <div class="flow-dock-pane flow-settings-pane" aria-label="Réglages et versions du flux">
             {move || {
                 if !editor.settings_open.get() {
                     return None;
@@ -329,15 +302,6 @@ fn FlowSettingsDrawer(
                                 <span class="flow-inspector__eyebrow">"Métadonnées & Historique"</span>
                                 <h2 class="flow-inspector__title">"Réglages du flux"</h2>
                             </div>
-                            <button
-                                type="button"
-                                class="header-icon-btn"
-                                aria-label="Fermer les réglages"
-                                title="Fermer les réglages"
-                                on:click=move |_| editor.settings_open.set(false)
-                            >
-                                <Icon name=IconName::Close size=16 />
-                            </button>
                         </header>
 
                         <div class="flow-inspector__body">
@@ -404,7 +368,7 @@ fn FlowSettingsDrawer(
                                         editor=editor
                                         meta=meta
                                         on_restored=Callback::new(move |version: i64| {
-                                            editor.settings_open.set(false);
+                                            editor.close_right_panel();
                                             let msg = format!(
                                                 "Version {version} chargée : enregistrez pour la publier."
                                             );
@@ -418,6 +382,92 @@ fn FlowSettingsDrawer(
                     </div>
                 })
             }}
+        </div>
+    }
+}
+
+#[component]
+fn RightDock(
+    editor: Editor,
+    meta: RwSignal<FlowRecord>,
+    feedback: RwSignal<Option<String>>,
+    can_manage: bool,
+) -> impl IntoView {
+    let is_open = move || editor.any_right_panel_open();
+    let has_selection = move || editor.selected.get().is_some();
+
+    view! {
+        <aside
+            class="flow-right-dock"
+            class:is-closed=move || !is_open()
+            aria-label="Panneau latéral de l'atelier"
+        >
+            <div class="flow-right-dock__bar">
+                <div class="flow-right-dock__tabs" role="tablist" aria-label="Vues du panneau">
+                    {can_manage.then(|| view! {
+                        <button
+                            type="button"
+                            role="tab"
+                            class="flow-right-dock__tab"
+                            aria-selected=move || editor.palette_open.get().to_string()
+                            on:click=move |_| editor.focus_palette_search()
+                        >
+                            "Composants"
+                        </button>
+                    })}
+                    <button
+                        type="button"
+                        role="tab"
+                        class="flow-right-dock__tab"
+                        disabled=move || !has_selection()
+                        aria-selected=move || {
+                            (editor.inspector_open.get() && has_selection()).to_string()
+                        }
+                        on:click=move |_| editor.open_inspector()
+                    >
+                        "Bloc"
+                    </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        class="flow-right-dock__tab"
+                        aria-selected=move || editor.settings_open.get().to_string()
+                        on:click=move |_| editor.open_settings()
+                    >
+                        "Réglages"
+                    </button>
+                </div>
+                <button
+                    type="button"
+                    class="header-icon-btn"
+                    title="Fermer le panneau (Échap)"
+                    aria-label="Fermer le panneau"
+                    on:click=move |_| editor.close_right_panel()
+                >
+                    <Icon name=IconName::Close size=CMD_ICON_SIZE />
+                </button>
+            </div>
+            <div class="flow-right-dock__body">
+                {move || {
+                    if can_manage && editor.palette_open.get() {
+                        view! { <Palette editor=editor /> }.into_any()
+                    } else if editor.inspector_open.get() && has_selection() {
+                        view! { <NodeInspector editor=editor can_manage=can_manage /> }.into_any()
+                    } else if editor.settings_open.get() {
+                        view! {
+                            <FlowSettingsPane
+                                editor=editor
+                                meta=meta
+                                feedback=feedback
+                                can_manage=can_manage
+                            />
+                        }
+                        .into_any()
+                    } else {
+                        ().into_any()
+                    }
+                }}
+            </div>
         </aside>
     }
 }
@@ -597,10 +647,29 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
         }
         if ctrl && key.eq_ignore_ascii_case("b") && can_manage {
             event.prevent_default();
-            editor.palette_open.update(|open| *open = !*open);
+            if editor.palette_open.get_untracked() {
+                editor.close_right_panel();
+            } else {
+                editor.focus_palette_search();
+            }
+            return;
+        }
+        if !ctrl && !in_input && can_manage && key == "/" {
+            event.prevent_default();
+            editor.focus_palette_search();
+            return;
+        }
+        if ctrl && !in_input && key.eq_ignore_ascii_case("a") {
+            event.prevent_default();
+            editor.select_all_nodes();
             return;
         }
         if ctrl && !in_input && can_manage {
+            if key.eq_ignore_ascii_case("d") {
+                event.prevent_default();
+                editor.duplicate_selected();
+                return;
+            }
             if key.eq_ignore_ascii_case("z") {
                 event.prevent_default();
                 if event.shift_key() {
@@ -616,19 +685,34 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
                 return;
             }
         }
+        if !ctrl && !in_input && can_manage && matches!(key.as_str(), "Delete" | "Backspace") {
+            if editor.disconnect_selected_wire() || editor.remove_selected_nodes() > 0 {
+                event.prevent_default();
+            }
+            return;
+        }
         if key == "Escape" {
-            if editor.pending_wire.get_untracked().is_some() {
+            if editor.quick_add.get_untracked().is_some() {
+                editor.quick_add.set(None);
+            } else if editor.pending_wire.get_untracked().is_some() {
                 editor.pending_wire.set(None);
             } else if editor.branch_target.get_untracked().is_some() {
                 editor.branch_target.set(None);
             } else if editor.selected_wire.get_untracked().is_some() {
                 editor.selected_wire.set(None);
-            } else if editor.inspector_open.get_untracked() {
-                editor.inspector_open.set(false);
-            } else if editor.settings_open.get_untracked() {
-                editor.settings_open.set(false);
+            } else if editor.palette_open.get_untracked()
+                || editor.inspector_open.get_untracked()
+                || editor.settings_open.get_untracked()
+            {
+                editor.close_right_panel();
             } else if editor.diagnostics_open.get_untracked() {
                 editor.diagnostics_open.set(false);
+            } else if editor.selected.get_untracked().is_some()
+                || !editor
+                    .selected_ids
+                    .with_untracked(std::collections::HashSet::is_empty)
+            {
+                editor.clear_selection();
             }
         }
     });
@@ -656,19 +740,19 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
                 <p class="flow-workbench__feedback" role="status">{text}</p>
             })}
 
-            <div class="flow-workspace-body">
-                {can_manage.then(|| view! { <Palette editor=editor /> })}
+            <div
+                class="flow-workspace-body"
+                class:is-panel-open=move || editor.any_right_panel_open()
+            >
                 <GraphCanvas editor=editor can_manage=can_manage />
-                <NodeInspector editor=editor can_manage=can_manage />
-                <FlowSettingsDrawer
+                <RightDock
                     editor=editor
                     meta=meta
                     feedback=feedback
                     can_manage=can_manage
                 />
+                <FlowDiagnosticsTray editor=editor diagnostics=diagnostics />
             </div>
-
-            <FlowDiagnosticsTray editor=editor diagnostics=diagnostics />
         </div>
     }
 }

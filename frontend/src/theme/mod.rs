@@ -74,6 +74,13 @@ mod tests {
         assert!(styles.contains(".tab-btn-badge {"));
         assert!(styles.contains(".settings-bento-grid {"));
         assert!(styles.contains(".studio-toolbar {"));
+        assert!(styles.contains(".flow-right-dock {"));
+        assert!(styles.contains(".flow-canvas-controls {"));
+        assert!(styles.contains(".mini-viewport {"));
+        assert!(styles.contains(".flow-quick-add {"));
+        assert!(styles.contains(".flow-canvas__marquee {"));
+        assert!(styles.contains(".flow-wire__popover {"));
+        assert!(styles.contains(".application-shell.is-workbench .app-topbar {"));
         assert!(styles.contains(".auth-role-grid {"));
         assert!(styles.contains(".diagnostic-box {"));
     }

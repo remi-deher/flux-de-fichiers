@@ -63,6 +63,18 @@ pub fn grouped_specs(
 #[component]
 pub fn Palette(editor: Editor) -> impl IntoView {
     let local_query = RwSignal::new(String::new());
+    let search_ref = NodeRef::<leptos::html::Input>::new();
+    let last_tick = RwSignal::new(0_u64);
+    Effect::new(move |_| {
+        let tick = editor.palette_focus_tick.get();
+        if tick > last_tick.get_untracked() {
+            last_tick.set(tick);
+            if let Some(input) = search_ref.get() {
+                let _ = input.focus();
+            }
+        }
+    });
+
     let groups = Memo::new(move |_| {
         let catalog = editor.catalog.get();
         let after_local = filter_specs(&catalog, &local_query.get());
@@ -70,41 +82,23 @@ pub fn Palette(editor: Editor) -> impl IntoView {
     });
 
     view! {
-        <aside
-            class="flow-palette-dock"
-            class:is-closed=move || !editor.palette_open.get()
-            aria-label="Composants de flux"
-        >
-            <header class="flow-palette__header">
-                <div class="flow-palette__title-wrap">
-                    <h2 class="flow-palette__title">"Composants"</h2>
-                    <span class="flow-palette__badge">
-                        {move || editor.catalog.with(|c| c.len())}
-                    </span>
-                </div>
-                <div class="flow-palette__header-actions">
-                    <button
-                        type="button"
-                        class="header-icon-btn"
-                        class:is-active=move || editor.palette_pinned.get()
-                        aria-pressed=move || editor.palette_pinned.get().to_string()
-                        title="Garder la palette ouverte après un ajout"
-                        aria-label="Garder la palette ouverte après un ajout"
-                        on:click=move |_| editor.palette_pinned.update(|pinned| *pinned = !*pinned)
-                    >
-                        <Icon name=IconName::Pin size=HEADER_ICON_SIZE />
-                    </button>
-                    <button
-                        type="button"
-                        class="header-icon-btn"
-                        title="Fermer la palette (Ctrl+B)"
-                        aria-label="Fermer la palette"
-                        on:click=move |_| editor.palette_open.set(false)
-                    >
-                        <Icon name=IconName::Close size=HEADER_ICON_SIZE />
-                    </button>
-                </div>
-            </header>
+        <div class="flow-dock-pane flow-palette-pane" aria-label="Composants de flux">
+            <div class="flow-palette__subbar">
+                <span class="flow-palette__badge">
+                    {move || format!("{} composants", editor.catalog.with(|c| c.len()))}
+                </span>
+                <button
+                    type="button"
+                    class="header-icon-btn"
+                    class:is-active=move || editor.palette_pinned.get()
+                    aria-pressed=move || editor.palette_pinned.get().to_string()
+                    title="Garder les composants ouverts après un ajout"
+                    aria-label="Garder les composants ouverts après un ajout"
+                    on:click=move |_| editor.palette_pinned.update(|pinned| *pinned = !*pinned)
+                >
+                    <Icon name=IconName::Pin size=HEADER_ICON_SIZE />
+                </button>
+            </div>
 
             {move || {
                 let target = editor.branch_target.get()?;
@@ -134,9 +128,10 @@ pub fn Palette(editor: Editor) -> impl IntoView {
             <div class="flow-palette__search">
                 <Icon name=IconName::Search size=14 class="flow-palette__search-icon" />
                 <input
+                    node_ref=search_ref
                     type="search"
                     class="form-input flow-palette__search-input"
-                    placeholder="Rechercher un composant…"
+                    placeholder="Filtrer (/)…"
                     aria-label="Rechercher un composant"
                     prop:value=move || local_query.get()
                     on:input=move |event| local_query.set(event_target_value(&event))
@@ -230,7 +225,7 @@ pub fn Palette(editor: Editor) -> impl IntoView {
                         .into_any()
                 }}
             </div>
-        </aside>
+        </div>
     }
 }
 

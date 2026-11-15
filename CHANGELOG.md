@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.23.0...v0.24.0) (2026-11-15)
+
+
+### Features
+
+* **flows:** ergonomie low-code (focus, canvas infini, quick-add, multi-sélection) ([6b046e5](https://github.com/remi-deher/flux-de-fichiers/commit/6b046e505a6a901285ec4d2293e7bcabd2cd1fd5))
+* **flows:** ergonomie low-code de l'éditeur de flux ([69bff82](https://github.com/remi-deher/flux-de-fichiers/commit/69bff821fca399897df8bd87d4f0930501a0d011))
+
 ## [0.23.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.22.0...v0.23.0) (2026-11-15)
 
 

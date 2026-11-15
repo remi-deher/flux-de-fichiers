@@ -61,5 +61,9 @@ mod tests {
         assert!(styles.contains(".widget-grid {"));
         assert!(styles.contains(".auth-gate {"));
         assert!(styles.contains(".widget[data-state=\"loading\"]"));
+        assert!(styles.contains(".live-progress {"));
+        assert!(styles.contains(".toast-stack {"));
+        assert!(styles.contains(".cmd-palette {"));
+        assert!(styles.contains(".flow-graph__port-dot {"));
     }
 }

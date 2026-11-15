@@ -6,7 +6,7 @@ use super::geometry::{
     CARD_HEIGHT, CARD_WIDTH, board_size, card_origin, input_anchor, link_path, output_anchor,
 };
 use super::state::Editor;
-use flux_shared::flows::{block_spec, layout};
+use flux_shared::flows::{FlowBlockKind, block_spec, layout};
 use leptos::prelude::*;
 
 fn link_class(port: Option<&str>) -> &'static str {
@@ -40,13 +40,15 @@ pub fn GraphCanvas(editor: Editor) -> impl IntoView {
                 let index = ports.iter().position(|port| *port == edge.port)?;
                 let start = output_anchor(*places.get(&edge.from)?, index, ports.len());
                 let end = input_anchor(*places.get(&edge.to)?);
+                let d = link_path(start, end);
                 let label = edge.port.clone().map(|port| {
                     view! {
                         <text class="flow-graph__port-label" x=start.x + 4.0 y=start.y + 14.0>{port}</text>
                     }
                 });
                 Some(view! {
-                    <path class=link_class(edge.port.as_deref()) d=link_path(start, end) />
+                    <path class="flow-graph__link-halo" d=d.clone() />
+                    <path class=link_class(edge.port.as_deref()) d=d />
                     {label}
                 })
             })
@@ -59,6 +61,8 @@ pub fn GraphCanvas(editor: Editor) -> impl IntoView {
                 let spec = block_spec(&node.kind);
                 let kind = spec.map_or_else(|| node.kind.as_str().to_owned(), |spec| spec.label.to_owned());
                 let incomplete = spec.is_some_and(|spec| !spec.missing_fields(&node.config).is_empty());
+                let has_input = node.kind != FlowBlockKind::FileInput;
+                let has_output = !graph.output_ports(node).is_empty();
                 let id = node.id.clone();
                 let name = node.name.clone();
                 let selected_id = id.clone();
@@ -75,8 +79,15 @@ pub fn GraphCanvas(editor: Editor) -> impl IntoView {
                             class:is-incomplete=incomplete
                             on:click=move |_| editor.selected.set(Some(id.clone()))
                         >
-                            <div class="flow-graph__kind">{kind}</div>
+                            {has_input.then(|| view! { <span class="flow-graph__port-dot is-in" aria-hidden="true"></span> })}
+                            <div class="flow-graph__head">
+                                <div class="flow-graph__kind">{kind}</div>
+                                {incomplete.then(|| view! {
+                                    <span class="flow-graph__badge" title="Réglage obligatoire manquant">"À compléter"</span>
+                                })}
+                            </div>
                             <div class="flow-graph__name">{name}</div>
+                            {has_output.then(|| view! { <span class="flow-graph__port-dot is-out" aria-hidden="true"></span> })}
                         </button>
                     </DragItem>
                 })

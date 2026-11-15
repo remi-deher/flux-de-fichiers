@@ -1,11 +1,13 @@
 //! Fiche d'une tâche : état, erreur, flux figé, téléchargement et relance manuelle.
 
 use super::model::{error_label, status_label, status_tone};
-use crate::ui::StatusBadge;
+use crate::ui::{Icon, IconName, StatusBadge, Toasts};
 use crate::{api, format};
 use flux_shared::format::format_bytes;
 use flux_shared::jobs::{Job, JobStatus, MAX_ATTEMPTS};
 use leptos::prelude::*;
+
+const ACTION_ICON_SIZE: u32 = 15;
 
 fn row(label: &'static str, value: String) -> impl IntoView {
     view! {
@@ -29,10 +31,10 @@ pub fn JobDetail(job: Job, can_manage: bool, on_changed: Callback<Job>) -> impl 
         if let Some(result) = retry.value().get() {
             match result {
                 Ok(job) => {
-                    feedback.set(Some("Tâche remise en file.".into()));
+                    Toasts::set_success(feedback, "Tâche remise en file.");
                     on_changed.run(job);
                 }
-                Err(error) => feedback.set(Some(error.message())),
+                Err(error) => Toasts::set_error(feedback, error.message()),
             }
         }
     });
@@ -47,7 +49,12 @@ pub fn JobDetail(job: Job, can_manage: bool, on_changed: Callback<Job>) -> impl 
             .output_name
             .clone()
             .unwrap_or_else(|| "resultat.mkv".into());
-        view! { <a class="btn btn-secondary" href=href download=name>"Télécharger le résultat"</a> }
+        view! {
+            <a class="btn btn-secondary" href=href download=name>
+                <Icon name=IconName::Download size=ACTION_ICON_SIZE />
+                <span>"Télécharger le résultat"</span>
+            </a>
+        }
     });
     let retryable = can_manage && job.is_retryable();
     let job_id = job.id;
@@ -75,7 +82,8 @@ pub fn JobDetail(job: Job, can_manage: bool, on_changed: Callback<Job>) -> impl 
                         disabled=move || retry.pending().get()
                         on:click=move |_| { retry.dispatch(job_id); }
                     >
-                        "Relancer"
+                        <Icon name=IconName::Refresh size=ACTION_ICON_SIZE />
+                        <span>"Relancer"</span>
                     </button>
                 })}
             </div>

@@ -6,7 +6,7 @@ use crate::api;
 use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
-use crate::ui::{Drawer, SubTab, TabbedTable};
+use crate::ui::{Drawer, SubTab, TabbedTable, Toasts};
 use flux_shared::plugins::vocab::{CatalogItemType, CatalogSection};
 use flux_shared::plugins::{
     CatalogEntry, CreateRepositoryRequest, PluginRepository, ToolStatus, ToolStatusSummary,
@@ -68,10 +68,11 @@ fn Repositories(reload_catalog: RwSignal<u32>, adding: RwSignal<bool>) -> impl I
     Effect::new(move |_| match act.value().get() {
         Some(Ok(())) => {
             feedback.set(None);
+            Toasts::notify_success("Opération sur le dépôt effectuée.");
             bump(reload);
             bump(reload_catalog);
         }
-        Some(Err(error)) => feedback.set(Some(error.message())),
+        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
     });
     let (name, url) = (RwSignal::new(String::new()), RwSignal::new(String::new()));
@@ -90,9 +91,10 @@ fn Repositories(reload_catalog: RwSignal<u32>, adding: RwSignal<bool>) -> impl I
             name.set(String::new());
             url.set(String::new());
             adding.set(false);
+            Toasts::notify_success("Dépôt ajouté.");
             bump(reload);
         }
-        Some(Err(error)) => feedback.set(Some(error.message())),
+        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
     });
     view! {
@@ -169,10 +171,10 @@ fn Tools(can_install: bool) -> impl IntoView {
     });
     Effect::new(move |_| match install.value().get() {
         Some(Ok(_)) => {
-            feedback.set(Some("Installation lancée.".into()));
+            Toasts::set_success(feedback, "Installation lancée.");
             bump(reload);
         }
-        Some(Err(error)) => feedback.set(Some(error.message())),
+        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
     });
     view! {
@@ -243,8 +245,8 @@ fn CatalogTable(
                         view! {
                             <tr>
                                 <td class="text-strong">{entry.name.clone()}<div class="text-mono text-xs text-dim">{entry.id.clone()}</div></td>
-                                <td>{entry.entry_type.as_str()}</td>
-                                <td class="text-mono">{entry.version.clone()}</td>
+                                <td><span class="repo-badge community">{entry.entry_type.as_str()}</span></td>
+                                <td><span class="tool-version-badge">{entry.version.clone()}</span></td>
                                 <td class="cell-end">{configurable.then(|| view! {
                                     <button type="button" class="btn btn-secondary btn-sm"
                                         on:click=move |_| { configuring.set(Some(id.clone())); settings_open.set(true); }>"Réglages"</button>

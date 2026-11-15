@@ -44,7 +44,7 @@ pub const BASE_CSS: &str = r#"
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  transition: width 0.2s ease-in-out;
+  transition: width 0.22s var(--ease-out);
   position: sticky;
   top: 0;
   height: 100vh;
@@ -193,7 +193,7 @@ pub const BASE_CSS: &str = r#"
   text-align: left;
   user-select: none;
   touch-action: manipulation;
-  transition: all 0.15s ease-in-out;
+  transition: all 0.16s var(--ease-out);
 }
 
 .tab-btn:hover {
@@ -210,7 +210,8 @@ pub const BASE_CSS: &str = r#"
   background-color: var(--primary-bg);
   color: var(--primary);
   font-weight: 600;
-  border-color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+  box-shadow: inset 3px 0 0 var(--primary);
 }
 
 .tab-role-icon {
@@ -331,33 +332,34 @@ pub const BASE_CSS: &str = r#"
   background-color: var(--bg-app);
 }
 
-/* --- Barre de commande & navigation flottante unifiée (Style Watchdeck TopBar) --- */
+/* --- Barre de commande & navigation flottante unifiée (Style Linear / Watchdeck) --- */
 .app-topbar {
   position: sticky;
   top: max(8px, var(--sat));
   z-index: 40;
   margin: 0.65rem 1.5rem 1rem 1.5rem;
-  background-color: rgba(22, 27, 34, 0.88);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid var(--border-color);
+  background-color: var(--bg-glass);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
-  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-              transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.2s ease,
-              border-color 0.2s ease;
+  transition: opacity 0.22s var(--ease-out),
+              transform 0.22s var(--ease-out),
+              box-shadow 0.2s var(--ease-out),
+              border-color 0.2s var(--ease-out);
   box-sizing: border-box;
 }
 
-[data-theme="light"] .app-topbar {
-  background-color: rgba(255, 255, 255, 0.90);
+.app-topbar:focus-within {
+  border-color: var(--border-highlight);
+  box-shadow: var(--shadow-glow);
 }
 
 /* Élévation quand la page est défilée */
 .app-topbar.is-elevated {
-  border-color: rgba(88, 166, 255, 0.35);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  border-color: var(--border-highlight);
+  box-shadow: var(--shadow-md);
 }
 
 /* Auto-masquage intelligent au défilement (disparaît vers le haut) */
@@ -747,6 +749,46 @@ body[data-filter-sheet] .topbar-search {
   box-sizing: border-box;
 }
 
+@keyframes pageFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tab-panel {
+  animation: pageFadeIn 0.22s var(--ease-out);
+}
+
+.kbd-shortcut {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.kbd-shortcut:hover {
+  border-color: var(--border-highlight);
+  color: var(--text-main);
+  background: var(--bg-elevated);
+}
+
 /* --- Hub d'accueil : Vue d'ensemble & Statistiques --- */
 .overview-hero-card {
   display: flex;
@@ -756,7 +798,7 @@ body[data-filter-sheet] .topbar-search {
   gap: var(--space-4);
   padding: var(--space-4) calc(var(--space-4) + 0.25rem);
   margin-bottom: var(--space-4);
-  background: linear-gradient(135deg, var(--bg-card) 0%, var(--primary-bg) 100%);
+  background: radial-gradient(circle at top right, color-mix(in srgb, var(--primary) 16%, transparent), transparent 60%), linear-gradient(135deg, var(--bg-card) 0%, var(--bg-elevated) 100%);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);

@@ -1,10 +1,15 @@
 //! Écran Workers : présence, worker intégré, retrait d'un worker et raccordement (ADR 0014).
 
+use crate::route::{Link, Route};
 use crate::ui::filters::presence;
 use crate::ui::search::{matches, query};
-use crate::ui::{Drawer, Registre, RegistreMessage, StatusBadge};
+use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
+use crate::ui::{
+    Drawer, Icon, IconName, MetricTone, PageHeader, Registre, RegistreMessage, StatItem, StatStrip,
+    StatusBadge,
+};
 use crate::{api, format};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use flux_shared::Permission;
 use flux_shared::session::Me;
 use flux_shared::workers::Worker;
@@ -44,6 +49,16 @@ fn role_label(worker: &Worker) -> &'static str {
     } else {
         "Distant"
     }
+}
+
+/// Synthèse `(total, en_ligne, hors_ligne)` des workers à l'instant `now`.
+pub fn worker_counts(workers: &[Worker], now: DateTime<Utc>) -> (usize, usize, usize) {
+    let total = workers.len();
+    let online = workers
+        .iter()
+        .filter(|worker| worker.is_online(now))
+        .count();
+    (total, online, total.saturating_sub(online))
 }
 
 #[component]
@@ -92,11 +107,35 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
     });
     let selected = RwSignal::new(None::<uuid::Uuid>);
     let detail_open = RwSignal::new(false);
+    let enroll_open = RwSignal::new(false);
+    if can_manage {
+        provide_topbar_action(ActionSpec {
+            label: "Enrôler un worker",
+            on_click: Callback::new(move |()| enroll_open.set(true)),
+        });
+    }
     let on_removed = Callback::new(move |()| {
         detail_open.set(false);
         reload.update(|count| *count = count.wrapping_add(1));
     });
     let list = Signal::derive(move || workers.get().and_then(Result::ok).unwrap_or_default());
+    let stats = Signal::derive(move || {
+        let all = list.get();
+        let (total, online, offline) = worker_counts(&all, Utc::now());
+        vec![
+            StatItem::new("Total", total.to_string(), MetricTone::Neutral),
+            StatItem::new("En ligne", online.to_string(), MetricTone::Success),
+            StatItem::new(
+                "Hors ligne",
+                offline.to_string(),
+                if offline > 0 {
+                    MetricTone::Warning
+                } else {
+                    MetricTone::Neutral
+                },
+            ),
+        ]
+    });
     let selected_worker = Signal::derive(move || {
         let id = selected.get()?;
         list.get().into_iter().find(|worker| worker.id == id)
@@ -147,13 +186,47 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
             .map(|worker| worker.name)
             .unwrap_or_default()
     });
+    let header_actions = can_manage
+        .then(|| {
+            view! {
+                <button type="button" class="btn btn-primary" on:click=move |_| enroll_open.set(true)>
+                    <Icon name=IconName::Plus size=15 />
+                    <span>"Enrôler un worker"</span>
+                </button>
+            }
+        })
+        .into_any();
     view! {
         <div class="tab-panel" role="tabpanel">
+            <PageHeader
+                eyebrow="Infrastructure"
+                title="Workers"
+                subtitle="Nœuds de traitement enregistrés, état de présence et enrôlement."
+                icon=IconName::Workers
+                actions=header_actions
+            />
+            <StatStrip aria_label="Synthèse des workers" items=stats />
             <div class="registre">
                 <Registre aria_label="Workers qui exécutent" headers=HEADERS.to_vec()>{rows}</Registre>
             </div>
             <Drawer open=detail_open eyebrow="Worker" title=title>
                 {move || selected_worker.get().map(|worker| view! { <WorkerDetail worker=worker can_manage=can_manage on_removed=on_removed /> })}
+            </Drawer>
+            <Drawer open=enroll_open eyebrow="Infrastructure" title="Enrôler un worker">
+                <div class="inspection-panel">
+                    <p class="form-help">
+                        "Créez d'abord une clé d'API de rôle worker dans les paramètres, enregistrez-la dans le fichier "
+                        <code>"/config/worker_key"</code>
+                        " puis démarrez le service suivant :"
+                    </p>
+                    <pre class="code-block-wrapper"><code>{enroll_compose(&origin())}</code></pre>
+                    <div class="inspection-drawer__actions">
+                        <Link to=Route::Settings class="btn btn-secondary">
+                            <Icon name=IconName::Key size=15 />
+                            <span>"Gérer les clés d'API"</span>
+                        </Link>
+                    </div>
+                </div>
             </Drawer>
         </div>
     }
@@ -169,5 +242,24 @@ mod tests {
         assert!(compose.contains("CENTRAL_URL: https://flux.example"));
         assert!(compose.contains("WORKER_KEY_FILE: /config/worker_key"));
         assert!(!compose.contains("WORKER_KEY:"));
+    }
+
+    #[test]
+    fn worker_counts_splits_online_and_offline_workers() {
+        let now = Utc::now();
+        let workers = [
+            Worker {
+                id: uuid::Uuid::nil(),
+                name: "central".into(),
+                last_seen: now,
+            },
+            Worker {
+                id: uuid::Uuid::from_u128(2),
+                name: "stale".into(),
+                last_seen: now - chrono::Duration::hours(2),
+            },
+        ];
+        assert_eq!(worker_counts(&[], now), (0, 0, 0));
+        assert_eq!(worker_counts(&workers, now), (2, 1, 1));
     }
 }

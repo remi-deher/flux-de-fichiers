@@ -25,6 +25,16 @@ pub enum IconName {
     Plus,
     Download,
     Sliders,
+    User,
+    Users,
+    Key,
+    Globe,
+    Package,
+    Layers,
+    Shield,
+    Clock,
+    Copy,
+    Folder,
 }
 
 impl IconName {
@@ -81,6 +91,34 @@ impl IconName {
             Self::Sliders => {
                 r#"<line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="2" x2="6" y1="14" y2="14"/><line x1="10" x2="14" y1="8" y2="8"/><line x1="18" x2="22" y1="16" y2="16"/>"#
             }
+            Self::User => {
+                r#"<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>"#
+            }
+            Self::Users => {
+                r#"<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>"#
+            }
+            Self::Key => {
+                r#"<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>"#
+            }
+            Self::Globe => {
+                r#"<circle cx="12" cy="12" r="10"/><line x1="2" x2="22" y1="12" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>"#
+            }
+            Self::Package => {
+                r#"<path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>"#
+            }
+            Self::Layers => {
+                r#"<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>"#
+            }
+            Self::Shield => r#"<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>"#,
+            Self::Clock => {
+                r#"<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>"#
+            }
+            Self::Copy => {
+                r#"<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>"#
+            }
+            Self::Folder => {
+                r#"<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>"#
+            }
         }
     }
 }
@@ -121,7 +159,7 @@ pub fn Icon(
 mod tests {
     use super::*;
 
-    const ALL_ICONS: [IconName; 20] = [
+    const ALL_ICONS: [IconName; 30] = [
         IconName::Dashboard,
         IconName::Libraries,
         IconName::Flows,
@@ -142,6 +180,16 @@ mod tests {
         IconName::Plus,
         IconName::Download,
         IconName::Sliders,
+        IconName::User,
+        IconName::Users,
+        IconName::Key,
+        IconName::Globe,
+        IconName::Package,
+        IconName::Layers,
+        IconName::Shield,
+        IconName::Clock,
+        IconName::Copy,
+        IconName::Folder,
     ];
 
     #[test]

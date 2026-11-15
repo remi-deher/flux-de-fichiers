@@ -1,5 +1,6 @@
 //! Règles d'affichage des tâches, sans DOM : libellés, filtres et mise à jour en direct.
 
+use crate::ui::{IconName, SubTab};
 use flux_shared::jobs::{Job, JobErrorCode, JobEvent, JobEventType, JobStatus};
 
 /// Onglet de l'écran Activité : la file en direct, l'historique ou les échecs à diagnostiquer.
@@ -13,11 +14,11 @@ pub enum JobFilter {
 impl JobFilter {
     pub const TABS: [Self; 3] = [Self::Live, Self::History, Self::Diagnostic];
 
-    pub fn tab(self) -> crate::ui::SubTab {
+    pub fn tab(self) -> SubTab {
         match self {
-            Self::Live => crate::ui::SubTab::new("File en direct", "⚡"),
-            Self::History => crate::ui::SubTab::new("Historique", "📜"),
-            Self::Diagnostic => crate::ui::SubTab::new("Diagnostic", "🔬"),
+            Self::Live => SubTab::new("File en direct", IconName::Activity),
+            Self::History => SubTab::new("Historique", IconName::Clock),
+            Self::Diagnostic => SubTab::new("Diagnostic", IconName::Shield),
         }
     }
 
@@ -102,6 +103,25 @@ pub fn merge_pages(first: Vec<Job>, older: &[Job]) -> Vec<Job> {
 /// Y a-t-il peut-être d'autres tâches après cette page ? Une page pleine le laisse penser.
 pub fn may_have_more(page_len: usize) -> bool {
     page_len >= JOBS_PAGE_SIZE
+}
+
+/// Synthèse `(en_cours, terminées, échouées, diagnostic)` des tâches chargées.
+pub fn summarize_jobs(jobs: &[Job]) -> (usize, usize, usize, usize) {
+    let mut active = 0_usize;
+    let mut completed = 0_usize;
+    let mut failed = 0_usize;
+    for job in jobs {
+        match job.status {
+            JobStatus::Queued | JobStatus::Running => active += 1,
+            JobStatus::Succeeded => completed += 1,
+            JobStatus::Failed => failed += 1,
+        }
+    }
+    let diagnostic = jobs
+        .iter()
+        .filter(|job| JobFilter::Diagnostic.accepts(job))
+        .count();
+    (active, completed, failed, diagnostic)
 }
 
 #[cfg(test)]
@@ -194,5 +214,29 @@ mod tests {
         ] {
             assert!(!error_label(code).is_empty());
         }
+    }
+
+    #[test]
+    fn summarize_jobs_counts_active_completed_failed_and_diagnostic()
+    -> Result<(), serde_json::Error> {
+        let queued = job(1)?;
+        let running = Job {
+            status: JobStatus::Running,
+            ..job(2)?
+        };
+        let succeeded = Job {
+            status: JobStatus::Succeeded,
+            ..job(3)?
+        };
+        let failed = Job {
+            status: JobStatus::Failed,
+            ..job(4)?
+        };
+        assert_eq!(
+            summarize_jobs(&[queued, running, succeeded, failed]),
+            (2, 1, 1, 1)
+        );
+        assert_eq!(summarize_jobs(&[]), (0, 0, 0, 0));
+        Ok(())
     }
 }

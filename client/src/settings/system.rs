@@ -1,7 +1,7 @@
 //! Système : versions et mise à jour, clé de chiffrement, base de données, limites et espace disque ; socle de la section Réseau.
 
 use crate::api;
-use crate::ui::SectionHeader;
+use crate::ui::{ProgressBar, SectionHeader};
 use flux_shared::format::format_bytes;
 use flux_shared::system::{KeySource, SystemStatus, VolumeSpace};
 use leptos::prelude::*;
@@ -63,16 +63,20 @@ pub fn StatusSection(
     title: &'static str,
     subtitle: &'static str,
     rows: fn(&SystemStatus) -> Vec<DetailRow>,
+    #[prop(optional)] extra: Option<fn(&SystemStatus) -> AnyView>,
     #[prop(optional)] footer: Option<AnyView>,
 ) -> impl IntoView {
     let status = LocalResource::new(|| api::get::<SystemStatus>(STATUS_PATH));
     view! {
-        <div class="settings-section">
+        <div class="settings-section section-panel">
             <SectionHeader title=title subtitle=subtitle />
             {move || match status.get() {
                 None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),
                 Some(Err(error)) => view! { <p class="text-danger">{error.message()}</p> }.into_any(),
-                Some(Ok(status)) => view! { <DetailGrid rows=rows(&status) /> }.into_any(),
+                Some(Ok(status)) => view! {
+                    <DetailGrid rows=rows(&status) />
+                    {extra.map(|render| render(&status))}
+                }.into_any(),
             }}
             {footer}
         </div>
@@ -120,6 +124,33 @@ fn volume_label(volume: Option<VolumeSpace>) -> String {
     )
 }
 
+/// Pourcentage d'occupation du volume disque, ou `None` si la capacité totale est nulle.
+pub fn volume_used_percent(vol: &VolumeSpace) -> Option<u8> {
+    if vol.total_bytes == 0 {
+        return None;
+    }
+    let used = u128::from(vol.total_bytes.saturating_sub(vol.available_bytes));
+    let total = u128::from(vol.total_bytes);
+    Some((used.saturating_mul(100) / total).min(100) as u8)
+}
+
+fn volume_meter(status: &SystemStatus) -> AnyView {
+    status
+        .storage
+        .volume
+        .as_ref()
+        .and_then(volume_used_percent)
+        .map(|percent| {
+            view! {
+                <div class="system-volume-meter">
+                    <span class="detail-term">"Occupation du volume"</span>
+                    <ProgressBar percent=u32::from(percent) label=format!("{percent} %") />
+                </div>
+            }
+        })
+        .into_any()
+}
+
 fn system_rows(status: &SystemStatus) -> Vec<DetailRow> {
     vec![
         DetailRow::mono("Version du central", status.version.clone()),
@@ -162,7 +193,7 @@ pub fn SystemSection() -> impl IntoView {
     .into_any();
     view! {
         <StatusSection title="Système" subtitle="Versions, mise à jour, clé de chiffrement, base de données et espace disque."
-            rows=system_rows footer=footer />
+            rows=system_rows extra=volume_meter footer=footer />
     }
 }
 
@@ -184,6 +215,31 @@ mod tests {
         };
         assert_eq!(volume_label(Some(space)), "1 Kio libres sur 2 Kio");
         assert_eq!(volume_label(None), "Illisible");
+    }
+
+    #[test]
+    fn volume_used_percent_handles_zero_and_typical_usage() {
+        assert_eq!(
+            volume_used_percent(&VolumeSpace {
+                total_bytes: 0,
+                available_bytes: 0,
+            }),
+            None
+        );
+        assert_eq!(
+            volume_used_percent(&VolumeSpace {
+                total_bytes: 1_000,
+                available_bytes: 250,
+            }),
+            Some(75)
+        );
+        assert_eq!(
+            volume_used_percent(&VolumeSpace {
+                total_bytes: 1_000,
+                available_bytes: 1_200,
+            }),
+            Some(0)
+        );
     }
 
     #[test]

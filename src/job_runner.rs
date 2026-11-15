@@ -2,7 +2,7 @@
 
 use crate::{
     domain::{Claim, JobErrorCode, JobStepEntry, JobStepStatus, ToolRequirement},
-    flows::{self, ArrContext, FlowEngine},
+    flows::{self, ArrContext, FlowEngine, FlowProgressCallback},
     media::{self, OutputProfile},
     plugins::{self, ProbeContract, default_tool_version},
     tools_cache::ToolCacheManager,
@@ -123,7 +123,7 @@ pub async fn execute_claim_processing(
     arr: Option<&ArrContext>,
     source_snapshot: &Path,
     work_dir: &Path,
-    progress_cb: Arc<dyn Fn(u32, &str) + Send + Sync>,
+    progress_cb: FlowProgressCallback,
 ) -> Result<JobExecutionResult, JobRunError> {
     if let Some(flow) = claim.frozen_flow.as_ref() {
         let mut engine = FlowEngine::new(cache_mgr, http_client);

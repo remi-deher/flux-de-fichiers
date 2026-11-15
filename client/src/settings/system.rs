@@ -52,8 +52,10 @@ pub fn DetailGrid(rows: Vec<DetailRow>) -> impl IntoView {
     view! {
         <div class="detail-grid">
             {rows.into_iter().map(|row| view! {
-                <div class="detail-term">{row.term}</div>
-                <div class="detail-val" class:text-mono=row.mono>{row.value}</div>
+                <div class="detail-row">
+                    <span class="detail-term">{row.term}</span>
+                    <span class="detail-val" class:text-mono=row.mono>{row.value}</span>
+                </div>
             }).collect_view()}
         </div>
     }

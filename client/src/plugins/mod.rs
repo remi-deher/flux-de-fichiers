@@ -4,11 +4,12 @@ mod settings;
 
 use crate::api;
 use crate::route::encode_segment;
-use crate::ui::filters::{PluginKindFilter, plugin_kind};
+use crate::ui::filters::{Filters, PluginKindFilter, plugin_kind};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
-    Drawer, EmptyState, Icon, IconName, MetricTone, SectionHeader, StatItem, StatStrip, Toasts,
+    Drawer, EmptyState, IconName, MetricTone, ResourceCard, SectionHeader, StatItem, StatStrip,
+    Tag, TagTone, Toasts,
 };
 use flux_shared::plugins::vocab::{CatalogItemType, CatalogSection};
 use flux_shared::plugins::{
@@ -321,47 +322,55 @@ fn ToolsSection(
             return None;
         }
         Some(view! {
-            <section class="section-panel">
+            <section class="page-section">
                 <SectionHeader
                     title="Outils distribués"
                     subtitle="Binaires d'analyse et de remuxing gérés et mis en cache sur les nœuds."
                 />
-                <div class="tools-grid">
+                <div class="resource-grid">
                     {shown.into_iter().map(|tool| {
                         let (label, class) = tool_status_label(tool.status);
                         let id = tool.id.clone();
                         let installable = can_install && tool.status == ToolStatus::NotInstalled;
+                        let tone = match tool.status {
+                            ToolStatus::Ready => MetricTone::Success,
+                            ToolStatus::Installing => MetricTone::Warning,
+                            ToolStatus::NotInstalled => MetricTone::Neutral,
+                        };
+                        let badge = view! {
+                            <div class="cluster">
+                                <Tag label=tool.version tone=TagTone::Mono />
+                                <span class=class>{label}</span>
+                            </div>
+                        }
+                        .into_any();
+                        let actions = installable.then(|| {
+                            let id = id.clone();
+                            view! {
+                                <button type="button" class="btn btn-secondary btn-sm" disabled=move || install.pending().get()
+                                    on:click=move |_| { install.dispatch(id.clone()); }>"Installer"</button>
+                            }
+                            .into_any()
+                        });
                         view! {
-                            <article class="tool-card">
-                                <div class="tool-card-header">
-                                    <div class="plugin-card__title-wrap">
-                                        <span class="plugin-card__icon" aria-hidden="true">
-                                            <Icon name=IconName::Package size=17 />
-                                        </span>
-                                        <h3 class="tool-name">{tool.name}</h3>
-                                    </div>
-                                    <div class="cluster">
-                                        <span class="tool-version-badge">{tool.version}</span>
-                                        <span class=class>{label}</span>
-                                    </div>
-                                </div>
-                                <p class="tool-desc">{tool.description}</p>
-                                <div class="plugin-card__meta">
-                                    <span class="repo-badge community">{tool.capability.as_str()}</span>
-                                    <span class="plugin-tag-chip text-mono">{tool.arch}</span>
-                                    <span class="plugin-tag-chip">{tool.distribution}</span>
+                            <ResourceCard
+                                title=tool.name
+                                subtitle=Some(tool.description)
+                                icon=IconName::Package
+                                tone=tone
+                                badge=Some(badge)
+                                footer_meta=id
+                                footer_actions=actions
+                            >
+                                <div class="cluster">
+                                    <Tag label=tool.capability.as_str() tone=TagTone::Primary />
+                                    <Tag label=tool.arch tone=TagTone::Mono />
+                                    <Tag label=tool.distribution tone=TagTone::Neutral />
                                     {tool.current_choice.then(|| view! {
-                                        <span class="repo-badge official">"Choix actuel"</span>
+                                        <Tag label="Choix actuel" tone=TagTone::Success />
                                     })}
                                 </div>
-                                <div class="tool-card-footer">
-                                    <code class="code-badge truncate">{id.clone()}</code>
-                                    {installable.then(|| view! {
-                                        <button type="button" class="btn btn-secondary btn-sm" disabled=move || install.pending().get()
-                                            on:click=move |_| { install.dispatch(id.clone()); }>"Installer"</button>
-                                    })}
-                                </div>
-                            </article>
+                            </ResourceCard>
                         }
                     }).collect_view()}
                 </div>
@@ -383,7 +392,7 @@ fn CatalogSectionView(
         <Drawer open=settings_open eyebrow="Réglages du plugin" title=title>
             {move || configuring.get().map(|id| view! { <PluginSettings plugin_id=id /> })}
         </Drawer>
-        <section class="section-panel">
+        <section class="page-section">
             <SectionHeader
                 title="Catalogue d'extensions"
                 subtitle="Plugins de traitement, modèles de flux, packs et ressources synchronisés."
@@ -427,62 +436,88 @@ fn CatalogSectionView(
                             .into_any();
                         }
                         view! {
-                            <div class="plugins-grid">
+                            <div class="resource-grid">
                                 {shown.into_iter().map(|entry| {
                                     let id = entry.id.clone();
+                                    let active_id = id.clone();
                                     let configurable = can_configure && entry.entry_type == CatalogItemType::Plugin;
                                     let badge_label = section_badge_label(entry.entry_type);
                                     let fallback_desc = section_fallback_desc(entry.entry_type);
+                                    let subtitle = entry
+                                        .entry_type
+                                        .subtitle()
+                                        .unwrap_or(fallback_desc)
+                                        .to_owned();
+                                    let tone = match entry.entry_type.section() {
+                                        Some(CatalogSection::Plugins) => MetricTone::Success,
+                                        Some(CatalogSection::Flows) => MetricTone::Warning,
+                                        _ => MetricTone::Neutral,
+                                    };
+                                    let badge = view! {
+                                        <div class="cluster">
+                                            <Tag label=entry.version tone=TagTone::Mono />
+                                            <Tag label=badge_label tone=TagTone::Primary />
+                                        </div>
+                                    }
+                                    .into_any();
+                                    let open_settings = configurable.then(|| {
+                                        let id = id.clone();
+                                        Callback::new(move |()| {
+                                            configuring.set(Some(id.clone()));
+                                            settings_open.set(true);
+                                        })
+                                    });
+                                    let actions = configurable.then(|| {
+                                        let id = id.clone();
+                                        view! {
+                                            <button type="button" class="btn btn-secondary btn-sm"
+                                                on:click=move |_| { configuring.set(Some(id.clone())); settings_open.set(true); }>
+                                                "Réglages"
+                                            </button>
+                                        }
+                                        .into_any()
+                                    });
                                     let has_meta = entry.capability.is_some()
                                         || entry.category.is_some_and(|cat| cat.shows_badge())
                                         || entry.distribution.is_some()
                                         || !entry.tags.is_empty();
                                     view! {
-                                        <article class="plugin-card">
-                                            <div class="plugin-card__head">
-                                                <div class="plugin-card__title-wrap">
-                                                    <span class="plugin-card__icon" aria-hidden="true">
-                                                        <Icon name=section_icon(entry.entry_type) size=17 />
-                                                    </span>
-                                                    <h3 class="plugin-card__title">{entry.name}</h3>
-                                                </div>
-                                                <div class="cluster">
-                                                    <span class="tool-version-badge">{entry.version}</span>
-                                                    <span class="repo-badge community">{badge_label}</span>
-                                                </div>
-                                            </div>
-                                            <div class="plugin-card__body">
-                                                {if has_meta {
-                                                    view! {
-                                                        <div class="plugin-card__meta">
-                                                            {entry.capability.map(|cap| view! {
-                                                                <span class="repo-badge official">{cap.as_str()}</span>
-                                                            })}
-                                                            {entry.category.filter(|cat| cat.shows_badge()).map(|cat| view! {
-                                                                <span class="plugin-tag-chip">{cat.as_str()}</span>
-                                                            })}
-                                                            {entry.distribution.map(|dist| view! {
-                                                                <span class="plugin-tag-chip">{dist}</span>
-                                                            })}
-                                                            {entry.tags.into_iter().map(|tag| view! {
-                                                                <span class="plugin-tag-chip">{tag}</span>
-                                                            }).collect_view()}
-                                                        </div>
-                                                    }.into_any()
-                                                } else {
-                                                    view! { <p class="plugin-card__desc">{fallback_desc}</p> }.into_any()
-                                                }}
-                                            </div>
-                                            <div class="plugin-card__foot">
-                                                <code class="code-badge truncate">{id.clone()}</code>
-                                                {configurable.then(|| view! {
-                                                    <button type="button" class="btn btn-secondary btn-sm"
-                                                        on:click=move |_| { configuring.set(Some(id.clone())); settings_open.set(true); }>
-                                                        "Réglages"
-                                                    </button>
-                                                })}
-                                            </div>
-                                        </article>
+                                        <ResourceCard
+                                            title=entry.name
+                                            subtitle=Some(subtitle)
+                                            icon=section_icon(entry.entry_type)
+                                            tone=tone
+                                            badge=Some(badge)
+                                            active=Some(Signal::derive(move || {
+                                                settings_open.get()
+                                                    && configuring.get().as_deref() == Some(active_id.as_str())
+                                            }))
+                                            on_click=open_settings
+                                            footer_meta=id
+                                            footer_actions=actions
+                                        >
+                                            {if has_meta {
+                                                view! {
+                                                    <div class="cluster">
+                                                        {entry.capability.map(|cap| view! {
+                                                            <Tag label=cap.as_str() tone=TagTone::Success />
+                                                        })}
+                                                        {entry.category.filter(|cat| cat.shows_badge()).map(|cat| view! {
+                                                            <Tag label=cat.as_str() tone=TagTone::Neutral />
+                                                        })}
+                                                        {entry.distribution.map(|dist| view! {
+                                                            <Tag label=dist tone=TagTone::Mono />
+                                                        })}
+                                                        {entry.tags.into_iter().map(|tag| view! {
+                                                            <Tag label=tag tone=TagTone::Neutral />
+                                                        }).collect_view()}
+                                                    </div>
+                                                }
+                                                .into_any()
+                                            } else {
+                                                view! { <p class="text-dim text-sm">{fallback_desc}</p> }.into_any()
+                                            }}
+                                        </ResourceCard>
                                     }
                                 }).collect_view()}
                             </div>
@@ -499,6 +534,7 @@ fn CatalogSectionView(
 pub fn PluginsPage(me: Me) -> impl IntoView {
     let central = me.instance_kind == InstanceKind::Central;
     let can_manage = central && me.allows(Permission::ManagePlugins);
+    let filters = use_context::<Filters>();
     let reload_catalog = RwSignal::new(0_u32);
     let reload_tools = RwSignal::new(0_u32);
     let reload_repos = RwSignal::new(0_u32);
@@ -528,12 +564,27 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
 
     let stats = Signal::derive(move || {
         let catalog_entries = catalog.get().and_then(Result::ok).unwrap_or_default();
-        let (total_catalog, plugins, flows_and_packs) = summarize_catalog(&catalog_entries);
+        let (total_catalog, plugins, _) = summarize_catalog(&catalog_entries);
+        let flows = catalog_entries
+            .iter()
+            .filter(|entry| entry.entry_type.section() == Some(CatalogSection::Flows))
+            .count();
+        let packs = catalog_entries
+            .iter()
+            .filter(|entry| entry.entry_type.section() == Some(CatalogSection::Packs))
+            .count();
+        let active_kind = plugin_kind();
+        let set_kind = move |next: PluginKindFilter| {
+            Callback::new(move |()| {
+                if let Some(filters) = filters {
+                    filters.plugin_kind.set(next);
+                }
+            })
+        };
         let mut items = vec![
-            StatItem::new(
-                "Extensions catalogue",
-                total_catalog.to_string(),
-                MetricTone::Neutral,
+            StatItem::new("Catalogue", total_catalog.to_string(), MetricTone::Neutral).with_filter(
+                active_kind == PluginKindFilter::Any,
+                set_kind(PluginKindFilter::Any),
             ),
             StatItem::new(
                 "Plugins",
@@ -543,11 +594,18 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
                 } else {
                     MetricTone::Neutral
                 },
+            )
+            .with_filter(
+                active_kind == PluginKindFilter::Plugins,
+                set_kind(PluginKindFilter::Plugins),
             ),
-            StatItem::new(
-                "Modèles & Packs",
-                flows_and_packs.to_string(),
-                MetricTone::Neutral,
+            StatItem::new("Flux", flows.to_string(), MetricTone::Neutral).with_filter(
+                active_kind == PluginKindFilter::Flows,
+                set_kind(PluginKindFilter::Flows),
+            ),
+            StatItem::new("Packs", packs.to_string(), MetricTone::Neutral).with_filter(
+                active_kind == PluginKindFilter::Packs,
+                set_kind(PluginKindFilter::Packs),
             ),
         ];
         if let Some(repos_res) = repositories {

@@ -15,111 +15,11 @@ pub const FLOWS_CSS: &str = r#"
   padding: 2rem 1rem;
 }
 
-.flows-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
-  gap: 1rem;
-  margin-top: 0.25rem;
-}
-
-.flow-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 1.15rem 1.25rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-  box-shadow: var(--shadow-sm);
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
-}
-
-.flow-card:hover {
-  border-color: var(--border-highlight);
-  box-shadow: var(--shadow-md);
-}
-
-.flow-card.active-flow {
-  border-left: 4px solid var(--primary);
-}
-
-.flow-card__head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 0.75rem;
-}
-
-.flow-card__title-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  min-width: 0;
-}
-
-.flow-card__title {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: var(--text-main);
-}
-
-.flow-card__badges {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.flow-card__desc {
-  margin: 0;
-  font-size: 0.8125rem;
-  line-height: 1.45;
-}
-
 .flow-card__pipeline {
   padding: 0.65rem 0.75rem;
   background: var(--bg-subtle);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-}
-
-.flow-card__foot {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.75rem;
-  padding-top: 0.75rem;
-  margin-top: auto;
-  border-top: 1px solid var(--border-subtle);
-  flex-wrap: wrap;
-}
-
-.flow-card__actions {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-}
-
-.flow-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 1rem;
-}
-
-.flow-card-title {
-  font-size: 1.125rem;
-  font-weight: 700;
-  color: var(--text-main);
-  margin: 0;
-}
-
-.flow-card-desc {
-  font-size: 0.875rem;
-  color: var(--text-dim);
-  margin: 0.35rem 0 0 0;
-  line-height: 1.45;
 }
 
 .flow-pipeline-container {
@@ -172,26 +72,6 @@ pub const FLOWS_CSS: &str = r#"
 .pipeline-arrow {
   color: var(--text-muted);
   font-size: 1rem;
-}
-
-.flow-card-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.75rem;
-  border-top: 1px solid var(--border-color);
-  padding-top: 0.875rem;
-  flex-wrap: wrap;
-}
-
-.flow-pattern-tag {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--text-dim);
-  background: var(--bg-subtle);
-  padding: 0.25rem 0.5rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-color);
 }
 
 /* --- Canvas Visuel No-Code (Zapier / FileFlows style) --- */

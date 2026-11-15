@@ -8,9 +8,10 @@ use crate::jobs::LiveJobs;
 use crate::jobs::model::{status_label, status_tone};
 use crate::jobs::table::job_progress_cell;
 use crate::route::{Link, Route, use_router};
+use crate::ui::filters::{Filters, JobStateFilter};
 use crate::ui::{
-    EmptyState, Icon, IconName, MetricCard, MetricTone, Registre, RegistreMessage, SectionHeader,
-    StatusBadge,
+    EmptyState, Icon, IconName, MetricTone, Registre, RegistreMessage, SectionHeader, StatItem,
+    StatStrip, StatusBadge,
 };
 use crate::{api, format};
 use chrono::Utc;
@@ -56,10 +57,22 @@ fn Hero(
     }
 }
 
+fn open_jobs_filtered(
+    router: crate::route::Router,
+    filters: Option<Filters>,
+    state: JobStateFilter,
+) {
+    if let Some(filters) = filters {
+        filters.pending_job_state.set(Some(state));
+    }
+    router.go(Route::Jobs);
+}
+
 #[component]
 pub fn CentralOverview(me: Me) -> impl IntoView {
     let _ = me;
     let router = use_router();
+    let filters = use_context::<Filters>();
     let live_progress = use_context::<LiveJobs>().map(|live| live.progress);
     let jobs = LocalResource::new(|| api::get::<Vec<Job>>(JOBS_PATH));
     let workers = LocalResource::new(|| api::get::<Vec<Worker>>(WORKERS_PATH));
@@ -84,17 +97,46 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                 let actions = view! { <WidgetPicker layout=layout /> }.into_any();
                 view! {
                     <Hero tone=tone status=status actions=actions />
-                    {layout_now.is_visible(Widget::Metrics).then(|| view! {
-                    <section class="metrics-grid" aria-label="Statistiques clés">
-                        <MetricCard label="Tâches en cours" value=summary.running.to_string() subtitle=format!("{} en attente", summary.queued) icon=IconName::Activity />
-                        <MetricCard label="Tâches échouées" value=summary.failed.to_string() subtitle=format!("{} relançable(s)", summary.retryable) icon=IconName::Alert
-                            tone={if summary.failed > 0 { MetricTone::Danger } else { MetricTone::Neutral }} />
-                        <MetricCard label="Workers en ligne" value=format!("{} / {}", summary.workers_online, summary.workers_total) subtitle="Central et workers" icon=IconName::Workers
-                            tone={if summary.workers_online < summary.workers_total { MetricTone::Warning } else { MetricTone::Success }}
-                            progress=f32::from(ratio_percent(summary.workers_online, summary.workers_total)) />
-                        <MetricCard label="Bibliothèques prêtes" value=format!("{} / {}", summary.libraries_ready, summary.libraries_total) subtitle="Avec flux et worker" icon=IconName::Libraries
-                            progress=f32::from(ratio_percent(summary.libraries_ready, summary.libraries_total)) />
-                    </section>
+                    {layout_now.is_visible(Widget::Metrics).then(|| {
+                        let go_active = Callback::new(move |()| {
+                            open_jobs_filtered(router, filters, JobStateFilter::Active)
+                        });
+                        let go_failed = Callback::new(move |()| {
+                            open_jobs_filtered(router, filters, JobStateFilter::Failed)
+                        });
+                        let go_workers = Callback::new(move |()| router.go(Route::Workers));
+                        let go_libraries = Callback::new(move |()| router.go(Route::Libraries));
+                        let kpis = vec![
+                            StatItem::new("Tâches en cours", summary.running.to_string(), MetricTone::Neutral)
+                                .with_detail(format!("{} en attente", summary.queued))
+                                .with_filter(false, go_active),
+                            StatItem::new(
+                                "Tâches échouées",
+                                summary.failed.to_string(),
+                                if summary.failed > 0 { MetricTone::Danger } else { MetricTone::Neutral },
+                            )
+                            .with_detail(format!("{} relançable(s)", summary.retryable))
+                            .with_filter(false, go_failed),
+                            StatItem::new(
+                                "Workers en ligne",
+                                format!("{} / {}", summary.workers_online, summary.workers_total),
+                                if summary.workers_online < summary.workers_total {
+                                    MetricTone::Warning
+                                } else {
+                                    MetricTone::Success
+                                },
+                            )
+                            .with_detail(format!("{} % actifs", ratio_percent(summary.workers_online, summary.workers_total)))
+                            .with_filter(false, go_workers),
+                            StatItem::new(
+                                "Bibliothèques prêtes",
+                                format!("{} / {}", summary.libraries_ready, summary.libraries_total),
+                                MetricTone::Neutral,
+                            )
+                            .with_detail("flux + worker")
+                            .with_filter(false, go_libraries),
+                        ];
+                        view! { <StatStrip aria_label="Statistiques clés" items=kpis /> }
                     })}
                     {layout_now.is_visible(Widget::Hardware).then(|| view! { <HardwareWidget /> })}
                     <div class="overview-grid-2col">
@@ -147,7 +189,9 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
 
 #[component]
 pub fn WorkerOverviewPage(me: Me) -> impl IntoView {
-    let _ = me;
+    let can_jobs = me.allows(flux_shared::Permission::ViewJobs);
+    let router = use_router();
+    let filters = use_context::<Filters>();
     let overview = LocalResource::new(|| api::get::<WorkerOverview>(WORKER_OVERVIEW_PATH));
     view! {
         <div class="tab-panel" role="tabpanel">
@@ -156,15 +200,41 @@ pub fn WorkerOverviewPage(me: Me) -> impl IntoView {
                 Some(Err(error)) => view! { <Hero tone="danger" status=format!("Central injoignable : {}", error.message()) /> }.into_any(),
                 Some(Ok(view)) => {
                     let contact = view.last_seen.map_or_else(|| "aucune activité enregistrée".to_owned(), |at| format!("dernière activité {}", format::datetime(at)));
+                    let mut items = vec![
+                        StatItem::new("En attente", view.jobs.queued.to_string(), MetricTone::Neutral)
+                            .with_detail("en file locale"),
+                        StatItem::new("En cours", view.jobs.running.to_string(), MetricTone::Neutral)
+                            .with_detail("traitements actifs"),
+                        StatItem::new("Réussies", view.jobs.succeeded.to_string(), MetricTone::Success)
+                            .with_detail("menées à terme"),
+                        StatItem::new(
+                            "En échec",
+                            view.jobs.failed.to_string(),
+                            if view.jobs.failed > 0 { MetricTone::Danger } else { MetricTone::Neutral },
+                        )
+                        .with_detail("sur ce worker"),
+                    ];
+                    if can_jobs {
+                        let states = [
+                            JobStateFilter::Active,
+                            JobStateFilter::Active,
+                            JobStateFilter::Completed,
+                            JobStateFilter::Failed,
+                        ];
+                        for (item, state) in items.iter_mut().zip(states) {
+                            *item = std::mem::replace(
+                                item,
+                                StatItem::new("", "", MetricTone::Neutral),
+                            )
+                            .with_filter(
+                                false,
+                                Callback::new(move |()| open_jobs_filtered(router, filters, state)),
+                            );
+                        }
+                    }
                     view! {
                         <Hero tone="success" status=format!("Central joignable • {contact}") />
-                        <section class="metrics-grid" aria-label="Tâches de ce worker">
-                            <MetricCard label="En attente" value=view.jobs.queued.to_string() subtitle="Tâches en file pour ce worker" icon=IconName::Activity />
-                            <MetricCard label="En cours" value=view.jobs.running.to_string() subtitle="Traitements actifs" icon=IconName::Refresh />
-                            <MetricCard label="Réussies" value=view.jobs.succeeded.to_string() subtitle="Menées à terme" icon=IconName::Check tone=MetricTone::Success />
-                            <MetricCard label="En échec" value=view.jobs.failed.to_string() subtitle="Échouées sur ce worker" icon=IconName::Alert
-                                tone={if view.jobs.failed > 0 { MetricTone::Danger } else { MetricTone::Neutral }} />
-                        </section>
+                        <StatStrip aria_label="Tâches de ce worker" items=items />
                     }.into_any()
                 }
             }}

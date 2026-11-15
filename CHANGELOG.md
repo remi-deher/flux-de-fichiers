@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.21.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.21.0...v0.21.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **ui:** corriger l'accolade CSS de page-transition-region et l'alignement topbar ([02d8320](https://github.com/remi-deher/flux-de-fichiers/commit/02d83207b0e07c99b258bed75ae20ca4533f1151))
+* **ui:** refondre workers, plugins et parametres et epurer la navigation ([b415839](https://github.com/remi-deher/flux-de-fichiers/commit/b415839746b2b6e30339814f9cdab16f47573335))
+* **ui:** refondre workers, plugins et paramètres et épurer la navigation ([b88725e](https://github.com/remi-deher/flux-de-fichiers/commit/b88725e476889aa6fb06f6d174ab42a6060167d9))
+
 ## [0.21.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.20.0...v0.21.0) (2026-11-15)
 
 

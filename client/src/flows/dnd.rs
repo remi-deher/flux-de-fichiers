@@ -468,8 +468,8 @@ mod tests {
             graph.node(&copy_id).map(|n| n.name.as_str()),
             Some("Remux (copie)")
         );
-        assert!(can_connect(&graph, &remux, &None, &copy_id, &catalog) == false);
-        assert!(graph.disconnect(&remux, &None) == ());
+        assert!(!can_connect(&graph, &remux, &None, &copy_id, &catalog));
+        graph.disconnect(&remux, &None);
         assert!(can_connect(&graph, &remux, &None, &copy_id, &catalog));
         assert_eq!(
             connect_checked(&mut graph, &copy_id, None, &input, &catalog),

@@ -2,7 +2,7 @@
 
 use super::account::role_label;
 use crate::api;
-use crate::ui::Drawer;
+use crate::ui::{Drawer, Icon, IconName, SectionHeader, Toasts};
 use flux_shared::Role;
 use flux_shared::accounts::{ApiKeyRecord, CreateKeyRequest, CreatedKey};
 use leptos::prelude::*;
@@ -36,21 +36,37 @@ pub fn KeysSection() -> impl IntoView {
             creating.set(false);
             revealed.set(Some(created.key));
             name.set(String::new());
+            feedback.set(None);
+            Toasts::notify_success("Clé d'API créée.");
             refresh();
         }
-        Some(Err(error)) => feedback.set(Some(error.message())),
+        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
     });
     Effect::new(move |_| match revoke.value().get() {
-        Some(Ok(())) => refresh(),
-        Some(Err(error)) => feedback.set(Some(error.message())),
+        Some(Ok(())) => {
+            feedback.set(None);
+            Toasts::notify_success("Clé d'API révoquée.");
+            refresh();
+        }
+        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
     });
+    let header_actions = view! {
+        <button type="button" class="btn btn-primary btn-sm" on:click=move |_| creating.set(true)>
+            <Icon name=IconName::Plus size=14 />
+            <span>"Créer une clé"</span>
+        </button>
+    }
+    .into_any();
     view! {
-        <div class="registre">
-            <div class="cluster-end">
-                <button type="button" class="btn btn-primary btn-sm" on:click=move |_| creating.set(true)>"Créer une clé"</button>
-            </div>
+        <section class="section-panel">
+            <SectionHeader
+                title="Clés d'API"
+                subtitle="Jetons d'authentification des workers et accès automatisés."
+                actions=header_actions
+            />
+            <div class="registre">
             {move || revealed.get().map(|key| view! {
                 <div class="settings-alert" role="status">
                     <p>"Copiez cette clé maintenant : elle ne sera plus affichée."</p>
@@ -113,6 +129,7 @@ pub fn KeysSection() -> impl IntoView {
             </form>
             </Drawer>
             <p class="form-help" role="status">{move || feedback.get()}</p>
-        </div>
+            </div>
+        </section>
     }
 }

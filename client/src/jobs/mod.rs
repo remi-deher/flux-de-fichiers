@@ -4,21 +4,21 @@
 mod detail;
 mod live;
 pub mod model;
-mod table;
+pub mod table;
 
 pub use live::LiveJobs;
 
 use crate::api;
 use crate::ui::filters::period;
 use crate::ui::search::{matches, query};
-use crate::ui::{Drawer, SubNav};
+use crate::ui::{Drawer, IconName, MetricTone, PageHeader, StatItem, StatStrip, SubNav, SubTab};
 use chrono::Utc;
 use detail::JobDetail;
 use flux_shared::jobs::Job;
 use flux_shared::session::Me;
 use flux_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
-use model::{JOBS_PAGE_SIZE, JobFilter, may_have_more, merge_pages};
+use model::{JOBS_PAGE_SIZE, JobFilter, may_have_more, merge_pages, summarize_jobs};
 use std::collections::HashMap;
 use table::JobsTable;
 use uuid::Uuid;
@@ -107,10 +107,54 @@ pub fn JobsPage(me: Me) -> impl IntoView {
             .map(|job| job.source_name)
             .unwrap_or_default()
     });
+    let stats = Signal::derive(move || {
+        let list = all_jobs.get();
+        let (active, completed, failed, diagnostic) = summarize_jobs(&list);
+        vec![
+            StatItem::new("En cours", active.to_string(), MetricTone::Neutral),
+            StatItem::new("Terminées", completed.to_string(), MetricTone::Success),
+            StatItem::new(
+                "Échouées",
+                failed.to_string(),
+                if failed > 0 {
+                    MetricTone::Danger
+                } else {
+                    MetricTone::Neutral
+                },
+            ),
+            StatItem::new(
+                "Diagnostic",
+                diagnostic.to_string(),
+                if diagnostic > 0 {
+                    MetricTone::Warning
+                } else {
+                    MetricTone::Neutral
+                },
+            )
+            .with_detail("à analyser"),
+        ]
+    });
+    let tabs: Signal<Vec<SubTab>> = Signal::derive(move || {
+        let list = all_jobs.get();
+        let (active, completed, failed, diagnostic) = summarize_jobs(&list);
+        let history = completed + failed;
+        vec![
+            JobFilter::Live.tab().with_badge(active),
+            JobFilter::History.tab().with_badge(history),
+            JobFilter::Diagnostic.tab().with_badge(diagnostic),
+        ]
+    });
     view! {
         <div class="tab-panel" role="tabpanel">
+            <PageHeader
+                eyebrow="Traitements"
+                title="Activité"
+                subtitle="File d'exécution en temps réel, historique et diagnostic des tâches."
+                icon=IconName::Activity
+            />
+            <StatStrip aria_label="Synthèse de l'activité" items=stats />
             <SubNav aria_label="Sous-navigation de l'activité"
-                tabs=JobFilter::TABS.iter().map(|filter| filter.tab()).collect()
+                tabs=tabs
                 selected=tab />
             <div class="registre">
                 <JobsTable jobs=visible progress=progress selected=selected on_open=open />

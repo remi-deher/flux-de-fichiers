@@ -8,6 +8,7 @@ use flux_shared::jobs::{Job, JobStatus, MAX_ATTEMPTS};
 use leptos::prelude::*;
 
 const ACTION_ICON_SIZE: u32 = 15;
+const SHORT_ID_CHARS: usize = 8;
 
 fn row(label: &'static str, value: String) -> impl IntoView {
     view! {
@@ -58,10 +59,24 @@ pub fn JobDetail(job: Job, can_manage: bool, on_changed: Callback<Job>) -> impl 
     });
     let retryable = can_manage && job.is_retryable();
     let job_id = job.id;
+    let short_id: String = job.id.to_string().chars().take(SHORT_ID_CHARS).collect();
+    let diagnostic = job.error_code.map(error_label);
 
     view! {
         <div class="inspection-panel">
-            <StatusBadge label=status_label(job.status) variant=status_tone(job.status) />
+            <div class="inspection-banner">
+                <StatusBadge label=status_label(job.status) variant=status_tone(job.status) />
+                <span class="text-mono text-xs text-dim">{format!("#{short_id}")}</span>
+            </div>
+            {diagnostic.map(|reason| view! {
+                <div class="diagnostic-box" role="alert">
+                    <Icon name=IconName::Alert size=16 />
+                    <div>
+                        <div class="diagnostic-box__title">"Diagnostic d'échec"</div>
+                        <div class="diagnostic-box__message">{reason}</div>
+                    </div>
+                </div>
+            })}
             <div class="detail-grid">
                 {row("Identifiant", job.id.to_string())}
                 {row("Tentatives", format!("{} sur {MAX_ATTEMPTS}", job.attempts))}

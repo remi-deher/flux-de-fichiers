@@ -34,20 +34,25 @@ pub const BASE_CSS: &str = r#"
   display: flex;
   flex: 1;
   min-height: 100vh;
+  padding: 0.5rem;
+  gap: 0.5rem;
+  background-color: var(--bg-app);
+  box-sizing: border-box;
 }
 
-/* --- Barre latérale de navigation (Navigation Rail inspirée d'Encoding Central) --- */
+/* --- Barre latérale de navigation (App Frame style Linear / Raycast) --- */
 .application-sidebar {
-  width: 240px;
+  width: 244px;
   background-color: var(--bg-card);
-  border-right: 1px solid var(--border-color);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   transition: width 0.22s var(--ease-out);
   position: sticky;
-  top: 0;
-  height: 100vh;
+  top: 0.5rem;
+  height: calc(100vh - 1rem);
   overflow-y: auto;
   z-index: 50;
   box-sizing: border-box;
@@ -63,8 +68,21 @@ pub const BASE_CSS: &str = r#"
 .application-sidebar.is-collapsed .brand-info,
 .application-sidebar.is-collapsed .tab-btn-label,
 .application-sidebar.is-collapsed .nav-group-label,
-.application-sidebar.is-collapsed .collapse-label {
+.application-sidebar.is-collapsed .collapse-label,
+.application-sidebar.is-collapsed .sidebar-cmd-btn__label,
+.application-sidebar.is-collapsed .sidebar-cmd-btn__kbd,
+.application-sidebar.is-collapsed .sidebar-user-meta {
   display: none;
+}
+
+.application-sidebar.is-collapsed .sidebar-cmd-btn {
+  justify-content: center;
+  padding: 0.5rem;
+}
+
+.application-sidebar.is-collapsed .sidebar-user-card {
+  flex-direction: column;
+  padding: 0.4rem;
 }
 
 .application-sidebar.is-collapsed .tab-btn {
@@ -142,12 +160,71 @@ pub const BASE_CSS: &str = r#"
 
 .brand-name {
   font-weight: 700;
-  font-size: 1rem;
+  font-size: 0.95rem;
   white-space: nowrap;
 }
 
+.brand-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.15rem;
+}
+
+.brand-node-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.08rem 0.42rem;
+  border-radius: var(--radius-pill);
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .brand-version {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.sidebar-cmd-btn {
+  margin-top: 0.75rem;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+  color: var(--text-dim);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-cmd-btn:hover {
+  border-color: var(--primary);
+  color: var(--text-main);
+}
+
+.sidebar-cmd-btn__label {
+  flex: 1;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.sidebar-cmd-btn__kbd {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-muted);
+}
   color: var(--text-dim);
 }
 
@@ -227,11 +304,59 @@ pub const BASE_CSS: &str = r#"
 
 /* Pied de la barre latérale */
 .sidebar-footer {
-  padding: 0.875rem 0.75rem;
+  padding: 0.75rem;
   border-top: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.sidebar-user-card {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+}
+
+.sidebar-user-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-pill);
+  background: var(--primary-bg);
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.sidebar-user-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-user-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-user-role {
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-collapse-btn {
@@ -327,23 +452,28 @@ pub const BASE_CSS: &str = r#"
 .page-transition-region {
   flex: 1;
   display: flex;
+.page-transition-region {
+  flex: 1;
+  display: flex;
   flex-direction: column;
   min-width: 0;
-  background-color: var(--bg-app);
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: clip;
 }
 
-/* --- Barre de commande & navigation flottante unifiée (Style Linear / Watchdeck) --- */
+/* --- Barre de commande intégrée dans le panneau principal --- */
 .app-topbar {
   position: sticky;
-  top: max(8px, var(--sat));
+  top: max(0px, var(--sat));
   z-index: 40;
-  margin: 0.65rem 1.5rem 1rem 1.5rem;
+  margin: 0;
   background-color: var(--bg-glass);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  border-bottom: 1px solid var(--border-subtle);
   transition: opacity 0.22s var(--ease-out),
               transform 0.22s var(--ease-out),
               box-shadow 0.2s var(--ease-out),
@@ -352,14 +482,13 @@ pub const BASE_CSS: &str = r#"
 }
 
 .app-topbar:focus-within {
-  border-color: var(--border-highlight);
-  box-shadow: var(--shadow-glow);
+  border-bottom-color: var(--border-highlight);
 }
 
 /* Élévation quand la page est défilée */
 .app-topbar.is-elevated {
-  border-color: var(--border-highlight);
-  box-shadow: var(--shadow-md);
+  border-bottom-color: var(--border-highlight);
+  box-shadow: var(--shadow-sm);
 }
 
 /* Auto-masquage intelligent au défilement (disparaît vers le haut) */
@@ -373,11 +502,43 @@ pub const BASE_CSS: &str = r#"
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 1rem;
-  padding: 0.45rem 0.85rem;
-  min-height: 48px;
+  padding: 0.5rem 1rem;
+  min-height: 52px;
   box-sizing: border-box;
+}
+
+.topbar-lead {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.topbar-breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.topbar-breadcrumb__group {
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.topbar-breadcrumb__sep {
+  color: var(--text-muted);
+}
+
+.topbar-breadcrumb__page {
+  color: var(--text-main);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Style des icônes vectorielles Lucide */
@@ -764,6 +925,135 @@ body[data-filter-sheet] .topbar-search {
   animation: pageFadeIn 0.22s var(--ease-out);
 }
 
+/* --- En-têtes d'écran & bandeau de KPIs (PageHeader & StatStrip) --- */
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.page-header__lead {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.page-header__icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.page-header__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.page-header__eyebrow {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--primary);
+}
+
+.page-header__title {
+  margin: 0;
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-main);
+}
+
+.page-header__subtitle {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.page-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.stat-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.stat-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  padding: 0.5rem 0.9rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.stat-pill[data-tone="success"] {
+  border-color: color-mix(in srgb, var(--success) 40%, var(--border-color));
+}
+
+.stat-pill[data-tone="warning"] {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border-color));
+}
+
+.stat-pill[data-tone="danger"] {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border-color));
+}
+
+.stat-pill__label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.stat-pill__value {
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-main);
+}
+
+.stat-pill[data-tone="success"] .stat-pill__value {
+  color: var(--success);
+}
+
+.stat-pill[data-tone="warning"] .stat-pill__value {
+  color: var(--warning);
+}
+
+.stat-pill[data-tone="danger"] .stat-pill__value {
+  color: var(--danger);
+}
+
+.stat-pill__detail {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 .kbd-shortcut {
   display: inline-flex;
   align-items: center;
@@ -1145,6 +1435,28 @@ body[data-filter-sheet] .topbar-search {
   font-size: 0.95rem;
 }
 
+.subnav-tab__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.2rem;
+  height: 1.2rem;
+  padding: 0 0.35rem;
+  border-radius: var(--radius-pill);
+  background: var(--bg-subtle);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.app-subnav__item.active .subnav-tab__badge,
+.app-subnav__item[aria-selected="true"] .subnav-tab__badge,
+.subnav-tab.active .subnav-tab__badge {
+  background: color-mix(in srgb, var(--primary) 22%, transparent);
+  color: var(--primary);
+}
+
 
 .subnav-actions {
   position: absolute;
@@ -1189,6 +1501,8 @@ body[data-filter-sheet] .topbar-search {
     overflow-x: hidden;
     max-width: 100vw;
     min-width: 0;
+    padding: 0;
+    gap: 0;
   }
 
   /* Étroit : la barre latérale devient un tiroir, ouvert par le bouton de la barre du haut. */
@@ -1201,6 +1515,9 @@ body[data-filter-sheet] .topbar-search {
     height: 100dvh;
     width: min(18rem, 85vw);
     max-width: 85vw;
+    border-radius: 0;
+    border: 0;
+    border-right: 1px solid var(--border-color);
     transform: translateX(-100%);
     visibility: hidden;
     transition: transform 0.2s ease-in-out, visibility 0.2s;
@@ -1215,8 +1532,21 @@ body[data-filter-sheet] .topbar-search {
 
   .application-sidebar.is-collapsed .brand-info,
   .application-sidebar.is-collapsed .tab-btn-label,
-  .application-sidebar.is-collapsed .nav-group-label {
+  .application-sidebar.is-collapsed .nav-group-label,
+  .application-sidebar.is-collapsed .sidebar-cmd-btn__label,
+  .application-sidebar.is-collapsed .sidebar-cmd-btn__kbd,
+  .application-sidebar.is-collapsed .sidebar-user-meta {
     display: revert;
+  }
+
+  .application-sidebar.is-collapsed .sidebar-user-card {
+    flex-direction: row;
+    padding: 0.45rem 0.55rem;
+  }
+
+  .application-sidebar.is-collapsed .sidebar-cmd-btn {
+    justify-content: flex-start;
+    padding: 0.45rem 0.6rem;
   }
 
   .sidebar-scrim {
@@ -1262,10 +1592,17 @@ body[data-filter-sheet] .topbar-search {
   .page-transition-region {
     max-width: 100vw;
     min-width: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
   }
 
   .app-topbar {
-    margin: 0.5rem 0.75rem;
+    margin: 0;
+  }
+
+  .topbar-breadcrumb {
+    display: none;
   }
 
   .topbar-container {

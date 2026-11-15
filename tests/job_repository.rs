@@ -309,7 +309,9 @@ async fn jobs_keep_the_flow_version_frozen_at_creation() -> anyhow::Result<()> {
     assert_eq!(claimed_flow.id, "flow.v");
     assert_eq!(claimed_flow.version, 1);
     assert_eq!(claimed_flow.definition, "{\"a\":1}");
-    assert!(claim.arr.is_none());
+    assert!(claim.operations.is_empty());
+    assert!(claim.block_operations.is_empty());
+    assert!(claim.plugin_configs.is_empty());
     repository::fail(
         &pool,
         job.id,

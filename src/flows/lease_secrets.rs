@@ -1,99 +1,130 @@
-//! Secrets qui voyagent avec le bail vers un worker distant : seulement ceux que le flux figé utilise.
-//!
-//! Le worker distant n'a pas la clé de chiffrement du central : il reçoit donc le clair, mais
-//! uniquement pour les connexions *arr* des services dont le flux contient un bloc, et jamais
-//! pour une tâche sans flux. Le transport reste protégé par le TLS du reverse proxy.
+//! Secrets de plugins déchiffrés qui voyagent dans un `Claim` ou un worker local :
+//! uniquement ceux référencés par `runtime.settingsPluginId` des opérations du flux figé.
 
-use super::{ArrContext, ArrLeaseContext, ArrService, FlowGraph, block::resolve_operation};
-use std::collections::HashSet;
+use crate::{
+    flows::contract::OperationRegistry,
+    plugins::plugin_secret_aad,
+    repository,
+    secrets::{SecretBox, is_encrypted},
+};
+use flux_shared::flows::FlowRecord;
+use serde_json::{Map, Value};
+use sqlx::SqlitePool;
+use std::{collections::HashMap, path::Path};
 
-/// Services *arr dont la définition contient au moins un bloc ; vide si elle est illisible.
-pub fn arr_services_in(definition: &str) -> HashSet<ArrService> {
-    serde_json::from_str::<FlowGraph>(definition)
-        .map(|graph| {
-            graph
-                .nodes
-                .iter()
-                .filter_map(|node| {
-                    let op_id = node.extra.get("operationId").and_then(|v| v.as_str());
-                    resolve_operation(op_id, &node.kind).arr_service()
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+/// Charge et déchiffre les réglages des seuls plugins utilisés par `flow` (vide si aucun flux).
+pub async fn load_flow_plugin_configs(
+    pool: &SqlitePool,
+    secrets_dir: &Path,
+    registry: &OperationRegistry,
+    flow: Option<&FlowRecord>,
+) -> HashMap<String, Value> {
+    let plugin_ids = registry.required_settings_plugins_for_flow(flow);
+    if plugin_ids.is_empty() {
+        return HashMap::new();
+    }
+    let Ok(secrets) = SecretBox::open(secrets_dir) else {
+        return HashMap::new();
+    };
+    let mut configs = HashMap::new();
+    for plugin_id in plugin_ids {
+        let Ok(Some(raw)) = repository::get_plugin_settings(pool, &plugin_id).await else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+            continue;
+        };
+        if let Some(decrypted) = decrypt_plugin_settings_value(&secrets, &plugin_id, value) {
+            configs.insert(plugin_id, decrypted);
+        }
+    }
+    configs
 }
 
-/// Contexte *arr limité aux services utilisés ; `None` s'il n'en reste aucun.
-pub fn lease_arr_context(definition: &str, arr: &ArrContext) -> Option<ArrLeaseContext> {
-    let used = arr_services_in(definition);
-    let connections: std::collections::HashMap<_, _> = arr
-        .connections
-        .iter()
-        .filter(|(service, _)| used.contains(service))
-        .map(|(service, connection)| (*service, connection.clone()))
-        .collect();
-    (!connections.is_empty()).then(|| ArrLeaseContext {
-        connections,
-        media_root: arr.media_root.clone(),
-    })
+/// Déchiffre les champs chiffrés d'un objet de réglages de plugin pour exécution par un worker.
+pub fn decrypt_plugin_settings_value(
+    secrets: &SecretBox,
+    plugin_id: &str,
+    value: Value,
+) -> Option<Value> {
+    let obj = value.as_object()?;
+    let mut out = Map::with_capacity(obj.len());
+    for (field, val) in obj {
+        match val.as_str() {
+            Some(text) if is_encrypted(text) => {
+                let clear = secrets
+                    .decrypt(text, &plugin_secret_aad(plugin_id, field))
+                    .ok()?;
+                out.insert(field.clone(), Value::String(clear));
+            }
+            _ => {
+                out.insert(field.clone(), val.clone());
+            }
+        }
+    }
+    Some(Value::Object(out))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flows::ArrConnection;
+    use crate::flows::contract::OperationRegistry;
     use serde_json::json;
 
-    fn context() -> ArrContext {
-        let connection = |url: &str| ArrConnection {
-            url: url.into(),
-            api_key: "secret".into(),
-            path_local: String::new(),
-            path_remote: String::new(),
+    fn sample_registry() -> OperationRegistry {
+        let mut reg = OperationRegistry::new();
+        let _ = reg.register_json(json!({
+            "schemaVersion": "1.1.0",
+            "id": "operation.sonarr.rescan",
+            "version": "1.0.0",
+            "name": "Sonarr Rescan",
+            "providerId": "plugin.sonarr",
+            "providerKind": "plugin",
+            "capability": "integration",
+            "status": "validated",
+            "runtime": {
+                "kind": "http",
+                "settingsPluginId": "plugin.sonarr",
+                "requiredSettings": ["url", "apiKey"],
+                "steps": [{ "url": "{$setting.url}/api", "method": "POST" }]
+            }
+        }));
+        reg.register_block_mapping("block.sonarr.rescan", "operation.sonarr.rescan");
+        reg
+    }
+
+    #[test]
+    fn decrypts_encrypted_plugin_settings_and_keeps_plaintext() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let secrets = SecretBox::open(dir.path())?;
+        let sealed =
+            secrets.encrypt("api_secret", &plugin_secret_aad("plugin.sonarr", "apiKey"))?;
+        let raw = json!({ "url": "http://sonarr:8989", "apiKey": sealed });
+        let decrypted = decrypt_plugin_settings_value(&secrets, "plugin.sonarr", raw)
+            .ok_or_else(|| anyhow::anyhow!("decryption failed"))?;
+        assert_eq!(decrypted["url"], "http://sonarr:8989");
+        assert_eq!(decrypted["apiKey"], "api_secret");
+
+        let reg = sample_registry();
+        let flow = FlowRecord {
+            id: "f1".into(),
+            version: 1,
+            name: "test".into(),
+            description: None,
+            file_mask: "*".into(),
+            is_default: false,
+            definition: json!({
+                "nodes": [{ "id": "n1", "type": "block.sonarr.rescan", "name": "s" }],
+                "connections": []
+            })
+            .to_string(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
         };
-        ArrContext {
-            connections: [
-                (ArrService::Sonarr, connection("http://sonarr")),
-                (ArrService::Radarr, connection("http://radarr")),
-            ]
-            .into(),
-            media_root: "/media".into(),
-        }
-    }
-
-    fn definition(kinds: &[&str]) -> String {
-        let nodes: Vec<_> = kinds
-            .iter()
-            .enumerate()
-            .map(|(index, kind)| json!({"id": format!("n{index}"), "type": kind, "name": "x"}))
-            .collect();
-        json!({"nodes": nodes, "connections": []}).to_string()
-    }
-
-    #[test]
-    fn services_come_from_the_blocks_of_the_flow() {
-        let used = arr_services_in(&definition(&["sonarr-rescan", "file-output"]));
-        assert_eq!(used, HashSet::from([ArrService::Sonarr]));
-        let plugin_used = arr_services_in(&definition(&[
-            "block.sonarr.rename",
-            "block.core.file-output",
-        ]));
-        assert_eq!(plugin_used, HashSet::from([ArrService::Sonarr]));
-        assert!(arr_services_in("pas du json").is_empty());
-    }
-
-    #[test]
-    fn lease_carries_only_the_connections_the_flow_uses() -> Result<(), &'static str> {
-        let lease = lease_arr_context(&definition(&["radarr-rename"]), &context())
-            .ok_or("contexte attendu")?;
-        assert_eq!(lease.connections.len(), 1);
-        assert!(lease.connections.contains_key(&ArrService::Radarr));
-        assert_eq!(lease.media_root, std::path::PathBuf::from("/media"));
+        assert_eq!(
+            reg.required_settings_plugins_for_flow(Some(&flow)),
+            vec!["plugin.sonarr".to_owned()]
+        );
         Ok(())
-    }
-
-    #[test]
-    fn lease_has_no_secret_without_an_arr_block() {
-        assert!(lease_arr_context(&definition(&["file-output"]), &context()).is_none());
     }
 }

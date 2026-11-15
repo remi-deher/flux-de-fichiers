@@ -276,7 +276,10 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                 probe_version: None,
                 required_tools: Vec::new(),
                 frozen_flow,
-                arr: None,
+                operations: Default::default(),
+                block_operations: Default::default(),
+                plugin_configs: Default::default(),
+                media_root: None,
             }))
         }
     }

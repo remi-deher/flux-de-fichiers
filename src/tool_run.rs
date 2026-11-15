@@ -1,5 +1,6 @@
-//! Exécution d'un outil externe (FFmpeg, MP4Box) avec progression lue sur sa sortie d'erreur.
+//! Exécution déclarative d'un outil externe avec progression, codes de sortie et extrait borné.
 
+use serde::{Deserialize, Serialize};
 use std::{path::Path, process::Stdio, time::Duration};
 use thiserror::Error;
 use tokio::{
@@ -7,11 +8,13 @@ use tokio::{
     process::Command,
 };
 
-const TOOL_TIMEOUT: Duration = Duration::from_secs(3600);
+const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(3600);
 const READ_CHUNK_BYTES: usize = 4096;
 /// Garde-fou : un segment de sortie plus long est tronqué (jamais conservé en entier).
 const MAX_SEGMENT_BYTES: usize = 64 * 1024;
-/// Taille maximale de l'extrait de console conservé par invocation (queue de stderr).
+/// Taille maximale de stdout JSON/texte capturée pour les sondes déclaratives.
+pub const MAX_STDOUT_CAPTURE_BYTES: usize = 8 * 1024 * 1024;
+/// Taille maximale de l'extrait de console conservé par invocation.
 const MAX_CAPTURED_LOG_BYTES: usize = 4096;
 const PERCENT_MAX: u32 = 100;
 const RUNNING_PERCENT_CAP: u32 = 99;
@@ -20,27 +23,19 @@ const RUNNING_PERCENT_CAP: u32 = 99;
 const SPAWN_BUSY_RETRIES: u32 = 5;
 const SPAWN_BUSY_DELAY: Duration = Duration::from_millis(25);
 
-/// Résultat d'une invocation réussie avec extrait console borné et masqué.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ToolRunOutcome {
-    pub excerpt: Option<String>,
+/// Analyseur de progression déclaré dans `runtime.console.progressFormat`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProgressParser {
+    #[default]
+    None,
+    FfmpegTime,
+    #[serde(rename = "fraction-100")]
+    Fraction100,
+    PercentLine,
 }
 
-/// Outil externe piloté par le moteur de flux.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExternalTool {
-    Ffmpeg,
-    Mp4Box,
-}
-
-impl ExternalTool {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Ffmpeg => "ffmpeg",
-            Self::Mp4Box => "mp4box",
-        }
-    }
-
+impl ProgressParser {
     /// Progression `(pourcentage, texte)` d'après un segment de sortie, si elle en porte une.
     pub fn parse_progress(
         self,
@@ -48,10 +43,62 @@ impl ExternalTool {
         duration_secs: Option<f64>,
     ) -> Option<(u32, String)> {
         match self {
-            Self::Ffmpeg => ffmpeg_progress(segment, duration_secs),
-            Self::Mp4Box => mp4box_progress(segment),
+            Self::None => None,
+            Self::FfmpegTime => ffmpeg_progress(segment, duration_secs),
+            Self::Fraction100 => fraction_100_progress(segment),
+            Self::PercentLine => percent_line_progress(segment),
         }
     }
+}
+
+/// Flux observé pour la progression déclarée dans `runtime.console.progressStream`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProgressStream {
+    Stdout,
+    #[default]
+    Stderr,
+}
+
+/// Paramètres d'exécution d'une commande externe issus d'un contrat d'opération.
+#[derive(Clone, Debug)]
+pub struct CommandSpec<'a> {
+    pub tool_label: &'a str,
+    pub bin: &'a Path,
+    pub args: &'a [String],
+    pub progress_parser: ProgressParser,
+    pub progress_stream: ProgressStream,
+    pub success_exit_codes: &'a [i32],
+    pub warning_exit_codes: &'a [i32],
+    pub duration_secs: Option<f64>,
+    pub timeout: Duration,
+    pub capture_stdout: bool,
+}
+
+impl<'a> CommandSpec<'a> {
+    pub fn new(tool_label: &'a str, bin: &'a Path, args: &'a [String]) -> Self {
+        Self {
+            tool_label,
+            bin,
+            args,
+            progress_parser: ProgressParser::None,
+            progress_stream: ProgressStream::Stderr,
+            success_exit_codes: &[0],
+            warning_exit_codes: &[],
+            duration_secs: None,
+            timeout: DEFAULT_TOOL_TIMEOUT,
+            capture_stdout: false,
+        }
+    }
+}
+
+/// Résultat d'une invocation réussie avec extrait console borné et masqué.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ToolRunOutcome {
+    pub excerpt: Option<String>,
+    pub exit_code: i32,
+    pub stdout: Vec<u8>,
+    pub warning: bool,
 }
 
 /// Échec d'exécution d'un outil externe.
@@ -59,20 +106,20 @@ impl ExternalTool {
 pub enum ToolRunError {
     #[error("{tool} : lancement impossible ({source})")]
     Spawn {
-        tool: &'static str,
+        tool: String,
         source: std::io::Error,
     },
     #[error("{tool} : délai dépassé")]
-    Timeout { tool: &'static str },
+    Timeout { tool: String },
     #[error("{tool} : échec (code {code:?})")]
     Failed {
-        tool: &'static str,
+        tool: String,
         code: Option<i32>,
         excerpt: Option<String>,
     },
     #[error("{tool} : {source}")]
     Wait {
-        tool: &'static str,
+        tool: String,
         source: std::io::Error,
     },
 }
@@ -110,13 +157,28 @@ fn ffmpeg_progress(segment: &str, duration_secs: Option<f64>) -> Option<(u32, St
     }
 }
 
-/// MP4Box écrit `ISO File Writing: |=====   | (50/100)` ; on lit le dernier `(n/100)`.
-fn mp4box_progress(segment: &str) -> Option<(u32, String)> {
+/// Parse une progression fractionnelle sur 100, par ex. `(50/100)`.
+fn fraction_100_progress(segment: &str) -> Option<(u32, String)> {
     let suffix = format!("/{PERCENT_MAX})");
     let end = segment.rfind(&suffix)?;
     let start = segment[..end].rfind('(')? + 1;
     let percent = segment[start..end].trim().parse::<u32>().ok()?;
     Some((percent.min(PERCENT_MAX), segment.trim().to_owned()))
+}
+
+/// Parse une progression en pourcentage en ligne (`Progress: 42%` ou `42%`).
+fn percent_line_progress(segment: &str) -> Option<(u32, String)> {
+    let trimmed = segment.trim();
+    if let Some(pct_str) = trimmed.strip_prefix("Progress: ") {
+        let raw = pct_str.trim().trim_end_matches('%');
+        if let Ok(pct) = raw.parse::<u32>() {
+            return Some((pct.min(PERCENT_MAX), trimmed.to_owned()));
+        }
+    }
+    if trimmed.contains('%') {
+        return Some((0, trimmed.to_owned()));
+    }
+    None
 }
 
 /// Masque les éventuels secrets dans les lignes console capturées (jetons Bearer, identifiants URL).
@@ -166,13 +228,18 @@ impl TailBuffer {
         }
     }
 
+    fn merge(&mut self, other: Self) {
+        for line in other.lines {
+            self.push(&line);
+        }
+    }
+
     fn finish(self) -> Option<String> {
         (!self.lines.is_empty()).then(|| self.lines.join("\n"))
     }
 }
 
-/// Découpe un flux d'octets en segments séparés par `\r` ou `\n` (les outils réécrivent
-/// leur ligne de progression avec `\r`).
+/// Découpe un flux d'octets en segments séparés par `\r` ou `\n`.
 async fn for_each_segment<R, F>(mut reader: R, mut on_segment: F)
 where
     R: AsyncRead + Unpin,
@@ -201,13 +268,29 @@ where
     flush(&mut pending);
 }
 
-/// Lance le processus ; réessaie quelques fois seulement si l'exécutable est encore occupé.
-async fn spawn_tool(bin: &Path, args: &[String]) -> std::io::Result<tokio::process::Child> {
+async fn read_bounded_bytes<R: AsyncRead + Unpin>(reader: R) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader
+        .take((MAX_STDOUT_CAPTURE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .await?;
+    Ok(bytes)
+}
+
+async fn spawn_tool(
+    bin: &Path,
+    args: &[String],
+    pipe_stdout: bool,
+) -> std::io::Result<tokio::process::Child> {
     let mut attempt = 0;
     loop {
         let spawned = Command::new(bin)
             .args(args)
-            .stdout(Stdio::null())
+            .stdout(if pipe_stdout {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn();
@@ -224,70 +307,115 @@ async fn spawn_tool(bin: &Path, args: &[String]) -> std::io::Result<tokio::proce
     }
 }
 
-/// Lance `bin args…` ; la progression est lue sur stderr. Succès seulement si le code de sortie est 0.
-pub async fn run_with_progress<F>(
-    tool: ExternalTool,
-    bin: &Path,
-    args: &[String],
-    on_progress: F,
-) -> Result<ToolRunOutcome, ToolRunError>
-where
-    F: FnMut(u32, &str) + Send + 'static,
-{
-    run_with_duration(tool, bin, args, None, on_progress).await
-}
-
-/// Lance `bin args…` en calculant la progression FFmpeg par rapport à `duration_secs` si connue.
-pub async fn run_with_duration<F>(
-    tool: ExternalTool,
-    bin: &Path,
-    args: &[String],
-    duration_secs: Option<f64>,
+/// Exécute une commande externe selon un contrat déclaratif (`CommandSpec`).
+pub async fn run_command<F>(
+    spec: CommandSpec<'_>,
     mut on_progress: F,
 ) -> Result<ToolRunOutcome, ToolRunError>
 where
     F: FnMut(u32, &str) + Send + 'static,
 {
-    let label = tool.label();
-    let mut child = spawn_tool(bin, args)
+    let pipe_stdout = spec.capture_stdout || spec.progress_stream == ProgressStream::Stdout;
+    let mut child = spawn_tool(spec.bin, spec.args, pipe_stdout)
         .await
         .map_err(|source| ToolRunError::Spawn {
-            tool: label,
+            tool: spec.tool_label.to_owned(),
             source,
         })?;
-    let stderr = child.stderr.take().ok_or(ToolRunError::Spawn {
-        tool: label,
+    let stderr = child.stderr.take().ok_or_else(|| ToolRunError::Spawn {
+        tool: spec.tool_label.to_owned(),
         source: std::io::Error::other("stderr indisponible"),
     })?;
-    let mut tail = TailBuffer::default();
-    let read_progress = async {
-        for_each_segment(stderr, |segment| {
-            tail.push(segment);
-            if let Some((percent, text)) = tool.parse_progress(segment, duration_secs) {
-                on_progress(percent, &text);
+    let stdout = child.stdout.take();
+
+    let (status, stdout_bytes, excerpt) = tokio::time::timeout(spec.timeout, async {
+        let read_streams = async {
+            let mut tail = TailBuffer::default();
+            if spec.capture_stdout {
+                let Some(out_reader) = stdout else {
+                    for_each_segment(stderr, |segment| tail.push(segment)).await;
+                    return (Vec::new(), tail.finish());
+                };
+                let (captured, ()) = tokio::join!(
+                    read_bounded_bytes(out_reader),
+                    for_each_segment(stderr, |segment| tail.push(segment)),
+                );
+                return (captured.unwrap_or_default(), tail.finish());
             }
-        })
-        .await;
-        tail.finish()
-    };
-    let (status, excerpt) = tokio::time::timeout(TOOL_TIMEOUT, async {
-        tokio::join!(child.wait(), read_progress)
+
+            if spec.progress_stream == ProgressStream::Stdout {
+                if let Some(out_reader) = stdout {
+                    let mut stderr_tail = TailBuffer::default();
+                    tokio::join!(
+                        for_each_segment(out_reader, |segment| {
+                            tail.push(segment);
+                            if let Some((pct, text)) = spec
+                                .progress_parser
+                                .parse_progress(segment, spec.duration_secs)
+                            {
+                                on_progress(pct, &text);
+                            }
+                        }),
+                        for_each_segment(stderr, |segment| stderr_tail.push(segment)),
+                    );
+                    tail.merge(stderr_tail);
+                    return (Vec::new(), tail.finish());
+                }
+            }
+
+            for_each_segment(stderr, |segment| {
+                tail.push(segment);
+                if let Some((pct, text)) = spec
+                    .progress_parser
+                    .parse_progress(segment, spec.duration_secs)
+                {
+                    on_progress(pct, &text);
+                }
+            })
+            .await;
+            (Vec::new(), tail.finish())
+        };
+
+        let (wait_res, (stdout_bytes, excerpt)) = tokio::join!(child.wait(), read_streams);
+        (wait_res, stdout_bytes, excerpt)
     })
     .await
-    .map_err(|_| ToolRunError::Timeout { tool: label })
-    .and_then(|(status, excerpt)| {
-        status
-            .map(|status| (status, excerpt))
+    .map_err(|_| ToolRunError::Timeout {
+        tool: spec.tool_label.to_owned(),
+    })
+    .and_then(|(status_res, stdout_bytes, excerpt)| {
+        status_res
+            .map(|status| (status, stdout_bytes, excerpt))
             .map_err(|source| ToolRunError::Wait {
-                tool: label,
+                tool: spec.tool_label.to_owned(),
                 source,
             })
     })?;
-    if status.code() == Some(0) {
-        Ok(ToolRunOutcome { excerpt })
+
+    if spec.capture_stdout && stdout_bytes.len() > MAX_STDOUT_CAPTURE_BYTES {
+        return Err(ToolRunError::Failed {
+            tool: spec.tool_label.to_owned(),
+            code: status.code(),
+            excerpt: Some("sortie standard trop volumineuse".to_owned()),
+        });
+    }
+
+    let success_codes = if spec.success_exit_codes.is_empty() {
+        &[0][..]
+    } else {
+        spec.success_exit_codes
+    };
+    let exit_code = status.code().unwrap_or(-1);
+    if success_codes.contains(&exit_code) {
+        Ok(ToolRunOutcome {
+            excerpt,
+            exit_code,
+            stdout: stdout_bytes,
+            warning: spec.warning_exit_codes.contains(&exit_code),
+        })
     } else {
         Err(ToolRunError::Failed {
-            tool: label,
+            tool: spec.tool_label.to_owned(),
             code: status.code(),
             excerpt,
         })
@@ -347,15 +475,18 @@ mod tests {
     }
 
     #[test]
-    fn mp4box_progress_reads_the_last_percentage() {
+    fn fraction_and_percent_parsers_extract_percentages() {
         let line = "ISO File Writing: |=====     | (50/100)";
-        assert_eq!(mp4box_progress(line), Some((50, line.into())));
+        assert_eq!(fraction_100_progress(line), Some((50, line.into())));
         assert_eq!(
-            mp4box_progress("Importing x (250/100)").map(|p| p.0),
+            fraction_100_progress("Importing x (250/100)").map(|p| p.0),
             Some(100)
         );
-        assert_eq!(mp4box_progress("(abc/100)"), None);
-        assert_eq!(mp4box_progress("no progress"), None);
+        assert_eq!(fraction_100_progress("(abc/100)"), None);
+        assert_eq!(
+            percent_line_progress("Progress: 75%"),
+            Some((75, "Progress: 75%".into()))
+        );
     }
 
     #[tokio::test]
@@ -366,7 +497,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn runs_a_fake_tool_and_reports_progress() -> Result<(), Box<dyn std::error::Error>> {
+    async fn runs_command_spec_progress_and_captures_stdout()
+    -> Result<(), Box<dyn std::error::Error>> {
         let dir = tempfile::tempdir()?;
         let bin = fake_tool(
             dir.path(),
@@ -375,13 +507,24 @@ mod tests {
         )?;
         let seen = Arc::new(Mutex::new(Vec::new()));
         let sink = seen.clone();
-        run_with_progress(ExternalTool::Mp4Box, &bin, &[], move |percent, _| {
+        let mut spec = CommandSpec::new("fake", &bin, &[]);
+        spec.progress_parser = ProgressParser::Fraction100;
+        run_command(spec, move |percent, _| {
             if let Ok(mut seen) = sink.lock() {
                 seen.push(percent);
             }
         })
         .await?;
         assert_eq!(*seen.lock().map_err(|e| e.to_string())?, [10, 100]);
+
+        let json_bin = fake_tool(dir.path(), "probe", r#"printf '{"ok":true}'"#)?;
+        let mut probe_spec = CommandSpec::new("probe", &json_bin, &[]);
+        probe_spec.capture_stdout = true;
+        probe_spec.success_exit_codes = &[0, 1];
+        probe_spec.warning_exit_codes = &[1];
+        let out = run_command(probe_spec, |_, _| {}).await?;
+        assert_eq!(out.stdout, b"{\"ok\":true}");
+        assert!(!out.warning);
         Ok(())
     }
 
@@ -394,13 +537,15 @@ mod tests {
             "failing",
             "printf 'Authorization: Bearer tok123\\nboom\\n' >&2; exit 3",
         )?;
-        let error = run_with_progress(ExternalTool::Ffmpeg, &failing, &[], |_, _| {}).await;
+        let spec = CommandSpec::new("ffmpeg", &failing, &[]);
+        let error = run_command(spec, |_, _| {}).await;
         match error {
             Err(ToolRunError::Failed {
-                tool: "ffmpeg",
+                tool,
                 code: Some(3),
                 excerpt,
             }) => {
+                assert_eq!(tool, "ffmpeg");
                 let text = excerpt.unwrap_or_default();
                 assert!(!text.contains("tok123"));
                 assert!(text.contains("boom"));
@@ -408,7 +553,8 @@ mod tests {
             other => panic!("attendu Failed, reçu {other:?}"),
         }
         let missing = dir.path().join("absent");
-        let error = run_with_progress(ExternalTool::Mp4Box, &missing, &[], |_, _| {}).await;
+        let missing_spec = CommandSpec::new("mp4box", &missing, &[]);
+        let error = run_command(missing_spec, |_, _| {}).await;
         assert!(matches!(error, Err(ToolRunError::Spawn { .. })));
         Ok(())
     }

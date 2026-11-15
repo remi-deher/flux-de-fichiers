@@ -52,7 +52,7 @@ pub async fn run(state: AppState) {
     }
 }
 
-async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim) {
+async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Claim) {
     let lease = LeaseRequest {
         worker_id,
         lease_token: claim.lease_token,
@@ -65,6 +65,19 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
             return;
         }
     };
+    if let Err(error) = crate::api::populate_claim_contracts(
+        &state.pool,
+        &state.config,
+        &state.catalog_cache,
+        worker_id,
+        &mut claim,
+    )
+    .await
+    {
+        report_failure(state, claim.job_id, &lease, JobErrorCode::RemuxFailed).await;
+        tracing::warn!(job_id=%claim.job_id, error=?error, "local claim contract preparation failed");
+        return;
+    }
     let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
     let cache = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
     let wanted = job_runner::collect_wanted_tools(&claim);
@@ -117,36 +130,19 @@ async fn execute(state: &AppState, worker_id: Uuid, claim: crate::domain::Claim)
         )
         .await?;
 
-        let arr = if claim.frozen_flow.is_some() {
-            let mut ctx = crate::flows::ArrContext::load(
-                &state.pool,
-                &state.config.config_dir,
-                &state.config.input_dir,
-            )
-            .await;
-            if let Some(lib_id) = claim.library_id
-                && let Ok(Some(local_path)) =
-                    repository::library_worker_local_path(&state.pool, lib_id, worker_id).await
-            {
-                ctx.media_root = local_path.into();
-            }
-            Some(ctx)
-        } else {
-            None
-        };
-
         let state_progress = state.clone();
         let job_id = claim.job_id;
         let progress_cb = std::sync::Arc::new(move |pct: u32, line: &str| {
             state_progress.notify_job_progress(job_id, pct, Some(line.to_string()));
         });
+        let registry = state.catalog_cache.operations(&roots).await;
 
         let execution = job_runner::execute_claim_processing(
             &claim,
             &cache,
             &state.http_client,
             Some(&state.config.config_dir),
-            arr.as_ref(),
+            Some(&registry),
             &source_snapshot,
             &work_dir,
             progress_cb,

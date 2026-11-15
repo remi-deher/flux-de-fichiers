@@ -37,12 +37,7 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         .await?;
     sqlx::migrate!().run(&pool).await?;
     common::install_keys(&pool).await?;
-    let (events_tx, _) = tokio::sync::broadcast::channel(128);
-    Ok(router(AppState {
-        pool,
-        config: Arc::new(config),
-        events_tx,
-    }))
+    Ok(router(AppState::new(pool, Arc::new(config))))
 }
 
 #[tokio::test]

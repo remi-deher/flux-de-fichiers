@@ -19,7 +19,7 @@ pub async fn catalog(
     _auth: ViewPluginsAuth,
 ) -> AppResult<Json<Vec<CatalogEntry>>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    Ok(Json(plugins::exposed_catalog(&roots)))
+    Ok(Json(s.catalog_cache.exposed_catalog(&roots).await))
 }
 
 /// Liste l'état d'installation et de cache des outils distribués.
@@ -29,7 +29,7 @@ pub async fn tools(
 ) -> AppResult<Json<Vec<ToolStatusSummary>>> {
     let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    Ok(Json(plugins::list_tools_status(&roots, &cache_mgr)))
+    Ok(Json(s.catalog_cache.tools_status(&roots, &cache_mgr).await))
 }
 
 /// Renvoie le contrat déclaratif de distribution d'un outil, lu dans les dépôts synchronisés.
@@ -100,7 +100,7 @@ pub async fn get_settings(
 ) -> AppResult<Json<plugins::PluginSettingsView>> {
     let secrets = SecretBox::open(&s.config.config_dir)?;
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    let schema_fields = plugins::settings_fields(&roots, &id);
+    let schema_fields = s.catalog_cache.settings_fields(&roots, &id).await;
     let mut saved = parse_saved(
         crate::repository::get_plugin_settings(&s.pool, &id)
             .await?
@@ -138,11 +138,11 @@ pub async fn save_settings(
     Json(payload): Json<Value>,
 ) -> AppResult<Json<Value>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    if !plugins::is_valid_repository_id(&id) || !plugins::plugin_exists(&roots, &id) {
+    if !plugins::is_valid_repository_id(&id) || !s.catalog_cache.plugin_exists(&roots, &id).await {
         return Err(AppError::NotFound);
     }
     let secrets = SecretBox::open(&s.config.config_dir)?;
-    let schema_fields = plugins::settings_fields(&roots, &id);
+    let schema_fields = s.catalog_cache.settings_fields(&roots, &id).await;
     let existing = parse_saved(
         crate::repository::get_plugin_settings(&s.pool, &id)
             .await?
@@ -209,6 +209,7 @@ pub async fn toggle_repository(
     _auth: AdminAuth,
 ) -> AppResult<Json<Value>> {
     let new_state = crate::repository::toggle_plugin_repository(&s.pool, &id).await?;
+    s.catalog_cache.invalidate().await;
     Ok(Json(serde_json::json!({
         "id": id,
         "enabled": new_state,
@@ -222,6 +223,7 @@ pub async fn delete_repository(
     _auth: AdminAuth,
 ) -> AppResult<Json<Value>> {
     crate::repository::delete_plugin_repository(&s.pool, &id).await?;
+    s.catalog_cache.invalidate().await;
     Ok(Json(serde_json::json!({
         "id": id,
         "deleted": true,
@@ -243,10 +245,34 @@ pub async fn sync_repository(
     .await
     .map_err(|error| AppError::RepositoryUnavailable(error.to_string()))?;
     crate::repository::touch_plugin_repository_sync(&s.pool, &id).await?;
+    s.catalog_cache.invalidate().await;
     Ok(Json(serde_json::json!({
         "id": id,
         "status": "synced",
         "syncedAt": chrono::Utc::now().to_rfc3339(),
         "report": report,
     })))
+}
+
+/// Lit le plan d'installation déclaratif (`packs/*/installation.json`) d'un pack du catalogue.
+pub async fn pack_installation(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    _auth: ViewPluginsAuth,
+) -> AppResult<Json<plugins::PackInstallation>> {
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    Ok(Json(plugins::read_pack_installation(&roots, &id)?))
+}
+
+/// Exécute l'installation déclarative d'un pack (outils requis et vérification des composants).
+pub async fn install_pack(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    _auth: AdminAuth,
+) -> AppResult<Json<plugins::PackInstallResult>> {
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
+    let result =
+        plugins::install_pack(&roots, &cache_mgr, &plugins::SyncPolicy::from_env(), &id).await?;
+    Ok(Json(result))
 }

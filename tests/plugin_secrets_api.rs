@@ -14,7 +14,6 @@ use std::{path::Path, sync::Arc};
 use tower::ServiceExt;
 
 const TEST_ADMIN_KEY: &str = "fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef";
-const BROADCAST_CAPACITY: usize = 128;
 const MAX_TEST_FILE_BYTES: u64 = 1024;
 const WEB_SESSION_TTL_SECONDS: i64 = 28_800;
 const RESPONSE_LIMIT_BYTES: usize = 16 * 1024;
@@ -71,13 +70,8 @@ async fn harness() -> anyhow::Result<Harness> {
         .await?;
     sqlx::migrate!().run(&pool).await?;
     common::install_keys(&pool).await?;
-    let (events_tx, _) = tokio::sync::broadcast::channel(BROADCAST_CAPACITY);
     let path = config.config_dir.clone();
-    let app = router(AppState {
-        pool: pool.clone(),
-        config: Arc::new(config),
-        events_tx,
-    });
+    let app = router(AppState::new(pool.clone(), Arc::new(config)));
     Ok(Harness {
         app,
         pool,

@@ -3,6 +3,7 @@
 mod arr;
 mod block;
 mod condition;
+mod custom_args;
 mod encode;
 mod encode_run;
 mod header_secrets;
@@ -15,8 +16,12 @@ mod webhook;
 pub use arr::{
     ArrAction, ArrBlock, ArrConnection, ArrContext, ArrLeaseContext, ArrService, execute_arr_block,
 };
-pub use block::{FlowBlockKind, StepDecision, decide_step};
+pub use block::{
+    BlockOperation, FlowBlockKind, StepDecision, decide_step, decide_step_for_operation,
+    resolve_operation,
+};
 pub use condition::{ConditionConfig, evaluate_condition};
+pub use custom_args::{CustomArgsError, ffmpeg_custom_args, mp4box_custom_args, parse_custom_args};
 pub use encode::{EncodePlan, argv_for, audio_plan, video_plan};
 pub use header_secrets::{
     decrypt_definition_headers, decrypt_headers, has_webhook_headers, mask_definition,
@@ -28,7 +33,12 @@ pub use route::next_connection;
 pub use tool::{InPlaceEdit, in_place_edit};
 pub use webhook::{WebhookBlockConfig, execute_webhook_block, webhook_method};
 
-use crate::{domain::FlowRecord, media, tools_cache::ToolCacheManager};
+use crate::{
+    domain::{FlowRecord, JobErrorCode, JobStepEntry, JobStepStatus},
+    media::{self, OutputProfile},
+    tool_run::ToolRunError,
+    tools_cache::ToolCacheManager,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -86,6 +96,76 @@ pub struct FlowExecutionOutcome {
     pub working_file: PathBuf,
     pub in_place: bool,
     pub warning: bool,
+    pub output_profile: OutputProfile,
+    pub steps: Vec<JobStepEntry>,
+}
+
+/// Échec typé d'une exécution de flux, portant le code d'erreur métier et les étapes déjà exécutées.
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+pub struct FlowExecutionError {
+    pub code: JobErrorCode,
+    pub message: String,
+    pub steps: Vec<JobStepEntry>,
+}
+
+/// Identifiants d'outils distribués nécessaires pour exécuter `definition` (inclut toujours `mkvmerge`).
+pub fn required_tool_ids(definition: &str) -> Vec<&'static str> {
+    let mut ids = vec![crate::plugins::REMUX_TOOL_ID];
+    if let Ok(graph) = serde_json::from_str::<FlowGraph>(definition) {
+        for node in &graph.nodes {
+            let op_id = node.extra.get("operationId").and_then(|v| v.as_str());
+            if let Some(tool_id) = resolve_operation(op_id, &node.kind).required_tool_id()
+                && !ids.contains(&tool_id)
+            {
+                ids.push(tool_id);
+            }
+        }
+    }
+    ids
+}
+
+/// Détermine le profil de validation attendu côté central pour un flux figé et une extension produite.
+pub fn output_profile_for_flow(
+    flow: Option<&FlowRecord>,
+    requested_ext: Option<&str>,
+) -> Option<OutputProfile> {
+    let Some(flow) = flow else {
+        return match requested_ext {
+            None | Some("mkv") => Some(OutputProfile::StrictMkvRemux),
+            _ => None,
+        };
+    };
+    let Ok(graph) = serde_json::from_str::<FlowGraph>(&flow.definition) else {
+        return Some(OutputProfile::StrictMkvRemux);
+    };
+    let ops: Vec<BlockOperation> = graph
+        .nodes
+        .iter()
+        .map(|node| {
+            let op_id = node.extra.get("operationId").and_then(|v| v.as_str());
+            resolve_operation(op_id, &node.kind)
+        })
+        .collect();
+    if requested_ext == Some("mp4") {
+        return ops
+            .contains(&BlockOperation::RemuxMp4)
+            .then_some(OutputProfile::Mp4Container);
+    }
+    if !matches!(requested_ext, None | Some("mkv")) {
+        return None;
+    }
+    if ops.contains(&BlockOperation::VideoEncode) || ops.contains(&BlockOperation::AudioEncode) {
+        Some(OutputProfile::TranscodedMkv)
+    } else if ops.contains(&BlockOperation::RemuxMkv) {
+        Some(OutputProfile::StrictMkvRemux)
+    } else if ops.contains(&BlockOperation::Mkvpropedit) {
+        Some(OutputProfile::MkvMetadataEdit)
+    } else if ops.contains(&BlockOperation::RemuxMp4) && requested_ext.is_none() {
+        Some(OutputProfile::Mp4Container)
+    } else {
+        Some(OutputProfile::StrictMkvRemux)
+    }
 }
 
 /// Moteur d'interprétation et d'exécution pas à pas des flux (Pipeline Engine).
@@ -130,19 +210,36 @@ impl<'a> FlowEngine<'a> {
         source_file: &Path,
         work_dir: &Path,
         on_progress: FlowProgressCallback,
-    ) -> anyhow::Result<FlowExecutionOutcome> {
+    ) -> Result<FlowExecutionOutcome, FlowExecutionError> {
         tracing::info!(job_id = %job_id, flow_id = %flow.id, flow_name = %flow.name, "starting pipeline engine execution");
-        let graph: FlowGraph = serde_json::from_str(&flow.definition)?;
+        let graph: FlowGraph =
+            serde_json::from_str(&flow.definition).map_err(|err| FlowExecutionError {
+                code: JobErrorCode::RemuxFailed,
+                message: format!("définition de flux invalide : {err}"),
+                steps: Vec::new(),
+            })?;
         let mkvmerge_bin = self.cache_mgr.resolve_executable(
             crate::plugins::REMUX_TOOL_ID,
             crate::plugins::REMUX_TOOL_VERSION,
             "mkvmerge",
             "MKVMERGE",
         );
-        let media_info = media::inspect_with(&mkvmerge_bin, source_file).await?;
+        let mut media_info = media::inspect_with(&mkvmerge_bin, source_file)
+            .await
+            .map_err(|err| FlowExecutionError {
+                code: JobErrorCode::RemuxFailed,
+                message: format!("inspection initiale impossible : {err}"),
+                steps: Vec::new(),
+            })?;
+        media_info = self.maybe_enrich_mediainfo(media_info, source_file).await;
         let mut current_working_file = source_file.to_path_buf();
         let mut is_in_place = true;
         let mut final_warning = false;
+        let mut output_profile = OutputProfile::StrictMkvRemux;
+        let mut has_remux_mkv = false;
+        let mut has_encode = false;
+        let mut has_edit = false;
+        let mut steps: Vec<JobStepEntry> = Vec::new();
         let mut ctx = FlowContext::new(
             job_id,
             source_file
@@ -166,6 +263,7 @@ impl<'a> FlowEngine<'a> {
             });
         let mut current_node_id = input_node.id;
         let mut max_steps = 32;
+        let mut step_index: i32 = 0;
         while max_steps > 0 {
             max_steps -= 1;
             let Some(node) = graph
@@ -176,34 +274,100 @@ impl<'a> FlowEngine<'a> {
             else {
                 break;
             };
+            step_index += 1;
+            let explicit_op = node.extra.get("operationId").and_then(|v| v.as_str());
+            let resolved_op = resolve_operation(explicit_op, &node.kind);
+            let op_id = explicit_op
+                .map(str::to_owned)
+                .unwrap_or_else(|| resolved_op.operation_id().to_owned());
             let step_ctx = ctx.with_step(&node.name);
-            let decision = decide_step(&node.kind, &node.config, &step_ctx.media_info);
-            tracing::info!(job_id = %job_id, block = %node.kind, "flow step");
+            let decision = decide_step_for_operation(
+                explicit_op,
+                &node.kind,
+                &node.config,
+                &step_ctx.media_info,
+            );
+            tracing::info!(job_id = %job_id, block = %node.kind, operation_id = %op_id, "flow step");
+            let mut step_message: Option<String> = decision
+                .port
+                .as_ref()
+                .map(|port| format!("branche -> {port}"));
+            let mut step_excerpt: Option<String> = None;
+            let mut step_status = JobStepStatus::Succeeded;
+
+            let fail_step = |steps: &mut Vec<JobStepEntry>,
+                             code: JobErrorCode,
+                             message: String,
+                             excerpt: Option<String>| {
+                steps.push(JobStepEntry {
+                    step_index,
+                    node_id: node.id.clone(),
+                    block_kind: node.kind.as_str().to_owned(),
+                    operation_id: Some(op_id.clone()),
+                    status: JobStepStatus::Failed,
+                    message: Some(message.clone()),
+                    output_excerpt: excerpt,
+                });
+                FlowExecutionError {
+                    code,
+                    message,
+                    steps: std::mem::take(steps),
+                }
+            };
+
             if let Some(edit) = &decision.edit {
+                has_edit = true;
                 let propedit_bin = self.cache_mgr.resolve_executable(
                     crate::plugins::REMUX_TOOL_ID,
                     crate::plugins::REMUX_TOOL_VERSION,
                     "mkvpropedit",
                     "MKVPROPEDIT",
                 );
-                media::propedit_in_place(
+                if let Err(err) = media::propedit_in_place(
                     &propedit_bin,
                     &current_working_file,
                     edit.default_audio_lang.as_deref(),
                     edit.force_subtitles,
                 )
-                .await?;
+                .await
+                {
+                    return Err(fail_step(
+                        &mut steps,
+                        JobErrorCode::RemuxFailed,
+                        format!("mkvpropedit : {err}"),
+                        None,
+                    ));
+                }
+                step_message = Some("édition en place des en-têtes Matroska".into());
                 tracing::info!(job_id = %job_id, "in-place mkvpropedit completed directly on working file");
             }
             if decision.reinpect {
-                ctx.media_info = media::inspect_with(&mkvmerge_bin, &current_working_file).await?;
+                let refreshed =
+                    match media::inspect_with(&mkvmerge_bin, &current_working_file).await {
+                        Ok(info) => {
+                            self.maybe_enrich_mediainfo(info, &current_working_file)
+                                .await
+                        }
+                        Err(err) => {
+                            return Err(fail_step(
+                                &mut steps,
+                                JobErrorCode::RemuxFailed,
+                                format!("ré-inspection média : {err}"),
+                                None,
+                            ));
+                        }
+                    };
+                ctx.media_info = refreshed;
+                step_message = Some("métadonnées techniques actualisées".into());
                 tracing::info!(job_id = %job_id, "media inspect refreshed for working file");
             }
             if decision.transform {
                 is_in_place = false;
+                has_remux_mkv = true;
+                output_profile = OutputProfile::StrictMkvRemux;
                 let target_output = work_dir.join("output.mkv");
                 let on_p = on_progress.clone();
-                final_warning = media::remux_with_progress(
+                match media::remux_with_progress(
                     &mkvmerge_bin,
                     &current_working_file,
                     &target_output,
@@ -211,12 +375,40 @@ impl<'a> FlowEngine<'a> {
                         on_p(pct, line);
                     },
                 )
-                .await?;
-                current_working_file = target_output;
+                .await
+                {
+                    Ok(warn) => {
+                        final_warning = warn;
+                        current_working_file = target_output;
+                        ctx.working_file = current_working_file.clone();
+                        step_message = Some(if warn {
+                            "remux MKV terminé avec avertissements".into()
+                        } else {
+                            "remux MKV sans perte".into()
+                        });
+                    }
+                    Err(err) => {
+                        return Err(fail_step(
+                            &mut steps,
+                            JobErrorCode::RemuxFailed,
+                            format!("remux MKV : {err}"),
+                            None,
+                        ));
+                    }
+                }
                 tracing::info!(job_id = %job_id, "remux step executed into staging working file");
             }
             if let Some(plan) = &decision.remux_mp4 {
+                if let Err(err) = mp4box_custom_args(&node.config) {
+                    return Err(fail_step(
+                        &mut steps,
+                        JobErrorCode::RemuxFailed,
+                        format!("paramètres MP4Box invalides : {err}"),
+                        None,
+                    ));
+                }
                 is_in_place = false;
+                output_profile = OutputProfile::Mp4Container;
                 let mp4box_bin = self.cache_mgr.resolve_executable(
                     crate::plugins::MP4BOX_TOOL_ID,
                     crate::plugins::MP4BOX_TOOL_VERSION,
@@ -226,16 +418,48 @@ impl<'a> FlowEngine<'a> {
                 let target_output = work_dir.join("remuxed.mp4");
                 let args = mp4box_argv(plan, &current_working_file, &target_output);
                 let on_p = on_progress.clone();
-                media::mp4box_with_progress(&mp4box_bin, &args, move |pct: u32, line: &str| {
-                    on_p(pct, line);
-                })
-                .await?;
-                current_working_file = target_output;
-                ctx.working_file = current_working_file.clone();
+                match media::mp4box_with_progress(
+                    &mp4box_bin,
+                    &args,
+                    move |pct: u32, line: &str| {
+                        on_p(pct, line);
+                    },
+                )
+                .await
+                {
+                    Ok(outcome) => {
+                        step_excerpt = outcome.excerpt;
+                        current_working_file = target_output;
+                        ctx.working_file = current_working_file.clone();
+                        step_message = Some("remuxage MP4 terminé".into());
+                    }
+                    Err(err) => {
+                        let excerpt = match &err {
+                            ToolRunError::Failed { excerpt, .. } => excerpt.clone(),
+                            _ => None,
+                        };
+                        return Err(fail_step(
+                            &mut steps,
+                            JobErrorCode::RemuxFailed,
+                            format!("MP4Box : {err}"),
+                            excerpt,
+                        ));
+                    }
+                }
                 tracing::info!(job_id = %job_id, "mp4 remux step completed");
             }
             if let Some(plan) = &decision.encode {
+                if let Err(err) = ffmpeg_custom_args(&node.config) {
+                    return Err(fail_step(
+                        &mut steps,
+                        JobErrorCode::EncodeFailed,
+                        format!("paramètres FFmpeg invalides : {err}"),
+                        None,
+                    ));
+                }
                 is_in_place = false;
+                has_encode = true;
+                output_profile = OutputProfile::TranscodedMkv;
                 let ffmpeg_bin = self.cache_mgr.resolve_executable(
                     crate::plugins::FFMPEG_TOOL_ID,
                     crate::plugins::FFMPEG_TOOL_VERSION,
@@ -246,30 +470,76 @@ impl<'a> FlowEngine<'a> {
                     EncodePlan::Video(_) => "encoded.mkv",
                     EncodePlan::Audio(_) => "encoded-audio.mkv",
                 });
-                encode_run::run_encode(
+                let duration_secs = media::media_duration_secs(&ctx.media_info);
+                match encode_run::run_encode(
                     &ffmpeg_bin,
                     plan,
                     &current_working_file,
                     &target_output,
+                    duration_secs,
                     &on_progress,
                     job_id,
                 )
-                .await?;
-                current_working_file = target_output;
-                ctx.working_file = current_working_file.clone();
+                .await
+                {
+                    Ok(encode_outcome) => {
+                        step_excerpt = encode_outcome.excerpt;
+                        step_message = Some(if encode_outcome.fallback_to_cpu {
+                            "encodage terminé (repli matériel -> CPU)".into()
+                        } else {
+                            "encodage terminé".into()
+                        });
+                        current_working_file = target_output;
+                        ctx.working_file = current_working_file.clone();
+                    }
+                    Err(err) => {
+                        let excerpt = match &err {
+                            ToolRunError::Failed { excerpt, .. } => excerpt.clone(),
+                            _ => None,
+                        };
+                        return Err(fail_step(
+                            &mut steps,
+                            JobErrorCode::EncodeFailed,
+                            format!("encodage FFmpeg : {err}"),
+                            excerpt,
+                        ));
+                    }
+                }
                 tracing::info!(job_id = %job_id, block = %node.kind, "plugin encode step completed");
             }
             if let Some(webhook_cfg) = &decision.notify {
                 let mut webhook_cfg = webhook_cfg.clone();
                 if let Some(dir) = self.secrets_dir {
-                    decrypt_headers(
-                        &crate::secrets::SecretBox::open(dir)?,
-                        &flow.id,
-                        &node.id,
-                        &mut webhook_cfg,
-                    )?;
+                    let secrets = crate::secrets::SecretBox::open(dir).map_err(|err| {
+                        fail_step(
+                            &mut steps,
+                            JobErrorCode::WebhookFailed,
+                            format!("clé de chiffrement webhook : {err}"),
+                            None,
+                        )
+                    })?;
+                    if let Err(err) =
+                        decrypt_headers(&secrets, &flow.id, &node.id, &mut webhook_cfg)
+                    {
+                        return Err(fail_step(
+                            &mut steps,
+                            JobErrorCode::WebhookFailed,
+                            format!("déchiffrement en-têtes webhook : {err}"),
+                            None,
+                        ));
+                    }
                 }
-                execute_webhook_block(&webhook_cfg, &step_ctx, self.http_client).await?;
+                if let Err(err) =
+                    execute_webhook_block(&webhook_cfg, &step_ctx, self.http_client).await
+                {
+                    return Err(fail_step(
+                        &mut steps,
+                        JobErrorCode::WebhookFailed,
+                        format!("webhook : {err}"),
+                        None,
+                    ));
+                }
+                step_message = Some("notification webhook délivrée".into());
             }
             if let Some(block) = &decision.integration {
                 let outcome = match self.arr {
@@ -281,11 +551,29 @@ impl<'a> FlowEngine<'a> {
                 };
                 if let Err(error) = outcome {
                     if block.fail_on_error {
-                        return Err(error);
+                        return Err(fail_step(
+                            &mut steps,
+                            JobErrorCode::IntegrationFailed,
+                            format!("intégration *arr : {error}"),
+                            None,
+                        ));
                     }
+                    step_status = JobStepStatus::Skipped;
+                    step_message = Some(format!("échec non bloquant : {error}"));
                     tracing::warn!(job_id = %job_id, service = ?block.service, error = %error, "bloc d'intégration en échec, flux poursuivi");
+                } else {
+                    step_message = Some("commande *arr transmise".into());
                 }
             }
+            steps.push(JobStepEntry {
+                step_index,
+                node_id: node.id.clone(),
+                block_kind: node.kind.as_str().to_owned(),
+                operation_id: Some(op_id),
+                status: step_status,
+                message: step_message,
+                output_excerpt: step_excerpt,
+            });
             if decision.stop {
                 tracing::info!(job_id = %job_id, "reached final file-output node, terminating pipeline");
                 break;
@@ -299,11 +587,39 @@ impl<'a> FlowEngine<'a> {
             };
             current_node_id = connection.to.clone();
         }
+        if has_edit
+            && !has_remux_mkv
+            && !has_encode
+            && output_profile == OutputProfile::StrictMkvRemux
+        {
+            output_profile = OutputProfile::MkvMetadataEdit;
+        }
         Ok(FlowExecutionOutcome {
             working_file: current_working_file,
             in_place: is_in_place,
             warning: final_warning,
+            output_profile,
+            steps,
         })
+    }
+
+    async fn maybe_enrich_mediainfo(
+        &self,
+        mut media_info: serde_json::Value,
+        path: &Path,
+    ) -> serde_json::Value {
+        let arch = crate::tools_cache::host_arch();
+        if let Ok(mediainfo_bin) = self.cache_mgr.verify_cached_binary(
+            crate::plugins::MEDIAINFO_TOOL_ID,
+            crate::plugins::MEDIAINFO_TOOL_VERSION,
+            arch,
+            "mediainfo",
+            None,
+        ) && let Ok(parsed) = media::inspect_mediainfo(&mediainfo_bin, path).await
+        {
+            media_info = media::attach_mediainfo(media_info, parsed);
+        }
+        media_info
     }
 }
 

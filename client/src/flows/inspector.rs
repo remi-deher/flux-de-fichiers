@@ -1,25 +1,34 @@
-//! Inspecteur du bloc sélectionné : nom, réglages générés, sorties et retrait.
+//! Inspecteur latéral repliable du bloc sélectionné : réglages, liaisons, duplication et retrait.
 
+use super::dnd::BranchTarget;
 use super::fields::FieldControl;
+use super::presentation::{NodeDomain, node_output_ports, output_presentation};
 use super::state::Editor;
+use crate::ui::{Icon, IconName};
 use flux_shared::flows::{FlowGraph, OwnedBlockSpec, find_owned};
 use leptos::prelude::*;
 
-/// Libellé d'une sortie : celui de la fiche, sinon le nom du port.
+const HEADER_ICON_SIZE: u32 = 16;
+const ACTION_ICON_SIZE: u32 = 14;
+
+/// Libellé d'une sortie : celui de la fiche, sinon la présentation sémantique du port.
 fn port_label(
     catalog: &[OwnedBlockSpec],
     graph: &FlowGraph,
     node_id: &str,
     port: &Option<String>,
 ) -> String {
-    let Some(port) = port else {
+    let Some(port_name) = port else {
         return "Suite".into();
     };
     graph
         .node(node_id)
         .and_then(|node| find_owned(catalog, &node.kind))
-        .and_then(|spec| spec.ports.iter().find(|(name, _)| name == port))
-        .map_or_else(|| port.clone(), |(_, label)| label.clone())
+        .and_then(|spec| spec.ports.iter().find(|(name, _)| name == port_name))
+        .map_or_else(
+            || output_presentation(port_name).label,
+            |(_, label)| label.clone(),
+        )
 }
 
 /// Relie (ou délie, `target` vide) la sortie `port` ; le graphe ne change pas si c'est refusé.
@@ -39,7 +48,7 @@ pub fn relink(
 }
 
 #[component]
-fn Outputs(editor: Editor, node_id: String) -> impl IntoView {
+fn Outputs(editor: Editor, node_id: String, can_manage: bool) -> impl IntoView {
     let feedback = RwSignal::new(None::<&'static str>);
     let id = StoredValue::new(node_id);
     move || {
@@ -49,7 +58,7 @@ fn Outputs(editor: Editor, node_id: String) -> impl IntoView {
         let Some(node) = graph.node(&node_id) else {
             return ().into_any();
         };
-        let ports = graph.output_ports(node);
+        let ports = node_output_ports(&graph, node, &catalog);
         if ports.is_empty() {
             return view! { <p class="form-help">"Dernier bloc : le flux s'arrête ici."</p> }
                 .into_any();
@@ -61,101 +70,198 @@ fn Outputs(editor: Editor, node_id: String) -> impl IntoView {
             .map(|candidate| (candidate.id.clone(), candidate.name.clone()))
             .collect();
         view! {
-            <h3 class="section-title">"Sorties"</h3>
-            {ports.into_iter().map(|port| {
-                let current = graph.outgoing(&node_id).find(|edge| edge.port == port).map(|edge| edge.to.clone()).unwrap_or_default();
-                let label = port_label(&catalog, &graph, &node_id, &port);
-                let select_id = format!("output-{node_id}-{}", port.clone().unwrap_or_default());
-                let from = node_id.clone();
-                view! {
-                    <div class="form-group">
-                        <label for=select_id.clone() class="form-label">{label}</label>
-                        <select id=select_id class="form-select" prop:value=current.clone()
-                            on:change=move |event| {
-                                let target = event_target_value(&event);
-                                match editor.graph.with(|graph| relink(graph, &from, &port, &target)) {
-                                    Ok(next) => {
-                                        editor.edit(|graph| *graph = next);
-                                        feedback.set(None);
+            <div class="flow-inspector__section">
+                <h3 class="flow-inspector__section-title">"Sorties & liaisons"</h3>
+                {ports.into_iter().map(|port| {
+                    let current = graph
+                        .outgoing(&node_id)
+                        .find(|edge| edge.port == port)
+                        .map(|edge| edge.to.clone())
+                        .unwrap_or_default();
+                    let label = port_label(&catalog, &graph, &node_id, &port);
+                    let select_id = format!("output-{node_id}-{}", port.clone().unwrap_or_default());
+                    let from = node_id.clone();
+                    let branch_from = node_id.clone();
+                    let branch_port = port.clone();
+                    let existing_to = (!current.is_empty()).then(|| current.clone());
+                    view! {
+                        <div class="form-group">
+                            <div class="flow-inspector__output-head">
+                                <label for=select_id.clone() class="form-label">{label}</label>
+                                {can_manage.then(|| view! {
+                                    <button
+                                        type="button"
+                                        class="btn btn-secondary btn-sm"
+                                        on:click=move |_| {
+                                            editor.branch_target.set(Some(BranchTarget {
+                                                source_id: branch_from.clone(),
+                                                port: branch_port.clone(),
+                                                replace_to: existing_to.clone(),
+                                            }));
+                                            editor.palette_open.set(true);
+                                        }
+                                    >
+                                        <Icon name=IconName::Plus size=12 />
+                                        <span>"Insérer"</span>
+                                    </button>
+                                })}
+                            </div>
+                            <select
+                                id=select_id
+                                class="form-select"
+                                disabled=!can_manage
+                                prop:value=current.clone()
+                                on:change=move |event| {
+                                    let target = event_target_value(&event);
+                                    match editor.graph.with_untracked(|graph| relink(graph, &from, &port, &target)) {
+                                        Ok(next) => {
+                                            editor.mutate_graph(|graph| *graph = next);
+                                            feedback.set(None);
+                                        }
+                                        Err(message) => feedback.set(Some(message)),
                                     }
-                                    Err(message) => feedback.set(Some(message)),
                                 }
-                            }>
-                            <option value="">"Non reliée"</option>
-                            {targets.iter().map(|(id, name)| view! {
-                                <option value=id.clone() selected=*id == current>{name.clone()}</option>
-                            }).collect_view()}
-                        </select>
-                    </div>
-                }
-            }).collect_view()}
-            <p class="form-help text-danger" role="status">{move || feedback.get()}</p>
+                            >
+                                <option value="">"Non reliée"</option>
+                                {targets.iter().map(|(id, name)| view! {
+                                    <option value=id.clone() selected=*id == current>{name.clone()}</option>
+                                }).collect_view()}
+                            </select>
+                        </div>
+                    }
+                }).collect_view()}
+                <p class="form-help text-danger" role="status">{move || feedback.get()}</p>
+            </div>
         }
         .into_any()
     }
 }
 
 #[component]
-pub fn NodeInspector(editor: Editor) -> impl IntoView {
-    move || {
-        let Some(node_id) = editor.selected.get() else {
-            return view! { <p class="form-help">"Sélectionnez un bloc pour voir ses réglages."</p> }.into_any();
-        };
-        let catalog = editor.catalog.get();
-        let Some(node) = editor
-            .graph
-            .with_untracked(|graph| graph.node(&node_id).cloned())
-        else {
-            return view! { <p class="form-help">"Sélectionnez un bloc pour voir ses réglages."</p> }.into_any();
-        };
-        let spec = find_owned(&catalog, &node.kind).cloned();
-        let name_id = node_id.clone();
-        let remove_id = node_id.clone();
-        let fields = spec
-            .as_ref()
-            .map(|spec| spec.fields.clone())
-            .unwrap_or_default();
-        let kind_label = spec
-            .as_ref()
-            .map(|spec| spec.label.clone())
-            .unwrap_or_else(|| node.kind.as_str().to_owned());
-        let description = spec.as_ref().map(|spec| spec.description.clone());
-        let from_plugin = spec.as_ref().is_some_and(|spec| spec.from_plugin);
-        view! {
-            <div class="form-group">
-                <span class="status-pill info">{kind_label}</span>
-                {description.map(|text| view! { <p class="form-help">{text}</p> })}
-                {from_plugin.then(|| view! {
-                    <p class="form-help">"Bloc fourni par un dépôt de plugins."</p>
-                })}
-                {spec.is_none().then(|| view! {
-                    <p class="form-help">"Bloc sans exécution native : il est traversé sans effet, ses réglages sont conservés tels quels."</p>
-                })}
-            </div>
-            <div class="form-group">
-                <label for="inspector-name" class="form-label">"Nom du bloc"</label>
-                <input id="inspector-name" class="form-input" prop:value=node.name.clone()
-                    on:input=move |event| {
-                        let name = event_target_value(&event);
-                        let id = name_id.clone();
-                        editor.edit(move |graph| {
-                            if let Some(node) = graph.node_mut(&id) {
-                                node.name = name;
-                            }
-                        });
-                    } />
-            </div>
-            {fields.into_iter().map(|field| view! {
-                <FieldControl editor=editor node_id=node_id.clone() field=field />
-            }).collect_view()}
-            <Outputs editor=editor node_id=node_id.clone() />
-            <button type="button" class="btn btn-danger-quiet" on:click=move |_| {
-                let id = remove_id.clone();
-                editor.edit(move |graph| graph.remove(&id));
-                editor.selected.set(None);
-            }>"Retirer ce bloc"</button>
-        }
-        .into_any()
+pub fn NodeInspector(editor: Editor, can_manage: bool) -> impl IntoView {
+    let is_open = move || editor.inspector_open.get() && editor.selected.get().is_some();
+
+    view! {
+        <aside
+            class="flow-inspector-drawer"
+            class:is-closed=move || !is_open()
+            aria-label="Inspecteur du bloc"
+        >
+            {move || {
+                let node_id = editor.selected.get()?;
+                if !editor.inspector_open.get() {
+                    return None;
+                }
+                let catalog = editor.catalog.get();
+                let node = editor
+                    .graph
+                    .with(|graph| graph.node(&node_id).cloned())?;
+                let spec = find_owned(&catalog, &node.kind).cloned();
+                let category = spec.as_ref().map_or("Bloc", |s| s.category.as_str());
+                let kind_label = spec
+                    .as_ref()
+                    .map(|s| s.label.clone())
+                    .unwrap_or_else(|| node.kind.as_str().to_owned());
+                let domain = NodeDomain::from_block(&node.kind, category);
+                let description = spec.as_ref().map(|s| s.description.clone());
+                let from_plugin = spec.as_ref().is_some_and(|s| s.from_plugin);
+                let fields = spec
+                    .as_ref()
+                    .map(|s| s.fields.clone())
+                    .unwrap_or_default();
+                let name_id = node_id.clone();
+                let dup_id = node_id.clone();
+                let remove_id = node_id.clone();
+
+                Some(view! {
+                    <div class="flow-inspector__shell">
+                        <header class="flow-inspector__header">
+                            <div class="flow-inspector__identity">
+                                <span
+                                    class="flow-inspector__badge"
+                                    style=format!("--node-accent: {}", domain.accent_var())
+                                >
+                                    <Icon name=domain.icon() size=13 />
+                                    <span>{format!("{category} · {kind_label}")}</span>
+                                </span>
+                                <h2 class="flow-inspector__title">{node.name.clone()}</h2>
+                            </div>
+                            <button
+                                type="button"
+                                class="header-icon-btn"
+                                aria-label="Fermer l'inspecteur"
+                                title="Fermer l'inspecteur"
+                                on:click=move |_| editor.inspector_open.set(false)
+                            >
+                                <Icon name=IconName::Close size=HEADER_ICON_SIZE />
+                            </button>
+                        </header>
+
+                        <div class="flow-inspector__body">
+                            {description.map(|text| view! { <p class="form-help">{text}</p> })}
+                            {from_plugin.then(|| view! {
+                                <p class="form-help">"Bloc fourni par un dépôt de plugins."</p>
+                            })}
+                            {spec.is_none().then(|| view! {
+                                <p class="form-help">
+                                    "Bloc sans exécution native : il est traversé sans effet, ses réglages sont conservés tels quels."
+                                </p>
+                            })}
+
+                            <div class="form-group">
+                                <label for="inspector-name" class="form-label">"Nom de l'étape"</label>
+                                <input
+                                    id="inspector-name"
+                                    class="form-input"
+                                    disabled=!can_manage
+                                    prop:value=node.name
+                                    on:input=move |event| {
+                                        let name = event_target_value(&event);
+                                        let id = name_id.clone();
+                                        editor.edit(move |graph| {
+                                            if let Some(node) = graph.node_mut(&id) {
+                                                node.name = name;
+                                            }
+                                        });
+                                    }
+                                />
+                            </div>
+
+                            {fields.into_iter().map(|field| view! {
+                                <FieldControl editor=editor node_id=node_id.clone() field=field />
+                            }).collect_view()}
+
+                            <Outputs editor=editor node_id=node_id.clone() can_manage=can_manage />
+                        </div>
+
+                        {can_manage.then(|| view! {
+                            <footer class="flow-inspector__footer">
+                                <button
+                                    type="button"
+                                    class="btn btn-secondary btn-sm"
+                                    on:click=move |_| {
+                                        editor.duplicate_node(&dup_id);
+                                    }
+                                >
+                                    <Icon name=IconName::Copy size=ACTION_ICON_SIZE />
+                                    <span>"Dupliquer"</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-danger-quiet btn-sm"
+                                    on:click=move |_| {
+                                        editor.remove_node(&remove_id);
+                                    }
+                                >
+                                    <Icon name=IconName::Trash size=ACTION_ICON_SIZE />
+                                    <span>"Retirer ce bloc"</span>
+                                </button>
+                            </footer>
+                        })}
+                    </div>
+                })
+            }}
+        </aside>
     }
 }
 

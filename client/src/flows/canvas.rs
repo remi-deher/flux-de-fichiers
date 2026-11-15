@@ -1,107 +1,922 @@
-//! Plan du graphe : cartes disposées en couches et liaisons SVG, recalculées depuis le modèle.
+//! Plan interactif 2D du graphe : cartes librement déplaçables, zoom/pan, ports et minimap.
 
-use super::dnd::DragPayload;
+use super::dnd::{BranchTarget, DragPayload, can_connect, connect_checked, disconnect_edge};
 use super::drag::DragItem;
 use super::geometry::{
-    CARD_HEIGHT, CARD_WIDTH, board_size, card_origin, input_anchor, link_path, output_anchor,
+    CARD_HEIGHT, CARD_WIDTH, ORIGIN_X, ORIGIN_Y, PlacedNode, Point, ZOOM_STEP, board_size,
+    clamp_zoom, default_positions, link_midpoint, link_path, place_with_positions,
 };
-use super::state::Editor;
-use flux_shared::flows::{FlowBlockKind, block_spec, layout};
+use super::presentation::{
+    NodeDomain, PortPresentation, node_output_ports, node_summary, output_presentation,
+};
+use super::state::{Editor, PendingWire};
+use crate::ui::{Icon, IconName, Toasts};
+use flux_shared::flows::{FlowBlockKind, FlowConnection, find_owned};
 use leptos::prelude::*;
+use std::collections::HashMap;
 
-fn link_class(port: Option<&str>) -> &'static str {
-    match port {
-        Some("true") => "flow-graph__link flow-graph__link--true",
-        Some("false") => "flow-graph__link flow-graph__link--false",
-        _ => "flow-graph__link",
+const NODE_ICON_SIZE: u32 = 16;
+const ACTION_ICON_SIZE: u32 = 14;
+const TOOLBAR_ICON_SIZE: u32 = 14;
+const WIRE_BADGE_WIDTH: f64 = 58.0;
+const WIRE_BADGE_HEIGHT: f64 = 20.0;
+const WIRE_BADGE_RX: f64 = 10.0;
+const ZOOM_PERCENT_SCALE: f64 = 100.0;
+const MINI_NODE_RX: f64 = 8.0;
+const DEFAULT_ZOOM: f64 = 1.0;
+const WIRE_DRAG_THRESHOLD: f64 = 8.0;
+
+#[derive(Clone, Debug)]
+struct DragNodeState {
+    node_id: String,
+    start_x: f64,
+    start_y: f64,
+    origin: Point,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PanBoardState {
+    start_x: f64,
+    start_y: f64,
+    scroll_left: i32,
+    scroll_top: i32,
+}
+
+struct OutputSlotData {
+    port: Option<String>,
+    pres: PortPresentation,
+    port_idx: usize,
+    existing_to: Option<String>,
+}
+
+fn wire_badge_label(port: &str) -> String {
+    let pres = output_presentation(port);
+    format!("{} {}", pres.symbol, pres.label)
+}
+
+#[component]
+fn CanvasToolbar(editor: Editor, can_manage: bool) -> impl IntoView {
+    move || {
+        let can_undo_layout = editor.previous_positions.get().is_some();
+        let pending = editor.pending_wire.get();
+        let selected_wire = editor.selected_wire.get();
+        let notice = editor.drop_notice.get();
+        if !can_undo_layout && pending.is_none() && selected_wire.is_none() && notice.is_none() {
+            return None;
+        }
+        Some(view! {
+            <div class="flow-canvas__toolbar" role="status">
+                {can_undo_layout.then(|| view! {
+                    <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        on:click=move |_| editor.undo_layout()
+                    >
+                        <Icon name=IconName::Undo size=TOOLBAR_ICON_SIZE />
+                        <span>"Annuler la disposition"</span>
+                    </button>
+                })}
+                {pending.as_ref().map(|_| view! {
+                    <div class="flow-canvas__banner">
+                        <span>"Liaison en cours : cliquez sur l'entrée du bloc cible."</span>
+                        <button
+                            type="button"
+                            class="btn btn-secondary btn-sm"
+                            on:click=move |_| editor.pending_wire.set(None)
+                        >
+                            "Annuler la liaison"
+                        </button>
+                    </div>
+                })}
+                {selected_wire.map(|conn| {
+                    let insert_conn = conn.clone();
+                    let delete_conn = conn.clone();
+                    view! {
+                        <div class="flow-canvas__banner">
+                            <span>"Liaison sélectionnée"</span>
+                            {can_manage.then(|| view! {
+                                <>
+                                    <button
+                                        type="button"
+                                        class="btn btn-secondary btn-sm"
+                                        on:click=move |_| {
+                                            editor.branch_target.set(Some(BranchTarget {
+                                                source_id: insert_conn.from.clone(),
+                                                port: insert_conn.port.clone(),
+                                                replace_to: Some(insert_conn.to.clone()),
+                                            }));
+                                            editor.selected_wire.set(None);
+                                            editor.palette_open.set(true);
+                                        }
+                                    >
+                                        <Icon name=IconName::Plus size=TOOLBAR_ICON_SIZE />
+                                        <span>"Insérer une étape"</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-danger-quiet btn-sm"
+                                        on:click=move |_| {
+                                            editor.mutate_graph(|graph| {
+                                                disconnect_edge(
+                                                    graph,
+                                                    &delete_conn.from,
+                                                    &delete_conn.port,
+                                                    &delete_conn.to,
+                                                );
+                                            });
+                                            editor.selected_wire.set(None);
+                                        }
+                                    >
+                                        <Icon name=IconName::Trash size=TOOLBAR_ICON_SIZE />
+                                        <span>"Supprimer la liaison"</span>
+                                    </button>
+                                </>
+                            })}
+                        </div>
+                    }
+                })}
+                {notice.map(|message| view! {
+                    <div class="flow-canvas__banner is-error">
+                        <span>{message}</span>
+                        <button
+                            type="button"
+                            class="header-icon-btn"
+                            aria-label="Fermer le message"
+                            on:click=move |_| editor.drop_notice.set(None)
+                        >
+                            <Icon name=IconName::Close size=TOOLBAR_ICON_SIZE />
+                        </button>
+                    </div>
+                })}
+            </div>
+        })
     }
 }
 
 #[component]
-pub fn GraphCanvas(editor: Editor) -> impl IntoView {
-    move || {
-        let graph = editor.graph.get();
-        if graph.nodes.is_empty() {
-            return view! {
-                <div class="flow-graph-board empty-state-panel">
-                    <p class="empty-state-title">"Aucun bloc : ajoutez-en depuis la palette."</p>
-                </div>
-            }
-            .into_any();
-        }
-        let places = layout(&graph);
-        let size = board_size(places.values());
-        let links = graph
-            .connections
-            .iter()
-            .filter_map(|edge| {
-                let from = graph.node(&edge.from)?;
-                let ports = graph.output_ports(from);
-                let index = ports.iter().position(|port| *port == edge.port)?;
-                let start = output_anchor(*places.get(&edge.from)?, index, ports.len());
-                let end = input_anchor(*places.get(&edge.to)?);
-                let d = link_path(start, end);
-                let label = edge.port.clone().map(|port| {
-                    view! {
-                        <text class="flow-graph__port-label" x=start.x + 4.0 y=start.y + 14.0>{port}</text>
-                    }
-                });
-                Some(view! {
-                    <path class="flow-graph__link-halo" d=d.clone() />
-                    <path class=link_class(edge.port.as_deref()) d=d />
-                    {label}
-                })
-            })
-            .collect_view();
-        let cards = graph
-            .nodes
-            .iter()
-            .filter_map(|node| {
-                let origin = card_origin(*places.get(&node.id)?);
-                let spec = block_spec(&node.kind);
-                let kind = spec.map_or_else(|| node.kind.as_str().to_owned(), |spec| spec.label.to_owned());
-                let incomplete = spec.is_some_and(|spec| !spec.missing_fields(&node.config).is_empty());
-                let has_input = node.kind != FlowBlockKind::FileInput;
-                let has_output = !graph.output_ports(node).is_empty();
-                let id = node.id.clone();
-                let name = node.name.clone();
-                let selected_id = id.clone();
-                let style = format!(
-                    "left:{}px;top:{}px;width:{CARD_WIDTH}px;height:{CARD_HEIGHT}px",
-                    origin.x, origin.y
-                );
-                Some(view! {
-                    <DragItem editor=editor payload=DragPayload::Card(id.clone()) target=id.clone() class="flow-graph__slot" style=style>
-                        <button
-                            type="button"
-                            class="flow-graph__card"
-                            class:is-selected=move || editor.selected.get().as_deref() == Some(selected_id.as_str())
-                            class:is-incomplete=incomplete
-                            on:click=move |_| editor.selected.set(Some(id.clone()))
-                        >
-                            {has_input.then(|| view! { <span class="flow-graph__port-dot is-in" aria-hidden="true"></span> })}
-                            <div class="flow-graph__head">
-                                <div class="flow-graph__kind">{kind}</div>
-                                {incomplete.then(|| view! {
-                                    <span class="flow-graph__badge" title="Réglage obligatoire manquant">"À compléter"</span>
-                                })}
-                            </div>
-                            <div class="flow-graph__name">{name}</div>
-                            {has_output.then(|| view! { <span class="flow-graph__port-dot is-out" aria-hidden="true"></span> })}
-                        </button>
-                    </DragItem>
-                })
-            })
-            .collect_view();
-        view! {
-            <div class="flow-graph-board">
-                <div class="flow-graph" style=format!("width:{}px;height:{}px", size.x, size.y)>
-                    <svg class="flow-graph__links" width=size.x height=size.y aria-hidden="true">{links}</svg>
-                    {cards}
-                </div>
-                <p class="form-help text-danger" role="status">{move || editor.drop_notice.get()}</p>
+fn MinimapPanel(
+    editor: Editor,
+    placed: Memo<Vec<PlacedNode>>,
+    board_dims: Memo<(f64, f64)>,
+    board_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    let minimap_ref = NodeRef::<leptos::html::Div>::new();
+    view! {
+        <div class="flow-minimap-panel">
+            <div class="flow-minimap__tools">
+                <button
+                    type="button"
+                    class="header-icon-btn"
+                    title="Dézoomer"
+                    aria-label="Dézoomer"
+                    on:click=move |_| editor.zoom.update(|z| *z = clamp_zoom(*z - ZOOM_STEP))
+                >
+                    "-"
+                </button>
+                <button
+                    type="button"
+                    class="flow-minimap__zoom-reset"
+                    title="Réinitialiser le zoom à 100 %"
+                    on:click=move |_| editor.zoom.set(DEFAULT_ZOOM)
+                >
+                    {move || format!("{} %", (editor.zoom.get() * ZOOM_PERCENT_SCALE).round())}
+                </button>
+                <button
+                    type="button"
+                    class="header-icon-btn"
+                    title="Zoomer"
+                    aria-label="Zoomer"
+                    on:click=move |_| editor.zoom.update(|z| *z = clamp_zoom(*z + ZOOM_STEP))
+                >
+                    "+"
+                </button>
             </div>
+            <div
+                node_ref=minimap_ref
+                style="cursor:pointer;"
+                title="Cliquer pour centrer le canevas sur cette zone"
+                on:click=move |event| {
+                    let Some(mini) = minimap_ref.get() else {
+                        return;
+                    };
+                    let Some(board) = board_ref.get() else {
+                        return;
+                    };
+                    let mini_w = f64::from(mini.client_width()).max(1.0);
+                    let mini_h = f64::from(mini.client_height()).max(1.0);
+                    let (bw, bh) = board_dims.get_untracked();
+                    let scale = (mini_w / bw.max(1.0)).min(mini_h / bh.max(1.0)).max(f64::EPSILON);
+                    let pad_x = (mini_w - bw * scale) / 2.0;
+                    let pad_y = (mini_h - bh * scale) / 2.0;
+                    let board_x = ((f64::from(event.offset_x()) - pad_x) / scale).clamp(0.0, bw);
+                    let board_y = ((f64::from(event.offset_y()) - pad_y) / scale).clamp(0.0, bh);
+                    let zoom = editor.zoom.get_untracked();
+                    let target_x = board_x * zoom - f64::from(board.client_width()) / 2.0;
+                    let target_y = board_y * zoom - f64::from(board.client_height()) / 2.0;
+                    let max_left = (board.scroll_width() - board.client_width()).max(0);
+                    let max_top = (board.scroll_height() - board.client_height()).max(0);
+                    board.set_scroll_left((target_x.round() as i32).clamp(0, max_left));
+                    board.set_scroll_top((target_y.round() as i32).clamp(0, max_top));
+                }
+            >
+                {move || {
+                    let (bw, bh) = board_dims.get();
+                    let nodes = placed.get();
+                    let graph = editor.graph.get();
+                    let selected_id = editor.selected.get();
+                    let map_by_id: HashMap<&str, &PlacedNode> =
+                        nodes.iter().map(|p| (p.id.as_str(), p)).collect();
+                    let lines = graph
+                        .connections
+                        .iter()
+                        .filter_map(|edge| {
+                            let from = map_by_id.get(edge.from.as_str())?;
+                            let to = map_by_id.get(edge.to.as_str())?;
+                            let a = Point {
+                                x: from.x + from.width / 2.0,
+                                y: from.y + from.height,
+                            };
+                            let b = to.in_port();
+                            Some(view! {
+                                <line class="mini-wire" x1=a.x y1=a.y x2=b.x y2=b.y />
+                            })
+                        })
+                        .collect_view();
+                    let rects = nodes
+                        .iter()
+                        .map(|node| {
+                            let is_selected = selected_id.as_deref() == Some(node.id.as_str());
+                            view! {
+                                <rect
+                                    class="mini-node"
+                                    class:is-selected=is_selected
+                                    x=node.x
+                                    y=node.y
+                                    width=node.width
+                                    height=node.height
+                                    rx=MINI_NODE_RX
+                                />
+                            }
+                        })
+                        .collect_view();
+                    view! {
+                        <svg
+                            class="flow-minimap__svg"
+                            style="pointer-events:none;"
+                            viewBox=format!("0 0 {bw} {bh}")
+                            aria-hidden="true"
+                        >
+                            {lines}
+                            {rects}
+                        </svg>
+                    }
+                }}
+            </div>
+        </div>
+    }
+}
+
+#[component]
+pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
+    let board_ref = NodeRef::<leptos::html::Div>::new();
+    let dragging_node = RwSignal::new(None::<DragNodeState>);
+    let panning = RwSignal::new(None::<PanBoardState>);
+    let wire_opened_on_press = RwSignal::new(false);
+    let ignore_click_for_node = RwSignal::new(None::<String>);
+
+    let placed = Memo::new(move |_| {
+        editor.graph.with(|graph| {
+            editor
+                .positions
+                .with(|custom| place_with_positions(graph, custom))
+        })
+    });
+    let board_dims = Memo::new(move |_| placed.with(|nodes| board_size(nodes)));
+
+    let connect_to_node = move |target_id: String| {
+        if !can_manage {
+            return;
         }
-        .into_any()
+        let Some(wire) = editor.pending_wire.get_untracked() else {
+            return;
+        };
+        editor.pending_wire.set(None);
+        let catalog = editor.catalog.get_untracked();
+        let mut outcome = Ok(());
+        editor.mutate_graph(|graph| {
+            outcome = connect_checked(graph, &wire.from_id, wire.port, &target_id, &catalog);
+        });
+        match outcome {
+            Ok(()) => Toasts::notify_success("Liaison créée."),
+            Err(err) => Toasts::notify_error(err.message()),
+        }
+    };
+
+    view! {
+        <section class="flow-canvas-area" aria-label="Plan du graphe">
+            <CanvasToolbar editor=editor can_manage=can_manage />
+            <div
+                node_ref=board_ref
+                class="flow-graph-board"
+                class:is-panning=move || panning.get().is_some()
+                on:mousedown=move |event| {
+                    if event.button() != 0 {
+                        return;
+                    }
+                    if dragging_node.get_untracked().is_some() {
+                        return;
+                    }
+                    editor.selected_wire.set(None);
+                    editor.pending_wire.set(None);
+                    editor.branch_target.set(None);
+                    if let Some(board) = board_ref.get() {
+                        panning.set(Some(PanBoardState {
+                            start_x: f64::from(event.client_x()),
+                            start_y: f64::from(event.client_y()),
+                            scroll_left: board.scroll_left(),
+                            scroll_top: board.scroll_top(),
+                        }));
+                    }
+                }
+                on:mousemove=move |event| {
+                    let cx = f64::from(event.client_x());
+                    let cy = f64::from(event.client_y());
+                    if let Some(drag) = dragging_node.get_untracked() {
+                        let zoom = editor.zoom.get_untracked().max(f64::EPSILON);
+                        editor.set_node_position_live(
+                            &drag.node_id,
+                            Point {
+                                x: drag.origin.x + (cx - drag.start_x) / zoom,
+                                y: drag.origin.y + (cy - drag.start_y) / zoom,
+                            },
+                        );
+                        return;
+                    }
+                    if let Some(pan) = panning.get_untracked()
+                        && let Some(board) = board_ref.get()
+                    {
+                        board.set_scroll_left(pan.scroll_left - (cx - pan.start_x).round() as i32);
+                        board.set_scroll_top(pan.scroll_top - (cy - pan.start_y).round() as i32);
+                        return;
+                    }
+                    if editor.pending_wire.get_untracked().is_some() {
+                        let zoom = editor.zoom.get_untracked().max(f64::EPSILON);
+                        editor.pending_wire.update(|wire| {
+                            if let Some(w) = wire.as_mut() {
+                                w.cursor = Point {
+                                    x: w.start_anchor.x + (cx - w.start_client_x) / zoom,
+                                    y: w.start_anchor.y + (cy - w.start_client_y) / zoom,
+                                };
+                            }
+                        });
+                    }
+                }
+                on:mouseup=move |_| {
+                    if dragging_node.get_untracked().is_some() {
+                        dragging_node.set(None);
+                        editor.commit_positions();
+                    }
+                    panning.set(None);
+                    if let Some(wire) = editor.pending_wire.get_untracked() {
+                        let moved = (wire.cursor.x - wire.start_anchor.x).abs() > WIRE_DRAG_THRESHOLD
+                            || (wire.cursor.y - wire.start_anchor.y).abs() > WIRE_DRAG_THRESHOLD;
+                        if moved {
+                            editor.pending_wire.set(None);
+                        }
+                    }
+                }
+                on:mouseleave=move |_| {
+                    if dragging_node.get_untracked().is_some() {
+                        dragging_node.set(None);
+                        editor.commit_positions();
+                    }
+                    panning.set(None);
+                }
+                on:wheel=move |event| {
+                    if !(event.ctrl_key() || event.meta_key()) {
+                        return;
+                    }
+                    event.prevent_default();
+                    let delta = if event.delta_y() < 0.0 {
+                        ZOOM_STEP
+                    } else {
+                        -ZOOM_STEP
+                    };
+                    editor.zoom.update(|z| *z = clamp_zoom(*z + delta));
+                }
+                on:dragover=move |event| {
+                    if !can_manage {
+                        return;
+                    }
+                    if matches!(
+                        editor.drag.get_untracked(),
+                        Some(DragPayload::Palette { .. })
+                    ) {
+                        event.prevent_default();
+                    }
+                }
+                on:drop=move |event| {
+                    if !can_manage {
+                        return;
+                    }
+                    let Some(DragPayload::Palette {
+                        kind,
+                        label,
+                        defaults,
+                    }) = editor.drag.get_untracked()
+                    else {
+                        return;
+                    };
+                    event.prevent_default();
+                    editor.end_drag();
+                    let mut created = String::new();
+                    editor.mutate_graph(|graph| {
+                        created = graph.append(FlowBlockKind::parse(&kind), &label, defaults);
+                    });
+                    let pos = editor
+                        .graph
+                        .with_untracked(|graph| default_positions(graph).get(&created).copied());
+                    if let Some(pt) = pos {
+                        editor.set_node_position(&created, pt);
+                    }
+                    editor.select_node(Some(created), true);
+                }
+            >
+                {move || {
+                    if editor.graph.with(|graph| graph.nodes.is_empty()) {
+                        return view! {
+                            <div class="flow-canvas__empty empty-state-panel">
+                                <p class="empty-state-title">
+                                    "Aucun bloc dans ce flux."
+                                </p>
+                                <p class="form-help">
+                                    "Ouvrez « + Composants » ou glissez une étape sur le canevas pour démarrer."
+                                </p>
+                            </div>
+                        }
+                        .into_any();
+                    }
+
+                    let wires_view = move || {
+                        let graph = editor.graph.get();
+                        let catalog = editor.catalog.get();
+                        let nodes_placed = placed.get();
+                        let placed_map: HashMap<String, PlacedNode> = nodes_placed
+                            .into_iter()
+                            .map(|p| (p.id.clone(), p))
+                            .collect();
+                        let selected_id = editor.selected.get();
+                        let selected_wire = editor.selected_wire.get();
+
+                        graph
+                            .connections
+                            .iter()
+                            .filter_map(|edge| {
+                                let from_node = graph.node(&edge.from)?;
+                                let from_placed = placed_map.get(&edge.from)?;
+                                let to_placed = placed_map.get(&edge.to)?;
+                                let ports = node_output_ports(&graph, from_node, &catalog);
+                                let start = from_placed.out_port_for(edge.port.as_deref(), &ports);
+                                let end = to_placed.in_port();
+                                let d = link_path(start, end);
+                                let mid = link_midpoint(start, end);
+                                let pres =
+                                    output_presentation(edge.port.as_deref().unwrap_or("default"));
+                                let is_selected_wire = selected_wire.as_ref() == Some(edge);
+                                let is_highlighted = is_selected_wire
+                                    || selected_id.as_deref() == Some(edge.from.as_str())
+                                    || selected_id.as_deref() == Some(edge.to.as_str());
+                                let is_muted = selected_id.is_some() && !is_highlighted;
+                                let click_edge = FlowConnection {
+                                    from: edge.from.clone(),
+                                    to: edge.to.clone(),
+                                    port: edge.port.clone(),
+                                };
+                                let badge = edge
+                                    .port
+                                    .as_deref()
+                                    .filter(|p| !p.is_empty())
+                                    .map(|port| {
+                                        let label = wire_badge_label(port);
+                                        let rx = mid.x - WIRE_BADGE_WIDTH / 2.0;
+                                        let ry = mid.y - WIRE_BADGE_HEIGHT / 2.0;
+                                        view! {
+                                            <g class="flow-wire__badge" data-tone=pres.tone.as_attr()>
+                                                <rect
+                                                    x=rx
+                                                    y=ry
+                                                    width=WIRE_BADGE_WIDTH
+                                                    height=WIRE_BADGE_HEIGHT
+                                                    rx=WIRE_BADGE_RX
+                                                />
+                                                <text x=mid.x y=mid.y text-anchor="middle" dominant-baseline="central">
+                                                    {label}
+                                                </text>
+                                            </g>
+                                        }
+                                    });
+                                Some(view! {
+                                    <path
+                                        class="flow-wire__hit"
+                                        d=d.clone()
+                                        on:mousedown=move |event| event.stop_propagation()
+                                        on:click=move |event| {
+                                            event.stop_propagation();
+                                            editor.selected_wire.set(Some(click_edge.clone()));
+                                        }
+                                    />
+                                    <path
+                                        class="flow-wire"
+                                        class:is-highlighted=is_highlighted
+                                        class:is-muted=is_muted
+                                        data-tone=pres.tone.as_attr()
+                                        d=d
+                                    />
+                                    {badge}
+                                })
+                            })
+                            .collect_view()
+                    };
+
+                    let ghost_wire_view = move || {
+                        let wire = editor.pending_wire.get()?;
+                        let nodes_placed = placed.get();
+                        let from_placed = nodes_placed.iter().find(|p| p.id == wire.from_id)?;
+                        let start = editor.graph.with(|graph| {
+                            let from_node = graph.node(&wire.from_id)?;
+                            let catalog = editor.catalog.get();
+                            let ports = node_output_ports(graph, from_node, &catalog);
+                            Some(from_placed.out_port_for(wire.port.as_deref(), &ports))
+                        })?;
+                        Some(view! {
+                            <path class="flow-wire flow-wire--ghost" d=link_path(start, wire.cursor) />
+                        })
+                    };
+
+                    let cards_view = move || {
+                        let graph = editor.graph.get();
+                        let catalog = editor.catalog.get();
+
+                        graph
+                            .nodes
+                            .iter()
+                            .map(|node| {
+                                let spec = find_owned(&catalog, &node.kind);
+                                let category = spec.map_or("Bloc", |s| s.category.as_str());
+                                let kind_label = spec.map_or_else(
+                                    || node.kind.as_str().to_owned(),
+                                    |s| s.label.clone(),
+                                );
+                                let domain = NodeDomain::from_block(&node.kind, category);
+                                let incomplete =
+                                    spec.is_some_and(|s| !s.missing_fields(&node.config).is_empty());
+                                let summary = node_summary(node, spec);
+                                let has_input = node.kind != FlowBlockKind::FileInput
+                                    && spec.is_none_or(|s| s.has_input);
+                                let ports = node_output_ports(&graph, node, &catalog);
+                                let port_count = ports.len();
+
+                                let output_slots: Vec<OutputSlotData> = ports
+                                    .into_iter()
+                                    .enumerate()
+                                    .map(|(port_idx, port)| {
+                                        let port_key = port.as_deref().unwrap_or("default");
+                                        let pres = output_presentation(port_key);
+                                        let existing_to = graph
+                                            .outgoing(&node.id)
+                                            .find(|edge| edge.port == port)
+                                            .map(|edge| edge.to.clone());
+                                        OutputSlotData {
+                                            port,
+                                            pres,
+                                            port_idx,
+                                            existing_to,
+                                        }
+                                    })
+                                    .collect();
+
+                                let id = node.id.clone();
+                                let node_name = node.name.clone();
+                                let style_id = id.clone();
+                                let drag_id = id.clone();
+                                let up_main_id = id.clone();
+                                let click_main_id = id.clone();
+                                let input_id = id.clone();
+                                let valid_id = id.clone();
+                                let dup_id = id.clone();
+                                let remove_id = id.clone();
+                                let selected_check = id.clone();
+                                let dragging_check = id.clone();
+                                let domain_icon = domain.icon();
+                                let accent_var = domain.accent_var();
+                                let slot_style = Signal::derive(move || {
+                                    let (x, y) = placed.with(|nodes| {
+                                        nodes
+                                            .iter()
+                                            .find(|p| p.id == style_id)
+                                            .map_or((ORIGIN_X, ORIGIN_Y), |p| (p.x, p.y))
+                                    });
+                                    format!(
+                                        "left:{x}px;top:{y}px;width:{CARD_WIDTH}px;min-height:{CARD_HEIGHT}px;--node-accent:{accent_var};"
+                                    )
+                                });
+                                let subtitle = format!("{category} · {kind_label}");
+
+                                view! {
+                                    <DragItem
+                                        editor=editor
+                                        payload=DragPayload::Card(id.clone())
+                                        target=id.clone()
+                                        draggable=false
+                                        class="canvas-node-slot"
+                                        style=slot_style
+                                    >
+                                        <article
+                                            class="canvas-node"
+                                            class:is-selected=move || editor.selected.get().as_deref() == Some(selected_check.as_str())
+                                            class:is-incomplete=incomplete
+                                            class:is-dragging=move || dragging_node.get().is_some_and(|d| d.node_id == dragging_check)
+                                        >
+                                            {has_input.then(move || {
+                                                let up_target_id = input_id.clone();
+                                                let click_target_id = input_id.clone();
+                                                let valid_target_id = valid_id.clone();
+                                                view! {
+                                                    <button
+                                                        type="button"
+                                                        class="canvas-port is-input"
+                                                        class:is-valid-target=move || {
+                                                            editor.pending_wire.with(|pw| {
+                                                                pw.as_ref().is_some_and(|wire| {
+                                                                    editor.graph.with(|g| {
+                                                                        editor.catalog.with(|c| {
+                                                                            can_connect(
+                                                                                g,
+                                                                                &wire.from_id,
+                                                                                &wire.port,
+                                                                                &valid_target_id,
+                                                                                c,
+                                                                            )
+                                                                        })
+                                                                    })
+                                                                })
+                                                            })
+                                                        }
+                                                        title="Entrée du bloc"
+                                                        aria-label="Relier à l'entrée de ce bloc"
+                                                        on:mousedown=move |event| event.stop_propagation()
+                                                        on:mouseup=move |event| {
+                                                            if editor.pending_wire.get_untracked().is_some() {
+                                                                event.stop_propagation();
+                                                                connect_to_node(up_target_id.clone());
+                                                            }
+                                                        }
+                                                        on:click=move |event| {
+                                                            event.stop_propagation();
+                                                            connect_to_node(click_target_id.clone());
+                                                        }
+                                                    ></button>
+                                                }
+                                            })}
+
+                                            <div class="canvas-node__heading">
+                                                <button
+                                                    type="button"
+                                                    class="canvas-node__icon"
+                                                    title="Glisser pour déplacer le bloc"
+                                                    aria-label="Déplacer le bloc sur le canevas"
+                                                    on:mousedown=move |event| {
+                                                        if !can_manage || event.button() != 0 {
+                                                            return;
+                                                        }
+                                                        event.stop_propagation();
+                                                        event.prevent_default();
+                                                        let origin = editor.node_point(&drag_id);
+                                                        dragging_node.set(Some(DragNodeState {
+                                                            node_id: drag_id.clone(),
+                                                            start_x: f64::from(event.client_x()),
+                                                            start_y: f64::from(event.client_y()),
+                                                            origin,
+                                                        }));
+                                                    }
+                                                >
+                                                    <Icon name=domain_icon size=NODE_ICON_SIZE />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    class="canvas-node__main"
+                                                    on:mousedown=move |event| event.stop_propagation()
+                                                    on:mouseup=move |event| {
+                                                        if editor.pending_wire.get_untracked().is_some() {
+                                                            event.stop_propagation();
+                                                            ignore_click_for_node.set(Some(up_main_id.clone()));
+                                                            connect_to_node(up_main_id.clone());
+                                                        }
+                                                    }
+                                                    on:click=move |event| {
+                                                        event.stop_propagation();
+                                                        if ignore_click_for_node
+                                                            .get_untracked()
+                                                            .as_deref()
+                                                            == Some(click_main_id.as_str())
+                                                        {
+                                                            ignore_click_for_node.set(None);
+                                                            return;
+                                                        }
+                                                        if editor.pending_wire.get_untracked().is_some() {
+                                                            connect_to_node(click_main_id.clone());
+                                                        } else {
+                                                            editor.select_node(Some(click_main_id.clone()), true);
+                                                        }
+                                                    }
+                                                >
+                                                    <span class="canvas-node__title-row">
+                                                        <span class="canvas-node__title">{node_name}</span>
+                                                        {incomplete.then(|| view! {
+                                                            <span class="canvas-node__warn" title="Réglage obligatoire manquant">"!"</span>
+                                                        })}
+                                                    </span>
+                                                    <span class="canvas-node__subtitle">{subtitle}</span>
+                                                    {summary.map(|text| view! {
+                                                        <span class="canvas-node__summary">{text}</span>
+                                                    })}
+                                                </button>
+                                                {can_manage.then(move || view! {
+                                                    <div class="canvas-node__actions">
+                                                        <button
+                                                            type="button"
+                                                            class="header-icon-btn canvas-node__action-btn"
+                                                            title="Dupliquer ce bloc"
+                                                            aria-label="Dupliquer ce bloc"
+                                                            on:mousedown=move |event| event.stop_propagation()
+                                                            on:click=move |event| {
+                                                                event.stop_propagation();
+                                                                editor.duplicate_node(&dup_id);
+                                                            }
+                                                        >
+                                                            <Icon name=IconName::Copy size=ACTION_ICON_SIZE />
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            class="header-icon-btn canvas-node__action-btn is-danger"
+                                                            title="Supprimer ce bloc"
+                                                            aria-label="Supprimer ce bloc"
+                                                            on:mousedown=move |event| event.stop_propagation()
+                                                            on:click=move |event| {
+                                                                event.stop_propagation();
+                                                                editor.remove_node(&remove_id);
+                                                            }
+                                                        >
+                                                            <Icon name=IconName::Trash size=ACTION_ICON_SIZE />
+                                                        </button>
+                                                    </div>
+                                                })}
+                                            </div>
+
+                                            {(!output_slots.is_empty()).then(move || view! {
+                                                <div
+                                                    class="canvas-node__outputs"
+                                                    style=format!("--output-count: {port_count};")
+                                                >
+                                                    {output_slots.into_iter().map(|slot| {
+                                                        let press_from = id.clone();
+                                                        let press_port = slot.port.clone();
+                                                        let click_from = id.clone();
+                                                        let click_port = slot.port.clone();
+                                                        let insert_from = id.clone();
+                                                        let insert_port = slot.port;
+                                                        let existing_to = slot.existing_to;
+                                                        let port_idx = slot.port_idx;
+                                                        let pres_label = slot.pres.label;
+                                                        let pres_symbol = slot.pres.symbol;
+                                                        let pres_tone = slot.pres.tone;
+                                                        let add_label = pres_label.clone();
+                                                        view! {
+                                                            <div class="canvas-output-slot" data-tone=pres_tone.as_attr()>
+                                                                <button
+                                                                    type="button"
+                                                                    class="canvas-port is-output"
+                                                                    title=format!("Sortie : {} (cliquer ou glisser pour relier)", pres_label)
+                                                                    aria-label=format!("Sortie {}", pres_label)
+                                                                    on:mousedown=move |event| {
+                                                                        event.stop_propagation();
+                                                                        event.prevent_default();
+                                                                        if !can_manage || event.button() != 0 {
+                                                                            return;
+                                                                        }
+                                                                        let same = editor.pending_wire.get_untracked().is_some_and(|w| {
+                                                                            w.from_id == press_from && w.port == press_port
+                                                                        });
+                                                                        if same {
+                                                                            wire_opened_on_press.set(false);
+                                                                            return;
+                                                                        }
+                                                                        let anchor = placed.with_untracked(|nodes| {
+                                                                            nodes
+                                                                                .iter()
+                                                                                .find(|p| p.id == press_from)
+                                                                                .map_or(Point { x: ORIGIN_X, y: ORIGIN_Y }, |p| {
+                                                                                    p.out_port(port_idx, port_count)
+                                                                                })
+                                                                        });
+                                                                        wire_opened_on_press.set(true);
+                                                                        editor.pending_wire.set(Some(PendingWire {
+                                                                            from_id: press_from.clone(),
+                                                                            port: press_port.clone(),
+                                                                            start_anchor: anchor,
+                                                                            start_client_x: f64::from(event.client_x()),
+                                                                            start_client_y: f64::from(event.client_y()),
+                                                                            cursor: anchor,
+                                                                        }));
+                                                                    }
+                                                                    on:click=move |event| {
+                                                                        event.stop_propagation();
+                                                                        if !can_manage {
+                                                                            return;
+                                                                        }
+                                                                        if wire_opened_on_press.get_untracked() {
+                                                                            wire_opened_on_press.set(false);
+                                                                            return;
+                                                                        }
+                                                                        let same = editor.pending_wire.get_untracked().is_some_and(|w| {
+                                                                            w.from_id == click_from && w.port == click_port
+                                                                        });
+                                                                        if same {
+                                                                            editor.pending_wire.set(None);
+                                                                        }
+                                                                    }
+                                                                >
+                                                                    <span>{pres_symbol}</span>
+                                                                </button>
+                                                                {can_manage.then(move || view! {
+                                                                    <button
+                                                                        type="button"
+                                                                        class="canvas-port__add"
+                                                                        title=format!("Insérer une étape sur « {} »", add_label)
+                                                                        aria-label=format!("Insérer une étape sur {}", add_label)
+                                                                        on:mousedown=move |event| event.stop_propagation()
+                                                                        on:click=move |event| {
+                                                                            event.stop_propagation();
+                                                                            editor.pending_wire.set(None);
+                                                                            editor.branch_target.set(Some(BranchTarget {
+                                                                                source_id: insert_from.clone(),
+                                                                                port: insert_port.clone(),
+                                                                                replace_to: existing_to.clone(),
+                                                                            }));
+                                                                            editor.palette_open.set(true);
+                                                                        }
+                                                                    >
+                                                                        "+"
+                                                                    </button>
+                                                                })}
+                                                            </div>
+                                                        }
+                                                    }).collect_view()}
+                                                </div>
+                                            })}
+                                        </article>
+                                    </DragItem>
+                                }
+                            })
+                            .collect_view()
+                    };
+
+                    view! {
+                        <div
+                            class="flow-graph-sizer"
+                            style=move || {
+                                let zoom = editor.zoom.get();
+                                let (bw, bh) = board_dims.get();
+                                format!("width:{}px;height:{}px;", bw * zoom, bh * zoom)
+                            }
+                        >
+                            <div
+                                class="flow-graph-stage"
+                                style=move || {
+                                    let zoom = editor.zoom.get();
+                                    let (bw, bh) = board_dims.get();
+                                    format!(
+                                        "width:{bw}px;height:{bh}px;transform:scale({zoom});transform-origin:0 0;"
+                                    )
+                                }
+                            >
+                                <svg
+                                    class="flow-canvas__wires"
+                                    attr:width=move || board_dims.get().0
+                                    attr:height=move || board_dims.get().1
+                                    aria-hidden="true"
+                                >
+                                    {wires_view}
+                                    {ghost_wire_view}
+                                </svg>
+                                {cards_view}
+                            </div>
+                        </div>
+                    }
+                    .into_any()
+                }}
+            </div>
+            <MinimapPanel editor=editor placed=placed board_dims=board_dims board_ref=board_ref />
+        </section>
     }
 }

@@ -73,6 +73,17 @@ pub fn is_ready(library: &Library) -> bool {
     library.flow_id.is_some() && !library.workers.is_empty()
 }
 
+/// Synthèse `(total, prêtes, avec_flux_lié)` pour le bandeau d'en-tête.
+pub fn library_counts(libraries: &[Library]) -> (usize, usize, usize) {
+    let total = libraries.len();
+    let ready = libraries.iter().filter(|library| is_ready(library)).count();
+    let bound = libraries
+        .iter()
+        .filter(|library| library.flow_id.is_some())
+        .count();
+    (total, ready, bound)
+}
+
 pub fn access_label(access: LibraryAccess) -> &'static str {
     match access {
         LibraryAccess::Read => "Lecture",
@@ -123,5 +134,40 @@ mod tests {
             ..LibraryDraft::default()
         };
         assert!(long.to_write().is_err());
+    }
+
+    #[test]
+    fn library_counts_tracks_ready_and_flow_bound_libraries() {
+        let now = chrono::Utc::now();
+        let ready = Library {
+            id: Uuid::nil(),
+            name: "Films".into(),
+            flow_id: Some("remux".into()),
+            workers: vec![LibraryWorkerPath {
+                worker_id: Uuid::nil(),
+                local_path: "/media/films".into(),
+                access: LibraryAccess::ReadWrite,
+            }],
+            created_at: now,
+            updated_at: now,
+        };
+        let flow_only = Library {
+            id: Uuid::nil(),
+            name: "Séries".into(),
+            flow_id: Some("remux".into()),
+            workers: Vec::new(),
+            created_at: now,
+            updated_at: now,
+        };
+        let empty = Library {
+            id: Uuid::nil(),
+            name: "Archives".into(),
+            flow_id: None,
+            workers: Vec::new(),
+            created_at: now,
+            updated_at: now,
+        };
+        assert_eq!(library_counts(&[]), (0, 0, 0));
+        assert_eq!(library_counts(&[ready, flow_only, empty]), (3, 1, 2));
     }
 }

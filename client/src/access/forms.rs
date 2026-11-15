@@ -3,6 +3,7 @@
 use super::{Gate, access_error, identity_after};
 use crate::api;
 use crate::sleep::sleep;
+use crate::ui::{Icon, IconName};
 use flux_shared::InstanceKind;
 use flux_shared::accounts::LoginRequest;
 use flux_shared::session::{Me, SessionInfo};
@@ -44,13 +45,16 @@ pub fn Field(
 pub fn GateCard(
     #[prop(into)] title: String,
     subtitle: &'static str,
+    #[prop(default = false)] wide: bool,
     children: Children,
 ) -> impl IntoView {
     view! {
         <div class="auth-gate" role="dialog" aria-modal="true" aria-labelledby="auth-gate-title">
-            <div class="auth-gate__card">
+            <div class="auth-gate__card" class:auth-gate__card--wide=wide>
                 <div class="auth-gate__brand">
-                    <span class="auth-gate__logo">"MKV"</span>
+                    <span class="auth-gate__logo" aria-hidden="true">
+                        <Icon name=IconName::Flows size=18 />
+                    </span>
                     <span class="auth-gate__name">"Flux de Fichiers"</span>
                 </div>
                 <h1 id="auth-gate-title" class="auth-gate__title">{title}</h1>
@@ -61,19 +65,66 @@ pub fn GateCard(
     }
 }
 
+#[derive(Clone, Copy)]
+enum RoleTarget {
+    Central,
+    Worker,
+}
+
+impl RoleTarget {
+    const fn to_gate(self) -> Gate {
+        match self {
+            Self::Central => Gate::SetupCentral,
+            Self::Worker => Gate::SetupWorker,
+        }
+    }
+}
+
+struct RoleOption {
+    target: RoleTarget,
+    icon: IconName,
+    badge: &'static str,
+    title: &'static str,
+    description: &'static str,
+}
+
+const ROLE_OPTIONS: [RoleOption; 2] = [
+    RoleOption {
+        target: RoleTarget::Central,
+        icon: IconName::Dashboard,
+        badge: "Recommandé pour démarrer",
+        title: "Installer un central",
+        description: "Orchestre principal : comptes, bibliothèques, flux nodaux et tâches.",
+    },
+    RoleOption {
+        target: RoleTarget::Worker,
+        icon: IconName::Workers,
+        badge: "Nœud de calcul",
+        title: "Enrôler un worker",
+        description: "Exécuteur dédié rattaché à un central existant pour traiter vos médias.",
+    },
+];
+
 #[component]
 pub fn RoleChoice(goto: Callback<Gate>) -> impl IntoView {
     view! {
-        <GateCard title="Bienvenue" subtitle="Choisissez le rôle de cette installation.">
-            <div class="auth-gate__form">
-                <button type="button" class="btn btn-primary auth-gate__submit" on:click=move |_| goto.run(Gate::SetupCentral)>
-                    "Installer un central"
-                </button>
-                <p class="form-help">"L'installation principale : comptes, bibliothèques, flux et tâches."</p>
-                <button type="button" class="btn btn-secondary auth-gate__submit" on:click=move |_| goto.run(Gate::SetupWorker)>
-                    "Enrôler un worker"
-                </button>
-                <p class="form-help">"Un worker rattaché à un central existant."</p>
+        <GateCard title="Bienvenue" subtitle="Choisissez le rôle de cette installation." wide=true>
+            <div class="auth-role-grid">
+                {ROLE_OPTIONS.into_iter().map(|opt| {
+                    let target = opt.target;
+                    view! {
+                        <button type="button" class="auth-role-card" on:click=move |_| goto.run(target.to_gate())>
+                            <div class="auth-role-card__top">
+                                <span class="auth-role-card__icon" aria-hidden="true">
+                                    <Icon name=opt.icon size=18 />
+                                </span>
+                                <span class="auth-role-card__badge">{opt.badge}</span>
+                            </div>
+                            <span class="auth-role-card__title">{opt.title}</span>
+                            <span class="auth-role-card__desc">{opt.description}</span>
+                        </button>
+                    }
+                }).collect_view()}
             </div>
         </GateCard>
     }

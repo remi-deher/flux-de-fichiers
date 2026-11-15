@@ -10,6 +10,25 @@ use uuid::Uuid;
 
 const HEADERS: [&str; 5] = ["Fichier", "État", "Progression", "Créée", "Action"];
 
+/// Cellule de progression partagée entre l'écran Activité et les tâches récentes de la Vue d'ensemble.
+pub fn job_progress_cell(
+    id: Uuid,
+    status: JobStatus,
+    progress: Option<RwSignal<HashMap<Uuid, u32>>>,
+) -> AnyView {
+    (move || match status {
+        JobStatus::Running => match progress.and_then(|map| map.get().get(&id).copied()) {
+            Some(pct) => view! { <ProgressBar percent=pct label=format!("{pct} %") /> }.into_any(),
+            None => view! { <ProgressBar label="En cours" /> }.into_any(),
+        },
+        JobStatus::Succeeded => {
+            view! { <span class="text-mono text-xs text-dim">"100 %"</span> }.into_any()
+        }
+        _ => view! { <span class="text-dim">"—"</span> }.into_any(),
+    })
+    .into_any()
+}
+
 #[component]
 pub fn JobsTable(
     jobs: Signal<Option<Result<Vec<Job>, String>>>,
@@ -26,23 +45,11 @@ pub fn JobsTable(
                 Some(Ok(list)) => list.into_iter().map(|job| {
                     let id = job.id;
                     let status = job.status;
-                    let progress_cell = move || match status {
-                        JobStatus::Running => match progress.get().get(&id).copied() {
-                            Some(pct) => {
-                                view! { <ProgressBar percent=pct label=format!("{pct} %") /> }.into_any()
-                            }
-                            None => view! { <ProgressBar label="En cours" /> }.into_any(),
-                        },
-                        JobStatus::Succeeded => {
-                            view! { <span class="text-mono text-xs text-dim">"100 %"</span> }.into_any()
-                        }
-                        _ => view! { <span class="text-dim">"—"</span> }.into_any(),
-                    };
                     view! {
                         <tr class="registre-row" class:is-open=move || selected.get() == Some(id)>
                             <td class="text-strong truncate">{job.source_name.clone()}</td>
                             <td><StatusBadge label=status_label(job.status) variant=status_tone(job.status) /></td>
-                            <td>{progress_cell}</td>
+                            <td>{job_progress_cell(id, status, Some(progress))}</td>
                             <td class="text-dim">{format::datetime(job.created_at)}</td>
                             <td class="cell-end">
                                 <button type="button" class="btn btn-secondary btn-sm registre-open-btn" on:click=move |_| on_open.run(id)>"Ouvrir"</button>

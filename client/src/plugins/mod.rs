@@ -6,7 +6,7 @@ use crate::api;
 use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
-use crate::ui::{Drawer, SubTab, TabbedTable, Toasts};
+use crate::ui::{Drawer, IconName, PageHeader, SubTab, TabbedTable, Toasts};
 use flux_shared::plugins::vocab::{CatalogItemType, CatalogSection};
 use flux_shared::plugins::{
     CatalogEntry, CreateRepositoryRequest, PluginRepository, ToolStatus, ToolStatusSummary,
@@ -300,13 +300,21 @@ impl PluginsTab {
     fn sub_tab(self) -> SubTab {
         match self {
             Self::Section(section @ CatalogSection::Applications) => {
-                SubTab::new(section.label(), "📦")
+                SubTab::new(section.label(), IconName::Package)
             }
-            Self::Section(section @ CatalogSection::Plugins) => SubTab::new(section.label(), "🧩"),
-            Self::Section(section @ CatalogSection::Flows) => SubTab::new(section.label(), "🔀"),
-            Self::Section(section @ CatalogSection::Other) => SubTab::new(section.label(), "🗂️"),
-            Self::Section(section @ CatalogSection::Packs) => SubTab::new(section.label(), "🎁"),
-            Self::Repositories => SubTab::new("Dépôts", "🌐"),
+            Self::Section(section @ CatalogSection::Plugins) => {
+                SubTab::new(section.label(), IconName::Plugins)
+            }
+            Self::Section(section @ CatalogSection::Flows) => {
+                SubTab::new(section.label(), IconName::Flows)
+            }
+            Self::Section(section @ CatalogSection::Other) => {
+                SubTab::new(section.label(), IconName::Layers)
+            }
+            Self::Section(section @ CatalogSection::Packs) => {
+                SubTab::new(section.label(), IconName::Download)
+            }
+            Self::Repositories => SubTab::new("Dépôts", IconName::Globe),
         }
     }
 }
@@ -327,7 +335,7 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
     let tab = RwSignal::new(0_usize);
     let adding = RwSignal::new(false);
     let tabs = visible_tabs(can_manage);
-    let sub_tabs = tabs.iter().map(|tab| tab.sub_tab()).collect();
+    let sub_tabs: Vec<SubTab> = tabs.iter().map(|tab| tab.sub_tab()).collect();
     let repositories_index = tabs.iter().position(|tab| *tab == PluginsTab::Repositories);
     if let Some(index) = repositories_index {
         provide_topbar_action(ActionSpec {
@@ -339,13 +347,21 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
         });
     }
     view! {
-        <TabbedTable aria_label="Sections des plugins" tabs=sub_tabs selected=tab>
-            {move || match tabs.get(tab.get()).copied() {
-                Some(PluginsTab::Section(CatalogSection::Applications)) => view! { <Tools can_install=can_manage /> }.into_any(),
-                Some(PluginsTab::Section(section)) => view! { <Catalog section=section reload=reload_catalog can_configure=can_manage /> }.into_any(),
-                _ => view! { <Repositories reload_catalog=reload_catalog adding=adding /> }.into_any(),
-            }}
-        </TabbedTable>
+        <div class="tab-panel" role="tabpanel">
+            <PageHeader
+                eyebrow="Infrastructure"
+                title="Plugins & outils"
+                subtitle="Catalogue d'extensions, outils installés sur les nœuds et dépôts distants."
+                icon=IconName::Plugins
+            />
+            <TabbedTable aria_label="Sections des plugins" tabs=sub_tabs selected=tab>
+                {move || match tabs.get(tab.get()).copied() {
+                    Some(PluginsTab::Section(CatalogSection::Applications)) => view! { <Tools can_install=can_manage /> }.into_any(),
+                    Some(PluginsTab::Section(section)) => view! { <Catalog section=section reload=reload_catalog can_configure=can_manage /> }.into_any(),
+                    _ => view! { <Repositories reload_catalog=reload_catalog adding=adding /> }.into_any(),
+                }}
+            </TabbedTable>
+        </div>
     }
 }
 

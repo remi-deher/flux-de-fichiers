@@ -7,7 +7,7 @@ use super::state::{Editor, incomplete_blocks};
 use super::versions::FlowVersions;
 use crate::api;
 use crate::route::{Link, Route, encode_segment, use_router};
-use crate::ui::{Drawer, Toasts};
+use crate::ui::{Drawer, Icon, IconName, Toasts};
 use chrono::{DateTime, Utc};
 use flux_shared::Permission;
 use flux_shared::flows::{
@@ -119,24 +119,56 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
 
     view! {
         <div class="tab-panel" role="tabpanel">
-            <div class="cluster-spread">
-                <Link to=Route::Flows class="btn btn-secondary btn-sm">"← Flux"</Link>
-                <span class="text-dim">
-                    {move || match meta.get().version {
-                        0 => "Jamais enregistré".to_owned(),
-                        version => format!("Version {version}"),
-                    }}
-                    {move || editor.dirty.get().then_some(" • modifications non enregistrées")}
-                </span>
-                <div class="inline-actions">
-                    {move || (meta.get().version > 0).then(|| view! {
-                        <button type="button" class="btn btn-secondary btn-sm" on:click=move |_| versions_open.set(true)>"Versions"</button>
-                    })}
-                    {can_manage.then(|| view! {
-                        <button type="button" class="btn btn-primary" disabled=move || save.pending().get() on:click=on_save>
-                            "Enregistrer"
-                        </button>
-                    })}
+            <div class="studio-toolbar">
+                <div class="studio-toolbar__top">
+                    <Link to=Route::Flows class="btn btn-secondary btn-sm">
+                        <Icon name=IconName::ChevronLeft size=15 />
+                        <span>"Flux"</span>
+                    </Link>
+                    <div class="studio-toolbar__meta">
+                        <div class="studio-toolbar__field">
+                            <label for="flow-name" class="form-label">"Nom"</label>
+                            <input id="flow-name" class="form-input" prop:value=move || meta.get().name
+                                on:input=move |event| { meta.update(|record| record.name = event_target_value(&event)); editor.dirty.set(true); } />
+                        </div>
+                        <div class="studio-toolbar__field studio-toolbar__field--mask">
+                            <label for="flow-mask" class="form-label">"Masque"</label>
+                            <input id="flow-mask" class="form-input text-mono" prop:value=move || meta.get().file_mask
+                                on:input=move |event| { meta.update(|record| record.file_mask = event_target_value(&event)); editor.dirty.set(true); } />
+                        </div>
+                        <div class="studio-toolbar__field studio-toolbar__field--desc">
+                            <label for="flow-description" class="form-label">"Description"</label>
+                            <input id="flow-description" class="form-input" placeholder="Description optionnelle…"
+                                prop:value=move || meta.get().description.unwrap_or_default()
+                                on:input=move |event| {
+                                    let text = event_target_value(&event);
+                                    meta.update(|record| record.description = (!text.trim().is_empty()).then_some(text));
+                                    editor.dirty.set(true);
+                                } />
+                        </div>
+                    </div>
+                    <div class="studio-toolbar__actions">
+                        <span class="studio-toolbar__status">
+                            {move || match meta.get().version {
+                                0 => "Jamais enregistré".to_owned(),
+                                version => format!("v{version}"),
+                            }}
+                            {move || editor.dirty.get().then_some(" · modifié")}
+                        </span>
+                        <label class="studio-toolbar__toggle">
+                            <input type="checkbox" prop:checked=move || meta.get().is_default
+                                on:change=move |event| { meta.update(|record| record.is_default = event_target_checked(&event)); editor.dirty.set(true); } />
+                            <span>"Par défaut"</span>
+                        </label>
+                        {move || (meta.get().version > 0).then(|| view! {
+                            <button type="button" class="btn btn-secondary btn-sm" on:click=move |_| versions_open.set(true)>"Versions"</button>
+                        })}
+                        {can_manage.then(|| view! {
+                            <button type="button" class="btn btn-primary btn-sm" disabled=move || save.pending().get() on:click=on_save>
+                                "Enregistrer"
+                            </button>
+                        })}
+                    </div>
                 </div>
             </div>
             <Drawer open=versions_open eyebrow="Versions du flux" title=Signal::derive(move || meta.get().name)>
@@ -155,32 +187,6 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
                     }
                 }}
             </Drawer>
-            <div class="form-grid-2">
-                <div class="form-group">
-                    <label for="flow-name" class="form-label">"Nom"</label>
-                    <input id="flow-name" class="form-input" prop:value=move || meta.get().name
-                        on:input=move |event| { meta.update(|record| record.name = event_target_value(&event)); editor.dirty.set(true); } />
-                </div>
-                <div class="form-group">
-                    <label for="flow-mask" class="form-label">"Masque de fichiers"</label>
-                    <input id="flow-mask" class="form-input" prop:value=move || meta.get().file_mask
-                        on:input=move |event| { meta.update(|record| record.file_mask = event_target_value(&event)); editor.dirty.set(true); } />
-                </div>
-                <div class="form-group">
-                    <label for="flow-description" class="form-label">"Description"</label>
-                    <input id="flow-description" class="form-input" prop:value=move || meta.get().description.unwrap_or_default()
-                        on:input=move |event| {
-                            let text = event_target_value(&event);
-                            meta.update(|record| record.description = (!text.trim().is_empty()).then_some(text));
-                            editor.dirty.set(true);
-                        } />
-                </div>
-                <label class="cluster">
-                    <input type="checkbox" prop:checked=move || meta.get().is_default
-                        on:change=move |event| { meta.update(|record| record.is_default = event_target_checked(&event)); editor.dirty.set(true); } />
-                    <span>"Flux par défaut des nouvelles tâches"</span>
-                </label>
-            </div>
             <p class="form-help" role="status">{move || feedback.get()}</p>
             {(!can_manage).then(|| view! { <p class="form-help">"Lecture seule : modifier un flux demande le droit de gestion des flux."</p> })}
             <div class="flow-editor">

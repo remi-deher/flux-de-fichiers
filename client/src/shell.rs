@@ -2,13 +2,15 @@
 //! et barre du haut (recherche globale et filtre de l'écran, workers en ligne), sur le gabarit du thème.
 
 use crate::route::{Route, use_router};
-use crate::settings::logout;
+use crate::settings::{logout, role_label};
 use crate::theme::ThemePicker;
 use crate::ui::filters::{FilterSheet, Filters};
 use crate::ui::global_search::SearchResults;
 use crate::ui::search::Search;
 use crate::ui::topbar_action::{TopbarAction, TopbarActionSlot};
-use crate::ui::{CommandPalette, CommandPaletteState, Icon, IconName, ToastViewport, Toasts};
+use crate::ui::{
+    CommandPalette, CommandPaletteState, Icon, IconName, ToastViewport, Toasts, breadcrumb_for,
+};
 use chrono::Utc;
 use flux_shared::session::Me;
 use flux_shared::workers::Worker;
@@ -154,22 +156,72 @@ fn search_placeholder(route: &Route) -> &'static str {
 #[derive(Clone, Copy)]
 struct NavDrawer(RwSignal<bool>);
 
+/// Initiales (1 ou 2 lettres majuscules) affichées dans l'avatar utilisateur.
+pub fn user_initials(name: &str) -> String {
+    let mut parts = name
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, '.' | '_' | '-'))
+        .filter(|part| !part.is_empty());
+    match (parts.next(), parts.next()) {
+        (Some(first), Some(second)) => first
+            .chars()
+            .take(1)
+            .chain(second.chars().take(1))
+            .flat_map(char::to_uppercase)
+            .collect(),
+        (Some(single), None) => single
+            .chars()
+            .take(2)
+            .flat_map(char::to_uppercase)
+            .collect(),
+        _ => "?".to_owned(),
+    }
+}
+
+/// Badge d'identité du nœud affiché sous la marque de l'application.
+pub const fn instance_role_badge(kind: InstanceKind) -> &'static str {
+    match kind {
+        InstanceKind::Central => "Central",
+        InstanceKind::Worker => "Worker",
+    }
+}
+
 #[component]
 fn Sidebar(me: Me) -> impl IntoView {
     let router = use_router();
     let collapsed = RwSignal::new(false);
     let drawer = use_context::<NavDrawer>().map(|drawer| drawer.0);
+    let palette = use_context::<CommandPaletteState>();
+    let user_name = me.name.clone();
+    let initials = user_initials(&user_name);
+    let user_role = role_label(me.role);
+    let node_badge = instance_role_badge(me.instance_kind);
     view! {
         <aside class="application-sidebar" class:is-collapsed=move || collapsed.get()
             class:is-open=move || drawer.is_some_and(|open| open.get()) aria-label="Navigation principale">
             <div class="sidebar-header">
                 <a href="/" class="brand" title="Flux de Fichiers">
-                    <span class="brand-mark">"MKV"</span>
+                    <span class="brand-mark" aria-hidden="true">
+                        <Icon name=IconName::Flows size=18 />
+                    </span>
                     <div class="brand-info">
                         <span class="brand-name">"Flux de Fichiers"</span>
-                        <span class="brand-version">{format!("v{}", env!("CARGO_PKG_VERSION"))}</span>
+                        <div class="brand-meta">
+                            <span class="brand-node-badge">{node_badge}</span>
+                            <span class="brand-version">{format!("v{}", env!("CARGO_PKG_VERSION"))}</span>
+                        </div>
                     </div>
                 </a>
+                <button
+                    type="button"
+                    class="sidebar-cmd-btn"
+                    title="Palette de commandes (Ctrl+K)"
+                    aria-label="Ouvrir la palette de commandes"
+                    on:click=move |_| if let Some(palette) = palette { palette.show(); }
+                >
+                    <Icon name=IconName::Search size=14 />
+                    <span class="sidebar-cmd-btn__label">"Aller à…"</span>
+                    <kbd class="sidebar-cmd-btn__kbd">"Ctrl K"</kbd>
+                </button>
             </div>
             <nav class="tab-navigation" aria-label="Navigation principale par groupes métier">
                 <div class="tab-list" role="tablist">
@@ -194,18 +246,25 @@ fn Sidebar(me: Me) -> impl IntoView {
                 </div>
             </nav>
             <div class="sidebar-footer">
-                <button type="button" class="sidebar-collapse-btn"
-                    aria-label=move || if collapsed.get() { "Déplier la navigation" } else { "Replier la navigation" }
-                    on:click=move |_| collapsed.update(|value| *value = !*value)>
-                    <Icon name=IconName::ChevronLeft size=16 class="collapse-icon" />
-                    <span class="collapse-label">"Replier"</span>
-                </button>
-                <div class="sidebar-footer-tools">
-                    <ThemePicker />
+                <div class="sidebar-user-card">
+                    <span class="sidebar-user-avatar" aria-hidden="true">{initials}</span>
+                    <div class="sidebar-user-meta">
+                        <span class="sidebar-user-name">{user_name}</span>
+                        <span class="sidebar-user-role">{user_role}</span>
+                    </div>
                     <button type="button" class="sidebar-logout-btn" aria-label="Se déconnecter" title="Se déconnecter"
                         on:click=move |_| leptos::task::spawn_local(logout())>
-                        <Icon name=IconName::Logout size=16 />
+                        <Icon name=IconName::Logout size=15 />
                     </button>
+                </div>
+                <div class="sidebar-footer-tools">
+                    <button type="button" class="sidebar-collapse-btn"
+                        aria-label=move || if collapsed.get() { "Déplier la navigation" } else { "Replier la navigation" }
+                        on:click=move |_| collapsed.update(|value| *value = !*value)>
+                        <Icon name=IconName::ChevronLeft size=16 class="collapse-icon" />
+                        <span class="collapse-label">"Replier"</span>
+                    </button>
+                    <ThemePicker />
                 </div>
             </div>
         </aside>
@@ -267,11 +326,23 @@ fn Topbar(me: Me) -> impl IntoView {
     view! {
         <header class="app-topbar" role="banner">
             <div class="topbar-container">
-                <button type="button" class="topbar-menu-btn" aria-label="Ouvrir la navigation"
-                    aria-expanded=move || nav.is_some_and(|open| open.get()).to_string()
-                    on:click=move |_| if let Some(nav) = nav { nav.update(|open| *open = !*open) }>
-                    <Icon name=IconName::Menu size=20 />
-                </button>
+                <div class="topbar-lead">
+                    <button type="button" class="topbar-menu-btn" aria-label="Ouvrir la navigation"
+                        aria-expanded=move || nav.is_some_and(|open| open.get()).to_string()
+                        on:click=move |_| if let Some(nav) = nav { nav.update(|open| *open = !*open) }>
+                        <Icon name=IconName::Menu size=20 />
+                    </button>
+                    <nav class="topbar-breadcrumb" aria-label="Fil d'Ariane">
+                        {move || {
+                            let (group, screen) = breadcrumb_for(&router.current());
+                            view! {
+                                <span class="topbar-breadcrumb__group">{group}</span>
+                                <span class="topbar-breadcrumb__sep" aria-hidden="true">"/"</span>
+                                <span class="topbar-breadcrumb__page">{screen}</span>
+                            }
+                        }}
+                    </nav>
+                </div>
                 <div class="topbar-search-anchor">
                     <div class="topbar-search" role="search">
                         <div class="search-capsule__query">
@@ -377,5 +448,15 @@ mod tests {
             search_placeholder(&Route::FlowEditor("f".into())),
             "Filtrer les flux…"
         );
+    }
+
+    #[test]
+    fn user_initials_and_node_badge_cover_edge_cases() {
+        assert_eq!(user_initials("Rémi Dupont"), "RD");
+        assert_eq!(user_initials("remi.dupont"), "RD");
+        assert_eq!(user_initials("admin"), "AD");
+        assert_eq!(user_initials(" "), "?");
+        assert_eq!(instance_role_badge(InstanceKind::Central), "Central");
+        assert_eq!(instance_role_badge(InstanceKind::Worker), "Worker");
     }
 }

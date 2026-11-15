@@ -3,7 +3,7 @@
 
 use super::account::role_label;
 use crate::api;
-use crate::ui::Drawer;
+use crate::ui::{Drawer, Icon, IconName, SectionHeader, Toasts};
 use flux_shared::Role;
 use flux_shared::accounts::{Account, CreateAccountRequest, UpdateAccountRequest};
 use leptos::prelude::*;
@@ -38,34 +38,49 @@ pub fn AccountsSection() -> impl IntoView {
         let request = request.clone();
         async move { api::post::<CreateAccountRequest, Account>(ACCOUNTS_PATH, Some(&request)).await }
     });
-    let done = move |result: Option<Result<Account, api::ApiError>>| match result {
-        Some(Ok(_)) => {
-            feedback.set(None);
-            creating.set(false);
-            reload.update(|count| *count = count.wrapping_add(1));
+    let handle_result = move |result: Option<Result<Account, api::ApiError>>,
+                              success_msg: &'static str| {
+        match result {
+            Some(Ok(_)) => {
+                feedback.set(None);
+                creating.set(false);
+                Toasts::notify_success(success_msg);
+                reload.update(|count| *count = count.wrapping_add(1));
+            }
+            Some(Err(api::ApiError::Rejected { status: 409, .. })) => {
+                Toasts::set_error(
+                    feedback,
+                    "Refusé : adresse e-mail déjà utilisée, ou le central doit garder au moins un administrateur actif.",
+                );
+            }
+            Some(Err(error)) => Toasts::set_error(feedback, error.message()),
+            None => {}
         }
-        Some(Err(api::ApiError::Rejected { status: 409, .. })) => {
-            feedback.set(Some(
-                "Refusé : adresse e-mail déjà utilisée, ou le central doit garder au moins un administrateur actif.".into(),
-            ));
-        }
-        Some(Err(error)) => feedback.set(Some(error.message())),
-        None => {}
     };
-    Effect::new(move |_| done(update.value().get()));
-    Effect::new(move |_| done(create.value().get()));
+    Effect::new(move |_| handle_result(update.value().get(), "Compte mis à jour."));
+    Effect::new(move |_| handle_result(create.value().get(), "Compte créé."));
     let (username, password, role, email) = (
         RwSignal::new(String::new()),
         RwSignal::new(String::new()),
         RwSignal::new(Role::Viewer),
         RwSignal::new(String::new()),
     );
+    let header_actions = view! {
+        <button type="button" class="btn btn-primary btn-sm" on:click=move |_| creating.set(true)>
+            <Icon name=IconName::Plus size=14 />
+            <span>"Créer un compte"</span>
+        </button>
+    }
+    .into_any();
     view! {
-        <div class="registre">
-            <div class="cluster-end">
-                <button type="button" class="btn btn-primary btn-sm" on:click=move |_| creating.set(true)>"Créer un compte"</button>
-            </div>
-            <div class="table-wrapper">
+        <section class="section-panel">
+            <SectionHeader
+                title="Utilisateurs"
+                subtitle="Comptes autorisés à piloter l'installation et leurs permissions."
+                actions=header_actions
+            />
+            <div class="registre">
+                <div class="table-wrapper">
                 <table class="data-table" aria-label="Comptes">
                     <thead><tr>
                         <th scope="col">"Identifiant"</th><th scope="col">"E-mail"</th><th scope="col">"Rôle"</th><th scope="col">"État"</th><th scope="col" class="cell-end">"Actions"</th>
@@ -143,6 +158,7 @@ pub fn AccountsSection() -> impl IntoView {
             </form>
             </Drawer>
             <p class="form-help" role="status">{move || feedback.get()}</p>
-        </div>
+            </div>
+        </section>
     }
 }

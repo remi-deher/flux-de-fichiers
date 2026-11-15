@@ -6,7 +6,7 @@ use leptos::prelude::*;
 #[component]
 pub fn TabbedTable(
     aria_label: &'static str,
-    tabs: Vec<SubTab>,
+    #[prop(into)] tabs: Signal<Vec<SubTab>>,
     selected: RwSignal<usize>,
     children: Children,
 ) -> impl IntoView {

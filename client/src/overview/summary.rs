@@ -78,6 +78,14 @@ pub fn alerts(
     list
 }
 
+/// Pourcentage entier borné `[0, 100]` d'une sous-partie sur un total.
+pub fn ratio_percent(part: usize, total: usize) -> u8 {
+    if total == 0 {
+        return 0;
+    }
+    ((part.saturating_mul(100)) / total).min(100) as u8
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,5 +123,12 @@ mod tests {
         assert_eq!(list.len(), 3);
         assert!(list[1].contains("nas") && !list[1].contains(INTEGRATED_WORKER_NAME));
         assert!(alerts(&Summary::default(), &[], now, false).is_empty());
+    }
+
+    #[test]
+    fn ratio_percent_is_zero_safe_and_clamped_to_hundred() {
+        assert_eq!(ratio_percent(0, 0), 0);
+        assert_eq!(ratio_percent(1, 4), 25);
+        assert_eq!(ratio_percent(5, 4), 100);
     }
 }

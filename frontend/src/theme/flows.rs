@@ -17,29 +17,88 @@ pub const FLOWS_CSS: &str = r#"
 
 .flows-grid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 1.25rem;
-  margin-top: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
+  gap: 1rem;
+  margin-top: 0.25rem;
 }
 
 .flow-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 1.25rem;
+  padding: 1.15rem 1.25rem;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  gap: 0.85rem;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .flow-card:hover {
-  border-color: var(--primary);
-  box-shadow: var(--shadow-sm);
+  border-color: var(--border-highlight);
+  box-shadow: var(--shadow-md);
 }
 
 .flow-card.active-flow {
   border-left: 4px solid var(--primary);
+}
+
+.flow-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.flow-card__title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.flow-card__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.flow-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.flow-card__desc {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.flow-card__pipeline {
+  padding: 0.65rem 0.75rem;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.flow-card__foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+  margin-top: auto;
+  border-top: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+
+.flow-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
 }
 
 .flow-card-header {
@@ -70,21 +129,34 @@ pub const FLOWS_CSS: &str = r#"
 
 .flow-pipeline {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.625rem;
-  min-width: max-content;
+  gap: 0.45rem;
 }
 
 .pipeline-step-node {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  background: var(--bg-subtle);
+  gap: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  font-size: 0.8125rem;
-  font-weight: 500;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.pipeline-step-node--more {
+  background: var(--primary-bg);
+  border-color: var(--border-highlight);
+  color: var(--primary);
+}
+
+.pipeline-connector {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  user-select: none;
 }
 
 .pipeline-step-node.in-place {
@@ -394,5 +466,77 @@ path.sim-pulse-line {
   to {
     stroke-dashoffset: 0;
   }
+}
+
+/* --- Barre d'outils compacte de l'atelier nodal --- */
+.studio-toolbar {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 0.9rem;
+  margin-bottom: 0.75rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.studio-toolbar__top {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.studio-toolbar__meta {
+  flex: 1 1 28rem;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.studio-toolbar__field {
+  flex: 1 1 11rem;
+  min-width: 0;
+}
+
+.studio-toolbar__field--mask {
+  flex: 0 1 8.5rem;
+}
+
+.studio-toolbar__field--desc {
+  flex: 1.5 1 14rem;
+}
+
+.studio-toolbar__field .form-label {
+  font-size: 0.72rem;
+  margin-bottom: 0.25rem;
+}
+
+.studio-toolbar__field .form-input {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8125rem;
+}
+
+.studio-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.studio-toolbar__status {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.studio-toolbar__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  cursor: pointer;
 }
 "#;

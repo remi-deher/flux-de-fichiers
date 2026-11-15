@@ -65,5 +65,11 @@ mod tests {
         assert!(styles.contains(".toast-stack {"));
         assert!(styles.contains(".cmd-palette {"));
         assert!(styles.contains(".flow-graph__port-dot {"));
+        assert!(styles.contains(".page-header {"));
+        assert!(styles.contains(".stat-strip {"));
+        assert!(styles.contains(".libraries-grid {"));
+        assert!(styles.contains(".studio-toolbar {"));
+        assert!(styles.contains(".auth-role-grid {"));
+        assert!(styles.contains(".diagnostic-box {"));
     }
 }

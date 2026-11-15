@@ -8,9 +8,9 @@ mod network_diagnostics;
 mod network_workers;
 mod system;
 
-pub use account::logout;
+pub use account::{logout, role_label};
 
-use crate::ui::{SubNav, SubTab};
+use crate::ui::{IconName, PageHeader, SubNav, SubTab};
 use account::AccountSection;
 use accounts::AccountsSection;
 use flux_shared::session::Me;
@@ -33,11 +33,11 @@ enum Section {
 impl Section {
     fn tab(self) -> SubTab {
         match self {
-            Self::Account => SubTab::new("Mon compte", "👤"),
-            Self::Users => SubTab::new("Utilisateurs", "👥"),
-            Self::Keys => SubTab::new("Clés d'API", "🔑"),
-            Self::System => SubTab::new("Système", "⚙️"),
-            Self::Network => SubTab::new("Réseau", "🌐"),
+            Self::Account => SubTab::new("Mon compte", IconName::User),
+            Self::Users => SubTab::new("Utilisateurs", IconName::Users),
+            Self::Keys => SubTab::new("Clés d'API", IconName::Key),
+            Self::System => SubTab::new("Système", IconName::Settings),
+            Self::Network => SubTab::new("Réseau", IconName::Globe),
         }
     }
 }
@@ -73,10 +73,16 @@ fn sections(me: &Me) -> Vec<Section> {
 pub fn SettingsPage(me: Me) -> impl IntoView {
     let visible = sections(&me);
     let tab = RwSignal::new(0_usize);
-    let tabs = visible.iter().map(|section| section.tab()).collect();
+    let tabs: Vec<SubTab> = visible.iter().map(|section| section.tab()).collect();
     let me = StoredValue::new(me);
     view! {
         <div class="tab-panel" role="tabpanel">
+            <PageHeader
+                eyebrow="Système"
+                title="Paramètres"
+                subtitle="Compte personnel, accès utilisateurs, clés d'API, stockage et configuration réseau."
+                icon=IconName::Settings
+            />
             <SubNav aria_label="Sections des paramètres" tabs=tabs selected=tab />
             {move || match visible.get(tab.get()).copied().unwrap_or(Section::Account) {
                 Section::Account => view! { <AccountSection me=me.get_value() /> }.into_any(),

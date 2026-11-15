@@ -31,7 +31,7 @@ pub fn usage_tone(percent: f32) -> MetricTone {
     }
 }
 
-fn used_label(used: u64, total: u64) -> String {
+pub fn used_label(used: u64, total: u64) -> String {
     format!(
         "{} utilisés sur {}",
         format_bytes(used),
@@ -39,7 +39,7 @@ fn used_label(used: u64, total: u64) -> String {
     )
 }
 
-fn gpu_label(devices: &[String]) -> String {
+pub fn gpu_label(devices: &[String]) -> String {
     match devices.len() {
         0 => "Aucun GPU détecté".to_owned(),
         1 => "1 périphérique GPU".to_owned(),

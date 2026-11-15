@@ -65,13 +65,17 @@ pub async fn get_version(
     Ok(Json(flow))
 }
 
-/// Enregistre ou met à jour la définition d'un flux.
+/// Enregistre ou met à jour la définition d'un flux (sans installer d'outils à l'enregistrement).
 pub async fn save_flow(
     State(s): State<AppState>,
     Path(id): Path<String>,
     _auth: AdminAuth,
     Json(payload): Json<UpdateFlowRequest>,
-) -> AppResult<(StatusCode, Json<crate::domain::FlowRecord>)> {
+) -> AppResult<(
+    StatusCode,
+    axum::http::HeaderMap,
+    Json<crate::domain::FlowRecord>,
+)> {
     if payload.name.trim().is_empty() {
         return Err(AppError::Invalid);
     }
@@ -87,7 +91,30 @@ pub async fn save_flow(
     }
     let mut flow = repository::save_flow(&s.pool, &id, &payload).await?;
     flow.definition = crate::flows::mask_definition(&flow.definition);
-    Ok((StatusCode::OK, Json(flow)))
+
+    let mut headers = axum::http::HeaderMap::new();
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let registry = s.catalog_cache.operations(&roots).await;
+    if !registry.is_empty() {
+        let cache_mgr = crate::tools_cache::ToolCacheManager::new(&s.config.tools_cache_dir);
+        let mut configured = std::collections::HashSet::new();
+        for plugin_id in registry.required_settings_plugins_for_flow(Some(&flow)) {
+            if let Ok(Some(raw)) = repository::get_plugin_settings(&s.pool, &plugin_id).await
+                && let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw)
+                && val.as_object().is_some_and(|obj| !obj.is_empty())
+            {
+                configured.insert(plugin_id);
+            }
+        }
+        let warnings = registry.flow_readiness_warnings(&flow, &cache_mgr, &configured);
+        if !warnings.is_empty() {
+            tracing::warn!(flow_id = %id, warnings = ?warnings, "dépendances ou réglages manquants lors de l'enregistrement du flux");
+            if let Ok(val) = axum::http::HeaderValue::from_str(&warnings.join(" | ")) {
+                headers.insert("x-flux-warnings", val);
+            }
+        }
+    }
+    Ok((StatusCode::OK, headers, Json(flow)))
 }
 
 /// Supprime un flux personnalisé (interdit sur le flux actif par défaut).

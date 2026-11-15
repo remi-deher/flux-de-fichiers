@@ -5,26 +5,104 @@ use crate::{
         MAX_ATTEMPTS, Worker,
     },
     error::{AppError, AppResult},
+    telemetry::TelemetrySnapshot,
 };
+use chrono::{DateTime, Utc};
+use flux_shared::workers::WorkerTelemetry;
 use sqlx::SqlitePool;
 use std::future::Future;
 use uuid::Uuid;
+
+#[derive(sqlx::FromRow)]
+struct WorkerRow {
+    id: Uuid,
+    name: String,
+    last_seen: DateTime<Utc>,
+    version: Option<String>,
+    remote_addr: Option<String>,
+    telemetry_json: Option<String>,
+}
+
+impl WorkerRow {
+    fn into_worker(self) -> Worker {
+        let telemetry = self
+            .telemetry_json
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<WorkerTelemetry>(raw).ok());
+        Worker {
+            id: self.id,
+            name: self.name,
+            last_seen: self.last_seen,
+            version: self.version,
+            remote_addr: self.remote_addr,
+            telemetry,
+        }
+    }
+}
+
+fn serialize_telemetry(snapshot: Option<&TelemetrySnapshot>) -> Option<String> {
+    snapshot
+        .map(TelemetrySnapshot::to_worker_telemetry)
+        .and_then(|t| serde_json::to_string(&t).ok())
+}
 
 pub async fn ping(pool: &SqlitePool) -> AppResult<()> {
     sqlx::query("SELECT 1").execute(pool).await?;
     Ok(())
 }
 
-pub async fn register(pool: &SqlitePool, name: &str) -> AppResult<Worker> {
-    let worker = sqlx::query_as(
-        "INSERT INTO workers(id, name) VALUES(?1, ?2) \
-         ON CONFLICT(name) DO UPDATE SET last_seen=datetime('now') RETURNING *",
+pub async fn register_with_metadata(
+    pool: &SqlitePool,
+    name: &str,
+    version: Option<&str>,
+    remote_addr: Option<&str>,
+    telemetry: Option<&TelemetrySnapshot>,
+) -> AppResult<Worker> {
+    let telemetry_json = serialize_telemetry(telemetry);
+    let row = sqlx::query_as::<_, WorkerRow>(
+        "INSERT INTO workers(id, name, version, remote_addr, telemetry_json) \
+         VALUES(?1, ?2, ?3, ?4, ?5) \
+         ON CONFLICT(name) DO UPDATE SET \
+             last_seen=datetime('now'), \
+             version=COALESCE(excluded.version, workers.version), \
+             remote_addr=COALESCE(excluded.remote_addr, workers.remote_addr), \
+             telemetry_json=COALESCE(excluded.telemetry_json, workers.telemetry_json) \
+         RETURNING *",
     )
     .bind(Uuid::new_v4())
     .bind(name)
+    .bind(version)
+    .bind(remote_addr)
+    .bind(telemetry_json)
     .fetch_one(pool)
     .await?;
-    Ok(worker)
+    Ok(row.into_worker())
+}
+
+pub async fn register(pool: &SqlitePool, name: &str) -> AppResult<Worker> {
+    register_with_metadata(pool, name, None, None, None).await
+}
+
+pub async fn touch_worker_telemetry(
+    pool: &SqlitePool,
+    worker_id: Uuid,
+    remote_addr: Option<&str>,
+    telemetry: Option<&TelemetrySnapshot>,
+) -> AppResult<()> {
+    let telemetry_json = serialize_telemetry(telemetry);
+    sqlx::query(
+        "UPDATE workers SET \
+             last_seen=datetime('now'), \
+             remote_addr=COALESCE(?2, remote_addr), \
+             telemetry_json=COALESCE(?3, telemetry_json) \
+         WHERE id=?1",
+    )
+    .bind(worker_id)
+    .bind(remote_addr)
+    .bind(telemetry_json)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 pub async fn worker_exists(pool: &SqlitePool, id: Uuid) -> AppResult<bool> {
@@ -36,10 +114,11 @@ pub async fn worker_exists(pool: &SqlitePool, id: Uuid) -> AppResult<bool> {
 }
 
 pub async fn find_worker_by_name(pool: &SqlitePool, name: &str) -> AppResult<Option<Worker>> {
-    Ok(sqlx::query_as("SELECT * FROM workers WHERE name=?1")
+    let row = sqlx::query_as::<_, WorkerRow>("SELECT * FROM workers WHERE name=?1")
         .bind(name)
         .fetch_optional(pool)
-        .await?)
+        .await?;
+    Ok(row.map(WorkerRow::into_worker))
 }
 
 /// Tâches traitées par ce worker, les plus récentes d'abord.
@@ -71,10 +150,10 @@ pub async fn count_jobs_for_worker(
 }
 
 pub async fn list_workers(pool: &SqlitePool) -> AppResult<Vec<Worker>> {
-    let workers = sqlx::query_as("SELECT * FROM workers ORDER BY name LIMIT 200")
+    let workers = sqlx::query_as::<_, WorkerRow>("SELECT * FROM workers ORDER BY name LIMIT 200")
         .fetch_all(pool)
         .await?;
-    Ok(workers)
+    Ok(workers.into_iter().map(WorkerRow::into_worker).collect())
 }
 
 pub async fn delete_worker(pool: &SqlitePool, id: Uuid) -> AppResult<()> {
@@ -217,8 +296,8 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
     // Bail expiré : échec explicite, jamais de remise en file silencieuse (relance : `retry_job`).
     sqlx::query(
         "UPDATE jobs \
-         SET status=?1, error_code=?2, lease_token=NULL, leased_until=NULL, \
-             updated_at=datetime('now') \
+         SET status=?1, error_code=?2, lease_token=NULL, lease_epoch=lease_epoch+1, \
+             leased_until=NULL, updated_at=datetime('now') \
          WHERE status=?3 AND leased_until <= datetime('now')",
     )
     .bind(JobStatus::Failed)
@@ -240,7 +319,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
     let job: Option<Job> = if let Some(id) = next_id {
         sqlx::query_as(
             "UPDATE jobs \
-             SET status=?2, worker_id=?3, lease_token=?4, \
+             SET status=?2, worker_id=?3, lease_token=?4, lease_epoch=lease_epoch+1, \
                  leased_until=datetime('now', '+' || ?5 || ' seconds'), \
                  attempts=attempts+1, error_code=NULL, updated_at=datetime('now') \
              WHERE id=?1 RETURNING *",
@@ -268,6 +347,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
             Ok(Some(Claim {
                 job_id: j.id,
                 lease_token: j.lease_token.ok_or(AppError::Internal)?,
+                lease_epoch: j.lease_epoch,
                 source_name: j.source_name,
                 source_sha256: j.source_sha256.ok_or(AppError::Internal)?,
                 source_bytes: j.source_bytes.ok_or(AppError::Internal)?,
@@ -276,7 +356,12 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                 probe_version: None,
                 required_tools: Vec::new(),
                 frozen_flow,
-                arr: None,
+                operations: Default::default(),
+                block_operations: Default::default(),
+                plugin_configs: Default::default(),
+                sealed_secrets: None,
+                allow_private_integrations: None,
+                media_root: None,
             }))
         }
     }
@@ -294,7 +379,8 @@ pub async fn retry_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
     }
     let job: Option<Job> = sqlx::query_as(
         "UPDATE jobs \
-         SET status=?2, worker_id=NULL, error_code=NULL, updated_at=datetime('now') \
+         SET status=?2, worker_id=NULL, lease_token=NULL, lease_epoch=lease_epoch+1, \
+             leased_until=NULL, error_code=NULL, updated_at=datetime('now') \
          WHERE id=?1 AND status=?3 AND error_code=?4 AND attempts < ?5 RETURNING *",
     )
     .bind(id)
@@ -312,12 +398,13 @@ pub async fn retry_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
 pub async fn active(pool: &SqlitePool, id: Uuid, lease: &LeaseRequest) -> AppResult<Job> {
     sqlx::query_as(
         "SELECT * FROM jobs \
-         WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND status=?4 \
-           AND leased_until > datetime('now')",
+         WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 \
+           AND status=?5 AND leased_until > datetime('now')",
     )
     .bind(id)
     .bind(lease.worker_id)
     .bind(lease.lease_token)
+    .bind(lease.lease_epoch)
     .bind(JobStatus::Running)
     .fetch_optional(pool)
     .await?
@@ -327,13 +414,14 @@ pub async fn active(pool: &SqlitePool, id: Uuid, lease: &LeaseRequest) -> AppRes
 pub async fn heartbeat(pool: &SqlitePool, id: Uuid, lease: &LeaseRequest) -> AppResult<()> {
     let count = sqlx::query(
         "UPDATE jobs \
-         SET leased_until=datetime('now', '+' || ?4 || ' seconds'), updated_at=datetime('now') \
-         WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND status=?5 \
-           AND leased_until > datetime('now')",
+         SET leased_until=datetime('now', '+' || ?5 || ' seconds'), updated_at=datetime('now') \
+         WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 \
+           AND status=?6 AND leased_until > datetime('now')",
     )
     .bind(id)
     .bind(lease.worker_id)
     .bind(lease.lease_token)
+    .bind(lease.lease_epoch)
     .bind(LEASE_SECONDS)
     .bind(JobStatus::Running)
     .execute(pool)
@@ -342,6 +430,7 @@ pub async fn heartbeat(pool: &SqlitePool, id: Uuid, lease: &LeaseRequest) -> App
     if count != 1 {
         return Err(AppError::Conflict);
     }
+    touch_worker_telemetry(pool, lease.worker_id, None, lease.telemetry.as_ref()).await?;
     Ok(())
 }
 
@@ -353,14 +442,15 @@ pub async fn fail(
 ) -> AppResult<()> {
     let count = sqlx::query(
         "UPDATE jobs \
-         SET status=?4, error_code=?5, lease_token=NULL, leased_until=NULL, \
-             updated_at=datetime('now') \
-         WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND status=?6 \
-           AND leased_until > datetime('now')",
+         SET status=?5, error_code=?6, lease_token=NULL, lease_epoch=lease_epoch+1, \
+             leased_until=NULL, updated_at=datetime('now') \
+         WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 \
+           AND status=?7 AND leased_until > datetime('now')",
     )
     .bind(id)
     .bind(lease.worker_id)
     .bind(lease.lease_token)
+    .bind(lease.lease_epoch)
     .bind(JobStatus::Failed)
     .bind(code)
     .bind(JobStatus::Running)
@@ -402,12 +492,13 @@ pub async fn publish_succeeded(
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let active: Option<Uuid> = sqlx::query_scalar(
         "SELECT id FROM jobs \
-         WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND status=?4 \
-           AND leased_until > datetime('now')",
+         WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 \
+           AND status=?5 AND leased_until > datetime('now')",
     )
     .bind(id)
     .bind(lease.worker_id)
     .bind(lease.lease_token)
+    .bind(lease.lease_epoch)
     .bind(JobStatus::Running)
     .fetch_optional(&mut *tx)
     .await?;
@@ -418,7 +509,8 @@ pub async fn publish_succeeded(
     sqlx::query(
         "UPDATE jobs \
          SET status=?2, output_name=?3, output_sha256=?4, output_bytes=?5, warning=?6, \
-             lease_token=NULL, leased_until=NULL, error_code=NULL, updated_at=datetime('now') \
+             lease_token=NULL, lease_epoch=lease_epoch+1, leased_until=NULL, error_code=NULL, \
+             updated_at=datetime('now') \
          WHERE id=?1",
     )
     .bind(id)

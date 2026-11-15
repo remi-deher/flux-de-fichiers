@@ -5,46 +5,9 @@ use crate::{
     error::{AppError, AppResult},
     tools_cache::ToolCacheManager,
 };
-use serde::{Deserialize, Serialize};
+pub use flux_shared::plugins::{PackInstallResult, PackInstallation};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-
-/// Composant déclaré dans un fichier `installation.json` de pack.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PackComponent {
-    pub id: String,
-    pub version: String,
-    pub kind: CatalogItemType,
-}
-
-/// Contrat déclaratif `packs/*/installation.json`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PackInstallation {
-    pub schema_version: String,
-    pub pack_id: String,
-    pub pack_version: String,
-    pub kind: String,
-    #[serde(default)]
-    pub components: Vec<PackComponent>,
-    #[serde(default)]
-    pub entrypoint: Option<PackComponent>,
-    #[serde(default)]
-    pub runtime_implemented: Option<bool>,
-}
-
-/// Bilan d'installation d'un pack déclaratif.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PackInstallResult {
-    pub pack_id: String,
-    pub pack_version: String,
-    pub installed_tools: Vec<String>,
-    pub failed_tools: Vec<(String, String)>,
-    pub verified_components: Vec<String>,
-    pub missing_components: Vec<String>,
-}
 
 /// Charge le contrat `installation.json` d'un pack du catalogue synchronisé.
 pub fn read_pack_installation(roots: &[PathBuf], pack_id: &str) -> AppResult<PackInstallation> {

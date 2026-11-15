@@ -22,9 +22,15 @@ fn lease(h: &HeaderMap) -> AppResult<LeaseRequest> {
             .and_then(|v| v.parse().ok())
             .ok_or(AppError::Invalid)
     };
+    let lease_epoch = h
+        .get("x-lease-epoch")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<i64>().ok())
+        .ok_or(AppError::Invalid)?;
     Ok(LeaseRequest {
         worker_id: uuid("x-worker-id")?,
         lease_token: uuid("x-lease-token")?,
+        lease_epoch,
         telemetry: None,
     })
 }
@@ -144,7 +150,10 @@ async fn profile_for_job(
             .ok(),
         _ => None,
     };
-    crate::flows::output_profile_for_flow(frozen_flow.as_ref(), requested_ext)
+    let roots = crate::plugins::catalog_roots(&s.pool, &s.config).await;
+    let registry = s.catalog_cache.operations(&roots).await;
+    registry
+        .output_profile_for_flow(frozen_flow.as_ref(), requested_ext)
         .ok_or(AppError::Invalid)
 }
 
@@ -224,6 +233,73 @@ async fn receive(
     Ok(())
 }
 
+async fn validate_staged_output(
+    s: &AppState,
+    profile: media::OutputProfile,
+    source: &std::path::Path,
+    staging: &std::path::Path,
+) -> anyhow::Result<()> {
+    match profile.post_validate() {
+        media::PostValidateMode::None => Ok(()),
+        media::PostValidateMode::Mp4Header => media::validate_mp4_header(staging).await,
+        mode => {
+            let roots = crate::plugins::catalog_roots(&s.pool, &s.config).await;
+            let registry = s.catalog_cache.operations(&roots).await;
+            let probe = registry
+                .primary_probe()
+                .ok_or_else(|| anyhow::anyhow!("sonde primaire manquante"))?;
+            let cache_mgr = crate::tools_cache::ToolCacheManager::new(&s.config.tools_cache_dir);
+            let mut versions = std::collections::HashMap::new();
+            if let crate::flows::OperationRuntime::Binary(bin) = &probe.runtime
+                && let Some(tool) = &bin.tool
+            {
+                versions.insert(
+                    tool.id.clone(),
+                    s.catalog_cache.resolve_tool_version(&roots, &tool.id).await,
+                );
+            }
+            match mode {
+                media::PostValidateMode::ValidMedia => {
+                    media::ensure_non_empty_file(staging).await?;
+                    crate::flows::binary_runner::run_probe_contract(
+                        &cache_mgr, &versions, probe, staging,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                    Ok(())
+                }
+                media::PostValidateMode::RemuxEquivalent => {
+                    let before = crate::flows::binary_runner::run_probe_contract(
+                        &cache_mgr, &versions, probe, source,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                    let after = crate::flows::binary_runner::run_probe_contract(
+                        &cache_mgr, &versions, probe, staging,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                    media::validate_remux_values(&before, &after)
+                }
+                media::PostValidateMode::TracksUnchanged => {
+                    let before = crate::flows::binary_runner::run_probe_contract(
+                        &cache_mgr, &versions, probe, source,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                    let after = crate::flows::binary_runner::run_probe_contract(
+                        &cache_mgr, &versions, probe, staging,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                    media::validate_tracks_unchanged_values(&before, &after)
+                }
+                media::PostValidateMode::None | media::PostValidateMode::Mp4Header => Ok(()),
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn publish_staged(
     s: &AppState,
@@ -242,7 +318,7 @@ pub(crate) async fn publish_staged(
     {
         return Err(AppError::Conflict);
     }
-    media::validate_output(profile, source, staging)
+    validate_staged_output(s, profile, source, staging)
         .await
         .map_err(|_| AppError::Invalid)?;
     let name = format!("{id}-{}.{}", lease.lease_token, profile.extension());

@@ -74,6 +74,55 @@ pub struct VolumeSpace {
     pub available_bytes: u64,
 }
 
+/// Mode de chiffrement SMTP supporté par le central.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SmtpTls {
+    /// Connexion en clair puis passage en TLS (port 587 par défaut).
+    #[default]
+    #[serde(rename = "starttls")]
+    StartTls,
+    /// TLS dès la connexion (port 465 par défaut).
+    Tls,
+    /// Aucun chiffrement (port 25 par défaut) : à réserver à un relais local.
+    None,
+}
+
+impl SmtpTls {
+    pub const SMTP_STARTTLS_PORT: u16 = 587;
+    pub const SMTP_TLS_PORT: u16 = 465;
+    pub const SMTP_PLAIN_PORT: u16 = 25;
+
+    pub const fn default_port(self) -> u16 {
+        match self {
+            Self::StartTls => Self::SMTP_STARTTLS_PORT,
+            Self::Tls => Self::SMTP_TLS_PORT,
+            Self::None => Self::SMTP_PLAIN_PORT,
+        }
+    }
+}
+
+/// État public de la configuration SMTP (le mot de passe n'est jamais exposé).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmtpStatus {
+    pub configured: bool,
+    pub host: Option<String>,
+    pub port: u16,
+    pub tls: SmtpTls,
+    pub username: Option<String>,
+    pub from: Option<String>,
+    pub password_set: bool,
+}
+
+/// Politique de requêtes sortantes appliquée aux dépôts et intégrations.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutboundPolicyStatus {
+    pub allow_private_plugin_hosts: bool,
+    pub block_private_integration_hosts: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemStatus {
@@ -84,6 +133,29 @@ pub struct SystemStatus {
     pub database_bytes: Option<u64>,
     pub network: NetworkStatus,
     pub storage: StorageStatus,
+    #[serde(default)]
+    pub smtp: SmtpStatus,
+    #[serde(default)]
+    pub outbound: OutboundPolicyStatus,
+}
+
+/// Corps de mise à jour des réglages réseau, sessions, SMTP et politique sortante (`PUT /api/v1/system/settings`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSystemSettingsRequest {
+    pub web_origin: Option<String>,
+    pub session_ttl_seconds: i64,
+    pub smtp_enabled: bool,
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<u16>,
+    pub smtp_tls: SmtpTls,
+    pub smtp_username: Option<String>,
+    /// Laisser `None` pour conserver le mot de passe actuel ; `Some("")` efface le mot de passe avec le compte.
+    #[serde(default)]
+    pub smtp_password: Option<String>,
+    pub smtp_from: Option<String>,
+    pub allow_private_plugin_hosts: bool,
+    pub block_private_integration_hosts: bool,
 }
 
 /// Charge matérielle du central, relevée à la demande (`GET /api/v1/system/hardware`).

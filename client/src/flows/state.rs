@@ -159,6 +159,9 @@ pub struct Editor {
     pub palette_focus_tick: RwSignal<u64>,
     pub diagnostics_open: RwSignal<bool>,
     pub settings_open: RwSignal<bool>,
+    pub simulation_open: RwSignal<bool>,
+    pub sim_media: RwSignal<super::simulation::SimulationMedia>,
+    pub sim_step: RwSignal<Option<usize>>,
     pub branch_target: RwSignal<Option<BranchTarget>>,
     pub quick_add: RwSignal<Option<QuickAddState>>,
     pub selected_wire: RwSignal<Option<FlowConnection>>,
@@ -198,6 +201,9 @@ impl Editor {
             palette_focus_tick: RwSignal::new(0),
             diagnostics_open: RwSignal::new(false),
             settings_open: RwSignal::new(false),
+            simulation_open: RwSignal::new(false),
+            sim_media: RwSignal::new(super::simulation::SimulationMedia::default()),
+            sim_step: RwSignal::new(None),
             branch_target: RwSignal::new(None),
             quick_add: RwSignal::new(None),
             selected_wire: RwSignal::new(None),
@@ -295,6 +301,7 @@ impl Editor {
     pub fn open_palette(&self) {
         self.inspector_open.set(false);
         self.settings_open.set(false);
+        self.simulation_open.set(false);
         self.palette_open.set(true);
     }
 
@@ -311,6 +318,7 @@ impl Editor {
         }
         self.palette_open.set(false);
         self.settings_open.set(false);
+        self.simulation_open.set(false);
         self.inspector_open.set(true);
     }
 
@@ -318,7 +326,16 @@ impl Editor {
     pub fn open_settings(&self) {
         self.palette_open.set(false);
         self.inspector_open.set(false);
+        self.simulation_open.set(false);
         self.settings_open.set(true);
+    }
+
+    /// Ouvre le simulateur de flux dans le tiroir droit unifié.
+    pub fn open_simulation(&self) {
+        self.palette_open.set(false);
+        self.inspector_open.set(false);
+        self.settings_open.set(false);
+        self.simulation_open.set(true);
     }
 
     /// Ferme le tiroir droit unifié quel que soit l'onglet actif.
@@ -326,6 +343,7 @@ impl Editor {
         self.palette_open.set(false);
         self.inspector_open.set(false);
         self.settings_open.set(false);
+        self.simulation_open.set(false);
     }
 
     /// Indique de façon réactive si un onglet du tiroir droit est ouvert.
@@ -333,6 +351,7 @@ impl Editor {
         self.palette_open.get()
             || (self.inspector_open.get() && self.selected.get().is_some())
             || self.settings_open.get()
+            || self.simulation_open.get()
     }
 
     /// Indique de façon réactive si un bloc donné est sélectionné (simple ou multiple).

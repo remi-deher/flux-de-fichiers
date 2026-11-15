@@ -16,6 +16,7 @@ use chrono::Utc;
 use detail::JobDetail;
 use flux_shared::flows::FlowRecord;
 use flux_shared::jobs::Job;
+use flux_shared::libraries::Library;
 use flux_shared::session::Me;
 use flux_shared::workers::Worker;
 use flux_shared::{InstanceKind, Permission};
@@ -33,6 +34,7 @@ pub fn JobsPage(me: Me) -> impl IntoView {
     let can_manage = central && me.allows(Permission::ManageJobs);
     let can_workers = central && me.allows(Permission::ViewWorkers);
     let can_flows = central && me.allows(Permission::ViewFlows);
+    let can_libraries = central && me.allows(Permission::ViewLibraries);
     let filters = use_context::<Filters>();
     // Sur le central, la liste suit le flux d'événements de l'application ; sur un worker, non.
     let live = use_context::<LiveJobs>();
@@ -43,6 +45,7 @@ pub fn JobsPage(me: Me) -> impl IntoView {
     );
     let selected = RwSignal::new(None::<Uuid>);
     let detail_open = RwSignal::new(false);
+    let selected_library = RwSignal::new(None::<Uuid>);
     let first_page = LocalResource::new(move || {
         reload.track();
         let path = format!("{JOBS_PATH}?limit={JOBS_PAGE_SIZE}");
@@ -82,6 +85,33 @@ pub fn JobsPage(me: Me) -> impl IntoView {
             .map(|flow| (flow.id, flow.name))
             .collect::<HashMap<String, String>>()
     });
+    let libraries_res = LocalResource::new(move || async move {
+        if can_libraries {
+            api::get::<Vec<Library>>("/api/v1/libraries")
+                .await
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    });
+    let libraries_map = Signal::derive(move || {
+        libraries_res
+            .get()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|library| (library.id, library.name))
+            .collect::<HashMap<Uuid, String>>()
+    });
+    let libraries_options = Signal::derive(move || {
+        let mut list: Vec<(Uuid, String)> = libraries_res
+            .get()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|library| (library.id, library.name))
+            .collect();
+        list.sort_by_key(|a| a.1.to_lowercase());
+        list
+    });
     // Pages plus anciennes, ajoutées à la demande (curseur : dernière tâche chargée).
     let older = RwSignal::new(Vec::<Job>::new());
     let exhausted = RwSignal::new(false);
@@ -116,6 +146,7 @@ pub fn JobsPage(me: Me) -> impl IntoView {
         let state = job_state();
         let text = query();
         let period = period();
+        let lib_filter = selected_library.get();
         let now = Utc::now();
         jobs.get().map(|result| {
             result
@@ -124,6 +155,7 @@ pub fn JobsPage(me: Me) -> impl IntoView {
                         .filter(|job| {
                             state.accepts(job)
                                 && period.accepts(job.created_at, now)
+                                && lib_filter.is_none_or(|id| job.library_id == Some(id))
                                 && matches(&[&job.source_name, &job.id.to_string()], &text)
                         })
                         .collect::<Vec<_>>()
@@ -193,12 +225,35 @@ pub fn JobsPage(me: Me) -> impl IntoView {
     view! {
         <div class="tab-panel" role="tabpanel">
             <StatStrip aria_label="Synthèse de l'activité" items=stats />
+            {move || {
+                let options = libraries_options.get();
+                (!options.is_empty()).then(|| view! {
+                    <div class="jobs-toolbar">
+                        <label for="jobs-library-filter" class="form-label">"Bibliothèque"</label>
+                        <select
+                            id="jobs-library-filter"
+                            class="form-select jobs-library-select"
+                            prop:value=move || selected_library.get().map_or_else(String::new, |id| id.to_string())
+                            on:change=move |event| {
+                                let raw = event_target_value(&event);
+                                selected_library.set(Uuid::parse_str(raw.trim()).ok());
+                            }
+                        >
+                            <option value="">"Toutes les bibliothèques"</option>
+                            {options.into_iter().map(|(id, name)| view! {
+                                <option value=id.to_string()>{name}</option>
+                            }).collect_view()}
+                        </select>
+                    </div>
+                })
+            }}
             <div class="registre">
                 <JobsTable
                     jobs=visible
                     progress=progress
                     workers=workers_map
                     flows=flows_map
+                    libraries=libraries_map
                     selected=selected
                     on_open=open
                 />
@@ -210,7 +265,14 @@ pub fn JobsPage(me: Me) -> impl IntoView {
                 </button>
             })}
             <Drawer open=detail_open eyebrow="Tâche" title=title>
-                {move || selected_job.get().map(|job| view! { <JobDetail job=job can_manage=can_manage on_changed=refresh /> })}
+                {move || selected_job.get().map(|job| view! {
+                    <JobDetail
+                        job=job
+                        libraries=libraries_map
+                        can_manage=can_manage
+                        on_changed=refresh
+                    />
+                })}
             </Drawer>
         </div>
     }

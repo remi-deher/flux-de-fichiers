@@ -119,6 +119,87 @@ pub fn filter_workers(
         .collect()
 }
 
+fn storage_used_bytes(telemetry: &flux_shared::workers::WorkerTelemetry) -> u64 {
+    telemetry
+        .storage_total_bytes
+        .saturating_sub(telemetry.storage_available_bytes)
+}
+
+fn telemetry_summary(telemetry: &flux_shared::workers::WorkerTelemetry) -> String {
+    let ram_pct =
+        crate::overview::hardware::percent(telemetry.ram_used_bytes, telemetry.ram_total_bytes);
+    let mut base = format!(
+        "{} cœurs · CPU {:.0} % · RAM {:.0} %",
+        telemetry.logical_cores, telemetry.cpu_usage_percent, ram_pct
+    );
+    if !telemetry.gpu_devices.is_empty() {
+        base.push_str(&format!(" · {} GPU", telemetry.gpu_devices.len()));
+    }
+    base
+}
+
+#[component]
+fn WorkerTelemetrySection(telemetry: flux_shared::workers::WorkerTelemetry) -> impl IntoView {
+    use crate::settings::system::{DetailGrid, DetailRow};
+    let cpu_pct = telemetry.cpu_usage_percent.clamp(0.0, 100.0);
+    let ram_pct =
+        crate::overview::hardware::percent(telemetry.ram_used_bytes, telemetry.ram_total_bytes);
+    let disk_used = storage_used_bytes(&telemetry);
+    let disk_pct = crate::overview::hardware::percent(disk_used, telemetry.storage_total_bytes);
+    let cpu_tone = crate::overview::hardware::usage_tone(cpu_pct);
+    let ram_tone = crate::overview::hardware::usage_tone(ram_pct);
+    let disk_tone = crate::overview::hardware::usage_tone(disk_pct);
+    let ram_detail =
+        crate::overview::hardware::used_label(telemetry.ram_used_bytes, telemetry.ram_total_bytes);
+    let disk_detail = if telemetry.storage_total_bytes > 0 {
+        crate::overview::hardware::used_label(disk_used, telemetry.storage_total_bytes)
+    } else {
+        "Volume non mesuré".to_owned()
+    };
+    let gpus = telemetry.gpu_devices.clone();
+    let gpu_headline = crate::overview::hardware::gpu_label(&gpus);
+    view! {
+        <div class="stack worker-telemetry-card">
+            <h3 class="flow-inspector__section-title">"Télémétrie matérielle"</h3>
+            <DetailGrid rows=vec![
+                DetailRow::text("Relevé", format::datetime(telemetry.timestamp)),
+                DetailRow::mono("Cœurs logiques", telemetry.logical_cores.to_string()),
+                DetailRow::text("GPU", gpu_headline),
+            ] />
+            <div class="worker-telemetry-bars">
+                <div class="worker-telemetry-metric">
+                    <div class="worker-telemetry-metric__head">
+                        <span>"CPU"</span>
+                        <span class="text-mono">{format!("{cpu_pct:.0} %")}</span>
+                    </div>
+                    <crate::ui::ProgressBar percent=cpu_pct.round() as u32 tone=cpu_tone />
+                </div>
+                <div class="worker-telemetry-metric">
+                    <div class="worker-telemetry-metric__head">
+                        <span>"Mémoire vive"</span>
+                        <span class="text-dim">{ram_detail}</span>
+                    </div>
+                    <crate::ui::ProgressBar percent=ram_pct.round() as u32 tone=ram_tone />
+                </div>
+                <div class="worker-telemetry-metric">
+                    <div class="worker-telemetry-metric__head">
+                        <span>"Stockage local"</span>
+                        <span class="text-dim">{disk_detail}</span>
+                    </div>
+                    <crate::ui::ProgressBar percent=disk_pct.round() as u32 tone=disk_tone />
+                </div>
+            </div>
+            {(!gpus.is_empty()).then(|| view! {
+                <div class="cluster cluster-wrap">
+                    {gpus.into_iter().map(|gpu| view! {
+                        <Tag label=gpu tone=TagTone::Mono />
+                    }).collect_view()}
+                </div>
+            })}
+        </div>
+    }
+}
+
 #[component]
 fn WorkerDetail(worker: Worker, can_manage: bool, on_removed: Callback<()>) -> impl IntoView {
     let now = Utc::now();
@@ -128,6 +209,18 @@ fn WorkerDetail(worker: Worker, can_manage: bool, on_removed: Callback<()>) -> i
     let age = contact_age(&worker, now);
     let feedback = RwSignal::new(None::<String>);
     let id = worker.id;
+    let version = worker
+        .version
+        .clone()
+        .unwrap_or_else(|| "Non transmise".to_owned());
+    let remote_addr = worker.remote_addr.clone().unwrap_or_else(|| {
+        if worker.is_integrated() {
+            "Local (intégré)".to_owned()
+        } else {
+            "Non relevée".to_owned()
+        }
+    });
+    let telemetry = worker.telemetry.clone();
     let remove = Action::new_local(move |_: &()| async move {
         api::delete(&format!("{WORKERS_PATH}/{id}")).await
     });
@@ -145,14 +238,23 @@ fn WorkerDetail(worker: Worker, can_manage: bool, on_removed: Callback<()>) -> i
             <div class="cluster cluster-wrap">
                 <StatusBadge label=badge_label variant=badge_variant pulse=liveness == Liveness::Online />
                 <Tag label=role_label tone=role_tone />
+                {worker.version.clone().map(|v| view! { <Tag label=format!("v{v}") tone=TagTone::Mono /> })}
             </div>
             <div class="detail-grid">
                 <div class="detail-term">"Identifiant"</div><div class="detail-val text-mono">{worker.id.to_string()}</div>
                 <div class="detail-term">"Rôle"</div><div class="detail-val">{role_label}</div>
+                <div class="detail-term">"Version"</div><div class="detail-val text-mono">{version}</div>
+                <div class="detail-term">"Adresse réseau"</div><div class="detail-val text-mono">{remote_addr}</div>
                 <div class="detail-term">"Dernier contact"</div><div class="detail-val">{format::datetime(worker.last_seen)}</div>
                 <div class="detail-term">"Ancienneté"</div>
                 <div class="detail-val" class:text-danger=liveness == Liveness::Silent>{age}</div>
             </div>
+            {match telemetry {
+                Some(t) => view! { <WorkerTelemetrySection telemetry=t /> }.into_any(),
+                None => view! {
+                    <p class="form-help">"Aucune télémétrie matérielle encore remontée pour ce nœud."</p>
+                }.into_any(),
+            }}
             <div class="inspection-drawer__actions">
                 {removable.then(|| view! {
                     <button type="button" class="btn btn-danger btn-sm" disabled=move || remove.pending().get()
@@ -425,7 +527,7 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                                     footer_meta=format!("{footer_hint} · {last_contact}")
                                     footer_actions=Some(actions)
                                 >
-                                    <div class="cluster">
+                                    <div class="cluster cluster-wrap">
                                         <Tag label=role_label tone=role_tone />
                                         <Tag
                                             label=libs_label
@@ -437,8 +539,13 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                                             tone={if active_jobs > 0 { TagTone::Primary } else { TagTone::Neutral }}
                                             icon=Some(IconName::Activity)
                                         />
+                                        {worker.version.clone().map(|v| view! { <Tag label=format!("v{v}") tone=TagTone::Mono /> })}
+                                        {worker.remote_addr.clone().map(|addr| view! { <Tag label=addr tone=TagTone::Mono /> })}
                                         <Tag label=short_id tone=TagTone::Mono />
                                     </div>
+                                    {worker.telemetry.as_ref().map(|t| view! {
+                                        <p class="form-help worker-card-telemetry">{telemetry_summary(t)}</p>
+                                    })}
                                 </ResourceCard>
                             }
                         }).collect_view()}
@@ -515,16 +622,25 @@ mod tests {
                 id: Uuid::from_u128(1),
                 name: INTEGRATED_WORKER_NAME.into(),
                 last_seen: now,
+                version: None,
+                remote_addr: None,
+                telemetry: None,
             },
             Worker {
                 id: Uuid::from_u128(2),
                 name: "nas-offline".into(),
                 last_seen: now - chrono::Duration::seconds(WORKER_ONLINE_SECONDS),
+                version: None,
+                remote_addr: None,
+                telemetry: None,
             },
             Worker {
                 id: Uuid::from_u128(3),
                 name: "nas-silent".into(),
                 last_seen: now - chrono::Duration::seconds(WORKER_SILENT_ALERT_SECONDS),
+                version: None,
+                remote_addr: None,
+                telemetry: None,
             },
         ];
         let summary = summarize_workers(&workers, now);
@@ -556,5 +672,25 @@ mod tests {
             filter_workers(workers, "silent", Presence::Offline, now).len(),
             1
         );
+    }
+
+    #[test]
+    fn telemetry_summary_formats_cpu_ram_and_gpu_count() {
+        let telemetry = flux_shared::workers::WorkerTelemetry {
+            timestamp: Utc::now(),
+            logical_cores: 8,
+            cpu_usage_percent: 42.4,
+            ram_total_bytes: 16 * 1024 * 1024 * 1024,
+            ram_used_bytes: 4 * 1024 * 1024 * 1024,
+            storage_total_bytes: 1_000_000_000,
+            storage_available_bytes: 250_000_000,
+            gpu_devices: vec!["Intel QuickSync".into()],
+        };
+        assert_eq!(storage_used_bytes(&telemetry), 750_000_000);
+        let summary = telemetry_summary(&telemetry);
+        assert!(summary.contains("8 cœurs"));
+        assert!(summary.contains("CPU 42 %"));
+        assert!(summary.contains("RAM 25 %"));
+        assert!(summary.contains("1 GPU"));
     }
 }

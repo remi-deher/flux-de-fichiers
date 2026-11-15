@@ -41,13 +41,17 @@ pub struct JobStepEntry {
 pub struct StepsReport {
     pub worker_id: Uuid,
     pub lease_token: Uuid,
+    #[serde(default)]
+    pub lease_epoch: i64,
     pub steps: Vec<JobStepEntry>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Claim {
     pub job_id: Uuid,
     pub lease_token: Uuid,
+    #[serde(default)]
+    pub lease_epoch: i64,
     pub source_name: String,
     pub source_sha256: String,
     pub source_bytes: i64,
@@ -67,25 +71,48 @@ pub struct Claim {
     /// que workers distants et intégré exécutent la même définition.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frozen_flow: Option<FlowRecord>,
-    /// Connexions *arr déchiffrées pour les blocs Sonarr/Radarr sur un worker distant.
+    /// Contrats d'opérations JSON nécessaires au worker pour exécuter le flux sans logique figée.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub operations: std::collections::HashMap<String, serde_json::Value>,
+    /// Table de correspondance bloc / alias -> `operationId` pour ce bail.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub block_operations: std::collections::HashMap<String, String>,
+    /// Réglages de plugins déchiffrés pour les seules opérations HTTP du flux figé.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub plugin_configs: std::collections::HashMap<String, serde_json::Value>,
+    /// Secrets du bail (réglages de plugins et en-têtes webhook) chiffrés pour le worker détenteur.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub arr: Option<crate::flows::ArrLeaseContext>,
+    pub sealed_secrets: Option<String>,
+    /// Politique réseau sortante pour les intégrations / webhooks exécutées par le worker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_private_integrations: Option<bool>,
+    /// Dossier source tel que vu par le central (pour les traductions de chemins d'intégration).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_root: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Register {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<crate::telemetry::TelemetrySnapshot>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ClaimRequest {
     pub worker_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<crate::telemetry::TelemetrySnapshot>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LeaseRequest {
     pub worker_id: Uuid,
     pub lease_token: Uuid,
+    #[serde(default)]
+    pub lease_epoch: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<crate::telemetry::TelemetrySnapshot>,
 }
@@ -94,6 +121,8 @@ pub struct LeaseRequest {
 pub struct Failure {
     pub worker_id: Uuid,
     pub lease_token: Uuid,
+    #[serde(default)]
+    pub lease_epoch: i64,
     pub error_code: String,
 }
 
@@ -102,6 +131,8 @@ pub struct Failure {
 pub struct ProgressReport {
     pub worker_id: Uuid,
     pub lease_token: Uuid,
+    #[serde(default)]
+    pub lease_epoch: i64,
     pub progress: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
@@ -202,10 +233,12 @@ mod tests {
             r#"{"job_id":"00000000-0000-0000-0000-000000000001","lease_token":"00000000-0000-0000-0000-000000000002","source_name":"a.mkv","source_sha256":"ab","source_bytes":1}"#,
         )?;
         assert!(bare.frozen_flow.is_none());
-        assert!(bare.arr.is_none());
+        assert!(bare.operations.is_empty());
+        assert!(bare.plugin_configs.is_empty());
         let with_flow = Claim {
             job_id: Uuid::nil(),
             lease_token: Uuid::nil(),
+            lease_epoch: 1,
             source_name: "a.mkv".into(),
             source_sha256: "ab".into(),
             source_bytes: 1,
@@ -224,12 +257,18 @@ mod tests {
                 created_at: chrono::DateTime::UNIX_EPOCH,
                 updated_at: chrono::DateTime::UNIX_EPOCH,
             }),
-            arr: None,
+            operations: std::collections::HashMap::new(),
+            block_operations: std::collections::HashMap::new(),
+            plugin_configs: std::collections::HashMap::new(),
+            sealed_secrets: None,
+            allow_private_integrations: None,
+            media_root: None,
         };
         let encoded = serde_json::to_value(&with_flow)?;
         assert_eq!(encoded["frozen_flow"]["id"], "flow.x");
         assert_eq!(encoded["frozen_flow"]["version"], 3);
-        assert!(encoded.get("arr").is_none());
+        assert!(encoded.get("operations").is_none());
+        assert!(encoded.get("plugin_configs").is_none());
         Ok(())
     }
 
@@ -238,6 +277,7 @@ mod tests {
         let report = ProgressReport {
             worker_id: Uuid::nil(),
             lease_token: Uuid::from_u128(1),
+            lease_epoch: 2,
             progress: 42,
             message: Some("Progress: 42%".into()),
         };

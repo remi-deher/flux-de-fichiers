@@ -50,25 +50,31 @@ pub async fn login(
     headers: HeaderMap,
     Json(request): Json<LoginRequest>,
 ) -> AppResult<Response> {
-    web_session::validate_origin(&headers, &state.config)?;
+    let effective = crate::runtime_settings::load_effective(&state.pool, &state.config).await;
+    web_session::validate_origin(&headers, &effective.config)?;
     let account = verify_credentials(&state.pool, &request.username, request.password).await?;
-    open_session(&state, &account).await
+    open_session_with_config(&state.pool, &effective.config, &account).await
 }
 
 /// Ouvre une session web pour ce compte et renvoie ses cookies.
 pub async fn open_session(state: &AppState, account: &repository::Account) -> AppResult<Response> {
-    let session = web_session::create(
-        &state.pool,
-        state.config.web_session_ttl_seconds,
-        &account.id,
-    )
-    .await?;
-    session_response(session, &account.username, &state.config)
+    let effective = crate::runtime_settings::load_effective(&state.pool, &state.config).await;
+    open_session_with_config(&state.pool, &effective.config, account).await
+}
+
+async fn open_session_with_config(
+    pool: &sqlx::SqlitePool,
+    config: &crate::config::Config,
+    account: &repository::Account,
+) -> AppResult<Response> {
+    let session = web_session::create(pool, config.web_session_ttl_seconds, &account.id).await?;
+    session_response(session, &account.username, config)
 }
 
 pub async fn current(State(state): State<AppState>, headers: HeaderMap) -> AppResult<Response> {
     if headers.contains_key(header::ORIGIN) {
-        web_session::validate_origin(&headers, &state.config)?;
+        let effective = crate::runtime_settings::load_effective(&state.pool, &state.config).await;
+        web_session::validate_origin(&headers, &effective.config)?;
     }
     let stored = web_session::from_headers(&state.pool, &headers).await?;
     let csrf_token = web_session::validate_csrf_cookie(&headers, &stored)?.to_owned();
@@ -86,11 +92,12 @@ pub async fn current(State(state): State<AppState>, headers: HeaderMap) -> AppRe
 }
 
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> AppResult<Response> {
-    web_session::validate_origin(&headers, &state.config)?;
+    let effective = crate::runtime_settings::load_effective(&state.pool, &state.config).await;
+    web_session::validate_origin(&headers, &effective.config)?;
     let session = web_session::from_headers(&state.pool, &headers).await?;
     web_session::validate_csrf(&headers, &session)?;
     web_session::revoke(&state.pool, &session).await?;
-    cleared_session_response(&state.config)
+    cleared_session_response(&effective.config)
 }
 
 /// Réponse de déconnexion : 204 et cookies de session effacés.

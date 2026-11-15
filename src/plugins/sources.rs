@@ -52,7 +52,9 @@ pub async fn sync_enabled_repositories(pool: &SqlitePool, config: &Config) {
         return;
     };
     let repos_dir = config.plugin_repos_dir();
-    let policy = super::SyncPolicy::from_env();
+    let policy = crate::runtime_settings::load_effective(pool, config)
+        .await
+        .sync_policy();
     for repo in repositories.into_iter().filter(|repo| repo.enabled) {
         match super::sync_repository(&repo, &repos_dir, &policy).await {
             Ok(report) => {

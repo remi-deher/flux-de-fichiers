@@ -1,6 +1,6 @@
 //! Registre des tâches filtrées, avec la progression reçue en direct.
 
-use super::model::{error_label, status_label, status_tone};
+use super::model::{error_label, resolve_library_label, status_label, status_tone};
 use crate::format;
 use crate::ui::{ProgressBar, Registre, RegistreMessage, StatusBadge, Tag, TagTone};
 use flux_shared::jobs::{Job, JobStatus};
@@ -53,6 +53,7 @@ pub fn JobsTable(
     progress: RwSignal<HashMap<Uuid, u32>>,
     workers: Signal<HashMap<Uuid, String>>,
     flows: Signal<HashMap<String, String>>,
+    libraries: Signal<HashMap<Uuid, String>>,
     selected: RwSignal<Option<Uuid>>,
     on_open: Callback<Uuid>,
 ) -> impl IntoView {
@@ -65,15 +66,24 @@ pub fn JobsTable(
                 Some(Ok(list)) => {
                     let workers_map = workers.get();
                     let flows_map = flows.get();
+                    let libs_map = libraries.get();
                     list.into_iter().map(|job| {
                         let id = job.id;
                         let status = job.status;
                         let flow_label = resolve_flow_label(job.flow_id.as_deref(), &flows_map);
                         let worker_label = resolve_worker_label(job.worker_id, &workers_map);
+                        let library_label = resolve_library_label(job.library_id, &libs_map);
                         view! {
                             <tr class="registre-row is-clickable" class:is-open=move || selected.get() == Some(id)
                                 on:click=move |_| on_open.run(id)>
-                                <td class="text-strong truncate">{job.source_name.clone()}</td>
+                                <td class="truncate">
+                                    <div class="cluster">
+                                        <span class="text-strong">{job.source_name.clone()}</span>
+                                        {library_label.map(|name| view! {
+                                            <Tag label=name tone=TagTone::Primary />
+                                        })}
+                                    </div>
+                                </td>
                                 <td>
                                     {match flow_label {
                                         Some(label) => view! { <Tag label=label tone=TagTone::Mono /> }.into_any(),
@@ -89,6 +99,9 @@ pub fn JobsTable(
                                 <td>
                                     <div class="cluster">
                                         <StatusBadge label=status_label(job.status) variant=status_tone(job.status) />
+                                        {job.warning.then(|| view! {
+                                            <Tag label="Avertissement" tone=TagTone::Warning />
+                                        })}
                                         {job.error_code.map(|code| view! {
                                             <Tag label=error_label(code) tone=TagTone::Danger />
                                         })}

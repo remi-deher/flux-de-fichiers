@@ -1361,4 +1361,136 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   flex-direction: column;
   gap: 0.45rem;
 }
+
+/* --- Packs déclaratifs & étapes d'exécution --- */
+.pack-components {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.step-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.step-item {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  padding: 0.65rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.step-item__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.step-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.step-item__msg {
+  margin: 0;
+  color: var(--text-main);
+}
+
+.step-excerpt {
+  margin: 0.25rem 0 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  overflow-x: auto;
+  max-height: 10rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.jobs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.jobs-toolbar .form-label {
+  margin-bottom: 0;
+}
+
+.jobs-library-select {
+  width: auto;
+  min-width: 14rem;
+}
+
+.settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+
+.settings-fieldset {
+  margin: 0;
+  padding: 0.85rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.settings-fieldset__legend {
+  padding: 0 0.35rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.worker-card-telemetry {
+  margin-top: 0.35rem;
+}
+
+.worker-telemetry-card {
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.worker-telemetry-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.worker-telemetry-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.worker-telemetry-metric__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.inspection-drawer__panel:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
 "#;

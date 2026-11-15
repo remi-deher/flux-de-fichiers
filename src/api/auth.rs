@@ -24,9 +24,11 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let app_state = AppState::from_ref(state);
+        let effective =
+            crate::runtime_settings::load_effective(&app_state.pool, &app_state.config).await;
         auth::authenticate(
             &app_state.pool,
-            &app_state.config,
+            &effective.config,
             &parts.headers,
             &parts.method,
         )

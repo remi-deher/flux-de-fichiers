@@ -343,24 +343,24 @@ where
                 return (captured.unwrap_or_default(), tail.finish());
             }
 
-            if spec.progress_stream == ProgressStream::Stdout {
-                if let Some(out_reader) = stdout {
-                    let mut stderr_tail = TailBuffer::default();
-                    tokio::join!(
-                        for_each_segment(out_reader, |segment| {
-                            tail.push(segment);
-                            if let Some((pct, text)) = spec
-                                .progress_parser
-                                .parse_progress(segment, spec.duration_secs)
-                            {
-                                on_progress(pct, &text);
-                            }
-                        }),
-                        for_each_segment(stderr, |segment| stderr_tail.push(segment)),
-                    );
-                    tail.merge(stderr_tail);
-                    return (Vec::new(), tail.finish());
-                }
+            if spec.progress_stream == ProgressStream::Stdout
+                && let Some(out_reader) = stdout
+            {
+                let mut stderr_tail = TailBuffer::default();
+                tokio::join!(
+                    for_each_segment(out_reader, |segment| {
+                        tail.push(segment);
+                        if let Some((pct, text)) = spec
+                            .progress_parser
+                            .parse_progress(segment, spec.duration_secs)
+                        {
+                            on_progress(pct, &text);
+                        }
+                    }),
+                    for_each_segment(stderr, |segment| stderr_tail.push(segment)),
+                );
+                tail.merge(stderr_tail);
+                return (Vec::new(), tail.finish());
             }
 
             for_each_segment(stderr, |segment| {

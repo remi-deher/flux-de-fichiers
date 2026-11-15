@@ -620,13 +620,13 @@ impl OperationRegistry {
             }
         }
 
-        if let Some(ext) = requested_ext {
-            if ext != "mkv" {
-                return profiles
-                    .iter()
-                    .find(|(_, p_ext)| p_ext == ext)
-                    .map(|(p, _)| *p);
-            }
+        if let Some(ext) = requested_ext
+            && ext != "mkv"
+        {
+            return profiles
+                .iter()
+                .find(|(_, p_ext)| p_ext == ext)
+                .map(|(p, _)| *p);
         }
         if !matches!(requested_ext, None | Some("mkv")) {
             return None;
@@ -1034,14 +1034,13 @@ mod tests {
     }
 
     #[test]
-    fn filepath_cannot_be_spoofed_via_node_config() {
+    fn filepath_cannot_be_spoofed_via_node_config() -> anyhow::Result<()> {
         let bin: BinaryRuntime = serde_json::from_value(json!({
             "kind": "binary",
             "executable": "dummy",
             "executionMode": "in-place",
             "argv": [{ "param": "source", "as": "filePath" }]
-        }))
-        .expect("valid binary runtime");
+        }))?;
         let err = build_binary_argv(
             &bin,
             &json!({"source": "/etc/passwd"}),
@@ -1049,6 +1048,7 @@ mod tests {
             None,
         );
         assert!(matches!(err, Err(ContractError::MissingPathParam(ref p)) if p == "source"));
+        Ok(())
     }
 
     #[test]

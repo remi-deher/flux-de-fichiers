@@ -29,6 +29,7 @@ pub struct HttpStepError {
 }
 
 /// Exécute une opération HTTP multi-étapes (webhooks ou intégrations REST).
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_http_operation(
     rt: &HttpRuntime,
     flow_id: &str,

@@ -442,13 +442,12 @@ fn next_connection<'a>(
     source_id: &str,
     port: Option<&str>,
 ) -> Option<&'a FlowConnection> {
-    if let Some(port) = port {
-        if let Some(exact) = connections
+    if let Some(port) = port
+        && let Some(exact) = connections
             .iter()
             .find(|c| c.from == source_id && c.port.as_deref() == Some(port))
-        {
-            return Some(exact);
-        }
+    {
+        return Some(exact);
     }
     connections.iter().find(|c| c.from == source_id)
 }

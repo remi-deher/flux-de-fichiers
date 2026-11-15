@@ -92,8 +92,19 @@ async fn remux_mp4_block_runs_mp4box_and_reports_progress() -> Result<(), Box<dy
     let (progress, log) = recording_progress();
     let outcome = FlowEngine::new(&cache, &http)
         .execute_flow(&flow, Uuid::new_v4(), &source, &work, progress)
-        .await?;
+        .await
+        .map_err(|e| e.message)?;
     assert_eq!(outcome.working_file, work.join("remuxed.mp4"));
+    assert_eq!(
+        outcome.output_profile,
+        crate::media::OutputProfile::Mp4Container
+    );
+    assert!(
+        outcome
+            .steps
+            .iter()
+            .any(|step| step.status == flux_shared::jobs::JobStepStatus::Succeeded)
+    );
     assert!(outcome.working_file.is_file() && !outcome.in_place);
     assert!(
         log.lock()
@@ -132,12 +143,12 @@ async fn remux_mp4_block_fails_with_a_typed_error_when_mp4box_fails()
         .await
         .err()
         .ok_or("échec attendu")?;
-    assert!(matches!(
-        error.downcast_ref::<crate::tool_run::ToolRunError>(),
-        Some(crate::tool_run::ToolRunError::Failed {
-            tool: "mp4box",
-            code: Some(2)
-        })
-    ));
+    assert_eq!(error.code, flux_shared::jobs::JobErrorCode::RemuxFailed);
+    assert!(
+        error
+            .steps
+            .iter()
+            .any(|step| step.status == flux_shared::jobs::JobStepStatus::Failed)
+    );
     Ok(())
 }

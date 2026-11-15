@@ -4,22 +4,37 @@ use super::{
     FlowProgressCallback,
     encode::{EncodePlan, argv_for},
 };
-use crate::{media, tool_run::ToolRunError};
+use crate::{
+    media,
+    tool_run::{ToolRunError, ToolRunOutcome},
+};
 use std::path::Path;
 use uuid::Uuid;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EncodeOutcome {
+    pub fallback_to_cpu: bool,
+    pub excerpt: Option<String>,
+}
 
 async fn encode_once(
     bin: &Path,
     plan: &EncodePlan,
     source: &Path,
     output: &Path,
+    duration_secs: Option<f64>,
     on_progress: &FlowProgressCallback,
-) -> Result<(), ToolRunError> {
+) -> Result<ToolRunOutcome, ToolRunError> {
     let args = argv_for(plan, source, output);
     let on_progress = on_progress.clone();
-    media::encode_with_progress(bin, &args, move |percent: u32, line: &str| {
-        on_progress(percent, line);
-    })
+    media::encode_with_duration(
+        bin,
+        &args,
+        duration_secs,
+        move |percent: u32, line: &str| {
+            on_progress(percent, line);
+        },
+    )
     .await
 }
 
@@ -30,12 +45,19 @@ pub async fn run_encode(
     plan: &EncodePlan,
     source: &Path,
     output: &Path,
+    duration_secs: Option<f64>,
     on_progress: &FlowProgressCallback,
     job_id: Uuid,
-) -> Result<(), ToolRunError> {
-    let error = match encode_once(bin, plan, source, output, on_progress).await {
+) -> Result<EncodeOutcome, ToolRunError> {
+    let error = match encode_once(bin, plan, source, output, duration_secs, on_progress).await {
+        Ok(outcome) => {
+            return Ok(EncodeOutcome {
+                fallback_to_cpu: false,
+                excerpt: outcome.excerpt,
+            });
+        }
         Err(error @ ToolRunError::Failed { .. }) => error,
-        other => return other,
+        Err(other) => return Err(other),
     };
     let Some(cpu_plan) = plan.cpu_fallback() else {
         return Err(error);
@@ -43,7 +65,11 @@ pub async fn run_encode(
     tracing::warn!(job_id = %job_id, error = %error, "encodeur matériel en échec, repli sur le CPU");
     // Une sortie partielle ne doit pas survivre à la retentative.
     let _ = tokio::fs::remove_file(output).await;
-    encode_once(bin, &cpu_plan, source, output, on_progress).await
+    let outcome = encode_once(bin, &cpu_plan, source, output, duration_secs, on_progress).await?;
+    Ok(EncodeOutcome {
+        fallback_to_cpu: true,
+        excerpt: outcome.excerpt,
+    })
 }
 
 #[cfg(test)]
@@ -65,7 +91,7 @@ for a; do last=$a; case "$a" in *_nvenc) exit 1;; esac; done
         fake_tool(dir, "ffmpeg", &script)
     }
 
-    async fn run(encoder: &str, bin: &Path, output: &Path) -> Result<(), ToolRunError> {
+    async fn run(encoder: &str, bin: &Path, output: &Path) -> Result<EncodeOutcome, ToolRunError> {
         let plan = EncodePlan::Video(video_plan(&json!({"codec": "h265", "encoder": encoder})));
         let progress: FlowProgressCallback = Arc::new(|_, _| {});
         run_encode(
@@ -73,6 +99,7 @@ for a; do last=$a; case "$a" in *_nvenc) exit 1;; esac; done
             &plan,
             Path::new("in.mkv"),
             output,
+            None,
             &progress,
             Uuid::new_v4(),
         )
@@ -93,7 +120,8 @@ for a; do last=$a; case "$a" in *_nvenc) exit 1;; esac; done
         let log = dir.path().join("log");
         let bin = fake_ffmpeg(dir.path(), &log)?;
         let output = dir.path().join("out.mkv");
-        run("nvidia", &bin, &output).await?;
+        let outcome = run("nvidia", &bin, &output).await?;
+        assert!(outcome.fallback_to_cpu);
         let attempts = attempts(&log);
         assert_eq!(attempts.len(), 2);
         assert!(attempts[0].contains("hevc_nvenc"));

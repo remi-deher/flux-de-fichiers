@@ -3,7 +3,8 @@ use uuid::Uuid;
 
 pub use flux_shared::flows::{FlowRecord, FlowVersionSummary, UpdateFlowRequest};
 pub use flux_shared::jobs::{
-    Job, JobErrorCode, JobEvent, JobEventType, JobStatus, MAX_ATTEMPTS, MediaFile, NewJob,
+    Job, JobErrorCode, JobEvent, JobEventType, JobStatus, JobStepLog, JobStepStatus, MAX_ATTEMPTS,
+    MediaFile, NewJob,
 };
 
 pub use flux_shared::libraries::{
@@ -12,6 +13,36 @@ pub use flux_shared::libraries::{
 pub use flux_shared::workers::{SystemConfig, Worker};
 
 pub const LEASE_SECONDS: i64 = 120;
+
+/// Outil et version attendue pour exécuter une tâche (dérivés du flux figé).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolRequirement {
+    pub tool_id: String,
+    pub version: String,
+}
+
+/// Étape exécutée d'un flux, remontée par un worker ou le runner local.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobStepEntry {
+    pub step_index: i32,
+    pub node_id: String,
+    pub block_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    pub status: JobStepStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_excerpt: Option<String>,
+}
+
+/// Rapport d'étapes transmis par un worker distant au central.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StepsReport {
+    pub worker_id: Uuid,
+    pub lease_token: Uuid,
+    pub steps: Vec<JobStepEntry>,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claim {
@@ -26,6 +57,12 @@ pub struct Claim {
     pub probe_tool_id: Option<String>,
     #[serde(default)]
     pub probe_version: Option<String>,
+    /// Outils exigés par le flux figé (et leurs versions du catalogue).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_tools: Vec<ToolRequirement>,
+    /// Bibliothèque associée à la tâche, si renseignée.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library_id: Option<Uuid>,
     /// Version de flux figée à la création de la tâche ; voyage avec le bail pour
     /// que workers distants et intégré exécutent la même définition.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -120,6 +157,9 @@ mod tests {
     fn job_error_code_roundtrip_and_worker_policy() -> Result<(), serde_json::Error> {
         let cases = [
             (JobErrorCode::RemuxFailed, "remux_failed", true),
+            (JobErrorCode::EncodeFailed, "encode_failed", true),
+            (JobErrorCode::WebhookFailed, "webhook_failed", true),
+            (JobErrorCode::IntegrationFailed, "integration_failed", true),
             (JobErrorCode::SourceIntegrity, "source_integrity", true),
             (JobErrorCode::TransferFailed, "transfer_failed", true),
             (JobErrorCode::ProbeUnavailable, "probe_unavailable", true),
@@ -171,6 +211,8 @@ mod tests {
             source_bytes: 1,
             probe_tool_id: None,
             probe_version: None,
+            required_tools: Vec::new(),
+            library_id: None,
             frozen_flow: Some(FlowRecord {
                 id: "flow.x".into(),
                 name: "X".into(),

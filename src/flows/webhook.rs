@@ -42,8 +42,29 @@ pub async fn execute_webhook_block(
         "executing flow webhook block"
     );
 
+    let validated = match crate::net_policy::validate_outbound_url(
+        &config.url,
+        crate::net_policy::OutboundPolicy::integration_from_env(),
+    )
+    .await
+    {
+        Ok(url) => url,
+        Err(error) => {
+            tracing::warn!(
+                job_id = %ctx.job_id,
+                step = %ctx.current_step,
+                error = %error,
+                "flow webhook URL refused by network policy"
+            );
+            if config.fail_on_error {
+                return Err(error.into());
+            }
+            return Ok(());
+        }
+    };
+
     let mut request = client
-        .request(webhook_method(&config.method), &config.url)
+        .request(webhook_method(&config.method), validated)
         .timeout(WEBHOOK_TIMEOUT);
     for (key, value) in &config.custom_headers {
         request = request.header(key, value);

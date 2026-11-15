@@ -376,3 +376,115 @@ async fn jobs_keep_the_flow_version_frozen_at_creation() -> anyhow::Result<()> {
     ));
     Ok(())
 }
+
+#[tokio::test]
+async fn jobs_freeze_library_flow_record_steps_and_clear_output_explicitly() -> anyhow::Result<()> {
+    let pool = pool().await?;
+    repository::save_flow(&pool, "flow.default", &flow_request("Default", "{\"d\":1}")).await?;
+    let mut lib_flow_req = flow_request("Lib", "{\"l\":1}");
+    lib_flow_req.is_default = false;
+    repository::save_flow(&pool, "flow.lib", &lib_flow_req).await?;
+
+    let worker = repository::register(&pool, "w-lib").await?;
+    let library = repository::insert_library(
+        &pool,
+        flux_de_fichiers::domain::LibraryWrite {
+            name: "Séries".into(),
+            flow_id: Some("flow.lib".into()),
+            workers: vec![flux_de_fichiers::domain::LibraryWorkerPath {
+                worker_id: worker.id,
+                local_path: "/srv/series".into(),
+                access: flux_de_fichiers::domain::LibraryAccess::ReadWrite,
+            }],
+        },
+    )
+    .await?;
+
+    let invalid = repository::insert_job_with_options(
+        &pool,
+        "film.mkv",
+        None,
+        &"ab".repeat(32),
+        10,
+        Some(uuid::Uuid::new_v4()),
+        None,
+    )
+    .await;
+    assert!(matches!(invalid, Err(AppError::Invalid)));
+
+    let job = repository::insert_job_with_options(
+        &pool,
+        "film.mkv",
+        None,
+        &"ab".repeat(32),
+        10,
+        Some(library.id),
+        None,
+    )
+    .await?;
+    assert_eq!(job.library_id, Some(library.id));
+    assert_eq!(job.flow_id.as_deref(), Some("flow.lib"));
+    assert_eq!(
+        repository::library_worker_local_path(&pool, library.id, worker.id)
+            .await?
+            .as_deref(),
+        Some("/srv/series")
+    );
+
+    let claim = repository::claim(&pool, worker.id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("bail attendu"))?;
+    assert_eq!(claim.library_id, Some(library.id));
+    let lease = LeaseRequest {
+        worker_id: worker.id,
+        lease_token: claim.lease_token,
+        telemetry: None,
+    };
+
+    repository::save_job_steps(
+        &pool,
+        job.id,
+        &[flux_de_fichiers::domain::JobStepEntry {
+            step_index: 0,
+            node_id: "node-1".into(),
+            block_kind: "encode".into(),
+            operation_id: Some("ffmpeg.encode".into()),
+            status: flux_de_fichiers::domain::JobStepStatus::Succeeded,
+            message: Some("OK".into()),
+            output_excerpt: Some("frame=10".into()),
+        }],
+    )
+    .await?;
+    let steps = repository::list_job_steps(&pool, job.id).await?;
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].operation_id.as_deref(), Some("ffmpeg.encode"));
+
+    assert!(matches!(
+        repository::clear_job_output_name(&pool, job.id).await,
+        Err(AppError::Conflict)
+    ));
+    repository::publish_succeeded(
+        &pool,
+        job.id,
+        &lease,
+        repository::PublishedOutput {
+            name: "out.mp4",
+            sha256: &"cd".repeat(32),
+            bytes: 42,
+            warning: false,
+        },
+        async { Ok(()) },
+    )
+    .await?;
+    assert_eq!(
+        repository::clear_job_output_name(&pool, job.id)
+            .await?
+            .as_deref(),
+        Some("out.mp4")
+    );
+    assert_eq!(
+        repository::succeeded_output_name(&pool, job.id).await?,
+        None
+    );
+    Ok(())
+}

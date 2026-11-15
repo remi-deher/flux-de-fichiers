@@ -29,12 +29,16 @@ fn lease(h: &HeaderMap) -> AppResult<LeaseRequest> {
     })
 }
 
-async fn stream_file(path: &std::path::Path, attachment_name: Option<&str>) -> AppResult<Response> {
+async fn stream_file(
+    path: &std::path::Path,
+    attachment_name: Option<&str>,
+    content_type: &str,
+) -> AppResult<Response> {
     let file = tokio::fs::File::open(path).await?;
     let size = file.metadata().await?.len();
     let mut response = (
         [
-            ("content-type", "video/x-matroska".to_owned()),
+            ("content-type", content_type.to_owned()),
             ("content-length", size.to_string()),
         ],
         Body::from_stream(ReaderStream::new(file)),
@@ -64,9 +68,27 @@ pub async fn source(
     stream_file(
         &storage::input_path(&s.config.input_dir, &job.source_name).await?,
         None,
+        "video/x-matroska",
     )
     .await
 }
+
+fn content_type_for_name(name: &str) -> &'static str {
+    if name.to_ascii_lowercase().ends_with(".mp4") {
+        media::OutputProfile::Mp4Container.content_type()
+    } else {
+        "video/x-matroska"
+    }
+}
+
+fn extension_for_name(name: &str) -> &'static str {
+    if name.to_ascii_lowercase().ends_with(".mp4") {
+        "mp4"
+    } else {
+        "mkv"
+    }
+}
+
 pub async fn output(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
@@ -75,9 +97,12 @@ pub async fn output(
     let name = repository::succeeded_output_name(&s.pool, id)
         .await?
         .ok_or(AppError::NotFound)?;
+    let content_type = content_type_for_name(&name);
+    let ext = extension_for_name(&name);
     let mut response = stream_file(
-        &s.config.data_dir.join("output").join(name),
-        Some(&format!("job-{id}.mkv")),
+        &s.config.data_dir.join("output").join(&name),
+        Some(&format!("job-{id}.{ext}")),
+        content_type,
     )
     .await?;
     response.headers_mut().insert(
@@ -85,6 +110,42 @@ pub async fn output(
         axum::http::HeaderValue::from_static("no-store"),
     );
     Ok(response)
+}
+
+/// Suppression explicite par un administrateur du fichier de sortie d'un job terminé.
+pub async fn delete_output(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    _auth: super::AdminAuth,
+) -> AppResult<StatusCode> {
+    let previous = repository::clear_job_output_name(&s.pool, id).await?;
+    if let Some(name) = previous
+        && !name.starts_with('.')
+        && !name.contains(['/', '\\', '\0'])
+    {
+        let path = s.config.data_dir.join("output").join(name);
+        if let Err(error) = tokio::fs::remove_file(path).await
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(job_id = %id, error = %error, "suppression explicite du fichier de sortie impossible");
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn profile_for_job(
+    s: &AppState,
+    job: &Job,
+    requested_ext: Option<&str>,
+) -> AppResult<media::OutputProfile> {
+    let frozen_flow = match (&job.flow_id, job.flow_version) {
+        (Some(flow_id), Some(version)) => repository::get_flow_version(&s.pool, flow_id, version)
+            .await
+            .ok(),
+        _ => None,
+    };
+    crate::flows::output_profile_for_flow(frozen_flow.as_ref(), requested_ext)
+        .ok_or(AppError::Invalid)
 }
 
 pub async fn result(
@@ -101,14 +162,24 @@ pub async fn result(
         Some("false") | None => false,
         _ => return Err(AppError::Invalid),
     };
-    let staging = s
-        .config
-        .data_dir
-        .join("staging")
-        .join(format!("{}.mkv", Uuid::new_v4()));
+    let requested_ext = match h
+        .get("x-output-ext")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_ascii_lowercase())
+    {
+        None => None,
+        Some(ext) if ext == "mkv" || ext == "mp4" => Some(ext),
+        Some(_) => return Err(AppError::Invalid),
+    };
+    let profile = profile_for_job(&s, &job, requested_ext.as_deref()).await?;
+    let staging = s.config.data_dir.join("staging").join(format!(
+        "{}.{}",
+        Uuid::new_v4(),
+        profile.extension()
+    ));
     let outcome = tokio::time::timeout(
         std::time::Duration::from_secs(3600),
-        receive(&s, id, &credentials, &job, body, &staging, warning),
+        receive(&s, id, &credentials, &job, body, &staging, warning, profile),
     )
     .await;
     if let Err(error) = tokio::fs::remove_file(&staging).await
@@ -120,6 +191,7 @@ pub async fn result(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn receive(
     s: &AppState,
     id: Uuid,
@@ -128,6 +200,7 @@ async fn receive(
     body: Body,
     staging: &std::path::Path,
     warning: bool,
+    profile: media::OutputProfile,
 ) -> AppResult<()> {
     let mut file = tokio::fs::OpenOptions::new()
         .write(true)
@@ -147,10 +220,11 @@ async fn receive(
     file.sync_all().await?;
     drop(file);
     let source = storage::input_path(&s.config.input_dir, &job.source_name).await?;
-    publish_staged(s, id, lease, job, &source, staging, warning).await?;
+    publish_staged(s, id, lease, job, &source, staging, warning, profile).await?;
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn publish_staged(
     s: &AppState,
     id: Uuid,
@@ -159,6 +233,7 @@ pub(crate) async fn publish_staged(
     source: &std::path::Path,
     staging: &std::path::Path,
     warning: bool,
+    profile: media::OutputProfile,
 ) -> AppResult<()> {
     let (hash, size) = storage::fingerprint(staging, s.config.max_file_bytes).await?;
     let (source_hash, source_size) = storage::fingerprint(source, s.config.max_file_bytes).await?;
@@ -167,10 +242,10 @@ pub(crate) async fn publish_staged(
     {
         return Err(AppError::Conflict);
     }
-    media::validate_remux(source, staging)
+    media::validate_output(profile, source, staging)
         .await
         .map_err(|_| AppError::Invalid)?;
-    let name = format!("{id}-{}.mkv", lease.lease_token);
+    let name = format!("{id}-{}.{}", lease.lease_token, profile.extension());
     let destination = s.config.data_dir.join("output").join(&name);
     if let Err(error) = repository::publish_succeeded(
         &s.pool,

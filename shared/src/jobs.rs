@@ -88,14 +88,16 @@ impl fmt::Display for JobEventType {
 
 /// Codes d'erreur persistés dans `jobs.error_code`.
 ///
-/// Seuls `remux_failed`, `source_integrity`, `transfer_failed` et
-/// `probe_unavailable` peuvent être déclarés par un worker. `lease_expired` et
-/// `missing_source_fingerprint` sont écrits par le central.
+/// Les codes liés au traitement ou transfert peuvent être déclarés par un worker ;
+/// `lease_expired` et `missing_source_fingerprint` sont écrits par le central.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::Type), sqlx(rename_all = "snake_case"))]
 #[serde(rename_all = "snake_case")]
 pub enum JobErrorCode {
     RemuxFailed,
+    EncodeFailed,
+    WebhookFailed,
+    IntegrationFailed,
     SourceIntegrity,
     TransferFailed,
     ProbeUnavailable,
@@ -107,6 +109,9 @@ impl JobErrorCode {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::RemuxFailed => "remux_failed",
+            Self::EncodeFailed => "encode_failed",
+            Self::WebhookFailed => "webhook_failed",
+            Self::IntegrationFailed => "integration_failed",
             Self::SourceIntegrity => "source_integrity",
             Self::TransferFailed => "transfer_failed",
             Self::ProbeUnavailable => "probe_unavailable",
@@ -119,6 +124,9 @@ impl JobErrorCode {
         matches!(
             self,
             Self::RemuxFailed
+                | Self::EncodeFailed
+                | Self::WebhookFailed
+                | Self::IntegrationFailed
                 | Self::SourceIntegrity
                 | Self::TransferFailed
                 | Self::ProbeUnavailable
@@ -130,6 +138,9 @@ impl JobErrorCode {
         match label {
             "source_integrity" => Self::SourceIntegrity,
             "remux_failed" => Self::RemuxFailed,
+            "encode_failed" => Self::EncodeFailed,
+            "webhook_failed" => Self::WebhookFailed,
+            "integration_failed" => Self::IntegrationFailed,
             "probe_unavailable" => Self::ProbeUnavailable,
             _ => Self::TransferFailed,
         }
@@ -148,6 +159,9 @@ impl FromStr for JobErrorCode {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "remux_failed" => Ok(Self::RemuxFailed),
+            "encode_failed" => Ok(Self::EncodeFailed),
+            "webhook_failed" => Ok(Self::WebhookFailed),
+            "integration_failed" => Ok(Self::IntegrationFailed),
             "source_integrity" => Ok(Self::SourceIntegrity),
             "transfer_failed" => Ok(Self::TransferFailed),
             "probe_unavailable" => Ok(Self::ProbeUnavailable),
@@ -156,6 +170,42 @@ impl FromStr for JobErrorCode {
             _ => Err(()),
         }
     }
+}
+
+/// Statut d'exécution d'un bloc dans un flux.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::Type), sqlx(rename_all = "snake_case"))]
+#[serde(rename_all = "snake_case")]
+pub enum JobStepStatus {
+    Succeeded,
+    Failed,
+    Skipped,
+}
+
+impl JobStepStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+/// Entrée de journal d'exécution d'une étape de flux (persistée et consultable via API).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
+pub struct JobStepLog {
+    pub id: i64,
+    pub job_id: Uuid,
+    pub step_index: i32,
+    pub node_id: String,
+    pub block_kind: String,
+    pub operation_id: Option<String>,
+    pub status: JobStepStatus,
+    pub message: Option<String>,
+    pub output_excerpt: Option<String>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -177,6 +227,9 @@ pub struct Job {
     pub leased_until: Option<DateTime<Utc>>,
     pub output_name: Option<String>,
     pub error_code: Option<JobErrorCode>,
+    /// Bibliothèque associée à la création de la tâche, si renseignée.
+    #[serde(default)]
+    pub library_id: Option<Uuid>,
     /// Flow et version figés à la création de la tâche (aucun si pas de flow par défaut).
     pub flow_id: Option<String>,
     pub flow_version: Option<i64>,
@@ -198,10 +251,14 @@ pub struct JobEvent {
     pub error_code: Option<JobErrorCode>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct NewJob {
     pub source_name: String,
     pub target_worker_id: Option<Uuid>,
+    #[serde(default)]
+    pub library_id: Option<Uuid>,
+    #[serde(default)]
+    pub flow_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -241,6 +298,7 @@ mod tests {
             leased_until: None,
             output_name: None,
             error_code,
+            library_id: None,
             flow_id: None,
             flow_version: None,
             created_at: now,

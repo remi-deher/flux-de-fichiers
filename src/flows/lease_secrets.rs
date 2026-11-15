@@ -4,20 +4,8 @@
 //! uniquement pour les connexions *arr* des services dont le flux contient un bloc, et jamais
 //! pour une tâche sans flux. Le transport reste protégé par le TLS du reverse proxy.
 
-use super::{ArrContext, ArrLeaseContext, ArrService, FlowBlockKind, FlowGraph};
+use super::{ArrContext, ArrLeaseContext, ArrService, FlowGraph, block::resolve_operation};
 use std::collections::HashSet;
-
-fn service_of(kind: &FlowBlockKind) -> Option<ArrService> {
-    match kind.as_str() {
-        "sonarr-rescan" | "sonarr-rename" | "block.sonarr.rescan" | "block.sonarr.rename" => {
-            Some(ArrService::Sonarr)
-        }
-        "radarr-rescan" | "radarr-rename" | "block.radarr.rescan" | "block.radarr.rename" => {
-            Some(ArrService::Radarr)
-        }
-        _ => None,
-    }
-}
 
 /// Services *arr dont la définition contient au moins un bloc ; vide si elle est illisible.
 pub fn arr_services_in(definition: &str) -> HashSet<ArrService> {
@@ -26,7 +14,10 @@ pub fn arr_services_in(definition: &str) -> HashSet<ArrService> {
             graph
                 .nodes
                 .iter()
-                .filter_map(|node| service_of(&node.kind))
+                .filter_map(|node| {
+                    let op_id = node.extra.get("operationId").and_then(|v| v.as_str());
+                    resolve_operation(op_id, &node.kind).arr_service()
+                })
                 .collect()
         })
         .unwrap_or_default()

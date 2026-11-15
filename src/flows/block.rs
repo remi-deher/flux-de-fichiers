@@ -120,7 +120,7 @@ pub fn is_entry_block(kind: &FlowBlockKind) -> bool {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BlockOperation {
+pub enum BlockOperation {
     Pass,
     Stop,
     MediaInspect,
@@ -137,7 +137,56 @@ enum BlockOperation {
     Webhook,
 }
 
-fn resolve_operation(operation_id: Option<&str>, kind: &FlowBlockKind) -> BlockOperation {
+impl BlockOperation {
+    /// Identifiant canonique d'opération issu du contrat de plugin.
+    pub const fn operation_id(self) -> &'static str {
+        match self {
+            Self::Pass => "operation.core.file-input",
+            Self::Stop => "operation.core.file-output",
+            Self::MediaInspect => "operation.mediainfo.probe",
+            Self::Condition => "operation.core.condition",
+            Self::Mkvpropedit => "operation.mkvtoolnix.mkvpropedit",
+            Self::RemuxMkv => "operation.mkvtoolnix.mkvmerge.remux",
+            Self::RemuxMp4 => "operation.mp4box.remux",
+            Self::VideoEncode => "operation.ffmpeg.video.encode",
+            Self::AudioEncode => "operation.ffmpeg.audio.encode",
+            Self::SonarrRescan => "operation.sonarr.rescan",
+            Self::SonarrRename => "operation.sonarr.rename",
+            Self::RadarrRescan => "operation.radarr.rescan",
+            Self::RadarrRename => "operation.radarr.rename",
+            Self::Webhook => "operation.core.webhook",
+        }
+    }
+
+    /// Outil distribué requis par cette opération, le cas échéant.
+    pub const fn required_tool_id(self) -> Option<&'static str> {
+        match self {
+            Self::Mkvpropedit | Self::RemuxMkv => Some(crate::plugins::REMUX_TOOL_ID),
+            Self::RemuxMp4 => Some(crate::plugins::MP4BOX_TOOL_ID),
+            Self::VideoEncode | Self::AudioEncode => Some(crate::plugins::FFMPEG_TOOL_ID),
+            Self::MediaInspect
+            | Self::Pass
+            | Self::Stop
+            | Self::Condition
+            | Self::SonarrRescan
+            | Self::SonarrRename
+            | Self::RadarrRescan
+            | Self::RadarrRename
+            | Self::Webhook => None,
+        }
+    }
+
+    /// Service *arr associé à cette opération, le cas échéant.
+    pub const fn arr_service(self) -> Option<ArrService> {
+        match self {
+            Self::SonarrRescan | Self::SonarrRename => Some(ArrService::Sonarr),
+            Self::RadarrRescan | Self::RadarrRename => Some(ArrService::Radarr),
+            _ => None,
+        }
+    }
+}
+
+pub fn resolve_operation(operation_id: Option<&str>, kind: &FlowBlockKind) -> BlockOperation {
     match operation_id.unwrap_or_else(|| kind.as_str()) {
         "operation.core.file-input" | "block.core.file-input" | "file-input" => {
             BlockOperation::Pass

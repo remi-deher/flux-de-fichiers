@@ -19,7 +19,7 @@ pub async fn list_blocks(
     _auth: ViewFlowsAuth,
 ) -> AppResult<Json<Vec<OwnedBlockSpec>>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    Ok(Json(plugins::flow_block_catalog(&roots)))
+    Ok(Json(s.catalog_cache.blocks(&roots).await))
 }
 
 /// Liste l'ensemble des flux configurés en base de données.

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.25.0...v0.26.0) (2026-11-15)
+
+
+### Features
+
+* **flows:** améliorer le drag-and-drop sur grille et synchroniser les liaisons ([02883cc](https://github.com/remi-deher/flux-de-fichiers/commit/02883ccbf481a8bc4846b7449694c096056d35f0))
+* **flows:** améliorer le drag-and-drop sur grille et synchroniser les liaisons ([7ea26a4](https://github.com/remi-deher/flux-de-fichiers/commit/7ea26a4f397dcdfa4a832a2f9fe2140c27744337))
+
 ## [0.25.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.24.0...v0.25.0) (2026-11-15)
 
 

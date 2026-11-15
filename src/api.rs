@@ -28,20 +28,107 @@ use sqlx::{
     SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
 };
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{
+    collections::VecDeque,
+    str::FromStr,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
 use tower_http::{
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     trace::TraceLayer,
 };
 
+const SSE_REPLAY_CAPACITY: usize = 256;
+const SSE_BROADCAST_CAPACITY: usize = 256;
+const OUTBOUND_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Tampon d'historique borné pour la reprise SSE via `Last-Event-ID`.
+#[derive(Clone)]
+pub struct EventHistory {
+    next_seq: Arc<AtomicU64>,
+    buffer: Arc<tokio::sync::Mutex<VecDeque<(u64, JobEvent)>>>,
+    tx: tokio::sync::broadcast::Sender<(u64, JobEvent)>,
+}
+
+impl Default for EventHistory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EventHistory {
+    pub fn new() -> Self {
+        let (tx, _) = tokio::sync::broadcast::channel(SSE_BROADCAST_CAPACITY);
+        Self {
+            next_seq: Arc::new(AtomicU64::new(1)),
+            buffer: Arc::new(tokio::sync::Mutex::new(VecDeque::with_capacity(
+                SSE_REPLAY_CAPACITY,
+            ))),
+            tx,
+        }
+    }
+
+    pub async fn publish(&self, event: JobEvent) -> u64 {
+        let mut guard = self.buffer.lock().await;
+        let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
+        guard.push_back((seq, event.clone()));
+        while guard.len() > SSE_REPLAY_CAPACITY {
+            guard.pop_front();
+        }
+        let _ = self.tx.send((seq, event));
+        seq
+    }
+
+    pub async fn subscribe_from(
+        &self,
+        last_event_id: Option<u64>,
+    ) -> (
+        Vec<(u64, JobEvent)>,
+        tokio::sync::broadcast::Receiver<(u64, JobEvent)>,
+    ) {
+        let guard = self.buffer.lock().await;
+        let rx = self.tx.subscribe();
+        let replay = match last_event_id {
+            Some(since) => guard
+                .iter()
+                .filter(|(seq, _)| *seq > since)
+                .cloned()
+                .collect(),
+            None => Vec::new(),
+        };
+        (replay, rx)
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub pool: SqlitePool,
     pub config: Arc<Config>,
-    pub events_tx: tokio::sync::broadcast::Sender<JobEvent>,
+    pub http_client: reqwest::Client,
+    pub catalog_cache: crate::plugins::CatalogCache,
+    pub event_history: EventHistory,
 }
 
 impl AppState {
+    pub fn new(pool: SqlitePool, config: Arc<Config>) -> Self {
+        let http_client = reqwest::Client::builder()
+            .timeout(OUTBOUND_HTTP_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap_or_default();
+        Self {
+            pool,
+            config,
+            http_client,
+            catalog_cache: crate::plugins::CatalogCache::new(),
+            event_history: EventHistory::new(),
+        }
+    }
+
     pub fn notify_job_event(
         &self,
         event_type: JobEventType,
@@ -58,7 +145,10 @@ impl AppState {
             message: None,
             error_code,
         };
-        let _ = self.events_tx.send(event);
+        let history = self.event_history.clone();
+        tokio::spawn(async move {
+            history.publish(event).await;
+        });
     }
 
     pub fn notify_job_progress(&self, job_id: uuid::Uuid, progress: u32, message: Option<String>) {
@@ -71,7 +161,10 @@ impl AppState {
             message,
             error_code: None,
         };
-        let _ = self.events_tx.send(event);
+        let history = self.event_history.clone();
+        tokio::spawn(async move {
+            history.publish(event).await;
+        });
     }
 }
 
@@ -156,6 +249,11 @@ fn json_routes() -> Router<AppState> {
             "/api/v1/worker/tools/{id}/distribution",
             get(plugins::worker_tool_distribution),
         )
+        .route(
+            "/api/v1/packs/{id}/installation",
+            get(plugins::pack_installation),
+        )
+        .route("/api/v1/packs/{id}/install", post(plugins::install_pack))
         .route("/api/v1/auth/session", get(session::current))
         .route("/api/v1/auth/login", post(session::login))
         .route("/api/v1/auth/forgot-password", post(password_reset::forgot))
@@ -191,6 +289,10 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/auth/logout", post(session::logout))
         .route("/api/v1/jobs", get(jobs::list).post(jobs::create))
         .route("/api/v1/jobs/{id}", get(jobs::get_job))
+        .route(
+            "/api/v1/jobs/{id}/steps",
+            get(jobs::steps).post(jobs::report_steps),
+        )
         .route("/api/v1/jobs/{id}/retry", post(jobs::retry))
         .route("/api/v1/workers", get(jobs::workers).post(register))
         .route(
@@ -211,7 +313,10 @@ fn json_routes() -> Router<AppState> {
 fn transfer_routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/jobs/events", get(jobs::events))
-        .route("/api/v1/jobs/{id}/output", get(transfers::output))
+        .route(
+            "/api/v1/jobs/{id}/output",
+            get(transfers::output).delete(transfers::delete_output),
+        )
         .route("/api/v1/jobs/{id}/source", get(transfers::source))
         .route("/api/v1/jobs/{id}/result", put(transfers::result))
         .layer(tower_http::timeout::TimeoutLayer::with_status_code(
@@ -318,6 +423,20 @@ async fn claim(
             claim.probe_tool_id = Some(probe.tool_id);
             claim.probe_version = Some(probe.version);
         }
+        let tool_ids = match claim.frozen_flow.as_ref() {
+            Some(flow) => crate::flows::required_tool_ids(&flow.definition),
+            None => vec![crate::plugins::REMUX_TOOL_ID],
+        };
+        let mut required_tools = Vec::with_capacity(tool_ids.len());
+        for tool_id in tool_ids {
+            let version = s.catalog_cache.resolve_tool_version(&roots, tool_id).await;
+            required_tools.push(ToolRequirement {
+                tool_id: tool_id.to_owned(),
+                version,
+            });
+        }
+        claim.required_tools = required_tools;
+
         // Worker distant : déchiffrer les en-têtes webhook et joindre les connexions *arr.
         if let Some(ref mut flow) = claim.frozen_flow
             && let Ok(secrets) = crate::secrets::SecretBox::open(&s.config.config_dir)
@@ -329,9 +448,15 @@ async fn claim(
         if let Some(flow) = &claim.frozen_flow
             && !crate::flows::arr_services_in(&flow.definition).is_empty()
         {
-            let arr =
+            let mut arr =
                 crate::flows::ArrContext::load(&s.pool, &s.config.config_dir, &s.config.input_dir)
                     .await;
+            if let Some(lib_id) = claim.library_id
+                && let Ok(Some(local_path)) =
+                    repository::library_worker_local_path(&s.pool, lib_id, r.worker_id).await
+            {
+                arr.media_root = local_path.into();
+            }
             claim.arr = crate::flows::lease_arr_context(&flow.definition, &arr);
         }
         s.notify_job_event(
@@ -351,6 +476,7 @@ const PLUGIN_SYNC_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 async fn plugin_sync_loop(state: AppState) {
     loop {
         crate::plugins::sync_enabled_repositories(&state.pool, &state.config).await;
+        state.catalog_cache.invalidate().await;
         tokio::time::sleep(PLUGIN_SYNC_INTERVAL).await;
     }
 }
@@ -386,12 +512,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     tokio::fs::create_dir_all(&config.config_dir).await?;
     let addr = config.bind;
     let tls = config.tls.clone();
-    let (events_tx, _) = tokio::sync::broadcast::channel(128);
-    let state = AppState {
-        pool: pool.clone(),
-        config: Arc::new(config),
-        events_tx,
-    };
+    let state = AppState::new(pool.clone(), Arc::new(config));
     if state.config.local_worker {
         tokio::spawn(crate::local_worker::run(state.clone()));
     }

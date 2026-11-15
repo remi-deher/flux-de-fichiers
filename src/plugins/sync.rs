@@ -2,25 +2,27 @@
 //! refusant les adresses privées, et atomique (l'ancienne copie reste en place en cas d'échec).
 
 use super::{CatalogItemType, PluginRepository, is_valid_repository_id, parse_index_tolerant};
-use crate::tools_cache::ToolCacheManager;
+use crate::{
+    net_policy::{self, NetPolicyError, OutboundPolicy},
+    tools_cache::ToolCacheManager,
+};
 use futures_util::{StreamExt, stream};
-use reqwest::{Client, StatusCode, Url, redirect::Policy};
+use reqwest::{Client, StatusCode, Url};
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     time::Duration,
 };
+use subtle::ConstantTimeEq;
 
 const INDEX_RELATIVE_PATH: &str = "catalogue/index.json";
 const DISTRIBUTION_FILE_NAME: &str = "distribution.v1.json";
 /// Variable d'environnement qui autorise les adresses privées (réseaux de laboratoire, tests).
-pub const ALLOW_PRIVATE_HOSTS_ENV: &str = "PLUGIN_ALLOW_PRIVATE_HOSTS";
+pub const ALLOW_PRIVATE_HOSTS_ENV: &str = net_policy::ALLOW_PRIVATE_HOSTS_ENV;
 const SYNC_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_FILE_BYTES: usize = 1024 * 1024;
 const MAX_FILES: usize = 500;
 const FETCH_CONCURRENCY: usize = 8;
-const UNIQUE_LOCAL_PREFIX_MASK: u16 = 0xfe00;
-const UNIQUE_LOCAL_PREFIX: u16 = 0xfc00;
 
 /// Règles réseau d'une synchronisation.
 #[derive(Clone, Copy, Debug, Default)]
@@ -68,32 +70,19 @@ pub struct SyncReport {
 }
 
 /// Adresse qui ne doit jamais être jointe depuis un dépôt distant (réseau interne, métadonnées cloud).
-fn is_forbidden_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => is_forbidden_v4(v4),
-        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
-            Some(mapped) => is_forbidden_v4(mapped),
-            None => is_forbidden_v6(v6),
-        },
+#[cfg(test)]
+fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
+    net_policy::is_forbidden_ip(ip)
+}
+
+impl From<NetPolicyError> for SyncError {
+    fn from(error: NetPolicyError) -> Self {
+        match error {
+            NetPolicyError::InvalidUrl(msg) => Self::InvalidUrl(msg),
+            NetPolicyError::ForbiddenHost(host) => Self::ForbiddenHost(host),
+            NetPolicyError::Network(msg) => Self::Network(msg),
+        }
     }
-}
-
-fn is_forbidden_v4(ip: Ipv4Addr) -> bool {
-    ip.is_loopback()
-        || ip.is_private()
-        || ip.is_link_local()
-        || ip.is_unspecified()
-        || ip.is_broadcast()
-        || ip.is_multicast()
-}
-
-fn is_forbidden_v6(ip: Ipv6Addr) -> bool {
-    let first_segment = ip.segments()[0];
-    ip.is_loopback()
-        || ip.is_unspecified()
-        || ip.is_multicast()
-        || ip.is_unicast_link_local()
-        || first_segment & UNIQUE_LOCAL_PREFIX_MASK == UNIQUE_LOCAL_PREFIX
 }
 
 /// Base du dépôt : l'URL de l'index privée de `catalogue/index.json`.
@@ -119,49 +108,18 @@ pub fn validate_index_url(raw: &str) -> Result<(), SyncError> {
     base_url(&url).map(|_| ())
 }
 
-/// Client dont la résolution DNS est figée sur des adresses déjà contrôlées.
+/// Client dont la résolution DNS est figée sur toutes les adresses IP publiques déjà contrôlées.
 async fn pinned_client(url: &Url, policy: &SyncPolicy) -> Result<Client, SyncError> {
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err(SyncError::InvalidUrl("schéma http ou https attendu".into()));
-    }
-    let port = url
-        .port_or_known_default()
-        .ok_or_else(|| SyncError::InvalidUrl("port inconnu".into()))?;
-    let (host_label, addresses): (String, Vec<SocketAddr>) = match url.domain() {
-        Some(domain) => {
-            let resolved = tokio::net::lookup_host((domain, port))
-                .await
-                .map_err(|error| SyncError::Network(error.to_string()))?
-                .collect();
-            (domain.to_owned(), resolved)
-        }
-        None => {
-            let literal = url.host_str().unwrap_or_default().trim_matches(['[', ']']);
-            let ip: IpAddr = literal
-                .parse()
-                .map_err(|_| SyncError::InvalidUrl("hôte invalide".into()))?;
-            (literal.to_owned(), vec![SocketAddr::new(ip, port)])
-        }
+    let outbound = OutboundPolicy {
+        allow_private_hosts: policy.allow_private_hosts,
+        require_https: false,
     };
-    if addresses.is_empty() {
-        return Err(SyncError::Network(format!("{host_label} : aucune adresse")));
-    }
-    if !policy.allow_private_hosts
-        && addresses
-            .iter()
-            .any(|address| is_forbidden_ip(address.ip()))
-    {
-        return Err(SyncError::ForbiddenHost(host_label));
-    }
-    let mut builder = Client::builder()
-        .redirect(Policy::none())
-        .timeout(SYNC_TIMEOUT);
-    if let Some(domain) = url.domain() {
-        builder = builder.resolve(domain, addresses[0]);
-    }
-    builder
-        .build()
-        .map_err(|error| SyncError::Network(error.to_string()))
+    let (_, addresses) = net_policy::resolve_checked(url, outbound).await?;
+    Ok(net_policy::build_pinned_client(
+        url,
+        &addresses,
+        SYNC_TIMEOUT,
+    )?)
 }
 
 /// Taille maximale d'une archive d'outil.
@@ -271,6 +229,105 @@ fn wanted_files(entries: &[super::CatalogEntry]) -> Result<Vec<String>, SyncErro
     Ok(wanted)
 }
 
+fn resolve_manifest_relative(manifest_rel: &str, declared_rel: &str) -> Option<String> {
+    let trimmed = declared_rel.trim().trim_start_matches("./");
+    if trimmed.is_empty() || !ToolCacheManager::is_safe_relative_path(Path::new(trimmed)) {
+        return None;
+    }
+    let joined = match Path::new(manifest_rel).parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.join(trimmed),
+        _ => PathBuf::from(trimmed),
+    };
+    if !ToolCacheManager::is_safe_relative_path(&joined) {
+        return None;
+    }
+    Some(joined.to_string_lossy().replace('\\', "/"))
+}
+
+/// Déduit les fichiers JSON annexes déclarés dans les manifestes (`files[]` et `pack.installation`).
+fn extra_files_from_manifests(
+    already_queued: &HashSet<String>,
+    fetched_files: &[(String, String)],
+) -> Result<Vec<String>, SyncError> {
+    let mut extra: Vec<String> = Vec::new();
+    let mut seen = already_queued.clone();
+    for (manifest_rel, content) in fetched_files {
+        let Ok(doc) = serde_json::from_str::<serde_json::Value>(content) else {
+            continue;
+        };
+        if let Some(declared) = doc.get("files").and_then(|v| v.as_array()) {
+            for item in declared {
+                let Some(path) = item.get("path").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let is_json = path.ends_with(".json")
+                    || item.get("mediaType").and_then(|v| v.as_str()) == Some("application/json");
+                if is_json
+                    && let Some(resolved) = resolve_manifest_relative(manifest_rel, path)
+                    && seen.insert(resolved.clone())
+                {
+                    extra.push(resolved);
+                }
+            }
+        }
+        if let Some(install_path) = doc
+            .get("pack")
+            .and_then(|pack| pack.get("installation"))
+            .and_then(|v| v.as_str())
+            && let Some(resolved) = resolve_manifest_relative(manifest_rel, install_path)
+            && seen.insert(resolved.clone())
+        {
+            extra.push(resolved);
+        }
+    }
+    if already_queued.len() + extra.len() > MAX_FILES {
+        return Err(SyncError::TooManyFiles);
+    }
+    extra.sort();
+    Ok(extra)
+}
+
+fn verify_optional_sha256(
+    relative: &str,
+    content: &str,
+    expected_by_path: &HashMap<String, String>,
+) -> Result<(), String> {
+    let Some(expected) = expected_by_path.get(relative) else {
+        return Ok(());
+    };
+    let actual = ToolCacheManager::compute_sha256(content.as_bytes());
+    let expected_norm = expected.to_lowercase();
+    if bool::from(actual.as_bytes().ct_eq(expected_norm.as_bytes())) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{relative} : empreinte sha256 invalide (attendu {expected_norm}, reçu {actual})"
+        ))
+    }
+}
+
+async fn fetch_json_batch(
+    client: &Client,
+    base: &Url,
+    paths: Vec<String>,
+) -> Vec<(String, Result<Option<String>, SyncError>)> {
+    stream::iter(paths)
+        .map(|relative| {
+            let client = client.clone();
+            let base = base.clone();
+            async move {
+                let result = match base.join(&relative) {
+                    Ok(url) => fetch_text(&client, &url).await,
+                    Err(error) => Err(SyncError::InvalidUrl(error.to_string())),
+                };
+                (relative, result)
+            }
+        })
+        .buffer_unordered(FETCH_CONCURRENCY)
+        .collect()
+        .await
+}
+
 /// Écrit les fichiers dans un dossier temporaire, puis le substitue d'un seul renommage.
 async fn publish(
     repos_dir: &Path,
@@ -329,28 +386,67 @@ pub async fn sync_repository(
     let parsed = parse_index_tolerant(&index_text)
         .map_err(|error| SyncError::InvalidIndex(error.to_string()))?;
     let mut skipped = parsed.skipped;
-    let wanted = wanted_files(&parsed.index.entries)?;
-
-    let fetched: Vec<(String, Result<Option<String>, SyncError>)> = stream::iter(wanted)
-        .map(|relative| {
-            let client = client.clone();
-            let base = base.clone();
-            async move {
-                let result = match base.join(&relative) {
-                    Ok(url) => fetch_text(&client, &url).await,
-                    Err(error) => Err(SyncError::InvalidUrl(error.to_string())),
-                };
-                (relative, result)
-            }
+    let expected_sha256: HashMap<String, String> = parsed
+        .index
+        .entries
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .sha256
+                .as_ref()
+                .map(|digest| (entry.manifest_path.clone(), digest.clone()))
         })
-        .buffer_unordered(FETCH_CONCURRENCY)
-        .collect()
-        .await;
+        .collect();
+    let wanted = wanted_files(&parsed.index.entries)?;
+    let mut already_queued: HashSet<String> = wanted.iter().cloned().collect();
+    already_queued.insert(INDEX_RELATIVE_PATH.to_owned());
 
+    let fetched = fetch_json_batch(&client, &base, wanted).await;
     let mut files: Vec<(String, String)> = vec![(INDEX_RELATIVE_PATH.to_owned(), index_text)];
+    let mut manifest_docs: Vec<(String, String)> = Vec::new();
+    collect_fetched_json(
+        fetched,
+        &expected_sha256,
+        &mut files,
+        &mut manifest_docs,
+        &mut skipped,
+    );
+
+    let extra = extra_files_from_manifests(&already_queued, &manifest_docs)?;
+    if !extra.is_empty() {
+        let extra_fetched = fetch_json_batch(&client, &base, extra).await;
+        collect_fetched_json(
+            extra_fetched,
+            &expected_sha256,
+            &mut files,
+            &mut Vec::new(),
+            &mut skipped,
+        );
+    }
+    let report = SyncReport {
+        entries: parsed.index.entries.len(),
+        files: files.len(),
+        skipped,
+    };
+    publish(repos_dir, &repository.id, &files).await?;
+    Ok(report)
+}
+
+fn collect_fetched_json(
+    fetched: Vec<(String, Result<Option<String>, SyncError>)>,
+    expected_sha256: &HashMap<String, String>,
+    files: &mut Vec<(String, String)>,
+    manifests: &mut Vec<(String, String)>,
+    skipped: &mut Vec<String>,
+) {
     for (relative, result) in fetched {
         match result {
             Ok(Some(content)) if serde_json::from_str::<serde_json::Value>(&content).is_ok() => {
+                if let Err(reason) = verify_optional_sha256(&relative, &content, expected_sha256) {
+                    skipped.push(reason);
+                    continue;
+                }
+                manifests.push((relative.clone(), content.clone()));
                 files.push((relative, content));
             }
             Ok(Some(_)) => skipped.push(format!("{relative} : JSON invalide")),
@@ -362,19 +458,14 @@ pub async fn sync_repository(
             Err(error) => skipped.push(format!("{relative} : {error}")),
         }
     }
-    let report = SyncReport {
-        entries: parsed.index.entries.len(),
-        files: files.len(),
-        skipped,
-    };
-    publish(repos_dir, &repository.id, &files).await?;
-    Ok(report)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::plugins::CatalogEntry;
+
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     fn entry(id: &str, kind: CatalogItemType, manifest: &str) -> CatalogEntry {
         CatalogEntry {
@@ -389,7 +480,38 @@ mod tests {
             category: None,
             tags: Vec::new(),
             owner: None,
+            sha256: None,
         }
+    }
+
+    #[test]
+    fn test_extra_files_extracts_pack_installation_and_json_files_safely() -> Result<(), SyncError>
+    {
+        let already = HashSet::from([
+            "catalogue/index.json".to_owned(),
+            "packs/media/manifest.json".to_owned(),
+        ]);
+        let manifests = vec![(
+            "packs/media/manifest.json".to_owned(),
+            r#"{
+                "files": [
+                    {"path": "README.md", "role": "docs", "mediaType": "text/markdown"},
+                    {"path": "blocks/extra.json", "mediaType": "application/json"},
+                    {"path": "../../etc/passwd.json", "mediaType": "application/json"}
+                ],
+                "pack": {"installation": "installation.json"}
+            }"#
+            .to_owned(),
+        )];
+        let extra = extra_files_from_manifests(&already, &manifests)?;
+        assert_eq!(
+            extra,
+            vec![
+                "packs/media/blocks/extra.json".to_owned(),
+                "packs/media/installation.json".to_owned(),
+            ]
+        );
+        Ok(())
     }
 
     #[test]

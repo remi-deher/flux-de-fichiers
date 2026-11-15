@@ -19,7 +19,7 @@ pub fn mp4_plan(config: &Value) -> Mp4Plan {
             .get("faststart")
             .and_then(Value::as_bool)
             .unwrap_or(true),
-        custom_parameters: super::encode::split_custom(config),
+        custom_parameters: super::custom_args::mp4box_custom_args(config).unwrap_or_default(),
     }
 }
 

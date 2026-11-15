@@ -23,7 +23,10 @@ pub fn status_tone(status: JobStatus) -> &'static str {
 
 pub fn error_label(code: JobErrorCode) -> &'static str {
     match code {
-        JobErrorCode::RemuxFailed => "Le traitement du média a échoué",
+        JobErrorCode::RemuxFailed => "Le remuxage du média a échoué",
+        JobErrorCode::EncodeFailed => "L'encodage média a échoué",
+        JobErrorCode::WebhookFailed => "L'appel webhook du flux a échoué",
+        JobErrorCode::IntegrationFailed => "L'intégration Sonarr/Radarr a échoué",
         JobErrorCode::SourceIntegrity => "Source altérée pendant le transfert",
         JobErrorCode::TransferFailed => "Transfert interrompu",
         JobErrorCode::ProbeUnavailable => "Sonde média absente sur le worker",
@@ -159,6 +162,9 @@ mod tests {
     fn every_error_code_has_a_label() {
         for code in [
             JobErrorCode::RemuxFailed,
+            JobErrorCode::EncodeFailed,
+            JobErrorCode::WebhookFailed,
+            JobErrorCode::IntegrationFailed,
             JobErrorCode::SourceIntegrity,
             JobErrorCode::TransferFailed,
             JobErrorCode::ProbeUnavailable,

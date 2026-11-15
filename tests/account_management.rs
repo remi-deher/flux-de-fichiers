@@ -41,12 +41,7 @@ async fn fresh_app() -> anyhow::Result<(axum::Router, tempfile::TempDir)> {
         .connect(&config.database_url)
         .await?;
     sqlx::migrate!().run(&pool).await?;
-    let (events_tx, _) = tokio::sync::broadcast::channel(128);
-    let app = router(AppState {
-        pool,
-        config: Arc::new(config),
-        events_tx,
-    });
+    let app = router(AppState::new(pool, Arc::new(config)));
     Ok((app, dir))
 }
 

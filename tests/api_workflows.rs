@@ -46,12 +46,7 @@ async fn test_app() -> anyhow::Result<(axum::Router, tempfile::TempDir)> {
         .await?;
     sqlx::migrate!().run(&pool).await?;
     common::install_keys(&pool).await?;
-    let (events_tx, _) = tokio::sync::broadcast::channel(128);
-    let app = router(AppState {
-        pool,
-        config: Arc::new(config),
-        events_tx,
-    });
+    let app = router(AppState::new(pool, Arc::new(config)));
     Ok((app, temp_dir))
 }
 
@@ -363,5 +358,290 @@ async fn failure_rejects_unknown_and_internal_error_codes() -> anyhow::Result<()
         let resp = app.clone().oneshot(req).await?;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{code}");
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::Result<()> {
+    let admin = "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef";
+    let worker_auth = "Bearer fdf_b0000001_fedcba9876543210fedcba9876543210fedcba9876543210";
+
+    let temp_dir = tempfile::tempdir()?;
+    let input_dir = temp_dir.path().join("input");
+    let output_dir = temp_dir.path().join("output");
+    let repos_dir = temp_dir.path().join("config/plugin-repos/repo.test");
+    std::fs::create_dir_all(&input_dir)?;
+    std::fs::create_dir_all(&output_dir)?;
+    std::fs::create_dir_all(&repos_dir)?;
+    std::fs::create_dir_all(repos_dir.join("catalogue"))?;
+    std::fs::create_dir_all(repos_dir.join("packs/demo"))?;
+    std::fs::write(input_dir.join("film.mkv"), vec![0u8; 512])?;
+    std::fs::write(
+        repos_dir.join("catalogue/index.json"),
+        r#"{"schemaVersion":"1.0.0","entries":[
+            {"id":"pack.demo","type":"pack","version":"1.0.0","name":"Demo","manifestPath":"packs/demo/manifest.json"}
+        ]}"#,
+    )?;
+    std::fs::write(
+        repos_dir.join("packs/demo/manifest.json"),
+        r#"{"id":"pack.demo","type":"pack","version":"1.0.0","pack":{"installation":"installation.json"}}"#,
+    )?;
+    std::fs::write(
+        repos_dir.join("packs/demo/installation.json"),
+        r#"{"schemaVersion":"1.0.0","packId":"pack.demo","packVersion":"1.0.0","kind":"declarative-bundle","components":[]}"#,
+    )?;
+
+    let config = Config {
+        bind: "127.0.0.1:3000".parse()?,
+        database_url: "sqlite::memory:".into(),
+        data_dir: temp_dir.path().to_path_buf(),
+        input_dir,
+        config_dir: temp_dir.path().join("config"),
+        tools_cache_dir: temp_dir.path().join("tools-cache"),
+        plugins_dir: Some(repos_dir),
+        static_dir: "frontend/dist".into(),
+        max_file_bytes: 10_000_000,
+        local_worker: false,
+        web_origin: None,
+        web_session_ttl_seconds: 28_800,
+        tls: None,
+        smtp: None,
+    };
+    std::fs::create_dir_all(&config.tools_cache_dir)?;
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&config.database_url)
+        .await?;
+    sqlx::migrate!().run(&pool).await?;
+    common::install_keys(&pool).await?;
+
+    let state = AppState::new(pool.clone(), Arc::new(config));
+    // Vérifie le tampon SSE Last-Event-ID avant même de requêter en HTTP.
+    let first_seq = state
+        .event_history
+        .publish(flux_de_fichiers::domain::JobEvent {
+            event_type: flux_de_fichiers::domain::JobEventType::JobCreated,
+            job_id: uuid::Uuid::new_v4(),
+            status: JobStatus::Queued,
+            timestamp: chrono::Utc::now(),
+            progress: None,
+            message: None,
+            error_code: None,
+        })
+        .await;
+    let second_seq = state
+        .event_history
+        .publish(flux_de_fichiers::domain::JobEvent {
+            event_type: flux_de_fichiers::domain::JobEventType::JobProgress,
+            job_id: uuid::Uuid::new_v4(),
+            status: JobStatus::Running,
+            timestamp: chrono::Utc::now(),
+            progress: Some(50),
+            message: Some("50%".into()),
+            error_code: None,
+        })
+        .await;
+    let (replayed, _) = state.event_history.subscribe_from(Some(first_seq)).await;
+    assert_eq!(replayed.len(), 1);
+    assert_eq!(replayed[0].0, second_seq);
+
+    let app = router(state);
+
+    // 1. Pack endpoints
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/packs/pack.demo/installation")
+                .header("authorization", admin)
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // 2. Worker + Library + Flow Sonarr
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/workers")
+                .method("POST")
+                .header("authorization", worker_auth)
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"name":"w-steps"}"#))?,
+        )
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let worker: Worker = serde_json::from_slice(&to_bytes(resp.into_body(), 1024 * 64).await?)?;
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/flows/flow.arr")
+                .method("PUT")
+                .header("authorization", admin)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "Arr",
+                        "file_mask": "*.mkv",
+                        "is_default": false,
+                        "definition": serde_json::json!({
+                            "nodes": [{"id": "n1", "type": "sonarr-rename", "name": "Rename"}],
+                            "connections": []
+                        }).to_string()
+                    })
+                    .to_string(),
+                ))?,
+        )
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/libraries")
+                .method("POST")
+                .header("authorization", admin)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "Anime",
+                        "flow_id": "flow.arr",
+                        "workers": [{
+                            "worker_id": worker.id,
+                            "local_path": "/mnt/anime",
+                            "access": "read_write"
+                        }]
+                    })
+                    .to_string(),
+                ))?,
+        )
+        .await?;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let lib_json: serde_json::Value =
+        serde_json::from_slice(&to_bytes(resp.into_body(), 1024 * 64).await?)?;
+    let lib_id = lib_json["id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("library id manquant"))?;
+
+    // 3. Création d'un job attaché à la bibliothèque + réclamation
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/jobs")
+                .method("POST")
+                .header("authorization", admin)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "source_name": "film.mkv",
+                        "library_id": lib_id
+                    })
+                    .to_string(),
+                ))?,
+        )
+        .await?;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let job: Job = serde_json::from_slice(&to_bytes(resp.into_body(), 1024 * 64).await?)?;
+    assert_eq!(job.flow_id.as_deref(), Some("flow.arr"));
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/claims")
+                .method("POST")
+                .header("authorization", worker_auth)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"worker_id": worker.id}).to_string(),
+                ))?,
+        )
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let claim: Claim =
+        serde_json::from_slice::<Option<Claim>>(&to_bytes(resp.into_body(), 1024 * 64).await?)?
+            .ok_or_else(|| anyhow::anyhow!("claim attendu"))?;
+    assert_eq!(claim.required_tools[0].tool_id, "app.mkvtoolnix");
+
+    // 4. Report des étapes & lecture côté admin
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/jobs/{}/steps", job.id))
+                .method("POST")
+                .header("authorization", worker_auth)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "worker_id": worker.id,
+                        "lease_token": claim.lease_token,
+                        "steps": [{
+                            "step_index": 0,
+                            "node_id": "n1",
+                            "block_kind": "sonarr-rename",
+                            "operation_id": "sonarr.rename",
+                            "status": "succeeded",
+                            "message": "OK"
+                        }]
+                    })
+                    .to_string(),
+                ))?,
+        )
+        .await?;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/jobs/{}/steps", job.id))
+                .header("authorization", admin)
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let steps: Vec<flux_de_fichiers::domain::JobStepLog> =
+        serde_json::from_slice(&to_bytes(resp.into_body(), 1024 * 64).await?)?;
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].node_id, "n1");
+
+    // 5. Suppression explicite de sortie terminée
+    let output_file = output_dir.join("done.mkv");
+    std::fs::write(&output_file, b"out")?;
+    flux_de_fichiers::repository::publish_succeeded(
+        &pool,
+        job.id,
+        &LeaseRequest {
+            worker_id: worker.id,
+            lease_token: claim.lease_token,
+            telemetry: None,
+        },
+        flux_de_fichiers::repository::PublishedOutput {
+            name: "done.mkv",
+            sha256: &"11".repeat(32),
+            bytes: 3,
+            warning: false,
+        },
+        async { Ok(()) },
+    )
+    .await?;
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/jobs/{}/output", job.id))
+                .method("DELETE")
+                .header("authorization", admin)
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    assert!(!output_file.exists());
     Ok(())
 }

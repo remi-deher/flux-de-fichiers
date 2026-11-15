@@ -47,12 +47,7 @@ async fn central_in(dir: &Path) -> anyhow::Result<axum::Router> {
         .connect(&config.database_url)
         .await?;
     sqlx::migrate!().run(&pool).await?;
-    let (events_tx, _) = tokio::sync::broadcast::channel(128);
-    Ok(central_router(AppState {
-        pool,
-        config: Arc::new(config),
-        events_tx,
-    }))
+    Ok(central_router(AppState::new(pool, Arc::new(config))))
 }
 
 struct Reply {

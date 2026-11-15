@@ -268,6 +268,21 @@ pub async fn delete_library(pool: &SqlitePool, id: Uuid) -> AppResult<()> {
     Ok(())
 }
 
+/// Chemin média local déclaré pour un couple `(bibliothèque, worker)`, utilisé pour la traduction `*arr`.
+pub async fn library_worker_local_path(
+    pool: &SqlitePool,
+    library_id: Uuid,
+    worker_id: Uuid,
+) -> AppResult<Option<String>> {
+    Ok(sqlx::query_scalar(
+        "SELECT local_path FROM library_workers WHERE library_id=?1 AND worker_id=?2",
+    )
+    .bind(library_id)
+    .bind(worker_id)
+    .fetch_optional(pool)
+    .await?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

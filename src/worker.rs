@@ -1,12 +1,15 @@
 use crate::{
     central_client::CentralClient,
     config,
-    domain::{Claim, ClaimRequest, Failure, LeaseRequest, ProgressReport, Register, Worker},
-    media, storage,
+    domain::{
+        Claim, ClaimRequest, Failure, JobErrorCode, JobStepEntry, LeaseRequest, ProgressReport,
+        Register, StepsReport, Worker,
+    },
+    job_runner::{self, JobRunError},
+    storage,
     worker_http::{WorkerState, WorkerWeb},
     worker_settings,
 };
-use anyhow::Context;
 use futures_util::StreamExt;
 use reqwest::{Client, RequestBuilder};
 use std::{
@@ -176,6 +179,28 @@ impl WorkerLoop {
         Ok(())
     }
 
+    async fn report_steps(&self, claim: &Claim, worker: Uuid, steps: &[JobStepEntry]) {
+        if steps.is_empty() {
+            return;
+        }
+        let report = self
+            .request(
+                reqwest::Method::POST,
+                &format!("/api/v1/jobs/{}/steps", claim.job_id),
+            )
+            .timeout(Duration::from_secs(10))
+            .json(&StepsReport {
+                worker_id: worker,
+                lease_token: claim.lease_token,
+                steps: steps.to_vec(),
+            })
+            .send()
+            .await;
+        if !matches!(report, Ok(r) if r.status().is_success()) {
+            tracing::warn!(job_id = %claim.job_id, "step report rejected or unavailable");
+        }
+    }
+
     async fn process(
         &self,
         claim: &Claim,
@@ -183,36 +208,20 @@ impl WorkerLoop {
         dir: &std::path::Path,
     ) -> anyhow::Result<()> {
         let cache_mgr = crate::tools_cache::ToolCacheManager::new(&self.config.tools_cache_dir);
-        let probe = match (
-            claim.probe_tool_id.as_deref(),
-            claim.probe_version.as_deref(),
-        ) {
-            (Some(tool_id), Some(version)) => Some(crate::plugins::ProbeContract {
-                tool_id: tool_id.to_owned(),
-                version: version.to_owned(),
-            }),
-            _ => None,
-        };
-        let mut wanted = vec![(
-            crate::plugins::REMUX_TOOL_ID.to_owned(),
-            crate::plugins::REMUX_TOOL_VERSION.to_owned(),
-        )];
-        if let Some(contract) = probe.as_ref() {
-            wanted.push((contract.tool_id.clone(), contract.version.clone()));
-        }
-        for (tool_id, version) in wanted {
-            if cache_mgr.is_ready(&tool_id, &version, crate::tools_cache::host_arch()) {
+        for req in job_runner::collect_wanted_tools(claim) {
+            if cache_mgr.is_ready(&req.tool_id, &req.version, crate::tools_cache::host_arch()) {
                 continue;
             }
-            if let Err(error) = self.install_tool(&cache_mgr, &tool_id, &version).await {
-                tracing::warn!(tool = %tool_id, error = %error, "installation de l'outil impossible");
+            if let Err(error) = self
+                .install_tool(&cache_mgr, &req.tool_id, &req.version)
+                .await
+            {
+                tracing::warn!(tool = %req.tool_id, version = %req.version, error = %error, "installation de l'outil impossible");
             }
         }
-        if !crate::plugins::file_job_may_start(&cache_mgr, probe.as_ref()) {
-            anyhow::bail!("probe_unavailable");
-        }
+        job_runner::ensure_probe_ready(&cache_mgr, claim)?;
+
         let input = dir.join("source.mkv");
-        let output = dir.join("output.mkv");
         let response = self
             .leased(reqwest::Method::GET, claim, worker, "source")
             .send()
@@ -228,53 +237,46 @@ impl WorkerLoop {
         while let Some(chunk) = chunks.next().await {
             let chunk = chunk?;
             total += chunk.len() as u64;
-            anyhow::ensure!(total <= self.config.max_bytes, "source too large");
+            if total > self.config.max_bytes {
+                return Err(
+                    JobRunError::simple(JobErrorCode::SourceIntegrity, "source_integrity").into(),
+                );
+            }
             file.write_all(&chunk).await?;
         }
         file.flush().await?;
         drop(file);
         let (hash, bytes) = storage::fingerprint(&input, self.config.max_bytes).await?;
-        anyhow::ensure!(
-            hash == claim.source_sha256 && bytes as i64 == claim.source_bytes,
-            "source_integrity"
-        );
-
-        let http_client = self.client.clone();
-        let progress_cb = self.progress_callback(claim, worker);
-        let (final_output, warning) = if let Some(flow) = claim.frozen_flow.as_ref() {
-            let arr = claim.arr.clone().map(crate::flows::ArrContext::from);
-            let mut engine = crate::flows::FlowEngine::new(&cache_mgr, &http_client);
-            if let Some(ref arr_ctx) = arr {
-                engine = engine.with_arr(arr_ctx);
-            }
-            let outcome = engine
-                .execute_flow(flow, claim.job_id, &input, dir, progress_cb)
-                .await
-                .map_err(|error| anyhow::anyhow!("flow_execution_failed: {error}"))?;
-            (outcome.working_file, outcome.warning)
-        } else {
-            let mkvmerge_bin = cache_mgr.resolve_executable(
-                crate::plugins::REMUX_TOOL_ID,
-                crate::plugins::REMUX_TOOL_VERSION,
-                "mkvmerge",
-                "MKVMERGE",
+        if hash != claim.source_sha256 || bytes as i64 != claim.source_bytes {
+            return Err(
+                JobRunError::simple(JobErrorCode::SourceIntegrity, "source_integrity").into(),
             );
-            let warning =
-                media::remux_with_progress(&mkvmerge_bin, &input, &output, move |pct, line| {
-                    progress_cb(pct, line);
-                })
-                .await
-                .context("remux_failed")?;
-            (output, warning)
-        };
+        }
 
-        let (_, output_size) = storage::fingerprint(&final_output, self.config.max_bytes).await?;
+        let arr = claim.arr.clone().map(crate::flows::ArrContext::from);
+        let progress_cb = self.progress_callback(claim, worker);
+        let outcome = job_runner::execute_claim_processing(
+            claim,
+            &cache_mgr,
+            &self.client,
+            None,
+            arr.as_ref(),
+            &input,
+            dir,
+            progress_cb,
+        )
+        .await?;
+        self.report_steps(claim, worker, &outcome.steps).await;
+
+        let (_, output_size) =
+            storage::fingerprint(&outcome.working_file, self.config.max_bytes).await?;
         let body = reqwest::Body::wrap_stream(ReaderStream::new(
-            tokio::fs::File::open(&final_output).await?,
+            tokio::fs::File::open(&outcome.working_file).await?,
         ));
         self.leased(reqwest::Method::PUT, claim, worker, "result")
             .header("content-length", output_size)
-            .header("x-remux-warning", warning.to_string())
+            .header("x-remux-warning", outcome.warning.to_string())
+            .header("x-output-ext", outcome.output_profile.extension())
             .body(body)
             .send()
             .await?
@@ -287,7 +289,7 @@ impl WorkerLoop {
             .work_dir
             .join(format!("{}-{}", claim.job_id, claim.lease_token));
         tokio::fs::create_dir(&dir).await?;
-        // Dropping processing on a lost lease or shutdown kills the mkvmerge child.
+        // Dropping processing on a lost lease or shutdown kills the child process.
         let result = tokio::select! {
             result = self.process(&claim, worker, &dir) => result,
             result = self.heartbeat(&claim, worker) => result,
@@ -298,19 +300,14 @@ impl WorkerLoop {
                 tokio::fs::remove_dir_all(&dir).await?;
                 return result;
             }
-            let message = error.to_string();
-            let code = if message == "source_integrity" || message.contains("source_integrity") {
-                "source_integrity"
-            } else if message == "remux_failed"
-                || message.contains("remux_failed")
-                || message.contains("flow_execution_failed")
-            {
-                "remux_failed"
-            } else if message == "probe_unavailable" || message.contains("probe_unavailable") {
-                "probe_unavailable"
+            let (code, steps) = if let Some(run_err) = error.downcast_ref::<JobRunError>() {
+                (run_err.code.as_str(), Some(run_err.steps.as_slice()))
             } else {
-                "transfer_failed"
+                ("transfer_failed", None)
             };
+            if let Some(steps) = steps {
+                self.report_steps(&claim, worker, steps).await;
+            }
             tracing::warn!(job_id=%claim.job_id, error_code=code, "processing failed");
             // Do not format reqwest errors: their URLs may contain sensitive context.
             let report = self

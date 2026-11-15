@@ -16,12 +16,15 @@ pub use identity::{
     set_account_email, set_setting, touch_api_key, update_account, update_password,
 };
 pub use jobs::{
-    PublishedOutput, active, claim, count_jobs_for_worker, delete_worker, fail,
-    find_worker_by_name, get_job, heartbeat, insert_job, list_jobs, list_jobs_for_worker,
-    list_workers, ping, publish_succeeded, register, retry_job, succeeded_output_name,
-    worker_exists,
+    PublishedOutput, active, claim, clear_job_output_name, count_jobs_for_worker, delete_worker,
+    fail, find_worker_by_name, get_job, heartbeat, insert_job, insert_job_with_options,
+    list_job_steps, list_jobs, list_jobs_for_worker, list_workers, ping, publish_succeeded,
+    register, retry_job, save_job_steps, succeeded_output_name, worker_exists,
 };
-pub use libraries::{delete_library, get_library, insert_library, list_libraries, update_library};
+pub use libraries::{
+    delete_library, get_library, insert_library, library_worker_local_path, list_libraries,
+    update_library,
+};
 pub use password_reset::{
     consume_reset_token, count_recent_reset_tokens, delete_account_reset_tokens,
     insert_reset_token, purge_expired_reset_tokens,

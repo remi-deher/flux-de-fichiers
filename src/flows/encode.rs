@@ -90,13 +90,7 @@ fn number(config: &Value, key: &str, default: u8) -> u8 {
 }
 
 pub(super) fn split_custom(config: &Value) -> Vec<String> {
-    config
-        .get("custom_parameters")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .split_whitespace()
-        .map(str::to_owned)
-        .collect()
+    super::custom_args::ffmpeg_custom_args(config).unwrap_or_default()
 }
 
 /// Mappe qualité 1..=9 vers une échelle CRF/CQ (plus bas = meilleur).

@@ -93,6 +93,12 @@ pub async fn install_from_distribution(
     distribution: &ToolDistribution,
     policy: &SyncPolicy,
 ) -> AppResult<PathBuf> {
+    if distribution.release_status.as_deref() == Some("contract-only") {
+        return Err(AppError::ToolUnavailable(format!(
+            "{} : contrat en attente (contract-only)",
+            distribution.tool_id
+        )));
+    }
     let artifact = artifact_for_host(distribution).ok_or_else(|| {
         AppError::ToolUnavailable(format!(
             "{} : aucun artefact pour {}",
@@ -102,14 +108,16 @@ pub async fn install_from_distribution(
     })?;
     let _installing = InstallingGuard::start(&distribution.tool_id);
     let _guard = INSTALL_LOCK.lock().await;
-    let binary = cache
-        .tool_dir(
-            &distribution.tool_id,
-            &distribution.tool_version,
-            &artifact.arch,
-        )
-        .join("bin")
-        .join(&artifact.binary_relative_path);
+    let binary = ToolCacheManager::resolve_bin_candidate(
+        &cache
+            .tool_dir(
+                &distribution.tool_id,
+                &distribution.tool_version,
+                &artifact.arch,
+            )
+            .join("bin"),
+        &artifact.binary_relative_path,
+    );
     if cache.is_ready(
         &distribution.tool_id,
         &distribution.tool_version,
@@ -126,8 +134,19 @@ pub async fn install_from_distribution(
     let tool_id = distribution.tool_id.clone();
     let tool_version = distribution.tool_version.clone();
     let artifact = artifact.clone();
+    let allowlist = distribution
+        .install_policy
+        .as_ref()
+        .map(|policy| policy.executable_allowlist.clone())
+        .unwrap_or_default();
     tokio::task::spawn_blocking(move || {
-        cache.extract_and_install(&tool_id, &tool_version, &artifact, &archive)
+        cache.extract_and_install_with_allowlist(
+            &tool_id,
+            &tool_version,
+            &artifact,
+            &archive,
+            &allowlist,
+        )
     })
     .await
     .map_err(|_| AppError::Internal)?
@@ -151,37 +170,53 @@ pub async fn ensure_tool_installed(
     install_from_distribution(cache, &distribution, policy).await
 }
 
-/// Installe les outils d'un job : la sonde du catalogue et l'outil de remuxage. Un échec est journalisé :
-/// le job échouera de lui-même s'il manque réellement un outil.
+/// Installe les outils d'un job : la sonde du catalogue et les outils requis avec résolution dynamique de version.
 pub async fn ensure_job_tools(
     roots: &[PathBuf],
     cache: &ToolCacheManager,
     probe: Option<&super::ProbeContract>,
     policy: &SyncPolicy,
 ) {
-    let mut wanted = vec![
-        (
-            super::REMUX_TOOL_ID.to_owned(),
-            super::REMUX_TOOL_VERSION.to_owned(),
-        ),
-        (
-            super::FFMPEG_TOOL_ID.to_owned(),
-            super::FFMPEG_TOOL_VERSION.to_owned(),
-        ),
-        (
-            super::MP4BOX_TOOL_ID.to_owned(),
-            super::MP4BOX_TOOL_VERSION.to_owned(),
-        ),
-    ];
+    let mut wanted: Vec<crate::domain::ToolRequirement> = [
+        super::REMUX_TOOL_ID,
+        super::FFMPEG_TOOL_ID,
+        super::MP4BOX_TOOL_ID,
+    ]
+    .into_iter()
+    .map(|tool_id| crate::domain::ToolRequirement {
+        tool_id: tool_id.to_owned(),
+        version: super::resolve_tool_version(roots, tool_id),
+    })
+    .collect();
     if let Some(contract) = probe {
-        wanted.push((contract.tool_id.clone(), contract.version.clone()));
+        wanted.push(crate::domain::ToolRequirement {
+            tool_id: contract.tool_id.clone(),
+            version: contract.version.clone(),
+        });
     }
-    for (tool_id, version) in wanted {
-        if cache.is_ready(&tool_id, &version, host_arch()) {
+    ensure_tools_for_requirements(roots, cache, &wanted, policy).await;
+}
+
+/// Installe uniquement la liste explicite d'outils requis par le graphe ou la sonde du job.
+pub async fn ensure_tools_for_requirements(
+    roots: &[PathBuf],
+    cache: &ToolCacheManager,
+    requirements: &[crate::domain::ToolRequirement],
+    policy: &SyncPolicy,
+) {
+    for req in requirements {
+        if cache.is_ready(&req.tool_id, &req.version, host_arch()) {
             continue;
         }
-        if let Err(error) = ensure_tool_installed(roots, cache, &tool_id, &version, policy).await {
-            tracing::warn!(tool = %tool_id, error = %error, "installation de l'outil impossible");
+        if let Err(error) =
+            ensure_tool_installed(roots, cache, &req.tool_id, &req.version, policy).await
+        {
+            tracing::warn!(
+                tool = %req.tool_id,
+                version = %req.version,
+                error = %error,
+                "installation de l'outil impossible"
+            );
         }
     }
 }
@@ -238,7 +273,9 @@ mod tests {
             schema_version: Some("1.0.0".into()),
             tool_id: "app.demo".into(),
             tool_version: "1.0.0".into(),
+            release_status: None,
             distribution_mode: "autonomous-binary".into(),
+            install_policy: None,
             artifacts: vec![ToolArtifact {
                 arch: host_arch().into(),
                 archive_url: format!("http://{address}/outil.tar.gz"),
@@ -387,6 +424,17 @@ mod tests {
         install_from_distribution(&cache, &contract, &policy).await?;
         assert!(watcher.await?);
         assert!(!is_installing("app.suivi"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_contract_only_distribution_is_rejected_cleanly() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let cache = ToolCacheManager::new(dir.path());
+        let mut contract = distribution("127.0.0.1:9".parse()?, "0".into());
+        contract.release_status = Some("contract-only".into());
+        let result = install_from_distribution(&cache, &contract, &SyncPolicy::default()).await;
+        assert!(matches!(result, Err(AppError::ToolUnavailable(_))));
         Ok(())
     }
 

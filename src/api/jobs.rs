@@ -38,12 +38,14 @@ pub async fn create(
     {
         return Err(AppError::Invalid);
     }
-    let job = repository::insert_job(
+    let job = repository::insert_job_with_options(
         &s.pool,
         &r.source_name,
         r.target_worker_id,
         &hash,
         bytes as i64,
+        r.library_id,
+        r.flow_id.as_deref(),
     )
     .await?;
     s.notify_job_event(JobEventType::JobCreated, job.id, JobStatus::Queued, None);
@@ -67,18 +69,48 @@ pub async fn list(
     Ok(Json(repository::list_jobs(&s.pool, p.before, limit).await?))
 }
 
+struct EventsCursor {
+    replay: std::collections::VecDeque<(u64, JobEvent)>,
+    rx: tokio::sync::broadcast::Receiver<(u64, JobEvent)>,
+    last_seq: u64,
+}
+
+fn format_sse_event(seq: u64, event: &JobEvent) -> Event {
+    let data = serde_json::to_string(event).unwrap_or_default();
+    Event::default()
+        .id(seq.to_string())
+        .event(event.event_type.as_str())
+        .data(data)
+}
+
 pub async fn events(
     State(s): State<AppState>,
+    h: HeaderMap,
     _auth: ViewJobsAuth,
 ) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
-    let rx = s.events_tx.subscribe();
-    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+    let last_event_id = h
+        .get("last-event-id")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|raw| raw.trim().parse::<u64>().ok());
+    let (replay, rx) = s.event_history.subscribe_from(last_event_id).await;
+    let cursor = EventsCursor {
+        replay: replay.into(),
+        rx,
+        last_seq: last_event_id.unwrap_or(0),
+    };
+    let stream = futures_util::stream::unfold(cursor, |mut cursor| async move {
+        if let Some((seq, event)) = cursor.replay.pop_front() {
+            cursor.last_seq = cursor.last_seq.max(seq);
+            return Some((Ok(format_sse_event(seq, &event)), cursor));
+        }
         loop {
-            match rx.recv().await {
-                Ok(event) => {
-                    let data = serde_json::to_string(&event).unwrap_or_default();
-                    let sse_event = Event::default().event(event.event_type.as_str()).data(data);
-                    return Some((Ok(sse_event), rx));
+            match cursor.rx.recv().await {
+                Ok((seq, event)) => {
+                    if seq <= cursor.last_seq {
+                        continue;
+                    }
+                    cursor.last_seq = seq;
+                    return Some((Ok(format_sse_event(seq, &event)), cursor));
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
@@ -87,6 +119,37 @@ pub async fn events(
     });
 
     Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15))))
+}
+
+/// Journal ordonné des étapes exécutées pour une tâche.
+pub async fn steps(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    _auth: ViewJobsAuth,
+) -> AppResult<Json<Vec<JobStepLog>>> {
+    Ok(Json(repository::list_job_steps(&s.pool, id).await?))
+}
+
+/// Remontée par un worker de la trace d'exécution des nœuds d'une tâche.
+pub async fn report_steps(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(r): Json<StepsReport>,
+) -> AppResult<StatusCode> {
+    crate::auth::authorize_worker(&s.pool, &h).await?;
+    repository::active(
+        &s.pool,
+        id,
+        &LeaseRequest {
+            worker_id: r.worker_id,
+            lease_token: r.lease_token,
+            telemetry: None,
+        },
+    )
+    .await?;
+    repository::save_job_steps(&s.pool, id, &r.steps).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn get_job(

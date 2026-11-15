@@ -30,12 +30,7 @@ fn app() -> anyhow::Result<axum::Router> {
         smtp: None,
     };
     let pool = SqlitePoolOptions::new().connect_lazy(&config.database_url)?;
-    let (events_tx, _) = tokio::sync::broadcast::channel(128);
-    Ok(router(AppState {
-        pool,
-        config: Arc::new(config),
-        events_tx,
-    }))
+    Ok(router(AppState::new(pool, Arc::new(config))))
 }
 
 async fn migrated_app(
@@ -63,12 +58,7 @@ async fn migrated_app(
         .await?;
     sqlx::migrate!().run(&pool).await?;
     common::install_keys(&pool).await?;
-    let (events_tx, _) = tokio::sync::broadcast::channel(128);
-    let app = router(AppState {
-        pool: pool.clone(),
-        config: Arc::new(config),
-        events_tx,
-    });
+    let app = router(AppState::new(pool.clone(), Arc::new(config)));
     Ok((app, pool))
 }
 

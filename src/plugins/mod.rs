@@ -9,7 +9,9 @@ use std::{
 };
 
 mod blocks;
+mod cache;
 mod install;
+mod packs;
 mod probe;
 mod secret_settings;
 mod settings;
@@ -17,10 +19,12 @@ mod sources;
 mod sync;
 
 pub use blocks::{flow_block_catalog, plugin_default_config};
+pub use cache::CatalogCache;
 pub use install::{
-    ensure_job_tools, ensure_tool_installed, install_from_distribution, is_installing,
-    parse_distribution, read_distribution,
+    ensure_job_tools, ensure_tool_installed, ensure_tools_for_requirements,
+    install_from_distribution, is_installing, parse_distribution, read_distribution,
 };
+pub use packs::{PackInstallResult, PackInstallation, install_pack, read_pack_installation};
 pub use probe::{ProbeContract, file_job_may_start, probe_is_ready, required_probe};
 pub use sources::{
     catalog_roots, is_valid_repository_id, repository_dir, sync_enabled_repositories,
@@ -51,6 +55,37 @@ pub const FFMPEG_TOOL_VERSION: &str = "1.0.0";
 /// MP4Box (GPAC) distribué par les dépôts de plugins, pour le remuxage MP4.
 pub const MP4BOX_TOOL_ID: &str = "app.mp4box";
 pub const MP4BOX_TOOL_VERSION: &str = "1.0.0";
+
+/// MediaInfo distribué par les dépôts de plugins, pour l'enrichissement technique des médias.
+pub const MEDIAINFO_TOOL_ID: &str = "app.mediainfo";
+pub const MEDIAINFO_TOOL_VERSION: &str = "1.0.0";
+
+/// Version par défaut d'un outil lorsque le catalogue local n'en fournit pas encore.
+pub fn default_tool_version(tool_id: &str) -> &'static str {
+    match tool_id {
+        REMUX_TOOL_ID => REMUX_TOOL_VERSION,
+        FFMPEG_TOOL_ID => FFMPEG_TOOL_VERSION,
+        MP4BOX_TOOL_ID => MP4BOX_TOOL_VERSION,
+        MEDIAINFO_TOOL_ID => MEDIAINFO_TOOL_VERSION,
+        _ => "1.0.0",
+    }
+}
+
+/// Résout dynamiquement la version d'un outil depuis `distribution.v1.json`, sinon le catalogue.
+pub fn resolve_tool_version(roots: &[PathBuf], tool_id: &str) -> String {
+    if let Ok(value) = read_distribution(roots, tool_id)
+        && let Ok(dist) = parse_distribution(&value.to_string())
+        && !dist.tool_version.trim().is_empty()
+    {
+        return dist.tool_version;
+    }
+    catalog_with_roots(roots)
+        .into_iter()
+        .find(|(_, entry)| entry.id == tool_id)
+        .map(|(_, entry)| entry.version)
+        .filter(|version| !version.trim().is_empty())
+        .unwrap_or_else(|| default_tool_version(tool_id).to_owned())
+}
 
 /// Conteneur de l'index du catalogue.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -372,6 +407,7 @@ mod tests {
             category: None,
             tags: Vec::new(),
             owner: None,
+            sha256: None,
         };
         let mut hidden = entry.clone();
         hidden.category = Some(PluginCategory::Other);

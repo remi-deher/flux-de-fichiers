@@ -1,7 +1,7 @@
 //! Onglet Outils de la page Plugins : état d'installation et déploiement des binaires.
 
 use super::tool_detail::{ToolDetail, ToolDrawerTab};
-use super::{TOOLS_PATH, bump, tool_status_label};
+use super::{SelectedItem, TOOLS_PATH, bump, tool_status_label};
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
@@ -87,21 +87,33 @@ pub fn ToolsSection(
     can_install: bool,
 ) -> impl IntoView {
     let active_filter = RwSignal::new(ToolStateFilter::All);
-    let selected_tool = RwSignal::new(None::<String>);
+    let selected_tool = RwSignal::new(None::<SelectedItem>);
+    let installing_id = RwSignal::new(None::<String>);
     let drawer_open = RwSignal::new(false);
     let drawer_tab = RwSignal::new(0_usize);
-    let drawer_title = Signal::derive(move || selected_tool.get().unwrap_or_default());
+    let drawer_title = Signal::derive(move || {
+        selected_tool
+            .get()
+            .map(|item| item.name)
+            .unwrap_or_default()
+    });
     let feedback = RwSignal::new(None::<String>);
     let install = Action::new_local(move |id: &String| {
-        let path = format!("{TOOLS_PATH}/{}/install", encode_segment(id));
+        let id = id.clone();
+        installing_id.set(Some(id.clone()));
+        let path = format!("{TOOLS_PATH}/{}/install", encode_segment(&id));
         async move { api::post::<(), Value>(&path, None).await }
     });
     Effect::new(move |_| match install.value().get() {
         Some(Ok(_)) => {
-            Toasts::set_success(feedback, "Installation lancée.");
+            installing_id.set(None);
+            Toasts::set_success(feedback, "Outil installé.");
             bump(reload_tools);
         }
-        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
+        Some(Err(error)) => {
+            installing_id.set(None);
+            Toasts::set_error(feedback, error.message());
+        }
         None => {}
     });
 
@@ -163,10 +175,10 @@ pub fn ToolsSection(
             tabs=ToolDrawerTab::TABS.to_vec()
             tab=drawer_tab
         >
-            {move || selected_tool.get().map(|id| {
+            {move || selected_tool.get().map(|item| {
                 view! {
                     <ToolDetail
-                        tool_id=id
+                        tool_id=item.id
                         tab=drawer_tab
                         can_install=can_install
                         reload_tools=reload_tools
@@ -219,8 +231,13 @@ pub fn ToolsSection(
                                 let (label, class) = tool_status_label(tool.status);
                                 let id = tool.id.clone();
                                 let open_id = id.clone();
+                                let open_name = tool.name.clone();
                                 let active_id = id.clone();
-                                let installable = can_install && tool.status == ToolStatus::NotInstalled;
+                                let installable = can_install
+                                    && tool.installable
+                                    && tool.status == ToolStatus::NotInstalled;
+                                let pending_contract = !tool.installable
+                                    && tool.status == ToolStatus::NotInstalled;
                                 let tone = match tool.status {
                                     ToolStatus::Ready => MetricTone::Success,
                                     ToolStatus::Installing => MetricTone::Warning,
@@ -234,16 +251,26 @@ pub fn ToolsSection(
                                 }
                                 .into_any();
                                 let open_detail = Callback::new(move |()| {
-                                    selected_tool.set(Some(open_id.clone()));
+                                    selected_tool.set(Some(SelectedItem {
+                                        id: open_id.clone(),
+                                        name: open_name.clone(),
+                                    }));
                                     drawer_tab.set(0);
                                     drawer_open.set(true);
                                 });
                                 let actions = view! {
                                     {installable.then(|| {
                                         let id = id.clone();
+                                        let id_label = id.clone();
                                         view! {
                                             <button type="button" class="btn btn-secondary btn-sm" disabled=move || install.pending().get()
-                                                on:click=move |_| { install.dispatch(id.clone()); }>"Installer"</button>
+                                                on:click=move |_| { install.dispatch(id.clone()); }>
+                                                {move || if install.pending().get() && installing_id.get().as_deref() == Some(id_label.as_str()) {
+                                                    "Installation…"
+                                                } else {
+                                                    "Installer"
+                                                }}
+                                            </button>
                                         }
                                     })}
                                     <button type="button" class="btn btn-secondary btn-sm"
@@ -259,7 +286,9 @@ pub fn ToolsSection(
                                         badge=Some(badge)
                                         active=Some(Signal::derive(move || {
                                             drawer_open.get()
-                                                && selected_tool.get().as_deref() == Some(active_id.as_str())
+                                                && selected_tool
+                                                    .get()
+                                                    .is_some_and(|item| item.id == active_id)
                                         }))
                                         on_click=Some(open_detail)
                                         footer_meta=id
@@ -271,6 +300,9 @@ pub fn ToolsSection(
                                             <Tag label=tool.distribution tone=TagTone::Neutral />
                                             {tool.current_choice.then(|| view! {
                                                 <Tag label="Choix actuel" tone=TagTone::Success />
+                                            })}
+                                            {pending_contract.then(|| view! {
+                                                <Tag label="Contrat en attente" tone=TagTone::Warning />
                                             })}
                                         </div>
                                     </ResourceCard>
@@ -302,6 +334,7 @@ mod tests {
             distribution: "apt".to_owned(),
             current_choice: false,
             status,
+            installable: true,
         }
     }
 

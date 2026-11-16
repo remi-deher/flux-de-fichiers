@@ -113,29 +113,22 @@ fn DistributionTab(
                 }.into_any()
             }}
         </div>
-        {if installable {
-            view! {
-                <div class="inspection-drawer__actions">
-                    <button
-                        type="button"
-                        class="btn btn-primary"
-                        disabled=move || install.pending().get()
-                        on:click=move |_| { install.dispatch(()); }
-                    >
-                        <Icon name=IconName::Download size=INSTALL_ICON_SIZE />
-                        <span>{move || if install.pending().get() { "Installation…" } else { "Installer l'outil" }}</span>
-                    </button>
-                </div>
-            }
-            .into_any()
-        } else if detail.summary.status == ToolStatus::NotInstalled {
-            view! {
-                <p class="text-dim text-sm">"Contrat en attente : aucun binaire distribuable pour cet hôte."</p>
-            }
-            .into_any()
-        } else {
-            view! { <></> }.into_any()
-        }}
+        {installable.then(|| view! {
+            <div class="inspection-drawer__actions">
+                <button
+                    type="button"
+                    class="btn btn-primary"
+                    disabled=move || install.pending().get()
+                    on:click=move |_| { install.dispatch(()); }
+                >
+                    <Icon name=IconName::Download size=INSTALL_ICON_SIZE />
+                    <span>{move || if install.pending().get() { "Installation…" } else { "Installer l'outil" }}</span>
+                </button>
+            </div>
+        })}
+        {(!installable && detail.summary.status == ToolStatus::NotInstalled).then(|| view! {
+            <p class="text-dim text-sm">"Contrat en attente : aucun binaire distribuable pour cet hôte."</p>
+        })}
         <p class="form-help" role="status">{move || feedback.get()}</p>
     }
 }

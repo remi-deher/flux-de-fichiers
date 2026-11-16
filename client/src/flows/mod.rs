@@ -51,15 +51,34 @@ pub fn pipeline_preview_labels(graph_json: &str) -> Vec<String> {
     pipeline_preview(graph_json).0
 }
 
-/// Synthèse `(total, par_défaut, blocs_configurés)` pour le bandeau des flows.
-pub fn flow_counts(flows: &[FlowRecord]) -> (usize, usize, usize) {
-    let total = flows.len();
-    let defaults = flows.iter().filter(|flow| flow.is_default).count();
-    let blocks = flows
+/// Nombre de bibliothèques liées à un flux donné.
+pub fn bound_library_count(flow_id: &str, libraries: &[Library]) -> usize {
+    libraries
         .iter()
-        .map(|flow| FlowGraph::parse(&flow.definition).nodes.len())
-        .sum();
-    (total, defaults, blocks)
+        .filter(|lib| lib.flow_id.as_deref() == Some(flow_id))
+        .count()
+}
+
+/// Compteurs affichés dans le bandeau `StatStrip` des flows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FlowUsageCounts {
+    pub total: usize,
+    pub used: usize,
+    pub unused: usize,
+}
+
+/// Synthèse `(total, utilisés, inutilisés)` pour le bandeau des flows.
+pub fn flow_usage_counts(flows: &[FlowRecord], libraries: &[Library]) -> FlowUsageCounts {
+    let used = flows
+        .iter()
+        .filter(|flow| bound_library_count(&flow.id, libraries) > 0)
+        .count();
+    let total = flows.len();
+    FlowUsageCounts {
+        total,
+        used,
+        unused: total.saturating_sub(used),
+    }
 }
 
 #[component]
@@ -190,7 +209,8 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
     }
     let stats = Signal::derive(move || {
         let list = flows.get().and_then(Result::ok).unwrap_or_default();
-        let (total, defaults, blocks) = flow_counts(&list);
+        let libs = libraries.get().unwrap_or_default();
+        let counts = flow_usage_counts(&list, &libs);
         let active = flow_filter();
         let set_filter = move |next: FlowFilter| {
             Callback::new(move |()| {
@@ -199,15 +219,28 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
                 }
             })
         };
-        vec![
-            StatItem::new("Total", total.to_string(), MetricTone::Neutral)
+        let mut items = vec![
+            StatItem::new("Tous", counts.total.to_string(), MetricTone::Neutral)
                 .with_filter(active == FlowFilter::All, set_filter(FlowFilter::All)),
-            StatItem::new("Par défaut", defaults.to_string(), MetricTone::Success).with_filter(
-                active == FlowFilter::DefaultOnly,
-                set_filter(FlowFilter::DefaultOnly),
-            ),
-            StatItem::new("Blocs configurés", blocks.to_string(), MetricTone::Neutral),
-        ]
+        ];
+        if can_libraries {
+            items.push(
+                StatItem::new("Utilisés", counts.used.to_string(), MetricTone::Success)
+                    .with_detail("≥ 1 bibliothèque")
+                    .with_filter(active == FlowFilter::Used, set_filter(FlowFilter::Used)),
+            );
+            let unused_tone = if counts.unused > 0 {
+                MetricTone::Warning
+            } else {
+                MetricTone::Neutral
+            };
+            items.push(
+                StatItem::new("Inutilisés", counts.unused.to_string(), unused_tone)
+                    .with_detail("aucune bibliothèque")
+                    .with_filter(active == FlowFilter::Unused, set_filter(FlowFilter::Unused)),
+            );
+        }
+        items
     });
     let grid = move || {
         let text = query();
@@ -230,8 +263,9 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
                 let shown: Vec<FlowRecord> = list
                     .into_iter()
                     .filter(|flow| {
-                        active_filter.accepts(flow.is_default)
-                            && matches(&[&flow.name, &flow.id, &flow.file_mask], &text)
+                        let usage_ok = !can_libraries
+                            || active_filter.accepts(bound_library_count(&flow.id, &libs));
+                        usage_ok && matches(&[&flow.name, &flow.id, &flow.file_mask], &text)
                     })
                     .collect();
                 if shown.is_empty() {
@@ -271,10 +305,7 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
                         {shown
                             .into_iter()
                             .map(|flow| {
-                                let bound_libraries = libs
-                                    .iter()
-                                    .filter(|lib| lib.flow_id.as_deref() == Some(flow.id.as_str()))
-                                    .count();
+                                let bound_libraries = bound_library_count(&flow.id, &libs);
                                 view! {
                                     <FlowCard
                                         flow=flow
@@ -533,41 +564,56 @@ mod tests {
     }
 
     #[test]
-    fn flow_counts_aggregates_defaults_and_blocks() {
-        let catalog = test_support::test_catalog();
-        let mut graph = FlowGraph::default();
-        graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
-            "Entrée",
-            serde_json::json!({}),
-            &catalog,
-        );
-        let def = serde_json::to_string(&graph).unwrap_or_default();
+    fn flow_usage_counts_tracks_used_and_unused_flows() {
         let now = Utc::now();
-        let flows = [
-            FlowRecord {
-                id: "f1".into(),
-                name: "Remux".into(),
-                description: None,
-                file_mask: "*.mkv".into(),
-                is_default: true,
-                definition: def.clone(),
-                version: 1,
+        let make_flow = |id: &str| FlowRecord {
+            id: id.into(),
+            name: id.into(),
+            description: None,
+            file_mask: "*.mkv".into(),
+            is_default: false,
+            definition: String::new(),
+            version: 1,
+            created_at: now,
+            updated_at: now,
+        };
+        let flows = [make_flow("f1"), make_flow("f2"), make_flow("f3")];
+        let libraries = [
+            Library {
+                id: uuid::Uuid::nil(),
+                name: "Films".into(),
+                flow_id: Some("f1".into()),
+                workers: Vec::new(),
                 created_at: now,
                 updated_at: now,
             },
-            FlowRecord {
-                id: "f2".into(),
-                name: "Léger".into(),
-                description: None,
-                file_mask: "*.mp4".into(),
-                is_default: false,
-                definition: def,
-                version: 2,
+            Library {
+                id: uuid::Uuid::nil(),
+                name: "Séries".into(),
+                flow_id: Some("f1".into()),
+                workers: Vec::new(),
+                created_at: now,
+                updated_at: now,
+            },
+            Library {
+                id: uuid::Uuid::nil(),
+                name: "Orpheline".into(),
+                flow_id: None,
+                workers: Vec::new(),
                 created_at: now,
                 updated_at: now,
             },
         ];
-        assert_eq!(flow_counts(&flows), (2, 1, 2));
+
+        assert_eq!(bound_library_count("f1", &libraries), 2);
+        assert_eq!(bound_library_count("f2", &libraries), 0);
+        assert_eq!(
+            flow_usage_counts(&flows, &libraries),
+            FlowUsageCounts {
+                total: 3,
+                used: 1,
+                unused: 2,
+            }
+        );
     }
 }

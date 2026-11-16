@@ -70,14 +70,11 @@ pub fn JobDetail(
 
     let flow = match (&job.flow_id, job.flow_version) {
         (Some(id), Some(version)) => format!("{id} (version {version})"),
-        _ => "Aucun (remux simple)".into(),
+        _ => "Aucun (opération par défaut)".into(),
     };
     let download = (job.status == JobStatus::Succeeded).then(|| {
         let href = format!("/api/v1/jobs/{}/output", job.id);
-        let name = job
-            .output_name
-            .clone()
-            .unwrap_or_else(|| "resultat.mkv".into());
+        let name = job.output_name.clone().unwrap_or_else(|| "resultat".into());
         view! {
             <a class="btn btn-secondary" href=href download=name>
                 <Icon name=IconName::Download size=ACTION_ICON_SIZE />

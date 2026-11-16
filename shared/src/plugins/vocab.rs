@@ -140,57 +140,52 @@ impl CatalogItemType {
     }
 }
 
-/// Ce qu'une pièce sait faire.
-///
-/// Le schéma d'index laisse `capability` libre, et les manifestes d'outils
-/// emploient déjà `probe` et `remux-mp4` en plus de l'enum étroit du schéma de
-/// manifeste (`remux`, `database`, `transcode`, `analyze`, `other`). L'union
-/// des valeurs réellement publiées par le dépôt est fermée : une chaîne
-/// inconnue est refusée, un sous-ensemble trop court empêcherait de lire l'index.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CatalogCapability {
-    #[serde(rename = "remux")]
-    Remux,
-    #[serde(rename = "database")]
-    Database,
-    #[serde(rename = "transcode")]
-    Transcode,
-    #[serde(rename = "analyze")]
-    Analyze,
-    #[serde(rename = "other")]
-    Other,
-    #[serde(rename = "video")]
-    Video,
-    #[serde(rename = "audio")]
-    Audio,
-    #[serde(rename = "integration")]
-    Integration,
-    #[serde(rename = "remux-mp4")]
-    RemuxMp4,
-    #[serde(rename = "probe")]
-    Probe,
-    #[serde(rename = "in-place")]
-    InPlace,
-    #[serde(rename = "faststart")]
-    Faststart,
-}
+/// Capacité déclarée par une pièce du catalogue (ouverte : toute chaîne non vide est acceptée).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct CatalogCapability(String);
 
 impl CatalogCapability {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Remux => "remux",
-            Self::Database => "database",
-            Self::Transcode => "transcode",
-            Self::Analyze => "analyze",
-            Self::Other => "other",
-            Self::Video => "video",
-            Self::Audio => "audio",
-            Self::Integration => "integration",
-            Self::RemuxMp4 => "remux-mp4",
-            Self::Probe => "probe",
-            Self::InPlace => "in-place",
-            Self::Faststart => "faststart",
+    pub fn new(value: impl Into<String>) -> Self {
+        let value = value.into();
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            Self("other".to_owned())
+        } else {
+            Self(trimmed.to_owned())
         }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_probe(&self) -> bool {
+        self.0 == "probe"
+    }
+}
+
+impl Default for CatalogCapability {
+    fn default() -> Self {
+        Self("other".to_owned())
+    }
+}
+
+impl TryFrom<String> for CatalogCapability {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err("la capacité ne peut pas être vide");
+        }
+        Ok(Self(trimmed.to_owned()))
+    }
+}
+
+impl From<CatalogCapability> for String {
+    fn from(cap: CatalogCapability) -> Self {
+        cap.0
     }
 }
 
@@ -369,31 +364,16 @@ mod tests {
     }
 
     #[test]
-    fn catalog_capabilities_cover_the_index_and_the_tool_schema() -> Result<(), serde_json::Error> {
-        let capabilities = [
-            CatalogCapability::Remux,
-            CatalogCapability::Database,
-            CatalogCapability::Transcode,
-            CatalogCapability::Analyze,
-            CatalogCapability::Other,
-            CatalogCapability::Video,
-            CatalogCapability::Audio,
-            CatalogCapability::Integration,
-            CatalogCapability::RemuxMp4,
-            CatalogCapability::Probe,
-            CatalogCapability::InPlace,
-            CatalogCapability::Faststart,
-        ];
-        for capability in capabilities {
-            let json = serde_json::to_string(&capability)?;
-            assert_eq!(json, format!("\"{}\"", capability.as_str()));
-            assert_eq!(
-                serde_json::from_str::<CatalogCapability>(&json)?,
-                capability
-            );
+    fn catalog_capabilities_accept_any_non_empty_string() -> Result<(), serde_json::Error> {
+        for raw in ["remux", "probe", "studio", "encode", "subtitles"] {
+            let cap = CatalogCapability::new(raw);
+            let json = serde_json::to_string(&cap)?;
+            assert_eq!(json, format!("\"{raw}\""));
+            assert_eq!(serde_json::from_str::<CatalogCapability>(&json)?, cap);
         }
-        assert!(serde_json::from_str::<CatalogCapability>("\"studio\"").is_err());
-        assert!(serde_json::from_str::<CatalogCapability>("\"encode\"").is_err());
+        assert!(CatalogCapability::new("probe").is_probe());
+        assert!(!CatalogCapability::new("transcode").is_probe());
+        assert!(serde_json::from_str::<CatalogCapability>("\"   \"").is_err());
         Ok(())
     }
 

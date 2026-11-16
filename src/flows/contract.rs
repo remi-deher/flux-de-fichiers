@@ -2,7 +2,9 @@
 
 use crate::{
     flows::custom_args::{CustomArgsError, safe_custom_args},
-    media::{OutputProfile, PostValidateMode, ProbeFormat},
+    media::{
+        DurationRule, MagicBytesRule, OutputSpec, PostValidateMode, PostValidateSpec, ProbeFormat,
+    },
     plugins::{CatalogItemType, catalog_with_roots, flow_block_catalog, load_manifest},
     tool_run::{ProgressParser, ProgressStream},
     tools_cache::{ToolCacheManager, host_arch},
@@ -75,6 +77,7 @@ pub struct OperationContract {
 
 /// Définition d'exécution selon la nature (`primitive`, `binary`, `http`).
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[allow(clippy::large_enum_variant)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum OperationRuntime {
     Primitive(PrimitiveRuntime),
@@ -212,6 +215,35 @@ pub struct RetryFallbackRule {
     pub message: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeMatch {
+    #[serde(default)]
+    pub extensions: Vec<String>,
+    #[serde(default)]
+    pub priority: i32,
+}
+
+impl ProbeMatch {
+    pub fn is_wildcard(&self) -> bool {
+        self.extensions.is_empty() || self.extensions.iter().any(|ext| ext.trim() == "*")
+    }
+
+    pub fn matches_path(&self, path: &Path) -> bool {
+        if self.is_wildcard() {
+            return true;
+        }
+        let Some(file_ext) = path.extension().and_then(|e| e.to_str()) else {
+            return false;
+        };
+        self.extensions.iter().any(|ext| {
+            ext.trim()
+                .trim_start_matches('.')
+                .eq_ignore_ascii_case(file_ext)
+        })
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BinaryRuntime {
@@ -226,13 +258,25 @@ pub struct BinaryRuntime {
     #[serde(default)]
     pub probe_format: Option<ProbeFormat>,
     #[serde(default)]
+    pub probe_require_paths: Vec<String>,
+    #[serde(default)]
+    pub probe_enrichment_key: Option<String>,
+    #[serde(default)]
+    pub probe_match: ProbeMatch,
+    #[serde(default)]
     pub output_extension: Option<String>,
+    #[serde(default)]
+    pub output_content_type: Option<String>,
     #[serde(default)]
     pub output_filename: Option<String>,
     #[serde(default)]
-    pub output_profile: Option<OutputProfile>,
-    #[serde(default)]
     pub post_validate: PostValidateMode,
+    #[serde(default)]
+    pub post_validate_magic: Option<MagicBytesRule>,
+    #[serde(default)]
+    pub post_validate_preserve_paths: Vec<String>,
+    #[serde(default)]
+    pub duration_rules: Vec<DurationRule>,
     #[serde(default)]
     pub skip_when_unchanged: bool,
     #[serde(default)]
@@ -244,8 +288,6 @@ pub struct BinaryRuntime {
     #[serde(default)]
     pub defaults: Map<String, Value>,
     #[serde(default)]
-    pub custom_args_profile: Option<String>,
-    #[serde(default)]
     pub custom_args_forbidden: Vec<String>,
     #[serde(default)]
     pub derived: Vec<DerivedRule>,
@@ -255,6 +297,36 @@ pub struct BinaryRuntime {
     pub retry_fallback: Vec<RetryFallbackRule>,
     #[serde(default)]
     pub console: ConsoleConfig,
+}
+
+impl BinaryRuntime {
+    pub fn post_validate_spec(&self) -> PostValidateSpec {
+        PostValidateSpec {
+            mode: self.post_validate,
+            magic: self.post_validate_magic.clone(),
+            preserve_paths: self.post_validate_preserve_paths.clone(),
+        }
+    }
+
+    pub fn output_spec(&self) -> Option<OutputSpec> {
+        let has_output = self.output_extension.is_some()
+            || self.output_content_type.is_some()
+            || self.post_validate != PostValidateMode::None;
+        if !has_output {
+            return None;
+        }
+        Some(OutputSpec {
+            extension: self
+                .output_extension
+                .clone()
+                .unwrap_or_else(|| "bin".to_owned()),
+            content_type: self
+                .output_content_type
+                .clone()
+                .unwrap_or_else(|| "application/octet-stream".to_owned()),
+            post_validate: self.post_validate_spec(),
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -440,22 +512,89 @@ impl OperationRegistry {
     }
 
     pub fn primary_probe(&self) -> Option<&OperationContract> {
-        let mut matches: Vec<&OperationContract> = self
+        let mut matches: Vec<(&OperationContract, &BinaryRuntime)> = self
             .operations
             .values()
-            .filter(|op| {
-                matches!(
-                    &op.runtime,
-                    OperationRuntime::Binary(bin)
-                        if bin.execution_mode == BinaryExecutionMode::ProbePrimary
-                )
+            .filter_map(|op| match &op.runtime {
+                OperationRuntime::Binary(bin)
+                    if bin.execution_mode == BinaryExecutionMode::ProbePrimary =>
+                {
+                    Some((op, bin))
+                }
+                _ => None,
             })
             .collect();
-        matches.sort_by(|a, b| a.id.cmp(&b.id));
-        matches.into_iter().next()
+        matches.sort_by(|(a_op, a_bin), (b_op, b_bin)| {
+            b_bin
+                .probe_match
+                .priority
+                .cmp(&a_bin.probe_match.priority)
+                .then_with(|| a_op.id.cmp(&b_op.id))
+        });
+        matches.into_iter().map(|(op, _)| op).next()
+    }
+
+    pub fn primary_probe_for_file(&self, path: &Path) -> Option<&OperationContract> {
+        let mut matches: Vec<(&OperationContract, &BinaryRuntime)> = self
+            .operations
+            .values()
+            .filter_map(|op| match &op.runtime {
+                OperationRuntime::Binary(bin)
+                    if bin.execution_mode == BinaryExecutionMode::ProbePrimary
+                        && bin.probe_match.matches_path(path) =>
+                {
+                    Some((op, bin))
+                }
+                _ => None,
+            })
+            .collect();
+        matches.sort_by(|(a_op, a_bin), (b_op, b_bin)| {
+            a_bin
+                .probe_match
+                .is_wildcard()
+                .cmp(&b_bin.probe_match.is_wildcard())
+                .then_with(|| b_bin.probe_match.priority.cmp(&a_bin.probe_match.priority))
+                .then_with(|| a_op.id.cmp(&b_op.id))
+        });
+        matches.into_iter().map(|(op, _)| op).next()
     }
 
     pub fn enrich_probes(&self) -> Vec<&OperationContract> {
+        let mut matches: Vec<(&OperationContract, &BinaryRuntime)> = self
+            .operations
+            .values()
+            .filter_map(|op| match &op.runtime {
+                OperationRuntime::Binary(bin)
+                    if bin.execution_mode == BinaryExecutionMode::ProbeEnrich =>
+                {
+                    Some((op, bin))
+                }
+                _ => None,
+            })
+            .collect();
+        matches.sort_by(|(a_op, a_bin), (b_op, b_bin)| {
+            b_bin
+                .probe_match
+                .priority
+                .cmp(&a_bin.probe_match.priority)
+                .then_with(|| a_op.id.cmp(&b_op.id))
+        });
+        matches.into_iter().map(|(op, _)| op).collect()
+    }
+
+    pub fn enrich_probes_for_file(&self, path: &Path) -> Vec<&OperationContract> {
+        self.enrich_probes()
+            .into_iter()
+            .filter(|op| {
+                matches!(
+                    &op.runtime,
+                    OperationRuntime::Binary(bin) if bin.probe_match.matches_path(path)
+                )
+            })
+            .collect()
+    }
+
+    pub fn all_probes(&self) -> Vec<&OperationContract> {
         let mut matches: Vec<&OperationContract> = self
             .operations
             .values()
@@ -463,7 +602,10 @@ impl OperationRegistry {
                 matches!(
                     &op.runtime,
                     OperationRuntime::Binary(bin)
-                        if bin.execution_mode == BinaryExecutionMode::ProbeEnrich
+                        if matches!(
+                            bin.execution_mode,
+                            BinaryExecutionMode::ProbePrimary | BinaryExecutionMode::ProbeEnrich
+                        )
                 )
             })
             .collect();
@@ -498,11 +640,8 @@ impl OperationRegistry {
             }
         };
 
-        if let Some(probe) = self.primary_probe() {
+        for probe in self.all_probes() {
             push_op_tool(probe);
-        }
-        for enrich in self.enrich_probes() {
-            push_op_tool(enrich);
         }
         match flow.and_then(|f| serde_json::from_str::<FlowGraph>(&f.definition).ok()) {
             Some(graph) => {
@@ -551,11 +690,8 @@ impl OperationRegistry {
                 ops.insert(op.id.clone(), raw.clone());
             }
         };
-        if let Some(probe) = self.primary_probe() {
+        for probe in self.all_probes() {
             insert_op(probe);
-        }
-        for enrich in self.enrich_probes() {
-            insert_op(enrich);
         }
         if let Some(default_op) = self.default_fallback_operation() {
             insert_op(default_op);
@@ -573,79 +709,75 @@ impl OperationRegistry {
         (ops, blocks)
     }
 
-    pub fn output_profile_for_flow(
+    pub fn duration_rules(&self) -> Vec<DurationRule> {
+        let mut rules = Vec::new();
+        for op in self.all_probes() {
+            if let OperationRuntime::Binary(bin) = &op.runtime {
+                for rule in &bin.duration_rules {
+                    if let Some(key) = &bin.probe_enrichment_key {
+                        rules.push(DurationRule {
+                            path: format!("{key}.{}", rule.path),
+                            scale: rule.scale,
+                        });
+                    }
+                    rules.push(rule.clone());
+                }
+            }
+        }
+        rules
+    }
+
+    pub fn output_spec_for_flow(
         &self,
         flow: Option<&FlowRecord>,
         requested_ext: Option<&str>,
-    ) -> Option<OutputProfile> {
-        let default_profile = self
+    ) -> Option<OutputSpec> {
+        let default_spec = self
             .default_fallback_operation()
             .and_then(|op| match &op.runtime {
-                OperationRuntime::Binary(bin) => bin.output_profile,
+                OperationRuntime::Binary(bin) => bin.output_spec(),
                 _ => None,
             })
-            .unwrap_or(OutputProfile::StrictMkvRemux);
-        let default_ext = self
-            .default_fallback_operation()
-            .and_then(|op| match &op.runtime {
-                OperationRuntime::Binary(bin) => bin.output_extension.as_deref(),
-                _ => None,
-            })
-            .unwrap_or("mkv");
+            .unwrap_or_default();
 
         let Some(flow) = flow else {
             return match requested_ext {
-                None => Some(default_profile),
-                Some(ext) if ext == default_ext => Some(default_profile),
+                None => Some(default_spec),
+                Some(ext) if ext.eq_ignore_ascii_case(&default_spec.extension) => {
+                    Some(default_spec)
+                }
                 _ => None,
             };
         };
         let Ok(graph) = serde_json::from_str::<FlowGraph>(&flow.definition) else {
-            return Some(default_profile);
+            return Some(default_spec);
         };
-        let mut profiles: Vec<(OutputProfile, String)> = Vec::new();
+        let mut specs: Vec<OutputSpec> = Vec::new();
         for node in &graph.nodes {
             if let Some(OperationContract {
                 runtime: OperationRuntime::Binary(bin),
                 ..
             }) = self.resolve_node_operation(node)
-                && let Some(profile) = bin.output_profile
+                && let Some(spec) = bin.output_spec()
             {
-                let ext = bin
-                    .output_extension
-                    .as_deref()
-                    .unwrap_or_else(|| profile.extension())
-                    .to_owned();
-                profiles.push((profile, ext));
+                specs.push(spec);
             }
         }
 
-        if let Some(ext) = requested_ext
-            && ext != "mkv"
-        {
-            return profiles
+        if let Some(ext) = requested_ext {
+            if let Some(matched) = specs
                 .iter()
-                .find(|(_, p_ext)| p_ext == ext)
-                .map(|(p, _)| *p);
-        }
-        if !matches!(requested_ext, None | Some("mkv")) {
+                .rev()
+                .find(|spec| spec.extension.eq_ignore_ascii_case(ext))
+            {
+                return Some(matched.clone());
+            }
+            if specs.is_empty() && default_spec.extension.eq_ignore_ascii_case(ext) {
+                return Some(default_spec);
+            }
             return None;
         }
-        for target in [
-            OutputProfile::TranscodedMkv,
-            OutputProfile::StrictMkvRemux,
-            OutputProfile::MkvMetadataEdit,
-        ] {
-            if profiles.iter().any(|(p, _)| *p == target) {
-                return Some(target);
-            }
-        }
-        if requested_ext.is_none()
-            && let Some((profile, _)) = profiles.iter().find(|(_, ext)| ext != "mkv")
-        {
-            return Some(*profile);
-        }
-        Some(default_profile)
+        specs.pop().or(Some(default_spec))
     }
 
     pub fn flow_readiness_warnings(
@@ -801,11 +933,7 @@ fn expand_arg_items(
                 Some(ParamFormat::SafeCustomArgs) => {
                     let raw = scalar_to_string(params.get(param));
                     if !raw.trim().is_empty() {
-                        let extra = safe_custom_args(
-                            &raw,
-                            runtime.custom_args_profile.as_deref(),
-                            &runtime.custom_args_forbidden,
-                        )?;
+                        let extra = safe_custom_args(&raw, &runtime.custom_args_forbidden)?;
                         *non_path_tokens += extra.len();
                         out.extend(extra);
                     }
@@ -1077,6 +1205,107 @@ mod tests {
         let reg = OperationRegistry::load_from_roots(&[sibling]);
         assert!(reg.primary_probe().is_some());
         assert!(reg.default_fallback_operation().is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn probe_selection_matches_file_extension_and_priority() -> anyhow::Result<()> {
+        let mut reg = OperationRegistry::default();
+        for op in [
+            json!({
+                "schemaVersion": "1.1.0",
+                "id": "operation.video.probe",
+                "version": "1.0.0",
+                "name": "VideoProbe",
+                "providerId": "plugin.video",
+                "providerKind": "plugin",
+                "capability": "probe",
+                "status": "validated",
+                "runtime": {
+                    "kind": "binary",
+                    "executable": "vprobe",
+                    "executionMode": "probe-primary",
+                    "probeMatch": { "extensions": ["mkv", "mp4"] },
+                    "argv": [{ "param": "source", "as": "filePath" }]
+                }
+            }),
+            json!({
+                "schemaVersion": "1.1.0",
+                "id": "operation.ebook.probe",
+                "version": "1.0.0",
+                "name": "EbookProbe",
+                "providerId": "plugin.calibre",
+                "providerKind": "plugin",
+                "capability": "probe",
+                "status": "validated",
+                "runtime": {
+                    "kind": "binary",
+                    "executable": "ebook-meta",
+                    "executionMode": "probe-primary",
+                    "probeMatch": { "extensions": ["epub", "mobi"], "priority": 10 },
+                    "argv": [{ "param": "source", "as": "filePath" }]
+                }
+            }),
+            json!({
+                "schemaVersion": "1.1.0",
+                "id": "operation.generic.probe",
+                "version": "1.0.0",
+                "name": "GenericProbe",
+                "providerId": "plugin.core",
+                "providerKind": "plugin",
+                "capability": "probe",
+                "status": "validated",
+                "runtime": {
+                    "kind": "binary",
+                    "executable": "fileprobe",
+                    "executionMode": "probe-primary",
+                    "argv": [{ "param": "source", "as": "filePath" }]
+                }
+            }),
+            json!({
+                "schemaVersion": "1.1.0",
+                "id": "operation.ebook.enrich",
+                "version": "1.0.0",
+                "name": "EbookEnrich",
+                "providerId": "plugin.calibre",
+                "providerKind": "plugin",
+                "capability": "probe",
+                "status": "validated",
+                "runtime": {
+                    "kind": "binary",
+                    "executable": "ebook-enrich",
+                    "executionMode": "probe-enrich",
+                    "probeMatch": { "extensions": ["epub"] },
+                    "argv": [{ "param": "source", "as": "filePath" }]
+                }
+            }),
+        ] {
+            reg.register_json(op)?;
+        }
+
+        assert_eq!(
+            reg.primary_probe_for_file(Path::new("film.MKV"))
+                .map(|o| o.id.as_str()),
+            Some("operation.video.probe")
+        );
+        assert_eq!(
+            reg.primary_probe_for_file(Path::new("roman.epub"))
+                .map(|o| o.id.as_str()),
+            Some("operation.ebook.probe")
+        );
+        assert_eq!(
+            reg.primary_probe_for_file(Path::new("archive.zip"))
+                .map(|o| o.id.as_str()),
+            Some("operation.generic.probe")
+        );
+        assert_eq!(
+            reg.enrich_probes_for_file(Path::new("roman.epub"))
+                .into_iter()
+                .map(|o| o.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["operation.ebook.enrich"]
+        );
+        assert!(reg.enrich_probes_for_file(Path::new("film.mkv")).is_empty());
         Ok(())
     }
 }

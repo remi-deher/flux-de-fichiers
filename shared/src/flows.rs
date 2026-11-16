@@ -8,9 +8,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::fmt;
 
+mod condition;
 mod graph;
 mod owned;
 
+pub use condition::{ConditionConfig, evaluate_condition, extract_json_values};
 pub use graph::{GraphError, GraphPosition, layout};
 pub use owned::{OwnedBlockSpec, OwnedFieldKind, OwnedFieldSpec, find_owned};
 

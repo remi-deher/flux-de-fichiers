@@ -196,10 +196,10 @@ async fn job_lease_publication_and_flow_queries() -> anyhow::Result<()> {
         lease_epoch: claim.lease_epoch,
         telemetry: None,
     };
-    repository::fail(&pool, third.id, &lease, JobErrorCode::RemuxFailed).await?;
+    repository::fail(&pool, third.id, &lease, JobErrorCode::OperationFailed).await?;
     assert_eq!(
         repository::get_job(&pool, third.id).await?.error_code,
-        Some(JobErrorCode::RemuxFailed)
+        Some(JobErrorCode::OperationFailed)
     );
     assert!(matches!(
         repository::fail(&pool, third.id, &lease, JobErrorCode::TransferFailed).await,
@@ -325,7 +325,7 @@ async fn jobs_keep_the_flow_version_frozen_at_creation() -> anyhow::Result<()> {
             lease_epoch: claim.lease_epoch,
             telemetry: None,
         },
-        JobErrorCode::RemuxFailed,
+        JobErrorCode::OperationFailed,
     )
     .await?;
 

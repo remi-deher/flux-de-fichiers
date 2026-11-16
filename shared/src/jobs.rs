@@ -3,11 +3,28 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::path::Path;
 use std::str::FromStr;
 use uuid::Uuid;
 
 /// Nombre maximal de tentatives d'une tâche, relances manuelles comprises.
 pub const MAX_ATTEMPTS: i32 = 3;
+const MAX_WORKING_EXT_LEN: usize = 16;
+
+/// Retourne un nom de fichier de travail sûr conservant l'extension de la source (`source.<ext>`).
+pub fn source_working_filename(source_name: &str) -> String {
+    match Path::new(source_name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .filter(|ext| {
+            !ext.is_empty()
+                && ext.len() <= MAX_WORKING_EXT_LEN
+                && ext.chars().all(|c| c.is_ascii_alphanumeric())
+        }) {
+        Some(ext) => format!("source.{ext}"),
+        None => "source".to_owned(),
+    }
+}
 
 /// Statuts persistés par `jobs.status` (CHECK SQL : queued, running, succeeded, failed).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,8 +111,8 @@ impl fmt::Display for JobEventType {
 #[cfg_attr(feature = "sqlx", derive(sqlx::Type), sqlx(rename_all = "snake_case"))]
 #[serde(rename_all = "snake_case")]
 pub enum JobErrorCode {
-    RemuxFailed,
-    EncodeFailed,
+    #[serde(alias = "remux_failed", alias = "encode_failed")]
+    OperationFailed,
     WebhookFailed,
     IntegrationFailed,
     SourceIntegrity,
@@ -108,8 +125,7 @@ pub enum JobErrorCode {
 impl JobErrorCode {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::RemuxFailed => "remux_failed",
-            Self::EncodeFailed => "encode_failed",
+            Self::OperationFailed => "operation_failed",
             Self::WebhookFailed => "webhook_failed",
             Self::IntegrationFailed => "integration_failed",
             Self::SourceIntegrity => "source_integrity",
@@ -123,8 +139,7 @@ impl JobErrorCode {
     pub fn is_worker_reportable(self) -> bool {
         matches!(
             self,
-            Self::RemuxFailed
-                | Self::EncodeFailed
+            Self::OperationFailed
                 | Self::WebhookFailed
                 | Self::IntegrationFailed
                 | Self::SourceIntegrity
@@ -137,8 +152,7 @@ impl JobErrorCode {
     pub fn from_worker_label(label: &str) -> Self {
         match label {
             "source_integrity" => Self::SourceIntegrity,
-            "remux_failed" => Self::RemuxFailed,
-            "encode_failed" => Self::EncodeFailed,
+            "operation_failed" | "remux_failed" | "encode_failed" => Self::OperationFailed,
             "webhook_failed" => Self::WebhookFailed,
             "integration_failed" => Self::IntegrationFailed,
             "probe_unavailable" => Self::ProbeUnavailable,
@@ -158,8 +172,7 @@ impl FromStr for JobErrorCode {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "remux_failed" => Ok(Self::RemuxFailed),
-            "encode_failed" => Ok(Self::EncodeFailed),
+            "operation_failed" | "remux_failed" | "encode_failed" => Ok(Self::OperationFailed),
             "webhook_failed" => Ok(Self::WebhookFailed),
             "integration_failed" => Ok(Self::IntegrationFailed),
             "source_integrity" => Ok(Self::SourceIntegrity),
@@ -314,8 +327,16 @@ mod tests {
         let lost = Some(JobErrorCode::LeaseExpired);
         assert!(job(JobStatus::Failed, lost, 1).is_retryable());
         assert!(!job(JobStatus::Failed, lost, MAX_ATTEMPTS).is_retryable());
-        assert!(!job(JobStatus::Failed, Some(JobErrorCode::RemuxFailed), 1).is_retryable());
+        assert!(!job(JobStatus::Failed, Some(JobErrorCode::OperationFailed), 1).is_retryable());
         assert!(!job(JobStatus::Running, None, 1).is_retryable());
+    }
+
+    #[test]
+    fn source_working_filename_preserves_safe_extension_and_rejects_traversal() {
+        assert_eq!(source_working_filename("mon_livre.epub"), "source.epub");
+        assert_eq!(source_working_filename("Film.MKV"), "source.MKV");
+        assert_eq!(source_working_filename("../weird/file"), "source");
+        assert_eq!(source_working_filename("bad.tar..gz"), "source.gz");
     }
 
     #[test]

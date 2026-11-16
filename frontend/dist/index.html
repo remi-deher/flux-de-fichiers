@@ -756,31 +756,6 @@ button, a, select, input {
   min-width: 0;
 }
 
-.topbar-breadcrumb {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.8125rem;
-  min-width: 0;
-  white-space: nowrap;
-}
-
-.topbar-breadcrumb__group {
-  color: var(--text-dim);
-  font-weight: 500;
-}
-
-.topbar-breadcrumb__sep {
-  color: var(--text-muted);
-}
-
-.topbar-breadcrumb__page {
-  color: var(--text-main);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* Style des icônes vectorielles Lucide */
 .lucide-icon {
   display: inline-block;
@@ -1507,10 +1482,6 @@ body[data-filter-sheet] .topbar-search {
     margin: 0;
   }
 
-  .topbar-breadcrumb {
-    display: none;
-  }
-
   .topbar-container {
     padding: 0.35rem 0.5rem;
   }
@@ -1862,12 +1833,14 @@ body[data-filter-sheet] .topbar-search {
   flex: none;
 }
 
-.inspection-drawer__subnav {
+.inspection-drawer__subnav,
+.page-subnav {
   display: flex;
   border-bottom: 1px solid var(--border-color);
 }
 
-.inspection-drawer__tab {
+.inspection-drawer__tab,
+.page-subnav__tab {
   flex: 1;
   appearance: none;
   border: 0;
@@ -1883,12 +1856,18 @@ body[data-filter-sheet] .topbar-search {
   cursor: pointer;
 }
 
-.inspection-drawer__tab.is-active {
+.page-subnav__tab:hover {
+  color: var(--text-main);
+}
+
+.inspection-drawer__tab.is-active,
+.page-subnav__tab.is-active {
   color: var(--text-main);
   border-bottom-color: var(--primary);
 }
 
-.inspection-drawer__tab:focus-visible {
+.inspection-drawer__tab:focus-visible,
+.page-subnav__tab:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: -2px;
 }

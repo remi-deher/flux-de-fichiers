@@ -19,7 +19,7 @@ use wasm_bindgen::JsCast;
 
 const FLOWS_PATH: &str = "/api/v1/flows";
 const BLOCKS_PATH: &str = "/api/v1/flows/blocks";
-const DEFAULT_FILE_MASK: &str = "*.mkv";
+const DEFAULT_FILE_MASK: &str = "*";
 const CMD_ICON_SIZE: u32 = 15;
 const CHEVRON_ICON_SIZE: u32 = 18;
 

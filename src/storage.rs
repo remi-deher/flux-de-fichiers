@@ -11,7 +11,6 @@ pub fn valid_name(name: &str) -> bool {
         && !name.starts_with('.')
         && !name.contains(['\\', '\0'])
         && name.len() <= 240
-        && name.to_ascii_lowercase().ends_with(".mkv")
 }
 
 pub async fn input_path(root: &Path, name: &str) -> AppResult<PathBuf> {
@@ -82,19 +81,19 @@ pub async fn fingerprint(path: &Path, limit: u64) -> AppResult<(String, u64)> {
 mod tests {
     use super::*;
     #[test]
-    fn only_flat_mkv_names_are_accepted() {
+    fn only_flat_non_hidden_names_are_accepted() {
         for name in [
             "../movie.mkv",
             "/movie.mkv",
             "a/b.mkv",
             "a\\b.mkv",
             ".hidden.mkv",
-            "x.mp4",
             "",
         ] {
             assert!(!valid_name(name), "{name}");
         }
         assert!(valid_name("Exemple vidéo.MKV"));
+        assert!(valid_name("x.mp4"));
     }
     #[tokio::test]
     async fn rejects_symlink_inputs() -> anyhow::Result<()> {

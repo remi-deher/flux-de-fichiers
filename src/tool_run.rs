@@ -29,7 +29,7 @@ const SPAWN_BUSY_DELAY: Duration = Duration::from_millis(25);
 pub enum ProgressParser {
     #[default]
     None,
-    FfmpegTime,
+    ElapsedTime,
     #[serde(rename = "fraction-100")]
     Fraction100,
     PercentLine,
@@ -44,7 +44,7 @@ impl ProgressParser {
     ) -> Option<(u32, String)> {
         match self {
             Self::None => None,
-            Self::FfmpegTime => ffmpeg_progress(segment, duration_secs),
+            Self::ElapsedTime => elapsed_time_progress(segment, duration_secs),
             Self::Fraction100 => fraction_100_progress(segment),
             Self::PercentLine => percent_line_progress(segment),
         }
@@ -124,8 +124,8 @@ pub enum ToolRunError {
     },
 }
 
-/// Parse une estampille temporelle FFmpeg (`HH:MM:SS.xx`) en secondes.
-pub fn parse_ffmpeg_timestamp(stamp: &str) -> Option<f64> {
+/// Parse une estampille temporelle (`HH:MM:SS.xx`) en secondes.
+pub fn parse_hms_timestamp(stamp: &str) -> Option<f64> {
     let mut parts = stamp.trim().split(':');
     let hours: f64 = parts.next()?.parse().ok()?;
     let minutes: f64 = parts.next()?.parse().ok()?;
@@ -138,10 +138,10 @@ pub fn parse_ffmpeg_timestamp(stamp: &str) -> Option<f64> {
     (total >= 0.0).then_some(total)
 }
 
-fn ffmpeg_progress(segment: &str, duration_secs: Option<f64>) -> Option<(u32, String)> {
+fn elapsed_time_progress(segment: &str, duration_secs: Option<f64>) -> Option<(u32, String)> {
     if let Some(time) = segment.split("time=").nth(1) {
         let stamp = time.split_whitespace().next().unwrap_or("");
-        let percent = match (parse_ffmpeg_timestamp(stamp), duration_secs) {
+        let percent = match (parse_hms_timestamp(stamp), duration_secs) {
             (Some(elapsed), Some(total)) if total > 0.0 => {
                 ((elapsed / total) * f64::from(PERCENT_MAX))
                     .round()
@@ -442,24 +442,24 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     #[test]
-    fn ffmpeg_progress_reads_time_then_frame_and_computes_percent() {
+    fn elapsed_time_progress_reads_time_then_frame_and_computes_percent() {
         assert_eq!(
-            ffmpeg_progress("frame=1 fps=2 time=00:00:03.50 bitrate=1k", None),
+            elapsed_time_progress("frame=1 fps=2 time=00:00:03.50 bitrate=1k", None),
             Some((0, "00:00:03.50".into()))
         );
         assert_eq!(
-            ffmpeg_progress("frame=1 fps=2 time=00:00:30.00 bitrate=1k", Some(60.0)),
+            elapsed_time_progress("frame=1 fps=2 time=00:00:30.00 bitrate=1k", Some(60.0)),
             Some((50, "00:00:30.00".into()))
         );
         assert_eq!(
-            ffmpeg_progress("frame=1 fps=2 time=00:01:05.00 bitrate=1k", Some(60.0)),
+            elapsed_time_progress("frame=1 fps=2 time=00:01:05.00 bitrate=1k", Some(60.0)),
             Some((99, "00:01:05.00".into()))
         );
         assert_eq!(
-            ffmpeg_progress("frame= 12", Some(60.0)),
+            elapsed_time_progress("frame= 12", Some(60.0)),
             Some((0, "frame= 12".into()))
         );
-        assert_eq!(ffmpeg_progress("Stream #0", None), None);
+        assert_eq!(elapsed_time_progress("Stream #0", None), None);
     }
 
     #[test]

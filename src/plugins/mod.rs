@@ -324,7 +324,7 @@ pub fn summarize_tool(
         name: entry.name,
         version: entry.version,
         status,
-        capability: entry.capability.unwrap_or(CatalogCapability::Other),
+        capability: entry.capability.unwrap_or_default(),
         current_choice: entry.current_choice.unwrap_or(false),
         arch: arch.to_string(),
         distribution: entry
@@ -372,11 +372,13 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn unknown_catalog_strings_are_rejected() {
+    fn unknown_catalog_types_and_empty_capabilities_are_rejected() {
         let bad_type = r#"{"schemaVersion":"1.0.0","entries":[{"id":"x","type":"extension","version":"1.0.0","name":"X","manifestPath":"x.json"}]}"#;
         assert!(serde_json::from_str::<CatalogIndex>(bad_type).is_err());
-        let bad_capability = r#"{"schemaVersion":"1.0.0","entries":[{"id":"x","type":"app","version":"1.0.0","name":"X","manifestPath":"x.json","capability":"studio"}]}"#;
-        assert!(serde_json::from_str::<CatalogIndex>(bad_capability).is_err());
+        let empty_capability = r#"{"schemaVersion":"1.0.0","entries":[{"id":"x","type":"app","version":"1.0.0","name":"X","manifestPath":"x.json","capability":"   "}]}"#;
+        assert!(serde_json::from_str::<CatalogIndex>(empty_capability).is_err());
+        let custom_capability = r#"{"schemaVersion":"1.0.0","entries":[{"id":"x","type":"app","version":"1.0.0","name":"X","manifestPath":"x.json","capability":"studio"}]}"#;
+        assert!(serde_json::from_str::<CatalogIndex>(custom_capability).is_ok());
     }
 
     #[test]

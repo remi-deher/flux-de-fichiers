@@ -72,7 +72,8 @@ fn base_registry() -> OperationRegistry {
                 "tool": { "id": "app.mkvtoolnix", "version": "1.0.0" },
                 "executable": "mkvmerge",
                 "executionMode": "probe-primary",
-                "probeFormat": "mkvmerge-json",
+                "probeFormat": "json",
+                "probeRequirePaths": ["container.recognized", "tracks"],
                 "argv": ["--output-charset", "UTF-8", "-J", { "param": "source", "as": "filePath" }],
                 "console": { "successExitCodes": [0, 1], "warningExitCodes": [1] }
             }
@@ -92,12 +93,13 @@ fn base_registry() -> OperationRegistry {
                 "executable": "MP4Box",
                 "executionMode": "staged-output",
                 "outputExtension": "mp4",
+                "outputContentType": "video/mp4",
                 "outputFilename": "remuxed.mp4",
-                "outputProfile": "mp4_container",
-                "postValidate": "mp4-header",
+                "postValidate": "magic-bytes",
+                "postValidateMagic": { "offset": 4, "ascii": "ftyp" },
                 "errorCode": "remux_failed",
                 "defaults": { "faststart": true, "custom_parameters": "" },
-                "customArgsProfile": "mp4box",
+                "customArgsForbidden": ["-add", "-cat", "-new", "-out"],
                 "argv": [
                     "-add", { "param": "source", "as": "filePath" },
                     { "when": { "param": "faststart", "truthy": true }, "then": ["-inter", "500"], "else": ["-flat"] },
@@ -122,9 +124,9 @@ fn base_registry() -> OperationRegistry {
                 "executable": "ffmpeg",
                 "executionMode": "staged-output",
                 "outputExtension": "mkv",
+                "outputContentType": "video/x-matroska",
                 "outputFilename": "encoded.mkv",
-                "outputProfile": "transcoded_mkv",
-                "postValidate": "valid-media",
+                "postValidate": "valid-probe",
                 "errorCode": "encode_failed",
                 "successMessage": "encodage terminé",
                 "defaults": { "codec": "h265", "encoder": "nvidia", "quality": 6 },
@@ -133,7 +135,7 @@ fn base_registry() -> OperationRegistry {
                 ],
                 "argv": ["-i", { "param": "source", "as": "filePath" }, "-c:v", { "param": "video_encoder" }, { "param": "destination", "as": "filePath" }],
                 "retryFallback": [{ "when": { "param": "encoder", "in": ["nvidia"] }, "overrides": { "encoder": "cpu" }, "message": "encodage terminé (repli matériel -> CPU)" }],
-                "console": { "progressFormat": "ffmpeg-time", "progressStream": "stderr", "successExitCodes": [0] }
+                "console": { "progressFormat": "elapsed-time", "progressStream": "stderr", "successExitCodes": [0] }
             }
         }),
         json!({
@@ -246,10 +248,8 @@ async fn remux_mp4_contract_runs_mp4box_and_reports_progress()
     .await
     .map_err(|e| e.message)?;
     assert_eq!(outcome.final_file, work.join("remuxed.mp4"));
-    assert_eq!(
-        outcome.output_profile,
-        crate::media::OutputProfile::Mp4Container
-    );
+    assert_eq!(outcome.output_spec.extension, "mp4");
+    assert_eq!(outcome.output_spec.content_type, "video/mp4");
     assert!(outcome.final_file.is_file() && !outcome.is_in_place);
     assert!(
         log.lock()
@@ -308,10 +308,8 @@ exit 2
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
     .map_err(|e| e.message)?;
-    assert_eq!(
-        outcome.output_profile,
-        crate::media::OutputProfile::TranscodedMkv
-    );
+    assert_eq!(outcome.output_spec.extension, "mkv");
+    assert_eq!(outcome.output_spec.content_type, "video/x-matroska");
     assert!(
         outcome
             .steps
@@ -355,9 +353,9 @@ exit 9
             "executable": "brandctl",
             "executionMode": "staged-output",
             "outputExtension": "mkv",
+            "outputContentType": "video/x-matroska",
             "outputFilename": "branded.mkv",
-            "outputProfile": "transcoded_mkv",
-            "postValidate": "valid-media",
+            "postValidate": "valid-probe",
             "successMessage": "marquage tiers réussi",
             "defaults": { "label": "FLUX" },
             "argv": [

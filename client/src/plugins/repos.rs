@@ -261,7 +261,7 @@ pub fn ReposSection(
                         }
                     })}
                 </Drawer>
-                <Drawer open=adding eyebrow="Plugins" title="Ajouter un dépôt".to_owned()>
+                <Drawer open=adding eyebrow="Extensions" title="Ajouter un dépôt".to_owned()>
                     <form class="inspection-panel" on:submit=move |event| {
                         event.prevent_default();
                         add.dispatch(CreateRepositoryRequest { id: None, name: name.get_untracked(), index_url: url.get_untracked() });

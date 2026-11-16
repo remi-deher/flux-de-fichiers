@@ -50,10 +50,9 @@ pub struct CatalogCounts {
     pub flows: usize,
     pub scripts: usize,
     pub resources: usize,
-    pub distributed_tools: usize,
 }
 
-/// Synthèse des entrées du catalogue par section (hors blocs).
+/// Synthèse des entrées du catalogue par section (hors blocs et outils distribués).
 pub fn summarize_catalog(entries: &[CatalogEntry]) -> CatalogCounts {
     let mut counts = CatalogCounts::default();
     for entry in entries {
@@ -78,10 +77,7 @@ pub fn summarize_catalog(entries: &[CatalogEntry]) -> CatalogCounts {
                 counts.total += 1;
                 counts.resources += 1;
             }
-            Some(CatalogSection::Applications) => {
-                counts.distributed_tools += 1;
-            }
-            None => {}
+            Some(CatalogSection::Applications) | None => {}
         }
     }
     counts
@@ -250,15 +246,6 @@ fn CatalogSectionView(
             .with_filter(
                 active_kind == PluginKindFilter::Resources,
                 set_kind(PluginKindFilter::Resources),
-            ),
-            StatItem::new(
-                "Outils distribués",
-                counts.distributed_tools.to_string(),
-                MetricTone::Neutral,
-            )
-            .with_filter(
-                active_kind == PluginKindFilter::DistributedTools,
-                set_kind(PluginKindFilter::DistributedTools),
             ),
         ];
         if let Some(repos) = repositories {
@@ -512,7 +499,7 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
 
     view! {
         <div class="tab-panel" role="tabpanel">
-            <nav class="page-subnav" role="tablist" aria-label="Vues des plugins">
+            <nav class="page-subnav" role="tablist" aria-label="Vues des extensions">
                 {PluginsTab::visible_tabs(can_manage).iter().copied().map(|tab| {
                     let is_active = move || active_tab.get() == tab;
                     view! {
@@ -634,7 +621,6 @@ mod tests {
                 flows: 1,
                 scripts: 1,
                 resources: 2,
-                distributed_tools: 1,
             }
         );
         assert_eq!(
@@ -652,10 +638,6 @@ mod tests {
         assert_eq!(
             filter_catalog(all.clone(), PluginKindFilter::Resources, "").len(),
             2
-        );
-        assert_eq!(
-            filter_catalog(all.clone(), PluginKindFilter::DistributedTools, "").len(),
-            1
         );
         assert_eq!(filter_catalog(all, PluginKindFilter::Flows, "").len(), 1);
     }

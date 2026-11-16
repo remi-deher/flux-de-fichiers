@@ -49,7 +49,10 @@ fn DistributionTab(
 ) -> impl IntoView {
     let tool_id = detail.summary.id.clone();
     let (status_label, status_class) = tool_status_label(detail.summary.status);
-    let installable = can_install && detail.summary.status == ToolStatus::NotInstalled;
+    let installable = can_install
+        && detail.summary.installable
+        && detail.summary.status == ToolStatus::NotInstalled
+        && detail.release_status.as_deref() != Some("contract-only");
     let feedback = RwSignal::new(None::<String>);
     let install = Action::new_local(move |(): &()| {
         let path = format!("{TOOLS_PATH}/{}/install", encode_segment(&tool_id));
@@ -57,7 +60,7 @@ fn DistributionTab(
     });
     Effect::new(move |_| match install.value().get() {
         Some(Ok(_)) => {
-            Toasts::set_success(feedback, "Installation lancée.");
+            Toasts::set_success(feedback, "Outil installé.");
             bump(reload_tools);
             bump(reload_detail);
         }
@@ -110,19 +113,29 @@ fn DistributionTab(
                 }.into_any()
             }}
         </div>
-        {installable.then(|| view! {
-            <div class="inspection-drawer__actions">
-                <button
-                    type="button"
-                    class="btn btn-primary"
-                    disabled=move || install.pending().get()
-                    on:click=move |_| { install.dispatch(()); }
-                >
-                    <Icon name=IconName::Download size=INSTALL_ICON_SIZE />
-                    <span>{move || if install.pending().get() { "Installation…" } else { "Installer l'outil" }}</span>
-                </button>
-            </div>
-        })}
+        {if installable {
+            view! {
+                <div class="inspection-drawer__actions">
+                    <button
+                        type="button"
+                        class="btn btn-primary"
+                        disabled=move || install.pending().get()
+                        on:click=move |_| { install.dispatch(()); }
+                    >
+                        <Icon name=IconName::Download size=INSTALL_ICON_SIZE />
+                        <span>{move || if install.pending().get() { "Installation…" } else { "Installer l'outil" }}</span>
+                    </button>
+                </div>
+            }
+            .into_any()
+        } else if detail.summary.status == ToolStatus::NotInstalled {
+            view! {
+                <p class="text-dim text-sm">"Contrat en attente : aucun binaire distribuable pour cet hôte."</p>
+            }
+            .into_any()
+        } else {
+            view! { <></> }.into_any()
+        }}
         <p class="form-help" role="status">{move || feedback.get()}</p>
     }
 }

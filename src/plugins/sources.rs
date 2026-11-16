@@ -5,7 +5,7 @@ use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
 
 const MAX_REPOSITORY_ID_LEN: usize = 64;
-const INDEX_RELATIVE_PATH: [&str; 2] = ["catalogue", "index.json"];
+const INDEX_RELATIVE_PATH: &str = "index.json";
 
 /// Un identifiant de dépôt sert de nom de dossier : lettres, chiffres, `.`, `-` et `_` seulement.
 pub fn is_valid_repository_id(id: &str) -> bool {
@@ -23,10 +23,7 @@ pub fn repository_dir(repos_dir: &Path, repository_id: &str) -> Option<PathBuf> 
 }
 
 fn has_index(dir: &Path) -> bool {
-    INDEX_RELATIVE_PATH
-        .iter()
-        .fold(dir.to_path_buf(), |path, part| path.join(part))
-        .is_file()
+    dir.join(INDEX_RELATIVE_PATH).is_file()
 }
 
 /// Dossiers de catalogue à lire, dans l'ordre de priorité : le dossier local de développement,
@@ -56,7 +53,7 @@ pub async fn sync_enabled_repositories(pool: &SqlitePool, config: &Config) {
         .await
         .sync_policy();
     for repo in repositories.into_iter().filter(|repo| repo.enabled) {
-        match super::sync_repository(&repo, &repos_dir, &policy).await {
+        match super::sync_repository_verified(pool, &repo, &repos_dir, &policy).await {
             Ok(report) => {
                 tracing::info!(repository = %repo.id, entries = report.entries, files = report.files, "dépôt de plugins synchronisé");
                 let _ = repository::touch_plugin_repository_sync(pool, &repo.id).await;
@@ -96,8 +93,7 @@ mod tests {
     fn test_has_index_requires_the_catalogue_file() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         assert!(!has_index(dir.path()));
-        std::fs::create_dir_all(dir.path().join("catalogue"))?;
-        std::fs::write(dir.path().join("catalogue/index.json"), "{}")?;
+        std::fs::write(dir.path().join("index.json"), "{}")?;
         assert!(has_index(dir.path()));
         Ok(())
     }

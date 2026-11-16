@@ -32,11 +32,10 @@ struct Harness {
 }
 
 fn write_plugin_catalog(root: &Path) -> anyhow::Result<()> {
-    std::fs::create_dir_all(root.join("catalogue"))?;
     std::fs::create_dir_all(root.join("plugins/core/blocks"))?;
     std::fs::create_dir_all(root.join("plugins/core/operations"))?;
     std::fs::write(
-        root.join("catalogue/index.json"),
+        root.join("index.json"),
         serde_json::json!({
             "schemaVersion": "1.0.0",
             "entries": [

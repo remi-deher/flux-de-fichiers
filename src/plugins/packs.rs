@@ -1,12 +1,16 @@
 //! Lecture et installation déclarative des packs de plugins (`packs/*/installation.json`).
 
-use super::{CatalogItemType, SyncPolicy, catalog_with_roots, ensure_tool_installed};
+use super::{
+    CatalogItemType, SyncPolicy, catalog_with_roots, ensure_tool_installed,
+    ensure_tool_installed_verified,
+};
 use crate::{
     error::{AppError, AppResult},
     tools_cache::ToolCacheManager,
 };
 pub use flux_shared::plugins::{PackInstallResult, PackInstallation};
 use serde_json::Value;
+use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
 
 /// Charge le contrat `installation.json` d'un pack du catalogue synchronisé.
@@ -56,6 +60,27 @@ pub async fn install_pack(
     policy: &SyncPolicy,
     pack_id: &str,
 ) -> AppResult<PackInstallResult> {
+    install_pack_with_optional_pool(None, roots, cache, policy, pack_id).await
+}
+
+/// Variante vérifiant également l'immuabilité TOFU des outils installés via la base SQLite.
+pub async fn install_pack_verified(
+    pool: &SqlitePool,
+    roots: &[PathBuf],
+    cache: &ToolCacheManager,
+    policy: &SyncPolicy,
+    pack_id: &str,
+) -> AppResult<PackInstallResult> {
+    install_pack_with_optional_pool(Some(pool), roots, cache, policy, pack_id).await
+}
+
+async fn install_pack_with_optional_pool(
+    pool: Option<&SqlitePool>,
+    roots: &[PathBuf],
+    cache: &ToolCacheManager,
+    policy: &SyncPolicy,
+    pack_id: &str,
+) -> AppResult<PackInstallResult> {
     let plan = read_pack_installation(roots, pack_id)?;
     let present_ids: std::collections::HashSet<String> = catalog_with_roots(roots)
         .into_iter()
@@ -70,9 +95,30 @@ pub async fn install_pack(
     for component in &plan.components {
         match component.kind {
             CatalogItemType::App => {
-                match ensure_tool_installed(roots, cache, &component.id, &component.version, policy)
-                    .await
-                {
+                let outcome = match pool {
+                    Some(pool) => {
+                        ensure_tool_installed_verified(
+                            pool,
+                            roots,
+                            cache,
+                            &component.id,
+                            &component.version,
+                            policy,
+                        )
+                        .await
+                    }
+                    None => {
+                        ensure_tool_installed(
+                            roots,
+                            cache,
+                            &component.id,
+                            &component.version,
+                            policy,
+                        )
+                        .await
+                    }
+                };
+                match outcome {
                     Ok(_) => installed_tools.push(component.id.clone()),
                     Err(error) => failed_tools.push((component.id.clone(), error.to_string())),
                 }
@@ -131,10 +177,9 @@ mod tests {
     async fn install_pack_reports_verified_plugins_and_missing_tools() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         let root = dir.path();
-        std::fs::create_dir_all(root.join("catalogue"))?;
         std::fs::create_dir_all(root.join("packs/demo"))?;
         std::fs::write(
-            root.join("catalogue/index.json"),
+            root.join("index.json"),
             r#"{"schemaVersion":"1.0.0","entries":[
                 {"id":"pack.demo","type":"pack","version":"1.0.0","name":"Demo","manifestPath":"packs/demo/manifest.json"},
                 {"id":"plugin.video","type":"plugin","version":"1.0.0","name":"Vid","manifestPath":"plugins/v.json"}

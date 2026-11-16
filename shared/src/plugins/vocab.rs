@@ -8,7 +8,7 @@ use serde_json::Value;
 /// Nature d'une pièce du catalogue (`type` du manifeste et de l'index).
 ///
 /// L'ensemble est celui de `schema/manifest.v1.1.schema.json`, qui couvre aussi
-/// `catalogue/index.json`. Une chaîne inconnue est refusée.
+/// `index.json`. Une chaîne inconnue est refusée.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CatalogItemType {
     #[serde(rename = "plugin")]

@@ -374,12 +374,11 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
     std::fs::create_dir_all(&input_dir)?;
     std::fs::create_dir_all(&output_dir)?;
     std::fs::create_dir_all(&repos_dir)?;
-    std::fs::create_dir_all(repos_dir.join("catalogue"))?;
     std::fs::create_dir_all(repos_dir.join("packs/demo"))?;
     std::fs::create_dir_all(repos_dir.join("plugins/video/operations"))?;
     std::fs::write(input_dir.join("film.mkv"), vec![0u8; 512])?;
     std::fs::write(
-        repos_dir.join("catalogue/index.json"),
+        repos_dir.join("index.json"),
         r#"{"schemaVersion":"1.0.0","entries":[
             {"id":"pack.demo","type":"pack","version":"1.0.0","name":"Demo","manifestPath":"packs/demo/manifest.json"},
             {"id":"plugin.video","type":"plugin","version":"1.0.0","name":"Video","manifestPath":"plugins/video/manifest.json"},

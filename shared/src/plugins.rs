@@ -29,7 +29,7 @@ pub struct CreateRepositoryRequest {
     pub index_url: String,
 }
 
-/// Fiche d'index dans `catalogue/index.json`.
+/// Fiche d'index dans `index.json` à la racine du dépôt.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogEntry {

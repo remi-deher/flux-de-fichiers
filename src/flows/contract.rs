@@ -1182,7 +1182,7 @@ mod tests {
     #[test]
     fn sibling_plugin_operations_all_deserialize_without_error() -> anyhow::Result<()> {
         let sibling = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../flux-de-fichiers-plugins");
-        if !sibling.join("catalogue/index.json").is_file() {
+        if !sibling.join("index.json").is_file() {
             return Ok(());
         }
         let mut count = 0usize;

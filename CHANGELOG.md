@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.29.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.28.0...v0.29.0) (2026-11-16)
+
+
+### Features
+
+* moteur et sondes agnostiques, conditions génériques et découplage UI ([62568fa](https://github.com/remi-deher/flux-de-fichiers/commit/62568fa9a56910f14b966776f78d31746a549de2))
+* moteur et sondes agnostiques, conditions génériques et découplage UI ([d7c39f0](https://github.com/remi-deher/flux-de-fichiers/commit/d7c39f0414bcc1b940ebf92d4906dae1c52bb67b))
+
+
+### Bug Fixes
+
+* **clippy:** corriger large_enum_variant et as_chunks ([40140fe](https://github.com/remi-deher/flux-de-fichiers/commit/40140fe240888612f170283c76072d2f52abdc61))
+
 ## [0.28.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.27.0...v0.28.0) (2026-11-15)
 
 

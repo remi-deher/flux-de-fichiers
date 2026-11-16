@@ -21,15 +21,21 @@ mod sync;
 pub use blocks::{flow_block_catalog, plugin_default_config};
 pub use cache::CatalogCache;
 pub use install::{
-    ensure_tool_installed, ensure_tools_for_requirements, install_from_distribution, is_installing,
-    parse_distribution, read_distribution,
+    ensure_tool_installed, ensure_tool_installed_verified, ensure_tools_for_requirements,
+    install_from_distribution, is_installing, parse_distribution, read_distribution,
 };
-pub use packs::{PackInstallResult, PackInstallation, install_pack, read_pack_installation};
+pub use packs::{
+    PackInstallResult, PackInstallation, install_pack, install_pack_verified,
+    read_pack_installation,
+};
 pub use probe::{ProbeContract, file_job_may_start, probe_is_ready, required_probe};
 pub use sources::{
     catalog_roots, is_valid_repository_id, repository_dir, sync_enabled_repositories,
 };
-pub use sync::{SyncError, SyncPolicy, SyncReport, sync_repository, validate_index_url};
+pub use sync::{
+    REQUIRE_IMMUTABLE_RELEASES_ENV, SyncError, SyncPolicy, SyncReport, is_mutable_branch_url,
+    sync_repository, sync_repository_verified, validate_index_url,
+};
 
 pub use flux_shared::plugins::vocab::{self, CatalogCapability, CatalogItemType, PluginCategory};
 pub use flux_shared::plugins::{
@@ -67,6 +73,10 @@ pub struct CatalogIndex {
     pub schema_version: String,
     #[serde(default)]
     pub generated_for: Option<String>,
+    #[serde(default)]
+    pub release_version: Option<String>,
+    #[serde(default)]
+    pub files_sha256: std::collections::HashMap<String, String>,
     pub entries: Vec<CatalogEntry>,
 }
 
@@ -133,7 +143,7 @@ pub struct ParsedIndex {
     pub skipped: Vec<String>,
 }
 
-/// Lit un `catalogue/index.json` en tolérant les fiches que ce central ne comprend pas.
+/// Lit un `index.json` à la racine en tolérant les fiches que ce central ne comprend pas.
 pub fn parse_index_tolerant(content: &str) -> anyhow::Result<ParsedIndex> {
     let value: Value = serde_json::from_str(content)?;
     let schema_version = value
@@ -145,6 +155,21 @@ pub fn parse_index_tolerant(content: &str) -> anyhow::Result<ParsedIndex> {
         .get("generatedFor")
         .and_then(Value::as_str)
         .map(str::to_owned);
+    let release_version = value
+        .get("releaseVersion")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+    let files_sha256 = value
+        .get("filesSha256")
+        .and_then(Value::as_object)
+        .map(|obj| {
+            obj.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
+                .collect()
+        })
+        .unwrap_or_default();
     let raw_entries = value
         .get("entries")
         .and_then(Value::as_array)
@@ -168,6 +193,8 @@ pub fn parse_index_tolerant(content: &str) -> anyhow::Result<ParsedIndex> {
         index: CatalogIndex {
             schema_version,
             generated_for,
+            release_version,
+            files_sha256,
             entries,
         },
         skipped,
@@ -199,7 +226,7 @@ fn drop_orphan_blocks(entries: &mut Vec<CatalogEntry>, skipped: &mut Vec<String>
 
 /// Charge l'index du catalogue depuis un dossier de dépôt ; les fiches inconnues sont journalisées.
 pub fn load_catalog(plugins_root: &Path) -> anyhow::Result<CatalogIndex> {
-    let index_path = plugins_root.join("catalogue").join("index.json");
+    let index_path = plugins_root.join("index.json");
     let content = std::fs::read_to_string(&index_path)?;
     let parsed = parse_index_tolerant(&content)?;
     for reason in &parsed.skipped {
@@ -418,10 +445,9 @@ mod tests {
     -> anyhow::Result<()> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/plugin-catalog-test");
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("catalogue"))?;
         std::fs::create_dir_all(root.join("plugins"))?;
         std::fs::write(
-            root.join("catalogue/index.json"),
+            root.join("index.json"),
             r#"{
                 "schemaVersion": "1.0.0",
                 "entries": [{
@@ -480,7 +506,7 @@ mod tests {
     #[test]
     fn sibling_plugin_repository_loads_with_these_enums() -> anyhow::Result<()> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../flux-de-fichiers-plugins");
-        let index = root.join("catalogue/index.json");
+        let index = root.join("index.json");
         if !index.is_file() {
             return Ok(());
         }
@@ -574,9 +600,8 @@ mod tests {
     #[test]
     fn exposed_catalog_never_lists_blocks() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
-        std::fs::create_dir_all(dir.path().join("catalogue"))?;
         std::fs::write(
-            dir.path().join("catalogue/index.json"),
+            dir.path().join("index.json"),
             r#"{"schemaVersion":"1.0.0","entries":[
                 {"id":"plugin.a","type":"plugin","version":"1.0.0","name":"A","manifestPath":"a.json"},
                 {"id":"block.a.run","type":"block","owner":"plugin.a","version":"1.0.0","name":"Run","manifestPath":"b.json"},

@@ -1,6 +1,7 @@
 //! Onglet Ressources & Blocs de la Librairie : import de fichiers locaux et modèles de blocs.
 
-use super::{LOCAL_BLOCK_TEMPLATES_PATH, LOCAL_ITEMS_PATH, LOCAL_RESOURCES_PATH, bump};
+use super::block_templates::{BlockTemplateCard, BlockTemplateDraft, BlockTemplateDrawer};
+use super::{LOCAL_ITEMS_PATH, LOCAL_RESOURCES_PATH, LocalDeleteButton, bump, use_local_delete};
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
@@ -12,23 +13,30 @@ use crate::ui::{
 use flux_shared::base64;
 use flux_shared::flows::FlowRecord;
 use flux_shared::local::{
-    CreateBlockTemplateRequest, LocalBlockTemplate, LocalLibrarySnapshot, LocalResourceSummary,
-    UploadLocalResourceRequest,
+    LocalBlockTemplate, LocalLibrarySnapshot, LocalResourceSummary, UploadLocalResourceRequest,
 };
 use flux_shared::plugins::vocab::CatalogItemType;
 use leptos::prelude::*;
 use serde_json::Value;
 use wasm_bindgen::JsCast;
 
-const RESOURCE_TYPES: &[(&str, &str)] = &[
-    ("resource.subtitle", "Sous-titres (.srt, .ass, .vtt)"),
-    ("resource.image", "Image (.png, .jpg, .webp)"),
-    ("resource.audio", "Audio / Son (.mp3, .wav, .aac)"),
-    ("resource.font", "Police (.ttf, .otf)"),
-    ("resource.language", "Langue / Dictionnaire"),
-    ("resource.color", "Palette / LUT couleur"),
-    ("resource.template", "Modèle de document"),
-    ("preset", "Préréglage"),
+const MAX_RESOURCE_BYTES: usize = 5 * 1024 * 1024;
+
+const RESOURCE_TYPES: &[(CatalogItemType, &str)] = &[
+    (
+        CatalogItemType::ResourceSubtitle,
+        "Sous-titres (.srt, .ass, .vtt)",
+    ),
+    (CatalogItemType::ResourceImage, "Image (.png, .jpg, .webp)"),
+    (
+        CatalogItemType::ResourceAudio,
+        "Audio / Son (.mp3, .wav, .aac)",
+    ),
+    (CatalogItemType::ResourceFont, "Police (.ttf, .otf)"),
+    (CatalogItemType::ResourceLanguage, "Langue / Dictionnaire"),
+    (CatalogItemType::ResourceColor, "Palette / LUT couleur"),
+    (CatalogItemType::ResourceTemplate, "Modèle de document"),
+    (CatalogItemType::Preset, "Préréglage"),
 ];
 
 pub fn parse_resource_type(raw: &str) -> CatalogItemType {
@@ -64,20 +72,29 @@ pub fn ResourcesSection(
     let filter = RwSignal::new(ResourcesKindFilter::All);
     let upload_open = RwSignal::new(false);
     let template_open = RwSignal::new(false);
+    let template_draft = RwSignal::new(None::<BlockTemplateDraft>);
     let feedback = RwSignal::new(None::<String>);
 
-    // État du formulaire d'upload
+    let res_id = RwSignal::new(None::<String>);
     let res_name = RwSignal::new(String::new());
-    let res_type = RwSignal::new("resource.subtitle".to_owned());
+    let res_type = RwSignal::new(CatalogItemType::ResourceSubtitle);
     let res_desc = RwSignal::new(String::new());
     let res_filename = RwSignal::new(String::new());
     let res_b64 = RwSignal::new(String::new());
     let reading_file = RwSignal::new(false);
 
-    // État du formulaire de modèle de blocs
-    let tpl_name = RwSignal::new(String::new());
-    let tpl_desc = RwSignal::new(String::new());
-    let tpl_json = RwSignal::new("{\"nodes\":[],\"connections\":[]}".to_owned());
+    Effect::new(move |_| {
+        if !upload_open.get() {
+            res_id.set(None);
+            res_name.set(String::new());
+            res_type.set(CatalogItemType::ResourceSubtitle);
+            res_desc.set(String::new());
+            res_filename.set(String::new());
+            res_b64.set(String::new());
+            reading_file.set(false);
+            feedback.set(None);
+        }
+    });
 
     let upload = Action::new_local(move |req: &UploadLocalResourceRequest| {
         let req = req.clone();
@@ -92,51 +109,14 @@ pub fn ResourcesSection(
     Effect::new(move |_| match upload.value().get() {
         Some(Ok(_)) => {
             upload_open.set(false);
-            res_name.set(String::new());
-            res_desc.set(String::new());
-            res_filename.set(String::new());
-            res_b64.set(String::new());
-            Toasts::notify_success("Fichier importé dans la librairie locale.");
+            Toasts::notify_success("Fichier enregistré dans la librairie locale.");
             bump(reload);
         }
         Some(Err(err)) => Toasts::set_error(feedback, err.message()),
         None => {}
     });
 
-    let save_template = Action::new_local(move |req: &CreateBlockTemplateRequest| {
-        let req = req.clone();
-        async move {
-            api::post::<CreateBlockTemplateRequest, LocalBlockTemplate>(
-                LOCAL_BLOCK_TEMPLATES_PATH,
-                Some(&req),
-            )
-            .await
-        }
-    });
-    Effect::new(move |_| match save_template.value().get() {
-        Some(Ok(_)) => {
-            template_open.set(false);
-            tpl_name.set(String::new());
-            tpl_desc.set(String::new());
-            Toasts::notify_success("Modèle de blocs enregistré.");
-            bump(reload);
-        }
-        Some(Err(err)) => Toasts::set_error(feedback, err.message()),
-        None => {}
-    });
-
-    let remove = Action::new_local(move |id: &String| {
-        let path = format!("{LOCAL_ITEMS_PATH}/{}", encode_segment(id));
-        async move { api::delete(&path).await }
-    });
-    Effect::new(move |_| match remove.value().get() {
-        Some(Ok(())) => {
-            Toasts::notify_success("Élément supprimé.");
-            bump(reload);
-        }
-        Some(Err(err)) => Toasts::notify_error(err.message()),
-        None => {}
-    });
+    let remove = use_local_delete(reload, "Élément supprimé.");
 
     let stats = Signal::derive(move || {
         let (files_count, blocks_count) = snapshot
@@ -177,6 +157,7 @@ pub fn ResourcesSection(
                 label: "Importer un fichier",
                 on_click: Callback::new(move |()| {
                     feedback.set(None);
+                    res_id.set(None);
                     upload_open.set(true);
                 }),
             },
@@ -184,11 +165,20 @@ pub fn ResourcesSection(
                 label: "Modèle de blocs",
                 on_click: Callback::new(move |()| {
                     feedback.set(None);
+                    template_draft.set(Some(BlockTemplateDraft::blank()));
                     template_open.set(true);
                 }),
             },
         ]);
     }
+
+    let upload_title = Signal::derive(move || {
+        if res_id.get().is_some() {
+            "Remplacer le fichier".to_owned()
+        } else {
+            "Importer un fichier".to_owned()
+        }
+    });
 
     view! {
         <StatStrip aria_label="Synthèse des ressources et modèles de blocs" items=stats />
@@ -235,17 +225,53 @@ pub fn ResourcesSection(
                     view! {
                         <div class="resource-grid resource-grid--list">
                             {files.into_iter().map(|res| {
-                                let del_id = res.id.clone();
+                                let download_url = format!("{LOCAL_ITEMS_PATH}/{}/file", encode_segment(&res.id));
+                                let dl_name = res.filename.clone();
                                 let kind_label = res.entry_type.subtitle().unwrap_or("Ressource");
                                 let badge = view! { <Tag label=kind_label tone=TagTone::Primary /> }.into_any();
-                                let actions = can_manage.then(|| {
-                                    let del_id = del_id.clone();
-                                    view! {
-                                        <button type="button" class="btn btn-sm btn-danger-quiet"
-                                            disabled=move || remove.pending().get()
-                                            on:click=move |_| { remove.dispatch(del_id.clone()); }>"Supprimer"</button>
-                                    }.into_any()
+                                let card_id = res.id.clone();
+                                let replace_res = can_manage.then(|| {
+                                    let r = res.clone();
+                                    Callback::new(move |()| {
+                                        feedback.set(None);
+                                        res_id.set(Some(r.id.clone()));
+                                        res_name.set(r.name.clone());
+                                        res_type.set(r.entry_type);
+                                        res_desc.set(r.description.clone().unwrap_or_default());
+                                        res_filename.set(String::new());
+                                        res_b64.set(String::new());
+                                        upload_open.set(true);
+                                    })
                                 });
+                                let active_card = Signal::derive(move || {
+                                    upload_open.get() && res_id.get().as_deref() == Some(card_id.as_str())
+                                });
+                                let actions = view! {
+                                    <a
+                                        href=download_url
+                                        download=dl_name
+                                        target="_blank"
+                                        rel="noopener"
+                                        class="btn btn-secondary btn-sm"
+                                        on:click=move |ev| ev.stop_propagation()
+                                    >
+                                        "Télécharger"
+                                    </a>
+                                    {can_manage.then(|| {
+                                        let del_id = res.id.clone();
+                                        let replace_cb = replace_res;
+                                        view! {
+                                            {replace_cb.map(|cb| view! {
+                                                <button type="button" class="btn btn-secondary btn-sm"
+                                                    on:click=move |ev| {
+                                                        ev.stop_propagation();
+                                                        cb.run(());
+                                                    }>"Remplacer"</button>
+                                            })}
+                                            <LocalDeleteButton id=del_id remove=remove />
+                                        }
+                                    })}
+                                }.into_any();
                                 view! {
                                     <ResourceCard
                                         title=res.name
@@ -253,8 +279,10 @@ pub fn ResourcesSection(
                                         icon=IconName::Package
                                         tone=MetricTone::Neutral
                                         badge=Some(badge)
+                                        active=Some(active_card)
+                                        on_click=replace_res
                                         footer_meta=format!("{} · {}", res.id, format_bytes(res.size_bytes))
-                                        footer_actions=actions
+                                        footer_actions=Some(actions)
                                     >
                                         <div class="cluster">
                                             <Tag label=res.filename tone=TagTone::Mono />
@@ -262,51 +290,22 @@ pub fn ResourcesSection(
                                     </ResourceCard>
                                 }
                             }).collect_view()}
-                            {blocks.into_iter().map(|tpl| {
-                                let del_id = tpl.id.clone();
-                                let nodes_count = tpl
-                                    .definition
-                                    .get("nodes")
-                                    .and_then(Value::as_array)
-                                    .map_or(0, Vec::len);
-                                let badge = view! {
-                                    <Tag
-                                        label="Modèle de blocs"
-                                        tone=if tpl.is_local { TagTone::Success } else { TagTone::Primary }
-                                    />
-                                }.into_any();
-                                let actions = (can_manage && tpl.is_local).then(|| {
-                                    let del_id = del_id.clone();
-                                    view! {
-                                        <button type="button" class="btn btn-sm btn-danger-quiet"
-                                            disabled=move || remove.pending().get()
-                                            on:click=move |_| { remove.dispatch(del_id.clone()); }>"Supprimer"</button>
-                                    }.into_any()
-                                });
-                                view! {
-                                    <ResourceCard
-                                        title=tpl.name
-                                        subtitle=tpl.description
-                                        icon=IconName::Layers
-                                        tone=MetricTone::Success
-                                        badge=Some(badge)
-                                        footer_meta=format!("{nodes_count} bloc(s) · {}", tpl.id)
-                                        footer_actions=actions
-                                    >
-                                        <div class="cluster">
-                                            {tpl.tags.into_iter().map(|t| view! {
-                                                <Tag label=t tone=TagTone::Neutral />
-                                            }).collect_view()}
-                                        </div>
-                                    </ResourceCard>
-                                }
+                            {blocks.into_iter().map(|tpl| view! {
+                                <BlockTemplateCard
+                                    tpl=tpl
+                                    can_manage=can_manage
+                                    draft_sig=template_draft
+                                    open_sig=template_open
+                                    feedback=feedback
+                                    remove=remove
+                                />
                             }).collect_view()}
                         </div>
                     }.into_any()
                 }
             }
         }}
-        <Drawer open=upload_open eyebrow="Ressource locale" title="Importer un fichier".to_owned()>
+        <Drawer open=upload_open eyebrow="Ressource locale" title=upload_title>
             <form class="inspection-panel" on:submit=move |ev| {
                 ev.prevent_default();
                 let b64 = res_b64.get_untracked();
@@ -315,8 +314,9 @@ pub fn ResourcesSection(
                     return;
                 }
                 upload.dispatch(UploadLocalResourceRequest {
+                    id: res_id.get_untracked(),
                     name: res_name.get_untracked(),
-                    entry_type: parse_resource_type(&res_type.get_untracked()),
+                    entry_type: res_type.get_untracked(),
                     filename: res_filename.get_untracked(),
                     content_base64: b64,
                     description: Some(res_desc.get_untracked()),
@@ -325,10 +325,10 @@ pub fn ResourcesSection(
                 <div class="form-group">
                     <label class="form-label" for="res-type">"Type de ressource"</label>
                     <select id="res-type" class="form-input"
-                        prop:value=move || res_type.get()
-                        on:change=move |e| res_type.set(event_target_value(&e))>
-                        {RESOURCE_TYPES.iter().map(|(val, label)| view! {
-                            <option value=*val>{*label}</option>
+                        prop:value=move || res_type.get().as_str()
+                        on:change=move |e| res_type.set(parse_resource_type(&event_target_value(&e)))>
+                        {RESOURCE_TYPES.iter().map(|&(kind, label)| view! {
+                            <option value=kind.as_str()>{label}</option>
                         }).collect_view()}
                     </select>
                 </div>
@@ -346,6 +346,18 @@ pub fn ResourcesSection(
                         };
                         let Some(files) = target.files() else { return; };
                         let Some(file) = files.get(0) else { return; };
+                        let file_size = file.size();
+                        if file_size <= 0.0 {
+                            Toasts::set_error(feedback, "Le fichier sélectionné est vide.");
+                            target.set_value("");
+                            return;
+                        }
+                        if file_size > MAX_RESOURCE_BYTES as f64 {
+                            Toasts::set_error(feedback, "Le fichier dépasse la taille maximale de 5 Mo.");
+                            target.set_value("");
+                            return;
+                        }
+                        feedback.set(None);
                         let fname = file.name();
                         res_filename.set(fname.clone());
                         if res_name.get_untracked().trim().is_empty() {
@@ -356,6 +368,8 @@ pub fn ResourcesSection(
                             if let Ok(buf) = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await {
                                 let bytes = js_sys::Uint8Array::new(&buf).to_vec();
                                 res_b64.set(base64::encode(&bytes));
+                            } else {
+                                Toasts::set_error(feedback, "Lecture du fichier impossible.");
                             }
                             reading_file.set(false);
                         });
@@ -375,73 +389,20 @@ pub fn ResourcesSection(
                         disabled=move || upload.pending().get() || reading_file.get()>
                         {move || if upload.pending().get() { "Import…" } else { "Importer" }}
                     </button>
-                </div>
-                <p class="form-error text-sm" role="status">{move || feedback.get()}</p>
-            </form>
-        </Drawer>
-        <Drawer open=template_open eyebrow="Modèle de blocs" title="Nouveau modèle de blocs".to_owned()>
-            <form class="inspection-panel" on:submit=move |ev| {
-                ev.prevent_default();
-                let Ok(definition) = serde_json::from_str::<Value>(&tpl_json.get_untracked()) else {
-                    Toasts::set_error(feedback, "Définition JSON invalide.");
-                    return;
-                };
-                save_template.dispatch(CreateBlockTemplateRequest {
-                    id: None,
-                    name: tpl_name.get_untracked(),
-                    description: Some(tpl_desc.get_untracked()),
-                    definition,
-                    tags: Vec::new(),
-                });
-            }>
-                <div class="form-group">
-                    <label class="form-label" for="btpl-name">"Nom du modèle *"</label>
-                    <input id="btpl-name" class="form-input" required=true
-                        prop:value=move || tpl_name.get()
-                        on:input=move |e| tpl_name.set(event_target_value(&e)) />
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="btpl-desc">"Description"</label>
-                    <input id="btpl-desc" class="form-input"
-                        prop:value=move || tpl_desc.get()
-                        on:input=move |e| tpl_desc.set(event_target_value(&e)) />
-                </div>
-                {move || {
-                    let available = flows.get().and_then(Result::ok).unwrap_or_default();
-                    (!available.is_empty()).then(|| view! {
-                        <div class="form-group">
-                            <label class="form-label" for="btpl-source">"Pré-remplir depuis un flow existant"</label>
-                            <select id="btpl-source" class="form-input" on:change=move |ev| {
-                                let chosen = event_target_value(&ev);
-                                if let Some(flow) = available.iter().find(|f| f.id == chosen) {
-                                    tpl_json.set(flow.definition.clone());
-                                    if tpl_name.get_untracked().trim().is_empty() {
-                                        tpl_name.set(format!("Blocs · {}", flow.name));
-                                    }
-                                }
-                            }>
-                                <option value="">"— Choisir un flow —"</option>
-                                {available.iter().map(|f| view! {
-                                    <option value=f.id.clone()>{f.name.clone()}</option>
-                                }).collect_view()}
-                            </select>
-                        </div>
-                    })
-                }}
-                <div class="form-group">
-                    <label class="form-label" for="btpl-json">"Graphe JSON ({ nodes, connections }) *"</label>
-                    <textarea id="btpl-json" class="form-input text-mono" rows="8" required=true
-                        prop:value=move || tpl_json.get()
-                        on:input=move |e| tpl_json.set(event_target_value(&e)) />
-                </div>
-                <div class="inspection-drawer__actions">
-                    <button type="submit" class="btn btn-primary" disabled=move || save_template.pending().get()>
-                        "Enregistrer le modèle"
+                    <button type="button" class="btn btn-secondary" on:click=move |_| upload_open.set(false)>
+                        "Annuler"
                     </button>
                 </div>
                 <p class="form-error text-sm" role="status">{move || feedback.get()}</p>
             </form>
         </Drawer>
+        <BlockTemplateDrawer
+            open=template_open
+            draft_sig=template_draft
+            flows=flows
+            reload=reload
+            feedback=feedback
+        />
     }
 }
 

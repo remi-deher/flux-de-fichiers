@@ -1,8 +1,8 @@
-//! Onglet Packs de la Librairie : assembler et gérer des packs locaux sans dépôt GitHub.
+//! Onglet Packs de la Librairie : assembler, inspecter et gérer des packs locaux sans dépôt GitHub.
 
-use super::{LOCAL_ITEMS_PATH, LOCAL_PACKS_PATH, bump};
+use super::{LOCAL_PACKS_PATH, LocalDeleteButton, bump, use_local_delete};
 use crate::api;
-use crate::route::encode_segment;
+use crate::plugins::{PackDetail, PackDrawerTab};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
@@ -64,6 +64,25 @@ pub fn LocalPacksSection(
     let selected = RwSignal::new(HashSet::<String>::new());
     let feedback = RwSignal::new(None::<String>);
 
+    let inspect_open = RwSignal::new(false);
+    let inspect_id = RwSignal::new(None::<String>);
+    let inspect_name = RwSignal::new(String::new());
+    let inspect_tab = RwSignal::new(0_usize);
+
+    Effect::new(move |_| {
+        if !create_open.get() {
+            pack_name.set(String::new());
+            pack_desc.set(String::new());
+            selected.set(HashSet::new());
+            feedback.set(None);
+        }
+    });
+    Effect::new(move |_| {
+        if !inspect_open.get() {
+            inspect_id.set(None);
+        }
+    });
+
     let save = Action::new_local(move |req: &CreateLocalPackRequest| {
         let req = req.clone();
         async move {
@@ -73,9 +92,6 @@ pub fn LocalPacksSection(
     Effect::new(move |_| match save.value().get() {
         Some(Ok(_)) => {
             create_open.set(false);
-            pack_name.set(String::new());
-            pack_desc.set(String::new());
-            selected.set(HashSet::new());
             Toasts::notify_success("Pack local créé.");
             bump(reload);
         }
@@ -83,18 +99,7 @@ pub fn LocalPacksSection(
         None => {}
     });
 
-    let remove = Action::new_local(move |id: &String| {
-        let path = format!("{LOCAL_ITEMS_PATH}/{}", encode_segment(id));
-        async move { api::delete(&path).await }
-    });
-    Effect::new(move |_| match remove.value().get() {
-        Some(Ok(())) => {
-            Toasts::notify_success("Pack local supprimé.");
-            bump(reload);
-        }
-        Some(Err(err)) => Toasts::notify_error(err.message()),
-        None => {}
-    });
+    let remove = use_local_delete(reload, "Pack local supprimé.");
 
     let stats = Signal::derive(move || {
         let count = snapshot
@@ -121,6 +126,15 @@ pub fn LocalPacksSection(
             }),
         });
     }
+
+    let inspect_title = Signal::derive(move || {
+        let name = inspect_name.get();
+        if name.is_empty() {
+            "Pack local".to_owned()
+        } else {
+            name
+        }
+    });
 
     view! {
         <StatStrip aria_label="Synthèse des packs locaux" items=stats />
@@ -153,25 +167,40 @@ pub fn LocalPacksSection(
                     view! {
                         <div class="resource-grid resource-grid--list">
                             {shown.into_iter().map(|pack| {
-                                let del_id = pack.id.clone();
-                                let badge = view! { <Tag label=pack.version.clone() tone=TagTone::Mono /> }.into_any();
-                                let actions = can_manage.then(|| {
-                                    let del_id = del_id.clone();
-                                    view! {
-                                        <button type="button" class="btn btn-sm btn-danger-quiet"
-                                            disabled=move || remove.pending().get()
-                                            on:click=move |_| { remove.dispatch(del_id.clone()); }>"Supprimer"</button>
-                                    }.into_any()
+                                let pid = pack.id.clone();
+                                let pname = pack.name.clone();
+                                let card_id = pack.id.clone();
+                                let open_inspect = Callback::new(move |()| {
+                                    inspect_id.set(Some(pid.clone()));
+                                    inspect_name.set(pname.clone());
+                                    inspect_tab.set(0);
+                                    inspect_open.set(true);
                                 });
+                                let active = Signal::derive(move || {
+                                    inspect_open.get() && inspect_id.get().as_deref() == Some(card_id.as_str())
+                                });
+                                let badge = view! { <Tag label=pack.version.clone() tone=TagTone::Mono /> }.into_any();
+                                let actions = view! {
+                                    <button type="button" class="btn btn-secondary btn-sm"
+                                        on:click=move |ev| {
+                                            ev.stop_propagation();
+                                            open_inspect.run(());
+                                        }>"Inspecter"</button>
+                                    {can_manage.then(|| {
+                                        let del_id = pack.id.clone();
+                                        view! { <LocalDeleteButton id=del_id remove=remove /> }
+                                    })}
+                                }.into_any();
                                 view! {
                                     <ResourceCard
                                         title=pack.name
-                                        subtitle=Some("Pack assemblé dans la librairie locale".to_owned())
                                         icon=IconName::Download
                                         tone=MetricTone::Success
                                         badge=Some(badge)
+                                        active=Some(active)
+                                        on_click=Some(open_inspect)
                                         footer_meta=pack.id
-                                        footer_actions=actions
+                                        footer_actions=Some(actions)
                                     >
                                         <div class="cluster">
                                             <Tag label="Dépôt local" tone=TagTone::Primary />
@@ -264,11 +293,30 @@ pub fn LocalPacksSection(
                             <button type="submit" class="btn btn-primary" disabled=move || save.pending().get()>
                                 "Créer le pack"
                             </button>
+                            <button type="button" class="btn btn-secondary" on:click=move |_| create_open.set(false)>
+                                "Annuler"
+                            </button>
                         </div>
                         <p class="form-error text-sm" role="status">{move || feedback.get()}</p>
                     </form>
                 }
             }}
+        </Drawer>
+        <Drawer
+            open=inspect_open
+            eyebrow="Pack local"
+            title=inspect_title
+            tabs=PackDrawerTab::TABS.to_vec()
+            tab=inspect_tab
+        >
+            {move || inspect_id.get().map(|id| view! {
+                <PackDetail
+                    pack_id=id
+                    tab=inspect_tab
+                    can_install=can_manage
+                    on_installed=Callback::new(move |()| bump(reload))
+                />
+            })}
         </Drawer>
     }
 }

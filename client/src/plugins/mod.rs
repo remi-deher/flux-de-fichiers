@@ -20,7 +20,7 @@ use flux_shared::plugins::{CatalogEntry, PluginRepository, ToolStatus, ToolStatu
 use flux_shared::session::Me;
 use flux_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
-use pack_detail::{PackDetail, PackDrawerTab};
+pub(crate) use pack_detail::{PackDetail, PackDrawerTab};
 use plugin_detail::{PluginDetail, PluginDrawerTab};
 use repos::ReposSection;
 use tools::ToolsSection;

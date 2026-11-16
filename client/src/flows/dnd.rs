@@ -353,8 +353,60 @@ pub fn duplicate_subgraph(graph: &mut FlowGraph, ids: &HashSet<String>) -> HashM
     id_map
 }
 
-/// Insère un modèle de blocs (sous-graphe `{ nodes, connections }`) avec de nouveaux identifiants.
-pub fn insert_subgraph(graph: &mut FlowGraph, template: &FlowGraph) -> Vec<String> {
+/// Insère un modèle de blocs (sous-graphe `{ nodes, connections }`), retourne `(nouveaux_ids, table old->new)`
+/// et le raccorde éventuellement à `target` en pontant l'éventuel successeur existant.
+pub fn insert_subgraph_mapped(
+    graph: &mut FlowGraph,
+    template: &FlowGraph,
+    target: Option<&BranchTarget>,
+    catalog: &[OwnedBlockSpec],
+) -> Result<(Vec<String>, HashMap<String, String>), GraphError> {
+    if template.nodes.is_empty() {
+        return Ok((Vec::new(), HashMap::new()));
+    }
+
+    let incoming_targets: HashSet<&str> = template
+        .connections
+        .iter()
+        .map(|edge| edge.to.as_str())
+        .collect();
+    let entry_source = template
+        .nodes
+        .iter()
+        .find(|node| !incoming_targets.contains(node.id.as_str()))
+        .unwrap_or(&template.nodes[0]);
+    let outgoing_sources: HashSet<&str> = template
+        .connections
+        .iter()
+        .map(|edge| edge.from.as_str())
+        .collect();
+    let exit_source = template
+        .nodes
+        .iter()
+        .rev()
+        .find(|node| !outgoing_sources.contains(node.id.as_str()))
+        .unwrap_or(&template.nodes[template.nodes.len() - 1]);
+
+    let previous_next = if let Some(branch) = target {
+        let Some(source) = graph.node(&branch.source_id) else {
+            return Err(GraphError::UnknownNode);
+        };
+        if node_output_ports(graph, source, catalog).is_empty() {
+            return Err(GraphError::InvalidPort);
+        }
+        if find_owned(catalog, &entry_source.kind).is_some_and(|spec| !spec.has_input) {
+            return Err(GraphError::InvalidPort);
+        }
+        branch.replace_to.clone().or_else(|| {
+            graph
+                .outgoing(&branch.source_id)
+                .find(|edge| edge.port == branch.port)
+                .map(|edge| edge.to.clone())
+        })
+    } else {
+        None
+    };
+
     let mut id_map = HashMap::new();
     let mut created = Vec::with_capacity(template.nodes.len());
     for source in &template.nodes {
@@ -379,7 +431,35 @@ pub fn insert_subgraph(graph: &mut FlowGraph, template: &FlowGraph) -> Vec<Strin
             });
         }
     }
-    created
+
+    if let Some(branch) = target
+        && let (Some(entry_id), Some(exit_id)) = (
+            id_map.get(&entry_source.id).cloned(),
+            id_map.get(&exit_source.id).cloned(),
+        )
+    {
+        graph.disconnect(&branch.source_id, &branch.port);
+        graph.connections.push(FlowConnection {
+            from: branch.source_id.clone(),
+            to: entry_id,
+            port: branch.port.clone(),
+        });
+        let exit_spec = find_owned(catalog, &exit_source.kind);
+        let exit_terminal = exit_spec.is_some_and(|spec| spec.terminal);
+        if let Some(next_id) = previous_next
+            && !exit_terminal
+            && graph.node(&next_id).is_some()
+        {
+            let bridge_port = exit_spec.and_then(|spec| spec.ports.first().map(|(p, _)| p.clone()));
+            graph.connections.push(FlowConnection {
+                from: exit_id,
+                to: next_id,
+                port: bridge_port,
+            });
+        }
+    }
+
+    Ok((created, id_map))
 }
 
 #[cfg(test)]
@@ -659,7 +739,7 @@ mod tests {
             Value::Null,
             &catalog,
         );
-        let created = insert_subgraph(&mut graph, &tpl);
+        let (created, _) = insert_subgraph_mapped(&mut graph, &tpl, None, &[]).unwrap_or_default();
         assert_eq!(created.len(), 2);
         assert_eq!(graph.nodes.len(), initial_len + 2);
         assert_ne!(created[0], n1);
@@ -668,6 +748,40 @@ mod tests {
             graph
                 .outgoing(&created[0])
                 .any(|edge| edge.to == created[1])
+        );
+    }
+
+    #[test]
+    fn insert_subgraph_mapped_bridges_branch_and_rejects_unknown_source() {
+        let catalog = test_catalog();
+        let (mut graph, input, remux) = chain(&catalog);
+        let mut tpl = FlowGraph::default();
+        tpl.append(
+            FlowBlockKind::parse("webhook"),
+            "Hook",
+            Value::Null,
+            &catalog,
+        );
+        let target = BranchTarget {
+            source_id: input.clone(),
+            port: None,
+            replace_to: None,
+        };
+        let (created, _) =
+            insert_subgraph_mapped(&mut graph, &tpl, Some(&target), &catalog).unwrap_or_default();
+        assert_eq!(created.len(), 1);
+        assert!(graph.outgoing(&input).any(|edge| edge.to == created[0]));
+        assert!(graph.outgoing(&created[0]).any(|edge| edge.to == remux));
+        assert!(!graph.outgoing(&input).any(|edge| edge.to == remux));
+
+        let missing = BranchTarget {
+            source_id: "inconnu".into(),
+            port: None,
+            replace_to: None,
+        };
+        assert_eq!(
+            insert_subgraph_mapped(&mut graph, &tpl, Some(&missing), &catalog),
+            Err(GraphError::UnknownNode)
         );
     }
 }

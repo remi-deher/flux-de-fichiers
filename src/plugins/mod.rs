@@ -26,8 +26,8 @@ pub use install::{
     install_from_distribution, is_installing, parse_distribution, read_distribution,
 };
 pub use local::{
-    build_local_snapshot, delete_local_item, save_local_block_template, save_local_flow_template,
-    save_local_pack, save_local_script, upload_local_resource,
+    build_local_snapshot, delete_local_item, local_resource_file, save_local_block_template,
+    save_local_flow_template, save_local_pack, save_local_script, upload_local_resource,
 };
 pub use packs::{
     PackInstallResult, PackInstallation, build_pack_detail, install_pack, install_pack_verified,

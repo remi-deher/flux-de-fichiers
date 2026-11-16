@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.31.0...v0.32.0) (2026-11-16)
+
+
+### Features
+
+* **ui:** move Librairies create actions to topbar and rename Extensions ([fddb9ee](https://github.com/remi-deher/flux-de-fichiers/commit/fddb9ee9b7db375727c60fa6e49173efbda9ab60))
+* **ui:** move Librairies create actions to topbar and rename Extensions ([3813bd1](https://github.com/remi-deher/flux-de-fichiers/commit/3813bd103dead1af740d27764b3a457f777ea611))
+
 ## [0.31.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.30.0...v0.31.0) (2026-11-16)
 
 

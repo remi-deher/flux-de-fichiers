@@ -174,6 +174,10 @@ pub const JSON_API_TIMEOUT: Duration = Duration::from_secs(60);
 /// Budget des transferts de fichiers et du flux SSE, déjà borné dans `receive`.
 pub const TRANSFER_TIMEOUT: Duration = Duration::from_secs(3600);
 pub const JSON_BODY_LIMIT: usize = 16 * 1024;
+/// Limite pour les scripts locaux (`MAX_SCRIPT_BYTES` = 512 Kio + enveloppe JSON), graphes de flows et modèles.
+pub const LARGE_JSON_BODY_LIMIT: usize = 1024 * 1024;
+/// Limite pour l'import base64 de ressources locales (`MAX_RESOURCE_BYTES` = 5 Mio ~ 6,7 Mio en base64).
+pub const LOCAL_RESOURCE_BODY_LIMIT: usize = 10 * 1024 * 1024;
 
 /// Routes dont la réponse peut durer bien au-delà d'un appel JSON.
 pub fn is_long_running_route(path: &str) -> bool {
@@ -217,7 +221,8 @@ fn json_routes() -> Router<AppState> {
             "/api/v1/flows/{id}",
             get(flows::get_flow)
                 .put(flows::save_flow)
-                .delete(flows::delete_flow),
+                .delete(flows::delete_flow)
+                .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
         )
         .route("/api/v1/plugins", get(plugins::catalog))
         .route("/api/v1/plugins/{id}", get(plugins::plugin_detail))
@@ -259,19 +264,26 @@ fn json_routes() -> Router<AppState> {
         )
         .route("/api/v1/packs/{id}/install", post(plugins::install_pack))
         .route("/api/v1/local", get(local::snapshot))
-        .route("/api/v1/local/scripts", post(local::upsert_script))
+        .route(
+            "/api/v1/local/scripts",
+            post(local::upsert_script)
+                .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
+        )
         .route(
             "/api/v1/local/resources",
-            post(local::upload_resource)
-                .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)),
+            post(local::upload_resource).layer(axum::extract::DefaultBodyLimit::max(
+                LOCAL_RESOURCE_BODY_LIMIT,
+            )),
         )
         .route(
             "/api/v1/local/block-templates",
-            post(local::create_block_template),
+            post(local::create_block_template)
+                .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
         )
         .route(
             "/api/v1/local/flow-templates",
-            post(local::create_flow_template),
+            post(local::create_flow_template)
+                .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
         )
         .route("/api/v1/local/packs", post(local::create_pack))
         .route(
@@ -348,6 +360,10 @@ fn transfer_routes() -> Router<AppState> {
         )
         .route("/api/v1/jobs/{id}/source", get(transfers::source))
         .route("/api/v1/jobs/{id}/result", put(transfers::result))
+        .route(
+            "/api/v1/local/items/{id}/file",
+            get(local::download_resource),
+        )
         .layer(tower_http::timeout::TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
             TRANSFER_TIMEOUT,

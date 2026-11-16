@@ -1,5 +1,6 @@
 //! Écran Librairie : bibliothèques médias, flows & modèles, scripts locaux, ressources & modèles de blocs, et packs maison.
 
+mod block_templates;
 mod draft;
 mod form;
 mod packs;
@@ -7,12 +8,13 @@ mod resources;
 mod scripts;
 
 use crate::flows::FlowsSection;
+use crate::route::encode_segment;
 use crate::ui::filters::{Filters, LibraryFilter, library_filter};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
     Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, StatusBadge, Tag,
-    TagTone,
+    TagTone, Toasts,
 };
 use crate::{api, format};
 use draft::{LibraryDraft, access_label, is_ready, library_counts};
@@ -41,6 +43,45 @@ const PREVIEW_WORKER_PATHS: usize = 2;
 
 pub(super) fn bump(signal: RwSignal<u32>) {
     signal.update(|count| *count = count.wrapping_add(1));
+}
+
+pub(super) fn use_local_delete(
+    reload: RwSignal<u32>,
+    success_msg: &'static str,
+) -> Action<String, Result<(), api::ApiError>> {
+    let remove = Action::new_local(move |id: &String| {
+        let path = format!("{LOCAL_ITEMS_PATH}/{}", encode_segment(id));
+        async move { api::delete(&path).await }
+    });
+    Effect::new(move |_| match remove.value().get() {
+        Some(Ok(())) => {
+            Toasts::notify_success(success_msg);
+            bump(reload);
+        }
+        Some(Err(err)) => Toasts::notify_error(err.message()),
+        None => {}
+    });
+    remove
+}
+
+#[component]
+pub(super) fn LocalDeleteButton(
+    id: String,
+    remove: Action<String, Result<(), api::ApiError>>,
+) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            class="btn btn-sm btn-danger-quiet"
+            disabled=move || remove.pending().get()
+            on:click=move |ev| {
+                ev.stop_propagation();
+                remove.dispatch(id.clone());
+            }
+        >
+            "Supprimer"
+        </button>
+    }
 }
 
 /// Sous-onglets de l'écran Librairie.
@@ -326,12 +367,16 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
         reload_libs.track();
         api::get::<Vec<Library>>(LIBRARIES_PATH)
     });
-    let flows = LocalResource::new(|| api::get::<Vec<FlowRecord>>(FLOWS_PATH));
+    let flows = LocalResource::new(move || {
+        reload_local.track();
+        api::get::<Vec<FlowRecord>>(FLOWS_PATH)
+    });
     let workers = LocalResource::new(|| api::get::<Vec<Worker>>(WORKERS_PATH));
     let snapshot = LocalResource::new(move || {
         reload_local.track();
         api::get::<LocalLibrarySnapshot>(LOCAL_PATH)
     });
+    let on_flow_changed = Callback::new(move |()| bump(reload_local));
     let tabs = LibraryTab::visible_tabs(&me);
 
     view! {
@@ -364,7 +409,7 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
                     />
                 }.into_any(),
                 LibraryTab::Flows => view! {
-                    <FlowsSection me=me.clone() />
+                    <FlowsSection me=me.clone() on_changed=on_flow_changed />
                 }.into_any(),
                 LibraryTab::Scripts => view! {
                     <ScriptsSection snapshot=snapshot reload=reload_local can_manage=can_manage_local />

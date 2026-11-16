@@ -94,6 +94,58 @@ pub fn flow_usage_counts(flows: &[FlowRecord], libraries: &[Library]) -> FlowUsa
     }
 }
 
+fn flow_template_id(flow_id: &str) -> String {
+    let raw = flow_id.strip_prefix("flow.").unwrap_or(flow_id);
+    let slug: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .take(64)
+        .collect();
+    let trimmed = slug.trim_matches('-');
+    let safe = if trimmed.is_empty() { "flow" } else { trimmed };
+    format!("flow.template.{safe}")
+}
+
+#[component]
+fn FlowPipelinePreview(
+    preview: Vec<String>,
+    extra_blocks: usize,
+    empty_label: &'static str,
+    aria_label: &'static str,
+) -> impl IntoView {
+    view! {
+        <div class="flow-card__pipeline">
+            {if preview.is_empty() {
+                view! { <span class="text-dim text-xs">{empty_label}</span> }.into_any()
+            } else {
+                let count = preview.len();
+                view! {
+                    <div class="flow-pipeline" aria-label=aria_label>
+                        {preview.into_iter().enumerate().map(|(idx, step)| {
+                            view! {
+                                <span class="pipeline-step-node">{step}</span>
+                                {(idx + 1 < count).then(|| view! {
+                                    <span class="pipeline-connector" aria-hidden="true">"→"</span>
+                                })}
+                            }
+                        }).collect_view()}
+                        {(extra_blocks > 0).then(|| view! {
+                            <span class="pipeline-connector" aria-hidden="true">"→"</span>
+                            <span class="pipeline-step-node pipeline-step-node--more">{format!("+{extra_blocks}")}</span>
+                        })}
+                    </div>
+                }.into_any()
+            }}
+        </div>
+    }
+}
+
 #[component]
 fn FlowCard(
     flow: FlowRecord,
@@ -120,7 +172,7 @@ fn FlowCard(
         None => {}
     });
     let tpl_req = CreateFlowTemplateRequest {
-        id: None,
+        id: Some(flow_template_id(&flow.id)),
         name: flow.name.clone(),
         description: flow.description.clone(),
         file_mask: Some(flow.file_mask.clone()),
@@ -191,29 +243,12 @@ fn FlowCard(
                     icon=Some(IconName::Libraries)
                 />
             </div>
-            <div class="flow-card__pipeline">
-                {if preview.is_empty() {
-                    view! { <span class="text-dim text-xs">"Pipeline vide"</span> }.into_any()
-                } else {
-                    let count = preview.len();
-                    view! {
-                        <div class="flow-pipeline" aria-label="Aperçu du pipeline">
-                            {preview.into_iter().enumerate().map(|(idx, step)| {
-                                view! {
-                                    <span class="pipeline-step-node">{step}</span>
-                                    {(idx + 1 < count).then(|| view! {
-                                        <span class="pipeline-connector" aria-hidden="true">"→"</span>
-                                    })}
-                                }
-                            }).collect_view()}
-                            {(extra_blocks > 0).then(|| view! {
-                                <span class="pipeline-connector" aria-hidden="true">"→"</span>
-                                <span class="pipeline-step-node pipeline-step-node--more">{format!("+{extra_blocks}")}</span>
-                            })}
-                        </div>
-                    }.into_any()
-                }}
-            </div>
+            <FlowPipelinePreview
+                preview=preview
+                extra_blocks=extra_blocks
+                empty_label="Pipeline vide"
+                aria_label="Aperçu du pipeline"
+            />
             {move || feedback.get().map(|err| view! {
                 <p class="text-danger text-xs" role="status">{err}</p>
             })}
@@ -307,29 +342,12 @@ fn FlowTemplateCard(
                 <Tag label=format!("v{}", template.version) tone=TagTone::Mono />
                 <Tag label=template.file_mask tone=TagTone::Primary />
             </div>
-            <div class="flow-card__pipeline">
-                {if preview.is_empty() {
-                    view! { <span class="text-dim text-xs">"Modèle vide"</span> }.into_any()
-                } else {
-                    let count = preview.len();
-                    view! {
-                        <div class="flow-pipeline" aria-label="Aperçu du modèle">
-                            {preview.into_iter().enumerate().map(|(idx, step)| {
-                                view! {
-                                    <span class="pipeline-step-node">{step}</span>
-                                    {(idx + 1 < count).then(|| view! {
-                                        <span class="pipeline-connector" aria-hidden="true">"→"</span>
-                                    })}
-                                }
-                            }).collect_view()}
-                            {(extra_blocks > 0).then(|| view! {
-                                <span class="pipeline-connector" aria-hidden="true">"→"</span>
-                                <span class="pipeline-step-node pipeline-step-node--more">{format!("+{extra_blocks}")}</span>
-                            })}
-                        </div>
-                    }.into_any()
-                }}
-            </div>
+            <FlowPipelinePreview
+                preview=preview
+                extra_blocks=extra_blocks
+                empty_label="Modèle vide"
+                aria_label="Aperçu du modèle"
+            />
             {move || feedback.get().map(|err| view! {
                 <p class="text-danger text-xs" role="status">{err}</p>
             })}
@@ -343,7 +361,7 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
 }
 
 #[component]
-pub fn FlowsSection(me: Me) -> impl IntoView {
+pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) -> impl IntoView {
     let can_manage = me.allows(Permission::ManageFlows);
     let can_templates = me.allows(Permission::ManageSettings);
     let can_libraries = me.allows(Permission::ViewLibraries);
@@ -370,7 +388,12 @@ pub fn FlowsSection(me: Me) -> impl IntoView {
             }
         }
     });
-    let on_removed = Callback::new(move |()| reload.update(|count| *count = count.wrapping_add(1)));
+    let on_removed = Callback::new(move |()| {
+        reload.update(|count| *count = count.wrapping_add(1));
+        if let Some(cb) = on_changed {
+            cb.run(());
+        }
+    });
     let router = use_router();
     if can_manage {
         provide_topbar_action(ActionSpec {

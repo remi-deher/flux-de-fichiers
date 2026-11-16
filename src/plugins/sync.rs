@@ -891,7 +891,7 @@ mod tests {
     -> anyhow::Result<()> {
         use axum::{Router, routing::get};
         use sqlx::sqlite::SqlitePoolOptions;
-        use std::sync::{Arc, Mutex};
+        use std::sync::Arc;
 
         let manifest_v1 = r#"{"schemaVersion":"1.1.0","id":"plugin.a","type":"plugin","version":"1.0.0","name":"A","description":"A","author":"a","license":"MIT"}"#.to_owned();
         let manifest_sha = ToolCacheManager::compute_sha256(manifest_v1.as_bytes());
@@ -910,22 +910,25 @@ mod tests {
             }]
         })
         .to_string();
-        let state = Arc::new(Mutex::new((index_v1.clone(), manifest_v1.clone())));
+        let state = Arc::new(tokio::sync::Mutex::new((
+            index_v1.clone(),
+            manifest_v1.clone(),
+        )));
         let st_idx = state.clone();
         let st_man = state.clone();
         let router = Router::new()
             .route(
                 "/v1.0.0/index.json",
                 get(move || {
-                    let body = st_idx.lock().expect("lock").0.clone();
-                    async move { body }
+                    let st = st_idx.clone();
+                    async move { st.lock().await.0.clone() }
                 }),
             )
             .route(
                 "/v1.0.0/plugins/a/manifest.json",
                 get(move || {
-                    let body = st_man.lock().expect("lock").1.clone();
-                    async move { body }
+                    let st = st_man.clone();
+                    async move { st.lock().await.1.clone() }
                 }),
             );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -955,7 +958,7 @@ mod tests {
         assert_eq!(ok_report.release_version.as_deref(), Some("1.0.0"));
 
         // Mutation du manifeste sans recalcul du SHA : IntegrityMismatch et copie précédente préservée
-        state.lock().expect("lock").1 = manifest_v1.replace("\"A\"", "\"Tampered\"");
+        state.lock().await.1 = manifest_v1.replace("\"A\"", "\"Tampered\"");
         let mismatch = sync_repository_verified(&pool, &repo, dir.path(), &strict_policy).await;
         assert!(matches!(mismatch, Err(SyncError::IntegrityMismatch(_))));
 
@@ -977,7 +980,7 @@ mod tests {
             }]
         })
         .to_string();
-        *state.lock().expect("lock") = (mutated_index, mutated_manifest);
+        *state.lock().await = (mutated_index, mutated_manifest);
         let pin_err = sync_repository_verified(&pool, &repo, dir.path(), &strict_policy).await;
         assert!(matches!(pin_err, Err(SyncError::ImmutableViolation(_))));
 

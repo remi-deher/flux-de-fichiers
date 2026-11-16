@@ -229,7 +229,7 @@ pub fn ReposSection(
                         </div>
                         <div class="form-group">
                             <label for="repo-url" class="form-label">"URL de l'index"</label>
-                            <input id="repo-url" class="form-input" type="url" required=true placeholder="https://…/catalogue/index.json"
+                            <input id="repo-url" class="form-input" type="url" required=true placeholder="https://…/index.json"
                                 prop:value=move || url.get() on:input=move |event| url.set(event_target_value(&event)) />
                         </div>
                         <div class="inspection-drawer__actions">

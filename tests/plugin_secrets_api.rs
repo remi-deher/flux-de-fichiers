@@ -28,10 +28,9 @@ struct Harness {
 }
 
 fn write_catalog(root: &Path) -> anyhow::Result<()> {
-    std::fs::create_dir_all(root.join("catalogue"))?;
     std::fs::create_dir_all(root.join("plugins"))?;
     std::fs::write(
-        root.join("catalogue/index.json"),
+        root.join("index.json"),
         r#"{"schemaVersion":"1.0.0","entries":[{"id":"plugin.demo","type":"plugin","version":"1.0.0","name":"Démo","manifestPath":"plugins/demo.json"}]}"#,
     )?;
     std::fs::write(

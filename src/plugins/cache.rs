@@ -158,9 +158,8 @@ mod tests {
     #[tokio::test]
     async fn cache_reflects_invalidation_after_disk_change() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
-        std::fs::create_dir_all(dir.path().join("catalogue"))?;
         std::fs::write(
-            dir.path().join("catalogue/index.json"),
+            dir.path().join("index.json"),
             r#"{"schemaVersion":"1.0.0","entries":[
                 {"id":"plugin.a","type":"plugin","version":"1.0.0","name":"A","manifestPath":"a.json"}
             ]}"#,
@@ -170,7 +169,7 @@ mod tests {
         assert_eq!(cache.exposed_catalog(&roots).await.len(), 1);
 
         std::fs::write(
-            dir.path().join("catalogue/index.json"),
+            dir.path().join("index.json"),
             r#"{"schemaVersion":"1.0.0","entries":[
                 {"id":"plugin.a","type":"plugin","version":"1.0.0","name":"A","manifestPath":"a.json"},
                 {"id":"app.mkvtoolnix","type":"app","version":"2.1.0","name":"MKV","manifestPath":"mkv.json"}

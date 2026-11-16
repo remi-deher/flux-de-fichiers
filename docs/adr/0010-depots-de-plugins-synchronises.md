@@ -13,13 +13,13 @@ installée dans le cache du nœud (ADR 0004, 0007).
 
 1. **Rien n'est embarqué dans le binaire** : le catalogue vient uniquement des dépôts.
 2. **Un dossier par dépôt** : `/config/plugins/<id-du-dépôt>/` reprend l'arborescence du
-   dépôt (`catalogue/index.json`, `apps/…`, `plugins/…`). Les identifiants de dépôt sont des
+   dépôt (`index.json` à la racine, `apps/…`, `plugins/…`). Les identifiants de dépôt sont des
    noms de dossier sûrs (`[A-Za-z0-9._-]`, 64 caractères, sans point initial). `PLUGINS_DIR`
    reste un dossier local de développement, prioritaire.
 3. **Schéma de référence** : type `app` et dossier `apps/` (branche `dev` du dépôt de
    plugins). Une fiche inconnue est ignorée et journalisée sans invalider l'index.
 4. **Synchronisation** : au démarrage, toutes les 6 h et à la demande (`POST …/sync`).
-   L'URL d'index finit par `/catalogue/index.json`. Sans redirection, adresses privées
+   L'URL d'index finit par `/index.json`. Sans redirection, adresses privées
    refusées (sauf `PLUGIN_ALLOW_PRIVATE_HOSTS=1`), DNS figé sur des adresses contrôlées,
    fichiers limités à 1 Mio et 500 fichiers. La copie est écrite dans un dossier temporaire
    puis substituée d'un renommage ; un échec conserve l'ancienne copie.

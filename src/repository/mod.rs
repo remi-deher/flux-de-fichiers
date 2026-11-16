@@ -33,5 +33,5 @@ pub use password_reset::{
 pub use plugins::{
     add_plugin_repository, delete_plugin_repository, get_plugin_repository, get_plugin_settings,
     list_plugin_repositories, set_plugin_settings, toggle_plugin_repository,
-    touch_plugin_repository_sync,
+    touch_plugin_repository_sync, verify_or_pin_release,
 };

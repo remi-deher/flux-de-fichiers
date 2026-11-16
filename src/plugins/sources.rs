@@ -26,10 +26,19 @@ fn has_index(dir: &Path) -> bool {
     dir.join(INDEX_RELATIVE_PATH).is_file()
 }
 
+/// Dossier du catalogue local géré depuis l'interface (sans dépôt GitHub).
+pub fn local_catalog_dir(config: &Config) -> PathBuf {
+    config.plugin_repos_dir().join("local")
+}
+
 /// Dossiers de catalogue à lire, dans l'ordre de priorité : le dossier local de développement,
-/// puis les dépôts activés déjà synchronisés (officiel en premier).
+/// le catalogue local utilisateur (`/config/plugins/local`), puis les dépôts activés déjà synchronisés.
 pub async fn catalog_roots(pool: &SqlitePool, config: &Config) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = config.plugins_dir.iter().cloned().collect();
+    let local_dir = local_catalog_dir(config);
+    if has_index(&local_dir) {
+        roots.push(local_dir);
+    }
     let repos_dir = config.plugin_repos_dir();
     if let Ok(repositories) = repository::list_plugin_repositories(pool).await {
         roots.extend(

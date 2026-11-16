@@ -26,14 +26,27 @@ use crate::ui::{
 };
 use crate::{api, format};
 use flux_shared::Permission;
-use flux_shared::flows::{FlowGraph, FlowRecord};
+use flux_shared::flows::{FlowGraph, FlowRecord, UpdateFlowRequest, new_flow_id};
 use flux_shared::libraries::Library;
+use flux_shared::local::{CreateFlowTemplateRequest, LocalFlowTemplate, LocalLibrarySnapshot};
 use flux_shared::session::Me;
 use leptos::prelude::*;
 
 const FLOWS_PATH: &str = "/api/v1/flows";
 const LIBRARIES_PATH: &str = "/api/v1/libraries";
+const LOCAL_PATH: &str = "/api/v1/local";
+const LOCAL_FLOW_TEMPLATES_PATH: &str = "/api/v1/local/flow-templates";
+const LOCAL_ITEMS_PATH: &str = "/api/v1/local/items";
 const PIPELINE_PREVIEW_LIMIT: usize = 4;
+
+/// Mode d'affichage de la section Flows & Modèles.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FlowsCatalogFilter {
+    #[default]
+    Flows,
+    Templates,
+    All,
+}
 
 fn pipeline_preview(graph_json: &str) -> (Vec<String>, usize) {
     let nodes = FlowGraph::parse(graph_json).nodes;
@@ -86,6 +99,7 @@ fn FlowCard(
     flow: FlowRecord,
     bound_libraries: usize,
     can_manage: bool,
+    can_templates: bool,
     on_removed: Callback<()>,
 ) -> impl IntoView {
     let router = use_router();
@@ -105,6 +119,32 @@ fn FlowCard(
         Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
     });
+    let tpl_req = CreateFlowTemplateRequest {
+        id: None,
+        name: flow.name.clone(),
+        description: flow.description.clone(),
+        file_mask: Some(flow.file_mask.clone()),
+        definition: serde_json::from_str(&flow.definition)
+            .unwrap_or_else(|_| serde_json::json!({"nodes": [], "connections": []})),
+    };
+    let save_template = Action::new_local(move |_: &()| {
+        let req = tpl_req.clone();
+        async move {
+            api::post::<CreateFlowTemplateRequest, LocalFlowTemplate>(
+                LOCAL_FLOW_TEMPLATES_PATH,
+                Some(&req),
+            )
+            .await
+        }
+    });
+    Effect::new(move |_| match save_template.value().get() {
+        Some(Ok(_)) => {
+            Toasts::notify_success("Flux enregistré comme modèle.");
+            on_removed.run(());
+        }
+        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
+        None => {}
+    });
     let removable = can_manage && !flow.is_default;
     let updated = format::datetime(flow.updated_at);
     let description = flow.description.filter(|text| !text.trim().is_empty());
@@ -115,6 +155,10 @@ fn FlowCard(
         .then(|| view! { <StatusBadge label="Défaut" variant="success" /> }.into_any());
     let actions = view! {
         <Link to=Route::FlowEditor(flow.id) class="btn btn-secondary btn-sm">"Ouvrir l'atelier"</Link>
+        {can_templates.then(|| view! {
+            <button type="button" class="btn btn-secondary btn-sm" disabled=move || save_template.pending().get()
+                on:click=move |_| { save_template.dispatch(()); }>"Modèle"</button>
+        })}
         {removable.then(|| view! {
             <button type="button" class="btn btn-sm btn-danger-quiet" disabled=move || remove.pending().get()
                 on:click=move |_| { remove.dispatch(()); }>"Supprimer"</button>
@@ -178,14 +222,141 @@ fn FlowCard(
 }
 
 #[component]
+fn FlowTemplateCard(
+    template: LocalFlowTemplate,
+    can_manage: bool,
+    can_delete: bool,
+    on_changed: Callback<()>,
+) -> impl IntoView {
+    let router = use_router();
+    let def_str = serde_json::to_string(&template.definition).unwrap_or_else(|_| "{}".into());
+    let (preview, total_blocks) = pipeline_preview(&def_str);
+    let extra_blocks = total_blocks.saturating_sub(preview.len());
+    let feedback = RwSignal::new(None::<String>);
+
+    let name_for_create = template.name.clone();
+    let desc_for_create = template.description.clone();
+    let mask_for_create = template.file_mask.clone();
+    let def_for_create = def_str;
+    let create_from_tpl = Action::new_local(move |_: &()| {
+        let suffix = (js_sys::Date::now() as u64 % 100_000).to_string();
+        let id = new_flow_id(&name_for_create, &suffix);
+        let path = format!("{FLOWS_PATH}/{}", encode_segment(&id));
+        let req = UpdateFlowRequest {
+            name: name_for_create.clone(),
+            description: desc_for_create.clone(),
+            file_mask: mask_for_create.clone(),
+            is_default: false,
+            definition: def_for_create.clone(),
+        };
+        async move { api::put::<UpdateFlowRequest, FlowRecord>(&path, &req).await }
+    });
+    Effect::new(move |_| match create_from_tpl.value().get() {
+        Some(Ok(created)) => {
+            Toasts::notify_success("Flux créé depuis le modèle.");
+            router.go(Route::FlowEditor(created.id));
+        }
+        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
+        None => {}
+    });
+
+    let del_id = template.id.clone();
+    let remove = Action::new_local(move |_: &()| {
+        let path = format!("{LOCAL_ITEMS_PATH}/{}", encode_segment(&del_id));
+        async move { api::delete(&path).await }
+    });
+    Effect::new(move |_| match remove.value().get() {
+        Some(Ok(())) => {
+            Toasts::notify_success("Modèle supprimé.");
+            on_changed.run(());
+        }
+        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
+        None => {}
+    });
+
+    let badge = view! {
+        <Tag
+            label=if template.is_local { "Modèle local" } else { "Modèle catalogue" }
+            tone=if template.is_local { TagTone::Success } else { TagTone::Primary }
+        />
+    }
+    .into_any();
+    let actions = view! {
+        {can_manage.then(|| view! {
+            <button type="button" class="btn btn-primary btn-sm" disabled=move || create_from_tpl.pending().get()
+                on:click=move |_| { create_from_tpl.dispatch(()); }>"Utiliser ce modèle"</button>
+        })}
+        {(can_delete && template.is_local).then(|| view! {
+            <button type="button" class="btn btn-sm btn-danger-quiet" disabled=move || remove.pending().get()
+                on:click=move |_| { remove.dispatch(()); }>"Supprimer"</button>
+        })}
+    }
+    .into_any();
+
+    view! {
+        <ResourceCard
+            title=template.name
+            subtitle=template.description
+            icon=IconName::Layers
+            tone=MetricTone::Neutral
+            badge=Some(badge)
+            footer_meta=format!("{total_blocks} bloc(s) · {}", template.id)
+            footer_actions=Some(actions)
+        >
+            <div class="cluster">
+                <Tag label=format!("v{}", template.version) tone=TagTone::Mono />
+                <Tag label=template.file_mask tone=TagTone::Primary />
+            </div>
+            <div class="flow-card__pipeline">
+                {if preview.is_empty() {
+                    view! { <span class="text-dim text-xs">"Modèle vide"</span> }.into_any()
+                } else {
+                    let count = preview.len();
+                    view! {
+                        <div class="flow-pipeline" aria-label="Aperçu du modèle">
+                            {preview.into_iter().enumerate().map(|(idx, step)| {
+                                view! {
+                                    <span class="pipeline-step-node">{step}</span>
+                                    {(idx + 1 < count).then(|| view! {
+                                        <span class="pipeline-connector" aria-hidden="true">"→"</span>
+                                    })}
+                                }
+                            }).collect_view()}
+                            {(extra_blocks > 0).then(|| view! {
+                                <span class="pipeline-connector" aria-hidden="true">"→"</span>
+                                <span class="pipeline-step-node pipeline-step-node--more">{format!("+{extra_blocks}")}</span>
+                            })}
+                        </div>
+                    }.into_any()
+                }}
+            </div>
+            {move || feedback.get().map(|err| view! {
+                <p class="text-danger text-xs" role="status">{err}</p>
+            })}
+        </ResourceCard>
+    }
+}
+
+#[component]
 pub fn FlowsPage(me: Me) -> impl IntoView {
+    view! { <FlowsSection me=me with_topbar=true /> }
+}
+
+#[component]
+pub fn FlowsSection(me: Me, with_topbar: bool) -> impl IntoView {
     let can_manage = me.allows(Permission::ManageFlows);
+    let can_templates = me.allows(Permission::ManageSettings);
     let can_libraries = me.allows(Permission::ViewLibraries);
     let filters = use_context::<Filters>();
     let reload = RwSignal::new(0_u32);
+    let view_mode = RwSignal::new(FlowsCatalogFilter::Flows);
     let flows = LocalResource::new(move || {
         reload.track();
         api::get::<Vec<FlowRecord>>(FLOWS_PATH)
+    });
+    let local_snapshot = LocalResource::new(move || {
+        reload.track();
+        api::get::<LocalLibrarySnapshot>(LOCAL_PATH)
     });
     let libraries = LocalResource::new(move || {
         reload.track();
@@ -201,7 +372,7 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
     });
     let on_removed = Callback::new(move |()| reload.update(|count| *count = count.wrapping_add(1)));
     let router = use_router();
-    if can_manage {
+    if with_topbar && can_manage {
         provide_topbar_action(ActionSpec {
             label: "Nouveau flux",
             on_click: Callback::new(move |()| router.go(Route::NewFlow)),
@@ -209,25 +380,36 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
     }
     let stats = Signal::derive(move || {
         let list = flows.get().and_then(Result::ok).unwrap_or_default();
+        let templates_count = local_snapshot
+            .get()
+            .and_then(Result::ok)
+            .map_or(0, |s| s.flow_templates.len());
         let libs = libraries.get().unwrap_or_default();
         let counts = flow_usage_counts(&list, &libs);
         let active = flow_filter();
+        let mode = view_mode.get();
         let set_filter = move |next: FlowFilter| {
             Callback::new(move |()| {
+                view_mode.set(FlowsCatalogFilter::Flows);
                 if let Some(filters) = filters {
                     filters.flow.set(next);
                 }
             })
         };
         let mut items = vec![
-            StatItem::new("Tous", counts.total.to_string(), MetricTone::Neutral)
-                .with_filter(active == FlowFilter::All, set_filter(FlowFilter::All)),
+            StatItem::new("Flows", counts.total.to_string(), MetricTone::Neutral).with_filter(
+                mode == FlowsCatalogFilter::Flows && active == FlowFilter::All,
+                set_filter(FlowFilter::All),
+            ),
         ];
         if can_libraries {
             items.push(
                 StatItem::new("Utilisés", counts.used.to_string(), MetricTone::Success)
                     .with_detail("≥ 1 bibliothèque")
-                    .with_filter(active == FlowFilter::Used, set_filter(FlowFilter::Used)),
+                    .with_filter(
+                        mode == FlowsCatalogFilter::Flows && active == FlowFilter::Used,
+                        set_filter(FlowFilter::Used),
+                    ),
             );
             let unused_tone = if counts.unused > 0 {
                 MetricTone::Warning
@@ -237,15 +419,84 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
             items.push(
                 StatItem::new("Inutilisés", counts.unused.to_string(), unused_tone)
                     .with_detail("aucune bibliothèque")
-                    .with_filter(active == FlowFilter::Unused, set_filter(FlowFilter::Unused)),
+                    .with_filter(
+                        mode == FlowsCatalogFilter::Flows && active == FlowFilter::Unused,
+                        set_filter(FlowFilter::Unused),
+                    ),
             );
         }
+        items.push(
+            StatItem::new("Modèles", templates_count.to_string(), MetricTone::Neutral).with_filter(
+                mode == FlowsCatalogFilter::Templates,
+                Callback::new(move |()| view_mode.set(FlowsCatalogFilter::Templates)),
+            ),
+        );
+        items.push(
+            StatItem::new(
+                "Tous",
+                (counts.total + templates_count).to_string(),
+                MetricTone::Neutral,
+            )
+            .with_filter(
+                mode == FlowsCatalogFilter::All,
+                Callback::new(move |()| view_mode.set(FlowsCatalogFilter::All)),
+            ),
+        );
         items
     });
     let grid = move || {
         let text = query();
         let active_filter = flow_filter();
+        let mode = view_mode.get();
         let libs = libraries.get().unwrap_or_default();
+        let templates = local_snapshot
+            .get()
+            .and_then(Result::ok)
+            .map(|s| s.flow_templates)
+            .unwrap_or_default();
+        let shown_templates: Vec<LocalFlowTemplate> = if matches!(
+            mode,
+            FlowsCatalogFilter::Templates | FlowsCatalogFilter::All
+        ) {
+            templates
+                .into_iter()
+                .filter(|tpl| matches(&[&tpl.name, &tpl.id, &tpl.file_mask], &text))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        if mode == FlowsCatalogFilter::Templates {
+            if shown_templates.is_empty() {
+                return view! {
+                    <div class="empty-state-panel">
+                        <EmptyState
+                            title="Aucun modèle de flow"
+                            message="Transformez un flow existant en modèle ou synchronisez un dépôt pour voir des modèles."
+                            icon_name=IconName::Layers
+                        />
+                    </div>
+                }
+                .into_any();
+            }
+            return view! {
+                <div class="resource-grid">
+                    {shown_templates
+                        .into_iter()
+                        .map(|tpl| view! {
+                            <FlowTemplateCard
+                                template=tpl
+                                can_manage=can_manage
+                                can_delete=can_templates
+                                on_changed=on_removed
+                            />
+                        })
+                        .collect_view()}
+                </div>
+            }
+            .into_any();
+        }
+
         match flows.get() {
             None => view! {
                 <div class="empty-state-panel">
@@ -268,7 +519,7 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
                         usage_ok && matches(&[&flow.name, &flow.id, &flow.file_mask], &text)
                     })
                     .collect();
-                if shown.is_empty() {
+                if shown.is_empty() && shown_templates.is_empty() {
                     let unfiltered = text.trim().is_empty() && active_filter == FlowFilter::All;
                     let create_action = (can_manage && unfiltered)
                         .then(|| {
@@ -311,9 +562,21 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
                                         flow=flow
                                         bound_libraries=bound_libraries
                                         can_manage=can_manage
+                                        can_templates=can_templates
                                         on_removed=on_removed
                                     />
                                 }
+                            })
+                            .collect_view()}
+                        {shown_templates
+                            .into_iter()
+                            .map(|tpl| view! {
+                                <FlowTemplateCard
+                                    template=tpl
+                                    can_manage=can_manage
+                                    can_delete=can_templates
+                                    on_changed=on_removed
+                                />
                             })
                             .collect_view()}
                     </div>
@@ -325,6 +588,14 @@ pub fn FlowsPage(me: Me) -> impl IntoView {
     view! {
         <div class="tab-panel" role="tabpanel">
             <StatStrip aria_label="Synthèse des flows" items=stats />
+            {(!with_topbar && can_manage).then(|| view! {
+                <div class="inline-actions">
+                    <Link to=Route::NewFlow class="btn btn-primary btn-sm">
+                        <Icon name=IconName::Plus size=14 />
+                        <span>"Nouveau flux"</span>
+                    </Link>
+                </div>
+            })}
             {grid}
         </div>
     }
@@ -357,6 +628,7 @@ pub(super) mod test_support {
                 suggested_next: Vec::new(),
                 from_plugin: true,
                 operation_id: None,
+                owner: None,
             })
         }
 

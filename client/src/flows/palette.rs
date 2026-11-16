@@ -1,13 +1,15 @@
 //! Dock Palette : recherche, catégories repliables, épinglage et insertion sur branche.
 
-use super::dnd::DragPayload;
+use super::dnd::{DragPayload, insert_subgraph};
 use super::drag::DragItem;
 use super::presentation::{NodeDomain, output_presentation};
 use super::state::Editor;
+use crate::api;
 use crate::route::{Link, Route};
 use crate::ui::search::{matches, query as global_query};
 use crate::ui::{Icon, IconName, Toasts};
-use flux_shared::flows::OwnedBlockSpec;
+use flux_shared::flows::{FlowGraph, OwnedBlockSpec};
+use flux_shared::local::LocalLibrarySnapshot;
 use leptos::prelude::*;
 
 const HEADER_ICON_SIZE: u32 = 15;
@@ -64,6 +66,7 @@ pub fn grouped_specs(
 #[component]
 pub fn Palette(editor: Editor) -> impl IntoView {
     let local_query = RwSignal::new(String::new());
+    let local_snapshot = LocalResource::new(|| api::get::<LocalLibrarySnapshot>("/api/v1/local"));
     let search_ref = NodeRef::<leptos::html::Input>::new();
     let last_tick = RwSignal::new(0_u64);
     Effect::new(move |_| {
@@ -250,6 +253,91 @@ pub fn Palette(editor: Editor) -> impl IntoView {
                         })
                         .collect_view()
                         .into_any()
+                }}
+                {move || {
+                    let templates = local_snapshot
+                        .get()
+                        .and_then(Result::ok)
+                        .map(|snap| snap.block_templates)
+                        .unwrap_or_default();
+                    let q_local = local_query.get();
+                    let q_global = global_query();
+                    let filtered: Vec<_> = templates
+                        .into_iter()
+                        .filter(|tpl| {
+                            matches(
+                                &[
+                                    &tpl.name,
+                                    &tpl.id,
+                                    tpl.description.as_deref().unwrap_or(""),
+                                ],
+                                &q_local,
+                            ) && matches(
+                                &[
+                                    &tpl.name,
+                                    &tpl.id,
+                                    tpl.description.as_deref().unwrap_or(""),
+                                ],
+                                &q_global,
+                            )
+                        })
+                        .collect();
+                    (!filtered.is_empty()).then(|| {
+                        let count = filtered.len();
+                        view! {
+                            <details class="flow-palette__group" open=true>
+                                <summary class="flow-palette__summary">
+                                    <span>"Modèles de blocs"</span>
+                                    <span class="flow-palette__count">{count}</span>
+                                </summary>
+                                <div class="flow-palette__list">
+                                    {filtered.into_iter().map(|tpl| {
+                                        let name = tpl.name.clone();
+                                        let desc = tpl.description.clone().unwrap_or_else(|| "Sous-graphe pré-configuré".into());
+                                        let def = tpl.definition.clone();
+                                        let insert = move || {
+                                            let Ok(parsed) = serde_json::from_value::<FlowGraph>(def.clone()) else {
+                                                Toasts::notify_error("Modèle de blocs invalide.");
+                                                return;
+                                            };
+                                            editor.mutate_graph(|graph| {
+                                                let created = insert_subgraph(graph, &parsed);
+                                                if let Some(first) = created.first() {
+                                                    editor.selected.set(Some(first.clone()));
+                                                }
+                                            });
+                                            Toasts::notify_success(format!("Modèle « {} » inséré.", name));
+                                        };
+                                        let insert_click = insert.clone();
+                                        view! {
+                                            <div
+                                                role="button"
+                                                tabindex="0"
+                                                class="flow-palette__card"
+                                                title=desc
+                                                on:click=move |_| insert_click()
+                                                on:keydown=move |event| {
+                                                    if event.key() == "Enter" || event.key() == " " {
+                                                        event.prevent_default();
+                                                        insert();
+                                                    }
+                                                }
+                                            >
+                                                <span class="flow-palette__card-icon" aria-hidden="true">
+                                                    <Icon name=IconName::Layers size=CARD_ICON_SIZE />
+                                                </span>
+                                                <span class="flow-palette__card-text">
+                                                    <span class="flow-palette__card-title">{tpl.name}</span>
+                                                    <span class="flow-palette__card-meta">"Modèle de blocs"</span>
+                                                </span>
+                                                <span class="flow-palette__card-plus" aria-hidden="true">"+"</span>
+                                            </div>
+                                        }
+                                    }).collect_view()}
+                                </div>
+                            </details>
+                        }
+                    })
                 }}
             </div>
         </div>

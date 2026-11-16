@@ -11,6 +11,7 @@ use std::{
 mod blocks;
 mod cache;
 mod install;
+mod local;
 mod packs;
 mod probe;
 mod secret_settings;
@@ -24,13 +25,18 @@ pub use install::{
     ensure_tool_installed, ensure_tool_installed_verified, ensure_tools_for_requirements,
     install_from_distribution, is_installing, parse_distribution, read_distribution,
 };
+pub use local::{
+    build_local_snapshot, delete_local_item, save_local_block_template, save_local_flow_template,
+    save_local_pack, save_local_script, upload_local_resource,
+};
 pub use packs::{
-    PackInstallResult, PackInstallation, install_pack, install_pack_verified,
+    PackInstallResult, PackInstallation, build_pack_detail, install_pack, install_pack_verified,
     read_pack_installation,
 };
 pub use probe::{ProbeContract, file_job_may_start, probe_is_ready, required_probe};
 pub use sources::{
-    catalog_roots, is_valid_repository_id, repository_dir, sync_enabled_repositories,
+    catalog_roots, is_valid_repository_id, local_catalog_dir, repository_dir,
+    sync_enabled_repositories,
 };
 pub use sync::{
     REQUIRE_IMMUTABLE_RELEASES_ENV, SyncError, SyncPolicy, SyncReport, is_mutable_branch_url,
@@ -39,8 +45,9 @@ pub use sync::{
 
 pub use flux_shared::plugins::vocab::{self, CatalogCapability, CatalogItemType, PluginCategory};
 pub use flux_shared::plugins::{
-    CatalogEntry, CreateRepositoryRequest, PluginRepository, PluginSettingsView, ToolStatus,
-    ToolStatusSummary,
+    CatalogEntry, CreateRepositoryRequest, PackDetailView, PluginCompatibility, PluginDependency,
+    PluginDetailView, PluginRepository, PluginSettingsView, RepositoryDetailView,
+    ToolArtifactSummary, ToolDetailView, ToolStatus, ToolStatusSummary,
 };
 pub use secret_settings::{
     mask, migrate_plaintext, plugin_secret_aad, rotate_settings, seal, secret_names,
@@ -108,11 +115,17 @@ pub struct PluginManifest {
     #[serde(default)]
     pub license: Option<String>,
     #[serde(default)]
+    pub capability: Option<CatalogCapability>,
+    #[serde(default)]
     pub tool: Option<ManifestToolDetails>,
     #[serde(default)]
     pub settings_schema: Option<SettingsSchema>,
     #[serde(default)]
     pub files: Vec<ManifestFileEntry>,
+    #[serde(default)]
+    pub dependencies: Vec<PluginDependency>,
+    #[serde(default)]
+    pub compatibility: Option<PluginCompatibility>,
     #[serde(
         default,
         deserialize_with = "vocab::deserialize_optional_category",
@@ -201,11 +214,16 @@ pub fn parse_index_tolerant(content: &str) -> anyhow::Result<ParsedIndex> {
     })
 }
 
-/// Un bloc appartient à un plugin du même index : sans propriétaire connu, il est écarté.
+/// Un bloc appartient à un plugin ou script du même index : sans propriétaire connu, il est écarté.
 fn drop_orphan_blocks(entries: &mut Vec<CatalogEntry>, skipped: &mut Vec<String>) {
-    let plugins: HashSet<String> = entries
+    let owners: HashSet<String> = entries
         .iter()
-        .filter(|entry| entry.entry_type == CatalogItemType::Plugin)
+        .filter(|entry| {
+            matches!(
+                entry.entry_type,
+                CatalogItemType::Plugin | CatalogItemType::Script
+            )
+        })
         .map(|entry| entry.id.clone())
         .collect();
     entries.retain(|entry| {
@@ -213,7 +231,7 @@ fn drop_orphan_blocks(entries: &mut Vec<CatalogEntry>, skipped: &mut Vec<String>
             && !entry
                 .owner
                 .as_ref()
-                .is_some_and(|owner| plugins.contains(owner));
+                .is_some_and(|owner| owners.contains(owner));
         if orphan {
             skipped.push(format!(
                 "{} : un bloc doit appartenir à un plugin du dépôt (owner)",
@@ -328,6 +346,187 @@ pub fn plugin_exists(roots: &[PathBuf], plugin_id: &str) -> bool {
     catalog_with_roots(roots)
         .iter()
         .any(|(_, entry)| entry.id == plugin_id)
+}
+
+/// Construit la fiche détaillée d'un plugin à partir de son entrée de catalogue, de son manifeste et de ses blocs.
+pub fn build_plugin_detail(
+    root: &Path,
+    entry: &CatalogEntry,
+    all_blocks: &[flux_shared::flows::OwnedBlockSpec],
+) -> PluginDetailView {
+    let manifest = load_manifest(root, &entry.manifest_path).ok();
+    let blocks = all_blocks
+        .iter()
+        .filter(|block| block.owner.as_deref() == Some(entry.id.as_str()))
+        .cloned()
+        .collect();
+    match manifest {
+        Some(manifest) => PluginDetailView {
+            id: entry.id.clone(),
+            name: manifest.name,
+            version: manifest.version,
+            description: manifest.description,
+            author: manifest.author,
+            license: manifest.license,
+            capability: manifest.capability.or_else(|| entry.capability.clone()),
+            category: manifest.category.or(entry.category),
+            tags: if manifest.tags.is_empty() {
+                entry.tags.clone()
+            } else {
+                manifest.tags
+            },
+            dependencies: manifest.dependencies,
+            compatibility: manifest.compatibility.unwrap_or_default(),
+            has_settings: manifest
+                .settings_schema
+                .is_some_and(|schema| !schema.fields.is_empty()),
+            blocks,
+        },
+        None => PluginDetailView {
+            id: entry.id.clone(),
+            name: entry.name.clone(),
+            version: entry.version.clone(),
+            description: None,
+            author: None,
+            license: None,
+            capability: entry.capability.clone(),
+            category: entry.category,
+            tags: entry.tags.clone(),
+            dependencies: Vec::new(),
+            compatibility: PluginCompatibility::default(),
+            has_settings: false,
+            blocks,
+        },
+    }
+}
+
+/// Construit la fiche détaillée d'un outil distribué (distribution, compatibilité et plugins utilisateurs).
+pub fn build_tool_detail(
+    roots: &[PathBuf],
+    cache_mgr: &ToolCacheManager,
+    tool_id: &str,
+) -> Option<ToolDetailView> {
+    let entries = catalog_with_roots(roots);
+    let (root, entry) = entries
+        .iter()
+        .find(|(_, entry)| entry.id == tool_id && entry.entry_type == CatalogItemType::App)?;
+    let manifest = load_manifest(root, &entry.manifest_path).ok();
+    let description = manifest
+        .as_ref()
+        .and_then(|m| m.description.clone())
+        .unwrap_or_default();
+    let summary = summarize_tool(entry.clone(), description, cache_mgr);
+    let distribution = read_distribution(roots, tool_id)
+        .ok()
+        .and_then(|value| parse_distribution(&value.to_string()).ok());
+    let host = host_arch();
+    let artifacts = distribution
+        .as_ref()
+        .map(|dist| {
+            dist.artifacts
+                .iter()
+                .map(|art| ToolArtifactSummary {
+                    arch: art.arch.clone(),
+                    archive_format: art.archive_format.clone(),
+                    archive_sha256: art.archive_sha256.clone(),
+                    binary_relative_path: art.binary_relative_path.clone(),
+                    host_supported: art.arch == host,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let used_by_plugins = entries
+        .iter()
+        .filter(|(_, item)| item.entry_type == CatalogItemType::Plugin)
+        .filter(|(plugin_root, item)| {
+            load_manifest(plugin_root, &item.manifest_path)
+                .ok()
+                .is_some_and(|m| m.dependencies.iter().any(|dep| dep.id == tool_id))
+        })
+        .map(|(_, item)| item.id.clone())
+        .collect();
+    let tags = manifest
+        .as_ref()
+        .filter(|m| !m.tags.is_empty())
+        .map(|m| m.tags.clone())
+        .unwrap_or_else(|| entry.tags.clone());
+    Some(ToolDetailView {
+        summary,
+        author: manifest.as_ref().and_then(|m| m.author.clone()),
+        license: manifest.as_ref().and_then(|m| m.license.clone()),
+        interface: manifest
+            .as_ref()
+            .and_then(|m| m.tool.as_ref().and_then(|t| t.interface.clone())),
+        invocation: manifest
+            .as_ref()
+            .and_then(|m| m.tool.as_ref().and_then(|t| t.invocation.clone())),
+        tags,
+        compatibility: manifest.and_then(|m| m.compatibility).unwrap_or_default(),
+        tool_version: distribution.as_ref().map(|d| d.tool_version.clone()),
+        release_status: distribution.as_ref().and_then(|d| d.release_status.clone()),
+        distribution_mode: distribution.map(|d| d.distribution_mode),
+        artifacts,
+        used_by_plugins,
+    })
+}
+
+/// Construit la fiche détaillée d'un dépôt de plugins à partir de sa copie locale synchronisée.
+pub fn build_repository_detail(
+    repository: PluginRepository,
+    repos_dir: &Path,
+) -> RepositoryDetailView {
+    let Some(dir) = repository_dir(repos_dir, &repository.id) else {
+        return RepositoryDetailView {
+            repository,
+            synced_on_disk: false,
+            schema_version: None,
+            release_version: None,
+            entries_count: 0,
+            skipped_count: 0,
+            entries: Vec::new(),
+        };
+    };
+    let index_path = dir.join("index.json");
+    let Ok(content) = std::fs::read_to_string(&index_path) else {
+        return RepositoryDetailView {
+            repository,
+            synced_on_disk: false,
+            schema_version: None,
+            release_version: None,
+            entries_count: 0,
+            skipped_count: 0,
+            entries: Vec::new(),
+        };
+    };
+    match parse_index_tolerant(&content) {
+        Ok(parsed) => {
+            let entries_count = parsed.index.entries.len();
+            let entries = parsed
+                .index
+                .entries
+                .into_iter()
+                .filter(|entry| entry.entry_type.section().is_some())
+                .collect();
+            RepositoryDetailView {
+                repository,
+                synced_on_disk: true,
+                schema_version: Some(parsed.index.schema_version),
+                release_version: parsed.index.release_version,
+                entries_count,
+                skipped_count: parsed.skipped.len(),
+                entries,
+            }
+        }
+        Err(_) => RepositoryDetailView {
+            repository,
+            synced_on_disk: true,
+            schema_version: None,
+            release_version: None,
+            entries_count: 0,
+            skipped_count: 0,
+            entries: Vec::new(),
+        },
+    }
 }
 
 /// Résumé d'un outil du catalogue : prêt s'il est dans le cache local, sinon installable.
@@ -614,6 +813,75 @@ mod tests {
             .map(|entry| entry.id)
             .collect();
         assert_eq!(ids, vec!["plugin.a", "pack.x"]);
+        Ok(())
+    }
+
+    #[test]
+    fn build_plugin_detail_filters_owned_blocks_and_reads_manifest() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::create_dir_all(dir.path().join("plugins/sonarr"))?;
+        std::fs::write(
+            dir.path().join("plugins/sonarr/manifest.json"),
+            r#"{
+                "schemaVersion": "1.1.0",
+                "id": "plugin.sonarr",
+                "type": "plugin",
+                "version": "1.2.0",
+                "name": "Sonarr Integration",
+                "description": "Synchronisation Sonarr",
+                "author": "flux-de-fichiers",
+                "license": "GPL-2.0-or-later",
+                "capability": "integration",
+                "dependencies": [{"id": "app.curl", "versionRange": "^8.0", "kind": "app", "optional": true}],
+                "compatibility": {"appMin": "1.0.0", "platforms": ["linux/amd64"]},
+                "settingsSchema": {"fields": [{"name": "url", "label": "URL", "type": "url", "required": true}]}
+            }"#,
+        )?;
+        let entry = CatalogEntry {
+            id: "plugin.sonarr".into(),
+            entry_type: CatalogItemType::Plugin,
+            version: "1.2.0".into(),
+            name: "Sonarr Integration".into(),
+            manifest_path: "plugins/sonarr/manifest.json".into(),
+            capability: None,
+            current_choice: None,
+            distribution: None,
+            category: None,
+            tags: vec!["arr".into()],
+            owner: None,
+            sha256: None,
+        };
+        let block = |kind: &str, owner: Option<&str>| flux_shared::flows::OwnedBlockSpec {
+            kind: kind.into(),
+            aliases: Vec::new(),
+            label: kind.into(),
+            category: "Intégrations".into(),
+            domain: None,
+            description: String::new(),
+            has_input: true,
+            ports: Vec::new(),
+            terminal: false,
+            fields: Vec::new(),
+            suggested_next: Vec::new(),
+            from_plugin: true,
+            operation_id: None,
+            owner: owner.map(str::to_owned),
+        };
+        let detail = build_plugin_detail(
+            dir.path(),
+            &entry,
+            &[
+                block("block.sonarr.rescan", Some("plugin.sonarr")),
+                block("block.radarr.rescan", Some("plugin.radarr")),
+            ],
+        );
+        assert_eq!(detail.id, "plugin.sonarr");
+        assert!(detail.has_settings);
+        assert_eq!(detail.author.as_deref(), Some("flux-de-fichiers"));
+        assert_eq!(detail.compatibility.platforms, vec!["linux/amd64"]);
+        assert_eq!(detail.dependencies.len(), 1);
+        assert_eq!(detail.blocks.len(), 1);
+        assert_eq!(detail.blocks[0].kind, "block.sonarr.rescan");
         Ok(())
     }
 }

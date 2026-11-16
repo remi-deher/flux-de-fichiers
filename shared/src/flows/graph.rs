@@ -256,6 +256,7 @@ mod tests {
             suggested_next: Vec::new(),
             from_plugin: true,
             operation_id: None,
+            owner: None,
         }
     }
 

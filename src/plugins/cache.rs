@@ -1,9 +1,9 @@
 //! Cache en mémoire du catalogue de plugins, invalidé lors des synchronisations et mutations de dépôts.
 
 use super::{
-    CatalogEntry, CatalogItemType, SettingsField, ToolStatusSummary, catalog_with_roots,
-    flow_block_catalog, load_manifest, parse_distribution, read_distribution,
-    settings_fields as load_settings_fields, summarize_tool,
+    CatalogEntry, CatalogItemType, PluginDetailView, SettingsField, ToolStatusSummary,
+    build_plugin_detail, catalog_with_roots, flow_block_catalog, load_manifest, parse_distribution,
+    read_distribution, settings_fields as load_settings_fields, summarize_tool,
 };
 use crate::{flows::OperationRegistry, tools_cache::ToolCacheManager};
 use flux_shared::flows::OwnedBlockSpec;
@@ -66,6 +66,27 @@ impl CatalogCache {
 
     pub async fn blocks(&self, roots: &[PathBuf]) -> Vec<OwnedBlockSpec> {
         self.snapshot(roots).await.blocks
+    }
+
+    pub async fn plugin_detail(
+        &self,
+        roots: &[PathBuf],
+        plugin_id: &str,
+    ) -> Option<PluginDetailView> {
+        let snapshot = self.snapshot(roots).await;
+        let (root, entry) = snapshot.entries.iter().find(|(_, entry)| {
+            entry.id == plugin_id
+                && matches!(
+                    entry.entry_type,
+                    CatalogItemType::Plugin | CatalogItemType::Script
+                )
+        })?;
+        let root = root.clone();
+        let entry = entry.clone();
+        let blocks = snapshot.blocks;
+        tokio::task::spawn_blocking(move || build_plugin_detail(&root, &entry, &blocks))
+            .await
+            .ok()
     }
 
     pub async fn operations(&self, roots: &[PathBuf]) -> OperationRegistry {

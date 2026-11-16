@@ -476,7 +476,7 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                     .into_any();
                 }
                 view! {
-                    <div class="resource-grid">
+                    <div class="resource-grid resource-grid--list">
                         {shown.into_iter().map(|worker| {
                             let id = worker.id;
                             let liveness = worker.liveness(now);

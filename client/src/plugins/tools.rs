@@ -1,11 +1,13 @@
 //! Onglet Outils de la page Plugins : état d'installation et déploiement des binaires.
 
+use super::tool_detail::{ToolDetail, ToolDrawerTab};
 use super::{TOOLS_PATH, bump, tool_status_label};
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
 use crate::ui::{
-    EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone, Toasts,
+    Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
+    Toasts,
 };
 use flux_shared::plugins::{ToolStatus, ToolStatusSummary};
 use leptos::prelude::*;
@@ -85,6 +87,10 @@ pub fn ToolsSection(
     can_install: bool,
 ) -> impl IntoView {
     let active_filter = RwSignal::new(ToolStateFilter::All);
+    let selected_tool = RwSignal::new(None::<String>);
+    let drawer_open = RwSignal::new(false);
+    let drawer_tab = RwSignal::new(0_usize);
+    let drawer_title = Signal::derive(move || selected_tool.get().unwrap_or_default());
     let feedback = RwSignal::new(None::<String>);
     let install = Action::new_local(move |id: &String| {
         let path = format!("{TOOLS_PATH}/{}/install", encode_segment(id));
@@ -150,6 +156,24 @@ pub fn ToolsSection(
 
     view! {
         <StatStrip aria_label="Synthèse des outils" items=stats />
+        <Drawer
+            open=drawer_open
+            eyebrow="Outil"
+            title=drawer_title
+            tabs=ToolDrawerTab::TABS.to_vec()
+            tab=drawer_tab
+        >
+            {move || selected_tool.get().map(|id| {
+                view! {
+                    <ToolDetail
+                        tool_id=id
+                        tab=drawer_tab
+                        can_install=can_install
+                        reload_tools=reload_tools
+                    />
+                }
+            })}
+        </Drawer>
         {move || {
             let text = query();
             let filter = active_filter.get();
@@ -190,10 +214,12 @@ pub fn ToolsSection(
                         .into_any();
                     }
                     view! {
-                        <div class="resource-grid">
+                        <div class="resource-grid resource-grid--list">
                             {shown.into_iter().map(|tool| {
                                 let (label, class) = tool_status_label(tool.status);
                                 let id = tool.id.clone();
+                                let open_id = id.clone();
+                                let active_id = id.clone();
                                 let installable = can_install && tool.status == ToolStatus::NotInstalled;
                                 let tone = match tool.status {
                                     ToolStatus::Ready => MetricTone::Success,
@@ -207,14 +233,23 @@ pub fn ToolsSection(
                                     </div>
                                 }
                                 .into_any();
-                                let actions = installable.then(|| {
-                                    let id = id.clone();
-                                    view! {
-                                        <button type="button" class="btn btn-secondary btn-sm" disabled=move || install.pending().get()
-                                            on:click=move |_| { install.dispatch(id.clone()); }>"Installer"</button>
-                                    }
-                                    .into_any()
+                                let open_detail = Callback::new(move |()| {
+                                    selected_tool.set(Some(open_id.clone()));
+                                    drawer_tab.set(0);
+                                    drawer_open.set(true);
                                 });
+                                let actions = view! {
+                                    {installable.then(|| {
+                                        let id = id.clone();
+                                        view! {
+                                            <button type="button" class="btn btn-secondary btn-sm" disabled=move || install.pending().get()
+                                                on:click=move |_| { install.dispatch(id.clone()); }>"Installer"</button>
+                                        }
+                                    })}
+                                    <button type="button" class="btn btn-secondary btn-sm"
+                                        on:click=move |_| open_detail.run(())>"Détails"</button>
+                                }
+                                .into_any();
                                 view! {
                                     <ResourceCard
                                         title=tool.name
@@ -222,8 +257,13 @@ pub fn ToolsSection(
                                         icon=IconName::Package
                                         tone=tone
                                         badge=Some(badge)
+                                        active=Some(Signal::derive(move || {
+                                            drawer_open.get()
+                                                && selected_tool.get().as_deref() == Some(active_id.as_str())
+                                        }))
+                                        on_click=Some(open_detail)
                                         footer_meta=id
-                                        footer_actions=actions
+                                        footer_actions=Some(actions)
                                     >
                                         <div class="cluster">
                                             <Tag label=tool.capability.as_str() tone=TagTone::Primary />

@@ -226,7 +226,9 @@ impl WorkerLoop {
         }
         job_runner::ensure_probe_ready(&cache_mgr, claim)?;
 
-        let input = dir.join("source.mkv");
+        let input = dir.join(flux_shared::jobs::source_working_filename(
+            &claim.source_name,
+        ));
         let response = self
             .leased(reqwest::Method::GET, claim, worker, "source")
             .send()
@@ -280,7 +282,7 @@ impl WorkerLoop {
         self.leased(reqwest::Method::PUT, claim, worker, "result")
             .header("content-length", output_size)
             .header("x-remux-warning", outcome.warning.to_string())
-            .header("x-output-ext", outcome.output_profile.extension())
+            .header("x-output-ext", &outcome.output_spec.extension)
             .body(body)
             .send()
             .await?

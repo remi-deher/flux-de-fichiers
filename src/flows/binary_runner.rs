@@ -6,9 +6,9 @@ use crate::{
         apply_derived, build_binary_argv, evaluate_condition, merge_params,
     },
     media::{
-        PostValidateMode, ProbeCommand, ProbeFormat, ensure_non_empty_file, media_duration_secs,
-        merge_probe_enrichment, run_probe_json, validate_mp4_header, validate_remux_values,
-        validate_tracks_unchanged_values,
+        PostValidateMode, PostValidateSpec, ProbeCommand, ensure_non_empty_file,
+        extract_duration_secs, merge_probe_enrichment, run_probe_json, validate_magic_bytes,
+        validate_probe_preserved,
     },
     tool_run::{CommandSpec, ToolRunError, run_command},
     tools_cache::{ToolCacheManager, host_arch},
@@ -105,6 +105,7 @@ pub async fn run_probe_contract(
     let (args, _) = build_binary_argv(rt, &Value::Null, &paths, None).map_err(|e| e.to_string())?;
     let mut cmd = ProbeCommand::new(&rt.executable, &bin, &args);
     cmd.format = rt.probe_format.unwrap_or_default();
+    cmd.require_paths = &rt.probe_require_paths;
     if !rt.console.success_exit_codes.is_empty() {
         cmd.success_exit_codes = &rt.console.success_exit_codes;
     }
@@ -112,12 +113,8 @@ pub async fn run_probe_contract(
     run_probe_json(cmd).await.map_err(|e| e.to_string())
 }
 
-fn enrichment_key<'a>(op: &'a OperationContract, rt: &BinaryRuntime) -> &'a str {
-    match rt.probe_format {
-        Some(ProbeFormat::MediainfoJson) => "mediainfo",
-        Some(ProbeFormat::MkvmergeJson) => "mkvmerge",
-        _ => op.id.as_str(),
-    }
+fn enrichment_key<'a>(op: &'a OperationContract, rt: &'a BinaryRuntime) -> &'a str {
+    rt.probe_enrichment_key.as_deref().unwrap_or(op.id.as_str())
 }
 
 /// Inspecte `source` via la sonde principale et enrichit optionnellement si une sonde `probe-enrich` est prête.
@@ -127,19 +124,27 @@ pub async fn probe_media_tree(
     tool_versions: &HashMap<String, String>,
     source: &Path,
 ) -> Result<Value, BinaryStepError> {
-    let primary = registry.primary_probe().ok_or_else(|| BinaryStepError {
-        code: JobErrorCode::ProbeUnavailable,
-        message: "aucun contrat de sonde primaire disponible".to_owned(),
-        excerpt: None,
-    })?;
+    let primary = registry
+        .primary_probe_for_file(source)
+        .ok_or_else(|| BinaryStepError {
+            code: JobErrorCode::ProbeUnavailable,
+            message: format!(
+                "aucune sonde primaire déclarée pour '{}'",
+                source
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("source")
+            ),
+            excerpt: None,
+        })?;
     let mut info = run_probe_contract(cache_mgr, tool_versions, primary, source)
         .await
         .map_err(|err| BinaryStepError {
-            code: error_code_for_op(primary, JobErrorCode::RemuxFailed),
-            message: format!("inspection média impossible : {err}"),
+            code: error_code_for_op(primary, JobErrorCode::OperationFailed),
+            message: format!("inspection impossible : {err}"),
             excerpt: None,
         })?;
-    for enrich in registry.enrich_probes() {
+    for enrich in registry.enrich_probes_for_file(source) {
         if let OperationRuntime::Binary(rt) = &enrich.runtime
             && is_binary_available_locally(cache_mgr, rt, tool_versions)
         {
@@ -186,7 +191,7 @@ pub async fn execute_binary_operation(
     rt: &BinaryRuntime,
     node_config: &Value,
 ) -> Result<BinaryStepOutcome, BinaryStepError> {
-    let error_code = rt.error_code.unwrap_or(JobErrorCode::RemuxFailed);
+    let error_code = rt.error_code.unwrap_or(JobErrorCode::OperationFailed);
     match rt.execution_mode {
         BinaryExecutionMode::ProbePrimary | BinaryExecutionMode::ProbeEnrich => {
             let mut updated = probe_media_tree(
@@ -253,7 +258,7 @@ pub async fn execute_binary_operation(
                 ctx.registry,
                 ctx.cache_mgr,
                 ctx.tool_versions,
-                rt.post_validate,
+                &rt.post_validate_spec(),
                 Some(ctx.media_info),
                 ctx.working_file,
                 ctx.working_file,
@@ -294,7 +299,9 @@ pub async fn execute_binary_operation(
                 }
             })?;
 
-            let duration_secs = media_duration_secs(ctx.media_info);
+            let mut duration_rules = rt.duration_rules.clone();
+            duration_rules.extend(ctx.registry.duration_rules());
+            let duration_secs = extract_duration_secs(ctx.media_info, &duration_rules);
             let bin = resolve_contract_binary(ctx.cache_mgr, rt, ctx.tool_versions);
             let on_p = ctx.on_progress.clone();
             let first_attempt = run_command(
@@ -345,7 +352,7 @@ pub async fn execute_binary_operation(
                 ctx.registry,
                 ctx.cache_mgr,
                 ctx.tool_versions,
-                rt.post_validate,
+                &rt.post_validate_spec(),
                 Some(ctx.media_info),
                 ctx.working_file,
                 &destination,
@@ -400,46 +407,57 @@ fn command_spec_from_contract<'a>(
     spec
 }
 
-async fn post_validate_output(
+pub(crate) async fn post_validate_output(
     registry: &OperationRegistry,
     cache_mgr: &ToolCacheManager,
     tool_versions: &HashMap<String, String>,
-    mode: PostValidateMode,
+    spec: &PostValidateSpec,
     cached_before: Option<&Value>,
     before_path: &Path,
     after_path: &Path,
 ) -> anyhow::Result<()> {
-    match mode {
+    match spec.mode {
         PostValidateMode::None => Ok(()),
-        PostValidateMode::Mp4Header => validate_mp4_header(after_path).await,
-        PostValidateMode::ValidMedia => {
+        PostValidateMode::NonEmpty => ensure_non_empty_file(after_path).await,
+        PostValidateMode::MagicBytes => {
+            let rule = spec
+                .magic
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("règle magic-bytes manquante dans le contrat"))?;
+            validate_magic_bytes(after_path, rule).await
+        }
+        PostValidateMode::ValidProbe => {
             ensure_non_empty_file(after_path).await?;
             let probe = registry
-                .primary_probe()
-                .ok_or_else(|| anyhow::anyhow!("sonde primaire manquante"))?;
+                .primary_probe_for_file(after_path)
+                .ok_or_else(|| anyhow::anyhow!("sonde primaire manquante pour la sortie"))?;
             run_probe_contract(cache_mgr, tool_versions, probe, after_path)
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
             Ok(())
         }
-        PostValidateMode::RemuxEquivalent | PostValidateMode::TracksUnchanged => {
-            let probe = registry
-                .primary_probe()
-                .ok_or_else(|| anyhow::anyhow!("sonde primaire manquante"))?;
+        PostValidateMode::ProbePreserve => {
             let before = match cached_before {
                 Some(existing) => existing.clone(),
-                None => run_probe_contract(cache_mgr, tool_versions, probe, before_path)
-                    .await
-                    .map_err(|e| anyhow::anyhow!(e))?,
+                None => {
+                    let before_probe =
+                        registry
+                            .primary_probe_for_file(before_path)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("sonde primaire manquante pour la source")
+                            })?;
+                    run_probe_contract(cache_mgr, tool_versions, before_probe, before_path)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e))?
+                }
             };
-            let after = run_probe_contract(cache_mgr, tool_versions, probe, after_path)
+            let after_probe = registry
+                .primary_probe_for_file(after_path)
+                .ok_or_else(|| anyhow::anyhow!("sonde primaire manquante pour la sortie"))?;
+            let after = run_probe_contract(cache_mgr, tool_versions, after_probe, after_path)
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
-            if mode == PostValidateMode::RemuxEquivalent {
-                validate_remux_values(&before, &after)
-            } else {
-                validate_tracks_unchanged_values(&before, &after)
-            }
+            validate_probe_preserved(&before, &after, &spec.preserve_paths)
         }
     }
 }

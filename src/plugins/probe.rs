@@ -16,7 +16,10 @@ pub fn required_probe(entries: &[CatalogEntry]) -> Option<ProbeContract> {
         .iter()
         .find(|entry| {
             entry.entry_type == CatalogItemType::App
-                && entry.capability == Some(CatalogCapability::Probe)
+                && entry
+                    .capability
+                    .as_ref()
+                    .is_some_and(CatalogCapability::is_probe)
                 && entry.current_choice == Some(true)
         })
         .map(|entry| ProbeContract {
@@ -61,9 +64,24 @@ mod tests {
     #[test]
     fn required_probe_is_the_current_probe_tool() -> Result<(), &'static str> {
         let entries = vec![
-            tool("app.mkvtoolnix", "1.0.0", CatalogCapability::Remux, true),
-            tool("app.mediainfo", "1.0.0", CatalogCapability::Probe, true),
-            tool("app.other-probe", "2.0.0", CatalogCapability::Probe, false),
+            tool(
+                "app.mkvtoolnix",
+                "1.0.0",
+                CatalogCapability::new("remux"),
+                true,
+            ),
+            tool(
+                "app.mediainfo",
+                "1.0.0",
+                CatalogCapability::new("probe"),
+                true,
+            ),
+            tool(
+                "app.other-probe",
+                "2.0.0",
+                CatalogCapability::new("probe"),
+                false,
+            ),
         ];
         let probe = required_probe(&entries).ok_or("sonde absente")?;
         assert_eq!(probe.tool_id, "app.mediainfo");
@@ -76,7 +94,7 @@ mod tests {
         let entries = vec![tool(
             "app.mediainfo",
             "1.0.0",
-            CatalogCapability::Probe,
+            CatalogCapability::new("probe"),
             false,
         )];
         assert!(required_probe(&entries).is_none());

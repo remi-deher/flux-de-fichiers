@@ -3,7 +3,7 @@
 use crate::{
     domain::{Claim, JobErrorCode, JobStepEntry, ToolRequirement},
     flows::{FlowEngine, FlowProgressCallback, OperationRegistry},
-    media::OutputProfile,
+    media::OutputSpec,
     plugins::{self, ProbeContract},
     tools_cache::ToolCacheManager,
 };
@@ -17,7 +17,7 @@ use std::{
 pub struct JobExecutionResult {
     pub working_file: PathBuf,
     pub warning: bool,
-    pub output_profile: OutputProfile,
+    pub output_spec: OutputSpec,
     pub steps: Vec<JobStepEntry>,
 }
 
@@ -91,16 +91,42 @@ pub fn collect_wanted_tools(claim: &Claim) -> Vec<ToolRequirement> {
     wanted
 }
 
-/// Vérifie que la sonde requise par le catalogue est prête sur le worker.
+/// Vérifie que la sonde requise pour ce fichier est prête dans le cache du worker.
 pub fn ensure_probe_ready(cache: &ToolCacheManager, claim: &Claim) -> Result<(), JobRunError> {
-    let probe = probe_from_claim(claim);
-    if !plugins::file_job_may_start(cache, probe.as_ref()) {
-        return Err(JobRunError::simple(
-            JobErrorCode::ProbeUnavailable,
-            "probe_unavailable",
-        ));
+    if let Some(probe) = probe_from_claim(claim) {
+        if !plugins::file_job_may_start(cache, Some(&probe)) {
+            return Err(JobRunError::simple(
+                JobErrorCode::ProbeUnavailable,
+                "probe_unavailable",
+            ));
+        }
+        return Ok(());
     }
-    Ok(())
+    if !claim.operations.is_empty() {
+        let registry =
+            OperationRegistry::from_raw(claim.operations.clone(), claim.block_operations.clone());
+        if let Some(probe_op) = registry.primary_probe_for_file(Path::new(&claim.source_name)) {
+            if let crate::flows::OperationRuntime::Binary(bin) = &probe_op.runtime
+                && let Some(tool) = &bin.tool
+            {
+                let contract = ProbeContract {
+                    tool_id: tool.id.clone(),
+                    version: tool.version.clone(),
+                };
+                if !plugins::file_job_may_start(cache, Some(&contract)) {
+                    return Err(JobRunError::simple(
+                        JobErrorCode::ProbeUnavailable,
+                        "probe_unavailable",
+                    ));
+                }
+            }
+            return Ok(());
+        }
+    }
+    Err(JobRunError::simple(
+        JobErrorCode::ProbeUnavailable,
+        "probe_unavailable",
+    ))
 }
 
 /// Exécute le flow figé du bail ou, à défaut, l'opération `defaultFallback` déclarée dans les contrats.
@@ -160,7 +186,7 @@ pub async fn execute_claim_processing(
         .map(|res| JobExecutionResult {
             working_file: res.final_file,
             warning: res.warning,
-            output_profile: res.output_profile,
+            output_spec: res.output_spec,
             steps: res.steps,
         })
         .map_err(|error| JobRunError {
@@ -284,5 +310,49 @@ mod tests {
         let wanted = collect_wanted_tools(&claim);
         let ids: Vec<_> = wanted.into_iter().map(|req| req.tool_id).collect();
         assert_eq!(ids, vec!["app.probe".to_owned(), "app.custom".to_owned()]);
+    }
+
+    #[test]
+    fn ensure_probe_ready_resolves_per_file_extension() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let cache = ToolCacheManager::new(dir.path());
+        let epub_dir = cache.tool_dir("app.calibre", "7.0.0", crate::tools_cache::host_arch());
+        std::fs::create_dir_all(&epub_dir)?;
+        std::fs::write(epub_dir.join(".ready"), b"")?;
+
+        let mut claim = sample_claim(None, Vec::new());
+        claim.source_name = "roman.epub".into();
+        claim.operations.insert(
+            "op.ebook.probe".into(),
+            json!({
+                "schemaVersion": "1.1.0",
+                "id": "op.ebook.probe",
+                "version": "1.0.0",
+                "name": "EbookProbe",
+                "providerId": "plugin.calibre",
+                "providerKind": "plugin",
+                "capability": "probe",
+                "status": "validated",
+                "runtime": {
+                    "kind": "binary",
+                    "tool": { "id": "app.calibre", "version": "7.0.0" },
+                    "executable": "ebook-meta",
+                    "executionMode": "probe-primary",
+                    "probeMatch": { "extensions": ["epub"] },
+                    "argv": [{ "param": "source", "as": "filePath" }]
+                }
+            }),
+        );
+        ensure_probe_ready(&cache, &claim)?;
+
+        claim.source_name = "autre.pdf".into();
+        assert!(matches!(
+            ensure_probe_ready(&cache, &claim),
+            Err(JobRunError {
+                code: JobErrorCode::ProbeUnavailable,
+                ..
+            })
+        ));
+        Ok(())
     }
 }

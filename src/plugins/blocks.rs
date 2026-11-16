@@ -157,7 +157,6 @@ fn load_block_document(root: &Path, manifest_path: &str) -> anyhow::Result<Plugi
 
 fn category_label(raw: &str) -> String {
     match raw {
-        "media" => "Média".into(),
         "data" => "Données".into(),
         "io" => "Entrée/Sortie".into(),
         other => {

@@ -12,7 +12,7 @@ pub mod lease_secrets;
 #[cfg(test)]
 mod engine_tests;
 
-use crate::{media::OutputProfile, tools_cache::ToolCacheManager};
+use crate::{media::OutputSpec, tools_cache::ToolCacheManager};
 use chrono::Utc;
 use serde_json::Value;
 use std::{
@@ -83,7 +83,7 @@ pub struct FlowExecutionOutcome {
     pub final_file: PathBuf,
     pub is_in_place: bool,
     pub warning: bool,
-    pub output_profile: OutputProfile,
+    pub output_spec: OutputSpec,
     pub steps: Vec<crate::domain::JobStepEntry>,
 }
 
@@ -119,14 +119,14 @@ impl<'a> FlowEngine<'a> {
             .registry
             .default_fallback_operation()
             .ok_or_else(|| FlowExecutionError {
-                code: flux_shared::jobs::JobErrorCode::RemuxFailed,
+                code: flux_shared::jobs::JobErrorCode::OperationFailed,
                 message: "aucune opération par défaut (defaultFallback) dans le catalogue"
                     .to_owned(),
                 steps: Vec::new(),
             })?;
         let OperationRuntime::Binary(bin_rt) = &op.runtime else {
             return Err(FlowExecutionError {
-                code: flux_shared::jobs::JobErrorCode::RemuxFailed,
+                code: flux_shared::jobs::JobErrorCode::OperationFailed,
                 message: format!("contrat par défaut « {} » non binaire", op.id),
                 steps: Vec::new(),
             });
@@ -172,9 +172,7 @@ impl<'a> FlowEngine<'a> {
                 .unwrap_or_else(|| source_file.to_path_buf()),
             is_in_place: !outcome.is_staged_output,
             warning: outcome.warning,
-            output_profile: bin_rt
-                .output_profile
-                .unwrap_or(OutputProfile::StrictMkvRemux),
+            output_spec: bin_rt.output_spec().unwrap_or_default(),
             steps: vec![crate::domain::JobStepEntry {
                 step_index: 0,
                 node_id: "default".to_owned(),
@@ -198,7 +196,7 @@ impl<'a> FlowEngine<'a> {
     ) -> Result<FlowExecutionOutcome, FlowExecutionError> {
         let graph: FlowGraph =
             serde_json::from_str(&flow.definition).map_err(|err| FlowExecutionError {
-                code: flux_shared::jobs::JobErrorCode::RemuxFailed,
+                code: flux_shared::jobs::JobErrorCode::OperationFailed,
                 message: format!("définition de flux invalide : {err}"),
                 steps: Vec::new(),
             })?;
@@ -219,14 +217,14 @@ impl<'a> FlowEngine<'a> {
         let mut current_working_file = source_file.to_path_buf();
         let mut is_in_place = true;
         let mut final_warning = false;
-        let mut last_output_profile: Option<OutputProfile> = None;
+        let mut last_output_spec: Option<OutputSpec> = None;
         let mut steps: Vec<crate::domain::JobStepEntry> = Vec::new();
         let mut ctx = FlowContext::new(
             job_id,
             source_file
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "source.mkv".into()),
+                .unwrap_or_else(|| "source".into()),
             current_working_file.clone(),
             media_info,
         );
@@ -240,7 +238,7 @@ impl<'a> FlowEngine<'a> {
             .or_else(|| graph.nodes.first().cloned())
         else {
             return Err(FlowExecutionError {
-                code: flux_shared::jobs::JobErrorCode::RemuxFailed,
+                code: flux_shared::jobs::JobErrorCode::OperationFailed,
                 message: "le flux ne contient aucun bloc d'entrée".to_owned(),
                 steps,
             });
@@ -266,7 +264,7 @@ impl<'a> FlowEngine<'a> {
                 let message = format!("aucun contrat d'opération pour le bloc « {} »", node.kind);
                 steps.push(failed_step(step_index, &node, None, message.clone(), None));
                 return Err(FlowExecutionError {
-                    code: flux_shared::jobs::JobErrorCode::RemuxFailed,
+                    code: flux_shared::jobs::JobErrorCode::OperationFailed,
                     message,
                     steps,
                 });
@@ -323,8 +321,8 @@ impl<'a> FlowEngine<'a> {
                                 is_in_place = false;
                             }
                             final_warning |= res.warning;
-                            if bin_rt.output_profile.is_some() {
-                                last_output_profile = bin_rt.output_profile;
+                            if let Some(spec) = bin_rt.output_spec() {
+                                last_output_spec = Some(spec);
                             }
                             step_message = res.message;
                             step_excerpt = res.excerpt;
@@ -418,15 +416,15 @@ impl<'a> FlowEngine<'a> {
             current_node_id = conn.to.clone();
         }
 
-        let resolved_profile = last_output_profile
-            .or_else(|| self.registry.output_profile_for_flow(Some(flow), None))
-            .unwrap_or(OutputProfile::StrictMkvRemux);
+        let resolved_spec = last_output_spec
+            .or_else(|| self.registry.output_spec_for_flow(Some(flow), None))
+            .unwrap_or_default();
 
         Ok(FlowExecutionOutcome {
             final_file: current_working_file,
             is_in_place,
             warning: final_warning,
-            output_profile: resolved_profile,
+            output_spec: resolved_spec,
             steps,
         })
     }

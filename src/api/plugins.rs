@@ -68,8 +68,15 @@ pub async fn install_tool(
     let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
         .await
         .sync_policy();
-    plugins::ensure_tool_installed(&roots, &cache_mgr, &entry.id, &entry.version, &sync_policy)
-        .await?;
+    plugins::ensure_tool_installed_verified(
+        &s.pool,
+        &roots,
+        &cache_mgr,
+        &entry.id,
+        &entry.version,
+        &sync_policy,
+    )
+    .await?;
     Ok(Json(serde_json::json!({
         "id": entry.id,
         "version": entry.version,
@@ -237,9 +244,14 @@ pub async fn sync_repository(
     let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
         .await
         .sync_policy();
-    let report = plugins::sync_repository(&repo, &s.config.plugin_repos_dir(), &sync_policy)
-        .await
-        .map_err(|error| AppError::RepositoryUnavailable(error.to_string()))?;
+    let report = plugins::sync_repository_verified(
+        &s.pool,
+        &repo,
+        &s.config.plugin_repos_dir(),
+        &sync_policy,
+    )
+    .await
+    .map_err(|error| AppError::RepositoryUnavailable(error.to_string()))?;
     crate::repository::touch_plugin_repository_sync(&s.pool, &id).await?;
     s.catalog_cache.invalidate().await;
     Ok(Json(serde_json::json!({
@@ -271,6 +283,7 @@ pub async fn install_pack(
     let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
         .await
         .sync_policy();
-    let result = plugins::install_pack(&roots, &cache_mgr, &sync_policy, &id).await?;
+    let result =
+        plugins::install_pack_verified(&s.pool, &roots, &cache_mgr, &sync_policy, &id).await?;
     Ok(Json(result))
 }

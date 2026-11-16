@@ -45,7 +45,7 @@ n'est figée dans ce squelette.
 ## Modèle du catalogue
 
 Le dépôt plugins est la source ; le moteur le lit sans jamais y écrire. L'index unique
-(`catalogue/index.json`) range les pièces en six sections, affichées par la page Plugins :
+(`index.json` à la racine) range les pièces en six sections, affichées par la page Plugins :
 
 | Section | Type d'index | Dépend de |
 |---|---|---|

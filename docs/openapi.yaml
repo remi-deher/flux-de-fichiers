@@ -246,7 +246,7 @@ paths:
         default: {$ref: '#/components/responses/Error'}
     post:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Ajouter un dépôt ; l'URL d'index doit être http(s) et finir par /catalogue/index.json
+      summary: Ajouter un dépôt ; l'URL d'index doit être http(s) et finir par /index.json
       requestBody:
         required: true
         content:

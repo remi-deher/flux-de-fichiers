@@ -103,6 +103,11 @@ pub async fn delete_plugin_repository(pool: &SqlitePool, id: &str) -> AppResult<
                 .bind(id)
                 .execute(pool)
                 .await?;
+            let repo_scope = format!("repo:{id}");
+            sqlx::query("DELETE FROM plugin_release_pins WHERE scope = ?1")
+                .bind(repo_scope)
+                .execute(pool)
+                .await?;
             Ok(())
         }
         None => Err(AppError::NotFound),
@@ -122,4 +127,51 @@ pub async fn touch_plugin_repository_sync(pool: &SqlitePool, id: &str) -> AppRes
     } else {
         Ok(())
     }
+}
+
+/// Épingle une release `(scope, version)` à son SHA-256 à sa première observation.
+/// Retourne `Ok(None)` si valide ou nouvellement épinglée, ou `Ok(Some(expected_sha256))` si la version a muté.
+pub async fn verify_or_pin_release(
+    pool: &SqlitePool,
+    scope: &str,
+    version: &str,
+    actual_sha256: &str,
+    source_url: &str,
+) -> AppResult<Option<String>> {
+    let normalized = actual_sha256.trim().to_ascii_lowercase();
+    let existing: Option<String> = sqlx::query_scalar(
+        "SELECT sha256 FROM plugin_release_pins WHERE scope = ?1 AND version = ?2",
+    )
+    .bind(scope)
+    .bind(version)
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(expected) = existing {
+        if expected == normalized {
+            return Ok(None);
+        }
+        return Ok(Some(expected));
+    }
+
+    sqlx::query(
+        "INSERT INTO plugin_release_pins (scope, version, sha256, source_url) \
+         VALUES (?1, ?2, ?3, ?4) \
+         ON CONFLICT(scope, version) DO NOTHING",
+    )
+    .bind(scope)
+    .bind(version)
+    .bind(&normalized)
+    .bind(source_url)
+    .execute(pool)
+    .await?;
+
+    let persisted: Option<String> = sqlx::query_scalar(
+        "SELECT sha256 FROM plugin_release_pins WHERE scope = ?1 AND version = ?2",
+    )
+    .bind(scope)
+    .bind(version)
+    .fetch_optional(pool)
+    .await?;
+    Ok(persisted.filter(|expected| expected != &normalized))
 }

@@ -1,8 +1,12 @@
-//! Écran Bibliothèques : liste, état et édition (nom, flux, chemins par worker) (ADR 0014).
+//! Écran Librairie : bibliothèques médias, flows & modèles, scripts locaux, ressources & modèles de blocs, et packs maison.
 
 mod draft;
 mod form;
+mod packs;
+mod resources;
+mod scripts;
 
+use crate::flows::FlowsSection;
 use crate::ui::filters::{Filters, LibraryFilter, library_filter};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
@@ -15,27 +19,74 @@ use draft::{LibraryDraft, access_label, is_ready, library_counts};
 use flux_shared::Permission;
 use flux_shared::flows::FlowRecord;
 use flux_shared::libraries::Library;
+use flux_shared::local::LocalLibrarySnapshot;
 use flux_shared::session::Me;
 use flux_shared::workers::Worker;
 use form::LibraryForm;
 use leptos::prelude::*;
+use packs::LocalPacksSection;
+use resources::ResourcesSection;
+use scripts::ScriptsSection;
 
 const LIBRARIES_PATH: &str = "/api/v1/libraries";
 const FLOWS_PATH: &str = "/api/v1/flows";
 const WORKERS_PATH: &str = "/api/v1/workers";
+pub(super) const LOCAL_PATH: &str = "/api/v1/local";
+pub(super) const LOCAL_SCRIPTS_PATH: &str = "/api/v1/local/scripts";
+pub(super) const LOCAL_RESOURCES_PATH: &str = "/api/v1/local/resources";
+pub(super) const LOCAL_BLOCK_TEMPLATES_PATH: &str = "/api/v1/local/block-templates";
+pub(super) const LOCAL_PACKS_PATH: &str = "/api/v1/local/packs";
+pub(super) const LOCAL_ITEMS_PATH: &str = "/api/v1/local/items";
 const PREVIEW_WORKER_PATHS: usize = 2;
 
+pub(super) fn bump(signal: RwSignal<u32>) {
+    signal.update(|count| *count = count.wrapping_add(1));
+}
+
+/// Sous-onglets de l'écran Librairie.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LibraryTab {
+    #[default]
+    Libraries,
+    Flows,
+    Scripts,
+    Resources,
+    Packs,
+}
+
+impl LibraryTab {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Libraries => "Bibliothèques",
+            Self::Flows => "Flows & Modèles",
+            Self::Scripts => "Scripts",
+            Self::Resources => "Ressources & Blocs",
+            Self::Packs => "Packs",
+        }
+    }
+
+    pub fn visible_tabs(me: &Me) -> Vec<Self> {
+        let mut tabs = vec![Self::Libraries];
+        if me.allows(Permission::ViewFlows) {
+            tabs.push(Self::Flows);
+        }
+        tabs.push(Self::Scripts);
+        tabs.push(Self::Resources);
+        tabs.push(Self::Packs);
+        tabs
+    }
+}
+
 #[component]
-pub fn LibrariesPage(me: Me) -> impl IntoView {
+fn MediaLibrariesSection(
+    me: Me,
+    libraries: LocalResource<Result<Vec<Library>, api::ApiError>>,
+    flows: LocalResource<Result<Vec<FlowRecord>, api::ApiError>>,
+    workers: LocalResource<Result<Vec<Worker>, api::ApiError>>,
+    reload: RwSignal<u32>,
+) -> impl IntoView {
     let can_manage = me.allows(Permission::ManageLibraries);
     let filters = use_context::<Filters>();
-    let reload = RwSignal::new(0_u32);
-    let libraries = LocalResource::new(move || {
-        reload.track();
-        api::get::<Vec<Library>>(LIBRARIES_PATH)
-    });
-    let flows = LocalResource::new(|| api::get::<Vec<FlowRecord>>(FLOWS_PATH));
-    let workers = LocalResource::new(|| api::get::<Vec<Worker>>(WORKERS_PATH));
     let editing = RwSignal::new(None::<LibraryDraft>);
     let drawer = RwSignal::new(false);
     let open_create = Callback::new(move |()| {
@@ -45,7 +96,7 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
     let on_done = Callback::new(move |()| {
         editing.set(None);
         drawer.set(false);
-        reload.update(|count| *count = count.wrapping_add(1));
+        bump(reload);
     });
     let flow_name = move |id: &Option<String>| {
         let Some(id) = id else {
@@ -269,10 +320,101 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
     }
 
     view! {
+        <StatStrip aria_label="Synthèse des bibliothèques" items=stats />
+        {grid}
+        <Drawer open=drawer eyebrow="Bibliothèque" title=title>{form}</Drawer>
+    }
+}
+
+#[component]
+pub fn LibrariesPage(me: Me) -> impl IntoView {
+    let can_manage_local = me.allows(Permission::ManageSettings);
+    let active_tab = RwSignal::new(LibraryTab::Libraries);
+    let reload_libs = RwSignal::new(0_u32);
+    let reload_local = RwSignal::new(0_u32);
+
+    let libraries = LocalResource::new(move || {
+        reload_libs.track();
+        api::get::<Vec<Library>>(LIBRARIES_PATH)
+    });
+    let flows = LocalResource::new(|| api::get::<Vec<FlowRecord>>(FLOWS_PATH));
+    let workers = LocalResource::new(|| api::get::<Vec<Worker>>(WORKERS_PATH));
+    let snapshot = LocalResource::new(move || {
+        reload_local.track();
+        api::get::<LocalLibrarySnapshot>(LOCAL_PATH)
+    });
+    let tabs = LibraryTab::visible_tabs(&me);
+
+    view! {
         <div class="tab-panel" role="tabpanel">
-            <StatStrip aria_label="Synthèse des bibliothèques" items=stats />
-            {grid}
-            <Drawer open=drawer eyebrow="Bibliothèque" title=title>{form}</Drawer>
+            <nav class="page-subnav" role="tablist" aria-label="Sections de la librairie">
+                {tabs.into_iter().map(|tab| {
+                    let is_active = move || active_tab.get() == tab;
+                    view! {
+                        <button
+                            type="button"
+                            role="tab"
+                            class="page-subnav__tab"
+                            class:is-active=is_active
+                            aria-selected=move || is_active().to_string()
+                            on:click=move |_| active_tab.set(tab)
+                        >
+                            {tab.label()}
+                        </button>
+                    }
+                }).collect_view()}
+            </nav>
+            {move || match active_tab.get() {
+                LibraryTab::Libraries => view! {
+                    <MediaLibrariesSection
+                        me=me.clone()
+                        libraries=libraries
+                        flows=flows
+                        workers=workers
+                        reload=reload_libs
+                    />
+                }.into_any(),
+                LibraryTab::Flows => view! {
+                    <FlowsSection me=me.clone() with_topbar=false />
+                }.into_any(),
+                LibraryTab::Scripts => view! {
+                    <ScriptsSection snapshot=snapshot reload=reload_local can_manage=can_manage_local />
+                }.into_any(),
+                LibraryTab::Resources => view! {
+                    <ResourcesSection
+                        snapshot=snapshot
+                        flows=flows
+                        reload=reload_local
+                        can_manage=can_manage_local
+                    />
+                }.into_any(),
+                LibraryTab::Packs => view! {
+                    <LocalPacksSection snapshot=snapshot reload=reload_local can_manage=can_manage_local />
+                }.into_any(),
+            }}
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flux_shared::InstanceKind;
+    use flux_shared::Role;
+    use flux_shared::session::CallerKind;
+
+    #[test]
+    fn library_tabs_respect_flow_view_permission() {
+        let admin = Me::new(
+            CallerKind::Account,
+            "admin".into(),
+            Role::Admin,
+            InstanceKind::Central,
+            None,
+        );
+        assert_eq!(LibraryTab::visible_tabs(&admin).len(), 5);
+        assert_eq!(LibraryTab::Libraries.label(), "Bibliothèques");
+        assert_eq!(LibraryTab::Flows.label(), "Flows & Modèles");
+        assert_eq!(LibraryTab::Resources.label(), "Ressources & Blocs");
     }
 }

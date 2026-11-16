@@ -226,9 +226,9 @@ pub fn BlockTemplateDrawer(
                                 prop:value=move || tags.get()
                                 on:input=move |e| tags.set(event_target_value(&e)) />
                         </div>
-                        {writable.then(|| move || {
+                        {move || {
                             let available = flows.get().and_then(Result::ok).unwrap_or_default();
-                            (!available.is_empty()).then(|| view! {
+                            (writable && !available.is_empty()).then(|| view! {
                                 <div class="form-group">
                                     <label class="form-label" for="btpl-source">"Pré-remplir depuis un flow existant"</label>
                                     <select id="btpl-source" class="form-input" on:change=move |ev| {
@@ -251,7 +251,7 @@ pub fn BlockTemplateDrawer(
                                     </select>
                                 </div>
                             })
-                        })}
+                        }}
                         <div class="form-group">
                             <label class="form-label" for="btpl-json">"Graphe JSON ({ nodes, connections }) *"</label>
                             <textarea id="btpl-json" class="form-input text-mono" rows="10" required=true disabled=!writable

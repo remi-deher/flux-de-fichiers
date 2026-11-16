@@ -235,7 +235,6 @@ pub fn ScriptsSection(
                                     <Tag label=script.interpreter.executable() tone=TagTone::Primary />
                                 }.into_any();
                                 let actions = can_manage.then(|| {
-                                    let open_edit = open_edit;
                                     let del_id = script.id.clone();
                                     view! {
                                         <button type="button" class="btn btn-secondary btn-sm"

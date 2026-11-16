@@ -1,7 +1,7 @@
 //! Onglet Dépôts de la page Plugins : sources officielles/tierces, synchronisation et ajout.
 
 use super::repo_detail::{RepoDetail, RepoDrawerTab};
-use super::{REPOSITORIES_PATH, bump};
+use super::{REPOSITORIES_PATH, SelectedItem, bump};
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
@@ -89,11 +89,16 @@ pub fn ReposSection(
     adding: RwSignal<bool>,
 ) -> impl IntoView {
     let active_filter = RwSignal::new(RepoFilter::All);
-    let selected_repo = RwSignal::new(None::<String>);
+    let selected_repo = RwSignal::new(None::<SelectedItem>);
     let detail_open = RwSignal::new(false);
     let detail_tab = RwSignal::new(0_usize);
     let reload_detail = RwSignal::new(0_u32);
-    let detail_title = Signal::derive(move || selected_repo.get().unwrap_or_default());
+    let detail_title = Signal::derive(move || {
+        selected_repo
+            .get()
+            .map(|item| item.name)
+            .unwrap_or_default()
+    });
     let feedback = RwSignal::new(None::<String>);
     let act = Action::new_local(move |(id, action): &(String, RepoAction)| {
         run_repo_action(id.clone(), *action)
@@ -198,8 +203,9 @@ pub fn ReposSection(
                                             }.into_any();
                                         }
                                         shown.into_iter().map(|repo| {
-                                            let (inspect_id, toggle_id, sync_id, delete_id) = (
+                                            let (inspect_id, inspect_name, toggle_id, sync_id, delete_id) = (
                                                 repo.id.clone(),
+                                                repo.name.clone(),
                                                 repo.id.clone(),
                                                 repo.id.clone(),
                                                 repo.id.clone(),
@@ -219,7 +225,10 @@ pub fn ReposSection(
                                                     <td class="cell-end inline-actions">
                                                         <button type="button" class="btn btn-secondary btn-sm"
                                                             on:click=move |_| {
-                                                                selected_repo.set(Some(inspect_id.clone()));
+                                                                selected_repo.set(Some(SelectedItem {
+                                                                    id: inspect_id.clone(),
+                                                                    name: inspect_name.clone(),
+                                                                }));
                                                                 detail_tab.set(0);
                                                                 detail_open.set(true);
                                                             }>"Inspecter"</button>
@@ -249,10 +258,10 @@ pub fn ReposSection(
                     tabs=RepoDrawerTab::TABS.to_vec()
                     tab=detail_tab
                 >
-                    {move || selected_repo.get().map(|id| {
+                    {move || selected_repo.get().map(|item| {
                         view! {
                             <RepoDetail
-                                repo_id=id
+                                repo_id=item.id
                                 tab=detail_tab
                                 reload_key=reload_detail
                                 on_action=on_repo_action

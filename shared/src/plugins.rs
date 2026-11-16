@@ -72,6 +72,10 @@ pub enum ToolStatus {
     NotInstalled,
 }
 
+const fn default_true() -> bool {
+    true
+}
+
 /// Résumé de l'état d'un outil pour l'API et l'interface utilisateur.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -85,6 +89,8 @@ pub struct ToolStatusSummary {
     pub arch: String,
     pub distribution: String,
     pub description: String,
+    #[serde(default = "default_true")]
+    pub installable: bool,
 }
 
 /// Type de champ connu des manifestes Sonarr et Radarr. Une valeur inconnue est refusée.

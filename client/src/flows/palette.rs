@@ -166,9 +166,9 @@ pub fn Palette(editor: Editor) -> impl IntoView {
                         if editor.catalog.with(|c| c.is_empty()) {
                             return view! {
                                 <div class="flow-palette__empty">
-                                    <p>"Catalogue de blocs vide : synchronisez un dépôt depuis Plugins."</p>
+                                    <p>"Catalogue de blocs vide : synchronisez un dépôt depuis Extensions."</p>
                                     <Link to=Route::Plugins class="btn btn-secondary btn-sm">
-                                        "Ouvrir Plugins"
+                                        "Ouvrir Extensions"
                                     </Link>
                                 </div>
                             }

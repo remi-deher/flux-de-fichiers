@@ -60,14 +60,14 @@ pub fn groups() -> Vec<(&'static str, Vec<Screen>)> {
             )],
         ),
         (
-            "Librairie",
+            "Librairies",
             vec![screen(
                 Route::Libraries,
-                "Librairie",
+                "Librairies",
                 IconName::Libraries,
                 Permission::ViewLibraries,
                 false,
-                "Filtrer la librairie…",
+                "Filtrer les librairies…",
             )],
         ),
         (
@@ -104,11 +104,11 @@ pub fn groups() -> Vec<(&'static str, Vec<Screen>)> {
                 ),
                 screen(
                     Route::Plugins,
-                    "Plugins",
+                    "Extensions",
                     IconName::Plugins,
                     Permission::ViewPlugins,
                     true,
-                    "Filtrer le catalogue…",
+                    "Filtrer les extensions…",
                 ),
             ],
         ),

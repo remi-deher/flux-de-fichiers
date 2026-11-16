@@ -218,7 +218,7 @@ pub fn QuickAddPopover(editor: Editor, board_ref: NodeRef<leptos::html::Div>) ->
                         let sug_len = res.suggested.len();
                         if res.suggested.is_empty() && res.others.is_empty() {
                             let empty_msg = if editor.catalog.with(|c| c.is_empty()) {
-                                "Aucun bloc disponible — synchronisez un dépôt dans Plugins."
+                                "Aucun bloc disponible — synchronisez un dépôt dans Extensions."
                             } else {
                                 "Aucun composant trouvé."
                             };

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.31.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.30.0...v0.31.0) (2026-11-16)
+
+
+### Features
+
+* **ui,plugins:** tiroirs à onglets, runtime script stdio et librairie locale ([c95bc66](https://github.com/remi-deher/flux-de-fichiers/commit/c95bc66555f069b607b347f32a1eaf21a30cd948))
+* **ui,plugins:** tiroirs à onglets, runtime script stdio et librairie locale ([125ef96](https://github.com/remi-deher/flux-de-fichiers/commit/125ef96b51dc044fa013916d41a27f346706b999))
+
+
+### Bug Fixes
+
+* **clippy:** use as_chunks in base64 and avoid expect_err in test ([6bd4ca2](https://github.com/remi-deher/flux-de-fichiers/commit/6bd4ca26e25dad58220c4ca01da275295c2407ff))
+
 ## [0.30.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.29.0...v0.30.0) (2026-11-16)
 
 

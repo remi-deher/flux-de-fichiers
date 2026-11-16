@@ -21,8 +21,8 @@ use crate::ui::filters::{Filters, FlowFilter, flow_filter};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
-    EmptyState, Icon, IconName, MetricTone, ResourceCard, StatItem, StatStrip, StatusBadge, Tag,
-    TagTone, Toasts,
+    EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, StatusBadge, Tag, TagTone,
+    Toasts,
 };
 use crate::{api, format};
 use flux_shared::Permission;
@@ -339,11 +339,11 @@ fn FlowTemplateCard(
 
 #[component]
 pub fn FlowsPage(me: Me) -> impl IntoView {
-    view! { <FlowsSection me=me with_topbar=true /> }
+    view! { <FlowsSection me=me /> }
 }
 
 #[component]
-pub fn FlowsSection(me: Me, with_topbar: bool) -> impl IntoView {
+pub fn FlowsSection(me: Me) -> impl IntoView {
     let can_manage = me.allows(Permission::ManageFlows);
     let can_templates = me.allows(Permission::ManageSettings);
     let can_libraries = me.allows(Permission::ViewLibraries);
@@ -372,7 +372,7 @@ pub fn FlowsSection(me: Me, with_topbar: bool) -> impl IntoView {
     });
     let on_removed = Callback::new(move |()| reload.update(|count| *count = count.wrapping_add(1)));
     let router = use_router();
-    if with_topbar && can_manage {
+    if can_manage {
         provide_topbar_action(ActionSpec {
             label: "Nouveau flux",
             on_click: Callback::new(move |()| router.go(Route::NewFlow)),
@@ -521,16 +521,6 @@ pub fn FlowsSection(me: Me, with_topbar: bool) -> impl IntoView {
                     .collect();
                 if shown.is_empty() && shown_templates.is_empty() {
                     let unfiltered = text.trim().is_empty() && active_filter == FlowFilter::All;
-                    let create_action = (can_manage && unfiltered)
-                        .then(|| {
-                            view! {
-                                <Link to=Route::NewFlow class="btn btn-primary">
-                                    <Icon name=IconName::Plus size=15 />
-                                    <span>"Nouveau flux"</span>
-                                </Link>
-                            }
-                        })
-                        .into_any();
                     return view! {
                         <div class="empty-state-panel">
                             <EmptyState
@@ -545,7 +535,6 @@ pub fn FlowsSection(me: Me, with_topbar: bool) -> impl IntoView {
                                     "Ajustez vos filtres pour afficher un flux."
                                 }
                                 icon_name=IconName::Flows
-                                action=create_action
                             />
                         </div>
                     }
@@ -588,14 +577,6 @@ pub fn FlowsSection(me: Me, with_topbar: bool) -> impl IntoView {
     view! {
         <div class="tab-panel" role="tabpanel">
             <StatStrip aria_label="Synthèse des flows" items=stats />
-            {(!with_topbar && can_manage).then(|| view! {
-                <div class="inline-actions">
-                    <Link to=Route::NewFlow class="btn btn-primary btn-sm">
-                        <Icon name=IconName::Plus size=14 />
-                        <span>"Nouveau flux"</span>
-                    </Link>
-                </div>
-            })}
             {grid}
         </div>
     }

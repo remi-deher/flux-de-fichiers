@@ -784,14 +784,14 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                 </p>
                                 <p class="form-help">
                                     {if catalog_empty {
-                                        "Le moteur n'embarque aucun bloc : synchronisez un dépôt de plugins pour peupler la palette."
+                                        "Le moteur n'embarque aucun bloc : synchronisez un dépôt d'extensions pour peupler la palette."
                                     } else {
                                         "Ouvrez « + Composants » ou glissez une étape sur le canevas pour démarrer."
                                     }}
                                 </p>
                                 {catalog_empty.then(|| view! {
                                     <Link to=Route::Plugins class="btn btn-primary btn-sm">
-                                        "Ouvrir Plugins"
+                                        "Ouvrir Extensions"
                                     </Link>
                                 })}
                             </div>

@@ -4,9 +4,10 @@ use super::{LOCAL_ITEMS_PATH, LOCAL_PACKS_PATH, bump};
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
+use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
-    Drawer, EmptyState, Icon, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag,
-    TagTone, Toasts,
+    Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
+    Toasts,
 };
 use flux_shared::local::{CreateLocalPackRequest, LocalLibrarySnapshot};
 use flux_shared::plugins::vocab::CatalogItemType;
@@ -111,19 +112,18 @@ pub fn LocalPacksSection(
         )]
     });
 
+    if can_manage {
+        provide_topbar_action(ActionSpec {
+            label: "Créer un pack local",
+            on_click: Callback::new(move |()| {
+                feedback.set(None);
+                create_open.set(true);
+            }),
+        });
+    }
+
     view! {
         <StatStrip aria_label="Synthèse des packs locaux" items=stats />
-        {can_manage.then(|| view! {
-            <div class="inline-actions">
-                <button type="button" class="btn btn-primary btn-sm" on:click=move |_| {
-                    feedback.set(None);
-                    create_open.set(true);
-                }>
-                    <Icon name=IconName::Plus size=14 />
-                    <span>"Créer un pack local"</span>
-                </button>
-            </div>
-        })}
         {move || {
             let text = query();
             match snapshot.get() {

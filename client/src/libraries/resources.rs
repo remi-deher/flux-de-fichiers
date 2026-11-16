@@ -4,9 +4,10 @@ use super::{LOCAL_BLOCK_TEMPLATES_PATH, LOCAL_ITEMS_PATH, LOCAL_RESOURCES_PATH, 
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
+use crate::ui::topbar_action::{ActionSpec, provide_topbar_actions};
 use crate::ui::{
-    Drawer, EmptyState, Icon, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag,
-    TagTone, Toasts,
+    Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
+    Toasts,
 };
 use flux_shared::base64;
 use flux_shared::flows::FlowRecord;
@@ -170,26 +171,27 @@ pub fn ResourcesSection(
         ]
     });
 
-    view! {
-        <StatStrip aria_label="Synthèse des ressources et modèles de blocs" items=stats />
-        {can_manage.then(|| view! {
-            <div class="inline-actions">
-                <button type="button" class="btn btn-primary btn-sm" on:click=move |_| {
+    if can_manage {
+        provide_topbar_actions(vec![
+            ActionSpec {
+                label: "Importer un fichier",
+                on_click: Callback::new(move |()| {
                     feedback.set(None);
                     upload_open.set(true);
-                }>
-                    <Icon name=IconName::Plus size=14 />
-                    <span>"Importer un fichier"</span>
-                </button>
-                <button type="button" class="btn btn-secondary btn-sm" on:click=move |_| {
+                }),
+            },
+            ActionSpec {
+                label: "Modèle de blocs",
+                on_click: Callback::new(move |()| {
                     feedback.set(None);
                     template_open.set(true);
-                }>
-                    <Icon name=IconName::Layers size=14 />
-                    <span>"Nouveau modèle de blocs"</span>
-                </button>
-            </div>
-        })}
+                }),
+            },
+        ]);
+    }
+
+    view! {
+        <StatStrip aria_label="Synthèse des ressources et modèles de blocs" items=stats />
         {move || {
             let text = query();
             let active = filter.get();

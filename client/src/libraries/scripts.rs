@@ -4,9 +4,10 @@ use super::{LOCAL_ITEMS_PATH, LOCAL_SCRIPTS_PATH, bump};
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
+use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
-    Drawer, EmptyState, Icon, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag,
-    TagTone, Toasts,
+    Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
+    Toasts,
 };
 use flux_shared::local::{LocalLibrarySnapshot, LocalScriptSummary, UpsertLocalScriptRequest};
 use leptos::prelude::*;
@@ -111,11 +112,16 @@ pub fn ScriptsSection(
         None => {}
     });
 
-    let open_create = move || {
-        feedback.set(None);
-        editing.set(Some(ScriptDraft::blank()));
-        drawer_open.set(true);
-    };
+    if can_manage {
+        provide_topbar_action(ActionSpec {
+            label: "Écrire un script",
+            on_click: Callback::new(move |()| {
+                feedback.set(None);
+                editing.set(Some(ScriptDraft::blank()));
+                drawer_open.set(true);
+            }),
+        });
+    }
 
     let stats = Signal::derive(move || {
         let count = snapshot
@@ -140,14 +146,6 @@ pub fn ScriptsSection(
 
     view! {
         <StatStrip aria_label="Synthèse des scripts locaux" items=stats />
-        {can_manage.then(|| view! {
-            <div class="inline-actions">
-                <button type="button" class="btn btn-primary btn-sm" on:click=move |_| open_create()>
-                    <Icon name=IconName::Plus size=14 />
-                    <span>"Écrire un script"</span>
-                </button>
-            </div>
-        })}
         {move || {
             let text = query();
             match snapshot.get() {
@@ -164,19 +162,12 @@ pub fn ScriptsSection(
                         .filter(|s| matches(&[&s.name, &s.id, &s.interpreter], &text))
                         .collect();
                     if shown.is_empty() {
-                        let empty_action = can_manage.then(|| view! {
-                            <button type="button" class="btn btn-primary" on:click=move |_| open_create()>
-                                <Icon name=IconName::Plus size=15 />
-                                <span>"Écrire un script"</span>
-                            </button>
-                        }).into_any();
                         return view! {
                             <div class="empty-state-panel">
                                 <EmptyState
                                     title="Aucun script local"
                                     message="Écrivez un script Bash, Python ou Node.js directement ici : il apparaîtra aussitôt dans la palette de vos flux."
                                     icon_name=IconName::Command
-                                    action=empty_action
                                 />
                             </div>
                         }.into_any();

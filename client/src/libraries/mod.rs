@@ -11,8 +11,8 @@ use crate::ui::filters::{Filters, LibraryFilter, library_filter};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
-    Drawer, EmptyState, Icon, IconName, MetricTone, ResourceCard, StatItem, StatStrip, StatusBadge,
-    Tag, TagTone,
+    Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, StatusBadge, Tag,
+    TagTone,
 };
 use crate::{api, format};
 use draft::{LibraryDraft, access_label, is_ready, library_counts};
@@ -194,16 +194,6 @@ fn MediaLibrariesSection(
                     .collect();
                 if shown.is_empty() {
                     let unfiltered = text.trim().is_empty() && active_filter == LibraryFilter::All;
-                    let create_action = (can_manage && unfiltered)
-                        .then(|| {
-                            view! {
-                                <button type="button" class="btn btn-primary" on:click=move |_| open_create.run(())>
-                                    <Icon name=IconName::Plus size=15 />
-                                    <span>"Nouvelle bibliothèque"</span>
-                                </button>
-                            }
-                        })
-                        .into_any();
                     return view! {
                         <div class="empty-state-panel">
                             <EmptyState
@@ -218,7 +208,6 @@ fn MediaLibrariesSection(
                                     "Ajustez vos filtres pour retrouver une bibliothèque."
                                 }
                                 icon_name=IconName::Libraries
-                                action=create_action
                             />
                         </div>
                     }
@@ -347,7 +336,7 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
 
     view! {
         <div class="tab-panel" role="tabpanel">
-            <nav class="page-subnav" role="tablist" aria-label="Sections de la librairie">
+            <nav class="page-subnav" role="tablist" aria-label="Sections des librairies">
                 {tabs.into_iter().map(|tab| {
                     let is_active = move || active_tab.get() == tab;
                     view! {
@@ -375,7 +364,7 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
                     />
                 }.into_any(),
                 LibraryTab::Flows => view! {
-                    <FlowsSection me=me.clone() with_topbar=false />
+                    <FlowsSection me=me.clone() />
                 }.into_any(),
                 LibraryTab::Scripts => view! {
                     <ScriptsSection snapshot=snapshot reload=reload_local can_manage=can_manage_local />

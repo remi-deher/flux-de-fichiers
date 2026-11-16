@@ -27,6 +27,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 # Compilation des sources et génération des binaires et de l'interface
 COPY src ./src
 COPY migrations ./migrations
+COPY docs/openapi.yaml ./docs/openapi.yaml
 COPY frontend/src ./frontend/src
 COPY shared/src ./shared/src
 COPY client/src ./client/src

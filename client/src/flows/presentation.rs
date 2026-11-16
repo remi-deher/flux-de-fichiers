@@ -8,76 +8,69 @@ const SUMMARY_MAX_CHARS: usize = 42;
 const SUMMARY_MAX_PARTS: usize = 3;
 const MASKED_SECRET: &str = "••••";
 
-/// Domaine métier d'un bloc, dictant son accent visuel et son pictogramme.
+/// Rôle fonctionnel d'un bloc, dictant son accent visuel et son pictogramme.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NodeDomain {
     Input,
     Logic,
-    Mkv,
-    Video,
-    Audio,
     Inspect,
+    Process,
     Integration,
     Output,
 }
 
 impl NodeDomain {
-    /// Déduit le domaine depuis la fiche du bloc (`domain`) ou, à défaut, sa catégorie.
+    /// Déduit le rôle visuel depuis la fiche du bloc (`domain`) ou, à défaut, sa catégorie.
     pub fn from_spec(spec: Option<&OwnedBlockSpec>, category: &str) -> Self {
         match spec.and_then(|s| s.domain.as_deref()) {
             Some("input") => Self::Input,
             Some("logic") => Self::Logic,
-            Some("mkv") => Self::Mkv,
-            Some("video") => Self::Video,
-            Some("audio") => Self::Audio,
             Some("inspect") => Self::Inspect,
             Some("integration") => Self::Integration,
             Some("output") => Self::Output,
-            _ => Self::from_category(category),
+            Some(_) => Self::Process,
+            None => Self::from_category(category),
         }
     }
 
     fn from_category(category: &str) -> Self {
         let lower = category.to_lowercase();
-        if lower.contains("vidéo") || lower.contains("video") {
-            Self::Video
-        } else if lower.contains("audio") {
-            Self::Audio
-        } else if lower.contains("logique") || lower.contains("logic") {
+        if lower.contains("logique") || lower.contains("logic") {
             Self::Logic
-        } else if lower.contains("mkv") {
-            Self::Mkv
         } else if lower.contains("inspect") {
             Self::Inspect
-        } else if lower.contains("entrée") || lower.contains("entree") {
+        } else if lower.contains("entrée") || lower.contains("entree") || lower.contains("input") {
             Self::Input
-        } else if lower.contains("sortie") {
+        } else if lower.contains("sortie") || lower.contains("output") {
             Self::Output
-        } else {
+        } else if lower.contains("intégration")
+            || lower.contains("integration")
+            || lower.contains("notification")
+        {
             Self::Integration
+        } else {
+            Self::Process
         }
     }
 
-    /// Jeton CSS portant la couleur d'accent du domaine.
+    /// Jeton CSS portant la couleur d'accent du bloc.
     pub const fn accent_var(self) -> &'static str {
         match self {
-            Self::Input | Self::Audio => "var(--info)",
+            Self::Input => "var(--info)",
             Self::Logic | Self::Output => "var(--success)",
-            Self::Mkv | Self::Inspect => "var(--accent)",
-            Self::Video => "var(--primary)",
+            Self::Inspect => "var(--accent)",
+            Self::Process => "var(--primary)",
             Self::Integration => "var(--warning)",
         }
     }
 
-    /// Icône vectorielle associée au domaine.
+    /// Icône vectorielle associée au bloc.
     pub const fn icon(self) -> IconName {
         match self {
             Self::Input => IconName::Folder,
             Self::Logic => IconName::Sliders,
-            Self::Mkv => IconName::Package,
-            Self::Video => IconName::Flows,
-            Self::Audio => IconName::Activity,
             Self::Inspect => IconName::Search,
+            Self::Process => IconName::Package,
             Self::Integration => IconName::Plugins,
             Self::Output => IconName::Check,
         }
@@ -357,16 +350,22 @@ mod tests {
         let cond = find_owned(&catalog, &FlowBlockKind::parse("block.core.condition"));
         assert_eq!(NodeDomain::from_spec(cond, "Logique"), NodeDomain::Logic);
         let video = find_owned(&catalog, &FlowBlockKind::parse("block.video.encode"));
-        assert_eq!(NodeDomain::from_spec(video, "Média"), NodeDomain::Video);
+        assert_eq!(NodeDomain::from_spec(video, "Média"), NodeDomain::Process);
         let audio = find_owned(&catalog, &FlowBlockKind::parse("block.audio.encode"));
-        assert_eq!(NodeDomain::from_spec(audio, "Média"), NodeDomain::Audio);
+        assert_eq!(NodeDomain::from_spec(audio, "Média"), NodeDomain::Process);
         let mkv = find_owned(
             &catalog,
             &FlowBlockKind::parse("block.metadata.mkvpropedit"),
         );
-        assert_eq!(NodeDomain::from_spec(mkv, "MKVToolNix"), NodeDomain::Mkv);
-        assert_eq!(NodeDomain::from_spec(None, "Vidéo"), NodeDomain::Video);
-        assert_eq!(NodeDomain::from_spec(None, "Audio"), NodeDomain::Audio);
+        assert_eq!(NodeDomain::from_spec(mkv, "Plugins"), NodeDomain::Process);
+        assert_eq!(
+            NodeDomain::from_spec(None, "Intégrations"),
+            NodeDomain::Integration
+        );
+        assert_eq!(
+            NodeDomain::from_spec(None, "Inspection"),
+            NodeDomain::Inspect
+        );
         let output = find_owned(&catalog, &FlowBlockKind::parse("block.core.file-output"));
         assert_eq!(NodeDomain::from_spec(output, "Sortie"), NodeDomain::Output);
     }

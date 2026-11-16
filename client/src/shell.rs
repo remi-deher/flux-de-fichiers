@@ -9,7 +9,6 @@ use crate::ui::search::Search;
 use crate::ui::topbar_action::{TopbarAction, TopbarActionSlot};
 use crate::ui::{
     CommandPalette, CommandPaletteState, Icon, IconName, TagTone, ToastViewport, Toasts,
-    breadcrumb_for,
 };
 use chrono::{DateTime, Utc};
 use flux_shared::jobs::{Job, JobStatus};
@@ -396,16 +395,6 @@ fn Topbar(me: Me, workers: Signal<Option<Vec<Worker>>>) -> impl IntoView {
                         on:click=move |_| if let Some(nav) = nav { nav.update(|open| *open = !*open) }>
                         <Icon name=IconName::Menu size=20 />
                     </button>
-                    <nav class="topbar-breadcrumb" aria-label="Fil d'Ariane">
-                        {move || {
-                            let (group, screen) = breadcrumb_for(&router.current());
-                            view! {
-                                <span class="topbar-breadcrumb__group">{group}</span>
-                                <span class="topbar-breadcrumb__sep" aria-hidden="true">"/"</span>
-                                <span class="topbar-breadcrumb__page">{screen}</span>
-                            }
-                        }}
-                    </nav>
                 </div>
                 <div class="topbar-search-anchor">
                     <div class="topbar-search" role="search">

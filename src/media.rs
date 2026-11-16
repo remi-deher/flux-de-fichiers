@@ -2,50 +2,59 @@ use crate::tool_run::{CommandSpec, ProgressParser, ProgressStream, run_command};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{path::Path, time::Duration};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
-const NANOSECONDS_PER_SECOND: f64 = 1_000_000_000.0;
-const MP4_MIN_HEADER_BYTES: usize = 8;
 const PROBE_DEFAULT_TIMEOUT_SECS: u64 = 60;
+const DEFAULT_DURATION_SCALE: f64 = 1.0;
 
-/// Profil de validation et d'extension de sortie dérivé du contrat d'opération final.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OutputProfile {
-    /// Remuxage Matroska sans perte : pistes, chapitres, tags et pièces jointes identiques.
-    StrictMkvRemux,
-    /// Édition d'en-têtes in-place : même nombre et codecs de pistes, flags/langues modifiables.
-    MkvMetadataEdit,
-    /// Transcodage vidéo ou audio vers MKV : conteneur Matroska valide avec pistes présentes.
-    TranscodedMkv,
-    /// Remuxage vers MP4 : fichier non vide portant une boîte ISO BMFF `ftyp`.
-    Mp4Container,
+const fn default_duration_scale() -> f64 {
+    DEFAULT_DURATION_SCALE
 }
 
-impl OutputProfile {
-    pub const fn extension(self) -> &'static str {
-        match self {
-            Self::Mp4Container => "mp4",
-            Self::StrictMkvRemux | Self::MkvMetadataEdit | Self::TranscodedMkv => "mkv",
-        }
-    }
+/// Règle déclarative d'extraction de durée depuis un arbre JSON de sonde.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DurationRule {
+    /// Chemin pointé dans l'arbre JSON (supporte `[*]` et `[idx]`).
+    pub path: String,
+    /// Facteur multiplicatif pour convertir la valeur brute en secondes (défaut : `1.0`).
+    #[serde(default = "default_duration_scale")]
+    pub scale: f64,
+}
 
-    pub const fn content_type(self) -> &'static str {
-        match self {
-            Self::Mp4Container => "video/mp4",
-            Self::StrictMkvRemux | Self::MkvMetadataEdit | Self::TranscodedMkv => {
-                "video/x-matroska"
+/// Règle déclarative de vérification d'en-tête binaire (magic bytes).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MagicBytesRule {
+    #[serde(default)]
+    pub offset: usize,
+    #[serde(default)]
+    pub ascii: Option<String>,
+    #[serde(default)]
+    pub hex: Option<String>,
+}
+
+impl MagicBytesRule {
+    /// Retourne la séquence d'octets attendue à `self.offset`.
+    pub fn expected_bytes(&self) -> anyhow::Result<Vec<u8>> {
+        if let Some(ascii) = &self.ascii {
+            anyhow::ensure!(!ascii.is_empty(), "magic ascii ne peut pas être vide");
+            return Ok(ascii.as_bytes().to_vec());
+        }
+        if let Some(hex) = &self.hex {
+            let clean: String = hex.chars().filter(|c| !c.is_whitespace()).collect();
+            anyhow::ensure!(
+                !clean.is_empty() && clean.len().is_multiple_of(2),
+                "magic hex invalide"
+            );
+            let mut bytes = Vec::with_capacity(clean.len() / 2);
+            for pair in clean.as_bytes().chunks_exact(2) {
+                let s = std::str::from_utf8(pair)?;
+                bytes.push(u8::from_str_radix(s, 16)?);
             }
+            return Ok(bytes);
         }
-    }
-
-    pub const fn post_validate(self) -> PostValidateMode {
-        match self {
-            Self::StrictMkvRemux => PostValidateMode::RemuxEquivalent,
-            Self::MkvMetadataEdit => PostValidateMode::TracksUnchanged,
-            Self::TranscodedMkv => PostValidateMode::ValidMedia,
-            Self::Mp4Container => PostValidateMode::Mp4Header,
-        }
+        anyhow::bail!("règle magic-bytes sans champ ascii ni hex")
     }
 }
 
@@ -55,20 +64,50 @@ impl OutputProfile {
 pub enum PostValidateMode {
     #[default]
     None,
-    RemuxEquivalent,
-    TracksUnchanged,
-    ValidMedia,
-    Mp4Header,
+    NonEmpty,
+    ValidProbe,
+    MagicBytes,
+    ProbePreserve,
 }
 
-/// Format JSON attendu d'une sonde déclarée (`runtime.probeFormat`).
+/// Spécification complète de validation post-exécution d'un fichier produit.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostValidateSpec {
+    #[serde(default)]
+    pub mode: PostValidateMode,
+    #[serde(default)]
+    pub magic: Option<MagicBytesRule>,
+    #[serde(default)]
+    pub preserve_paths: Vec<String>,
+}
+
+/// Contrat de sortie effectif d'une opération ou d'un flux (extension, MIME et validation).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputSpec {
+    pub extension: String,
+    pub content_type: String,
+    #[serde(default)]
+    pub post_validate: PostValidateSpec,
+}
+
+impl Default for OutputSpec {
+    fn default() -> Self {
+        Self {
+            extension: "bin".to_owned(),
+            content_type: "application/octet-stream".to_owned(),
+            post_validate: PostValidateSpec::default(),
+        }
+    }
+}
+
+/// Format attendu d'une sonde déclarée (`runtime.probeFormat`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProbeFormat {
     #[default]
-    MkvmergeJson,
-    MediainfoJson,
-    RawJson,
+    Json,
 }
 
 /// Paramètres nécessaires pour exécuter une sonde binaire déclarative sur un chemin média.
@@ -78,6 +117,7 @@ pub struct ProbeCommand<'a> {
     pub bin: &'a Path,
     pub args: &'a [String],
     pub format: ProbeFormat,
+    pub require_paths: &'a [String],
     pub success_exit_codes: &'a [i32],
     pub timeout: Duration,
 }
@@ -88,14 +128,15 @@ impl<'a> ProbeCommand<'a> {
             label,
             bin,
             args,
-            format: ProbeFormat::MkvmergeJson,
+            format: ProbeFormat::Json,
+            require_paths: &[],
             success_exit_codes: &[0, 1],
             timeout: Duration::from_secs(PROBE_DEFAULT_TIMEOUT_SECS),
         }
     }
 }
 
-/// Exécute une sonde binaire et valide la structure JSON selon son `ProbeFormat`.
+/// Exécute une sonde binaire et valide la structure JSON selon son contrat.
 pub async fn run_probe_json(cmd: ProbeCommand<'_>) -> anyhow::Result<Value> {
     let mut spec = CommandSpec::new(cmd.label, cmd.bin, cmd.args);
     spec.progress_parser = ProgressParser::None;
@@ -106,28 +147,38 @@ pub async fn run_probe_json(cmd: ProbeCommand<'_>) -> anyhow::Result<Value> {
 
     let outcome = run_command(spec, |_, _| {}).await?;
     let data: Value = serde_json::from_slice(&outcome.stdout)?;
-    validate_probe_json(cmd.format, &data)?;
+    validate_probe_json(cmd.format, &data, cmd.require_paths)?;
     Ok(data)
 }
 
-/// Valide la structure JSON minimale retournée par une sonde selon son format déclaré.
-pub fn validate_probe_json(format: ProbeFormat, data: &Value) -> anyhow::Result<()> {
+fn resolve_json_path<'a>(data: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut current = data;
+    for segment in path.split('.').filter(|s| !s.is_empty()) {
+        current = current.get(segment)?;
+    }
+    Some(current)
+}
+
+/// Valide la structure JSON minimale retournée par une sonde et vérifie `require_paths`.
+pub fn validate_probe_json(
+    format: ProbeFormat,
+    data: &Value,
+    require_paths: &[String],
+) -> anyhow::Result<()> {
     match format {
-        ProbeFormat::MkvmergeJson => {
-            anyhow::ensure!(
-                data["container"]["recognized"] == true && data["container"]["supported"] == true,
-                "unsupported container"
-            );
-            anyhow::ensure!(
-                data["tracks"].as_array().is_some_and(|t| !t.is_empty()),
-                "no tracks"
-            );
-        }
-        ProbeFormat::MediainfoJson => {
-            anyhow::ensure!(data.get("media").is_some(), "missing mediainfo media node");
-        }
-        ProbeFormat::RawJson => {
+        ProbeFormat::Json => {
             anyhow::ensure!(data.is_object() || data.is_array(), "invalid probe json");
+        }
+    }
+    for path in require_paths {
+        let value = resolve_json_path(data, path)
+            .ok_or_else(|| anyhow::anyhow!("missing required probe path: {path}"))?;
+        anyhow::ensure!(
+            !matches!(value, Value::Null | Value::Bool(false)),
+            "probe path {path} is null or false"
+        );
+        if let Some(items) = value.as_array() {
+            anyhow::ensure!(!items.is_empty(), "probe path {path} is empty");
         }
     }
     Ok(())
@@ -141,132 +192,118 @@ pub fn merge_probe_enrichment(mut primary: Value, key: &str, enrichment: Value) 
     primary
 }
 
-fn track_signature(data: &Value) -> Vec<Value> {
-    data["tracks"]
-        .as_array()
-        .map(|tracks| {
-            tracks
-                .iter()
-                .map(|t| {
-                    let p = &t["properties"];
-                    serde_json::json!([
-                        t["type"],
-                        t["codec"],
-                        p["language"],
-                        p["enabled_track"],
-                        p["track_name"],
-                        p["default_track"],
-                        p["forced_track"],
-                        p["audio_channels"],
-                        p["audio_sampling_frequency"],
-                        p["pixel_dimensions"]
-                    ])
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn track_codecs(data: &Value) -> Vec<(Option<&str>, Option<&str>)> {
-    data["tracks"]
-        .as_array()
-        .map(|tracks| {
-            tracks
-                .iter()
-                .map(|t| (t["type"].as_str(), t["codec"].as_str()))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Extrait la durée totale en secondes depuis un arbre de sonde MKV ou MediaInfo.
-pub fn media_duration_secs(info: &Value) -> Option<f64> {
-    if let Some(ns) = info
-        .pointer("/container/properties/duration")
-        .and_then(Value::as_u64)
-        && ns > 0
-    {
-        return Some(ns as f64 / NANOSECONDS_PER_SECOND);
+fn collect_json_path<'a>(current: &'a Value, segments: &[&str], out: &mut Vec<Option<&'a Value>>) {
+    let Some((&head, rest)) = segments.split_first() else {
+        out.push(Some(current));
+        return;
+    };
+    if let Some(key) = head.strip_suffix("[*]") {
+        let target = if key.is_empty() {
+            Some(current)
+        } else {
+            current.get(key)
+        };
+        if let Some(items) = target.and_then(Value::as_array) {
+            for item in items {
+                collect_json_path(item, rest, out);
+            }
+        }
+        return;
     }
-    for pointer in ["/mediainfo/media/track", "/media/track"] {
-        if let Some(tracks) = info.pointer(pointer).and_then(Value::as_array) {
-            for track in tracks {
-                if let Some(raw) = track.get("Duration").and_then(Value::as_str)
-                    && let Ok(secs) = raw.parse::<f64>()
-                    && secs > 0.0
-                {
-                    return Some(secs);
-                }
-                if let Some(secs) = track.get("Duration").and_then(Value::as_f64)
-                    && secs > 0.0
-                {
-                    return Some(secs);
-                }
+    if let Some(bracket) = head.find('[')
+        && let Some(idx_str) = head[bracket + 1..].strip_suffix(']')
+        && let Ok(idx) = idx_str.parse::<usize>()
+    {
+        let key = &head[..bracket];
+        let target = if key.is_empty() {
+            Some(current)
+        } else {
+            current.get(key)
+        };
+        match target
+            .and_then(Value::as_array)
+            .and_then(|arr| arr.get(idx))
+        {
+            Some(next) => collect_json_path(next, rest, out),
+            None => out.push(None),
+        }
+        return;
+    }
+    match current.get(head) {
+        Some(next) => collect_json_path(next, rest, out),
+        None => out.push(None),
+    }
+}
+
+fn resolve_path_values<'a>(data: &'a Value, path: &str) -> Vec<Option<&'a Value>> {
+    let segments: Vec<&str> = path.split('.').filter(|s| !s.is_empty()).collect();
+    let mut out = Vec::new();
+    collect_json_path(data, &segments, &mut out);
+    out
+}
+
+/// Extrait la durée totale en secondes depuis un arbre JSON selon les règles déclarées.
+pub fn extract_duration_secs(info: &Value, rules: &[DurationRule]) -> Option<f64> {
+    for rule in rules {
+        if rule.scale <= 0.0 || !rule.scale.is_finite() {
+            continue;
+        }
+        for value in resolve_path_values(info, &rule.path).into_iter().flatten() {
+            let raw = value
+                .as_f64()
+                .or_else(|| value.as_str().and_then(|s| s.parse::<f64>().ok()));
+            if let Some(val) = raw
+                && val > 0.0
+                && val.is_finite()
+            {
+                return Some(val * rule.scale);
             }
         }
     }
     None
 }
 
-/// Valide qu'un fichier MP4 commence par une boîte ISO BMFF `ftyp`.
-pub async fn validate_mp4_header(output: &Path) -> anyhow::Result<()> {
+/// Valide qu'un fichier produit contient les octets magiques attendus à l'offset configuré.
+pub async fn validate_magic_bytes(output: &Path, rule: &MagicBytesRule) -> anyhow::Result<()> {
+    let expected = rule.expected_bytes()?;
     let mut file = tokio::fs::File::open(output).await?;
     let size = file.metadata().await?.len();
-    anyhow::ensure!(size >= MP4_MIN_HEADER_BYTES as u64, "mp4 output too small");
-    let mut header = [0u8; 16];
-    let read = file.read(&mut header).await?;
-    anyhow::ensure!(read >= MP4_MIN_HEADER_BYTES, "incomplete mp4 header");
-    anyhow::ensure!(&header[4..8] == b"ftyp", "missing ISO BMFF ftyp box");
-    Ok(())
-}
-
-/// Valide l'équivalence stricte de remuxage entre deux arbres de sonde.
-pub fn validate_remux_values(before: &Value, after: &Value) -> anyhow::Result<()> {
+    let required_end = (rule.offset as u64)
+        .checked_add(expected.len() as u64)
+        .ok_or_else(|| anyhow::anyhow!("magic bytes offset overflow"))?;
+    anyhow::ensure!(size >= required_end, "output too small for magic header");
+    if rule.offset > 0 {
+        file.seek(std::io::SeekFrom::Start(rule.offset as u64))
+            .await?;
+    }
+    let mut actual = vec![0u8; expected.len()];
+    file.read_exact(&mut actual).await?;
     anyhow::ensure!(
-        track_signature(before) == track_signature(after),
-        "track metadata mismatch"
-    );
-    anyhow::ensure!(
-        before["container"]["properties"]["title"] == after["container"]["properties"]["title"],
-        "container title mismatch"
-    );
-    let attachment_signature = |v: &Value| -> Vec<Value> {
-        v["attachments"]
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .map(|a| serde_json::json!([a["file_name"], a["content_type"], a["size"]]))
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-    anyhow::ensure!(
-        attachment_signature(before) == attachment_signature(after),
-        "attachment mismatch"
-    );
-    anyhow::ensure!(
-        before["chapters"] == after["chapters"]
-            && before["global_tags"] == after["global_tags"]
-            && before["track_tags"] == after["track_tags"],
-        "chapter or tag mismatch"
+        actual == expected,
+        "magic bytes mismatch at offset {}",
+        rule.offset
     );
     Ok(())
 }
 
-/// Valide qu'une édition en place n'a modifié ni le nombre ni les codecs des pistes.
-pub fn validate_tracks_unchanged_values(before: &Value, after: &Value) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        track_codecs(before) == track_codecs(after),
-        "track layout mismatch after metadata edit"
-    );
+/// Vérifie que tous les chemins déclarés dans `preserve_paths` sont identiques entre `before` et `after`.
+pub fn validate_probe_preserved(
+    before: &Value,
+    after: &Value,
+    preserve_paths: &[String],
+) -> anyhow::Result<()> {
+    for path in preserve_paths {
+        let left = resolve_path_values(before, path);
+        let right = resolve_path_values(after, path);
+        anyhow::ensure!(left == right, "preserved probe path mismatch: {path}");
+    }
     Ok(())
 }
 
-/// Vérifie qu'un fichier média produit est non vide.
+/// Vérifie qu'un fichier produit est non vide.
 pub async fn ensure_non_empty_file(output: &Path) -> anyhow::Result<()> {
     let meta = tokio::fs::metadata(output).await?;
-    anyhow::ensure!(meta.len() > 0, "empty media output");
+    anyhow::ensure!(meta.len() > 0, "empty output file");
     Ok(())
 }
 
@@ -277,60 +314,96 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn extracts_duration_from_mkvmerge_and_mediainfo_trees() {
-        let mkv = json!({
+    fn extracts_duration_from_declarative_rules() {
+        let rules = vec![
+            DurationRule {
+                path: "container.properties.duration".to_owned(),
+                scale: 1e-9,
+            },
+            DurationRule {
+                path: "mediainfo.media.track[*].Duration".to_owned(),
+                scale: 1.0,
+            },
+        ];
+        let primary = json!({
             "container": { "properties": { "duration": 90_000_000_000u64 } }
         });
-        assert_eq!(media_duration_secs(&mkv), Some(90.0));
+        assert_eq!(extract_duration_secs(&primary, &rules), Some(90.0));
 
         let enriched = merge_probe_enrichment(
-            mkv,
+            json!({}),
             "mediainfo",
             json!({ "media": { "track": [{ "@type": "General", "Duration": "45.5" }] } }),
         );
-        assert_eq!(media_duration_secs(&enriched), Some(90.0));
-        assert_eq!(
-            media_duration_secs(&json!({
-                "mediainfo": { "media": { "track": [{ "Duration": 12.25 }] } }
-            })),
-            Some(12.25)
-        );
+        assert_eq!(extract_duration_secs(&enriched, &rules), Some(45.5));
+        assert_eq!(extract_duration_secs(&json!({}), &rules), None);
     }
 
     #[tokio::test]
-    async fn validate_mp4_header_requires_ftyp_box() -> anyhow::Result<()> {
+    async fn validate_magic_bytes_checks_ascii_and_hex() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
-        let valid = dir.path().join("ok.mp4");
-        let invalid = dir.path().join("bad.mp4");
+        let valid = dir.path().join("ok.bin");
+        let invalid = dir.path().join("bad.bin");
         tokio::fs::write(&valid, b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00").await?;
-        tokio::fs::write(&invalid, b"not-an-mp4-container").await?;
+        tokio::fs::write(&invalid, b"not-a-valid-header").await?;
 
-        validate_mp4_header(&valid).await?;
-        assert!(validate_mp4_header(&invalid).await.is_err());
+        let ascii_rule = MagicBytesRule {
+            offset: 4,
+            ascii: Some("ftyp".to_owned()),
+            hex: None,
+        };
+        validate_magic_bytes(&valid, &ascii_rule).await?;
+        assert!(validate_magic_bytes(&invalid, &ascii_rule).await.is_err());
+
+        let hex_rule = MagicBytesRule {
+            offset: 4,
+            ascii: None,
+            hex: Some("66747970".to_owned()),
+        };
+        validate_magic_bytes(&valid, &hex_rule).await?;
         Ok(())
     }
 
     #[test]
-    fn validate_remux_and_tracks_compare_probe_trees() -> anyhow::Result<()> {
+    fn validate_probe_preserved_compares_declared_paths() -> anyhow::Result<()> {
         let src = json!({
-            "container": { "recognized": true, "supported": true, "properties": { "title": "Film" } },
+            "container": { "properties": { "title": "Film" } },
             "tracks": [{ "type": "video", "codec": "HEVC", "properties": { "language": "und" } }],
-            "attachments": [],
-            "chapters": [],
-            "global_tags": [],
-            "track_tags": []
+            "chapters": []
         });
         let changed_lang = json!({
-            "container": { "recognized": true, "supported": true, "properties": { "title": "Film" } },
+            "container": { "properties": { "title": "Film" } },
             "tracks": [{ "type": "video", "codec": "HEVC", "properties": { "language": "fra" } }],
-            "attachments": [],
-            "chapters": [],
-            "global_tags": [],
-            "track_tags": []
+            "chapters": []
         });
-        validate_remux_values(&src, &src)?;
-        assert!(validate_remux_values(&src, &changed_lang).is_err());
-        validate_tracks_unchanged_values(&src, &changed_lang)?;
+        let strict_paths = vec![
+            "container.properties.title".to_owned(),
+            "tracks[*].type".to_owned(),
+            "tracks[*].codec".to_owned(),
+            "tracks[*].properties.language".to_owned(),
+            "chapters".to_owned(),
+        ];
+        let layout_paths = vec!["tracks[*].type".to_owned(), "tracks[*].codec".to_owned()];
+
+        validate_probe_preserved(&src, &src, &strict_paths)?;
+        assert!(validate_probe_preserved(&src, &changed_lang, &strict_paths).is_err());
+        validate_probe_preserved(&src, &changed_lang, &layout_paths)?;
+        Ok(())
+    }
+
+    #[test]
+    fn validate_probe_json_checks_required_paths() -> anyhow::Result<()> {
+        let valid = json!({ "container": { "recognized": true }, "tracks": [{ "id": 0 }] });
+        let reqs = vec!["container.recognized".to_owned(), "tracks".to_owned()];
+        validate_probe_json(ProbeFormat::Json, &valid, &reqs)?;
+
+        let empty_tracks = json!({ "container": { "recognized": true }, "tracks": [] });
+        assert!(validate_probe_json(ProbeFormat::Json, &empty_tracks, &reqs).is_err());
+
+        let false_flag = json!({ "container": { "recognized": false }, "tracks": [{ "id": 0 }] });
+        assert!(validate_probe_json(ProbeFormat::Json, &false_flag, &reqs).is_err());
+
+        assert!(validate_probe_json(ProbeFormat::Json, &json!({}), &reqs).is_err());
         Ok(())
     }
 

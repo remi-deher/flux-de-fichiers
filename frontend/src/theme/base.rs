@@ -547,31 +547,6 @@ pub const BASE_CSS: &str = r#"
   min-width: 0;
 }
 
-.topbar-breadcrumb {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.8125rem;
-  min-width: 0;
-  white-space: nowrap;
-}
-
-.topbar-breadcrumb__group {
-  color: var(--text-dim);
-  font-weight: 500;
-}
-
-.topbar-breadcrumb__sep {
-  color: var(--text-muted);
-}
-
-.topbar-breadcrumb__page {
-  color: var(--text-main);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* Style des icônes vectorielles Lucide */
 .lucide-icon {
   display: inline-block;
@@ -1296,10 +1271,6 @@ body[data-filter-sheet] .topbar-search {
 
   .app-topbar {
     margin: 0;
-  }
-
-  .topbar-breadcrumb {
-    display: none;
   }
 
   .topbar-container {

@@ -270,22 +270,21 @@ async fn test_storage_list_inputs_behavior() -> anyhow::Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let input_dir = temp_dir.path();
 
-    // Fichier MKV valide
-    let mkv_path = input_dir.join("film_vacances.mkv");
-    std::fs::write(&mkv_path, vec![0u8; 1024])?;
+    // Plusieurs types de fichiers valides (moteur agnostique au format)
+    std::fs::write(input_dir.join("film_vacances.mkv"), vec![0u8; 1024])?;
+    std::fs::write(input_dir.join("livre.epub"), b"contenu epub")?;
 
-    // Fichier non-MKV à ignorer
-    let txt_path = input_dir.join("notes.txt");
-    std::fs::write(&txt_path, "texte quelconque")?;
-
-    // Sous-répertoire
-    let sub_dir = input_dir.join("sous_dossier");
-    std::fs::create_dir_all(&sub_dir)?;
+    // Fichier caché, fichier vide et sous-répertoire ignorés
+    std::fs::write(input_dir.join(".hidden.mkv"), vec![0u8; 128])?;
+    std::fs::write(input_dir.join("vide.txt"), b"")?;
+    std::fs::create_dir_all(input_dir.join("sous_dossier"))?;
 
     let inputs = storage::list_inputs(input_dir, 10_000_000).await?;
-    assert_eq!(inputs.len(), 1);
+    assert_eq!(inputs.len(), 2);
     assert_eq!(inputs[0].name, "film_vacances.mkv");
     assert_eq!(inputs[0].bytes, 1024);
+    assert_eq!(inputs[1].name, "livre.epub");
+    assert_eq!(inputs[1].bytes, b"contenu epub".len() as u64);
 
     Ok(())
 }
@@ -401,7 +400,7 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
     )?;
     std::fs::write(
         repos_dir.join("plugins/video/operations/probe.json"),
-        r#"{"schemaVersion":"1.1.0","id":"operation.mkvtoolnix.probe","version":"1.0.0","name":"Probe","providerId":"plugin.video","providerKind":"plugin","capability":"probe","status":"validated","runtime":{"kind":"binary","tool":{"id":"app.mkvtoolnix","version":"1.0.0"},"executable":"mkvmerge","executionMode":"probe-primary","probeFormat":"mkvmerge-json","argv":[{"param":"source","as":"filePath"}]}}"#,
+        r#"{"schemaVersion":"1.1.0","id":"operation.mkvtoolnix.probe","version":"1.0.0","name":"Probe","providerId":"plugin.video","providerKind":"plugin","capability":"probe","status":"validated","runtime":{"kind":"binary","tool":{"id":"app.mkvtoolnix","version":"1.0.0"},"executable":"mkvmerge","executionMode":"probe-primary","probeFormat":"json","probeRequirePaths":["container.recognized","tracks"],"argv":[{"param":"source","as":"filePath"}]}}"#,
     )?;
 
     let config = Config {

@@ -85,7 +85,7 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
     )
     .await
     {
-        report_failure(state, claim.job_id, &lease, JobErrorCode::RemuxFailed).await;
+        report_failure(state, claim.job_id, &lease, JobErrorCode::OperationFailed).await;
         tracing::warn!(job_id=%claim.job_id, error=?error, "local claim contract preparation failed");
         return;
     }
@@ -125,7 +125,9 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
             return;
         }
     };
-    let source_snapshot = work_dir.join("source.mkv");
+    let source_snapshot = work_dir.join(flux_shared::jobs::source_working_filename(
+        &claim.source_name,
+    ));
     let mut heartbeat = tokio::spawn(heartbeat_loop(
         state.pool.clone(),
         state.config.data_dir.clone(),
@@ -176,7 +178,7 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
             &source_snapshot,
             &execution.working_file,
             execution.warning,
-            execution.output_profile,
+            &execution.output_spec,
         )
         .await?;
         anyhow::Ok(())

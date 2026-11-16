@@ -187,8 +187,7 @@ mod tests {
     #[test]
     fn job_error_code_roundtrip_and_worker_policy() -> Result<(), serde_json::Error> {
         let cases = [
-            (JobErrorCode::RemuxFailed, "remux_failed", true),
-            (JobErrorCode::EncodeFailed, "encode_failed", true),
+            (JobErrorCode::OperationFailed, "operation_failed", true),
             (JobErrorCode::WebhookFailed, "webhook_failed", true),
             (JobErrorCode::IntegrationFailed, "integration_failed", true),
             (JobErrorCode::SourceIntegrity, "source_integrity", true),
@@ -217,8 +216,12 @@ mod tests {
             JobErrorCode::SourceIntegrity
         );
         assert_eq!(
+            JobErrorCode::from_worker_label("operation_failed"),
+            JobErrorCode::OperationFailed
+        );
+        assert_eq!(
             JobErrorCode::from_worker_label("remux_failed"),
-            JobErrorCode::RemuxFailed
+            JobErrorCode::OperationFailed
         );
         assert_eq!(
             JobErrorCode::from_worker_label("anything-else"),

@@ -811,8 +811,8 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                         let selected_wire = editor.selected_wire.get();
                         let sim_step = editor.sim_step.get();
                         let sim_rep = editor.simulation_open.get().then(|| {
-                            let media = editor.sim_media.get();
-                            super::simulation::simulate_flow(&graph, &catalog, &media)
+                            let input = editor.sim_input.get();
+                            super::simulation::simulate_flow(&graph, &catalog, &input)
                         });
 
                         graph
@@ -911,8 +911,8 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                         let catalog = editor.catalog.get();
                         let sim_step = editor.sim_step.get();
                         let sim_rep = editor.simulation_open.get().then(|| {
-                            let media = editor.sim_media.get();
-                            super::simulation::simulate_flow(&graph, &catalog, &media)
+                            let input = editor.sim_input.get();
+                            super::simulation::simulate_flow(&graph, &catalog, &input)
                         });
                         let sim_visited = sim_rep
                             .as_ref()

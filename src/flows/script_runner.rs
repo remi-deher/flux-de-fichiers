@@ -543,7 +543,7 @@ mod tests {
             outside_file.display()
         );
         let (op, rt) = test_op(&script, 10);
-        let err = execute_script_operation(
+        let res = execute_script_operation(
             &op,
             &rt,
             &cache,
@@ -557,9 +557,8 @@ mod tests {
             1,
             Arc::new(|_, _| {}),
         )
-        .await
-        .expect_err("sortie hors work_dir doit être refusée");
-        assert!(err.message.contains("hors du répertoire"));
+        .await;
+        assert!(matches!(res, Err(err) if err.message.contains("hors du répertoire")));
         Ok(())
     }
 

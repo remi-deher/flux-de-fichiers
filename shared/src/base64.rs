@@ -44,7 +44,7 @@ pub fn decode(input: &str) -> Result<Vec<u8>, &'static str> {
         return Err("longueur base64 invalide");
     }
     let mut out = Vec::with_capacity((clean.len() / 4) * 3);
-    for (idx, quad) in clean.chunks_exact(4).enumerate() {
+    for (idx, quad) in clean.as_chunks::<4>().0.iter().enumerate() {
         let is_last = (idx + 1) * 4 == clean.len();
         let a = decode_val(quad[0]).ok_or("caractère base64 invalide")?;
         let b = decode_val(quad[1]).ok_or("caractère base64 invalide")?;

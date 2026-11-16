@@ -35,7 +35,7 @@ fn lease(h: &HeaderMap) -> AppResult<LeaseRequest> {
     })
 }
 
-async fn stream_file(
+pub(super) async fn stream_file(
     path: &std::path::Path,
     attachment_name: Option<&str>,
     content_type: &str,

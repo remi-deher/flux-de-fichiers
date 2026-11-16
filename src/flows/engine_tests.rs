@@ -441,3 +441,257 @@ async fn mkvpropedit_skips_when_unchanged_and_fails_cleanly_on_error()
     );
     Ok(())
 }
+
+fn register_core_and_probe(reg: &mut OperationRegistry) -> Result<(), Box<dyn std::error::Error>> {
+    for op in [
+        json!({
+            "schemaVersion": "1.1.0",
+            "id": "operation.core.file-input",
+            "version": "1.0.0",
+            "name": "Entrée",
+            "providerId": "plugin.core",
+            "providerKind": "plugin",
+            "capability": "control",
+            "status": "validated",
+            "runtime": { "kind": "primitive", "primitive": "entry" }
+        }),
+        json!({
+            "schemaVersion": "1.1.0",
+            "id": "operation.core.file-output",
+            "version": "1.0.0",
+            "name": "Sortie",
+            "providerId": "plugin.core",
+            "providerKind": "plugin",
+            "capability": "control",
+            "status": "validated",
+            "runtime": { "kind": "primitive", "primitive": "terminal" }
+        }),
+        json!({
+            "schemaVersion": "1.1.0",
+            "id": "operation.mkvtoolnix.probe",
+            "version": "1.0.0",
+            "name": "Probe",
+            "providerId": "plugin.video",
+            "providerKind": "plugin",
+            "capability": "probe",
+            "status": "validated",
+            "runtime": {
+                "kind": "binary",
+                "tool": { "id": "app.mkvtoolnix", "version": "1.0.0" },
+                "executable": "mkvmerge",
+                "executionMode": "probe-primary",
+                "probeFormat": "json",
+                "probeRequirePaths": ["container.recognized", "tracks"],
+                "argv": ["--output-charset", "UTF-8", "-J", { "param": "source", "as": "filePath" }],
+                "console": { "successExitCodes": [0, 1], "warningExitCodes": [1] }
+            }
+        }),
+    ] {
+        reg.register_json(op)?;
+    }
+    reg.register_block_mapping("file-input", "operation.core.file-input");
+    reg.register_block_mapping("file-output", "operation.core.file-output");
+    Ok(())
+}
+
+#[tokio::test]
+async fn local_script_executes_end_to_end_across_registry_routing_and_claim_payload()
+-> Result<(), Box<dyn std::error::Error>> {
+    use crate::domain::JobStepStatus;
+    use crate::plugins::save_local_script;
+    use flux_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
+
+    let dir = tempfile::tempdir()?;
+    let local_dir = dir.path().join("local");
+    let cache = ToolCacheManager::new(dir.path().join("cache"));
+    install_fake_probe(&cache)?;
+
+    save_local_script(
+        &local_dir,
+        UpsertLocalScriptRequest {
+            id: None,
+            name: "Router".into(),
+            description: None,
+            interpreter: ScriptInterpreter::Sh,
+            code: concat!(
+                "cat >/dev/null\n",
+                "printf 'transformed-payload' > transformed.mkv\n",
+                "printf '{\"status\":\"ok\",\"workingFile\":\"transformed.mkv\",\"nextPort\":\"alt\",\"mediaInfo\":{\"customTag\":\"from-script\"},\"message\":\"routé\"}\n'",
+            )
+            .into(),
+            filename: None,
+            category: None,
+            tags: vec![],
+        },
+    )?;
+    save_local_script(
+        &local_dir,
+        UpsertLocalScriptRequest {
+            id: None,
+            name: "Skipper".into(),
+            description: None,
+            interpreter: ScriptInterpreter::Sh,
+            code: concat!(
+                "if grep -q '\"customTag\":\"from-script\"'; then\n",
+                "  printf '{\"status\":\"skip\",\"message\":\"mediaInfo reçu\"}\n'\n",
+                "else\n",
+                "  printf '{\"status\":\"error\",\"message\":\"mediaInfo absent\"}\n'\n",
+                "fi\n",
+            )
+            .into(),
+            filename: None,
+            category: None,
+            tags: vec![],
+        },
+    )?;
+    save_local_script(
+        &local_dir,
+        UpsertLocalScriptRequest {
+            id: None,
+            name: "Unused".into(),
+            description: None,
+            interpreter: ScriptInterpreter::Sh,
+            code:
+                "cat >/dev/null\nprintf '{\"status\":\"error\",\"message\":\"mauvaise branche\"}'"
+                    .into(),
+            filename: None,
+            category: None,
+            tags: vec![],
+        },
+    )?;
+
+    let mut reg = OperationRegistry::load_from_roots(&[local_dir]);
+    register_core_and_probe(&mut reg)?;
+
+    let source = dir.path().join("in.mkv");
+    std::fs::write(&source, "raw-input")?;
+    let work = dir.path().join("work");
+    std::fs::create_dir(&work)?;
+    let flow = flow_record(json!({
+        "nodes": [
+            {"id": "n1", "type": "file-input", "name": "in"},
+            {"id": "n2", "type": "block.script.router", "name": "Router"},
+            {"id": "n3", "type": "block.script.skipper", "name": "Skipper"},
+            {"id": "n_bad", "type": "block.script.unused", "name": "Unused"},
+            {"id": "n4", "type": "file-output", "name": "out"}
+        ],
+        "connections": [
+            {"from": "n1", "to": "n2"},
+            {"from": "n2", "to": "n_bad", "port": "main"},
+            {"from": "n2", "to": "n3", "port": "alt"},
+            {"from": "n3", "to": "n4"}
+        ]
+    }));
+
+    let (claim_ops, claim_blocks) = reg.claim_payload_for_flow(Some(&flow));
+    assert_eq!(
+        claim_blocks.get("block.script.router").map(String::as_str),
+        Some("operation.script.router")
+    );
+    assert!(
+        claim_ops
+            .get("operation.script.router")
+            .and_then(|v| v.get("runtime"))
+            .and_then(|v| v.get("code"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|code| code.contains("transformed.mkv"))
+    );
+
+    let http = reqwest::Client::new();
+    let (progress, _) = recording_progress();
+    let outcome = FlowEngine {
+        registry: &reg,
+        cache_mgr: &cache,
+        http_client: &http,
+        secrets_dir: None,
+        plugin_configs: &HashMap::new(),
+        tool_versions: &HashMap::new(),
+        media_root: None,
+        allow_private_integrations: None,
+    }
+    .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
+    .await
+    .map_err(|e| e.message)?;
+
+    assert_eq!(
+        outcome.final_file,
+        std::fs::canonicalize(work.join("transformed.mkv"))?
+    );
+    assert_eq!(
+        std::fs::read_to_string(&outcome.final_file)?,
+        "transformed-payload"
+    );
+    assert!(outcome.steps.iter().any(|s| {
+        s.node_id == "n3"
+            && s.status == JobStepStatus::Skipped
+            && s.message.as_deref() == Some("mediaInfo reçu")
+    }));
+    Ok(())
+}
+
+#[tokio::test]
+async fn local_script_stop_pipeline_halts_execution_before_output()
+-> Result<(), Box<dyn std::error::Error>> {
+    use crate::plugins::save_local_script;
+    use flux_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
+
+    let dir = tempfile::tempdir()?;
+    let local_dir = dir.path().join("local");
+    let cache = ToolCacheManager::new(dir.path().join("cache"));
+    install_fake_probe(&cache)?;
+
+    save_local_script(
+        &local_dir,
+        UpsertLocalScriptRequest {
+            id: None,
+            name: "Halt".into(),
+            description: None,
+            interpreter: ScriptInterpreter::Sh,
+            code: "cat >/dev/null\nprintf '{\"status\":\"ok\",\"stopPipeline\":true,\"message\":\"arrêt demandé\"}'"
+                .into(),
+            filename: None,
+            category: None,
+            tags: vec![],
+        },
+    )?;
+
+    let mut reg = OperationRegistry::load_from_roots(&[local_dir]);
+    register_core_and_probe(&mut reg)?;
+
+    let source = dir.path().join("in.mkv");
+    std::fs::write(&source, "raw")?;
+    let work = dir.path().join("work");
+    std::fs::create_dir(&work)?;
+    let flow = flow_record(json!({
+        "nodes": [
+            {"id": "n1", "type": "file-input", "name": "in"},
+            {"id": "n2", "type": "block.script.halt", "name": "Halt"},
+            {"id": "n3", "type": "file-output", "name": "out"}
+        ],
+        "connections": [
+            {"from": "n1", "to": "n2"},
+            {"from": "n2", "to": "n3"}
+        ]
+    }));
+
+    let http = reqwest::Client::new();
+    let (progress, _) = recording_progress();
+    let outcome = FlowEngine {
+        registry: &reg,
+        cache_mgr: &cache,
+        http_client: &http,
+        secrets_dir: None,
+        plugin_configs: &HashMap::new(),
+        tool_versions: &HashMap::new(),
+        media_root: None,
+        allow_private_integrations: None,
+    }
+    .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
+    .await
+    .map_err(|e| e.message)?;
+
+    assert_eq!(outcome.steps.len(), 2);
+    assert_eq!(outcome.steps[1].node_id, "n2");
+    assert_eq!(outcome.steps[1].message.as_deref(), Some("arrêt demandé"));
+    Ok(())
+}

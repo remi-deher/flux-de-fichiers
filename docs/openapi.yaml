@@ -237,6 +237,15 @@ paths:
             application/json:
               schema: {type: array, items: {type: object}}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/plugins/{id}:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Détail d'un plugin, dépendances, blocs fournis et statut des outils requis
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Vue détaillée du plugin}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins/repositories:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
@@ -262,6 +271,14 @@ paths:
         '200': {description: Dépôt ajouté}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins/repositories/{id}:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Détail d'un dépôt de plugins (entrées et index brut résolu)
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Détail du dépôt}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
     delete:
       security: [{ApiKey: []}, {WebSession: []}]
       summary: Supprimer un dépôt tiers (le dépôt officiel est protégé)
@@ -320,6 +337,15 @@ paths:
       responses:
         '200': {description: Outils}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/tools/{id}:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Détail d'un outil (distribution et plugins consommateurs)
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Détail de l'outil}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/tools/{id}/distribution:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
@@ -346,6 +372,160 @@ paths:
       parameters: [{in: path, name: id, required: true, schema: {type: string}}]
       responses:
         '200': {description: Contrat distribution.v1}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/packs/{id}:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Détail d'un pack (métadonnées, recette installation.json et statut des composants)
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Vue détaillée du pack}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/packs/{id}/installation:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Recette brute `installation.json` d'un pack
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Recette d'installation}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/packs/{id}/install:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Installer les outils requis d'un pack et vérifier la présence de ses composants
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Bilan d'installation du pack}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/local:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Instantané consolidé de la librairie locale (scripts, ressources, modèles de blocs/flows, packs locaux)
+      description: Accessible avec le droit `ViewLibraries` ou `ViewFlows`.
+      responses:
+        '200':
+          description: Instantané local et modèles disponibles
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LocalLibrarySnapshot'}
+        '403': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/local/scripts:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Créer ou mettre à jour un script local (`stdio` JSON) et générer son opération et son bloc
+      description: >-
+        Limite HTTP 1 Mio ; code plafonné à 512 Kio. Retourne `409` en cas de collision sans `id`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpsertLocalScriptRequest'}
+      responses:
+        '200':
+          description: Script enregistré
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LocalScriptSummary'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/local/resources:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Importer ou remplacer une ressource binaire locale (max 5 Mio décodé, limite HTTP 10 Mio)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UploadLocalResourceRequest'}
+      responses:
+        '200':
+          description: Ressource importée
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LocalResourceSummary'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/local/block-templates:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Créer ou mettre à jour un modèle de blocs (sous-graphe `FlowGraph`, limite HTTP 1 Mio)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateBlockTemplateRequest'}
+      responses:
+        '200':
+          description: Modèle de blocs enregistré
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LocalBlockTemplate'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/local/flow-templates:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Créer ou mettre à jour un modèle de flow local (limite HTTP 1 Mio)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateFlowTemplateRequest'}
+      responses:
+        '200':
+          description: Modèle de flow enregistré
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LocalFlowTemplate'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/local/packs:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Assembler un pack local depuis des scripts, ressources, flows ou plugins
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateLocalPackRequest'}
+      responses:
+        '200': {description: Entrée de pack créée dans l'index local}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/local/items/{id}:
+    delete:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Supprimer un élément du catalogue local et reconstruire `index.json`
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Élément supprimé}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/local/items/{id}/file:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Télécharger le fichier d'une ressource locale importée (`nosniff`, `no-store`)
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200':
+          description: Contenu binaire de la ressource
+          headers:
+            X-Content-Type-Options:
+              schema: {type: string, const: nosniff}
+            Cache-Control:
+              schema: {type: string, const: no-store}
+            Content-Disposition:
+              schema: {type: string}
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        '404': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/auth/session:
     get:
@@ -1119,3 +1299,109 @@ components:
           description: Version figée du flow ; modifier le flow ensuite ne change pas la tâche.
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    ScriptInterpreter:
+      type: string
+      enum: [bash, sh, python3, node, deno, bun, pwsh]
+    LocalScriptSummary:
+      type: object
+      required: [id, slug, name, interpreter, entrypoint, code]
+      properties:
+        id: {type: string}
+        slug: {type: string}
+        name: {type: string}
+        description: {type: [string, 'null']}
+        interpreter: {$ref: '#/components/schemas/ScriptInterpreter'}
+        entrypoint: {type: string}
+        code: {type: string}
+        category: {type: [string, 'null'], enum: [media, data, io, other, null]}
+        tags: {type: array, items: {type: string}}
+    UpsertLocalScriptRequest:
+      type: object
+      required: [name, interpreter, code]
+      properties:
+        id: {type: [string, 'null']}
+        name: {type: string}
+        description: {type: [string, 'null']}
+        interpreter: {$ref: '#/components/schemas/ScriptInterpreter'}
+        code: {type: string}
+        filename: {type: [string, 'null']}
+        category: {type: [string, 'null'], enum: [media, data, io, other, null]}
+        tags: {type: array, items: {type: string}}
+    LocalResourceSummary:
+      type: object
+      required: [id, slug, name, entryType, filename, sizeBytes]
+      properties:
+        id: {type: string}
+        slug: {type: string}
+        name: {type: string}
+        entryType: {type: string}
+        filename: {type: string}
+        sizeBytes: {type: integer, minimum: 0}
+        description: {type: [string, 'null']}
+    UploadLocalResourceRequest:
+      type: object
+      required: [name, entryType, filename, contentBase64]
+      properties:
+        id: {type: [string, 'null']}
+        name: {type: string}
+        entryType: {type: string}
+        filename: {type: string}
+        contentBase64: {type: string, format: byte}
+        description: {type: [string, 'null']}
+    LocalBlockTemplate:
+      type: object
+      required: [id, name, definition, isLocal]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        description: {type: [string, 'null']}
+        definition: {type: object}
+        tags: {type: array, items: {type: string}}
+        isLocal: {type: boolean}
+    CreateBlockTemplateRequest:
+      type: object
+      required: [name, definition]
+      properties:
+        id: {type: [string, 'null']}
+        name: {type: string}
+        description: {type: [string, 'null']}
+        definition: {type: object}
+        tags: {type: array, items: {type: string}}
+    LocalFlowTemplate:
+      type: object
+      required: [id, name, fileMask, version, definition, isLocal]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        description: {type: [string, 'null']}
+        fileMask: {type: string}
+        version: {type: string}
+        definition: {type: object}
+        isLocal: {type: boolean}
+    CreateFlowTemplateRequest:
+      type: object
+      required: [name, definition]
+      properties:
+        id: {type: [string, 'null']}
+        name: {type: string}
+        description: {type: [string, 'null']}
+        fileMask: {type: [string, 'null']}
+        definition: {type: object}
+    CreateLocalPackRequest:
+      type: object
+      required: [name, components]
+      properties:
+        id: {type: [string, 'null']}
+        name: {type: string}
+        description: {type: [string, 'null']}
+        components: {type: array, items: {type: object}}
+        entrypoint: {type: [object, 'null']}
+    LocalLibrarySnapshot:
+      type: object
+      required: [scripts, resources, blockTemplates, flowTemplates, packs]
+      properties:
+        scripts: {type: array, items: {$ref: '#/components/schemas/LocalScriptSummary'}}
+        resources: {type: array, items: {$ref: '#/components/schemas/LocalResourceSummary'}}
+        blockTemplates: {type: array, items: {$ref: '#/components/schemas/LocalBlockTemplate'}}
+        flowTemplates: {type: array, items: {$ref: '#/components/schemas/LocalFlowTemplate'}}
+        packs: {type: array, items: {type: object}}

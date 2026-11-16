@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.34.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.33.0...v0.34.0) (2026-11-16)
+
+
+### Features
+
+* **flows:** support du bloc unique Script et routage conditionnel ([c1268ef](https://github.com/remi-deher/flux-de-fichiers/commit/c1268effb406a53508cbedf9074027a5943bc9da))
+* **flows:** support unified script block with library/inline modes and conditional routing ([98d670a](https://github.com/remi-deher/flux-de-fichiers/commit/98d670ac33c451938b676308a9782e123ba9302f))
+
 ## [0.33.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.32.0...v0.33.0) (2026-11-16)
 
 

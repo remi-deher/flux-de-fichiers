@@ -353,6 +353,35 @@ pub fn duplicate_subgraph(graph: &mut FlowGraph, ids: &HashSet<String>) -> HashM
     id_map
 }
 
+/// Insère un modèle de blocs (sous-graphe `{ nodes, connections }`) avec de nouveaux identifiants.
+pub fn insert_subgraph(graph: &mut FlowGraph, template: &FlowGraph) -> Vec<String> {
+    let mut id_map = HashMap::new();
+    let mut created = Vec::with_capacity(template.nodes.len());
+    for source in &template.nodes {
+        let new_id = next_node_id(graph);
+        let node = FlowNode {
+            id: new_id.clone(),
+            kind: source.kind.clone(),
+            name: source.name.clone(),
+            config: source.config.clone(),
+            extra: source.extra.clone(),
+        };
+        graph.nodes.push(node);
+        id_map.insert(source.id.clone(), new_id.clone());
+        created.push(new_id);
+    }
+    for edge in &template.connections {
+        if let (Some(new_from), Some(new_to)) = (id_map.get(&edge.from), id_map.get(&edge.to)) {
+            graph.connections.push(FlowConnection {
+                from: new_from.clone(),
+                to: new_to.clone(),
+                port: edge.port.clone(),
+            });
+        }
+    }
+    created
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::test_support::test_catalog;
@@ -610,5 +639,35 @@ mod tests {
 
         assert!(graph.outgoing(new_remux).any(|edge| edge.to == *new_output));
         assert!(!graph.incoming(new_remux).any(|edge| edge.from == input));
+    }
+
+    #[test]
+    fn insert_subgraph_remaps_ids_and_preserves_internal_links() {
+        let catalog = test_catalog();
+        let (mut graph, _input, _remux) = chain(&catalog);
+        let initial_len = graph.nodes.len();
+        let mut tpl = FlowGraph::default();
+        let n1 = tpl.append(
+            FlowBlockKind::parse("block.video.remux-mkv"),
+            "R",
+            Value::Null,
+            &catalog,
+        );
+        let n2 = tpl.append(
+            FlowBlockKind::parse("block.core.file-output"),
+            "Out",
+            Value::Null,
+            &catalog,
+        );
+        let created = insert_subgraph(&mut graph, &tpl);
+        assert_eq!(created.len(), 2);
+        assert_eq!(graph.nodes.len(), initial_len + 2);
+        assert_ne!(created[0], n1);
+        assert_ne!(created[1], n2);
+        assert!(
+            graph
+                .outgoing(&created[0])
+                .any(|edge| edge.to == created[1])
+        );
     }
 }

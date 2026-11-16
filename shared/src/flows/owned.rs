@@ -53,6 +53,9 @@ pub struct OwnedBlockSpec {
     /// Opération déclarée par le manifeste plugin, si connue.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_id: Option<String>,
+    /// Plugin propriétaire du bloc (`owner` dans `index.json`), si connu.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
 }
 
 impl OwnedBlockSpec {
@@ -169,6 +172,7 @@ mod tests {
             suggested_next: Vec::new(),
             from_plugin: true,
             operation_id: Some("operation.core.webhook".into()),
+            owner: None,
         }
     }
 

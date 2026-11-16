@@ -208,13 +208,13 @@ pub fn mask_log_secrets(input: &str) -> String {
 }
 
 #[derive(Default)]
-struct TailBuffer {
+pub(crate) struct TailBuffer {
     lines: Vec<String>,
     total_bytes: usize,
 }
 
 impl TailBuffer {
-    fn push(&mut self, segment: &str) {
+    pub(crate) fn push(&mut self, segment: &str) {
         let trimmed = segment.trim();
         if trimmed.is_empty() {
             return;
@@ -234,13 +234,13 @@ impl TailBuffer {
         }
     }
 
-    fn finish(self) -> Option<String> {
+    pub(crate) fn finish(self) -> Option<String> {
         (!self.lines.is_empty()).then(|| self.lines.join("\n"))
     }
 }
 
 /// Découpe un flux d'octets en segments séparés par `\r` ou `\n`.
-async fn for_each_segment<R, F>(mut reader: R, mut on_segment: F)
+pub(crate) async fn for_each_segment<R, F>(mut reader: R, mut on_segment: F)
 where
     R: AsyncRead + Unpin,
     F: FnMut(&str),
@@ -268,7 +268,9 @@ where
     flush(&mut pending);
 }
 
-async fn read_bounded_bytes<R: AsyncRead + Unpin>(reader: R) -> std::io::Result<Vec<u8>> {
+pub(crate) async fn read_bounded_bytes<R: AsyncRead + Unpin>(
+    reader: R,
+) -> std::io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     reader
         .take((MAX_STDOUT_CAPTURE_BYTES + 1) as u64)

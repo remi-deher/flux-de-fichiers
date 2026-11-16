@@ -8,6 +8,7 @@ mod custom_args;
 pub mod header_secrets;
 pub mod http_runner;
 pub mod lease_secrets;
+pub mod script_runner;
 
 #[cfg(test)]
 mod engine_tests;
@@ -25,7 +26,7 @@ use uuid::Uuid;
 pub use condition::{ConditionConfig, evaluate_condition};
 pub use contract::{
     BinaryExecutionMode, BinaryRuntime, ContractError, HttpRuntime, OperationContract,
-    OperationRegistry, OperationRuntime, PrimitiveKind, ToolRef,
+    OperationRegistry, OperationRuntime, PrimitiveKind, ScriptInterpreter, ScriptRuntime, ToolRef,
 };
 pub use custom_args::{CustomArgsError, parse_custom_args, safe_custom_args};
 pub use flux_shared::flows::{FlowBlockKind, FlowConnection, FlowGraph, FlowNode, FlowRecord};
@@ -378,6 +379,65 @@ impl<'a> FlowEngine<'a> {
                                 Some(op.id.clone()),
                                 err.message.clone(),
                                 None,
+                            ));
+                            return Err(FlowExecutionError {
+                                code: err.code,
+                                message: err.message,
+                                steps,
+                            });
+                        }
+                    }
+                }
+                OperationRuntime::Script(script_rt) => {
+                    match script_runner::execute_script_operation(
+                        op,
+                        script_rt,
+                        self.cache_mgr,
+                        self.tool_versions,
+                        &flow.id,
+                        &node.id,
+                        &node.config,
+                        work_dir,
+                        &current_working_file,
+                        &ctx.media_info,
+                        step_index,
+                        on_progress.clone(),
+                    )
+                    .await
+                    {
+                        Ok(script_runner::ScriptStepOutcome::Succeeded {
+                            next_working_file,
+                            updated_media_info,
+                            next_port: script_port,
+                            stop_pipeline: script_stop,
+                            message,
+                            excerpt,
+                        }) => {
+                            if let Some(updated_info) = updated_media_info {
+                                ctx.media_info = updated_info;
+                            }
+                            if let Some(next_file) = next_working_file {
+                                current_working_file = next_file;
+                                ctx.working_file = current_working_file.clone();
+                                is_in_place = false;
+                            }
+                            next_port = script_port;
+                            stop_pipeline = script_stop;
+                            step_message = message;
+                            step_excerpt = excerpt;
+                        }
+                        Ok(script_runner::ScriptStepOutcome::Skipped { message, excerpt }) => {
+                            step_status = crate::domain::JobStepStatus::Skipped;
+                            step_message = Some(message);
+                            step_excerpt = excerpt;
+                        }
+                        Err(err) => {
+                            steps.push(failed_step(
+                                step_index,
+                                &node,
+                                Some(op.id.clone()),
+                                err.message.clone(),
+                                err.excerpt.clone(),
                             ));
                             return Err(FlowExecutionError {
                                 code: err.code,

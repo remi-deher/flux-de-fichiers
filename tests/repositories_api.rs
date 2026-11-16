@@ -154,7 +154,7 @@ async fn test_repositories_lifecycle_and_official_protection() -> anyhow::Result
     let del_custom_res = app.clone().oneshot(del_custom_req).await?;
     assert_eq!(del_custom_res.status(), StatusCode::OK);
 
-    // 7. Vérifier que seul le dépôt officiel subsiste
+    // 7. Vérifier que seul le dépôt officiel subsiste et exposer sa fiche détaillée
     let list_req = Request::builder()
         .uri("/api/v1/plugins/repositories")
         .header("authorization", format!("Bearer {TEST_ADMIN_KEY}"))
@@ -164,6 +164,17 @@ async fn test_repositories_lifecycle_and_official_protection() -> anyhow::Result
     let final_repos: Vec<PluginRepository> = serde_json::from_slice(&list_bytes)?;
     assert_eq!(final_repos.len(), 1);
     assert_eq!(final_repos[0].id, "repo.official");
+
+    let detail_req = Request::builder()
+        .uri("/api/v1/plugins/repositories/repo.official")
+        .header("authorization", format!("Bearer {TEST_ADMIN_KEY}"))
+        .body(Body::empty())?;
+    let detail_res = app.clone().oneshot(detail_req).await?;
+    assert_eq!(detail_res.status(), StatusCode::OK);
+    let detail_bytes = to_bytes(detail_res.into_body(), 1024 * 16).await?;
+    let detail: serde_json::Value = serde_json::from_slice(&detail_bytes)?;
+    assert_eq!(detail["repository"]["id"], "repo.official");
+    assert_eq!(detail["syncedOnDisk"], false);
 
     Ok(())
 }

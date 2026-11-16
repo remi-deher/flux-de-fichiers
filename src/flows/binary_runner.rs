@@ -165,6 +165,7 @@ fn error_code_for_op(op: &OperationContract, fallback: JobErrorCode) -> JobError
     match &op.runtime {
         OperationRuntime::Binary(rt) => rt.error_code.unwrap_or(fallback),
         OperationRuntime::Http(rt) => rt.error_code.unwrap_or(fallback),
+        OperationRuntime::Script(rt) => rt.error_code.unwrap_or(fallback),
         OperationRuntime::Primitive(_) => fallback,
     }
 }

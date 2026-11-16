@@ -22,6 +22,24 @@ pub async fn catalog(
     Ok(Json(s.catalog_cache.exposed_catalog(&roots).await))
 }
 
+/// Fiche détaillée d'un plugin du catalogue (métadonnées, dépendances, compatibilité et blocs exposés).
+pub async fn plugin_detail(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    _auth: ViewPluginsAuth,
+) -> AppResult<Json<plugins::PluginDetailView>> {
+    if !plugins::is_valid_repository_id(&id) {
+        return Err(AppError::NotFound);
+    }
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let detail = s
+        .catalog_cache
+        .plugin_detail(&roots, &id)
+        .await
+        .ok_or(AppError::NotFound)?;
+    Ok(Json(detail))
+}
+
 /// Liste l'état d'installation et de cache des outils distribués.
 pub async fn tools(
     State(s): State<AppState>,
@@ -177,6 +195,24 @@ pub async fn list_repositories(
     Ok(Json(repos))
 }
 
+/// Fiche détaillée d'un dépôt de plugins avec son contenu indexé localement.
+pub async fn repository_detail(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    _auth: ViewPluginsAuth,
+) -> AppResult<Json<plugins::RepositoryDetailView>> {
+    if !plugins::is_valid_repository_id(&id) {
+        return Err(AppError::NotFound);
+    }
+    let repo = crate::repository::get_plugin_repository(&s.pool, &id).await?;
+    let repos_dir = s.config.plugin_repos_dir();
+    let detail =
+        tokio::task::spawn_blocking(move || plugins::build_repository_detail(repo, &repos_dir))
+            .await
+            .map_err(|_| AppError::Internal)?;
+    Ok(Json(detail))
+}
+
 /// Ajoute un nouveau dépôt tiers de plugins ou flux.
 pub async fn add_repository(
     State(s): State<AppState>,
@@ -270,6 +306,41 @@ pub async fn pack_installation(
 ) -> AppResult<Json<plugins::PackInstallation>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     Ok(Json(plugins::read_pack_installation(&roots, &id)?))
+}
+
+/// Fiche détaillée d'un pack (métadonnées + plan d'installation).
+pub async fn pack_detail(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    _auth: ViewPluginsAuth,
+) -> AppResult<Json<plugins::PackDetailView>> {
+    if !plugins::is_valid_repository_id(&id) {
+        return Err(AppError::NotFound);
+    }
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let detail = tokio::task::spawn_blocking(move || plugins::build_pack_detail(&roots, &id))
+        .await
+        .map_err(|_| AppError::Internal)??;
+    Ok(Json(detail))
+}
+
+/// Fiche détaillée d'un outil distribué (contrat de distribution, compatibilité et plugins utilisateurs).
+pub async fn tool_detail(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    _auth: ViewPluginsAuth,
+) -> AppResult<Json<plugins::ToolDetailView>> {
+    if !plugins::is_valid_repository_id(&id) {
+        return Err(AppError::NotFound);
+    }
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
+    let detail =
+        tokio::task::spawn_blocking(move || plugins::build_tool_detail(&roots, &cache_mgr, &id))
+            .await
+            .map_err(|_| AppError::Internal)?
+            .ok_or(AppError::NotFound)?;
+    Ok(Json(detail))
 }
 
 /// Exécute l'installation déclarative d'un pack (outils requis et vérification des composants).

@@ -270,6 +270,46 @@ pub async fn get_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
         .ok_or(AppError::NotFound)
 }
 
+/// Indique si la bibliothèque possède déjà une tâche active ou réussie pour ce fichier et cette empreinte.
+pub async fn has_library_file_job(
+    pool: &SqlitePool,
+    library_id: Uuid,
+    source_name: &str,
+    source_sha256: &str,
+) -> AppResult<bool> {
+    let found: Option<(i64,)> = sqlx::query_as(
+        "SELECT 1 FROM jobs \
+         WHERE library_id=?1 AND source_name=?2 AND source_sha256=?3 \
+         AND status IN ('queued', 'running', 'succeeded') \
+         LIMIT 1",
+    )
+    .bind(library_id)
+    .bind(source_name)
+    .bind(source_sha256)
+    .fetch_optional(pool)
+    .await?;
+    Ok(found.is_some())
+}
+
+/// Supprime ou annule une tâche qui n'est pas en cours d'exécution (`running`).
+pub async fn delete_job(pool: &SqlitePool, id: Uuid) -> AppResult<()> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT status FROM jobs WHERE id=?1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    let Some((status,)) = row else {
+        return Err(AppError::NotFound);
+    };
+    if status == "running" {
+        return Err(AppError::Conflict);
+    }
+    sqlx::query("DELETE FROM jobs WHERE id=?1 AND status != 'running'")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn list_jobs(pool: &SqlitePool, before: Option<Uuid>, limit: i64) -> AppResult<Vec<Job>> {
     let jobs = sqlx::query_as(
         "SELECT * FROM jobs \

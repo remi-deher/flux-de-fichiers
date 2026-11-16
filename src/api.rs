@@ -1,17 +1,17 @@
 mod accounts;
 pub mod auth;
 pub mod diagnostics;
-mod flows;
-mod installation;
-mod jobs;
+pub(crate) mod flows;
+pub(crate) mod installation;
+pub(crate) mod jobs;
 mod keys;
-mod libraries;
-mod local;
+pub(crate) mod libraries;
+pub(crate) mod local;
 mod password_reset;
-mod plugins;
+pub(crate) mod plugins;
 pub(crate) mod session;
 mod setup;
-mod system;
+pub(crate) mod system;
 pub(crate) mod transfers;
 mod worker_view;
 use crate::{config::Config, domain::*, error::AppResult, repository};
@@ -198,6 +198,13 @@ pub fn is_long_running_route(path: &str) -> bool {
 fn json_routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(health))
+        .route("/api/v1/openapi.yaml", get(openapi_yaml))
+        .route(
+            "/mcp",
+            post(crate::mcp::handle_post)
+                .get(crate::mcp::handle_get)
+                .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
+        )
         .route("/api/v1/config", get(jobs::system_config))
         .route("/api/v1/files", get(jobs::files))
         .route(
@@ -210,12 +217,18 @@ fn json_routes() -> Router<AppState> {
                 .put(libraries::update)
                 .delete(libraries::delete),
         )
+        .route("/api/v1/libraries/{id}/scan", post(libraries::scan))
         .route("/api/v1/flows", get(flows::list_flows))
         .route("/api/v1/flows/blocks", get(flows::list_blocks))
+        .route("/api/v1/flows/validate", post(flows::validate_flow))
         .route("/api/v1/flows/{id}/versions", get(flows::list_versions))
         .route(
             "/api/v1/flows/{id}/versions/{version}",
             get(flows::get_version),
+        )
+        .route(
+            "/api/v1/flows/{id}/versions/{version}/restore",
+            post(flows::restore_version),
         )
         .route(
             "/api/v1/flows/{id}",
@@ -329,7 +342,10 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/api-keys/{id}", axum::routing::delete(keys::revoke))
         .route("/api/v1/auth/logout", post(session::logout))
         .route("/api/v1/jobs", get(jobs::list).post(jobs::create))
-        .route("/api/v1/jobs/{id}", get(jobs::get_job))
+        .route(
+            "/api/v1/jobs/{id}",
+            get(jobs::get_job).delete(jobs::delete_job),
+        )
         .route(
             "/api/v1/jobs/{id}/steps",
             get(jobs::steps).post(jobs::report_steps),
@@ -360,6 +376,14 @@ fn transfer_routes() -> Router<AppState> {
         )
         .route("/api/v1/jobs/{id}/source", get(transfers::source))
         .route("/api/v1/jobs/{id}/result", put(transfers::result))
+        .route(
+            "/api/v1/files/{name}",
+            put(libraries::upload_file).delete(libraries::delete_file),
+        )
+        .route(
+            "/api/v1/libraries/{id}/files/{name}",
+            post(libraries::upload_to_library),
+        )
         .route(
             "/api/v1/local/items/{id}/file",
             get(local::download_resource),
@@ -437,6 +461,16 @@ pub(crate) async fn serve_spa(
         }
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
+}
+
+async fn openapi_yaml(_auth: ViewOverviewAuth) -> impl axum::response::IntoResponse {
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/yaml; charset=utf-8",
+        )],
+        include_str!("../docs/openapi.yaml"),
+    )
 }
 
 async fn health(State(s): State<AppState>) -> AppResult<StatusCode> {

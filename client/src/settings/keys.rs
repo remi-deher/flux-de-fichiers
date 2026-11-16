@@ -9,8 +9,8 @@ use flux_shared::accounts::{ApiKeyRecord, CreateKeyRequest, CreatedKey};
 use leptos::prelude::*;
 
 const KEYS_PATH: &str = "/api/v1/api-keys";
-/// Rôles possibles d'une clé : une clé worker sert au protocole des workers.
-const KEY_ROLES: [Role; 3] = [Role::Admin, Role::Worker, Role::Viewer];
+/// Rôles possibles d'une clé : `worker` pour les nœuds, `mcp` pour l'automatisation MCP.
+const KEY_ROLES: [Role; 4] = [Role::Admin, Role::Mcp, Role::Worker, Role::Viewer];
 
 #[component]
 pub fn KeysSection() -> impl IntoView {

@@ -160,6 +160,16 @@ pub async fn get_job(
 ) -> AppResult<Json<Job>> {
     Ok(Json(repository::get_job(&s.pool, id).await?))
 }
+
+/// Supprime ou annule une tâche qui n'est pas en cours d'exécution.
+pub async fn delete_job(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    _auth: AdminAuth,
+) -> AppResult<StatusCode> {
+    repository::delete_job(&s.pool, id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
 /// Relance manuelle d'une tâche échouée après perte de bail (aucune relance automatique).
 pub async fn retry(
     State(s): State<AppState>,

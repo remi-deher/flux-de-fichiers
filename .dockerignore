@@ -10,5 +10,6 @@ var
 target
 **/target
 node_modules
-docs
+docs/*
+!docs/openapi.yaml
 tests

@@ -8,8 +8,8 @@ mod tools_system;
 
 use crate::{
     api::{
-        AdminAuth, AppState, ViewFlowsAuth, ViewLibrariesAuth, ViewPluginsAuth, flows, libraries,
-        plugins,
+        AdminAuth, AppState, OPENAPI_SPEC, ViewFlowsAuth, ViewLibrariesAuth, ViewPluginsAuth,
+        flows, libraries, plugins,
     },
     auth::{self, Principal},
     error::AppError,
@@ -27,8 +27,6 @@ use protocol::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
-
-const OPENAPI_SPEC: &str = include_str!("../../docs/openapi.yaml");
 
 fn all_tools() -> Vec<McpTool> {
     let mut tools = Vec::new();

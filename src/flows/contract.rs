@@ -77,6 +77,7 @@ pub struct OperationContract {
 
 /// Définition d'exécution selon la nature (`primitive`, `binary`, `http`).
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[allow(clippy::large_enum_variant)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum OperationRuntime {
     Primitive(PrimitiveRuntime),

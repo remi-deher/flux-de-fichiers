@@ -1,6 +1,6 @@
 [package]
 name = "flux-shared"
-version = "0.34.1"
+version = "0.35.0"
 edition = "2024"
 rust-version = "1.99"
 description = "Types partagés entre le central et l'interface : rôles, droits, contrat des tâches."

@@ -13,6 +13,7 @@ const LOGOUT_PATH: &str = "/api/v1/auth/logout";
 pub fn role_label(role: flux_shared::Role) -> &'static str {
     match role {
         flux_shared::Role::Admin => "Administrateur",
+        flux_shared::Role::Mcp => "MCP",
         flux_shared::Role::Worker => "Worker",
         flux_shared::Role::Viewer => "Lecteur",
     }

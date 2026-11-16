@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.34.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.34.0...v0.34.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **clippy:** avoid unit_arg in tool_detail empty branch ([79b3809](https://github.com/remi-deher/flux-de-fichiers/commit/79b380964a5c62176f91b9bf3868b2e87fa49bc8))
+* show human names in Extensions drawers and guard non-installable tools ([2d65bd9](https://github.com/remi-deher/flux-de-fichiers/commit/2d65bd94f5a9f02c804517b5650bbd6b42cec00e))
+* show human names in Extensions drawers and guard non-installable tools ([2af396f](https://github.com/remi-deher/flux-de-fichiers/commit/2af396fb770372d96981a6f49c1b604f46afb454))
+
 ## [0.34.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.33.0...v0.34.0) (2026-11-16)
 
 

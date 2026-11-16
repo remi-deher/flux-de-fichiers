@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.35.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.34.1...v0.35.0) (2026-11-16)
+
+
+### Features
+
+* add native MCP server, mcp API key role, and library/flow/job API endpoints ([c67291b](https://github.com/remi-deher/flux-de-fichiers/commit/c67291ba9bbb4a475e2ba9ec3ff48c56c01bec4c))
+* add native MCP server, mcp API key role, and library/flow/job API endpoints ([23ff35c](https://github.com/remi-deher/flux-de-fichiers/commit/23ff35c14227e82b8d784cd04b34bc1b455e2f35))
+
+
+### Bug Fixes
+
+* **docker:** copy docs/openapi.yaml into build stage ([06a134b](https://github.com/remi-deher/flux-de-fichiers/commit/06a134bf28ecbedb30f064708963974a9be34bc5))
+* **docker:** copy docs/openapi.yaml into build stage ([4b7d730](https://github.com/remi-deher/flux-de-fichiers/commit/4b7d7305a456ea6b9008ffbda79f754efaae8432))
+* **docker:** include docs/openapi.yaml in docker build context ([fe9926d](https://github.com/remi-deher/flux-de-fichiers/commit/fe9926dd2bc46601472bc5fe6eba4301b9bf5317))
+* **docker:** include docs/openapi.yaml in docker build context ([7bd0df4](https://github.com/remi-deher/flux-de-fichiers/commit/7bd0df485ce17b4cf1c4b80cb53596af21f57990))
+
 ## [0.34.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.34.0...v0.34.1) (2026-11-16)
 
 

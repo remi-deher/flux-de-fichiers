@@ -29,6 +29,7 @@ use leptos::prelude::*;
 use packs::LocalPacksSection;
 use resources::ResourcesSection;
 use scripts::ScriptsSection;
+pub(crate) use scripts::starter_script_code;
 
 const LIBRARIES_PATH: &str = "/api/v1/libraries";
 const FLOWS_PATH: &str = "/api/v1/flows";

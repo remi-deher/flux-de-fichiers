@@ -95,7 +95,7 @@ impl Presence {
     }
 }
 
-/// Catégorie du catalogue de plugins.
+/// Catégorie du catalogue d'extensions.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PluginKindFilter {
     #[default]
@@ -105,7 +105,6 @@ pub enum PluginKindFilter {
     Scripts,
     Resources,
     Packs,
-    DistributedTools,
 }
 
 impl PluginKindFilter {
@@ -120,9 +119,6 @@ impl PluginKindFilter {
             Self::Scripts => entry.entry_type.section() == Some(CatalogSection::Scripts),
             Self::Resources => entry.entry_type.section() == Some(CatalogSection::Other),
             Self::Packs => entry.entry_type.section() == Some(CatalogSection::Packs),
-            Self::DistributedTools => {
-                entry.entry_type.section() == Some(CatalogSection::Applications)
-            }
         }
     }
 }
@@ -395,8 +391,7 @@ mod tests {
         assert!(PluginKindFilter::Resources.accepts(&subtitle));
         assert!(!PluginKindFilter::Resources.accepts(&script));
         assert!(PluginKindFilter::Packs.accepts(&pack));
-        assert!(PluginKindFilter::DistributedTools.accepts(&app));
-        assert!(!PluginKindFilter::DistributedTools.accepts(&plugin));
+        assert!(!PluginKindFilter::Packs.accepts(&app));
         assert!(PluginKindFilter::Any.accepts(&preset));
         assert!(!PluginKindFilter::Packs.accepts(&preset));
     }

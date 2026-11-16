@@ -131,22 +131,27 @@ fn sanitize_script_filename(entrypoint: Option<&str>, step_index: i32) -> String
 fn resolve_program(
     cache_mgr: &ToolCacheManager,
     rt: &ScriptRuntime,
+    interp_override: Option<ScriptInterpreter>,
     tool_versions: &HashMap<String, String>,
 ) -> Result<PathBuf, ScriptStepError> {
     let error_code = rt.error_code.unwrap_or(JobErrorCode::OperationFailed);
+    let effective_interp = interp_override.or(rt.interpreter);
     if let Some(tool) = &rt.tool {
         let version = tool_versions
             .get(&tool.id)
             .map(String::as_str)
             .unwrap_or(&tool.version);
-        let bin_name = rt
-            .executable
-            .as_deref()
-            .or_else(|| rt.interpreter.map(ScriptInterpreter::executable))
+        let bin_name = interp_override
+            .map(ScriptInterpreter::executable)
+            .or(rt.executable.as_deref())
+            .or_else(|| effective_interp.map(ScriptInterpreter::executable))
             .unwrap_or(&tool.id);
-        return Ok(cache_mgr.resolve_executable(&tool.id, version, bin_name, ""));
+        let cached = cache_mgr.resolve_executable(&tool.id, version, bin_name, "");
+        if cached.is_file() || effective_interp.is_none() {
+            return Ok(cached);
+        }
     }
-    if let Some(interp) = rt.interpreter {
+    if let Some(interp) = effective_interp {
         return Ok(PathBuf::from(interp.executable()));
     }
     Err(ScriptStepError {
@@ -210,7 +215,11 @@ pub async fn execute_script_operation(
     on_progress: ScriptProgressCallback,
 ) -> Result<ScriptStepOutcome, ScriptStepError> {
     let error_code = rt.error_code.unwrap_or(JobErrorCode::OperationFailed);
-    let program = resolve_program(cache_mgr, rt, tool_versions)?;
+    let interp_override = node_config
+        .get("interpreter")
+        .and_then(Value::as_str)
+        .and_then(ScriptInterpreter::from_executable);
+    let program = resolve_program(cache_mgr, rt, interp_override, tool_versions)?;
     if rt.args.len() > MAX_SCRIPT_ARGS {
         return Err(ScriptStepError {
             code: error_code,
@@ -219,11 +228,20 @@ pub async fn execute_script_operation(
         });
     }
 
+    let inline_code = rt.code.as_deref().or_else(|| {
+        node_config
+            .get("code")
+            .and_then(Value::as_str)
+            .filter(|c| !c.trim().is_empty())
+    });
     let mut args = rt.args.clone();
-    let _temp_guard = match rt.code.as_deref() {
+    let _temp_guard = match inline_code {
         Some(code) => {
+            let fallback_name = interp_override
+                .or(rt.interpreter)
+                .map(|i| format!("run.{}", i.default_extension()));
             let script_path = work_dir.join(sanitize_script_filename(
-                rt.entrypoint.as_deref(),
+                rt.entrypoint.as_deref().or(fallback_name.as_deref()),
                 step_index,
             ));
             std::fs::write(&script_path, code).map_err(|err| ScriptStepError {

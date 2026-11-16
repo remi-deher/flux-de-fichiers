@@ -389,9 +389,28 @@ impl<'a> FlowEngine<'a> {
                     }
                 }
                 OperationRuntime::Script(script_rt) => {
+                    let mut effective_rt = script_rt.clone();
+                    if effective_rt.code.is_none()
+                        && node.config.get("mode").and_then(Value::as_str) != Some("inline")
+                        && let Some(script_id) = node
+                            .config
+                            .get("scriptId")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                        && let Some(target_op) =
+                            self.registry.get(&format!("operation.{script_id}"))
+                        && let OperationRuntime::Script(target_rt) = &target_op.runtime
+                    {
+                        let fallback_tool = effective_rt.tool.clone();
+                        effective_rt = target_rt.clone();
+                        if effective_rt.tool.is_none() {
+                            effective_rt.tool = fallback_tool;
+                        }
+                    }
                     match script_runner::execute_script_operation(
                         op,
-                        script_rt,
+                        &effective_rt,
                         self.cache_mgr,
                         self.tool_versions,
                         &flow.id,
@@ -513,12 +532,13 @@ fn next_connection<'a>(
     source_id: &str,
     port: Option<&str>,
 ) -> Option<&'a FlowConnection> {
-    if let Some(port) = port
-        && let Some(exact) = connections
+    if let Some(port) = port {
+        return connections
             .iter()
-            .find(|c| c.from == source_id && c.port.as_deref() == Some(port))
-    {
-        return Some(exact);
+            .find(|c| c.from == source_id && c.port.as_deref() == Some(port));
     }
-    connections.iter().find(|c| c.from == source_id)
+    connections
+        .iter()
+        .find(|c| c.from == source_id && c.port.is_none())
+        .or_else(|| connections.iter().find(|c| c.from == source_id))
 }

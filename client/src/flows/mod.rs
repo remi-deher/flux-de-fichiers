@@ -10,6 +10,7 @@ mod inspector;
 mod palette;
 mod presentation;
 mod quick_add;
+mod script_inspector;
 mod simulation;
 mod state;
 mod versions;

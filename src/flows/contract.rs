@@ -788,6 +788,11 @@ impl OperationRegistry {
                     blocks.insert(node.kind.as_str().to_owned(), op.id.clone());
                     insert_op(op);
                 }
+                if let Some(script_id) = node.config.get("scriptId").and_then(Value::as_str)
+                    && let Some(target_op) = self.get(&format!("operation.{script_id}"))
+                {
+                    insert_op(target_op);
+                }
             }
         }
         (ops, blocks)

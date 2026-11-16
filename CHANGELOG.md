@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.33.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.32.0...v0.33.0) (2026-11-16)
+
+
+### Features
+
+* **libraries:** finaliser et pérenniser le catalogue local ([7a21e44](https://github.com/remi-deher/flux-de-fichiers/commit/7a21e442abacfd8acc1dd4b0dd990b1263fc4200))
+* **libraries:** harden local catalog, UI drawers, engine tests and docs ([c356137](https://github.com/remi-deher/flux-de-fichiers/commit/c35613709accf337afd48dddb107df00c728c0f6))
+
+
+### Bug Fixes
+
+* **client:** resolve clippy lints in libraries drawers ([b61980f](https://github.com/remi-deher/flux-de-fichiers/commit/b61980fb8f3359f69112767c25571607040a9ba3))
+
 ## [0.32.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.31.0...v0.32.0) (2026-11-16)
 
 

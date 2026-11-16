@@ -15,25 +15,30 @@ use std::{
 };
 use subtle::ConstantTimeEq;
 
-const INDEX_RELATIVE_PATH: &str = "catalogue/index.json";
+const INDEX_RELATIVE_PATH: &str = "index.json";
 const DISTRIBUTION_FILE_NAME: &str = "distribution.v1.json";
 /// Variable d'environnement qui autorise les adresses privées (réseaux de laboratoire, tests).
 pub const ALLOW_PRIVATE_HOSTS_ENV: &str = net_policy::ALLOW_PRIVATE_HOSTS_ENV;
+/// Variable d'environnement imposant des releases immuables (URL figée, `releaseVersion` et SHA-256 complets).
+pub const REQUIRE_IMMUTABLE_RELEASES_ENV: &str = "PLUGIN_REQUIRE_IMMUTABLE_RELEASES";
 const SYNC_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_FILE_BYTES: usize = 1024 * 1024;
 const MAX_FILES: usize = 500;
 const FETCH_CONCURRENCY: usize = 8;
 
-/// Règles réseau d'une synchronisation.
+/// Règles réseau et d'immuabilité d'une synchronisation.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SyncPolicy {
     pub allow_private_hosts: bool,
+    pub require_immutable_releases: bool,
 }
 
 impl SyncPolicy {
     pub fn from_env() -> Self {
         Self {
             allow_private_hosts: std::env::var(ALLOW_PRIVATE_HOSTS_ENV).is_ok_and(|v| v == "1"),
+            require_immutable_releases: std::env::var(REQUIRE_IMMUTABLE_RELEASES_ENV)
+                .is_ok_and(|v| v == "1"),
         }
     }
 }
@@ -54,6 +59,10 @@ pub enum SyncError {
     InvalidIndex(String),
     #[error("trop de fichiers déclarés par l'index")]
     TooManyFiles,
+    #[error("intégrité SHA-256 refusée : {0}")]
+    IntegrityMismatch(String),
+    #[error("release immuable violée : {0}")]
+    ImmutableViolation(String),
     #[error("réseau : {0}")]
     Network(String),
     #[error("stockage : {0}")]
@@ -67,6 +76,31 @@ pub struct SyncReport {
     pub entries: usize,
     pub files: usize,
     pub skipped: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_version: Option<String>,
+    #[serde(default)]
+    pub index_sha256: String,
+}
+
+/// Indique si une URL pointe vers une branche Git mouvante (`dev`, `main`, `master`, `refs/heads/`).
+pub fn is_mutable_branch_url(url: &Url) -> bool {
+    let path = url.path();
+    if path.contains("/refs/heads/")
+        || path.ends_with("/dev/index.json")
+        || path.ends_with("/main/index.json")
+        || path.ends_with("/master/index.json")
+    {
+        return true;
+    }
+    if url.host_str() == Some("raw.githubusercontent.com") {
+        let mut segments = path.trim_start_matches('/').split('/');
+        if let (Some(_owner), Some(_repo), Some(branch)) =
+            (segments.next(), segments.next(), segments.next())
+        {
+            return matches!(branch, "dev" | "main" | "master");
+        }
+    }
+    false
 }
 
 /// Adresse qui ne doit jamais être jointe depuis un dépôt distant (réseau interne, métadonnées cloud).
@@ -85,7 +119,7 @@ impl From<NetPolicyError> for SyncError {
     }
 }
 
-/// Base du dépôt : l'URL de l'index privée de `catalogue/index.json`.
+/// Base du dépôt : l'URL de l'index privée de `index.json`.
 fn base_url(index_url: &Url) -> Result<Url, SyncError> {
     let suffix = format!("/{INDEX_RELATIVE_PATH}");
     let path = index_url.path();
@@ -99,7 +133,7 @@ fn base_url(index_url: &Url) -> Result<Url, SyncError> {
     Ok(base)
 }
 
-/// Valide l'URL d'index d'un dépôt à l'ajout : schéma http(s) et suffixe `/catalogue/index.json`.
+/// Valide l'URL d'index d'un dépôt à l'ajout : schéma http(s) et suffixe `/index.json`.
 pub fn validate_index_url(raw: &str) -> Result<(), SyncError> {
     let url = Url::parse(raw).map_err(|error| SyncError::InvalidUrl(error.to_string()))?;
     if !matches!(url.scheme(), "http" | "https") {
@@ -291,8 +325,14 @@ fn verify_optional_sha256(
     relative: &str,
     content: &str,
     expected_by_path: &HashMap<String, String>,
-) -> Result<(), String> {
+    require_digest: bool,
+) -> Result<(), SyncError> {
     let Some(expected) = expected_by_path.get(relative) else {
+        if require_digest {
+            return Err(SyncError::IntegrityMismatch(format!(
+                "{relative} : empreinte SHA-256 manquante dans l'index"
+            )));
+        }
         return Ok(());
     };
     let actual = ToolCacheManager::compute_sha256(content.as_bytes());
@@ -300,9 +340,9 @@ fn verify_optional_sha256(
     if bool::from(actual.as_bytes().ct_eq(expected_norm.as_bytes())) {
         Ok(())
     } else {
-        Err(format!(
+        Err(SyncError::IntegrityMismatch(format!(
             "{relative} : empreinte sha256 invalide (attendu {expected_norm}, reçu {actual})"
-        ))
+        )))
     }
 }
 
@@ -363,17 +403,25 @@ async fn publish(
     Ok(())
 }
 
-/// Synchronise un dépôt : index, manifestes et contrats de distribution, copiés atomiquement.
-pub async fn sync_repository(
+struct PreparedSync {
+    files: Vec<(String, String)>,
+    report: SyncReport,
+}
+
+async fn prepare_sync(
     repository: &PluginRepository,
-    repos_dir: &Path,
     policy: &SyncPolicy,
-) -> Result<SyncReport, SyncError> {
+) -> Result<PreparedSync, SyncError> {
     if !is_valid_repository_id(&repository.id) {
         return Err(SyncError::InvalidRepositoryId);
     }
     let index_url = Url::parse(&repository.index_url)
         .map_err(|error| SyncError::InvalidUrl(error.to_string()))?;
+    if policy.require_immutable_releases && is_mutable_branch_url(&index_url) {
+        return Err(SyncError::ImmutableViolation(format!(
+            "l'URL pointe vers une branche mouvante ({index_url}) ; utilisez un tag ou une release immuable"
+        )));
+    }
     let base = base_url(&index_url)?;
     let client = pinned_client(&index_url, policy).await?;
 
@@ -383,20 +431,27 @@ pub async fn sync_repository(
             status: StatusCode::NOT_FOUND.as_u16(),
             url: index_url.to_string(),
         })?;
+    let index_sha256 = ToolCacheManager::compute_sha256(index_text.as_bytes());
     let parsed = parse_index_tolerant(&index_text)
         .map_err(|error| SyncError::InvalidIndex(error.to_string()))?;
+    let release_version = parsed.index.release_version.clone();
+    if policy.require_immutable_releases && release_version.is_none() {
+        return Err(SyncError::ImmutableViolation(
+            "index.json doit déclarer 'releaseVersion'".into(),
+        ));
+    }
     let mut skipped = parsed.skipped;
-    let expected_sha256: HashMap<String, String> = parsed
-        .index
-        .entries
-        .iter()
-        .filter_map(|entry| {
-            entry
-                .sha256
-                .as_ref()
-                .map(|digest| (entry.manifest_path.clone(), digest.clone()))
-        })
-        .collect();
+    let mut expected_sha256: HashMap<String, String> = parsed.index.files_sha256.clone();
+    for entry in &parsed.index.entries {
+        if let Some(digest) = &entry.sha256 {
+            expected_sha256.insert(entry.manifest_path.clone(), digest.clone());
+        } else if policy.require_immutable_releases {
+            return Err(SyncError::ImmutableViolation(format!(
+                "{} : empreinte sha256 manquante dans l'index",
+                entry.id
+            )));
+        }
+    }
     let wanted = wanted_files(&parsed.index.entries)?;
     let mut already_queued: HashSet<String> = wanted.iter().cloned().collect();
     already_queued.insert(INDEX_RELATIVE_PATH.to_owned());
@@ -407,10 +462,11 @@ pub async fn sync_repository(
     collect_fetched_json(
         fetched,
         &expected_sha256,
+        policy.require_immutable_releases,
         &mut files,
         &mut manifest_docs,
         &mut skipped,
-    );
+    )?;
 
     let extra = extra_files_from_manifests(&already_queued, &manifest_docs)?;
     if !extra.is_empty() {
@@ -418,34 +474,78 @@ pub async fn sync_repository(
         collect_fetched_json(
             extra_fetched,
             &expected_sha256,
+            policy.require_immutable_releases,
             &mut files,
             &mut Vec::new(),
             &mut skipped,
-        );
+        )?;
     }
     let report = SyncReport {
         entries: parsed.index.entries.len(),
         files: files.len(),
         skipped,
+        release_version,
+        index_sha256,
     };
-    publish(repos_dir, &repository.id, &files).await?;
-    Ok(report)
+    Ok(PreparedSync { files, report })
+}
+
+/// Synchronise un dépôt : index, manifestes et contrats de distribution, copiés atomiquement.
+pub async fn sync_repository(
+    repository: &PluginRepository,
+    repos_dir: &Path,
+    policy: &SyncPolicy,
+) -> Result<SyncReport, SyncError> {
+    let prepared = prepare_sync(repository, policy).await?;
+    publish(repos_dir, &repository.id, &prepared.files).await?;
+    Ok(prepared.report)
+}
+
+/// Synchronise un dépôt en imposant l'immuabilité TOFU en base (`plugin_release_pins`) avant publication.
+pub async fn sync_repository_verified(
+    pool: &sqlx::SqlitePool,
+    repository: &PluginRepository,
+    repos_dir: &Path,
+    policy: &SyncPolicy,
+) -> Result<SyncReport, SyncError> {
+    let prepared = prepare_sync(repository, policy).await?;
+    if let Some(release_version) = &prepared.report.release_version {
+        let scope = format!("repo:{}", repository.id);
+        match crate::repository::verify_or_pin_release(
+            pool,
+            &scope,
+            release_version,
+            &prepared.report.index_sha256,
+            &repository.index_url,
+        )
+        .await
+        {
+            Ok(None) => {}
+            Ok(Some(expected)) => {
+                return Err(SyncError::ImmutableViolation(format!(
+                    "la release {release_version} du dépôt {} a changé d'empreinte (attendu {expected}, reçu {})",
+                    repository.id, prepared.report.index_sha256
+                )));
+            }
+            Err(error) => return Err(SyncError::Network(error.to_string())),
+        }
+    }
+    publish(repos_dir, &repository.id, &prepared.files).await?;
+    Ok(prepared.report)
 }
 
 fn collect_fetched_json(
     fetched: Vec<(String, Result<Option<String>, SyncError>)>,
     expected_sha256: &HashMap<String, String>,
+    require_digest: bool,
     files: &mut Vec<(String, String)>,
     manifests: &mut Vec<(String, String)>,
     skipped: &mut Vec<String>,
-) {
+) -> Result<(), SyncError> {
     for (relative, result) in fetched {
         match result {
             Ok(Some(content)) if serde_json::from_str::<serde_json::Value>(&content).is_ok() => {
-                if let Err(reason) = verify_optional_sha256(&relative, &content, expected_sha256) {
-                    skipped.push(reason);
-                    continue;
-                }
+                verify_optional_sha256(&relative, &content, expected_sha256, require_digest)?;
                 manifests.push((relative.clone(), content.clone()));
                 files.push((relative, content));
             }
@@ -458,6 +558,7 @@ fn collect_fetched_json(
             Err(error) => skipped.push(format!("{relative} : {error}")),
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -488,7 +589,7 @@ mod tests {
     fn test_extra_files_extracts_pack_installation_and_json_files_safely() -> Result<(), SyncError>
     {
         let already = HashSet::from([
-            "catalogue/index.json".to_owned(),
+            "index.json".to_owned(),
             "packs/media/manifest.json".to_owned(),
         ]);
         let manifests = vec![(
@@ -539,7 +640,7 @@ mod tests {
 
     #[test]
     fn test_base_url_strips_the_index_suffix() -> Result<(), SyncError> {
-        let url = Url::parse("https://example.org/depot/main/catalogue/index.json?x=1")
+        let url = Url::parse("https://example.org/depot/main/index.json?x=1")
             .map_err(|error| SyncError::InvalidUrl(error.to_string()))?;
         assert_eq!(base_url(&url)?.as_str(), "https://example.org/depot/main/");
         let wrong = Url::parse("https://example.org/depot/liste.json")
@@ -600,16 +701,16 @@ mod tests {
         publish(
             dir.path(),
             "repo.test",
-            &[("catalogue/index.json".into(), "{\"v\":1}".into())],
+            &[("index.json".into(), "{\"v\":1}".into())],
         )
         .await?;
         publish(
             dir.path(),
             "repo.test",
-            &[("catalogue/index.json".into(), "{\"v\":2}".into())],
+            &[("index.json".into(), "{\"v\":2}".into())],
         )
         .await?;
-        let content = std::fs::read_to_string(dir.path().join("repo.test/catalogue/index.json"))?;
+        let content = std::fs::read_to_string(dir.path().join("repo.test/index.json"))?;
         assert_eq!(content, "{\"v\":2}");
         let leftovers: Vec<_> = std::fs::read_dir(dir.path())?
             .filter_map(Result::ok)
@@ -624,7 +725,7 @@ mod tests {
         let repository = PluginRepository {
             id: "repo.local".into(),
             name: "Local".into(),
-            index_url: "http://127.0.0.1:9/catalogue/index.json".into(),
+            index_url: "http://127.0.0.1:9/index.json".into(),
             is_official: false,
             enabled: true,
             last_synced_at: None,
@@ -640,7 +741,7 @@ mod tests {
         let repository = PluginRepository {
             id: "../evil".into(),
             name: "Mal".into(),
-            index_url: "https://example.org/catalogue/index.json".into(),
+            index_url: "https://example.org/index.json".into(),
             is_official: false,
             enabled: true,
             last_synced_at: None,
@@ -655,7 +756,7 @@ mod tests {
         use axum::{Router, http::StatusCode, routing::get};
         let router = Router::new()
             .route(
-                "/depot/catalogue/index.json",
+                "/depot/index.json",
                 get(|| async {
                     r#"{"schemaVersion":"1.0.0","entries":[
                         {"id":"app.demo","type":"app","version":"1.0.0","name":"Démo","manifestPath":"apps/demo/manifest.json","capability":"probe","currentChoice":true},
@@ -689,7 +790,7 @@ mod tests {
         let repository = PluginRepository {
             id: "repo.fixture".into(),
             name: "Fixture".into(),
-            index_url: format!("http://{address}/depot/catalogue/index.json"),
+            index_url: format!("http://{address}/depot/index.json"),
             is_official: false,
             enabled: true,
             last_synced_at: None,
@@ -697,6 +798,7 @@ mod tests {
         };
         let policy = SyncPolicy {
             allow_private_hosts: true,
+            ..SyncPolicy::default()
         };
 
         let report = sync_repository(&repository, dir.path(), &policy).await?;
@@ -715,7 +817,7 @@ mod tests {
         );
 
         let root = dir.path().join("repo.fixture");
-        assert!(root.join("catalogue/index.json").is_file());
+        assert!(root.join("index.json").is_file());
         assert!(root.join("apps/demo/manifest.json").is_file());
         assert!(root.join("apps/demo/distribution.v1.json").is_file());
         let entries = crate::plugins::list_catalog(&[root]);
@@ -733,7 +835,7 @@ mod tests {
         let mut repository = PluginRepository {
             id: "repo.fixture".into(),
             name: "Fixture".into(),
-            index_url: format!("http://{address}/depot/catalogue/index.json"),
+            index_url: format!("http://{address}/depot/index.json"),
             is_official: false,
             enabled: true,
             last_synced_at: None,
@@ -741,25 +843,147 @@ mod tests {
         };
         let policy = SyncPolicy {
             allow_private_hosts: true,
+            ..SyncPolicy::default()
         };
         sync_repository(&repository, dir.path(), &policy).await?;
 
-        repository.index_url = format!("http://{address}/absent/catalogue/index.json");
+        repository.index_url = format!("http://{address}/absent/index.json");
         let failure = sync_repository(&repository, dir.path(), &policy).await;
         assert!(matches!(failure, Err(SyncError::Http { status: 404, .. })));
-        assert!(
-            dir.path()
-                .join("repo.fixture/catalogue/index.json")
-                .is_file()
-        );
+        assert!(dir.path().join("repo.fixture/index.json").is_file());
         Ok(())
     }
 
     #[test]
     fn test_validate_index_url_checks_scheme_and_suffix() {
-        assert!(validate_index_url("https://example.org/d/catalogue/index.json").is_ok());
-        assert!(validate_index_url("ftp://example.org/d/catalogue/index.json").is_err());
-        assert!(validate_index_url("https://example.org/d/index.json").is_err());
+        assert!(validate_index_url("https://example.org/d/index.json").is_ok());
+        assert!(validate_index_url("ftp://example.org/d/index.json").is_err());
+        assert!(validate_index_url("https://example.org/d/catalogue.json").is_err());
+        assert!(validate_index_url("https://example.org/d/mon-index.json").is_err());
         assert!(validate_index_url("pas une url").is_err());
+    }
+
+    #[test]
+    fn test_mutable_branch_url_detection() -> anyhow::Result<()> {
+        for mutable in [
+            "https://raw.githubusercontent.com/org/repo/dev/index.json",
+            "https://raw.githubusercontent.com/org/repo/main/index.json",
+            "https://raw.githubusercontent.com/org/repo/refs/heads/main/index.json",
+            "https://example.org/depot/master/index.json",
+        ] {
+            assert!(is_mutable_branch_url(&Url::parse(mutable)?), "{mutable}");
+        }
+        for immutable in [
+            "https://raw.githubusercontent.com/org/repo/catalogue-v1.0.0/index.json",
+            "https://github.com/org/repo/releases/download/tools-1.0.0/ffmpeg.tar.gz",
+            "https://example.org/releases/v2.1.0/index.json",
+        ] {
+            assert!(
+                !is_mutable_branch_url(&Url::parse(immutable)?),
+                "{immutable}"
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_integrity_mismatch_and_immutable_pin_abort_sync_without_overwriting()
+    -> anyhow::Result<()> {
+        use axum::{Router, routing::get};
+        use sqlx::sqlite::SqlitePoolOptions;
+        use std::sync::{Arc, Mutex};
+
+        let manifest_v1 = r#"{"schemaVersion":"1.1.0","id":"plugin.a","type":"plugin","version":"1.0.0","name":"A","description":"A","author":"a","license":"MIT"}"#.to_owned();
+        let manifest_sha = ToolCacheManager::compute_sha256(manifest_v1.as_bytes());
+        let index_v1 = serde_json::json!({
+            "schemaVersion": "1.0.0",
+            "generatedFor": "demo",
+            "releaseVersion": "1.0.0",
+            "filesSha256": { "plugins/a/manifest.json": manifest_sha },
+            "entries": [{
+                "id": "plugin.a",
+                "type": "plugin",
+                "version": "1.0.0",
+                "name": "A",
+                "manifestPath": "plugins/a/manifest.json",
+                "sha256": manifest_sha
+            }]
+        })
+        .to_string();
+        let state = Arc::new(Mutex::new((index_v1.clone(), manifest_v1.clone())));
+        let st_idx = state.clone();
+        let st_man = state.clone();
+        let router = Router::new()
+            .route(
+                "/v1.0.0/index.json",
+                get(move || {
+                    let body = st_idx.lock().expect("lock").0.clone();
+                    async move { body }
+                }),
+            )
+            .route(
+                "/v1.0.0/plugins/a/manifest.json",
+                get(move || {
+                    let body = st_man.lock().expect("lock").1.clone();
+                    async move { body }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+
+        let pool = SqlitePoolOptions::new().connect("sqlite::memory:").await?;
+        sqlx::migrate!().run(&pool).await?;
+        let dir = tempfile::tempdir()?;
+        let repo = PluginRepository {
+            id: "repo.immutable".into(),
+            name: "Immutable".into(),
+            index_url: format!("http://{address}/v1.0.0/index.json"),
+            is_official: false,
+            enabled: true,
+            last_synced_at: None,
+            created_at: String::new(),
+        };
+        let strict_policy = SyncPolicy {
+            allow_private_hosts: true,
+            require_immutable_releases: true,
+        };
+
+        let ok_report = sync_repository_verified(&pool, &repo, dir.path(), &strict_policy).await?;
+        assert_eq!(ok_report.release_version.as_deref(), Some("1.0.0"));
+
+        // Mutation du manifeste sans recalcul du SHA : IntegrityMismatch et copie précédente préservée
+        state.lock().expect("lock").1 = manifest_v1.replace("\"A\"", "\"Tampered\"");
+        let mismatch = sync_repository_verified(&pool, &repo, dir.path(), &strict_policy).await;
+        assert!(matches!(mismatch, Err(SyncError::IntegrityMismatch(_))));
+
+        // Mutation de l'index à version identique 1.0.0 : ImmutableViolation (TOFU)
+        let mutated_manifest = manifest_v1.replace("\"A\"", "\"Mutated\"");
+        let mutated_sha = ToolCacheManager::compute_sha256(mutated_manifest.as_bytes());
+        let mutated_index = serde_json::json!({
+            "schemaVersion": "1.0.0",
+            "generatedFor": "demo",
+            "releaseVersion": "1.0.0",
+            "filesSha256": { "plugins/a/manifest.json": mutated_sha },
+            "entries": [{
+                "id": "plugin.a",
+                "type": "plugin",
+                "version": "1.0.0",
+                "name": "Mutated",
+                "manifestPath": "plugins/a/manifest.json",
+                "sha256": mutated_sha
+            }]
+        })
+        .to_string();
+        *state.lock().expect("lock") = (mutated_index, mutated_manifest);
+        let pin_err = sync_repository_verified(&pool, &repo, dir.path(), &strict_policy).await;
+        assert!(matches!(pin_err, Err(SyncError::ImmutableViolation(_))));
+
+        let on_disk =
+            std::fs::read_to_string(dir.path().join("repo.immutable/plugins/a/manifest.json"))?;
+        assert!(on_disk.contains("\"A\""));
+        Ok(())
     }
 }

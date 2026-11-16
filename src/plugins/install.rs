@@ -1,11 +1,12 @@
 //! Installation d'un outil distribué dans le cache local, d'après son contrat de distribution.
 
-use super::{SyncPolicy, sync::fetch_archive};
+use super::{SyncPolicy, is_mutable_branch_url, sync::fetch_archive};
 use crate::{
     error::{AppError, AppResult},
     tools_cache::{ToolArtifact, ToolCacheManager, ToolDistribution, host_arch},
 };
 use reqwest::Url;
+use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
 
 const DISTRIBUTION_FILE_NAME: &str = "distribution.v1.json";
@@ -99,6 +100,14 @@ pub async fn install_from_distribution(
             distribution.tool_id
         )));
     }
+    if policy.require_immutable_releases
+        && distribution.release_status.as_deref() != Some("released")
+    {
+        return Err(AppError::ToolUnavailable(format!(
+            "{} : releaseStatus 'released' requis en mode immuable",
+            distribution.tool_id
+        )));
+    }
     let artifact = artifact_for_host(distribution).ok_or_else(|| {
         AppError::ToolUnavailable(format!(
             "{} : aucun artefact pour {}",
@@ -106,6 +115,14 @@ pub async fn install_from_distribution(
             host_arch()
         ))
     })?;
+    let url = Url::parse(&artifact.archive_url)
+        .map_err(|error| AppError::InvalidManifest(error.to_string()))?;
+    if policy.require_immutable_releases && is_mutable_branch_url(&url) {
+        return Err(AppError::InvalidManifest(format!(
+            "{} : archiveUrl pointe vers une branche mouvante ({url})",
+            distribution.tool_id
+        )));
+    }
     let _installing = InstallingGuard::start(&distribution.tool_id);
     let _guard = INSTALL_LOCK.lock().await;
     let binary = ToolCacheManager::resolve_bin_candidate(
@@ -125,8 +142,6 @@ pub async fn install_from_distribution(
     ) {
         return Ok(binary);
     }
-    let url = Url::parse(&artifact.archive_url)
-        .map_err(|error| AppError::InvalidManifest(error.to_string()))?;
     let archive = fetch_archive(&url, policy)
         .await
         .map_err(|error| AppError::RepositoryUnavailable(error.to_string()))?;
@@ -160,12 +175,53 @@ pub async fn ensure_tool_installed(
     version: &str,
     policy: &SyncPolicy,
 ) -> AppResult<PathBuf> {
+    ensure_tool_installed_with_optional_pool(None, roots, cache, tool_id, version, policy).await
+}
+
+/// Variante vérifiant en plus l'immuabilité TOFU de l'archive (`plugin_release_pins`).
+pub async fn ensure_tool_installed_verified(
+    pool: &SqlitePool,
+    roots: &[PathBuf],
+    cache: &ToolCacheManager,
+    tool_id: &str,
+    version: &str,
+    policy: &SyncPolicy,
+) -> AppResult<PathBuf> {
+    ensure_tool_installed_with_optional_pool(Some(pool), roots, cache, tool_id, version, policy)
+        .await
+}
+
+async fn ensure_tool_installed_with_optional_pool(
+    pool: Option<&SqlitePool>,
+    roots: &[PathBuf],
+    cache: &ToolCacheManager,
+    tool_id: &str,
+    version: &str,
+    policy: &SyncPolicy,
+) -> AppResult<PathBuf> {
     let distribution = parse_distribution(&read_distribution(roots, tool_id)?.to_string())?;
     if distribution.tool_id != tool_id || distribution.tool_version != version {
         return Err(AppError::ToolUnavailable(format!(
             "{tool_id}@{version} : le contrat déclare {}@{}",
             distribution.tool_id, distribution.tool_version
         )));
+    }
+    if let (Some(pool), Some(artifact)) = (pool, artifact_for_host(&distribution)) {
+        let scope = format!("tool:{tool_id}:{}", artifact.arch);
+        if let Some(expected) = crate::repository::verify_or_pin_release(
+            pool,
+            &scope,
+            version,
+            &artifact.archive_sha256,
+            &artifact.archive_url,
+        )
+        .await?
+        {
+            return Err(AppError::InvalidManifest(format!(
+                "{tool_id}@{version} ({}) : archiveSha256 muté (attendu {expected}, reçu {})",
+                artifact.arch, artifact.archive_sha256
+            )));
+        }
     }
     install_from_distribution(cache, &distribution, policy).await
 }
@@ -256,6 +312,7 @@ mod tests {
                 archive_sha256,
                 binary_relative_path: "demo".into(),
                 binary_sha256: None,
+                binaries: std::collections::HashMap::new(),
                 permissions: None,
             }],
         }
@@ -269,6 +326,7 @@ mod tests {
         let cache = ToolCacheManager::new(dir.path());
         let policy = SyncPolicy {
             allow_private_hosts: true,
+            ..SyncPolicy::default()
         };
         let contract = distribution(address, hex(&archive));
 
@@ -289,6 +347,7 @@ mod tests {
         let cache = ToolCacheManager::new(dir.path());
         let policy = SyncPolicy {
             allow_private_hosts: true,
+            ..SyncPolicy::default()
         };
         let contract = distribution(address, "0".repeat(64));
 
@@ -381,6 +440,7 @@ mod tests {
         let cache = ToolCacheManager::new(dir.path());
         let policy = SyncPolicy {
             allow_private_hosts: true,
+            ..SyncPolicy::default()
         };
         let mut contract = distribution(address, hex(&archive));
         contract.tool_id = "app.suivi".into();
@@ -422,6 +482,87 @@ mod tests {
         }];
         ensure_tools_for_requirements(&[], &cache, &wanted, &SyncPolicy::default()).await;
         assert!(!cache.is_ready("app.example", "1.0.0", host_arch()));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_tool_pin_refuses_mutated_archive_sha256_for_same_version() -> anyhow::Result<()> {
+        use sqlx::sqlite::SqlitePoolOptions;
+
+        let pool = SqlitePoolOptions::new().connect("sqlite::memory:").await?;
+        sqlx::migrate!().run(&pool).await?;
+
+        let archive = archive_with("demo", b"#!/bin/sh\nexit 0\n")?;
+        let address = serve_archive(archive.clone()).await?;
+        let dir = tempfile::tempdir()?;
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(root.join("apps/demo"))?;
+        let sha = hex(&archive);
+        std::fs::write(
+            distribution_path(&root, "demo"),
+            serde_json::json!({
+                "schemaVersion": "1.0.0",
+                "toolId": "app.demo",
+                "toolVersion": "1.0.0",
+                "releaseStatus": "released",
+                "distributionMode": "autonomous-binary",
+                "artifacts": [{
+                    "arch": host_arch(),
+                    "os": "linux",
+                    "archiveUrl": format!("http://{address}/outil.tar.gz"),
+                    "archiveFormat": "tar.gz",
+                    "archiveSha256": sha,
+                    "binaryRelativePath": "demo"
+                }]
+            })
+            .to_string(),
+        )?;
+
+        let cache = ToolCacheManager::new(dir.path().join("cache"));
+        let policy = SyncPolicy {
+            allow_private_hosts: true,
+            require_immutable_releases: true,
+        };
+        ensure_tool_installed_verified(
+            &pool,
+            std::slice::from_ref(&root),
+            &cache,
+            "app.demo",
+            "1.0.0",
+            &policy,
+        )
+        .await?;
+
+        // Une archive différente sous la même version 1.0.0 est refusée par l'épinglage TOFU.
+        std::fs::write(
+            distribution_path(&root, "demo"),
+            serde_json::json!({
+                "schemaVersion": "1.0.0",
+                "toolId": "app.demo",
+                "toolVersion": "1.0.0",
+                "releaseStatus": "released",
+                "distributionMode": "autonomous-binary",
+                "artifacts": [{
+                    "arch": host_arch(),
+                    "os": "linux",
+                    "archiveUrl": format!("http://{address}/outil.tar.gz"),
+                    "archiveFormat": "tar.gz",
+                    "archiveSha256": "a".repeat(64),
+                    "binaryRelativePath": "demo"
+                }]
+            })
+            .to_string(),
+        )?;
+        let mutated = ensure_tool_installed_verified(
+            &pool,
+            std::slice::from_ref(&root),
+            &cache,
+            "app.demo",
+            "1.0.0",
+            &policy,
+        )
+        .await;
+        assert!(matches!(mutated, Err(AppError::InvalidManifest(_))));
         Ok(())
     }
 }

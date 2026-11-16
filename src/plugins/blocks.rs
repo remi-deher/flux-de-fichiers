@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn sibling_plugin_blocks_load_all_plugin_manifests() -> anyhow::Result<()> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../flux-de-fichiers-plugins");
-        let index = root.join("catalogue/index.json");
+        let index = root.join("index.json");
         if !index.is_file() {
             return Ok(());
         }

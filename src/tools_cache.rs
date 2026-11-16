@@ -2,6 +2,7 @@ use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashMap,
     fs,
     io::Read,
     os::unix::fs::PermissionsExt,
@@ -10,6 +11,15 @@ use std::{
 
 const EXECUTABLE_UNIX_MODE: u32 = 0o755;
 const DEFAULT_SAFE_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
+
+/// Empreinte attendue d'un exécutable secondaire dans une archive multi-binaires.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolBinaryDigest {
+    #[serde(alias = "relative_path")]
+    pub relative_path: String,
+    pub sha256: String,
+}
 
 /// Déclaration d'un artefact d'outil pour une architecture donnée.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -26,6 +36,8 @@ pub struct ToolArtifact {
     pub binary_relative_path: String,
     #[serde(default, alias = "binary_sha256")]
     pub binary_sha256: Option<String>,
+    #[serde(default)]
+    pub binaries: HashMap<String, ToolBinaryDigest>,
     #[serde(default)]
     pub permissions: Option<ArtifactPermissions>,
 }
@@ -338,7 +350,7 @@ impl ToolCacheManager {
             }
         }
 
-        // 4. Validation de l'empreinte du binaire extrait (si renseignée)
+        // 4. Validation de l'empreinte du binaire extrait et des multi-binaires éventuels
         let actual_binary_sha256 = Self::compute_file_sha256(&binary_path)?;
         if let Some(expected_binary_sha256) = &artifact.binary_sha256 {
             let matches = bool::from(subtle::ConstantTimeEq::ct_eq(
@@ -350,6 +362,26 @@ impl ToolCacheManager {
                     expected: expected_binary_sha256.clone(),
                     actual: actual_binary_sha256,
                 });
+            }
+        }
+        for (exe_name, entry) in &artifact.binaries {
+            if !Self::is_safe_relative_path(Path::new(&entry.relative_path)) {
+                return Err(AppError::InvalidManifest(format!(
+                    "unsafe binary path for {exe_name}: {}",
+                    entry.relative_path
+                )));
+            }
+            let extra_path = Self::resolve_bin_candidate(&bin_dir, &entry.relative_path);
+            if !extra_path.is_file() {
+                return Err(AppError::NotFound);
+            }
+            let actual = Self::compute_file_sha256(&extra_path)?;
+            let expected = entry.sha256.to_lowercase();
+            if !bool::from(subtle::ConstantTimeEq::ct_eq(
+                actual.as_bytes(),
+                expected.as_bytes(),
+            )) {
+                return Err(AppError::ChecksumMismatch { expected, actual });
             }
         }
 
@@ -475,6 +507,7 @@ mod tests {
             archive_sha256,
             binary_relative_path: "mkvmerge".into(),
             binary_sha256: Some(binary_sha256.clone()),
+            binaries: HashMap::new(),
             permissions: Some(ArtifactPermissions {
                 unix_mode: Some("0755".into()),
                 owner: Some("runtime-user".into()),
@@ -522,6 +555,7 @@ mod tests {
                 .into(),
             binary_relative_path: "test_tool".into(),
             binary_sha256: None,
+            binaries: HashMap::new(),
             permissions: None,
         };
 
@@ -555,6 +589,7 @@ mod tests {
             archive_sha256: ToolCacheManager::compute_sha256(&archive_bytes),
             binary_relative_path: "lien".into(),
             binary_sha256: None,
+            binaries: HashMap::new(),
             permissions: None,
         };
 
@@ -613,6 +648,7 @@ mod tests {
             archive_sha256: ToolCacheManager::compute_sha256(&archive_bytes),
             binary_relative_path: "bin/mkvmerge".into(),
             binary_sha256: None,
+            binaries: HashMap::new(),
             permissions: None,
         };
         let allowlist = vec!["bin/mkvmerge".into(), "bin/mkvpropedit".into()];
@@ -662,6 +698,52 @@ mod tests {
                 .map(|p| p.executable_allowlist.as_slice()),
             Some(["bin/demo".to_string()].as_slice())
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_reject_multi_binary_archive_with_secondary_digest_mismatch()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let tmp = tempdir()?;
+        let manager = ToolCacheManager::new(tmp.path());
+
+        let mut tar_builder = tar::Builder::new(Vec::new());
+        for (name, body) in [
+            ("ffmpeg", b"main-bin".as_slice()),
+            ("ffprobe", b"secondary-bin".as_slice()),
+        ] {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            tar_builder.append_data(&mut header, name, body)?;
+        }
+        let tar_bytes = tar_builder.into_inner()?;
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        std::io::Write::write_all(&mut encoder, &tar_bytes)?;
+        let archive_bytes = encoder.finish()?;
+
+        let mut binaries = HashMap::new();
+        binaries.insert(
+            "ffprobe".into(),
+            ToolBinaryDigest {
+                relative_path: "ffprobe".into(),
+                sha256: "f".repeat(64),
+            },
+        );
+        let artifact = ToolArtifact {
+            arch: "x86_64".into(),
+            archive_url: "https://example.local/ffmpeg.tar.gz".into(),
+            archive_format: "tar.gz".into(),
+            archive_sha256: ToolCacheManager::compute_sha256(&archive_bytes),
+            binary_relative_path: "ffmpeg".into(),
+            binary_sha256: Some(ToolCacheManager::compute_sha256(b"main-bin")),
+            binaries,
+            permissions: None,
+        };
+        let result = manager.extract_and_install("app.ffmpeg", "1.0.0", &artifact, &archive_bytes);
+        assert!(matches!(result, Err(AppError::ChecksumMismatch { .. })));
+        assert!(!manager.is_ready("app.ffmpeg", "1.0.0", "x86_64"));
         Ok(())
     }
 }

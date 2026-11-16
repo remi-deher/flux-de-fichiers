@@ -63,6 +63,7 @@ impl EffectiveRuntimeSettings {
     pub fn sync_policy(&self) -> SyncPolicy {
         SyncPolicy {
             allow_private_hosts: self.outbound.allow_private_plugin_hosts,
+            require_immutable_releases: SyncPolicy::from_env().require_immutable_releases,
         }
     }
 

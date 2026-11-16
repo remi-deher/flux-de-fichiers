@@ -484,11 +484,10 @@ async fn test_flow_blocks_catalog_is_empty_without_plugins() -> anyhow::Result<(
 #[tokio::test]
 async fn test_flow_blocks_catalog_loads_from_plugins_directory() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
-    std::fs::create_dir_all(dir.path().join("catalogue"))?;
     std::fs::create_dir_all(dir.path().join("plugins/core/blocks"))?;
     std::fs::create_dir_all(dir.path().join("plugins/video/blocks"))?;
     std::fs::write(
-        dir.path().join("catalogue/index.json"),
+        dir.path().join("index.json"),
         serde_json::json!({
             "schemaVersion": "1.0.0",
             "entries": [

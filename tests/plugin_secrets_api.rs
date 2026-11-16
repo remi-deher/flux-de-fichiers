@@ -16,7 +16,7 @@ use tower::ServiceExt;
 const TEST_ADMIN_KEY: &str = "fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef";
 const MAX_TEST_FILE_BYTES: u64 = 1024;
 const WEB_SESSION_TTL_SECONDS: i64 = 28_800;
-const RESPONSE_LIMIT_BYTES: usize = 16 * 1024;
+const RESPONSE_LIMIT_BYTES: usize = 256 * 1024;
 const PLUGIN_ID: &str = "plugin.demo";
 const SECRET_VALUE: &str = "SECRET-VALUE-123";
 
@@ -105,16 +105,18 @@ async fn harness() -> anyhow::Result<Harness> {
     })
 }
 
-async fn call(
+async fn send_with_key(
     app: &axum::Router,
+    key: &str,
     method: &str,
     uri: &str,
     body: Option<serde_json::Value>,
-) -> anyhow::Result<(StatusCode, serde_json::Value)> {
+    read_limit: usize,
+) -> anyhow::Result<(StatusCode, axum::http::HeaderMap, Vec<u8>)> {
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
-        .header("authorization", format!("Bearer {TEST_ADMIN_KEY}"));
+        .header("authorization", format!("Bearer {key}"));
     let request = match body {
         Some(json) => builder
             .header("content-type", "application/json")
@@ -126,9 +128,31 @@ async fn call(
     };
     let response = app.clone().oneshot(request).await?;
     let status = response.status();
-    let bytes = to_bytes(response.into_body(), RESPONSE_LIMIT_BYTES).await?;
+    let headers = response.headers().clone();
+    let bytes = to_bytes(response.into_body(), read_limit).await?.to_vec();
+    Ok((status, headers, bytes))
+}
+
+async fn call_with_key(
+    app: &axum::Router,
+    key: &str,
+    method: &str,
+    uri: &str,
+    body: Option<serde_json::Value>,
+) -> anyhow::Result<(StatusCode, serde_json::Value)> {
+    let (status, _, bytes) =
+        send_with_key(app, key, method, uri, body, RESPONSE_LIMIT_BYTES).await?;
     let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     Ok((status, value))
+}
+
+async fn call(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    body: Option<serde_json::Value>,
+) -> anyhow::Result<(StatusCode, serde_json::Value)> {
+    call_with_key(app, TEST_ADMIN_KEY, method, uri, body).await
 }
 
 async fn stored(pool: &SqlitePool) -> anyhow::Result<String> {
@@ -346,6 +370,36 @@ async fn test_local_library_crud_without_github() -> anyhow::Result<()> {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(res["id"], "resource.sous-titres-fr");
 
+    let (status, dl_headers, dl_bytes) = send_with_key(
+        &h.app,
+        TEST_ADMIN_KEY,
+        "GET",
+        "/api/v1/local/items/resource.sous-titres-fr/file",
+        None,
+        64 * 1024,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(dl_bytes, b"1\n00:00:00,000 --> 00:00:01,000\nOK\n".to_vec());
+    assert_eq!(
+        dl_headers
+            .get("x-content-type-options")
+            .and_then(|v| v.to_str().ok()),
+        Some("nosniff")
+    );
+    assert_eq!(
+        dl_headers
+            .get("cache-control")
+            .and_then(|v| v.to_str().ok()),
+        Some("no-store")
+    );
+    assert_eq!(
+        dl_headers
+            .get("content-disposition")
+            .and_then(|v| v.to_str().ok()),
+        Some("attachment; filename=\"fr.srt\"")
+    );
+
     let (status, tpl) = call(
         &h.app,
         "POST",
@@ -359,11 +413,46 @@ async fn test_local_library_crud_without_github() -> anyhow::Result<()> {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(tpl["id"], "template.block.bloc-remux");
 
+    let (status, flow_tpl) = call(
+        &h.app,
+        "POST",
+        "/api/v1/local/flow-templates",
+        Some(serde_json::json!({
+            "name": "Flux HEVC",
+            "fileMask": "*.mkv",
+            "definition": {"nodes": [], "connections": []}
+        })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(flow_tpl["id"], "flow.template.flux-hevc");
+
+    let (status, pack) = call(
+        &h.app,
+        "POST",
+        "/api/v1/local/packs",
+        Some(serde_json::json!({
+            "name": "Pack Tag",
+            "description": "Suite complète",
+            "components": [{"id": "script.tag-perso", "version": "1.0.0", "kind": "script"}]
+        })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(pack["id"], "pack.local.pack-tag");
+
+    let (status, pack_detail) =
+        call(&h.app, "GET", "/api/v1/packs/pack.local.pack-tag", None).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(pack_detail["id"], "pack.local.pack-tag");
+
     let (status, snap) = call(&h.app, "GET", "/api/v1/local", None).await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(snap["scripts"].as_array().map(Vec::len), Some(1));
     assert_eq!(snap["resources"].as_array().map(Vec::len), Some(1));
     assert_eq!(snap["blockTemplates"].as_array().map(Vec::len), Some(1));
+    assert_eq!(snap["flowTemplates"].as_array().map(Vec::len), Some(1));
+    assert_eq!(snap["packs"].as_array().map(Vec::len), Some(1));
 
     let (status, _) = call(
         &h.app,
@@ -374,8 +463,276 @@ async fn test_local_library_crud_without_github() -> anyhow::Result<()> {
     .await?;
     assert_eq!(status, StatusCode::OK);
 
+    let (status, _) = call(
+        &h.app,
+        "GET",
+        "/api/v1/local/items/resource.sous-titres-fr/file",
+        None,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
     let (status, snap2) = call(&h.app, "GET", "/api/v1/local", None).await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(snap2["resources"].as_array().map(Vec::len), Some(0));
+    Ok(())
+}
+
+#[derive(Clone, Default)]
+struct ViewerCookies {
+    session: String,
+    csrf: String,
+}
+
+impl ViewerCookies {
+    fn from_headers(headers: &axum::http::HeaderMap) -> Self {
+        let mut out = Self::default();
+        for value in headers.get_all("set-cookie") {
+            let text = value.to_str().unwrap_or_default();
+            let pair = text.split(';').next().unwrap_or_default();
+            if let Some(token) = pair.strip_prefix("flux_session=") {
+                out.session = token.to_owned();
+            } else if let Some(token) = pair.strip_prefix("flux_csrf=") {
+                out.csrf = token.to_owned();
+            }
+        }
+        out
+    }
+}
+
+async fn call_viewer(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookies: Option<&ViewerCookies>,
+    body: Option<serde_json::Value>,
+) -> anyhow::Result<(StatusCode, axum::http::HeaderMap, serde_json::Value)> {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("host", "localhost:3000")
+        .header("origin", "http://localhost:3000");
+    if let Some(c) = cookies {
+        builder = builder
+            .header(
+                "cookie",
+                format!("flux_session={}; flux_csrf={}", c.session, c.csrf),
+            )
+            .header("x-csrf-token", c.csrf.clone());
+    }
+    let request = match body {
+        Some(json) => builder
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&json)?))?,
+        None => builder.body(Body::empty())?,
+    };
+    let response = app.clone().oneshot(request).await?;
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = to_bytes(response.into_body(), RESPONSE_LIMIT_BYTES).await?;
+    Ok((
+        status,
+        headers,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    ))
+}
+
+#[tokio::test]
+async fn test_local_library_limits_conflicts_and_role_permissions() -> anyhow::Result<()> {
+    let h = harness().await?;
+    let viewer_pass = "un-bon-mot-de-passe";
+    let (status, _) = call(
+        &h.app,
+        "POST",
+        "/api/v1/accounts",
+        Some(serde_json::json!({
+            "username": "viewer-local",
+            "password": viewer_pass,
+            "role": "viewer"
+        })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, headers, _) = call_viewer(
+        &h.app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(serde_json::json!({"username": "viewer-local", "password": viewer_pass})),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    let viewer = ViewerCookies::from_headers(&headers);
+
+    // Un script > 16 Kio (JSON_BODY_LIMIT) doit passer jusqu'à LARGE_JSON_BODY_LIMIT.
+    let big_code = format!(
+        "# {}\nprintf '{{\"status\":\"ok\"}}'",
+        "x".repeat(24 * 1024)
+    );
+    let (status, created) = call(
+        &h.app,
+        "POST",
+        "/api/v1/local/scripts",
+        Some(serde_json::json!({
+            "name": "Gros Script",
+            "interpreter": "sh",
+            "code": big_code
+        })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(created["id"], "script.gros-script");
+
+    // Créer à nouveau sans id provoque 409 Conflict ; avec id la mise à jour réussit.
+    let (status, _) = call(
+        &h.app,
+        "POST",
+        "/api/v1/local/scripts",
+        Some(serde_json::json!({
+            "name": "Gros Script",
+            "interpreter": "sh",
+            "code": "echo dup"
+        })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let (status, _) = call(
+        &h.app,
+        "POST",
+        "/api/v1/local/scripts",
+        Some(serde_json::json!({
+            "id": "script.gros-script",
+            "name": "Gros Script",
+            "interpreter": "python3",
+            "code": "print('{\"status\":\"ok\"}')"
+        })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+
+    // Au-delà de MAX_SCRIPT_BYTES (512 Kio), rejet 413 Payload Too Large.
+    let huge_code = "x".repeat(520 * 1024);
+    let (status, _) = call(
+        &h.app,
+        "POST",
+        "/api/v1/local/scripts",
+        Some(serde_json::json!({
+            "name": "Trop Gros Script",
+            "interpreter": "sh",
+            "code": huge_code
+        })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+
+    // Modèles de blocs/flows et définition de flow > 16 Kio passent aussi.
+    let big_nodes: Vec<_> = (0..180)
+        .map(|i| serde_json::json!({"id": format!("n{i}"), "type": "file-input", "name": format!("N{i}"), "config": {"pad": "x".repeat(120)}}))
+        .collect();
+    let big_graph = serde_json::json!({"nodes": big_nodes, "connections": []});
+    let (status, _) = call(
+        &h.app,
+        "POST",
+        "/api/v1/local/block-templates",
+        Some(serde_json::json!({
+            "name": "Grand Modèle Bloc",
+            "definition": big_graph
+        })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = call(
+        &h.app,
+        "POST",
+        "/api/v1/local/flow-templates",
+        Some(serde_json::json!({
+            "name": "Grand Modèle Flow",
+            "definition": big_graph
+        })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = call(
+        &h.app,
+        "PUT",
+        "/api/v1/flows/flow.large.test",
+        Some(serde_json::json!({
+            "name": "Grand Flow",
+            "file_mask": "*.mkv",
+            "is_default": false,
+            "definition": serde_json::to_string(&big_graph)?
+        })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+
+    // Ressource > 16 Kio (base64 ~ 32 Kio).
+    let raw_asset = vec![b'A'; 24 * 1024];
+    let (status, _) = call(
+        &h.app,
+        "POST",
+        "/api/v1/local/resources",
+        Some(serde_json::json!({
+            "name": "Grosse Police",
+            "entryType": "resource.font",
+            "filename": "font.ttf",
+            "contentBase64": flux_shared::base64::encode(&raw_asset)
+        })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+
+    // Permissions : Viewer peut lire GET /api/v1/local et télécharger, mais pas modifier.
+    let (status, _, _) = call_viewer(&h.app, "GET", "/api/v1/local", Some(&viewer), None).await?;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = call_viewer(
+        &h.app,
+        "GET",
+        "/api/v1/local/items/resource.grosse-police/file",
+        Some(&viewer),
+        None,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+
+    for (method, uri, body) in [
+        (
+            "POST",
+            "/api/v1/local/scripts",
+            Some(serde_json::json!({"name":"x","interpreter":"sh","code":"echo"})),
+        ),
+        (
+            "POST",
+            "/api/v1/local/block-templates",
+            Some(serde_json::json!({"name":"x","definition":{"nodes":[],"connections":[]}})),
+        ),
+        (
+            "POST",
+            "/api/v1/local/flow-templates",
+            Some(serde_json::json!({"name":"x","definition":{"nodes":[],"connections":[]}})),
+        ),
+        ("DELETE", "/api/v1/local/items/script.gros-script", None),
+    ] {
+        let (status, _, _) = call_viewer(&h.app, method, uri, Some(&viewer), body).await?;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    // Une clé Worker n'a ni ViewLibraries ni ViewFlows -> 403 même sur GET /api/v1/local.
+    let (status, _) =
+        call_with_key(&h.app, common::WORKER_KEY, "GET", "/api/v1/local", None).await?;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Télécharger un script (non ressource) retourne 404.
+    let (status, _) = call(
+        &h.app,
+        "GET",
+        "/api/v1/local/items/script.gros-script/file",
+        None,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     Ok(())
 }

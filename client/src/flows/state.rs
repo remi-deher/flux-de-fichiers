@@ -2,11 +2,11 @@
 
 use super::dnd::{
     BranchTarget, DragPayload, disconnect_edge, drop_outcome, duplicate_node as clone_node,
-    duplicate_subgraph, insert_on_branch,
+    duplicate_subgraph, insert_on_branch, insert_subgraph_mapped,
 };
 use super::geometry::{
-    GRID_STEP, Point, ROW_STRIDE, Viewport, default_positions, place_with_positions,
-    resolve_node_origin, snap_point,
+    GRID_STEP, ORIGIN_X, ORIGIN_Y, Point, ROW_STRIDE, Viewport, default_positions,
+    place_with_positions, resolve_node_origin, snap_point,
 };
 #[cfg(not(test))]
 use crate::prefs;
@@ -608,6 +608,89 @@ impl Editor {
         Ok(new_id)
     }
 
+    /// Insère un modèle de blocs en évitant tout chevauchement, en honorant `branch_target` et `palette_pinned`.
+    pub fn insert_template_subgraph(
+        &self,
+        template: &FlowGraph,
+    ) -> Result<Vec<String>, GraphError> {
+        if template.nodes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let template_layout = default_positions(template);
+        let min_tpl_x = template_layout
+            .values()
+            .map(|pt| pt.x)
+            .fold(f64::INFINITY, f64::min);
+        let min_tpl_y = template_layout
+            .values()
+            .map(|pt| pt.y)
+            .fold(f64::INFINITY, f64::min);
+        let base_tpl_x = if min_tpl_x.is_finite() {
+            min_tpl_x
+        } else {
+            ORIGIN_X
+        };
+        let base_tpl_y = if min_tpl_y.is_finite() {
+            min_tpl_y
+        } else {
+            ORIGIN_Y
+        };
+
+        let branch = self.branch_target.get_untracked();
+        let existing_ids: Vec<String> = self
+            .graph
+            .with_untracked(|g| g.nodes.iter().map(|n| n.id.clone()).collect());
+        let (anchor_x, anchor_y) = if let Some(ref b) = branch {
+            let src = self.node_point(&b.source_id);
+            (src.x, src.y + ROW_STRIDE)
+        } else {
+            let next_y = existing_ids
+                .iter()
+                .map(|id| self.node_point(id).y + ROW_STRIDE)
+                .fold(ORIGIN_Y, f64::max);
+            (ORIGIN_X, next_y)
+        };
+
+        let catalog = self.catalog.get_untracked();
+        let mut outcome = Err(GraphError::UnknownNode);
+        self.mutate_graph(|graph| {
+            outcome = insert_subgraph_mapped(graph, template, branch.as_ref(), &catalog);
+        });
+        let (created, id_map) = outcome?;
+
+        let snap = self.snap_to_grid.get_untracked();
+        let moves: Vec<(String, Point)> = template
+            .nodes
+            .iter()
+            .filter_map(|tpl_node| {
+                let new_id = id_map.get(&tpl_node.id)?;
+                let tpl_pt = template_layout.get(&tpl_node.id).copied().unwrap_or(Point {
+                    x: base_tpl_x,
+                    y: base_tpl_y,
+                });
+                Some((
+                    new_id.clone(),
+                    Point {
+                        x: anchor_x + (tpl_pt.x - base_tpl_x),
+                        y: anchor_y + (tpl_pt.y - base_tpl_y),
+                    },
+                ))
+            })
+            .collect();
+        self.move_nodes_live(&moves, snap);
+        self.commit_positions();
+        self.branch_target.set(None);
+
+        let stay_on_palette = self.palette_pinned.get_untracked();
+        if let Some(first) = created.first() {
+            self.select_node(Some(first.clone()), !stay_on_palette);
+        }
+        if stay_on_palette {
+            self.open_palette();
+        }
+        Ok(created)
+    }
+
     /// Duplique un bloc avec un léger décalage visuel et ouvre son inspecteur.
     pub fn duplicate_node(&self, id: &str) -> Option<String> {
         let orig = self.node_point(id);
@@ -1101,5 +1184,29 @@ mod tests {
 
         editor.set_node_position(&id, Point { x: 432.0, y: 264.0 });
         assert_eq!(editor.node_point(&id), Point { x: 432.0, y: 264.0 });
+    }
+
+    #[test]
+    fn insert_template_subgraph_places_without_overlap_and_honors_pin() {
+        let catalog = test_catalog();
+        let mut graph = FlowGraph::default();
+        let input = graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            &catalog,
+        );
+        let editor = Editor::for_flow(None, graph);
+        editor.catalog.set(catalog.clone());
+        editor.palette_pinned.set(true);
+
+        let mut tpl = FlowGraph::default();
+        tpl.append(FlowBlockKind::parse("webhook"), "Hook", json!({}), &catalog);
+        let created = editor.insert_template_subgraph(&tpl).unwrap_or_default();
+        assert_eq!(created.len(), 1);
+        assert!(editor.node_point(&created[0]).y > editor.node_point(&input).y);
+        assert!(editor.palette_open.get_untracked());
+        assert!(!editor.inspector_open.get_untracked());
+        assert!(editor.branch_target.get_untracked().is_none());
     }
 }

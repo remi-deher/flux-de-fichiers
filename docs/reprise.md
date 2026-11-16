@@ -93,8 +93,8 @@ paramètres.
   (`client/src/ui/`, `client/src/shell.rs`).
 - Non repris : widgets personnalisables de la vue d'ensemble, feuille de filtres de la barre du
   haut (remplacée par les onglets), onglets Réseau / Stockage / Intégrations, télémétrie
-  matérielle, page Mises à jour, import de flux depuis le catalogue (route inexistante),
-  simulation animée.
+  matérielle, page Mises à jour, simulation animée. Les modèles de flows (locaux et issus du
+  catalogue) se créent et s'utilisent dans Librairies → Flows & Modèles (`/api/v1/local/flow-templates`).
 - Éditeur de flux : glisser-déposer sans position libre (mise en page automatique) ; non essayé
   en réel (HTML5 DnD, `beforeunload`). Restaurer une version garde les en-têtes secrets du flux courant (masqués).
 - Aucun de ces écrans ni leurs correctifs (recherche globale, tiroir mobile, session expirée, choix du worker, pagination) n'a été ouvert en réel : seuls clippy et les tests natifs ont tourné.
@@ -156,13 +156,14 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 - [x] « Mot de passe oublié » par courriel SMTP (ADR 0015) ; la CLI `reset-password` reste le recours.
 - [x] Changement de mot de passe depuis un worker (`PUT /api/v1/account/password` relayé vers `PUT /api/v1/worker/account/password` sur le central).
 - [x] Passe d'accessibilité (`Drawer` modal avec `aria-modal`, `aria-labelledby`, focus automatique et fermeture `Échap`, étiquettes ARIA et styles `:focus-visible`).
+- [x] Librairies locales autonomes (`src/plugins/local/`, `client/src/libraries/`) : scripts locaux (`stdio` JSON avec `ScriptInterpreter` typé, catégorie, étiquettes, starters et bloc palette dédié), import/remplacement/téléchargement de ressources (`/api/v1/local/items/{id}/file`), modèles de blocs (édition, inspection, insertion en palette sans chevauchement avec `branch_target` / `palette_pinned`), modèles de flows (`FlowsSection`) et packs locaux assemblés avec tiroir d'inspection/installation (`<PackDetail>`).
 
 ### 3. Moteur et plugins
 
 - [x] Exécuter `block.video.remux-mp4` (MP4Box) (#114).
 - [x] Artefacts `ffmpeg` / `ffprobe` / `MP4Box` / `mkvtoolnix` / `mediainfo` intégrés dans `.github/workflows/build-tools.yml` (côté `flux-de-fichiers-plugins`).
 - [x] Repli automatique GPU → CPU quand l'encodeur matériel échoue (#133).
-- [x] Moteur 100 % déclaratif par contrats ([ADR 0017](adr/0017-moteur-generique-et-contrats.md)) : `OperationRegistry`, exécuteurs génériques `binary_runner` / `http_runner`, installation déclarative de packs.
+- [x] Moteur 100 % déclaratif par contrats ([ADR 0017](adr/0017-moteur-generique-et-contrats.md)) : `OperationRegistry`, exécuteurs génériques `binary_runner` / `http_runner` et `script_runner` (`kind: "script"`, routage `nextPort`, `workingFile`, fusion `mediaInfo`, `Skip`, `stopPipeline`), installation déclarative de packs. Côté `flux-de-fichiers-plugins` : schémas, `build_index.py`, `check_catalogue.py` et `scaffold.py script` alignés sur `type: "script"`.
 - [x] Chiffrement par clé de worker et par bail des secrets transmis sur `/api/v1/claims` (`Claim.sealed_secrets`, dérivation `SecretBox::for_worker_lease` liée à `(job_id, lease_epoch)`).
 - [ ] Requêtes SQL vérifiées à la compilation (`sqlx::query!` + `.sqlx`) : non activé car `sqlx-cli` est absent localement et le `Dockerfile` construit sans base active ni cache `.sqlx/` (`SQLX_OFFLINE`) ; le durcissement du pool SQLite (`busy_timeout` / `acquire_timeout` 15 s, `max_connections` 16, `temp_store = MEMORY`, `cache_size = -16000`, `wal_autocheckpoint = 1000`) et les index (`jobs_worker_recent_idx`, `jobs_flow_idx`) ont été appliqués dans `src/api.rs` et `migrations/0016_hardening_and_settings.sql`.
 

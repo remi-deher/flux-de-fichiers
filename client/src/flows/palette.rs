@@ -1,6 +1,6 @@
 //! Dock Palette : recherche, catégories repliables, épinglage et insertion sur branche.
 
-use super::dnd::{DragPayload, insert_subgraph};
+use super::dnd::DragPayload;
 use super::drag::DragItem;
 use super::presentation::{NodeDomain, output_presentation};
 use super::state::Editor;
@@ -84,6 +84,27 @@ pub fn Palette(editor: Editor) -> impl IntoView {
         let after_local = filter_specs(&catalog, &local_query.get());
         grouped_specs(&after_local, &global_query())
     });
+    let filtered_templates = Memo::new(move |_| {
+        let templates = local_snapshot
+            .get()
+            .and_then(Result::ok)
+            .map(|snap| snap.block_templates)
+            .unwrap_or_default();
+        let q_local = local_query.get();
+        let q_global = global_query();
+        templates
+            .into_iter()
+            .filter(|tpl| {
+                matches(
+                    &[&tpl.name, &tpl.id, tpl.description.as_deref().unwrap_or("")],
+                    &q_local,
+                ) && matches(
+                    &[&tpl.name, &tpl.id, tpl.description.as_deref().unwrap_or("")],
+                    &q_global,
+                )
+            })
+            .collect::<Vec<_>>()
+    });
 
     view! {
         <div class="flow-dock-pane flow-palette-pane" aria-label="Composants de flux">
@@ -156,14 +177,20 @@ pub fn Palette(editor: Editor) -> impl IntoView {
             <div class="flow-palette__groups">
                 {move || {
                     let list = groups.get();
-                    if list.is_empty() {
+                    let tpls = filtered_templates.get();
+                    if list.is_empty() && tpls.is_empty() {
                         if !editor.catalog_loaded.get() {
                             return view! {
                                 <p class="flow-palette__empty">"Chargement des blocs…"</p>
                             }
                             .into_any();
                         }
-                        if editor.catalog.with(|c| c.is_empty()) {
+                        let catalog_empty = editor.catalog.with(|c| c.is_empty())
+                            && local_snapshot
+                                .get()
+                                .and_then(Result::ok)
+                                .is_none_or(|s| s.block_templates.is_empty());
+                        if catalog_empty {
                             return view! {
                                 <div class="flow-palette__empty">
                                     <p>"Catalogue de blocs vide : synchronisez un dépôt depuis Extensions."</p>
@@ -202,7 +229,15 @@ pub fn Palette(editor: Editor) -> impl IntoView {
                                                     Some(&spec),
                                                     &spec.category,
                                                 );
-                                                let plugin_label = "Plugin";
+                                                let source_label = if spec
+                                                    .owner
+                                                    .as_deref()
+                                                    .is_some_and(|o| o.starts_with("script."))
+                                                {
+                                                    "Script"
+                                                } else {
+                                                    "Plugin"
+                                                };
                                                 let accent_style =
                                                     format!("--component-accent: {}", domain.accent_var());
                                                 let payload = DragPayload::Palette {
@@ -239,7 +274,7 @@ pub fn Palette(editor: Editor) -> impl IntoView {
                                                             </span>
                                                             <span class="flow-palette__card-text">
                                                                 <span class="flow-palette__card-title">{label}</span>
-                                                                <span class="flow-palette__card-meta">{plugin_label}</span>
+                                                                <span class="flow-palette__card-meta">{source_label}</span>
                                                             </span>
                                                             <span class="flow-palette__card-plus" aria-hidden="true">"+"</span>
                                                         </div>
@@ -255,33 +290,7 @@ pub fn Palette(editor: Editor) -> impl IntoView {
                         .into_any()
                 }}
                 {move || {
-                    let templates = local_snapshot
-                        .get()
-                        .and_then(Result::ok)
-                        .map(|snap| snap.block_templates)
-                        .unwrap_or_default();
-                    let q_local = local_query.get();
-                    let q_global = global_query();
-                    let filtered: Vec<_> = templates
-                        .into_iter()
-                        .filter(|tpl| {
-                            matches(
-                                &[
-                                    &tpl.name,
-                                    &tpl.id,
-                                    tpl.description.as_deref().unwrap_or(""),
-                                ],
-                                &q_local,
-                            ) && matches(
-                                &[
-                                    &tpl.name,
-                                    &tpl.id,
-                                    tpl.description.as_deref().unwrap_or(""),
-                                ],
-                                &q_global,
-                            )
-                        })
-                        .collect();
+                    let filtered = filtered_templates.get();
                     (!filtered.is_empty()).then(|| {
                         let count = filtered.len();
                         view! {
@@ -300,13 +309,10 @@ pub fn Palette(editor: Editor) -> impl IntoView {
                                                 Toasts::notify_error("Modèle de blocs invalide.");
                                                 return;
                                             };
-                                            editor.mutate_graph(|graph| {
-                                                let created = insert_subgraph(graph, &parsed);
-                                                if let Some(first) = created.first() {
-                                                    editor.selected.set(Some(first.clone()));
-                                                }
-                                            });
-                                            Toasts::notify_success(format!("Modèle « {} » inséré.", name));
+                                            match editor.insert_template_subgraph(&parsed) {
+                                                Ok(_) => Toasts::notify_success(format!("Modèle « {} » inséré.", name)),
+                                                Err(err) => Toasts::notify_error(err.message()),
+                                            }
                                         };
                                         let insert_click = insert.clone();
                                         view! {

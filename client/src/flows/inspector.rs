@@ -163,6 +163,10 @@ pub fn NodeInspector(editor: Editor, can_manage: bool) -> impl IntoView {
                 let domain = NodeDomain::from_spec(spec.as_ref(), category);
                 let description = spec.as_ref().map(|s| s.description.clone());
                 let from_plugin = spec.as_ref().is_some_and(|s| s.from_plugin);
+                let is_script = spec
+                    .as_ref()
+                    .and_then(|s| s.owner.as_deref())
+                    .is_some_and(|owner| owner.starts_with("script."));
                 let fields = spec
                     .as_ref()
                     .map(|s| s.fields.clone())
@@ -188,7 +192,10 @@ pub fn NodeInspector(editor: Editor, can_manage: bool) -> impl IntoView {
 
                         <div class="flow-inspector__body">
                             {description.map(|text| view! { <p class="form-help">{text}</p> })}
-                            {from_plugin.then(|| view! {
+                            {is_script.then(|| view! {
+                                <p class="form-help">"Bloc script (stdin/stdout JSON) : configurez le code depuis Librairies → Scripts."</p>
+                            })}
+                            {(from_plugin && !is_script).then(|| view! {
                                 <p class="form-help">"Bloc fourni par un dépôt de plugins."</p>
                             })}
                             {spec.is_none().then(|| view! {

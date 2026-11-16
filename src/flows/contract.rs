@@ -92,32 +92,7 @@ pub enum OperationRuntime {
     Script(ScriptRuntime),
 }
 
-/// Interpréteur système supporté pour l'exécution agnostique de scripts (sans shell libre).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ScriptInterpreter {
-    Bash,
-    Sh,
-    Python3,
-    Node,
-    Deno,
-    Bun,
-    Pwsh,
-}
-
-impl ScriptInterpreter {
-    pub const fn executable(self) -> &'static str {
-        match self {
-            Self::Bash => "bash",
-            Self::Sh => "sh",
-            Self::Python3 => "python3",
-            Self::Node => "node",
-            Self::Deno => "deno",
-            Self::Bun => "bun",
-            Self::Pwsh => "pwsh",
-        }
-    }
-}
+pub use flux_shared::local::ScriptInterpreter;
 
 /// Contrat d'exécution d'un script ou exécutable agnostique via `stdin`/`stdout` JSON (`kind: "script"`).
 #[derive(Clone, Debug, Deserialize, Serialize)]

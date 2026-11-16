@@ -3,6 +3,7 @@
 use super::dnd::BranchTarget;
 use super::fields::FieldControl;
 use super::presentation::{NodeDomain, node_output_ports, output_presentation};
+use super::script_inspector::{ScriptBlockInspector, UNIFIED_SCRIPT_KIND};
 use super::state::Editor;
 use crate::ui::{Icon, IconName};
 use flux_shared::flows::{FlowGraph, OwnedBlockSpec, find_owned};
@@ -167,10 +168,12 @@ pub fn NodeInspector(editor: Editor, can_manage: bool) -> impl IntoView {
                     .as_ref()
                     .and_then(|s| s.owner.as_deref())
                     .is_some_and(|owner| owner.starts_with("script."));
+                let is_unified_script = node.kind.as_str() == UNIFIED_SCRIPT_KIND;
                 let fields = spec
                     .as_ref()
                     .map(|s| s.fields.clone())
                     .unwrap_or_default();
+                let node_for_script = node.clone();
                 let name_id = node_id.clone();
                 let dup_id = node_id.clone();
                 let remove_id = node_id.clone();
@@ -223,9 +226,20 @@ pub fn NodeInspector(editor: Editor, can_manage: bool) -> impl IntoView {
                                 />
                             </div>
 
-                            {fields.into_iter().map(|field| view! {
-                                <FieldControl editor=editor node_id=node_id.clone() field=field />
-                            }).collect_view()}
+                            {if is_unified_script {
+                                view! {
+                                    <ScriptBlockInspector
+                                        editor=editor
+                                        node_id=node_id.clone()
+                                        node=node_for_script
+                                        can_manage=can_manage
+                                    />
+                                }.into_any()
+                            } else {
+                                fields.into_iter().map(|field| view! {
+                                    <FieldControl editor=editor node_id=node_id.clone() field=field />
+                                }).collect_view().into_any()
+                            }}
 
                             <Outputs editor=editor node_id=node_id.clone() can_manage=can_manage />
                         </div>

@@ -463,13 +463,15 @@ pub(crate) async fn serve_spa(
     }
 }
 
+pub(crate) const OPENAPI_SPEC: &str = include_str!("../docs/openapi.yaml");
+
 async fn openapi_yaml(_auth: ViewOverviewAuth) -> impl axum::response::IntoResponse {
     (
         [(
             axum::http::header::CONTENT_TYPE,
             "application/yaml; charset=utf-8",
         )],
-        include_str!("../docs/openapi.yaml"),
+        OPENAPI_SPEC,
     )
 }
 

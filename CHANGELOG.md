@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.30.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.29.0...v0.30.0) (2026-11-16)
+
+
+### Features
+
+* **plugins:** releases immuables, SHA-256 complet et index.json à la racine ([d1697fc](https://github.com/remi-deher/flux-de-fichiers/commit/d1697fc7cbfb557d9ddf7e4e4ea8291cc72df784))
+* **plugins:** releases immuables, SHA-256 complet et index.json à la racine ([a973500](https://github.com/remi-deher/flux-de-fichiers/commit/a973500dd563057e9b0e3f817315af24e6d2d1cd))
+
+
+### Bug Fixes
+
+* **plugins:** supprimer expect() dans le test de sync pour clippy ([b9d1165](https://github.com/remi-deher/flux-de-fichiers/commit/b9d1165da4ff2b613639a7a7d8827be4b2d6c89a))
+
 ## [0.29.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.28.0...v0.29.0) (2026-11-16)
 
 

@@ -12,6 +12,7 @@ pub mod instance;
 pub mod job_runner;
 pub mod local_worker;
 pub mod mail;
+pub mod mcp;
 pub mod media;
 pub mod net_policy;
 pub mod password;

@@ -415,10 +415,13 @@ pub fn build_tool_detail(
         .as_ref()
         .and_then(|m| m.description.clone())
         .unwrap_or_default();
-    let summary = summarize_tool(entry.clone(), description, cache_mgr);
     let distribution = read_distribution(roots, tool_id)
         .ok()
         .and_then(|value| parse_distribution(&value.to_string()).ok());
+    let installable = distribution
+        .as_ref()
+        .is_some_and(distribution_is_installable);
+    let summary = summarize_tool(entry.clone(), description, installable, cache_mgr);
     let host = host_arch();
     let artifacts = distribution
         .as_ref()
@@ -529,10 +532,27 @@ pub fn build_repository_detail(
     }
 }
 
-/// Résumé d'un outil du catalogue : prêt s'il est dans le cache local, sinon installable.
+fn distribution_is_installable(dist: &crate::tools_cache::ToolDistribution) -> bool {
+    dist.release_status.as_deref() != Some("contract-only")
+        && install::artifact_for_host(dist).is_some()
+}
+
+/// Indique si l'outil dispose d'un contrat distribuable pour l'architecture de cet hôte.
+pub fn is_tool_installable(roots: &[PathBuf], tool_id: &str) -> bool {
+    let Ok(raw) = read_distribution(roots, tool_id) else {
+        return false;
+    };
+    let Ok(dist) = parse_distribution(&raw.to_string()) else {
+        return false;
+    };
+    distribution_is_installable(&dist)
+}
+
+/// Résumé d'un outil du catalogue : prêt s'il est dans le cache local, sinon installable selon son contrat.
 pub fn summarize_tool(
     entry: CatalogEntry,
     description: String,
+    installable: bool,
     cache_mgr: &ToolCacheManager,
 ) -> ToolStatusSummary {
     let arch = host_arch();
@@ -557,6 +577,7 @@ pub fn summarize_tool(
             .distribution
             .unwrap_or_else(|| "autonomous-binary".into()),
         description,
+        installable,
     }
 }
 
@@ -573,7 +594,8 @@ pub fn list_tools_status(
                 .ok()
                 .and_then(|manifest| manifest.description)
                 .unwrap_or_default();
-            summarize_tool(entry, description, cache_mgr)
+            let installable = is_tool_installable(roots, &entry.id);
+            summarize_tool(entry, description, installable, cache_mgr)
         })
         .collect()
 }
@@ -587,7 +609,7 @@ pub fn tool_statuses_for_entries(
     entries
         .into_iter()
         .filter(|entry| entry.entry_type == CatalogItemType::App)
-        .map(|entry| summarize_tool(entry, String::new(), cache_mgr))
+        .map(|entry| summarize_tool(entry, String::new(), true, cache_mgr))
         .collect()
 }
 
@@ -882,6 +904,43 @@ mod tests {
         assert_eq!(detail.dependencies.len(), 1);
         assert_eq!(detail.blocks.len(), 1);
         assert_eq!(detail.blocks[0].kind, "block.sonarr.rescan");
+        Ok(())
+    }
+
+    #[test]
+    fn is_tool_installable_distinguishes_released_from_contract_only() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let arch = host_arch();
+        for (folder, id, status) in [
+            ("released-tool", "app.released-tool", "released"),
+            ("pending-tool", "app.pending-tool", "contract-only"),
+        ] {
+            let tool_dir = dir.path().join("apps").join(folder);
+            std::fs::create_dir_all(&tool_dir)?;
+            std::fs::write(
+                tool_dir.join("distribution.v1.json"),
+                serde_json::json!({
+                    "schemaVersion": "1.0.0",
+                    "toolId": id,
+                    "toolVersion": "1.0.0",
+                    "distributionMode": "autonomous-binary",
+                    "releaseStatus": status,
+                    "artifacts": [{
+                        "arch": arch,
+                        "os": "linux",
+                        "archiveUrl": "https://example.invalid/tool.tar.gz",
+                        "archiveFormat": "tar.gz",
+                        "archiveSha256": "0000",
+                        "binaryRelativePath": "tool"
+                    }]
+                })
+                .to_string(),
+            )?;
+        }
+        let roots = [dir.path().to_path_buf()];
+        assert!(is_tool_installable(&roots, "app.released-tool"));
+        assert!(!is_tool_installable(&roots, "app.pending-tool"));
+        assert!(!is_tool_installable(&roots, "app.unknown"));
         Ok(())
     }
 }

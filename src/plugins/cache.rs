@@ -2,8 +2,9 @@
 
 use super::{
     CatalogEntry, CatalogItemType, PluginDetailView, SettingsField, ToolStatusSummary,
-    build_plugin_detail, catalog_with_roots, flow_block_catalog, load_manifest, parse_distribution,
-    read_distribution, settings_fields as load_settings_fields, summarize_tool,
+    build_plugin_detail, catalog_with_roots, flow_block_catalog, is_tool_installable,
+    load_manifest, parse_distribution, read_distribution, settings_fields as load_settings_fields,
+    summarize_tool,
 };
 use crate::{flows::OperationRegistry, tools_cache::ToolCacheManager};
 use flux_shared::flows::OwnedBlockSpec;
@@ -16,7 +17,7 @@ struct CachedSnapshot {
     entries: Vec<(PathBuf, CatalogEntry)>,
     blocks: Vec<OwnedBlockSpec>,
     operations: OperationRegistry,
-    tool_descriptions: Vec<(CatalogEntry, String)>,
+    tool_descriptions: Vec<(CatalogEntry, String, bool)>,
 }
 
 /// Cache thread-safe des métadonnées du catalogue lues depuis les dépôts synchronisés.
@@ -102,7 +103,9 @@ impl CatalogCache {
             .await
             .tool_descriptions
             .into_iter()
-            .map(|(entry, description)| summarize_tool(entry, description, cache_mgr))
+            .map(|(entry, description, installable)| {
+                summarize_tool(entry, description, installable, cache_mgr)
+            })
             .collect()
     }
 
@@ -160,7 +163,8 @@ fn build_snapshot(roots: Vec<PathBuf>) -> CachedSnapshot {
                 .ok()
                 .and_then(|manifest| manifest.description)
                 .unwrap_or_default();
-            (entry.clone(), description)
+            let installable = is_tool_installable(&roots, &entry.id);
+            (entry.clone(), description, installable)
         })
         .collect();
     CachedSnapshot {

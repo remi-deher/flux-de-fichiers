@@ -173,10 +173,16 @@ impl PluginsTab {
         }
     }
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SelectedItem {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Clone, PartialEq, Eq)]
 enum CatalogDrawer {
-    Plugin(String),
-    PackDetails(String),
+    Plugin(SelectedItem),
+    PackDetails(SelectedItem),
 }
 
 #[component]
@@ -188,14 +194,24 @@ fn CatalogSectionView(
     can_configure: bool,
 ) -> impl IntoView {
     let filters = use_context::<Filters>();
-    let inspecting_plugin = RwSignal::new(None::<String>);
+    let inspecting_plugin = RwSignal::new(None::<SelectedItem>);
     let plugin_drawer_open = RwSignal::new(false);
     let plugin_tab = RwSignal::new(0_usize);
-    let inspecting_pack = RwSignal::new(None::<String>);
+    let inspecting_pack = RwSignal::new(None::<SelectedItem>);
     let pack_drawer_open = RwSignal::new(false);
     let pack_tab = RwSignal::new(0_usize);
-    let plugin_title = Signal::derive(move || inspecting_plugin.get().unwrap_or_default());
-    let pack_title = Signal::derive(move || inspecting_pack.get().unwrap_or_default());
+    let plugin_title = Signal::derive(move || {
+        inspecting_plugin
+            .get()
+            .map(|item| item.name)
+            .unwrap_or_default()
+    });
+    let pack_title = Signal::derive(move || {
+        inspecting_pack
+            .get()
+            .map(|item| item.name)
+            .unwrap_or_default()
+    });
     let on_pack_installed = Callback::new(move |()| bump(reload_tools));
     let stats = Signal::derive(move || {
         let catalog_entries = catalog.get().and_then(Result::ok).unwrap_or_default();
@@ -272,8 +288,8 @@ fn CatalogSectionView(
             tabs=PluginDrawerTab::tabs(can_configure).to_vec()
             tab=plugin_tab
         >
-            {move || inspecting_plugin.get().map(|id| {
-                view! { <PluginDetail plugin_id=id tab=plugin_tab can_configure=can_configure /> }
+            {move || inspecting_plugin.get().map(|item| {
+                view! { <PluginDetail plugin_id=item.id tab=plugin_tab can_configure=can_configure /> }
             })}
         </Drawer>
         <Drawer
@@ -283,10 +299,10 @@ fn CatalogSectionView(
             tabs=PackDrawerTab::TABS.to_vec()
             tab=pack_tab
         >
-            {move || inspecting_pack.get().map(|id| {
+            {move || inspecting_pack.get().map(|item| {
                 view! {
                     <PackDetail
-                        pack_id=id
+                        pack_id=item.id
                         tab=pack_tab
                         can_install=can_configure
                         on_installed=on_pack_installed
@@ -340,11 +356,17 @@ fn CatalogSectionView(
                                     let active_id = id.clone();
                                     let target = match entry.entry_type {
                                         CatalogItemType::Plugin => Some((
-                                            CatalogDrawer::Plugin(id.clone()),
+                                            CatalogDrawer::Plugin(SelectedItem {
+                                                id: id.clone(),
+                                                name: entry.name.clone(),
+                                            }),
                                             if can_configure { "Configurer" } else { "Détails" },
                                         )),
                                         CatalogItemType::Pack => Some((
-                                            CatalogDrawer::PackDetails(id.clone()),
+                                            CatalogDrawer::PackDetails(SelectedItem {
+                                                id: id.clone(),
+                                                name: entry.name.clone(),
+                                            }),
                                             if can_configure { "Voir / Installer" } else { "Détails" },
                                         )),
                                         _ => None,
@@ -415,11 +437,13 @@ fn CatalogSectionView(
                                             badge=Some(badge)
                                             active=Some(Signal::derive(move || {
                                                 (plugin_drawer_open.get()
-                                                    && inspecting_plugin.get().as_deref()
-                                                        == Some(active_id.as_str()))
+                                                    && inspecting_plugin
+                                                        .get()
+                                                        .is_some_and(|item| item.id == active_id))
                                                     || (pack_drawer_open.get()
-                                                        && inspecting_pack.get().as_deref()
-                                                            == Some(active_id.as_str()))
+                                                        && inspecting_pack
+                                                            .get()
+                                                            .is_some_and(|item| item.id == active_id))
                                             }))
                                             on_click=open_drawer
                                             footer_meta=id

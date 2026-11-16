@@ -1088,6 +1088,10 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   margin-top: 0.25rem;
 }
 
+.resource-grid--list {
+  grid-template-columns: 1fr;
+}
+
 .resource-card {
   display: flex;
   flex-direction: column;

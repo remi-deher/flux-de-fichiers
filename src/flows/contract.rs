@@ -23,6 +23,8 @@ use thiserror::Error;
 
 const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 15;
 const DEFAULT_CONSOLE_TIMEOUT_SECS: u64 = 3600;
+const DEFAULT_SCRIPT_TIMEOUT_SECS: u64 = 300;
+const MAX_INLINE_SCRIPT_BYTES: usize = 512 * 1024;
 
 fn default_console_timeout() -> u64 {
     DEFAULT_CONSOLE_TIMEOUT_SECS
@@ -30,6 +32,10 @@ fn default_console_timeout() -> u64 {
 
 fn default_http_timeout() -> u64 {
     DEFAULT_HTTP_TIMEOUT_SECS
+}
+
+fn default_script_timeout() -> u64 {
+    DEFAULT_SCRIPT_TIMEOUT_SECS
 }
 
 /// Erreur d'évaluation ou de résolution d'un contrat d'opération.
@@ -75,7 +81,7 @@ pub struct OperationContract {
     pub runtime: OperationRuntime,
 }
 
-/// Définition d'exécution selon la nature (`primitive`, `binary`, `http`).
+/// Définition d'exécution selon la nature (`primitive`, `binary`, `http`, `script`).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[allow(clippy::large_enum_variant)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -83,6 +89,58 @@ pub enum OperationRuntime {
     Primitive(PrimitiveRuntime),
     Binary(BinaryRuntime),
     Http(HttpRuntime),
+    Script(ScriptRuntime),
+}
+
+/// Interpréteur système supporté pour l'exécution agnostique de scripts (sans shell libre).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScriptInterpreter {
+    Bash,
+    Sh,
+    Python3,
+    Node,
+    Deno,
+    Bun,
+    Pwsh,
+}
+
+impl ScriptInterpreter {
+    pub const fn executable(self) -> &'static str {
+        match self {
+            Self::Bash => "bash",
+            Self::Sh => "sh",
+            Self::Python3 => "python3",
+            Self::Node => "node",
+            Self::Deno => "deno",
+            Self::Bun => "bun",
+            Self::Pwsh => "pwsh",
+        }
+    }
+}
+
+/// Contrat d'exécution d'un script ou exécutable agnostique via `stdin`/`stdout` JSON (`kind: "script"`).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptRuntime {
+    #[serde(default)]
+    pub tool: Option<ToolRef>,
+    #[serde(default)]
+    pub executable: Option<String>,
+    #[serde(default)]
+    pub interpreter: Option<ScriptInterpreter>,
+    #[serde(default)]
+    pub entrypoint: Option<String>,
+    #[serde(default)]
+    pub code: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub error_code: Option<JobErrorCode>,
+    #[serde(default = "default_script_timeout")]
+    pub timeout_seconds: u64,
+    #[serde(default)]
+    pub defaults: Map<String, Value>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -402,6 +460,49 @@ pub struct HttpRuntime {
     pub steps: Vec<HttpStep>,
 }
 
+/// Charge le fichier `entrypoint` d'une opération `kind: "script"` depuis le dossier du manifeste
+/// afin de le transporter dans `Claim` vers les workers distants, sans jamais sortir de `manifest_dir`.
+fn resolve_script_entrypoint(manifest_dir: &Path, raw: &mut Value) {
+    let Some(runtime) = raw.get_mut("runtime").and_then(Value::as_object_mut) else {
+        return;
+    };
+    if runtime.get("kind").and_then(Value::as_str) != Some("script") {
+        return;
+    }
+    if runtime
+        .get("code")
+        .and_then(Value::as_str)
+        .is_some_and(|code| !code.is_empty())
+    {
+        return;
+    }
+    let Some(entrypoint) = runtime.get("entrypoint").and_then(Value::as_str) else {
+        return;
+    };
+    let rel = Path::new(entrypoint);
+    if !ToolCacheManager::is_safe_relative_path(rel) {
+        return;
+    }
+    let Ok(base) = std::fs::canonicalize(manifest_dir) else {
+        return;
+    };
+    let Ok(resolved) = std::fs::canonicalize(base.join(rel)) else {
+        return;
+    };
+    if !resolved.starts_with(&base) {
+        return;
+    }
+    let Ok(bytes) = std::fs::read(&resolved) else {
+        return;
+    };
+    if bytes.len() > MAX_INLINE_SCRIPT_BYTES {
+        return;
+    }
+    if let Ok(code) = String::from_utf8(bytes) {
+        runtime.insert("code".to_owned(), Value::String(code));
+    }
+}
+
 /// Registre en mémoire des contrats d'opérations et de la table bloc/alias → `operationId`.
 #[derive(Clone, Debug, Default)]
 pub struct OperationRegistry {
@@ -433,14 +534,17 @@ impl OperationRegistry {
     pub fn load_from_roots(roots: &[PathBuf]) -> Self {
         let mut registry = Self::new();
         for (root, entry) in catalog_with_roots(roots) {
-            if entry.entry_type != CatalogItemType::Plugin {
+            if !matches!(
+                entry.entry_type,
+                CatalogItemType::Plugin | CatalogItemType::Script
+            ) {
                 continue;
             }
             let Ok(manifest) = load_manifest(&root, &entry.manifest_path) else {
                 continue;
             };
             let manifest_rel = Path::new(&entry.manifest_path);
-            let manifest_dir = manifest_rel.parent().unwrap_or_else(|| Path::new(""));
+            let manifest_dir = root.join(manifest_rel.parent().unwrap_or_else(|| Path::new("")));
             for file in manifest.files {
                 if file.role.as_deref() != Some("operation") {
                     continue;
@@ -449,11 +553,12 @@ impl OperationRegistry {
                 if !ToolCacheManager::is_safe_relative_path(rel_path) {
                     continue;
                 }
-                let full_path = root.join(manifest_dir).join(rel_path);
+                let full_path = manifest_dir.join(rel_path);
                 let Ok(text) = std::fs::read_to_string(&full_path) else {
                     continue;
                 };
-                if let Ok(value) = serde_json::from_str::<Value>(&text) {
+                if let Ok(mut value) = serde_json::from_str::<Value>(&text) {
+                    resolve_script_entrypoint(&manifest_dir, &mut value);
                     let _ = registry.register_json(value);
                 }
             }
@@ -632,8 +737,12 @@ impl OperationRegistry {
         let mut seen = HashSet::new();
         let mut tools = Vec::new();
         let mut push_op_tool = |op: &OperationContract| {
-            if let OperationRuntime::Binary(bin) = &op.runtime
-                && let Some(tool) = &bin.tool
+            let tool = match &op.runtime {
+                OperationRuntime::Binary(bin) => bin.tool.as_ref(),
+                OperationRuntime::Script(script) => script.tool.as_ref(),
+                OperationRuntime::Primitive(_) | OperationRuntime::Http(_) => None,
+            };
+            if let Some(tool) = tool
                 && seen.insert(tool.id.clone())
             {
                 tools.push(tool.clone());
@@ -1306,6 +1415,62 @@ mod tests {
             vec!["operation.ebook.enrich"]
         );
         assert!(reg.enrich_probes_for_file(Path::new("film.mkv")).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn load_from_roots_inlines_safe_script_entrypoint_and_rejects_traversal() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        std::fs::create_dir_all(dir.path().join("scripts/hello/operations"))?;
+        std::fs::write(dir.path().join("outside.sh"), "echo secret")?;
+        std::fs::write(
+            dir.path().join("index.json"),
+            r#"{"schemaVersion":"1.0.0","entries":[
+                {"id":"script.hello","type":"script","version":"1.0.0","name":"Hello","manifestPath":"scripts/hello/manifest.json"}
+            ]}"#,
+        )?;
+        std::fs::write(
+            dir.path().join("scripts/hello/manifest.json"),
+            r#"{"schemaVersion":"1.1.0","id":"script.hello","type":"script","version":"1.0.0","name":"Hello",
+                "files":[
+                    {"path":"operations/run.json","role":"operation","mediaType":"application/json"},
+                    {"path":"operations/evil.json","role":"operation","mediaType":"application/json"}
+                ]}"#,
+        )?;
+        std::fs::write(
+            dir.path().join("scripts/hello/operations/run.json"),
+            r#"{"schemaVersion":"1.1.0","id":"operation.script.hello","version":"1.0.0","name":"Hello",
+                "providerId":"script.hello","providerKind":"script","capability":"custom","status":"validated",
+                "runtime":{"kind":"script","interpreter":"sh","entrypoint":"run.sh"}}"#,
+        )?;
+        std::fs::write(
+            dir.path().join("scripts/hello/run.sh"),
+            "printf '{\"status\":\"ok\"}'",
+        )?;
+        std::fs::write(
+            dir.path().join("scripts/hello/operations/evil.json"),
+            r#"{"schemaVersion":"1.1.0","id":"operation.script.evil","version":"1.0.0","name":"Evil",
+                "providerId":"script.hello","providerKind":"script","capability":"custom","status":"validated",
+                "runtime":{"kind":"script","interpreter":"sh","entrypoint":"../../outside.sh"}}"#,
+        )?;
+
+        let reg = OperationRegistry::load_from_roots(&[dir.path().to_path_buf()]);
+        let ok_op = reg
+            .get("operation.script.hello")
+            .ok_or_else(|| anyhow::anyhow!("opération script manquante"))?;
+        let OperationRuntime::Script(rt) = &ok_op.runtime else {
+            panic!("attendu ScriptRuntime");
+        };
+        assert_eq!(rt.code.as_deref(), Some("printf '{\"status\":\"ok\"}'"));
+
+        let evil_op = reg
+            .get("operation.script.evil")
+            .ok_or_else(|| anyhow::anyhow!("opération evil manquante"))?;
+        let OperationRuntime::Script(evil_rt) = &evil_op.runtime else {
+            panic!("attendu ScriptRuntime");
+        };
+        assert!(evil_rt.code.is_none());
         Ok(())
     }
 }

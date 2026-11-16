@@ -17,6 +17,8 @@ pub enum CatalogItemType {
     App,
     #[serde(rename = "flow")]
     Flow,
+    #[serde(rename = "script")]
+    Script,
     #[serde(rename = "preset")]
     Preset,
     #[serde(rename = "resource.font")]
@@ -25,6 +27,8 @@ pub enum CatalogItemType {
     ResourceImage,
     #[serde(rename = "resource.audio")]
     ResourceAudio,
+    #[serde(rename = "resource.subtitle")]
+    ResourceSubtitle,
     #[serde(rename = "resource.color")]
     ResourceColor,
     #[serde(rename = "resource.language")]
@@ -43,10 +47,12 @@ impl CatalogItemType {
             Self::Plugin => "plugin",
             Self::App => "app",
             Self::Flow => "flow",
+            Self::Script => "script",
             Self::Preset => "preset",
             Self::ResourceFont => "resource.font",
             Self::ResourceImage => "resource.image",
             Self::ResourceAudio => "resource.audio",
+            Self::ResourceSubtitle => "resource.subtitle",
             Self::ResourceColor => "resource.color",
             Self::ResourceLanguage => "resource.language",
             Self::ResourceTemplate => "resource.template",
@@ -63,16 +69,18 @@ pub enum CatalogSection {
     Applications,
     Plugins,
     Flows,
-    /// Éléments externes appelables par un flux : image, musique, police, langue, etc.
+    Scripts,
+    /// Éléments externes appelables par un flux : image, musique, sous-titre, police, langue, etc.
     Other,
     Packs,
 }
 
 impl CatalogSection {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Applications,
         Self::Plugins,
         Self::Flows,
+        Self::Scripts,
         Self::Other,
         Self::Packs,
     ];
@@ -82,6 +90,7 @@ impl CatalogSection {
             Self::Applications => "Applications",
             Self::Plugins => "Plugins",
             Self::Flows => "Flows",
+            Self::Scripts => "Scripts",
             Self::Other => "Autre",
             Self::Packs => "Packs",
         }
@@ -95,10 +104,12 @@ impl CatalogItemType {
             Self::App => Some(CatalogSection::Applications),
             Self::Plugin => Some(CatalogSection::Plugins),
             Self::Flow => Some(CatalogSection::Flows),
+            Self::Script => Some(CatalogSection::Scripts),
             Self::Preset
             | Self::ResourceFont
             | Self::ResourceImage
             | Self::ResourceAudio
+            | Self::ResourceSubtitle
             | Self::ResourceColor
             | Self::ResourceLanguage
             | Self::ResourceTemplate => Some(CatalogSection::Other),
@@ -114,6 +125,7 @@ impl CatalogItemType {
             Self::ResourceFont => Some("Polices"),
             Self::ResourceImage => Some("Images"),
             Self::ResourceAudio => Some("Musiques et sons"),
+            Self::ResourceSubtitle => Some("Sous-titres"),
             Self::ResourceColor => Some("Couleurs"),
             Self::ResourceLanguage => Some("Langues"),
             Self::ResourceTemplate => Some("Modèles"),
@@ -126,14 +138,18 @@ impl CatalogItemType {
         self != Self::Block
     }
 
-    /// Règle de dépendance : un plugin dépend d'applications, un flow de plugins ou
-    /// d'éléments « Autre », un pack regroupe des pièces autonomes. Applications et
+    /// Règle de dépendance : un plugin dépend d'applications, un flow de plugins, scripts ou
+    /// d'éléments « Autre », un pack regroupe des pièces autonomes. Applications, scripts et
     /// « Autre » ne dépendent de rien ; un bloc ne dépend que de son plugin propriétaire.
     pub fn may_depend_on(self, target: Self) -> bool {
         let target_section = target.section();
         match self {
             Self::Plugin => target == Self::App,
-            Self::Flow => target == Self::Plugin || target_section == Some(CatalogSection::Other),
+            Self::Flow => {
+                target == Self::Plugin
+                    || target == Self::Script
+                    || target_section == Some(CatalogSection::Other)
+            }
             Self::Pack => target.can_stand_alone() && target != Self::Pack,
             _ => false,
         }
@@ -293,10 +309,12 @@ mod tests {
             CatalogItemType::Plugin,
             CatalogItemType::App,
             CatalogItemType::Flow,
+            CatalogItemType::Script,
             CatalogItemType::Preset,
             CatalogItemType::ResourceFont,
             CatalogItemType::ResourceImage,
             CatalogItemType::ResourceAudio,
+            CatalogItemType::ResourceSubtitle,
             CatalogItemType::ResourceColor,
             CatalogItemType::ResourceLanguage,
             CatalogItemType::ResourceTemplate,
@@ -313,14 +331,16 @@ mod tests {
         Ok(())
     }
 
-    const ALL_TYPES: [CatalogItemType; 12] = [
+    const ALL_TYPES: [CatalogItemType; 14] = [
         CatalogItemType::Plugin,
         CatalogItemType::App,
         CatalogItemType::Flow,
+        CatalogItemType::Script,
         CatalogItemType::Preset,
         CatalogItemType::ResourceFont,
         CatalogItemType::ResourceImage,
         CatalogItemType::ResourceAudio,
+        CatalogItemType::ResourceSubtitle,
         CatalogItemType::ResourceColor,
         CatalogItemType::ResourceLanguage,
         CatalogItemType::ResourceTemplate,
@@ -350,15 +370,20 @@ mod tests {
 
     #[test]
     fn dependency_rules_follow_the_catalog_model() {
-        use CatalogItemType::{App, Block, Flow, Pack, Plugin, ResourceImage};
+        use CatalogItemType::{
+            App, Block, Flow, Pack, Plugin, ResourceImage, ResourceSubtitle, Script,
+        };
         assert!(Plugin.may_depend_on(App));
         assert!(!Plugin.may_depend_on(Flow));
         assert!(Flow.may_depend_on(Plugin));
+        assert!(Flow.may_depend_on(Script));
         assert!(Flow.may_depend_on(ResourceImage));
+        assert!(Flow.may_depend_on(ResourceSubtitle));
         assert!(!Flow.may_depend_on(App));
         assert!(!App.may_depend_on(Plugin));
         assert!(!ResourceImage.may_depend_on(App));
-        assert!(Pack.may_depend_on(App) && Pack.may_depend_on(Flow));
+        assert!(!Script.may_depend_on(App));
+        assert!(Pack.may_depend_on(App) && Pack.may_depend_on(Flow) && Pack.may_depend_on(Script));
         assert!(!Pack.may_depend_on(Block) && !Pack.may_depend_on(Pack));
         assert!(!Block.may_depend_on(App));
     }

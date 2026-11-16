@@ -5,11 +5,13 @@
 
 pub mod accounts;
 pub mod app;
+pub mod base64;
 pub mod diagnostics;
 pub mod flows;
 pub mod format;
 pub mod jobs;
 pub mod libraries;
+pub mod local;
 pub mod plugins;
 pub mod search;
 pub mod session;

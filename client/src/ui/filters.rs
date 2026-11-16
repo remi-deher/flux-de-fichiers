@@ -102,7 +102,10 @@ pub enum PluginKindFilter {
     Any,
     Plugins,
     Flows,
+    Scripts,
+    Resources,
     Packs,
+    DistributedTools,
 }
 
 impl PluginKindFilter {
@@ -114,7 +117,12 @@ impl PluginKindFilter {
                 .is_some_and(|section| section != CatalogSection::Applications),
             Self::Plugins => entry.entry_type.section() == Some(CatalogSection::Plugins),
             Self::Flows => entry.entry_type.section() == Some(CatalogSection::Flows),
+            Self::Scripts => entry.entry_type.section() == Some(CatalogSection::Scripts),
+            Self::Resources => entry.entry_type.section() == Some(CatalogSection::Other),
             Self::Packs => entry.entry_type.section() == Some(CatalogSection::Packs),
+            Self::DistributedTools => {
+                entry.entry_type.section() == Some(CatalogSection::Applications)
+            }
         }
     }
 }
@@ -364,20 +372,31 @@ mod tests {
     fn plugin_kind_filter_selects_catalog_sections() {
         let plugin = catalog_entry(CatalogItemType::Plugin);
         let flow = catalog_entry(CatalogItemType::Flow);
+        let script = catalog_entry(CatalogItemType::Script);
         let pack = catalog_entry(CatalogItemType::Pack);
         let preset = catalog_entry(CatalogItemType::Preset);
+        let subtitle = catalog_entry(CatalogItemType::ResourceSubtitle);
         let app = catalog_entry(CatalogItemType::App);
         let block = catalog_entry(CatalogItemType::Block);
 
         assert!(PluginKindFilter::Any.accepts(&plugin));
         assert!(PluginKindFilter::Any.accepts(&flow));
+        assert!(PluginKindFilter::Any.accepts(&script));
+        assert!(PluginKindFilter::Any.accepts(&subtitle));
         assert!(!PluginKindFilter::Any.accepts(&app));
         assert!(!PluginKindFilter::Any.accepts(&block));
 
         assert!(PluginKindFilter::Plugins.accepts(&plugin));
         assert!(!PluginKindFilter::Plugins.accepts(&flow));
         assert!(PluginKindFilter::Flows.accepts(&flow));
+        assert!(PluginKindFilter::Scripts.accepts(&script));
+        assert!(!PluginKindFilter::Scripts.accepts(&flow));
+        assert!(PluginKindFilter::Resources.accepts(&preset));
+        assert!(PluginKindFilter::Resources.accepts(&subtitle));
+        assert!(!PluginKindFilter::Resources.accepts(&script));
         assert!(PluginKindFilter::Packs.accepts(&pack));
+        assert!(PluginKindFilter::DistributedTools.accepts(&app));
+        assert!(!PluginKindFilter::DistributedTools.accepts(&plugin));
         assert!(PluginKindFilter::Any.accepts(&preset));
         assert!(!PluginKindFilter::Packs.accepts(&preset));
     }

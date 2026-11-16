@@ -41,7 +41,8 @@ pub fn flow_block_catalog(roots: &[PathBuf]) -> Vec<OwnedBlockSpec> {
         let Ok(document) = load_block_document(&root, &entry.manifest_path) else {
             continue;
         };
-        let owned = document_to_spec(&document);
+        let mut owned = document_to_spec(&document);
+        owned.owner = entry.owner.clone();
         if let Some(existing) = catalog.iter_mut().find(|spec| spec.kind == owned.kind) {
             *existing = owned;
         } else {
@@ -247,6 +248,7 @@ fn document_to_spec(document: &PluginBlockDocument) -> OwnedBlockSpec {
         suggested_next: document.suggested_next.clone(),
         from_plugin: true,
         operation_id: document.operation_id.clone(),
+        owner: None,
     };
     // Prefixe les défauts du manifeste pour les listes de choix.
     apply_declared_defaults(&mut spec, &document.field_defaults);
@@ -321,6 +323,7 @@ mod tests {
             .find(|spec| spec.kind == "block.video.encode")
             .ok_or_else(|| anyhow::anyhow!("bloc d'encodage vidéo absent"))?;
         assert!(encode.from_plugin);
+        assert_eq!(encode.owner.as_deref(), Some("plugin.video"));
         assert!(
             encode
                 .fields

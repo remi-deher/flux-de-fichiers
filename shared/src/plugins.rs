@@ -2,6 +2,7 @@
 
 pub mod vocab;
 
+use crate::flows::OwnedBlockSpec;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use vocab::{CatalogCapability, CatalogItemType, PluginCategory};
@@ -156,4 +157,134 @@ pub struct PackInstallResult {
     pub failed_tools: Vec<(String, String)>,
     pub verified_components: Vec<String>,
     pub missing_components: Vec<String>,
+}
+
+/// Dépendance déclarée dans le manifeste d'un plugin.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDependency {
+    pub id: String,
+    #[serde(default)]
+    pub version_range: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub optional: bool,
+}
+
+/// Compatibilité déclarée par le manifeste d'un plugin.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCompatibility {
+    #[serde(default)]
+    pub app_min: Option<String>,
+    #[serde(default)]
+    pub platforms: Vec<String>,
+}
+
+/// Fiche détaillée d'un plugin pour le tiroir d'inspection (`GET /api/v1/plugins/{id}`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDetailView {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub license: Option<String>,
+    #[serde(default)]
+    pub capability: Option<CatalogCapability>,
+    #[serde(default, deserialize_with = "vocab::deserialize_optional_category")]
+    pub category: Option<PluginCategory>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub dependencies: Vec<PluginDependency>,
+    #[serde(default)]
+    pub compatibility: PluginCompatibility,
+    #[serde(default)]
+    pub has_settings: bool,
+    #[serde(default)]
+    pub blocks: Vec<OwnedBlockSpec>,
+}
+
+/// Fiche détaillée d'un pack pour le tiroir à onglets (`GET /api/v1/packs/{id}`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackDetailView {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub license: Option<String>,
+    #[serde(default, deserialize_with = "vocab::deserialize_optional_category")]
+    pub category: Option<PluginCategory>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub compatibility: PluginCompatibility,
+    pub installation: PackInstallation,
+}
+
+/// Artefact déclaré dans `distribution.v1.json` pour une architecture donnée.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolArtifactSummary {
+    pub arch: String,
+    pub archive_format: String,
+    pub archive_sha256: String,
+    pub binary_relative_path: String,
+    pub host_supported: bool,
+}
+
+/// Fiche détaillée d'un outil distribué pour le tiroir à onglets (`GET /api/v1/tools/{id}`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolDetailView {
+    pub summary: ToolStatusSummary,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub license: Option<String>,
+    #[serde(default)]
+    pub interface: Option<String>,
+    #[serde(default)]
+    pub invocation: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub compatibility: PluginCompatibility,
+    #[serde(default)]
+    pub tool_version: Option<String>,
+    #[serde(default)]
+    pub release_status: Option<String>,
+    #[serde(default)]
+    pub distribution_mode: Option<String>,
+    #[serde(default)]
+    pub artifacts: Vec<ToolArtifactSummary>,
+    #[serde(default)]
+    pub used_by_plugins: Vec<String>,
+}
+
+/// Fiche détaillée d'un dépôt de plugins (`GET /api/v1/plugins/repositories/{id}`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryDetailView {
+    pub repository: PluginRepository,
+    pub synced_on_disk: bool,
+    #[serde(default)]
+    pub schema_version: Option<String>,
+    #[serde(default)]
+    pub release_version: Option<String>,
+    pub entries_count: usize,
+    pub skipped_count: usize,
+    #[serde(default)]
+    pub entries: Vec<CatalogEntry>,
 }

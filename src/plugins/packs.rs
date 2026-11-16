@@ -8,7 +8,7 @@ use crate::{
     error::{AppError, AppResult},
     tools_cache::ToolCacheManager,
 };
-pub use flux_shared::plugins::{PackInstallResult, PackInstallation};
+pub use flux_shared::plugins::{PackDetailView, PackInstallResult, PackInstallation};
 use serde_json::Value;
 use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
@@ -51,6 +51,43 @@ pub fn read_pack_installation(roots: &[PathBuf], pack_id: &str) -> AppResult<Pac
         )));
     }
     Ok(plan)
+}
+
+/// Construit la fiche détaillée d'un pack (métadonnées du manifeste + plan d'installation).
+pub fn build_pack_detail(roots: &[PathBuf], pack_id: &str) -> AppResult<PackDetailView> {
+    let Some((root, entry)) = catalog_with_roots(roots)
+        .into_iter()
+        .find(|(_, entry)| entry.id == pack_id && entry.entry_type == CatalogItemType::Pack)
+    else {
+        return Err(AppError::NotFound);
+    };
+    let installation = read_pack_installation(roots, pack_id)?;
+    let manifest = super::load_manifest(&root, &entry.manifest_path).ok();
+    Ok(PackDetailView {
+        id: entry.id,
+        name: manifest
+            .as_ref()
+            .map(|m| m.name.clone())
+            .unwrap_or(entry.name),
+        version: manifest
+            .as_ref()
+            .map(|m| m.version.clone())
+            .unwrap_or(entry.version),
+        description: manifest.as_ref().and_then(|m| m.description.clone()),
+        author: manifest.as_ref().and_then(|m| m.author.clone()),
+        license: manifest.as_ref().and_then(|m| m.license.clone()),
+        category: manifest
+            .as_ref()
+            .and_then(|m| m.category)
+            .or(entry.category),
+        tags: manifest
+            .as_ref()
+            .filter(|m| !m.tags.is_empty())
+            .map(|m| m.tags.clone())
+            .unwrap_or(entry.tags),
+        compatibility: manifest.and_then(|m| m.compatibility).unwrap_or_default(),
+        installation,
+    })
 }
 
 /// Installe les outils et contrôle la présence des composants déclarés par un pack.
@@ -123,18 +160,16 @@ async fn install_pack_with_optional_pool(
                     Err(error) => failed_tools.push((component.id.clone(), error.to_string())),
                 }
             }
-            CatalogItemType::Plugin | CatalogItemType::Block | CatalogItemType::Flow => {
-                if present_ids.contains(&component.id) {
-                    verified_components.push(component.id.clone());
-                } else {
-                    missing_components.push(component.id.clone());
-                }
-            }
             CatalogItemType::Pack => {}
-            CatalogItemType::Preset
+            CatalogItemType::Plugin
+            | CatalogItemType::Block
+            | CatalogItemType::Flow
+            | CatalogItemType::Script
+            | CatalogItemType::Preset
             | CatalogItemType::ResourceFont
             | CatalogItemType::ResourceImage
             | CatalogItemType::ResourceAudio
+            | CatalogItemType::ResourceSubtitle
             | CatalogItemType::ResourceColor
             | CatalogItemType::ResourceLanguage
             | CatalogItemType::ResourceTemplate => {

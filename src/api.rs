@@ -6,6 +6,7 @@ mod installation;
 mod jobs;
 mod keys;
 mod libraries;
+mod local;
 mod password_reset;
 mod plugins;
 pub(crate) mod session;
@@ -219,6 +220,7 @@ fn json_routes() -> Router<AppState> {
                 .delete(flows::delete_flow),
         )
         .route("/api/v1/plugins", get(plugins::catalog))
+        .route("/api/v1/plugins/{id}", get(plugins::plugin_detail))
         .route(
             "/api/v1/plugins/repositories",
             get(plugins::list_repositories).post(plugins::add_repository),
@@ -229,7 +231,7 @@ fn json_routes() -> Router<AppState> {
         )
         .route(
             "/api/v1/plugins/repositories/{id}",
-            axum::routing::delete(plugins::delete_repository),
+            get(plugins::repository_detail).delete(plugins::delete_repository),
         )
         .route(
             "/api/v1/plugins/repositories/{id}/sync",
@@ -240,6 +242,7 @@ fn json_routes() -> Router<AppState> {
             get(plugins::get_settings).put(plugins::save_settings),
         )
         .route("/api/v1/tools", get(plugins::tools))
+        .route("/api/v1/tools/{id}", get(plugins::tool_detail))
         .route(
             "/api/v1/tools/{id}/distribution",
             get(plugins::tool_distribution),
@@ -249,11 +252,32 @@ fn json_routes() -> Router<AppState> {
             "/api/v1/worker/tools/{id}/distribution",
             get(plugins::worker_tool_distribution),
         )
+        .route("/api/v1/packs/{id}", get(plugins::pack_detail))
         .route(
             "/api/v1/packs/{id}/installation",
             get(plugins::pack_installation),
         )
         .route("/api/v1/packs/{id}/install", post(plugins::install_pack))
+        .route("/api/v1/local", get(local::snapshot))
+        .route("/api/v1/local/scripts", post(local::upsert_script))
+        .route(
+            "/api/v1/local/resources",
+            post(local::upload_resource)
+                .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)),
+        )
+        .route(
+            "/api/v1/local/block-templates",
+            post(local::create_block_template),
+        )
+        .route(
+            "/api/v1/local/flow-templates",
+            post(local::create_flow_template),
+        )
+        .route("/api/v1/local/packs", post(local::create_pack))
+        .route(
+            "/api/v1/local/items/{id}",
+            axum::routing::delete(local::delete_item),
+        )
         .route("/api/v1/auth/session", get(session::current))
         .route("/api/v1/auth/login", post(session::login))
         .route("/api/v1/auth/forgot-password", post(password_reset::forgot))

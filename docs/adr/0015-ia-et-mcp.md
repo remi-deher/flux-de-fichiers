@@ -1,7 +1,6 @@
 # 0015 — IA et MCP
 
-Statut : proposé (14 nov. 2026), cadré avec l'utilisateur ; les questions ouvertes ci-dessous
-restent à trancher avant tout code.
+Statut : accepté (16 nov. 2026) — implémenté en Streamable HTTP JSON-RPC 2.0 sur `/mcp` avec rôle `mcp`.
 
 ## Contexte
 

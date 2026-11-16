@@ -106,6 +106,8 @@ impl Permission {
 pub enum Role {
     /// Pilote toute l'application.
     Admin,
+    /// Clé d'un client MCP externe : gère flux, bibliothèques, tâches, plugins et réglages.
+    Mcp,
     /// Clé d'un worker : protocole de worker seulement.
     Worker,
     /// Consulte l'application sans rien modifier : tous les droits « voir », aucune administration.
@@ -116,6 +118,7 @@ impl Role {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Admin => "admin",
+            Self::Mcp => "mcp",
             Self::Worker => "worker",
             Self::Viewer => "viewer",
         }
@@ -124,13 +127,14 @@ impl Role {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "admin" => Some(Self::Admin),
+            "mcp" => Some(Self::Mcp),
             "worker" => Some(Self::Worker),
             "viewer" => Some(Self::Viewer),
             _ => None,
         }
     }
 
-    /// Rôles qu'un compte humain peut porter (un worker est réservé aux clés d'API).
+    /// Rôles qu'un compte humain peut porter (worker et mcp sont réservés aux clés d'API).
     pub const ACCOUNT_ROLES: [Self; 2] = [Self::Admin, Self::Viewer];
 
     pub fn is_account_role(self) -> bool {
@@ -148,6 +152,10 @@ impl Role {
     pub const fn allows(self, permission: Permission) -> bool {
         match self {
             Self::Admin => !matches!(permission, Permission::WorkerProtocol),
+            Self::Mcp => !matches!(
+                permission,
+                Permission::WorkerProtocol | Permission::ManageAccounts | Permission::ManageApiKeys
+            ),
             Self::Worker => matches!(permission, Permission::WorkerProtocol),
             Self::Viewer => matches!(
                 permission,
@@ -182,7 +190,7 @@ mod tests {
             let serialized = serde_json::to_string(&permission).unwrap_or_default();
             assert_eq!(serialized, format!("\"{}\"", permission.as_str()));
         }
-        for role in [Role::Admin, Role::Worker, Role::Viewer] {
+        for role in [Role::Admin, Role::Mcp, Role::Worker, Role::Viewer] {
             assert_eq!(
                 serde_json::to_string(&role).unwrap_or_default(),
                 format!("\"{}\"", role.as_str())
@@ -222,6 +230,14 @@ mod tests {
         }
         assert!(Role::Viewer.is_account_role() && Role::Admin.is_account_role());
         assert!(!Role::Worker.is_account_role());
+        assert!(!Role::Mcp.is_account_role());
+        assert!(Role::Mcp.allows(Permission::ManageFlows));
+        assert!(Role::Mcp.allows(Permission::ManageLibraries));
+        assert!(Role::Mcp.allows(Permission::ManagePlugins));
+        assert!(Role::Mcp.allows(Permission::ManageSettings));
+        assert!(!Role::Mcp.allows(Permission::WorkerProtocol));
+        assert!(!Role::Mcp.allows(Permission::ManageApiKeys));
+        assert!(!Role::Mcp.allows(Permission::ManageAccounts));
     }
 
     #[test]

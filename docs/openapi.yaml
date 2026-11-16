@@ -54,6 +54,148 @@ paths:
                     name: {type: string}
                     bytes: {type: integer, minimum: 1}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/openapi.yaml:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Lire la spécification OpenAPI 3.1.0 du central
+      responses:
+        '200':
+          description: Spécification OpenAPI au format YAML
+          content:
+            application/yaml:
+              schema: {type: string}
+  /mcp:
+    post:
+      security: [{ApiKey: []}]
+      summary: Point d'entrée Streamable HTTP (JSON-RPC 2.0) du serveur MCP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200':
+          description: Réponse JSON-RPC 2.0
+        '202':
+          description: Notification JSON-RPC acceptée
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/files/{name}:
+    put:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Déposer un fichier média dans le dossier d'entrée (input_dir)
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        '201':
+          description: Fichier déposé avec son empreinte SHA-256
+        default: {$ref: '#/components/responses/Error'}
+    delete:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Supprimer un fichier média du dossier d'entrée (input_dir)
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema: {type: string}
+      responses:
+        '204':
+          description: Fichier supprimé
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/flows/validate:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Valider la structure d'un graphe de flux avant sauvegarde
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [definition]
+              properties:
+                definition: {type: [object, string]}
+      responses:
+        '200':
+          description: Rapport de validation (valid, errors, warnings)
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/flows/{id}/versions/{version}/restore:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Restaurer une version figée d'un flux en tant que nouvelle version courante
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string}
+        - in: path
+          name: version
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: Flux restauré
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/delete:
+    delete:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Supprimer ou annuler une tâche (DELETE /api/v1/jobs/{id})
+      responses:
+        '204':
+          description: Tâche supprimée
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/libraries/{id}/files/{name}:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Déposer un fichier média et créer immédiatement une tâche dans la bibliothèque
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string, format: uuid}
+        - in: path
+          name: name
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        '201':
+          description: Fichier déposé et tâche créée
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/libraries/{id}/scan:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Scanner le dossier d'entrée et créer les tâches manquantes pour la bibliothèque
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dryRun: {type: boolean}
+                targetWorkerId: {type: string, format: uuid}
+                flowId: {type: string}
+      responses:
+        '200':
+          description: Bilan du scan (fichiers analysés, tâches créées, doublons ignorés)
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/libraries:
     get:
       security: [{ApiKey: []}, {WebSession: []}]

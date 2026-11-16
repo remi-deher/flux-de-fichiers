@@ -257,3 +257,94 @@ async fn libraries_round_trip_flow_and_worker_paths() -> anyhow::Result<()> {
     assert_eq!(gone.status(), StatusCode::NOT_FOUND);
     Ok(())
 }
+
+#[tokio::test]
+async fn upload_and_scan_library_routes() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut config = Config {
+        bind: "127.0.0.1:3000".parse()?,
+        database_url: "sqlite::memory:".into(),
+        data_dir: dir.path().to_path_buf(),
+        input_dir: dir.path().join("input"),
+        config_dir: dir.path().join("config"),
+        tools_cache_dir: dir.path().join("tools-cache"),
+        plugins_dir: None,
+        static_dir: "frontend/dist".into(),
+        max_file_bytes: 1024,
+        local_worker: false,
+        web_origin: None,
+        web_session_ttl_seconds: 28_800,
+        tls: None,
+        smtp: None,
+    };
+    config.input_dir = dir.path().join("input");
+    std::fs::create_dir_all(&config.input_dir)?;
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&config.database_url)
+        .await?;
+    sqlx::migrate!().run(&pool).await?;
+    common::install_keys(&pool).await?;
+    let app = router(AppState::new(pool, Arc::new(config)));
+
+    let lib = admin(
+        &app,
+        "POST",
+        "/api/v1/libraries",
+        Some(serde_json::json!({ "name": "Séries", "workers": [] })),
+    )
+    .await?;
+    assert_eq!(lib.status(), StatusCode::CREATED);
+    let lib_id = json_of(lib).await?["id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("missing id"))?
+        .to_owned();
+
+    // 1. Upload direct dans input_dir
+    let put_req = Request::builder()
+        .method("PUT")
+        .uri("/api/v1/files/episode1.mkv")
+        .header("authorization", format!("Bearer {}", common::ADMIN_KEY))
+        .body(Body::from("video-bytes-1"))?;
+    let put_resp = app.clone().oneshot(put_req).await?;
+    assert_eq!(put_resp.status(), StatusCode::CREATED);
+
+    // 2. Scan de la bibliothèque -> crée 1 tâche
+    let scan = admin(
+        &app,
+        "POST",
+        &format!("/api/v1/libraries/{lib_id}/scan"),
+        Some(serde_json::json!({})),
+    )
+    .await?;
+    assert_eq!(scan.status(), StatusCode::OK);
+    let scan_json = json_of(scan).await?;
+    assert_eq!(scan_json["createdJobs"], 1);
+    assert_eq!(scan_json["skippedExisting"], 0);
+
+    // 3. Upload direct + création de tâche immédiate dans la bibliothèque
+    let post_req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/libraries/{lib_id}/files/episode2.mkv"))
+        .header("authorization", format!("Bearer {}", common::ADMIN_KEY))
+        .body(Body::from("video-bytes-2"))?;
+    let post_resp = app.clone().oneshot(post_req).await?;
+    assert_eq!(post_resp.status(), StatusCode::CREATED);
+    let post_json = json_of(post_resp).await?;
+    assert_eq!(post_json["file"]["name"], "episode2.mkv");
+    assert_eq!(post_json["job"]["source_name"], "episode2.mkv");
+
+    // 4. Nouveau scan -> les 2 fichiers sont déjà en file
+    let rescan = admin(
+        &app,
+        "POST",
+        &format!("/api/v1/libraries/{lib_id}/scan"),
+        Some(serde_json::json!({ "dryRun": true })),
+    )
+    .await?;
+    assert_eq!(rescan.status(), StatusCode::OK);
+    let rescan_json = json_of(rescan).await?;
+    assert_eq!(rescan_json["createdJobs"], 0);
+    assert_eq!(rescan_json["skippedExisting"], 2);
+    Ok(())
+}

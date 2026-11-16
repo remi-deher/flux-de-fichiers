@@ -57,8 +57,14 @@ impl FlowGraph {
     /// plus toute sortie nommée déjà utilisée par une liaison enregistrée.
     pub fn output_ports(&self, node: &FlowNode, catalog: &[OwnedBlockSpec]) -> Vec<Option<String>> {
         let spec = find_owned(catalog, &node.kind);
+        let is_conditional_script = node
+            .config
+            .get("routing")
+            .and_then(serde_json::Value::as_str)
+            == Some("conditional");
         let mut ports: Vec<Option<String>> = match spec {
             Some(spec) if spec.terminal => Vec::new(),
+            _ if is_conditional_script => vec![Some("true".to_owned()), Some("false".to_owned())],
             Some(spec) if !spec.ports.is_empty() => spec
                 .ports
                 .iter()
@@ -421,5 +427,29 @@ mod tests {
             .node("node-2")
             .map(|node| legacy.output_ports(node, &catalog));
         assert_eq!(ports.map(|ports| ports.len()), Some(3));
+    }
+
+    #[test]
+    fn conditional_script_node_exposes_true_and_false_ports() {
+        let catalog = test_catalog();
+        let mut graph = FlowGraph::default();
+        let id = graph.append(
+            FlowBlockKind::parse("block.scripts.run"),
+            "Script",
+            serde_json::json!({"mode": "inline", "routing": "single"}),
+            &catalog,
+        );
+        if let Some(node) = graph.node(&id) {
+            assert_eq!(graph.output_ports(node, &catalog), vec![None]);
+        }
+        if let Some(node) = graph.node_mut(&id) {
+            node.config["routing"] = serde_json::json!("conditional");
+        }
+        if let Some(node) = graph.node(&id) {
+            assert_eq!(
+                graph.output_ports(node, &catalog),
+                vec![Some("true".into()), Some("false".into())]
+            );
+        }
     }
 }

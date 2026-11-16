@@ -695,3 +695,114 @@ async fn local_script_stop_pipeline_halts_execution_before_output()
     assert_eq!(outcome.steps[1].message.as_deref(), Some("arrêt demandé"));
     Ok(())
 }
+
+#[tokio::test]
+async fn unified_script_block_supports_inline_library_ref_and_strict_next_port()
+-> Result<(), Box<dyn std::error::Error>> {
+    use crate::plugins::save_local_script;
+    use flux_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
+
+    let dir = tempfile::tempdir()?;
+    let local_dir = dir.path().join("local");
+    let cache = ToolCacheManager::new(dir.path().join("cache"));
+    install_fake_probe(&cache)?;
+
+    save_local_script(
+        &local_dir,
+        UpsertLocalScriptRequest {
+            id: None,
+            name: "Lib Branch".into(),
+            description: None,
+            interpreter: ScriptInterpreter::Sh,
+            code: "cat >/dev/null\nprintf '{\"status\":\"ok\",\"nextPort\":\"false\",\"message\":\"branche fausse\"}'"
+                .into(),
+            filename: None,
+            category: None,
+            tags: vec![],
+        },
+    )?;
+
+    let mut reg = OperationRegistry::load_from_roots(&[local_dir]);
+    register_core_and_probe(&mut reg)?;
+    reg.register_json(json!({
+        "schemaVersion": "1.1.0",
+        "id": "operation.scripts.run",
+        "version": "1.0.0",
+        "name": "Script",
+        "providerId": "plugin.scripts",
+        "providerKind": "plugin",
+        "capability": "script",
+        "status": "validated",
+        "runtime": {
+            "kind": "script",
+            "tool": { "id": "app.script-runners", "version": "1.0.0" },
+            "interpreter": "sh",
+            "timeoutSeconds": 300
+        }
+    }))?;
+    reg.register_block_mapping("block.scripts.run", "operation.scripts.run");
+
+    // 1. Mode inline -> passe au bloc suivant en mode library (scriptId) qui renvoie nextPort: "false".
+    // Seule la branche "true" est câblée : next_connection ne doit PAS retomber sur "true".
+    let flow = flow_record(json!({
+        "nodes": [
+            {"id": "n1", "type": "file-input", "name": "in"},
+            {
+                "id": "n2",
+                "type": "block.scripts.run",
+                "name": "Inline",
+                "config": {
+                    "mode": "inline",
+                    "interpreter": "sh",
+                    "code": "cat >/dev/null\nprintf '{\"status\":\"ok\",\"message\":\"inline ok\"}'"
+                }
+            },
+            {
+                "id": "n3",
+                "type": "block.scripts.run",
+                "name": "Library Ref",
+                "config": {
+                    "mode": "library",
+                    "scriptId": "script.lib-branch",
+                    "routing": "conditional"
+                }
+            },
+            {"id": "n_true", "type": "file-output", "name": "out"}
+        ],
+        "connections": [
+            {"from": "n1", "to": "n2"},
+            {"from": "n2", "to": "n3"},
+            {"from": "n3", "to": "n_true", "port": "true"}
+        ]
+    }));
+
+    let (claim_ops, _) = reg.claim_payload_for_flow(Some(&flow));
+    assert!(claim_ops.contains_key("operation.scripts.run"));
+    assert!(claim_ops.contains_key("operation.script.lib-branch"));
+
+    let source = dir.path().join("in.mkv");
+    std::fs::write(&source, "raw")?;
+    let work = dir.path().join("work");
+    std::fs::create_dir(&work)?;
+    let http = reqwest::Client::new();
+    let (progress, _) = recording_progress();
+    let outcome = FlowEngine {
+        registry: &reg,
+        cache_mgr: &cache,
+        http_client: &http,
+        secrets_dir: None,
+        plugin_configs: &HashMap::new(),
+        tool_versions: &HashMap::new(),
+        media_root: None,
+        allow_private_integrations: None,
+    }
+    .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
+    .await
+    .map_err(|e| e.message)?;
+
+    // n1 -> n2 -> n3 exécutés ; n_true non exécuté car nextPort="false" et seul "true" était relié.
+    assert_eq!(outcome.steps.len(), 3);
+    assert_eq!(outcome.steps[1].message.as_deref(), Some("inline ok"));
+    assert_eq!(outcome.steps[2].message.as_deref(), Some("branche fausse"));
+    Ok(())
+}

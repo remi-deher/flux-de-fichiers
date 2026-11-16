@@ -463,11 +463,23 @@ pub(crate) async fn populate_claim_contracts(
 ) -> AppResult<()> {
     let roots = crate::plugins::catalog_roots(pool, config).await;
     let catalog = crate::plugins::list_catalog(&roots);
-    if let Some(probe) = crate::plugins::required_probe(&catalog) {
+    let registry = catalog_cache.operations(&roots).await;
+    if let Some(probe_op) =
+        registry.primary_probe_for_file(std::path::Path::new(&claim.source_name))
+    {
+        if let crate::flows::OperationRuntime::Binary(bin) = &probe_op.runtime
+            && let Some(tool) = &bin.tool
+        {
+            let version = catalog_cache.resolve_tool_version(&roots, &tool.id).await;
+            claim.probe_tool_id = Some(tool.id.clone());
+            claim.probe_version = Some(version);
+        }
+    } else if registry.all_probes().is_empty()
+        && let Some(probe) = crate::plugins::required_probe(&catalog)
+    {
         claim.probe_tool_id = Some(probe.tool_id);
         claim.probe_version = Some(probe.version);
     }
-    let registry = catalog_cache.operations(&roots).await;
     let tool_refs = registry.required_tool_refs_for_flow(claim.frozen_flow.as_ref());
     let mut required_tools = Vec::with_capacity(tool_refs.len());
     for tool in tool_refs {

@@ -73,15 +73,35 @@ pub fn is_ready(library: &Library) -> bool {
     library.flow_id.is_some() && !library.workers.is_empty()
 }
 
-/// Synthèse `(total, prêtes, avec_flux_lié)` pour le bandeau d'en-tête.
-pub fn library_counts(libraries: &[Library]) -> (usize, usize, usize) {
-    let total = libraries.len();
-    let ready = libraries.iter().filter(|library| is_ready(library)).count();
-    let bound = libraries
-        .iter()
-        .filter(|library| library.flow_id.is_some())
-        .count();
-    (total, ready, bound)
+/// Compteurs affichés dans le bandeau `StatStrip` des bibliothèques.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LibraryCounts {
+    pub total: usize,
+    pub ready: usize,
+    pub missing_flow: usize,
+    pub missing_worker: usize,
+}
+
+/// Synthèse pour le bandeau d'en-tête des bibliothèques.
+pub fn library_counts(libraries: &[Library]) -> LibraryCounts {
+    let mut counts = LibraryCounts {
+        total: libraries.len(),
+        ..LibraryCounts::default()
+    };
+    for library in libraries {
+        let has_flow = library.flow_id.is_some();
+        let has_worker = !library.workers.is_empty();
+        if has_flow && has_worker {
+            counts.ready += 1;
+        }
+        if !has_flow {
+            counts.missing_flow += 1;
+        }
+        if !has_worker {
+            counts.missing_worker += 1;
+        }
+    }
+    counts
 }
 
 pub fn access_label(access: LibraryAccess) -> &'static str {
@@ -167,7 +187,15 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        assert_eq!(library_counts(&[]), (0, 0, 0));
-        assert_eq!(library_counts(&[ready, flow_only, empty]), (3, 1, 2));
+        assert_eq!(library_counts(&[]), LibraryCounts::default());
+        assert_eq!(
+            library_counts(&[ready, flow_only, empty]),
+            LibraryCounts {
+                total: 3,
+                ready: 1,
+                missing_flow: 1,
+                missing_worker: 2,
+            }
+        );
     }
 }

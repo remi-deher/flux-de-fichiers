@@ -1,27 +1,26 @@
 //! Plugins : catalogue d'extensions, outils distribués, dépôts synchronisés et réglages (ADR 0010, 0014).
 
 mod pack_detail;
+mod repos;
 mod settings;
+mod tools;
 
 use crate::api;
-use crate::route::encode_segment;
 use crate::ui::filters::{Filters, PluginKindFilter, plugin_kind};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
-    Drawer, EmptyState, IconName, MetricTone, ResourceCard, SectionHeader, StatItem, StatStrip,
-    Tag, TagTone, Toasts,
+    Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
 };
 use flux_shared::plugins::vocab::{CatalogItemType, CatalogSection};
-use flux_shared::plugins::{
-    CatalogEntry, CreateRepositoryRequest, PluginRepository, ToolStatus, ToolStatusSummary,
-};
+use flux_shared::plugins::{CatalogEntry, PluginRepository, ToolStatus, ToolStatusSummary};
 use flux_shared::session::Me;
 use flux_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
 use pack_detail::PackDetail;
-use serde_json::Value;
+use repos::ReposSection;
 use settings::PluginSettings;
+use tools::ToolsSection;
 
 const REPOSITORIES_PATH: &str = "/api/v1/plugins/repositories";
 const CATALOG_PATH: &str = "/api/v1/plugins";
@@ -37,27 +36,6 @@ pub fn tool_status_label(status: ToolStatus) -> (&'static str, &'static str) {
 
 fn bump(signal: RwSignal<u32>) {
     signal.update(|count| *count = count.wrapping_add(1));
-}
-
-/// Opération sur un dépôt : bascule, synchronisation ou suppression.
-#[derive(Clone, Copy)]
-enum RepoAction {
-    Toggle,
-    Sync,
-    Delete,
-}
-
-async fn run_repo_action(id: String, action: RepoAction) -> Result<(), api::ApiError> {
-    let base = format!("{REPOSITORIES_PATH}/{}", encode_segment(&id));
-    match action {
-        RepoAction::Toggle => api::put::<(), Value>(&format!("{base}/toggle"), &())
-            .await
-            .map(|_| ()),
-        RepoAction::Sync => api::post::<(), Value>(&format!("{base}/sync"), None)
-            .await
-            .map(|_| ()),
-        RepoAction::Delete => api::delete(&base).await,
-    }
 }
 
 /// Synthèse `(catalogue, plugins, modèles_et_packs)` des entrées exposées hors applications.
@@ -100,7 +78,7 @@ fn catalog_entry_matches(entry: &CatalogEntry, text: &str) -> bool {
     let mut fields: Vec<&str> = Vec::with_capacity(4 + entry.tags.len());
     fields.push(&entry.name);
     fields.push(&entry.id);
-    if let Some(cap) = entry.capability {
+    if let Some(cap) = entry.capability.as_ref() {
         fields.push(cap.as_str());
     }
     if let Some(sub) = entry.entry_type.subtitle() {
@@ -145,243 +123,32 @@ fn section_fallback_desc(entry_type: CatalogItemType) -> &'static str {
     }
 }
 
-#[component]
-fn ReposSection(
-    repositories: LocalResource<Result<Vec<PluginRepository>, api::ApiError>>,
-    reload_repos: RwSignal<u32>,
-    reload_catalog: RwSignal<u32>,
-    adding: RwSignal<bool>,
-) -> impl IntoView {
-    let feedback = RwSignal::new(None::<String>);
-    let act = Action::new_local(move |(id, action): &(String, RepoAction)| {
-        run_repo_action(id.clone(), *action)
-    });
-    Effect::new(move |_| match act.value().get() {
-        Some(Ok(())) => {
-            feedback.set(None);
-            Toasts::notify_success("Opération sur le dépôt effectuée.");
-            bump(reload_repos);
-            bump(reload_catalog);
-        }
-        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
-        None => {}
-    });
-    let (name, url) = (RwSignal::new(String::new()), RwSignal::new(String::new()));
-    let add = Action::new_local(move |request: &CreateRepositoryRequest| {
-        let request = request.clone();
-        async move {
-            api::post::<CreateRepositoryRequest, PluginRepository>(
-                REPOSITORIES_PATH,
-                Some(&request),
-            )
-            .await
-        }
-    });
-    Effect::new(move |_| match add.value().get() {
-        Some(Ok(_)) => {
-            name.set(String::new());
-            url.set(String::new());
-            adding.set(false);
-            Toasts::notify_success("Dépôt ajouté.");
-            bump(reload_repos);
-        }
-        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
-        None => {}
-    });
-    view! {
-        <section class="section-panel">
-            <SectionHeader
-                title="Dépôts de plugins"
-                subtitle="Sources officielles et communautaires synchronisées par ce nœud."
-            />
-            <div class="registre">
-                <div class="table-wrapper">
-                    <table class="data-table" aria-label="Dépôts de plugins">
-                        <thead><tr>
-                            <th scope="col">"Dépôt"</th><th scope="col">"Index"</th><th scope="col">"État"</th>
-                            <th scope="col">"Dernière synchronisation"</th><th scope="col" class="cell-end">"Actions"</th>
-                        </tr></thead>
-                        <tbody>
-                            {move || {
-                                let text = query();
-                                match repositories.get() {
-                                    None => view! {
-                                        <tr><td colspan="5" class="empty-state-text">"Chargement des dépôts…"</td></tr>
-                                    }.into_any(),
-                                    Some(Err(error)) => view! {
-                                        <tr><td colspan="5" class="text-danger">{error.message()}</td></tr>
-                                    }.into_any(),
-                                    Some(Ok(list)) => {
-                                        let shown: Vec<PluginRepository> = list
-                                            .into_iter()
-                                            .filter(|repo| matches(&[&repo.name, &repo.index_url], &text))
-                                            .collect();
-                                        if shown.is_empty() {
-                                            return view! {
-                                                <tr><td colspan="5" class="empty-state-text">"Aucun dépôt correspondant."</td></tr>
-                                            }.into_any();
-                                        }
-                                        shown.into_iter().map(|repo| {
-                                            let (toggle_id, sync_id, delete_id) = (repo.id.clone(), repo.id.clone(), repo.id.clone());
-                                            view! {
-                                                <tr>
-                                                    <td class="text-strong">
-                                                        {repo.name.clone()}
-                                                        {repo.is_official.then(|| view! {
-                                                            " "<span class="repo-badge official">"Officiel"</span>
-                                                        })}
-                                                    </td>
-                                                    <td class="text-mono truncate">{repo.index_url.clone()}</td>
-                                                    <td><span class=if repo.enabled { "status-pill success" } else { "status-pill info" }>
-                                                        {if repo.enabled { "Actif" } else { "Désactivé" }}</span></td>
-                                                    <td class="text-dim">{repo.last_synced_at.clone().unwrap_or_else(|| "Jamais".into())}</td>
-                                                    <td class="cell-end inline-actions">
-                                                        <button type="button" class="btn btn-secondary btn-sm" disabled=move || act.pending().get()
-                                                            on:click=move |_| { act.dispatch((sync_id.clone(), RepoAction::Sync)); }>"Synchroniser"</button>
-                                                        <button type="button" class="btn btn-secondary btn-sm" disabled=move || act.pending().get()
-                                                            on:click=move |_| { act.dispatch((toggle_id.clone(), RepoAction::Toggle)); }>
-                                                            {if repo.enabled { "Désactiver" } else { "Activer" }}</button>
-                                                        {(!repo.is_official).then(|| view! {
-                                                            <button type="button" class="btn btn-sm btn-danger-quiet" disabled=move || act.pending().get()
-                                                                on:click=move |_| { act.dispatch((delete_id.clone(), RepoAction::Delete)); }>"Retirer"</button>
-                                                        })}
-                                                    </td>
-                                                </tr>
-                                            }
-                                        }).collect_view().into_any()
-                                    }
-                                }
-                            }}
-                        </tbody>
-                    </table>
-                </div>
-                <Drawer open=adding eyebrow="Plugins" title="Ajouter un dépôt".to_owned()>
-                    <form class="inspection-panel" on:submit=move |event| {
-                        event.prevent_default();
-                        add.dispatch(CreateRepositoryRequest { id: None, name: name.get_untracked(), index_url: url.get_untracked() });
-                    }>
-                        <div class="form-group">
-                            <label for="repo-name" class="form-label">"Nom du dépôt"</label>
-                            <input id="repo-name" class="form-input" required=true prop:value=move || name.get()
-                                on:input=move |event| name.set(event_target_value(&event)) />
-                        </div>
-                        <div class="form-group">
-                            <label for="repo-url" class="form-label">"URL de l'index"</label>
-                            <input id="repo-url" class="form-input" type="url" required=true placeholder="https://…/catalogue/index.json"
-                                prop:value=move || url.get() on:input=move |event| url.set(event_target_value(&event)) />
-                        </div>
-                        <div class="inspection-drawer__actions">
-                            <button type="submit" class="btn btn-primary" disabled=move || add.pending().get()>"Ajouter le dépôt"</button>
-                        </div>
-                    </form>
-                </Drawer>
-                <p class="form-help" role="status">{move || feedback.get()}</p>
-            </div>
-        </section>
-    }
+/// Sous-onglets de l'écran Plugins, séparés par intention.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PluginsTab {
+    #[default]
+    Catalog,
+    Tools,
+    Repositories,
 }
 
-#[component]
-fn ToolsSection(
-    tools: LocalResource<Result<Vec<ToolStatusSummary>, api::ApiError>>,
-    reload_tools: RwSignal<u32>,
-    can_install: bool,
-) -> impl IntoView {
-    let feedback = RwSignal::new(None::<String>);
-    let install = Action::new_local(move |id: &String| {
-        let path = format!("{TOOLS_PATH}/{}/install", encode_segment(id));
-        async move { api::post::<(), Value>(&path, None).await }
-    });
-    Effect::new(move |_| match install.value().get() {
-        Some(Ok(_)) => {
-            Toasts::set_success(feedback, "Installation lancée.");
-            bump(reload_tools);
+impl PluginsTab {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Catalog => "Catalogue",
+            Self::Tools => "Outils",
+            Self::Repositories => "Dépôts",
         }
-        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
-        None => {}
-    });
-    move || {
-        let text = query();
-        let list = tools.get().and_then(Result::ok).unwrap_or_default();
-        if list.is_empty() {
-            return None;
+    }
+
+    pub fn visible_tabs(can_manage: bool) -> &'static [Self] {
+        if can_manage {
+            &[Self::Catalog, Self::Tools, Self::Repositories]
+        } else {
+            &[Self::Catalog, Self::Tools]
         }
-        let shown: Vec<ToolStatusSummary> = list
-            .into_iter()
-            .filter(|tool| {
-                matches(
-                    &[
-                        &tool.name,
-                        &tool.id,
-                        &tool.description,
-                        tool.capability.as_str(),
-                    ],
-                    &text,
-                )
-            })
-            .collect();
-        if shown.is_empty() && !text.trim().is_empty() {
-            return None;
-        }
-        Some(view! {
-            <section class="page-section">
-                <SectionHeader
-                    title="Outils distribués"
-                    subtitle="Binaires d'analyse et de remuxing gérés et mis en cache sur les nœuds."
-                />
-                <div class="resource-grid">
-                    {shown.into_iter().map(|tool| {
-                        let (label, class) = tool_status_label(tool.status);
-                        let id = tool.id.clone();
-                        let installable = can_install && tool.status == ToolStatus::NotInstalled;
-                        let tone = match tool.status {
-                            ToolStatus::Ready => MetricTone::Success,
-                            ToolStatus::Installing => MetricTone::Warning,
-                            ToolStatus::NotInstalled => MetricTone::Neutral,
-                        };
-                        let badge = view! {
-                            <div class="cluster">
-                                <Tag label=tool.version tone=TagTone::Mono />
-                                <span class=class>{label}</span>
-                            </div>
-                        }
-                        .into_any();
-                        let actions = installable.then(|| {
-                            let id = id.clone();
-                            view! {
-                                <button type="button" class="btn btn-secondary btn-sm" disabled=move || install.pending().get()
-                                    on:click=move |_| { install.dispatch(id.clone()); }>"Installer"</button>
-                            }
-                            .into_any()
-                        });
-                        view! {
-                            <ResourceCard
-                                title=tool.name
-                                subtitle=Some(tool.description)
-                                icon=IconName::Package
-                                tone=tone
-                                badge=Some(badge)
-                                footer_meta=id
-                                footer_actions=actions
-                            >
-                                <div class="cluster">
-                                    <Tag label=tool.capability.as_str() tone=TagTone::Primary />
-                                    <Tag label=tool.arch tone=TagTone::Mono />
-                                    <Tag label=tool.distribution tone=TagTone::Neutral />
-                                    {tool.current_choice.then(|| view! {
-                                        <Tag label="Choix actuel" tone=TagTone::Success />
-                                    })}
-                                </div>
-                            </ResourceCard>
-                        }
-                    }).collect_view()}
-                </div>
-                <p class="form-help" role="status">{move || feedback.get()}</p>
-            </section>
-        })
     }
 }
-
 #[derive(Clone, PartialEq, Eq)]
 enum CatalogDrawer {
     PluginSettings(String),
@@ -402,6 +169,7 @@ fn CatalogSectionView(
     reload_tools: RwSignal<u32>,
     can_configure: bool,
 ) -> impl IntoView {
+    let filters = use_context::<Filters>();
     let inspecting = RwSignal::new(None::<CatalogDrawer>);
     let drawer_open = RwSignal::new(false);
     let title = Signal::derive(move || {
@@ -411,7 +179,56 @@ fn CatalogSectionView(
             .unwrap_or_default()
     });
     let on_pack_installed = Callback::new(move |()| bump(reload_tools));
+    let stats = Signal::derive(move || {
+        let catalog_entries = catalog.get().and_then(Result::ok).unwrap_or_default();
+        let (total_catalog, plugins, _) = summarize_catalog(&catalog_entries);
+        let flows = catalog_entries
+            .iter()
+            .filter(|entry| entry.entry_type.section() == Some(CatalogSection::Flows))
+            .count();
+        let packs = catalog_entries
+            .iter()
+            .filter(|entry| entry.entry_type.section() == Some(CatalogSection::Packs))
+            .count();
+        let active_kind = plugin_kind();
+        let set_kind = move |next: PluginKindFilter| {
+            Callback::new(move |()| {
+                if let Some(filters) = filters {
+                    filters.plugin_kind.set(next);
+                }
+            })
+        };
+        vec![
+            StatItem::new("Tous", total_catalog.to_string(), MetricTone::Neutral).with_filter(
+                active_kind == PluginKindFilter::Any,
+                set_kind(PluginKindFilter::Any),
+            ),
+            StatItem::new(
+                "Plugins",
+                plugins.to_string(),
+                if plugins > 0 {
+                    MetricTone::Success
+                } else {
+                    MetricTone::Neutral
+                },
+            )
+            .with_filter(
+                active_kind == PluginKindFilter::Plugins,
+                set_kind(PluginKindFilter::Plugins),
+            ),
+            StatItem::new("Packs", packs.to_string(), MetricTone::Neutral).with_filter(
+                active_kind == PluginKindFilter::Packs,
+                set_kind(PluginKindFilter::Packs),
+            ),
+            StatItem::new("Flux", flows.to_string(), MetricTone::Neutral).with_filter(
+                active_kind == PluginKindFilter::Flows,
+                set_kind(PluginKindFilter::Flows),
+            ),
+        ]
+    });
+
     view! {
+        <StatStrip aria_label="Synthèse du catalogue" items=stats />
         <Drawer open=drawer_open eyebrow="Catalogue" title=title>
             {move || match inspecting.get() {
                 Some(CatalogDrawer::PluginSettings(id)) => {
@@ -431,10 +248,6 @@ fn CatalogSectionView(
             }}
         </Drawer>
         <section class="page-section">
-            <SectionHeader
-                title="Catalogue d'extensions"
-                subtitle="Plugins de traitement, modèles de flux, packs et ressources synchronisés."
-            />
             {move || {
                 let text = query();
                 let kind = plugin_kind();
@@ -480,14 +293,18 @@ fn CatalogSectionView(
                                     let active_id = id.clone();
                                     let target = match entry.entry_type {
                                         CatalogItemType::Plugin if can_configure => {
-                                            Some((CatalogDrawer::PluginSettings(id.clone()), "Réglages"))
+                                            Some((CatalogDrawer::PluginSettings(id.clone()), "Configurer"))
                                         }
                                         CatalogItemType::Pack => Some((
                                             CatalogDrawer::PackDetails(id.clone()),
-                                            if can_configure { "Installer le pack" } else { "Détails" },
+                                            if can_configure { "Voir / Installer" } else { "Détails" },
                                         )),
                                         _ => None,
                                     };
+                                    let is_template = matches!(
+                                        entry.entry_type,
+                                        CatalogItemType::Flow | CatalogItemType::Preset
+                                    );
                                     let badge_label = section_badge_label(entry.entry_type);
                                     let fallback_desc = section_fallback_desc(entry.entry_type);
                                     let subtitle = entry
@@ -528,7 +345,8 @@ fn CatalogSectionView(
                                         }
                                         .into_any()
                                     });
-                                    let has_meta = entry.capability.is_some()
+                                    let has_meta = is_template
+                                        || entry.capability.is_some()
                                         || entry.category.is_some_and(|cat| cat.shows_badge())
                                         || entry.distribution.is_some()
                                         || !entry.tags.is_empty();
@@ -552,6 +370,9 @@ fn CatalogSectionView(
                                             {if has_meta {
                                                 view! {
                                                     <div class="cluster">
+                                                        {is_template.then(|| view! {
+                                                            <Tag label="Modèle prêt à l'emploi" tone=TagTone::Success />
+                                                        })}
                                                         {entry.capability.map(|cap| view! {
                                                             <Tag label=cap.as_str() tone=TagTone::Success />
                                                         })}
@@ -587,7 +408,7 @@ fn CatalogSectionView(
 pub fn PluginsPage(me: Me) -> impl IntoView {
     let central = me.instance_kind == InstanceKind::Central;
     let can_manage = central && me.allows(Permission::ManagePlugins);
-    let filters = use_context::<Filters>();
+    let active_tab = RwSignal::new(PluginsTab::Catalog);
     let reload_catalog = RwSignal::new(0_u32);
     let reload_tools = RwSignal::new(0_u32);
     let reload_repos = RwSignal::new(0_u32);
@@ -596,7 +417,10 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
     if can_manage {
         provide_topbar_action(ActionSpec {
             label: "Ajouter un dépôt",
-            on_click: Callback::new(move |()| adding.set(true)),
+            on_click: Callback::new(move |()| {
+                active_tab.set(PluginsTab::Repositories);
+                adding.set(true);
+            }),
         });
     }
 
@@ -615,96 +439,52 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
         })
     });
 
-    let stats = Signal::derive(move || {
-        let catalog_entries = catalog.get().and_then(Result::ok).unwrap_or_default();
-        let (total_catalog, plugins, _) = summarize_catalog(&catalog_entries);
-        let flows = catalog_entries
-            .iter()
-            .filter(|entry| entry.entry_type.section() == Some(CatalogSection::Flows))
-            .count();
-        let packs = catalog_entries
-            .iter()
-            .filter(|entry| entry.entry_type.section() == Some(CatalogSection::Packs))
-            .count();
-        let active_kind = plugin_kind();
-        let set_kind = move |next: PluginKindFilter| {
-            Callback::new(move |()| {
-                if let Some(filters) = filters {
-                    filters.plugin_kind.set(next);
-                }
-            })
-        };
-        let mut items = vec![
-            StatItem::new("Catalogue", total_catalog.to_string(), MetricTone::Neutral).with_filter(
-                active_kind == PluginKindFilter::Any,
-                set_kind(PluginKindFilter::Any),
-            ),
-            StatItem::new(
-                "Plugins",
-                plugins.to_string(),
-                if plugins > 0 {
-                    MetricTone::Success
-                } else {
-                    MetricTone::Neutral
-                },
-            )
-            .with_filter(
-                active_kind == PluginKindFilter::Plugins,
-                set_kind(PluginKindFilter::Plugins),
-            ),
-            StatItem::new("Flux", flows.to_string(), MetricTone::Neutral).with_filter(
-                active_kind == PluginKindFilter::Flows,
-                set_kind(PluginKindFilter::Flows),
-            ),
-            StatItem::new("Packs", packs.to_string(), MetricTone::Neutral).with_filter(
-                active_kind == PluginKindFilter::Packs,
-                set_kind(PluginKindFilter::Packs),
-            ),
-        ];
-        if let Some(repos_res) = repositories {
-            let repos = repos_res.get().and_then(Result::ok).unwrap_or_default();
-            let active = repos.iter().filter(|repo| repo.enabled).count();
-            items.push(StatItem::new(
-                "Dépôts actifs",
-                format!("{active} / {}", repos.len()),
-                if active > 0 {
-                    MetricTone::Success
-                } else {
-                    MetricTone::Warning
-                },
-            ));
-        } else {
-            let tools_list = tools.get().and_then(Result::ok).unwrap_or_default();
-            let ready = tools_list
-                .iter()
-                .filter(|tool| tool.status == ToolStatus::Ready)
-                .count();
-            items.push(StatItem::new(
-                "Outils prêts",
-                format!("{ready} / {}", tools_list.len()),
-                if ready > 0 {
-                    MetricTone::Success
-                } else {
-                    MetricTone::Neutral
-                },
-            ));
-        }
-        items
-    });
-
     view! {
         <div class="tab-panel" role="tabpanel">
-            <StatStrip aria_label="Synthèse des plugins et dépôts" items=stats />
-            <CatalogSectionView catalog=catalog reload_tools=reload_tools can_configure=can_manage />
-            <ToolsSection tools=tools reload_tools=reload_tools can_install=can_manage />
-            {repositories.map(|repos| view! {
-                <ReposSection
-                    repositories=repos
-                    reload_repos=reload_repos
-                    reload_catalog=reload_catalog
-                    adding=adding
-                />
-            })}
+            <nav class="page-subnav" role="tablist" aria-label="Vues des plugins">
+                {PluginsTab::visible_tabs(can_manage).iter().copied().map(|tab| {
+                    let is_active = move || active_tab.get() == tab;
+                    view! {
+                        <button
+                            type="button"
+                            role="tab"
+                            class="page-subnav__tab"
+                            class:is-active=is_active
+                            aria-selected=move || is_active().to_string()
+                            on:click=move |_| active_tab.set(tab)
+                        >
+                            {tab.label()}
+                        </button>
+                    }
+                }).collect_view()}
+            </nav>
+            {move || match active_tab.get() {
+                PluginsTab::Catalog => view! {
+                    <CatalogSectionView
+                        catalog=catalog
+                        reload_tools=reload_tools
+                        can_configure=can_manage
+                    />
+                }.into_any(),
+                PluginsTab::Tools => view! {
+                    <ToolsSection
+                        tools=tools
+                        reload_tools=reload_tools
+                        can_install=can_manage
+                    />
+                }.into_any(),
+                PluginsTab::Repositories => match repositories {
+                    Some(repos) => view! {
+                        <ReposSection
+                            repositories=repos
+                            reload_repos=reload_repos
+                            reload_catalog=reload_catalog
+                            adding=adding
+                        />
+                    }.into_any(),
+                    None => ().into_any(),
+                },
+            }}
         </div>
     }
 }
@@ -713,6 +493,22 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
 mod tests {
     use super::*;
     use flux_shared::plugins::vocab::CatalogCapability;
+
+    #[test]
+    fn visible_tabs_hide_repositories_without_manage_permission() {
+        assert_eq!(
+            PluginsTab::visible_tabs(false),
+            &[PluginsTab::Catalog, PluginsTab::Tools]
+        );
+        assert_eq!(
+            PluginsTab::visible_tabs(true),
+            &[
+                PluginsTab::Catalog,
+                PluginsTab::Tools,
+                PluginsTab::Repositories
+            ]
+        );
+    }
 
     #[test]
     fn every_tool_state_has_a_label() {
@@ -745,7 +541,7 @@ mod tests {
     #[test]
     fn summarize_and_filter_catalog_exclude_apps_and_blocks() {
         let mut plugin = entry("plugin.sonarr", CatalogItemType::Plugin);
-        plugin.capability = Some(CatalogCapability::Integration);
+        plugin.capability = Some(CatalogCapability::new("integration"));
         plugin.tags = vec!["arr".into(), "tv".into()];
         let flow = entry("flow.remux", CatalogItemType::Flow);
         let pack = entry("pack.base", CatalogItemType::Pack);

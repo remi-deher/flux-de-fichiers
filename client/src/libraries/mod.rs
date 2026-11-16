@@ -70,7 +70,7 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
 
     let stats = Signal::derive(move || {
         let list = libraries.get().and_then(Result::ok).unwrap_or_default();
-        let (total, ready, bound) = library_counts(&list);
+        let counts = library_counts(&list);
         let active = library_filter();
         let set_filter = move |next: LibraryFilter| {
             Callback::new(move |()| {
@@ -79,18 +79,39 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
                 }
             })
         };
+        let tone_for = |count: usize| {
+            if count > 0 {
+                MetricTone::Warning
+            } else {
+                MetricTone::Neutral
+            }
+        };
         vec![
-            StatItem::new("Total", total.to_string(), MetricTone::Neutral)
+            StatItem::new("Toutes", counts.total.to_string(), MetricTone::Neutral)
                 .with_filter(active == LibraryFilter::All, set_filter(LibraryFilter::All)),
-            StatItem::new("Prêtes", ready.to_string(), MetricTone::Success)
+            StatItem::new("Prêtes", counts.ready.to_string(), MetricTone::Success)
                 .with_detail("flux + worker")
                 .with_filter(
                     active == LibraryFilter::Ready,
                     set_filter(LibraryFilter::Ready),
                 ),
-            StatItem::new("Avec flux lié", bound.to_string(), MetricTone::Neutral).with_filter(
-                active == LibraryFilter::Bound,
-                set_filter(LibraryFilter::Bound),
+            StatItem::new(
+                "Sans flux",
+                counts.missing_flow.to_string(),
+                tone_for(counts.missing_flow),
+            )
+            .with_filter(
+                active == LibraryFilter::MissingFlow,
+                set_filter(LibraryFilter::MissingFlow),
+            ),
+            StatItem::new(
+                "Sans worker",
+                counts.missing_worker.to_string(),
+                tone_for(counts.missing_worker),
+            )
+            .with_filter(
+                active == LibraryFilter::MissingWorker,
+                set_filter(LibraryFilter::MissingWorker),
             ),
         ]
     });
@@ -115,7 +136,8 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
                 let shown: Vec<Library> = list
                     .into_iter()
                     .filter(|library| {
-                        active_filter.accepts(is_ready(library), library.flow_id.is_some())
+                        active_filter
+                            .accepts(library.flow_id.is_some(), !library.workers.is_empty())
                             && matches(&[&library.name], &text)
                     })
                     .collect();

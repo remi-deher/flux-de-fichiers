@@ -73,39 +73,55 @@ pub fn contact_age(worker: &Worker, now: DateTime<Utc>) -> String {
 pub struct WorkerSummary {
     pub total: usize,
     pub online: usize,
-    pub remote: usize,
     pub offline: usize,
     pub silent: usize,
+    pub busy_workers: usize,
+    pub active_jobs: usize,
 }
 
-pub fn summarize_workers(workers: &[Worker], now: DateTime<Utc>) -> WorkerSummary {
+/// Nombre de tâches actives (`Running` ou `Queued`) assignées à un worker.
+pub fn active_jobs_for(worker_id: Uuid, jobs: &[Job]) -> usize {
+    jobs.iter()
+        .filter(|job| {
+            job.worker_id == Some(worker_id)
+                && matches!(job.status, JobStatus::Running | JobStatus::Queued)
+        })
+        .count()
+}
+
+pub fn summarize_workers(workers: &[Worker], jobs: &[Job], now: DateTime<Utc>) -> WorkerSummary {
     let total = workers.len();
     let mut online = 0_usize;
-    let mut remote = 0_usize;
     let mut offline = 0_usize;
     let mut silent = 0_usize;
+    let mut busy_workers = 0_usize;
+    let mut active_jobs = 0_usize;
     for worker in workers {
-        if !worker.is_integrated() {
-            remote += 1;
-        }
         match worker.liveness(now) {
             Liveness::Online => online += 1,
             Liveness::Offline => offline += 1,
             Liveness::Silent => silent += 1,
         }
+        let worker_jobs = active_jobs_for(worker.id, jobs);
+        if worker_jobs > 0 {
+            busy_workers += 1;
+            active_jobs += worker_jobs;
+        }
     }
     WorkerSummary {
         total,
         online,
-        remote,
         offline,
         silent,
+        busy_workers,
+        active_jobs,
     }
 }
 
-/// Filtre les workers par recherche textuelle (`nom`, `id`) et critère de présence.
+/// Filtre les workers par recherche textuelle (`nom`, `id`) et critère de présence/activité.
 pub fn filter_workers(
     workers: Vec<Worker>,
+    jobs: &[Job],
     text: &str,
     online_filter: crate::ui::filters::Presence,
     now: DateTime<Utc>,
@@ -114,7 +130,8 @@ pub fn filter_workers(
         .into_iter()
         .filter(|worker| {
             matches(&[&worker.name, &worker.id.to_string()], text)
-                && online_filter.accepts(worker.is_online(now))
+                && online_filter
+                    .accepts(worker.is_online(now), active_jobs_for(worker.id, jobs) > 0)
         })
         .collect()
 }
@@ -338,7 +355,8 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
     let list = Signal::derive(move || workers.get().and_then(Result::ok).unwrap_or_default());
     let stats = Signal::derive(move || {
         let all = list.get();
-        let summary = summarize_workers(&all, Utc::now());
+        let jobs_list = jobs.get().unwrap_or_default();
+        let summary = summarize_workers(&all, &jobs_list, Utc::now());
         let active = presence();
         let set_presence = move |next: Presence| {
             Callback::new(move |()| {
@@ -355,23 +373,15 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
         } else {
             MetricTone::Neutral
         };
-        let mut inactive_pill = StatItem::new(
-            "Hors ligne / Silencieux",
-            inactive.to_string(),
-            inactive_tone,
-        )
-        .with_filter(active == Presence::Offline, set_presence(Presence::Offline));
+        let mut offline_pill = StatItem::new("Hors ligne", inactive.to_string(), inactive_tone)
+            .with_filter(active == Presence::Offline, set_presence(Presence::Offline));
         if summary.silent > 0 {
-            inactive_pill = inactive_pill.with_detail(format!("{} silencieux", summary.silent));
+            offline_pill = offline_pill.with_detail(format!("{} silencieux", summary.silent));
         }
-        vec![
-            StatItem::new(
-                "Workers déclarés",
-                summary.total.to_string(),
-                MetricTone::Neutral,
-            )
-            .with_detail("central inclus")
-            .with_filter(active == Presence::Any, set_presence(Presence::Any)),
+        let mut items = vec![
+            StatItem::new("Tous", summary.total.to_string(), MetricTone::Neutral)
+                .with_detail("central inclus")
+                .with_filter(active == Presence::Any, set_presence(Presence::Any)),
             StatItem::new(
                 "En ligne",
                 summary.online.to_string(),
@@ -382,13 +392,31 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                 },
             )
             .with_filter(active == Presence::Online, set_presence(Presence::Online)),
-            StatItem::new(
-                "Nœuds distants",
-                summary.remote.to_string(),
-                MetricTone::Neutral,
-            ),
-            inactive_pill,
-        ]
+            offline_pill,
+        ];
+        if can_jobs {
+            let mut working_pill = StatItem::new(
+                "En traitement",
+                summary.busy_workers.to_string(),
+                if summary.busy_workers > 0 {
+                    MetricTone::Success
+                } else {
+                    MetricTone::Neutral
+                },
+            )
+            .with_filter(active == Presence::Working, set_presence(Presence::Working));
+            if summary.active_jobs > 0 {
+                let job_word = if summary.active_jobs == 1 {
+                    "tâche en cours"
+                } else {
+                    "tâches en cours"
+                };
+                working_pill =
+                    working_pill.with_detail(format!("{} {job_word}", summary.active_jobs));
+            }
+            items.push(working_pill);
+        }
+        items
     });
     let selected_worker = Signal::derive(move || {
         let id = selected.get()?;
@@ -414,7 +442,7 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
             .into_any(),
             Some(Ok(all)) => {
                 let now = Utc::now();
-                let shown = filter_workers(all, &text, online_filter, now);
+                let shown = filter_workers(all, &jobs_list, &text, online_filter, now);
                 if shown.is_empty() {
                     let unfiltered = text.trim().is_empty() && online_filter == Presence::Any;
                     let empty_action = (can_manage && unfiltered)
@@ -466,13 +494,7 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                                 .iter()
                                 .filter(|lib| lib.workers.iter().any(|entry| entry.worker_id == id))
                                 .count();
-                            let active_jobs = jobs_list
-                                .iter()
-                                .filter(|job| {
-                                    job.worker_id == Some(id)
-                                        && matches!(job.status, JobStatus::Running | JobStatus::Queued)
-                                })
-                                .count();
+                            let active_jobs = active_jobs_for(id, &jobs_list);
                             let libs_label = match mounted_libs {
                                 0 => "0 bibliothèque".to_owned(),
                                 1 => "1 bibliothèque".to_owned(),
@@ -643,33 +665,61 @@ mod tests {
                 telemetry: None,
             },
         ];
-        let summary = summarize_workers(&workers, now);
+        let jobs = vec![Job {
+            id: Uuid::nil(),
+            source_name: "/media/film.mkv".into(),
+            source_sha256: None,
+            source_bytes: None,
+            output_sha256: None,
+            output_bytes: None,
+            warning: false,
+            target_worker_id: None,
+            worker_id: Some(Uuid::from_u128(1)),
+            status: JobStatus::Running,
+            attempts: 1,
+            lease_epoch: 1,
+            lease_token: None,
+            leased_until: None,
+            output_name: None,
+            error_code: None,
+            library_id: None,
+            flow_id: Some("f1".into()),
+            flow_version: Some(1),
+            created_at: now,
+            updated_at: now,
+        }];
+        let summary = summarize_workers(&workers, &jobs, now);
         assert_eq!(
             summary,
             WorkerSummary {
                 total: 3,
                 online: 1,
-                remote: 2,
                 offline: 1,
                 silent: 1,
+                busy_workers: 1,
+                active_jobs: 1,
             }
         );
         assert_eq!(contact_age(&workers[2], now), "il y a 10 min");
 
         assert_eq!(
-            filter_workers(workers.clone(), "", Presence::Any, now).len(),
+            filter_workers(workers.clone(), &jobs, "", Presence::Any, now).len(),
             3
         );
         assert_eq!(
-            filter_workers(workers.clone(), "nas", Presence::Any, now).len(),
+            filter_workers(workers.clone(), &jobs, "nas", Presence::Any, now).len(),
             2
         );
         assert_eq!(
-            filter_workers(workers.clone(), "", Presence::Online, now).len(),
+            filter_workers(workers.clone(), &jobs, "", Presence::Online, now).len(),
             1
         );
         assert_eq!(
-            filter_workers(workers, "silent", Presence::Offline, now).len(),
+            filter_workers(workers.clone(), &jobs, "", Presence::Working, now).len(),
+            1
+        );
+        assert_eq!(
+            filter_workers(workers, &jobs, "silent", Presence::Offline, now).len(),
             1
         );
     }

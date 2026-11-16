@@ -74,21 +74,23 @@ impl JobStateFilter {
     }
 }
 
-/// Présence d'un worker.
+/// Présence et activité d'un worker.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Presence {
     #[default]
     Any,
     Online,
     Offline,
+    Working,
 }
 
 impl Presence {
-    pub fn accepts(self, online: bool) -> bool {
+    pub fn accepts(self, online: bool, busy: bool) -> bool {
         match self {
             Self::Any => true,
             Self::Online => online,
             Self::Offline => !online,
+            Self::Working => busy,
         }
     }
 }
@@ -123,15 +125,17 @@ pub enum LibraryFilter {
     #[default]
     All,
     Ready,
-    Bound,
+    MissingFlow,
+    MissingWorker,
 }
 
 impl LibraryFilter {
-    pub fn accepts(self, ready: bool, has_flow: bool) -> bool {
+    pub fn accepts(self, has_flow: bool, has_worker: bool) -> bool {
         match self {
             Self::All => true,
-            Self::Ready => ready,
-            Self::Bound => has_flow,
+            Self::Ready => has_flow && has_worker,
+            Self::MissingFlow => !has_flow,
+            Self::MissingWorker => !has_worker,
         }
     }
 }
@@ -141,14 +145,16 @@ impl LibraryFilter {
 pub enum FlowFilter {
     #[default]
     All,
-    DefaultOnly,
+    Used,
+    Unused,
 }
 
 impl FlowFilter {
-    pub fn accepts(self, is_default: bool) -> bool {
+    pub fn accepts(self, bound_libraries: usize) -> bool {
         match self {
             Self::All => true,
-            Self::DefaultOnly => is_default,
+            Self::Used => bound_libraries > 0,
+            Self::Unused => bound_libraries == 0,
         }
     }
 }
@@ -378,19 +384,26 @@ mod tests {
 
     #[test]
     fn presence_and_resource_filters_accept_matching_states() {
-        assert!(Presence::Any.accepts(true) && Presence::Any.accepts(false));
-        assert!(Presence::Online.accepts(true) && !Presence::Online.accepts(false));
-        assert!(Presence::Offline.accepts(false) && !Presence::Offline.accepts(true));
+        assert!(Presence::Any.accepts(true, false) && Presence::Any.accepts(false, false));
+        assert!(Presence::Online.accepts(true, false) && !Presence::Online.accepts(false, true));
+        assert!(Presence::Offline.accepts(false, false) && !Presence::Offline.accepts(true, false));
+        assert!(Presence::Working.accepts(true, true) && !Presence::Working.accepts(true, false));
 
         assert!(LibraryFilter::All.accepts(false, false));
         assert!(LibraryFilter::Ready.accepts(true, true));
         assert!(!LibraryFilter::Ready.accepts(false, true));
-        assert!(LibraryFilter::Bound.accepts(false, true));
-        assert!(!LibraryFilter::Bound.accepts(false, false));
+        assert!(!LibraryFilter::Ready.accepts(true, false));
+        assert!(LibraryFilter::MissingFlow.accepts(false, true));
+        assert!(!LibraryFilter::MissingFlow.accepts(true, false));
+        assert!(LibraryFilter::MissingWorker.accepts(true, false));
+        assert!(!LibraryFilter::MissingWorker.accepts(false, true));
 
-        assert!(FlowFilter::All.accepts(false));
-        assert!(FlowFilter::DefaultOnly.accepts(true));
-        assert!(!FlowFilter::DefaultOnly.accepts(false));
+        assert!(FlowFilter::All.accepts(0));
+        assert!(FlowFilter::All.accepts(2));
+        assert!(FlowFilter::Used.accepts(1));
+        assert!(!FlowFilter::Used.accepts(0));
+        assert!(FlowFilter::Unused.accepts(0));
+        assert!(!FlowFilter::Unused.accepts(1));
     }
 
     #[test]
@@ -407,7 +420,7 @@ mod tests {
             presence: RwSignal::new(Presence::Online),
             plugin_kind: RwSignal::new(PluginKindFilter::Plugins),
             library: RwSignal::new(LibraryFilter::Ready),
-            flow: RwSignal::new(FlowFilter::DefaultOnly),
+            flow: RwSignal::new(FlowFilter::Used),
             pending_job_state: RwSignal::new(Some(JobStateFilter::Failed)),
         };
         filters.apply_route_change();

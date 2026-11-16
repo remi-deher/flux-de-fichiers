@@ -46,7 +46,9 @@ async fn test_app() -> anyhow::Result<axum::Router> {
 
 #[test]
 fn test_condition_evaluation() {
-    let media_info = serde_json::json!({
+    let probe_info = serde_json::json!({
+        "format": "epub",
+        "pages": 320,
         "tracks": [
             {
                 "type": "video",
@@ -62,32 +64,39 @@ fn test_condition_evaluation() {
     });
 
     let cond_hevc = ConditionConfig {
-        property: "video.codec".into(),
+        property: "tracks[type=video].codec".into(),
         operator: "eq".into(),
         target: "hevc".into(),
     };
-    assert!(flows::evaluate_condition(&cond_hevc, &media_info));
+    assert!(flows::evaluate_condition(&cond_hevc, &probe_info));
 
     let cond_h264 = ConditionConfig {
-        property: "video.codec".into(),
+        property: "tracks[type=video].codec".into(),
         operator: "eq".into(),
         target: "h264".into(),
     };
-    assert!(!flows::evaluate_condition(&cond_h264, &media_info));
+    assert!(!flows::evaluate_condition(&cond_h264, &probe_info));
 
     let cond_lang_fre = ConditionConfig {
-        property: "audio.language".into(),
+        property: "tracks[type=audio].properties.language".into(),
         operator: "contains".into(),
         target: "fre".into(),
     };
-    assert!(flows::evaluate_condition(&cond_lang_fre, &media_info));
+    assert!(flows::evaluate_condition(&cond_lang_fre, &probe_info));
 
-    let cond_lang_eng = ConditionConfig {
-        property: "audio.language".into(),
-        operator: "eq".into(),
-        target: "eng".into(),
+    let cond_format = ConditionConfig {
+        property: "format".into(),
+        operator: "exact".into(),
+        target: "EPUB".into(),
     };
-    assert!(!flows::evaluate_condition(&cond_lang_eng, &media_info));
+    assert!(flows::evaluate_condition(&cond_format, &probe_info));
+
+    let cond_pages = ConditionConfig {
+        property: "pages".into(),
+        operator: "gt".into(),
+        target: "200".into(),
+    };
+    assert!(flows::evaluate_condition(&cond_pages, &probe_info));
 }
 
 #[tokio::test]

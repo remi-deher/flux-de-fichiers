@@ -1,123 +1,102 @@
 //! Simulation à sec d'un flux dans l'éditeur sans lancer de tâche réelle.
 //!
-//! Évalue localement les nœuds `condition` selon les mêmes règles que le moteur Rust
-//! (`video.codec`, `audio.language`, repli documentaire, opérateurs `eq`/`contains`/`neq`)
-//! et trace le chemin parcouru pas à pas sur le graphe.
+//! Évalue localement les nœuds `condition` avec le même évaluateur JSON générique
+//! que le moteur (`flux_shared::flows::evaluate_condition`) et trace le parcours sur le graphe.
 
 use super::presentation::{node_summary, output_presentation};
 use super::state::Editor;
 use crate::ui::{Icon, IconName, Tag, TagTone};
-use flux_shared::flows::{FlowConnection, FlowGraph, FlowNode, OwnedBlockSpec, find_owned};
+use flux_shared::flows::{
+    ConditionConfig, FlowConnection, FlowGraph, FlowNode, OwnedBlockSpec, evaluate_condition,
+    find_owned,
+};
 use leptos::prelude::*;
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
 const MAX_SIMULATION_STEPS: usize = 64;
+const JSON_EDITOR_ROWS: u32 = 6;
 
-/// Profils de média types proposés en un clic dans le simulateur.
+/// Exemples prêts à l'emploi de documents JSON de sonde pour tester un flux.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SimulationPreset {
-    H264MkvStereo,
-    HevcMp4MultiAudio,
-    Av1MkvVod,
+    StructuredTracks,
+    DocumentMetadata,
+    Minimal,
 }
 
 impl SimulationPreset {
     pub const ALL: [Self; 3] = [
-        Self::H264MkvStereo,
-        Self::HevcMp4MultiAudio,
-        Self::Av1MkvVod,
+        Self::StructuredTracks,
+        Self::DocumentMetadata,
+        Self::Minimal,
     ];
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::H264MkvStereo => "H.264 MKV (VF)",
-            Self::HevcMp4MultiAudio => "HEVC MP4 (VO/VF)",
-            Self::Av1MkvVod => "AV1 MKV (VO)",
+            Self::StructuredTracks => "Pistes structurées",
+            Self::DocumentMetadata => "Document / Livre",
+            Self::Minimal => "JSON vide",
         }
     }
 
-    pub fn media(self) -> SimulationMedia {
-        match self {
-            Self::H264MkvStereo => SimulationMedia {
-                file_name: "serie-s01e01.mkv".into(),
-                container: "mkv".into(),
-                video_codec: "h264".into(),
-                audio_codec: "aac".into(),
-                audio_languages: "fre".into(),
-                width: 1920,
-                height: 1080,
-            },
-            Self::HevcMp4MultiAudio => SimulationMedia {
-                file_name: "film-4k.mp4".into(),
-                container: "mp4".into(),
-                video_codec: "hevc".into(),
-                audio_codec: "eac3".into(),
-                audio_languages: "eng, fre".into(),
-                width: 3840,
-                height: 2160,
-            },
-            Self::Av1MkvVod => SimulationMedia {
-                file_name: "documentaire.mkv".into(),
-                container: "mkv".into(),
-                video_codec: "av1".into(),
-                audio_codec: "opus".into(),
-                audio_languages: "eng".into(),
-                width: 1920,
-                height: 1080,
-            },
+    pub fn input(self) -> SimulationInput {
+        let (file_name, sample) = match self {
+            Self::StructuredTracks => (
+                "exemple.bin",
+                json!({
+                    "format": "container",
+                    "tracks": [
+                        { "type": "video", "codec": "h264", "properties": { "width": 1920, "height": 1080 } },
+                        { "type": "audio", "codec": "aac", "properties": { "language": "fre" } }
+                    ]
+                }),
+            ),
+            Self::DocumentMetadata => (
+                "document.epub",
+                json!({
+                    "format": "epub",
+                    "pages": 320,
+                    "metadata": { "language": "fre", "author": "Exemple" }
+                }),
+            ),
+            Self::Minimal => ("fichier.dat", json!({})),
+        };
+        SimulationInput {
+            file_name: file_name.to_owned(),
+            probe_json: serde_json::to_string_pretty(&sample).unwrap_or_else(|_| "{}".to_owned()),
         }
     }
 }
 
-/// Paramètres fictifs d'un fichier d'entrée utilisés pour évaluer les conditions.
+/// Entrée fictive utilisée pour simuler le routage d'un flux sur un document de sonde quelconque.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SimulationMedia {
+pub struct SimulationInput {
     pub file_name: String,
-    pub container: String,
-    pub video_codec: String,
-    pub audio_codec: String,
-    pub audio_languages: String,
-    pub width: u32,
-    pub height: u32,
+    pub probe_json: String,
 }
 
-impl Default for SimulationMedia {
+impl Default for SimulationInput {
     fn default() -> Self {
-        SimulationPreset::H264MkvStereo.media()
+        SimulationPreset::StructuredTracks.input()
     }
 }
 
-impl SimulationMedia {
-    /// Construit un document `mediaInfo` compatible avec `src/flows/condition.rs`.
-    pub fn to_media_info(&self) -> Value {
-        let mut tracks = vec![json!({
-            "type": "video",
-            "codec": self.video_codec.trim(),
-            "properties": {
-                "width": self.width,
-                "height": self.height,
-            }
-        })];
-        for lang in self
-            .audio_languages
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
+impl SimulationInput {
+    /// Construit un arbre JSON de sonde utilisable par `flux_shared::flows::evaluate_condition`.
+    pub fn to_probe_value(&self) -> Result<Value, String> {
+        let mut parsed: Value = serde_json::from_str(&self.probe_json)
+            .map_err(|err| format!("JSON de sonde invalide : {err}"))?;
+        if let Some(obj) = parsed.as_object_mut()
+            && !self.file_name.trim().is_empty()
+            && !obj.contains_key("file_name")
         {
-            tracks.push(json!({
-                "type": "audio",
-                "codec": self.audio_codec.trim(),
-                "properties": {
-                    "language": lang,
-                }
-            }));
+            obj.insert(
+                "file_name".to_owned(),
+                Value::String(self.file_name.trim().to_owned()),
+            );
         }
-        json!({
-            "file_name": self.file_name.trim(),
-            "container": self.container.trim(),
-            "tracks": tracks,
-        })
+        Ok(parsed)
     }
 }
 
@@ -204,68 +183,38 @@ fn is_condition_node(node: &FlowNode, spec: Option<&OwnedBlockSpec>) -> bool {
             && node.config.get("target").is_some())
 }
 
-fn evaluate_condition(node: &FlowNode, media_info: &Value) -> (bool, String) {
-    let property = node
-        .config
-        .get("property")
-        .and_then(Value::as_str)
-        .unwrap_or("video.codec")
-        .trim();
-    let operator = node
-        .config
-        .get("operator")
-        .and_then(Value::as_str)
-        .unwrap_or("eq")
-        .trim();
-    let target = node
-        .config
-        .get("target")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
-
-    let prop_lower = property.to_lowercase();
-    let op_lower = operator.to_lowercase();
-    let target_lower = target.to_lowercase();
-    let tracks = media_info["tracks"].as_array();
-
-    let match_found = if prop_lower == "video.codec" {
-        tracks
-            .map(|arr| {
-                arr.iter().any(|track| {
-                    track["type"].as_str() == Some("video")
-                        && track["codec"]
-                            .as_str()
-                            .is_some_and(|codec| codec.to_lowercase().contains(&target_lower))
-                })
-            })
-            .unwrap_or(false)
-    } else if prop_lower == "audio.language" {
-        tracks
-            .map(|arr| {
-                arr.iter().any(|track| {
-                    track["type"].as_str() == Some("audio")
-                        && track["properties"]["language"]
-                            .as_str()
-                            .is_some_and(|lang| lang.to_lowercase().contains(&target_lower))
-                })
-            })
-            .unwrap_or(false)
-    } else {
-        media_info
-            .to_string()
-            .to_lowercase()
-            .contains(&target_lower)
+fn evaluate_node_condition(node: &FlowNode, probe_info: &Value) -> (bool, String) {
+    let config = ConditionConfig {
+        property: node
+            .config
+            .get("property")
+            .and_then(Value::as_str)
+            .unwrap_or("any")
+            .trim()
+            .to_owned(),
+        operator: node
+            .config
+            .get("operator")
+            .and_then(Value::as_str)
+            .unwrap_or("eq")
+            .trim()
+            .to_owned(),
+        target: node
+            .config
+            .get("target")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_owned(),
     };
-
-    let result = match op_lower.as_str() {
-        "neq" => !match_found,
-        _ => match_found,
-    };
+    let result = evaluate_condition(&config, probe_info);
     let verdict = if result { "Vrai" } else { "Faux" };
     (
         result,
-        format!("{property} {operator} {target} → {verdict}"),
+        format!(
+            "{} {} {} → {verdict}",
+            config.property, config.operator, config.target
+        ),
     )
 }
 
@@ -301,11 +250,11 @@ fn pick_outgoing<'a>(
     }
 }
 
-/// Exécute une simulation déterministe du `graph` pour le média fictif `media`.
+/// Exécute une simulation déterministe du `graph` sur un document d'entrée `input`.
 pub fn simulate_flow(
     graph: &FlowGraph,
     catalog: &[OwnedBlockSpec],
-    media: &SimulationMedia,
+    input: &SimulationInput,
 ) -> SimulationReport {
     let Some(entry) = find_entry_node(graph, catalog) else {
         return SimulationReport {
@@ -315,10 +264,16 @@ pub fn simulate_flow(
         };
     };
 
-    let media_info = media.to_media_info();
     let mut visited = HashSet::new();
     let mut steps = Vec::new();
     let mut warnings = Vec::new();
+    let probe_info = match input.to_probe_value() {
+        Ok(value) => value,
+        Err(err) => {
+            warnings.push(err);
+            json!({ "file_name": input.file_name.trim() })
+        }
+    };
     let mut current_id = Some(entry.id.clone());
 
     while let Some(node_id) = current_id {
@@ -351,7 +306,7 @@ pub fn simulate_flow(
         }
 
         let (selected_port, detail) = if is_condition_node(node, spec) {
-            let (matched, note) = evaluate_condition(node, &media_info);
+            let (matched, note) = evaluate_node_condition(node, &probe_info);
             let port_key = if matched { "true" } else { "false" };
             (Some(port_key.to_owned()), note)
         } else {
@@ -420,8 +375,8 @@ pub fn FlowSimulationPanel(editor: Editor) -> impl IntoView {
     let report = Memo::new(move |_| {
         let graph = editor.graph.get();
         let catalog = editor.catalog.get();
-        let media = editor.sim_media.get();
-        simulate_flow(&graph, &catalog, &media)
+        let input = editor.sim_input.get();
+        simulate_flow(&graph, &catalog, &input)
     });
 
     let step_back = move |_| {
@@ -463,14 +418,14 @@ pub fn FlowSimulationPanel(editor: Editor) -> impl IntoView {
 
                 <div class="flow-inspector__body">
                     <div class="flow-inspector__section">
-                        <span class="flow-inspector__section-title">"Profil de média"</span>
+                        <span class="flow-inspector__section-title">"Entrée de simulation"</span>
                         <div class="flow-sim__presets">
                             {SimulationPreset::ALL.into_iter().map(|preset| view! {
                                 <button
                                     type="button"
                                     class="btn btn-secondary btn-sm"
                                     on:click=move |_| {
-                                        editor.sim_media.set(preset.media());
+                                        editor.sim_input.set(preset.input());
                                         editor.sim_step.set(None);
                                     }
                                 >
@@ -480,31 +435,22 @@ pub fn FlowSimulationPanel(editor: Editor) -> impl IntoView {
                         </div>
                         <div class="flow-sim__fields">
                             <div class="form-group">
-                                <label for="sim-video-codec" class="form-label">"Codec vidéo"</label>
-                                <input id="sim-video-codec" class="form-input text-mono"
-                                    prop:value=move || editor.sim_media.get().video_codec
+                                <label for="sim-file-name" class="form-label">"Nom du fichier"</label>
+                                <input id="sim-file-name" class="form-input text-mono"
+                                    prop:value=move || editor.sim_input.get().file_name
                                     on:input=move |ev| {
-                                        editor.sim_media.update(|m| m.video_codec = event_target_value(&ev));
+                                        editor.sim_input.update(|m| m.file_name = event_target_value(&ev));
                                     }
                                 />
                             </div>
                             <div class="form-group">
-                                <label for="sim-audio-langs" class="form-label">"Langues audio"</label>
-                                <input id="sim-audio-langs" class="form-input text-mono" placeholder="fre, eng"
-                                    prop:value=move || editor.sim_media.get().audio_languages
+                                <label for="sim-probe-json" class="form-label">"Métadonnées de sonde (JSON)"</label>
+                                <textarea id="sim-probe-json" class="form-input text-mono" rows=JSON_EDITOR_ROWS
+                                    prop:value=move || editor.sim_input.get().probe_json
                                     on:input=move |ev| {
-                                        editor.sim_media.update(|m| m.audio_languages = event_target_value(&ev));
+                                        editor.sim_input.update(|m| m.probe_json = event_target_value(&ev));
                                     }
-                                />
-                            </div>
-                            <div class="form-group">
-                                <label for="sim-container" class="form-label">"Conteneur"</label>
-                                <input id="sim-container" class="form-input text-mono"
-                                    prop:value=move || editor.sim_media.get().container
-                                    on:input=move |ev| {
-                                        editor.sim_media.update(|m| m.container = event_target_value(&ev));
-                                    }
-                                />
+                                ></textarea>
                             </div>
                         </div>
                     </div>
@@ -669,13 +615,13 @@ mod tests {
         );
         let cond = graph.append(
             FlowBlockKind::parse("block.core.condition"),
-            "Déjà HEVC ?",
-            json!({"property": "video.codec", "operator": "eq", "target": "hevc"}),
+            "Condition codec ?",
+            json!({"property": "tracks[type=video].codec", "operator": "eq", "target": "hevc"}),
             &catalog,
         );
         let encode = graph.append(
             FlowBlockKind::parse("block.video.encode"),
-            "Encoder HEVC",
+            "Traitement",
             json!({}),
             &catalog,
         );
@@ -700,7 +646,11 @@ mod tests {
         );
         assert!(graph.connect(&encode, None, &out, &catalog).is_ok());
 
-        let h264 = simulate_flow(&graph, &catalog, &SimulationPreset::H264MkvStereo.media());
+        let h264 = simulate_flow(
+            &graph,
+            &catalog,
+            &SimulationPreset::StructuredTracks.input(),
+        );
         assert_eq!(h264.status, SimulationStatus::Complete);
         let h264_nodes: Vec<_> = h264.steps.iter().map(|s| s.node_id.as_str()).collect();
         assert_eq!(
@@ -708,11 +658,11 @@ mod tests {
             vec![entry.as_str(), cond.as_str(), encode.as_str(), out.as_str()]
         );
 
-        let hevc = simulate_flow(
-            &graph,
-            &catalog,
-            &SimulationPreset::HevcMp4MultiAudio.media(),
-        );
+        let hevc_input = SimulationInput {
+            file_name: "film-4k.mp4".into(),
+            probe_json: r#"{"tracks":[{"type":"video","codec":"hevc"}]}"#.into(),
+        };
+        let hevc = simulate_flow(&graph, &catalog, &hevc_input);
         assert_eq!(hevc.status, SimulationStatus::Complete);
         let hevc_nodes: Vec<_> = hevc.steps.iter().map(|s| s.node_id.as_str()).collect();
         assert_eq!(
@@ -722,7 +672,7 @@ mod tests {
     }
 
     #[test]
-    fn simulation_evaluates_audio_language_and_detects_dead_ends_and_cycles() {
+    fn simulation_evaluates_generic_paths_and_detects_dead_ends_and_cycles() {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let entry = graph.append(
@@ -731,10 +681,10 @@ mod tests {
             json!({}),
             &catalog,
         );
-        let audio = graph.append(
+        let doc_cond = graph.append(
             FlowBlockKind::parse("block.core.condition"),
-            "VF présente ?",
-            json!({"property": "audio.language", "operator": "contains", "target": "fre"}),
+            "Format EPUB ?",
+            json!({"property": "format", "operator": "exact", "target": "epub"}),
             &catalog,
         );
         let dead = graph.append(
@@ -744,40 +694,46 @@ mod tests {
             &catalog,
         );
         graph.connections.clear();
-        assert!(graph.connect(&entry, None, &audio, &catalog).is_ok());
+        assert!(graph.connect(&entry, None, &doc_cond, &catalog).is_ok());
         assert!(
             graph
-                .connect(&audio, Some("true".into()), &dead, &catalog)
+                .connect(&doc_cond, Some("true".into()), &dead, &catalog)
                 .is_ok()
         );
 
-        // H264MkvStereo a audio_languages = "fre" -> suit "true" vers `dead`, qui n'a pas de suite.
-        let dead_rep = simulate_flow(&graph, &catalog, &SimulationPreset::H264MkvStereo.media());
+        let dead_rep = simulate_flow(
+            &graph,
+            &catalog,
+            &SimulationPreset::DocumentMetadata.input(),
+        );
         assert_eq!(dead_rep.status, SimulationStatus::IncompletePath);
         assert_eq!(
             dead_rep.steps.last().map(|s| s.node_id.as_str()),
             Some(dead.as_str())
         );
 
-        // Av1MkvVod a audio_languages = "eng" -> suit "false" (pas câblé) -> impasse sur condition.
-        let miss_rep = simulate_flow(&graph, &catalog, &SimulationPreset::Av1MkvVod.media());
+        let miss_rep = simulate_flow(&graph, &catalog, &SimulationPreset::Minimal.input());
         assert_eq!(miss_rep.status, SimulationStatus::IncompletePath);
         assert_eq!(
             miss_rep.steps.last().map(|s| s.node_id.as_str()),
-            Some(audio.as_str())
+            Some(doc_cond.as_str())
         );
 
         // L'éditeur bloque la boucle à la connexion, et le simulateur détecte une boucle héritée.
-        assert!(graph.connect(&dead, None, &audio, &catalog).is_err());
+        assert!(graph.connect(&dead, None, &doc_cond, &catalog).is_err());
         graph.connections.push(FlowConnection {
             from: dead.clone(),
-            to: audio.clone(),
+            to: doc_cond.clone(),
             port: None,
         });
-        let cycle_rep = simulate_flow(&graph, &catalog, &SimulationPreset::H264MkvStereo.media());
+        let cycle_rep = simulate_flow(
+            &graph,
+            &catalog,
+            &SimulationPreset::DocumentMetadata.input(),
+        );
         assert_eq!(cycle_rep.status, SimulationStatus::CycleDetected);
 
-        let empty = simulate_flow(&FlowGraph::default(), &catalog, &SimulationMedia::default());
+        let empty = simulate_flow(&FlowGraph::default(), &catalog, &SimulationInput::default());
         assert_eq!(empty.status, SimulationStatus::NoEntry);
     }
 }

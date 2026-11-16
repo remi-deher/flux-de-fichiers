@@ -331,12 +331,14 @@ pub const COMPONENTS_CSS: &str = r#"
   flex: none;
 }
 
-.inspection-drawer__subnav {
+.inspection-drawer__subnav,
+.page-subnav {
   display: flex;
   border-bottom: 1px solid var(--border-color);
 }
 
-.inspection-drawer__tab {
+.inspection-drawer__tab,
+.page-subnav__tab {
   flex: 1;
   appearance: none;
   border: 0;
@@ -352,12 +354,18 @@ pub const COMPONENTS_CSS: &str = r#"
   cursor: pointer;
 }
 
-.inspection-drawer__tab.is-active {
+.page-subnav__tab:hover {
+  color: var(--text-main);
+}
+
+.inspection-drawer__tab.is-active,
+.page-subnav__tab.is-active {
   color: var(--text-main);
   border-bottom-color: var(--primary);
 }
 
-.inspection-drawer__tab:focus-visible {
+.inspection-drawer__tab:focus-visible,
+.page-subnav__tab:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: -2px;
 }

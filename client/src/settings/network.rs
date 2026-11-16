@@ -288,7 +288,7 @@ fn SettingsRuntimeForm(initial: SystemStatus, on_saved: Callback<()>) -> impl In
                     <input type="checkbox"
                         prop:checked=move || block_private_integration_hosts.get()
                         on:change=move |ev| block_private_integration_hosts.set(event_target_checked(&ev)) />
-                    <span>"Bloquer les adresses privées pour les intégrations (webhooks, Sonarr/Radarr)"</span>
+                    <span>"Bloquer les adresses privées pour les intégrations (webhooks, services externes)"</span>
                 </label>
             </fieldset>
 

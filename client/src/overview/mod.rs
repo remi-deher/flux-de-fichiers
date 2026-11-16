@@ -1,25 +1,21 @@
 //! Vue d'ensemble : chiffres clés, points d'attention et tâches récentes ; sur un worker, ses tâches.
 
 pub mod hardware;
+mod jobs_widget;
 mod summary;
 mod widgets;
 
 use crate::jobs::LiveJobs;
-use crate::jobs::model::{status_label, status_tone};
-use crate::jobs::table::job_progress_cell;
-use crate::route::{Link, Route, use_router};
+use crate::route::{Route, use_router};
 use crate::ui::filters::{Filters, JobStateFilter};
-use crate::ui::{
-    EmptyState, Icon, IconName, MetricTone, Registre, RegistreMessage, SectionHeader, StatItem,
-    StatStrip, StatusBadge,
-};
+use crate::ui::{EmptyState, Icon, IconName, MetricTone, SectionHeader, StatItem, StatStrip};
 use crate::{api, format};
 use chrono::Utc;
 use flux_shared::jobs::Job;
 use flux_shared::libraries::Library;
 use flux_shared::session::Me;
 use flux_shared::workers::{Worker, WorkerOverview};
-use hardware::HardwareWidget;
+use jobs_widget::JobsWidget;
 use leptos::prelude::*;
 use summary::{Summary, alerts, ratio_percent};
 use widgets::{Widget, WidgetLayout, WidgetPicker};
@@ -28,7 +24,6 @@ const JOBS_PATH: &str = "/api/v1/jobs?limit=200";
 const WORKERS_PATH: &str = "/api/v1/workers";
 const LIBRARIES_PATH: &str = "/api/v1/libraries";
 const WORKER_OVERVIEW_PATH: &str = "/api/v1/worker/overview";
-const RECENT_JOBS: usize = 5;
 
 fn plain_http() -> bool {
     window()
@@ -93,7 +88,6 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                 } else {
                     ("warning", format!("{} point(s) à surveiller", attention.len()))
                 };
-                let recent: Vec<Job> = jobs_list.into_iter().take(RECENT_JOBS).collect();
                 let actions = view! { <WidgetPicker layout=layout /> }.into_any();
                 view! {
                     <Hero tone=tone status=status actions=actions />
@@ -138,7 +132,6 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                         ];
                         view! { <StatStrip aria_label="Statistiques clés" items=kpis /> }
                     })}
-                    {layout_now.is_visible(Widget::Hardware).then(|| view! { <HardwareWidget /> })}
                     <div class="overview-grid-2col">
                         {layout_now.is_visible(Widget::Attention).then(|| view! {
                         <section class="section-panel">
@@ -158,27 +151,11 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                         </section>
                         })}
                         {layout_now.is_visible(Widget::RecentJobs).then(|| view! {
-                        <section class="section-panel">
-                            <SectionHeader title="Tâches récentes" actions=view! { <Link to=Route::Jobs class="btn btn-secondary btn-sm">"Toutes les tâches →"</Link> }.into_any() />
-                            <Registre aria_label="Tâches récentes" headers=vec!["Fichier", "État", "Progression", "Créée"]>
-                                {if recent.is_empty() {
-                                    view! { <RegistreMessage span=4 text="Aucune tâche." /> }.into_any()
-                                } else {
-                                    recent.into_iter().map(|job| {
-                                        let id = job.id;
-                                        let status = job.status;
-                                        view! {
-                                            <tr class="registre-row is-clickable" on:click=move |_| router.go(Route::Jobs)>
-                                                <td class="text-strong truncate">{job.source_name}</td>
-                                                <td><StatusBadge label=status_label(status) variant=status_tone(status) /></td>
-                                                <td>{job_progress_cell(id, status, live_progress)}</td>
-                                                <td class="text-dim">{format::datetime(job.created_at)}</td>
-                                            </tr>
-                                        }
-                                    }).collect_view().into_any()
-                                }}
-                            </Registre>
-                        </section>
+                            <JobsWidget
+                                jobs=jobs_list
+                                workers=workers_list
+                                live_progress=live_progress
+                            />
                         })}
                     </div>
                 }

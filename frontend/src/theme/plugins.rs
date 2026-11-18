@@ -3,7 +3,7 @@
 pub const PLUGINS_CSS: &str = r#"
 /* --- Étiquettes de statut de dépôt --- */
 .repo-badge {
-  font-size: 0.6875rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;

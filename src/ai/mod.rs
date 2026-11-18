@@ -700,12 +700,18 @@ mod tests {
         let mock_llm = axum::Router::new()
             .route(
                 "/models",
-                axum::routing::get(|headers: axum::http::HeaderMap| async move {
+                axum::routing::get(|headers: axum::http::HeaderMap, uri: axum::http::Uri| async move {
                     assert_eq!(
                         headers
                             .get("chatgpt-account-id")
                             .and_then(|v| v.to_str().ok()),
                         Some("acct-1")
+                    );
+                    // Le backend Codex masque les modèles dont la version minimale n'est pas atteinte.
+                    assert_eq!(
+                        uri.query(),
+                        Some("client_version=0.170.0"),
+                        "version de client annoncée à /models"
                     );
                     Json(json!({ "models": [
                         { "slug": "interdit", "visibility": "hide", "priority": 0 },

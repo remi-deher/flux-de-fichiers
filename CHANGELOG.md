@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.42.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.41.0...v0.42.0) (2026-11-18)
+
+
+### Features
+
+* approval enrollment, library automation, job scheduling, sqlx offline and mcp audit ([a1f5316](https://github.com/remi-deher/flux-de-fichiers/commit/a1f5316050dd5045331624c8df96ee6027375ee0))
+* enrôlement par approbation, automatisation, SQLx hors-ligne et audit MCP ([d2b6da9](https://github.com/remi-deher/flux-de-fichiers/commit/d2b6da95e03dbe46c6add7025cdffa896d92d91f))
+
+
+### Bug Fixes
+
+* collapse nested condition in worker schedule validation ([c15d4d7](https://github.com/remi-deher/flux-de-fichiers/commit/c15d4d7bc2084c111399af048071cde3680b2c4b))
+* simplifier le rendu conditionnel dans workers ([d5e4ed4](https://github.com/remi-deher/flux-de-fichiers/commit/d5e4ed48b2a464065d4b3c843a556d6252525ac8))
+* simplify conditional header actions in workers view ([9f102c9](https://github.com/remi-deher/flux-de-fichiers/commit/9f102c9793ad76e9d9b345d24a33ff190d5585fd))
+
 ## [0.41.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.40.0...v0.41.0) (2026-11-18)
 
 

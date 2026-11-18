@@ -109,6 +109,23 @@ async fn resolve_endpoint(
     })
 }
 
+/// Premier modèle proposé au compte, quand aucun modèle n'est choisi (comme Codex CLI).
+async fn first_available_model(
+    endpoint: &ProviderEndpoint,
+    policy: OutboundPolicy,
+) -> AppResult<String> {
+    let models = provider::list_chatgpt_models(endpoint, policy)
+        .await
+        .map_err(|err| {
+            tracing::warn!(provider = %endpoint.provider, error = %err, "liste des modèles indisponible");
+            AppError::Internal
+        })?;
+    models.into_iter().next().ok_or_else(|| {
+        tracing::warn!(provider = %endpoint.provider, "aucun modèle proposé à ce compte");
+        AppError::Internal
+    })
+}
+
 async fn integration_policy(state: &AppState) -> OutboundPolicy {
     runtime_settings::load_effective(&state.pool, &state.config)
         .await
@@ -242,7 +259,7 @@ pub async fn chat(
     }
 
     let policy = integration_policy(&state).await;
-    let endpoint = resolve_endpoint(
+    let mut endpoint = resolve_endpoint(
         &state,
         ai_cfg.provider,
         ai_cfg.base_url.clone(),
@@ -251,6 +268,9 @@ pub async fn chat(
         policy,
     )
     .await?;
+    if ai_cfg.provider.has_automatic_model() && endpoint.model.trim().is_empty() {
+        endpoint.model = first_available_model(&endpoint, policy).await?;
+    }
     let tools = available_tools_for_assistant(&principal, ai_cfg.allow_write_tools);
     let system_prompt = build_system_prompt(
         &principal,
@@ -275,7 +295,7 @@ pub async fn chat(
             ModelTurnResponse::FinalText(reply) => {
                 return Ok(Json(AiChatResponse {
                     reply,
-                    model: ai_cfg.model,
+                    model: endpoint.model.clone(),
                     provider: ai_cfg.provider,
                     tool_calls: traces,
                     rounds_used,
@@ -323,7 +343,7 @@ pub async fn chat(
 
     Ok(Json(AiChatResponse {
         reply,
-        model: ai_cfg.model,
+        model: endpoint.model.clone(),
         provider: ai_cfg.provider,
         tool_calls: traces,
         rounds_used,
@@ -666,7 +686,24 @@ mod tests {
     #[tokio::test]
     async fn chatgpt_oauth_chat_requires_connection_sends_account_and_can_disconnect()
     -> anyhow::Result<()> {
-        let mock_llm = axum::Router::new().route(
+        let mock_llm = axum::Router::new()
+            .route(
+                "/models",
+                axum::routing::get(|headers: axum::http::HeaderMap| async move {
+                    assert_eq!(
+                        headers
+                            .get("chatgpt-account-id")
+                            .and_then(|v| v.to_str().ok()),
+                        Some("acct-1")
+                    );
+                    Json(json!({ "models": [
+                        { "slug": "interdit", "visibility": "hide", "priority": 0 },
+                        { "slug": "gpt-second", "visibility": "list", "priority": 2 },
+                        { "slug": "gpt-auto", "visibility": "list", "priority": 1 },
+                    ]}))
+                }),
+            )
+            .route(
             "/responses",
             post(
                 |headers: axum::http::HeaderMap, Json(body): Json<Value>| async move {
@@ -681,6 +718,8 @@ mod tests {
                     assert_eq!(header("chatgpt-account-id"), "acct-1");
                     assert_eq!(body["stream"], true);
                     assert_eq!(body["store"], false);
+                    // Modèle vide : le premier modèle proposé au compte est utilisé.
+                    assert_eq!(body["model"], "gpt-auto");
                     assert!(body["instructions"].as_str().is_some_and(|s| !s.is_empty()));
                     let events = [
                         json!({
@@ -727,7 +766,7 @@ mod tests {
             enabled: true,
             provider: AiProvider::ChatGptOauth,
             base_url: format!("http://{mock_addr}"),
-            model: "gpt-test".into(),
+            model: String::new(),
             api_key: None,
             allow_write_tools: false,
             max_tool_rounds: 3,
@@ -771,17 +810,19 @@ mod tests {
             serde_json::from_slice(&axum::body::to_bytes(chat.into_body(), 65_536).await?)?;
         assert_eq!(chat.reply, "Bonjour ChatGPT");
         assert_eq!(chat.provider, AiProvider::ChatGptOauth);
+        assert_eq!(chat.model, "gpt-auto");
 
         let test_body = Body::from(serde_json::to_vec(&AiTestRequest {
             provider: AiProvider::ChatGptOauth,
             base_url: format!("http://{mock_addr}"),
-            model: "gpt-test".into(),
+            model: String::new(),
             api_key: None,
         })?);
         let tested = call("POST", "/api/v1/ai/test", &admin, test_body).await?;
         let tested: AiTestResponse =
             serde_json::from_slice(&axum::body::to_bytes(tested.into_body(), 16_384).await?)?;
         assert!(tested.reachable);
+        assert_eq!(tested.available_models, ["gpt-auto", "gpt-second"]);
 
         // Seul un administrateur gère la connexion.
         assert_eq!(

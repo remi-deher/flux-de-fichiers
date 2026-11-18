@@ -14,6 +14,7 @@ pub mod format;
 pub mod jobs;
 pub mod libraries;
 pub mod local;
+pub mod logs;
 pub mod mcp;
 pub mod plugins;
 pub mod search;

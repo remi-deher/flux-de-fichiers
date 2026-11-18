@@ -388,6 +388,7 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/api-keys", get(keys::list).post(keys::create))
         .route("/api/v1/api-keys/{id}", axum::routing::delete(keys::revoke))
         .route("/api/v1/mcp/audit", get(crate::mcp::list_audit))
+        .route("/api/v1/logs", get(crate::logs::list))
         .route("/api/v1/ai/status", get(crate::ai::client_status))
         .route(
             "/api/v1/ai/settings",

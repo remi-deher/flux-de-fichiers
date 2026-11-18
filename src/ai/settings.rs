@@ -69,7 +69,7 @@ impl EffectiveAiSettings {
     pub fn as_client_status(&self) -> AiClientStatus {
         let ready = self.enabled
             && !self.base_url.trim().is_empty()
-            && !self.model.trim().is_empty()
+            && (self.provider.has_automatic_model() || !self.model.trim().is_empty())
             && (!self.provider.requires_api_key()
                 || self.api_key.as_ref().is_some_and(|k| !k.is_empty()))
             && (!self.provider.uses_oauth() || self.oauth.is_some());
@@ -191,7 +191,8 @@ pub async fn update(
 ) -> AppResult<EffectiveAiSettings> {
     let base_url = validate_base_url(&request.base_url)?;
     let model = request.model.trim().to_owned();
-    if model.is_empty() || model.chars().any(char::is_control) {
+    let model_required = !request.provider.has_automatic_model();
+    if (model_required && model.is_empty()) || model.chars().any(char::is_control) {
         return Err(AppError::Invalid);
     }
 

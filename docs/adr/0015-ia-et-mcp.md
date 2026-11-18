@@ -76,8 +76,23 @@ que par clé d'API. Premier fournisseur : **ChatGPT** (`chatgpt_oauth`), même f
   de Codex CLI et le modèle par défaut (`gpt-5-codex`, modifiable) peuvent changer côté
   fournisseur ; l'usage reste soumis à ses conditions. La clé d'API OpenAI/compatible demeure
   l'option stable.
+- **Modèle** : aucun nom fixe. Le modèle peut rester vide (« automatique ») : le central
+  interroge `GET /backend-api/codex/models` avec le jeton du compte et retient le premier
+  modèle visible par priorité, comme Codex CLI. Le bouton « Tester & lister les modèles »
+  affiche cette liste. Un nom fixe (ex. `gpt-5-codex`) est refusé par certains comptes
+  (HTTP 400 `model_not_found`, constaté en production le 18 nov. 2026).
 - **Hors périmètre** : Anthropic (OAuth réservé à Claude Code par ses conditions) et OAuth
   générique configurable, non retenus pour l'instant.
+
+## Journal applicatif dans Activité (18 nov. 2026)
+
+Les erreurs du central (dont les échecs d'appel au fournisseur IA) n'allaient que dans
+`LOG_DIR/flux.jsonl.<date>`, invisibles depuis l'interface (l'API ne renvoie que
+`internal_error`). L'écran **Activité** gagne un onglet **Journal**, réservé aux
+administrateurs (`ManageApiKeys`) : `GET /api/v1/logs?level=&search=&limit=` lit la fin des
+quatre fichiers les plus récents (4 Mio chacun, jamais un fichier entier), du plus récent au
+plus ancien, avec filtre de niveau minimal et recherche (message, module, champs). Journal du
+central uniquement ; les workers gardent le leur.
 
 ## Questions ouvertes
 

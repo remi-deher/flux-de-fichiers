@@ -2,11 +2,16 @@
 
 use super::settings::PluginSettings;
 use crate::api;
+use crate::flows::NodeDomain;
 use crate::route::encode_segment;
-use crate::ui::{Tag, TagTone};
-use flux_shared::flows::{OwnedBlockSpec, OwnedFieldKind, OwnedFieldSpec};
+use crate::ui::{Icon, Tag, TagTone};
+use flux_shared::flows::OwnedBlockSpec;
+#[cfg(test)]
+use flux_shared::flows::{OwnedFieldKind, OwnedFieldSpec};
 use flux_shared::plugins::PluginDetailView;
 use leptos::prelude::*;
+
+const BLOCK_CARD_ICON_SIZE: u32 = 16;
 
 /// Onglets du tiroir d'un plugin, ordonnés par usage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +46,7 @@ impl PluginDrawerTab {
     }
 }
 
+#[cfg(test)]
 fn field_kind_label(kind: &OwnedFieldKind) -> &'static str {
     match kind {
         OwnedFieldKind::Text => "Texte",
@@ -50,6 +56,7 @@ fn field_kind_label(kind: &OwnedFieldKind) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn format_field_chip(field: &OwnedFieldSpec) -> String {
     let required = if field.required { " *" } else { "" };
     format!(
@@ -68,57 +75,54 @@ fn BlocksTab(blocks: Vec<OwnedBlockSpec>) -> impl IntoView {
         }
         .into_any();
     }
+    let mut grouped: Vec<(String, Vec<OwnedBlockSpec>)> = Vec::new();
+    for block in blocks {
+        if let Some((_, items)) = grouped.iter_mut().find(|(cat, _)| cat == &block.category) {
+            items.push(block);
+        } else {
+            grouped.push((block.category.clone(), vec![block]));
+        }
+    }
     view! {
-        <ul class="step-list">
-            {blocks.into_iter().map(|block| {
-                let kind = block.kind.clone();
-                let label = block.label.clone();
-                let description = block.description.clone();
-                let category = block.category.clone();
-                let domain = block.domain.clone();
-                let has_input = block.has_input;
-                let terminal = block.terminal;
-                let ports = block.ports.clone();
-                let operation_id = block.operation_id.clone();
-                let aliases = block.aliases.clone();
-                let fields = block.fields.clone();
+        <div class="flow-palette__groups">
+            {grouped.into_iter().map(|(category, items)| {
+                let count = items.len();
                 view! {
-                    <li class="step-item">
-                        <div class="step-item__head">
-                            <span class="text-strong">{label}</span>
-                            <Tag label=kind tone=TagTone::Mono />
-                            <Tag label=category tone=TagTone::Primary />
-                            {domain.map(|d| view! { <Tag label=d tone=TagTone::Neutral /> })}
-                            {(!has_input).then(|| view! { <Tag label="Début de flux" tone=TagTone::Success /> })}
-                            {terminal.then(|| view! { <Tag label="Fin de flux" tone=TagTone::Warning /> })}
+                    <details class="flow-palette__group" open=true>
+                        <summary class="flow-palette__summary">
+                            <span>{category}</span>
+                            <span class="flow-palette__count">{count}</span>
+                        </summary>
+                        <div class="flow-palette__list">
+                            {items.into_iter().map(|block| {
+                                let domain = NodeDomain::from_spec(Some(&block), &block.category);
+                                let accent_style = format!("--component-accent: {}", domain.accent_var());
+                                let label = block.label.clone();
+                                let description = block.description.clone();
+                                let meta = if !description.is_empty() {
+                                    description.clone()
+                                } else if !block.fields.is_empty() {
+                                    format!("{} paramètre(s)", block.fields.len())
+                                } else {
+                                    block.kind.clone()
+                                };
+                                view! {
+                                    <div class="flow-palette__card" style=accent_style title=description>
+                                        <span class="flow-palette__card-icon" aria-hidden="true">
+                                            <Icon name=domain.icon() size=BLOCK_CARD_ICON_SIZE />
+                                        </span>
+                                        <span class="flow-palette__card-text">
+                                            <span class="flow-palette__card-title">{label}</span>
+                                            <span class="flow-palette__card-meta">{meta}</span>
+                                        </span>
+                                    </div>
+                                }
+                            }).collect_view()}
                         </div>
-                        {(!description.is_empty()).then(|| view! {
-                            <p class="step-item__msg text-sm">{description}</p>
-                        })}
-                        {(!ports.is_empty() || operation_id.is_some() || !aliases.is_empty()).then(|| view! {
-                            <div class="step-item__meta">
-                                {ports.into_iter().map(|(id, port_label)| view! {
-                                    <Tag label=format!("Sortie : {port_label} ({id})") tone=TagTone::Neutral />
-                                }).collect_view()}
-                                {operation_id.map(|op| view! {
-                                    <Tag label=format!("Op : {op}") tone=TagTone::Mono />
-                                })}
-                                {aliases.into_iter().map(|alias| view! {
-                                    <Tag label=format!("Alias : {alias}") tone=TagTone::Mono />
-                                }).collect_view()}
-                            </div>
-                        })}
-                        {(!fields.is_empty()).then(|| view! {
-                            <div class="step-item__meta">
-                                {fields.iter().map(|field| view! {
-                                    <Tag label=format_field_chip(field) tone=TagTone::Neutral />
-                                }).collect_view()}
-                            </div>
-                        })}
-                    </li>
+                    </details>
                 }
             }).collect_view()}
-        </ul>
+        </div>
     }
     .into_any()
 }

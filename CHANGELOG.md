@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.36.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.35.0...v0.36.0) (2026-11-18)
+
+
+### Features
+
+* add selectable API key scopes and simplify technical UI/MCP nomenclature ([ba5dd1d](https://github.com/remi-deher/flux-de-fichiers/commit/ba5dd1d90257c8ec29bab195aa89df1bf9c4f72f))
+* add selectable API key scopes and simplify technical UI/MCP nomenclature ([f7f63fc](https://github.com/remi-deher/flux-de-fichiers/commit/f7f63fc3b5583af6f432879a28e5999b1e46502a))
+
 ## [0.35.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.34.1...v0.35.0) (2026-11-16)
 
 

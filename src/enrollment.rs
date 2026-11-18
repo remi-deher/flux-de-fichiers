@@ -1,16 +1,41 @@
-//! Enrôlement d'un worker auprès du central (ADR 0011) : le worker présente les identifiants d'un
-//! administrateur, le central crée la clé d'API du worker et la renvoie une seule fois. Le mot de passe
-//! n'est jamais conservé par le worker.
+//! Enrôlement d'un worker auprès du central : demande à approuver (ADR 0016) et secours par
+//! identifiants administrateur (ADR 0011).
 
-use crate::error::{AppError, AppResult};
+use crate::{
+    api_keys,
+    error::{AppError, AppResult},
+};
+use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
+use flux_shared::workers::{
+    WorkerEnrollmentCreated, WorkerEnrollmentPollResponse, WorkerEnrollmentRequestInput,
+};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::{LazyLock, Mutex},
+    time::{Duration, Instant},
+};
+use uuid::Uuid;
 
-/// Chemin de la route d'enrôlement, partagé entre le client (worker) et le serveur (central).
+/// Chemin de la route d'enrôlement direct (secours ADR 0011).
 pub const ENROLL_PATH: &str = "/api/v1/workers/enroll";
+/// Chemin des demandes d'enrôlement à approuver (ADR 0016).
+pub const WORKERS_REQUESTS_PATH: &str = "/api/v1/workers/requests";
+/// En-tête portant le secret aléatoire généré par le worker pour retirer sa clé.
+pub const ENROLLMENT_SECRET_HEADER: &str = "x-enrollment-secret";
+
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+const SECRET_BYTES: usize = 24;
+const SHA256_HEX_LEN: usize = 64;
+const RATE_WINDOW: Duration = Duration::from_secs(60);
+const MAX_REQUESTS_PER_ADDR: usize = 5;
+const MAX_TRACKED_ADDRS: usize = 1024;
+const WORKER_NAME_MAX_LEN: usize = 80;
+
+static REQUEST_RATE_LIMITER: LazyLock<Mutex<HashMap<String, VecDeque<Instant>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Serialize, Deserialize)]
 pub struct EnrollRequest {
@@ -37,15 +62,19 @@ pub fn error_for_status(status: StatusCode) -> Option<AppError> {
     }
 }
 
-/// Demande au central la clé d'API d'un nouveau worker. Aucune redirection n'est suivie et le détail
-/// des erreurs réseau n'est pas relayé (l'adresse saisie ne doit pas fuiter dans les messages).
-pub async fn request_key(central: &reqwest::Url, request: &EnrollRequest) -> AppResult<String> {
-    let client = reqwest::Client::builder()
+fn build_client() -> AppResult<reqwest::Client> {
+    reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .map_err(|_| AppError::Internal)?;
+        .map_err(|_| AppError::Internal)
+}
+
+/// Demande au central la clé d'API d'un nouveau worker (voie directe ADR 0011). Aucune redirection
+/// n'est suivie et le détail des erreurs réseau n'est pas relayé.
+pub async fn request_key(central: &reqwest::Url, request: &EnrollRequest) -> AppResult<String> {
+    let client = build_client()?;
     let url = central.join(ENROLL_PATH).map_err(|_| AppError::Invalid)?;
     let response = client
         .post(url)
@@ -61,6 +90,124 @@ pub async fn request_key(central: &reqwest::Url, request: &EnrollRequest) -> App
         .await
         .map_err(|_| AppError::CentralUnavailable)?;
     Ok(enrolled.key)
+}
+
+/// Génère un secret aléatoire côté worker et son empreinte SHA-256 à envoyer au central.
+pub fn generate_secret_and_hash() -> (String, String) {
+    let mut bytes = [0_u8; SECRET_BYTES];
+    OsRng.fill_bytes(&mut bytes);
+    let secret: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let hash = api_keys::hash_secret(&secret);
+    (secret, hash)
+}
+
+/// Vérifie qu'une empreinte SHA-256 hexadécimale est syntaxiquement valide.
+pub fn is_valid_sha256_hex(raw: &str) -> bool {
+    raw.len() == SHA256_HEX_LEN && raw.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Nom de worker proposé par défaut à partir du nom d'hôte, nettoyé pour respecter les règles.
+pub fn default_worker_name() -> String {
+    let raw = std::env::var("HOSTNAME")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| std::fs::read_to_string("/etc/hostname").ok())
+        .unwrap_or_else(|| "worker".to_owned());
+    let cleaned: String = raw
+        .trim()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || "-_.".contains(*c))
+        .take(WORKER_NAME_MAX_LEN)
+        .collect();
+    if cleaned.is_empty() {
+        "worker".to_owned()
+    } else {
+        cleaned
+    }
+}
+
+/// Limite la fréquence des demandes d'enrôlement par adresse source.
+pub fn check_request_rate_limit(addr: Option<&str>) -> AppResult<()> {
+    let key = addr
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("unknown");
+    let now = Instant::now();
+    let mut guard = REQUEST_RATE_LIMITER
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    if guard.len() >= MAX_TRACKED_ADDRS && !guard.contains_key(key) {
+        guard.retain(|_, hits| {
+            hits.front()
+                .is_some_and(|first| now.duration_since(*first) < RATE_WINDOW)
+        });
+        if guard.len() >= MAX_TRACKED_ADDRS {
+            return Err(AppError::RateLimited);
+        }
+    }
+    let hits = guard.entry(key.to_owned()).or_default();
+    while hits
+        .front()
+        .is_some_and(|ts| now.duration_since(*ts) >= RATE_WINDOW)
+    {
+        hits.pop_front();
+    }
+    if hits.len() >= MAX_REQUESTS_PER_ADDR {
+        return Err(AppError::RateLimited);
+    }
+    hits.push_back(now);
+    Ok(())
+}
+
+/// Dépose une demande d'enrôlement auprès du central (ADR 0016).
+pub async fn submit_enrollment_request(
+    central: &reqwest::Url,
+    request: &WorkerEnrollmentRequestInput,
+) -> AppResult<WorkerEnrollmentCreated> {
+    let client = build_client()?;
+    let url = central
+        .join(WORKERS_REQUESTS_PATH)
+        .map_err(|_| AppError::Invalid)?;
+    let response = client
+        .post(url)
+        .json(request)
+        .send()
+        .await
+        .map_err(|_| AppError::CentralUnavailable)?;
+    if let Some(error) = error_for_status(response.status()) {
+        return Err(error);
+    }
+    response
+        .json::<WorkerEnrollmentCreated>()
+        .await
+        .map_err(|_| AppError::CentralUnavailable)
+}
+
+/// Interroge le central sur l'avancement d'une demande et récupère la clé si approuvée.
+pub async fn poll_enrollment_request(
+    central: &reqwest::Url,
+    id: Uuid,
+    secret: &str,
+) -> AppResult<WorkerEnrollmentPollResponse> {
+    let client = build_client()?;
+    let path = format!("{WORKERS_REQUESTS_PATH}/{id}");
+    let url = central.join(&path).map_err(|_| AppError::Invalid)?;
+    let response = client
+        .get(url)
+        .header(ENROLLMENT_SECRET_HEADER, secret)
+        .send()
+        .await
+        .map_err(|_| AppError::CentralUnavailable)?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err(AppError::NotFound);
+    }
+    if let Some(error) = error_for_status(response.status()) {
+        return Err(error);
+    }
+    response
+        .json::<WorkerEnrollmentPollResponse>()
+        .await
+        .map_err(|_| AppError::CentralUnavailable)
 }
 
 #[cfg(test)]

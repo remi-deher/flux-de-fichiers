@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS(SELECT 1 FROM jobs WHERE library_id=?1 AND source_name=?2 AND source_sha256=?3 AND status IN ('queued', 'running', 'succeeded')) AS \"exists!: bool\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "exists!: bool",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "16789690e9f600d9dd3539c2e64b2e3dde5889bde23bbae4be83080c91a8a448"
+}

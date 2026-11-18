@@ -1,0 +1,80 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO libraries (id, name, flow_id, scan_interval_minutes, include_extensions, exclude_patterns, min_file_bytes, output_policy) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) RETURNING id AS \"id!: Uuid\", name, flow_id, scan_interval_minutes AS \"scan_interval_minutes: i32\", last_scanned_at AS \"last_scanned_at: chrono::DateTime<chrono::Utc>\", include_extensions, exclude_patterns, min_file_bytes, output_policy AS \"output_policy: LibraryOutputPolicy\", created_at AS \"created_at: chrono::DateTime<chrono::Utc>\", updated_at AS \"updated_at: chrono::DateTime<chrono::Utc>\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "flow_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "scan_interval_minutes: i32",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_scanned_at: chrono::DateTime<chrono::Utc>",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "include_extensions",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "exclude_patterns",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "min_file_bytes",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "output_policy: LibraryOutputPolicy",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at: chrono::DateTime<chrono::Utc>",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at: chrono::DateTime<chrono::Utc>",
+        "ordinal": 10,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "55b80ec060269f7b255d4eaa5704623d93fc1e83740a369e44c4bcf8a07dabd1"
+}

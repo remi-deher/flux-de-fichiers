@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO flows (id, name, description, file_mask, is_default, definition, version, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now')) ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, file_mask=excluded.file_mask, is_default=excluded.is_default, definition=excluded.definition, version=excluded.version, updated_at=datetime('now') RETURNING id AS \"id!: String\", name, description, file_mask, is_default AS \"is_default: bool\", definition, version, created_at AS \"created_at: DateTime<Utc>\", updated_at AS \"updated_at: DateTime<Utc>\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "description",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "file_mask",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_default: bool",
+        "ordinal": 4,
+        "type_info": "Bool"
+      },
+      {
+        "name": "definition",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "version",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at: DateTime<Utc>",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at: DateTime<Utc>",
+        "ordinal": 8,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c290cfdfbed362373705fca620c7c79cfd9ae953948bbfb237daddc237dac287"
+}

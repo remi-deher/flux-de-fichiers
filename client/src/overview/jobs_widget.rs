@@ -44,7 +44,10 @@ impl JobsWidgetTab {
     pub fn matches(self, status: JobStatus) -> bool {
         match self {
             Self::Running => status == JobStatus::Running,
-            Self::Completed => matches!(status, JobStatus::Succeeded | JobStatus::Failed),
+            Self::Completed => matches!(
+                status,
+                JobStatus::Succeeded | JobStatus::Failed | JobStatus::Canceled
+            ),
             Self::Queued => status == JobStatus::Queued,
         }
     }
@@ -73,7 +76,7 @@ pub fn count_jobs_by_tab(jobs: &[Job]) -> JobsTabCounts {
     for job in jobs {
         match job.status {
             JobStatus::Running => counts.running += 1,
-            JobStatus::Succeeded | JobStatus::Failed => counts.completed += 1,
+            JobStatus::Succeeded | JobStatus::Failed | JobStatus::Canceled => counts.completed += 1,
             JobStatus::Queued => counts.queued += 1,
         }
     }
@@ -232,6 +235,7 @@ mod tests {
             library_id: None,
             flow_id: None,
             flow_version: None,
+            priority: 0,
             created_at: now,
             updated_at: now,
         }

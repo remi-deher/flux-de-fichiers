@@ -309,6 +309,60 @@ pub(crate) async fn publish_staged(
         return Err(error);
     }
     tracing::info!(job_id=%id, worker_id=%lease.worker_id, bytes=size, warning, "remux completed");
+    if let Some(lib_id) = job.library_id
+        && let Ok(lib) = repository::get_library(&s.pool, lib_id).await
+    {
+        apply_library_output_policy(
+            lib.output_policy,
+            &s.config.input_dir,
+            &job.source_name,
+            &destination,
+            &spec.extension,
+        )
+        .await;
+    }
     s.notify_job_event(JobEventType::JobSucceeded, id, JobStatus::Succeeded, None);
     Ok(())
+}
+
+async fn apply_library_output_policy(
+    policy: crate::domain::LibraryOutputPolicy,
+    input_dir: &std::path::Path,
+    source_name: &str,
+    published_output: &std::path::Path,
+    output_ext: &str,
+) {
+    use crate::domain::LibraryOutputPolicy;
+    if matches!(policy, LibraryOutputPolicy::OutputDir) {
+        return;
+    }
+    let Ok(source_path) = storage::input_path(input_dir, source_name).await else {
+        return;
+    };
+    let Some(parent) = source_path.parent() else {
+        return;
+    };
+    let stem = source_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+    let target_name = format!("{stem}.{output_ext}");
+    let target_path = parent.join(&target_name);
+    if matches!(policy, LibraryOutputPolicy::ReplaceWithBackup) {
+        let mut backup = source_path.as_os_str().to_owned();
+        backup.push(".bak");
+        if let Err(err) = tokio::fs::rename(&source_path, &backup).await {
+            tracing::warn!(error = %err, "backup before library replacement failed");
+            return;
+        }
+    } else if target_path != source_path {
+        let _ = tokio::fs::remove_file(&source_path).await;
+    }
+    if tokio::fs::hard_link(published_output, &target_path)
+        .await
+        .is_err()
+        && let Err(err) = tokio::fs::copy(published_output, &target_path).await
+    {
+        tracing::warn!(error = %err, "library in-place replacement failed");
+    }
 }

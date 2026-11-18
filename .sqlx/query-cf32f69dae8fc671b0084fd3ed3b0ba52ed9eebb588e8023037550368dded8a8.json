@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id AS \"id!: String\", name, index_url, is_official AS \"is_official: bool\", enabled AS \"enabled: bool\", last_synced_at, created_at FROM plugin_repositories ORDER BY is_official DESC, created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "index_url",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_official: bool",
+        "ordinal": 3,
+        "type_info": "Bool"
+      },
+      {
+        "name": "enabled: bool",
+        "ordinal": 4,
+        "type_info": "Bool"
+      },
+      {
+        "name": "last_synced_at",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 6,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "cf32f69dae8fc671b0084fd3ed3b0ba52ed9eebb588e8023037550368dded8a8"
+}

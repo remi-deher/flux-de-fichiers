@@ -11,22 +11,23 @@ pub use live::LiveJobs;
 use crate::api;
 use crate::ui::filters::{Filters, JobStateFilter, job_state, period};
 use crate::ui::search::{matches, query};
-use crate::ui::{Drawer, MetricTone, StatItem, StatStrip};
+use crate::ui::{Drawer, MetricTone, StatItem, StatStrip, Toasts};
 use chrono::Utc;
 use detail::JobDetail;
 use flux_shared::flows::FlowRecord;
-use flux_shared::jobs::Job;
+use flux_shared::jobs::{Job, JobBatchAction, JobBatchRequest, JobBatchResult};
 use flux_shared::libraries::Library;
 use flux_shared::session::Me;
 use flux_shared::workers::Worker;
 use flux_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
 use model::{JOBS_PAGE_SIZE, may_have_more, merge_pages, summarize_jobs};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use table::JobsTable;
 use uuid::Uuid;
 
 const JOBS_PATH: &str = "/api/v1/jobs";
+const JOBS_BATCH_PATH: &str = "/api/v1/jobs/batch";
 
 #[component]
 pub fn JobsPage(me: Me) -> impl IntoView {
@@ -44,9 +45,26 @@ pub fn JobsPage(me: Me) -> impl IntoView {
         |live| live.progress,
     );
     let selected = RwSignal::new(None::<Uuid>);
+    let checked_ids = RwSignal::new(HashSet::<Uuid>::new());
     let detail_open = RwSignal::new(false);
     let job_tab = RwSignal::new(0_usize);
     let selected_library = RwSignal::new(None::<Uuid>);
+    let batch_action = Action::new_local(move |req: &JobBatchRequest| {
+        let req = req.clone();
+        async move { api::post::<JobBatchRequest, JobBatchResult>(JOBS_BATCH_PATH, Some(&req)).await }
+    });
+    Effect::new(move |_| match batch_action.value().get() {
+        Some(Ok(res)) => {
+            checked_ids.set(HashSet::new());
+            Toasts::notify_success(format!(
+                "{} tâche(s) traitée(s) ({} ignorée(s)).",
+                res.updated, res.skipped
+            ));
+            reload.update(|count| *count = count.wrapping_add(1));
+        }
+        Some(Err(err)) => Toasts::notify_error(err.message()),
+        None => {}
+    });
     let first_page = LocalResource::new(move || {
         reload.track();
         let path = format!("{JOBS_PATH}?limit={JOBS_PAGE_SIZE}");
@@ -229,23 +247,70 @@ pub fn JobsPage(me: Me) -> impl IntoView {
             <StatStrip aria_label="Synthèse de l'activité" items=stats />
             {move || {
                 let options = libraries_options.get();
-                (!options.is_empty()).then(|| view! {
-                    <div class="jobs-toolbar">
-                        <label for="jobs-library-filter" class="form-label">"Bibliothèque"</label>
-                        <select
-                            id="jobs-library-filter"
-                            class="form-select jobs-library-select"
-                            prop:value=move || selected_library.get().map_or_else(String::new, |id| id.to_string())
-                            on:change=move |event| {
-                                let raw = event_target_value(&event);
-                                selected_library.set(Uuid::parse_str(raw.trim()).ok());
-                            }
-                        >
-                            <option value="">"Toutes les bibliothèques"</option>
-                            {options.into_iter().map(|(id, name)| view! {
-                                <option value=id.to_string()>{name}</option>
-                            }).collect_view()}
-                        </select>
+                let selected_count = checked_ids.with(HashSet::len);
+                (can_manage || !options.is_empty()).then(|| view! {
+                    <div class="jobs-toolbar cluster cluster-wrap">
+                        {(!options.is_empty()).then(|| view! {
+                            <div class="cluster">
+                                <label for="jobs-library-filter" class="form-label">"Bibliothèque"</label>
+                                <select
+                                    id="jobs-library-filter"
+                                    class="form-select jobs-library-select"
+                                    prop:value=move || selected_library.get().map_or_else(String::new, |id| id.to_string())
+                                    on:change=move |event| {
+                                        let raw = event_target_value(&event);
+                                        selected_library.set(Uuid::parse_str(raw.trim()).ok());
+                                    }
+                                >
+                                    <option value="">"Toutes les bibliothèques"</option>
+                                    {options.into_iter().map(|(id, name)| view! {
+                                        <option value=id.to_string()>{name}</option>
+                                    }).collect_view()}
+                                </select>
+                            </div>
+                        })}
+                        {can_manage.then(|| view! {
+                            <div class="cluster cluster-wrap">
+                                <button type="button" class="btn btn-secondary btn-sm"
+                                    on:click=move |_| {
+                                        if let Some(Ok(list)) = visible.get_untracked() {
+                                            checked_ids.set(list.into_iter().map(|j| j.id).collect());
+                                        }
+                                    }>
+                                    "Tout sélectionner"
+                                </button>
+                                {(selected_count > 0).then(|| {
+                                    let dispatch_batch = move |action: JobBatchAction| {
+                                        let ids: Vec<Uuid> = checked_ids.get_untracked().into_iter().collect();
+                                        if !ids.is_empty() {
+                                            batch_action.dispatch(JobBatchRequest { ids, action });
+                                        }
+                                    };
+                                    view! {
+                                        <span class="text-sm text-dim">{format!("{selected_count} sélectionnée(s)")}</span>
+                                        <button type="button" class="btn btn-secondary btn-sm"
+                                            disabled=move || batch_action.pending().get()
+                                            on:click=move |_| dispatch_batch(JobBatchAction::Retry)>
+                                            "Relancer"
+                                        </button>
+                                        <button type="button" class="btn btn-secondary btn-sm"
+                                            disabled=move || batch_action.pending().get()
+                                            on:click=move |_| dispatch_batch(JobBatchAction::Cancel)>
+                                            "Annuler"
+                                        </button>
+                                        <button type="button" class="btn btn-danger-quiet btn-sm"
+                                            disabled=move || batch_action.pending().get()
+                                            on:click=move |_| dispatch_batch(JobBatchAction::Delete)>
+                                            "Supprimer"
+                                        </button>
+                                        <button type="button" class="btn btn-secondary btn-sm"
+                                            on:click=move |_| checked_ids.set(HashSet::new())>
+                                            "Effacer"
+                                        </button>
+                                    }
+                                })}
+                            </div>
+                        })}
                     </div>
                 })
             }}
@@ -257,6 +322,8 @@ pub fn JobsPage(me: Me) -> impl IntoView {
                     flows=flows_map
                     libraries=libraries_map
                     selected=selected
+                    checked_ids=checked_ids
+                    can_manage=can_manage
                     on_open=open
                 />
             </div>

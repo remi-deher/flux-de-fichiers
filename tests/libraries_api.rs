@@ -474,3 +474,86 @@ async fn browse_library_filesystem_local_and_remote_worker() -> anyhow::Result<(
     worker_task.await??;
     Ok(())
 }
+
+#[tokio::test]
+async fn library_automation_rules_filter_scan_and_persist() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let input_dir = dir.path().join("input");
+    std::fs::create_dir_all(&input_dir)?;
+    std::fs::write(input_dir.join("movie.mkv"), vec![b'a'; 200])?;
+    std::fs::write(input_dir.join("movie.sample.mkv"), vec![b'b'; 200])?;
+    std::fs::write(input_dir.join("tiny.mkv"), vec![b'c'; 10])?;
+    std::fs::write(input_dir.join("clip.mp4"), vec![b'd'; 200])?;
+
+    let config = Config {
+        bind: "127.0.0.1:3000".parse()?,
+        database_url: "sqlite::memory:".into(),
+        data_dir: dir.path().to_path_buf(),
+        input_dir,
+        config_dir: dir.path().join("config"),
+        tools_cache_dir: dir.path().join("tools"),
+        plugins_dir: None,
+        static_dir: "frontend/dist".into(),
+        max_file_bytes: 1024 * 1024,
+        local_worker: false,
+        web_origin: None,
+        web_session_ttl_seconds: 28_800,
+        tls: None,
+        smtp: None,
+    };
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&config.database_url)
+        .await?;
+    sqlx::migrate!().run(&pool).await?;
+    common::install_keys(&pool).await?;
+    let app = router(AppState::new(pool.clone(), Arc::new(config)));
+
+    save_flow(&app, "flow.auto", "Auto HEVC").await?;
+    let create_resp = admin(
+        &app,
+        "POST",
+        "/api/v1/libraries",
+        Some(serde_json::json!({
+            "name": "Films filtrés",
+            "flow_id": "flow.auto",
+            "workers": [],
+            "scan_interval_minutes": 15,
+            "include_extensions": ["mkv"],
+            "exclude_patterns": ["*sample*"],
+            "min_file_bytes": 100,
+            "output_policy": "replace_with_backup"
+        })),
+    )
+    .await?;
+    assert_eq!(create_resp.status(), StatusCode::CREATED);
+    let created = json_of(create_resp).await?;
+    let lib_id = created["id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("missing id"))?
+        .to_owned();
+    assert_eq!(created["scan_interval_minutes"], 15);
+    assert_eq!(created["output_policy"], "replace_with_backup");
+
+    // Avant le scan, la bibliothèque planifiée est due.
+    let due_before = flux_de_fichiers::repository::due_scheduled_libraries(&pool).await?;
+    assert_eq!(due_before.len(), 1);
+
+    let scan_resp = admin(
+        &app,
+        "POST",
+        &format!("/api/v1/libraries/{lib_id}/scan"),
+        Some(serde_json::json!({"dry_run": false})),
+    )
+    .await?;
+    assert_eq!(scan_resp.status(), StatusCode::OK);
+    let scan_json = json_of(scan_resp).await?;
+    assert_eq!(scan_json["scannedFiles"], 4);
+    assert_eq!(scan_json["createdJobs"], 1);
+    assert_eq!(scan_json["createdFiles"], serde_json::json!(["movie.mkv"]));
+
+    // Une fois scannée, elle n'est plus immédiatement due.
+    let due_after = flux_de_fichiers::repository::due_scheduled_libraries(&pool).await?;
+    assert!(due_after.is_empty());
+    Ok(())
+}

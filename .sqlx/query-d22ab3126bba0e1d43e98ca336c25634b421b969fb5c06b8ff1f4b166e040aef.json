@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT is_default AS \"is_default: bool\" FROM flows WHERE id=?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "is_default: bool",
+        "ordinal": 0,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d22ab3126bba0e1d43e98ca336c25634b421b969fb5c06b8ff1f4b166e040aef"
+}

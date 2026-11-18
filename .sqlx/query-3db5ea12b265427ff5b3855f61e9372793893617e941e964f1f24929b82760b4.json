@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE plugin_settings SET settings = ?1 WHERE plugin_id = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "3db5ea12b265427ff5b3855f61e9372793893617e941e964f1f24929b82760b4"
+}

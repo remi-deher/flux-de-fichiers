@@ -1,14 +1,22 @@
 //! Registre des tâches filtrées, avec la progression reçue en direct.
 
-use super::model::{error_label, resolve_library_label, status_label, status_tone};
+use super::model::{error_label, priority_label, resolve_library_label, status_label, status_tone};
 use crate::format;
 use crate::ui::{ProgressBar, Registre, RegistreMessage, StatusBadge, Tag, TagTone};
 use flux_shared::jobs::{Job, JobStatus};
 use leptos::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
-const HEADERS: [&str; 6] = ["Fichier", "Flux", "Worker", "État", "Progression", "Créée"];
+const HEADERS: [&str; 7] = [
+    "",
+    "Fichier",
+    "Flux",
+    "Worker",
+    "État",
+    "Progression",
+    "Créée",
+];
 
 fn resolve_flow_label(flow_id: Option<&str>, flows: &HashMap<String, String>) -> Option<String> {
     let id = flow_id?;
@@ -55,14 +63,22 @@ pub fn JobsTable(
     flows: Signal<HashMap<String, String>>,
     libraries: Signal<HashMap<Uuid, String>>,
     selected: RwSignal<Option<Uuid>>,
+    checked_ids: RwSignal<HashSet<Uuid>>,
+    can_manage: bool,
     on_open: Callback<Uuid>,
 ) -> impl IntoView {
+    let headers: Vec<&'static str> = if can_manage {
+        HEADERS.to_vec()
+    } else {
+        HEADERS[1..].to_vec()
+    };
+    let span = headers.len();
     view! {
-        <Registre aria_label="Tâches" headers=HEADERS.to_vec()>
+        <Registre aria_label="Tâches" headers=headers>
             {move || match jobs.get() {
-                None => view! { <RegistreMessage span=HEADERS.len() text="Chargement des tâches…" /> }.into_any(),
-                Some(Err(message)) => view! { <RegistreMessage span=HEADERS.len() text=message /> }.into_any(),
-                Some(Ok(list)) if list.is_empty() => view! { <RegistreMessage span=HEADERS.len() text="Aucune tâche dans cette vue." /> }.into_any(),
+                None => view! { <RegistreMessage span=span text="Chargement des tâches…" /> }.into_any(),
+                Some(Err(message)) => view! { <RegistreMessage span=span text=message /> }.into_any(),
+                Some(Ok(list)) if list.is_empty() => view! { <RegistreMessage span=span text="Aucune tâche dans cette vue." /> }.into_any(),
                 Some(Ok(list)) => {
                     let workers_map = workers.get();
                     let flows_map = flows.get();
@@ -70,17 +86,43 @@ pub fn JobsTable(
                     list.into_iter().map(|job| {
                         let id = job.id;
                         let status = job.status;
+                        let priority = job.priority;
                         let flow_label = resolve_flow_label(job.flow_id.as_deref(), &flows_map);
                         let worker_label = resolve_worker_label(job.worker_id, &workers_map);
                         let library_label = resolve_library_label(job.library_id, &libs_map);
                         view! {
                             <tr class="registre-row is-clickable" class:is-open=move || selected.get() == Some(id)
                                 on:click=move |_| on_open.run(id)>
+                                {can_manage.then(|| view! {
+                                    <td on:click=move |ev| ev.stop_propagation()>
+                                        <input
+                                            type="checkbox"
+                                            aria-label="Sélectionner la tâche"
+                                            prop:checked=move || checked_ids.with(|set| set.contains(&id))
+                                            on:change=move |ev| {
+                                                let checked = event_target_checked(&ev);
+                                                checked_ids.update(|set| {
+                                                    if checked {
+                                                        set.insert(id);
+                                                    } else {
+                                                        set.remove(&id);
+                                                    }
+                                                });
+                                            }
+                                        />
+                                    </td>
+                                })}
                                 <td class="truncate">
                                     <div class="cluster">
                                         <span class="text-strong">{job.source_name.clone()}</span>
                                         {library_label.map(|name| view! {
                                             <Tag label=name tone=TagTone::Primary />
+                                        })}
+                                        {(priority != 0).then(|| view! {
+                                            <Tag
+                                                label=priority_label(priority)
+                                                tone={if priority > 0 { TagTone::Warning } else { TagTone::Neutral }}
+                                            />
                                         })}
                                     </div>
                                 </td>

@@ -25,12 +25,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --locked --release -j ${CARGO_JOBS}
 
 # Compilation des sources et génération des binaires et de l'interface
+COPY .sqlx ./.sqlx
 COPY src ./src
 COPY migrations ./migrations
 COPY docs/openapi.yaml ./docs/openapi.yaml
 COPY frontend/src ./frontend/src
 COPY shared/src ./shared/src
 COPY client/src ./client/src
+ENV SQLX_OFFLINE=true
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/src/target \

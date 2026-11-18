@@ -736,3 +736,71 @@ async fn test_local_library_limits_conflicts_and_role_permissions() -> anyhow::R
     assert_eq!(status, StatusCode::NOT_FOUND);
     Ok(())
 }
+
+#[tokio::test]
+async fn plugin_connection_test_and_worker_active_tools_work() -> anyhow::Result<()> {
+    let h = harness().await?;
+
+    // Worker récupère les couples outil/version actifs pour la purge de cache.
+    let (status, tools_json) = call_with_key(
+        &h.app,
+        common::WORKER_KEY,
+        "GET",
+        "/api/v1/worker/tools",
+        None,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(tools_json[0]["tool_id"], "app.ffmpeg");
+    assert_eq!(tools_json[0]["version"], "7.1.0");
+
+    // Démarrer un petit serveur HTTP local pour vérifier le test de connexion d'un plugin API.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let mock = axum::Router::new().route(
+        "/",
+        axum::routing::get(|headers: axum::http::HeaderMap| async move {
+            let auth = headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default();
+            if auth == "Bearer secret-tok" {
+                StatusCode::OK
+            } else {
+                StatusCode::UNAUTHORIZED
+            }
+        }),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, mock).await });
+
+    let (status, body) = call(
+        &h.app,
+        "POST",
+        "/api/v1/plugins/plugin.demo/test",
+        Some(serde_json::json!({
+            "url": format!("http://{addr}"),
+            "apiKey": "secret-tok"
+        })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["statusCode"], 200);
+
+    let (status, bad_body) = call(
+        &h.app,
+        "POST",
+        "/api/v1/plugins/plugin.demo/test",
+        Some(serde_json::json!({
+            "url": format!("http://{addr}"),
+            "apiKey": "wrong"
+        })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(bad_body["ok"], false);
+    assert_eq!(bad_body["statusCode"], 401);
+
+    server.abort();
+    Ok(())
+}

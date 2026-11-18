@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE jobs SET status=?2, output_name=?3, output_sha256=?4, output_bytes=?5, warning=?6, lease_token=NULL, lease_epoch=lease_epoch+1, leased_until=NULL, error_code=NULL, updated_at=datetime('now') WHERE id=?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "24fee84eac904bfcf36d17574938c3404dfd21625b65f45462100bc7566f0dd9"
+}

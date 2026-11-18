@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT csrf_hash AS \"csrf_hash!: String\", expires_at AS \"expires_at: DateTime<Utc>\", account_id AS \"account_id!: String\" FROM sessions WHERE token_hash=?1 AND csrf_hash IS NOT NULL AND account_id IS NOT NULL AND datetime(expires_at) > datetime('now')",
+  "describe": {
+    "columns": [
+      {
+        "name": "csrf_hash!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "expires_at: DateTime<Utc>",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "account_id!: String",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "3ca20cc49ae968e59aca50f64534a44f60d9bf1353228b891e85f9318e47263e"
+}

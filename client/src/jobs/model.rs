@@ -68,6 +68,7 @@ pub fn status_label(status: JobStatus) -> &'static str {
         JobStatus::Running => "En cours",
         JobStatus::Succeeded => "Réussie",
         JobStatus::Failed => "Échouée",
+        JobStatus::Canceled => "Annulée",
     }
 }
 
@@ -78,6 +79,20 @@ pub fn status_tone(status: JobStatus) -> &'static str {
         JobStatus::Running => "warning",
         JobStatus::Succeeded => "success",
         JobStatus::Failed => "danger",
+        JobStatus::Canceled => "neutral",
+    }
+}
+
+/// Libellé lisible d'une priorité de tâche.
+pub fn priority_label(priority: i32) -> String {
+    if priority >= 10 {
+        format!("Haute ({priority})")
+    } else if priority > 0 {
+        format!("+{priority}")
+    } else if priority < 0 {
+        format!("Basse ({priority})")
+    } else {
+        "Normale".to_owned()
     }
 }
 
@@ -148,7 +163,7 @@ pub fn summarize_jobs(jobs: &[Job]) -> (usize, usize, usize, usize) {
         match job.status {
             JobStatus::Running => running += 1,
             JobStatus::Queued => queued += 1,
-            JobStatus::Succeeded => completed += 1,
+            JobStatus::Succeeded | JobStatus::Canceled => completed += 1,
             JobStatus::Failed => failed += 1,
         }
     }

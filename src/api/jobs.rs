@@ -39,7 +39,7 @@ pub async fn create(
     {
         return Err(AppError::Invalid);
     }
-    let job = repository::insert_job_with_options(
+    let job = repository::insert_job_with_priority(
         &s.pool,
         &r.source_name,
         r.target_worker_id,
@@ -47,6 +47,7 @@ pub async fn create(
         bytes as i64,
         r.library_id,
         r.flow_id.as_deref(),
+        r.priority,
     )
     .await?;
     s.notify_job_event(JobEventType::JobCreated, job.id, JobStatus::Queued, None);
@@ -181,11 +182,69 @@ pub async fn retry(
     s.notify_job_event(JobEventType::JobRetried, job.id, JobStatus::Queued, None);
     Ok(Json(job))
 }
+
+/// Annule activement une tâche en attente ou en cours d'exécution.
+pub async fn cancel(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    _auth: ManageJobsAuth,
+) -> AppResult<Json<Job>> {
+    let job = repository::cancel_job(&s.pool, id).await?;
+    s.notify_job_event(JobEventType::JobCanceled, job.id, JobStatus::Canceled, None);
+    Ok(Json(job))
+}
+
+/// Met à jour la priorité d'une tâche en attente.
+pub async fn update_priority(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    _auth: ManageJobsAuth,
+    Json(r): Json<UpdateJobPriorityRequest>,
+) -> AppResult<Json<Job>> {
+    Ok(Json(
+        repository::update_job_priority(&s.pool, id, r.priority).await?,
+    ))
+}
+
+/// Applique une action (`retry`, `cancel`, `delete`) à un lot de tâches.
+pub async fn batch(
+    State(s): State<AppState>,
+    _auth: ManageJobsAuth,
+    Json(r): Json<JobBatchRequest>,
+) -> AppResult<Json<JobBatchResult>> {
+    let (result, events) = repository::batch_jobs(&s.pool, &r.ids, r.action).await?;
+    for (event_type, job_id, status) in events {
+        s.notify_job_event(event_type, job_id, status, None);
+    }
+    Ok(Json(result))
+}
+
+/// Statistiques globales et économies d'espace disque agrégées par bibliothèque.
+pub async fn stats(
+    State(s): State<AppState>,
+    _auth: ViewJobsAuth,
+) -> AppResult<Json<JobStorageStats>> {
+    Ok(Json(repository::job_storage_stats(&s.pool).await?))
+}
+
 pub async fn workers(
     State(s): State<AppState>,
     _auth: ViewWorkersAuth,
 ) -> AppResult<Json<Vec<Worker>>> {
     Ok(Json(repository::list_workers(&s.pool).await?))
+}
+
+/// Met à jour la concurrence maximale et la fenêtre horaire d'un worker.
+pub async fn update_worker_settings(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    _auth: ManageWorkersAuth,
+    Json(r): Json<UpdateWorkerSettingsRequest>,
+) -> AppResult<Json<Worker>> {
+    Ok(Json(
+        repository::update_worker_settings(&s.pool, id, r.max_concurrency, r.schedule.as_ref())
+            .await?,
+    ))
 }
 
 pub async fn delete_worker(

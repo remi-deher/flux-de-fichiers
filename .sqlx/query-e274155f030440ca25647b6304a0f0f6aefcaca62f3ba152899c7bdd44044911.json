@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id AS \"id!: Uuid\" FROM jobs WHERE status=?1 AND attempts < ?2 AND (target_worker_id IS NULL OR target_worker_id=?3) ORDER BY priority DESC, created_at ASC, id ASC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "e274155f030440ca25647b6304a0f0f6aefcaca62f3ba152899c7bdd44044911"
+}

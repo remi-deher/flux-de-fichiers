@@ -5,11 +5,12 @@ use crate::{
 use sqlx::SqlitePool;
 
 pub async fn get_plugin_settings(pool: &SqlitePool, plugin_id: &str) -> AppResult<Option<String>> {
-    let settings: Option<String> =
-        sqlx::query_scalar("SELECT settings FROM plugin_settings WHERE plugin_id = ?1")
-            .bind(plugin_id)
-            .fetch_optional(pool)
-            .await?;
+    let settings: Option<String> = sqlx::query_scalar!(
+        "SELECT settings FROM plugin_settings WHERE plugin_id = ?1",
+        plugin_id
+    )
+    .fetch_optional(pool)
+    .await?;
     Ok(settings)
 }
 
@@ -18,22 +19,22 @@ pub async fn set_plugin_settings(
     plugin_id: &str,
     settings_json: &str,
 ) -> AppResult<()> {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO plugin_settings (plugin_id, settings, updated_at) \
          VALUES (?1, ?2, datetime('now')) \
          ON CONFLICT(plugin_id) DO UPDATE SET settings = ?2, updated_at = datetime('now')",
+        plugin_id,
+        settings_json,
     )
-    .bind(plugin_id)
-    .bind(settings_json)
     .execute(pool)
     .await?;
     Ok(())
 }
 
 pub async fn list_plugin_repositories(pool: &SqlitePool) -> AppResult<Vec<PluginRepository>> {
-    let repos = sqlx::query_as::<_, PluginRepository>(
-        "SELECT id, name, index_url, is_official, enabled, last_synced_at, created_at \
-         FROM plugin_repositories ORDER BY is_official DESC, created_at ASC",
+    let repos = sqlx::query_as!(
+        PluginRepository,
+        r#"SELECT id AS "id!: String", name, index_url, is_official AS "is_official: bool", enabled AS "enabled: bool", last_synced_at, created_at FROM plugin_repositories ORDER BY is_official DESC, created_at ASC"#,
     )
     .fetch_all(pool)
     .await?;
@@ -41,11 +42,11 @@ pub async fn list_plugin_repositories(pool: &SqlitePool) -> AppResult<Vec<Plugin
 }
 
 pub async fn get_plugin_repository(pool: &SqlitePool, id: &str) -> AppResult<PluginRepository> {
-    sqlx::query_as::<_, PluginRepository>(
-        "SELECT id, name, index_url, is_official, enabled, last_synced_at, created_at \
-         FROM plugin_repositories WHERE id = ?1",
+    sqlx::query_as!(
+        PluginRepository,
+        r#"SELECT id AS "id!: String", name, index_url, is_official AS "is_official: bool", enabled AS "enabled: bool", last_synced_at, created_at FROM plugin_repositories WHERE id = ?1"#,
+        id,
     )
-    .bind(id)
     .fetch_optional(pool)
     .await?
     .ok_or(AppError::NotFound)
@@ -57,57 +58,61 @@ pub async fn add_plugin_repository(
     name: &str,
     index_url: &str,
 ) -> AppResult<PluginRepository> {
-    let repo = sqlx::query_as::<_, PluginRepository>(
-        "INSERT INTO plugin_repositories (id, name, index_url, is_official, enabled) \
-         VALUES (?1, ?2, ?3, 0, 1) \
-         RETURNING id, name, index_url, is_official, enabled, last_synced_at, created_at",
+    let repo = sqlx::query_as!(
+        PluginRepository,
+        r#"INSERT INTO plugin_repositories (id, name, index_url, is_official, enabled) VALUES (?1, ?2, ?3, 0, 1) RETURNING id AS "id!: String", name, index_url, is_official AS "is_official: bool", enabled AS "enabled: bool", last_synced_at, created_at"#,
+        id,
+        name,
+        index_url,
     )
-    .bind(id)
-    .bind(name)
-    .bind(index_url)
     .fetch_one(pool)
     .await?;
     Ok(repo)
 }
 
 pub async fn toggle_plugin_repository(pool: &SqlitePool, id: &str) -> AppResult<bool> {
-    let current: Option<bool> =
-        sqlx::query_scalar("SELECT enabled FROM plugin_repositories WHERE id = ?1")
-            .bind(id)
-            .fetch_optional(pool)
-            .await?;
+    let current: Option<bool> = sqlx::query_scalar!(
+        r#"SELECT enabled AS "enabled: bool" FROM plugin_repositories WHERE id = ?1"#,
+        id
+    )
+    .fetch_optional(pool)
+    .await?;
     let new_state = match current {
         Some(val) => !val,
         None => return Err(AppError::NotFound),
     };
-    sqlx::query("UPDATE plugin_repositories SET enabled = ?1 WHERE id = ?2")
-        .bind(new_state)
-        .bind(id)
-        .execute(pool)
-        .await?;
+    sqlx::query!(
+        "UPDATE plugin_repositories SET enabled = ?1 WHERE id = ?2",
+        new_state,
+        id
+    )
+    .execute(pool)
+    .await?;
     Ok(new_state)
 }
 
 pub async fn delete_plugin_repository(pool: &SqlitePool, id: &str) -> AppResult<()> {
-    let is_official: Option<bool> =
-        sqlx::query_scalar("SELECT is_official FROM plugin_repositories WHERE id = ?1")
-            .bind(id)
-            .fetch_optional(pool)
-            .await?;
+    let is_official: Option<bool> = sqlx::query_scalar!(
+        r#"SELECT is_official AS "is_official: bool" FROM plugin_repositories WHERE id = ?1"#,
+        id
+    )
+    .fetch_optional(pool)
+    .await?;
     match is_official {
         Some(true) => Err(AppError::InvalidManifest(
             "Le catalogue officiel ne peut pas être supprimé.".to_string(),
         )),
         Some(false) => {
-            sqlx::query("DELETE FROM plugin_repositories WHERE id = ?1")
-                .bind(id)
+            sqlx::query!("DELETE FROM plugin_repositories WHERE id = ?1", id)
                 .execute(pool)
                 .await?;
             let repo_scope = format!("repo:{id}");
-            sqlx::query("DELETE FROM plugin_release_pins WHERE scope = ?1")
-                .bind(repo_scope)
-                .execute(pool)
-                .await?;
+            sqlx::query!(
+                "DELETE FROM plugin_release_pins WHERE scope = ?1",
+                repo_scope
+            )
+            .execute(pool)
+            .await?;
             Ok(())
         }
         None => Err(AppError::NotFound),
@@ -115,10 +120,10 @@ pub async fn delete_plugin_repository(pool: &SqlitePool, id: &str) -> AppResult<
 }
 
 pub async fn touch_plugin_repository_sync(pool: &SqlitePool, id: &str) -> AppResult<()> {
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         "UPDATE plugin_repositories SET last_synced_at = datetime('now') WHERE id = ?1",
+        id
     )
-    .bind(id)
     .execute(pool)
     .await?
     .rows_affected();
@@ -139,11 +144,11 @@ pub async fn verify_or_pin_release(
     source_url: &str,
 ) -> AppResult<Option<String>> {
     let normalized = actual_sha256.trim().to_ascii_lowercase();
-    let existing: Option<String> = sqlx::query_scalar(
+    let existing: Option<String> = sqlx::query_scalar!(
         "SELECT sha256 FROM plugin_release_pins WHERE scope = ?1 AND version = ?2",
+        scope,
+        version
     )
-    .bind(scope)
-    .bind(version)
     .fetch_optional(pool)
     .await?;
 
@@ -154,23 +159,23 @@ pub async fn verify_or_pin_release(
         return Ok(Some(expected));
     }
 
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO plugin_release_pins (scope, version, sha256, source_url) \
          VALUES (?1, ?2, ?3, ?4) \
          ON CONFLICT(scope, version) DO NOTHING",
+        scope,
+        version,
+        normalized,
+        source_url,
     )
-    .bind(scope)
-    .bind(version)
-    .bind(&normalized)
-    .bind(source_url)
     .execute(pool)
     .await?;
 
-    let persisted: Option<String> = sqlx::query_scalar(
+    let persisted: Option<String> = sqlx::query_scalar!(
         "SELECT sha256 FROM plugin_release_pins WHERE scope = ?1 AND version = ?2",
+        scope,
+        version
     )
-    .bind(scope)
-    .bind(version)
     .fetch_optional(pool)
     .await?;
     Ok(persisted.filter(|expected| expected != &normalized))

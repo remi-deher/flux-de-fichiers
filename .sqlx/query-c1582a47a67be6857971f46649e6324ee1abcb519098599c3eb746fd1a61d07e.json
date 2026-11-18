@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE jobs SET status=?1, error_code=?2, lease_token=NULL, lease_epoch=lease_epoch+1, leased_until=NULL, updated_at=datetime('now') WHERE status=?3 AND leased_until <= datetime('now')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "c1582a47a67be6857971f46649e6324ee1abcb519098599c3eb746fd1a61d07e"
+}

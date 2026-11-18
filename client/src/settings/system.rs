@@ -1,9 +1,12 @@
 //! Système : versions et mise à jour, clé de chiffrement, base de données, limites et espace disque ; socle du tableau de bord Paramètres.
 
+use crate::api;
 use crate::ui::{ProgressBar, SectionHeader};
 use flux_shared::format::format_bytes;
-use flux_shared::system::{KeySource, SystemStatus, VolumeSpace};
+use flux_shared::system::{KeySource, SystemStatus, UpdateCheckStatus, VolumeSpace};
 use leptos::prelude::*;
+
+const SYSTEM_UPDATES_PATH: &str = "/api/v1/system/updates";
 
 /// Version de l'interface WASM actuellement chargée dans le navigateur.
 const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -181,25 +184,62 @@ fn system_rows(status: &SystemStatus) -> Vec<DetailRow> {
 
 #[component]
 pub fn SystemSection(status: Signal<Option<Result<SystemStatus, String>>>) -> impl IntoView {
+    let check_updates = Action::new_local(move |()| async move {
+        api::get::<UpdateCheckStatus>(SYSTEM_UPDATES_PATH).await
+    });
+    let updates_enabled = Signal::derive(move || {
+        status
+            .get()
+            .and_then(Result::ok)
+            .is_some_and(|s| s.check_updates_enabled)
+    });
     let footer = view! {
-        <details class="settings-help-details">
-            <summary class="settings-help-details__summary">
-                "Procédures de maintenance (clé de chiffrement & mise à jour)"
-            </summary>
-            <div class="settings-help-details__body">
-                <p class="form-help">
-                    "Rotation de la clé : arrêter le central, puis lancer "
-                    <code>"flux-de-fichiers rotate-secret"</code>
-                    " ; une copie de l'ancienne clé et de la base est rangée dans /config/backups."
-                </p>
-                <p class="form-help">
-                    "Version disponible : le central ne contacte aucun service externe, il ne peut donc pas la connaître. Les versions publiées se consultent sur le dépôt de l'image."
-                </p>
-                <p class="form-help">
-                    "Mettre à jour : sauvegarder /config, tirer la nouvelle image puis redémarrer le conteneur du central, ensuite celui de chaque worker. Les migrations de la base s'appliquent au démarrage."
-                </p>
-            </div>
-        </details>
+        <div class="stack">
+            {move || updates_enabled.get().then(|| view! {
+                <div class="cluster cluster-wrap">
+                    <button type="button" class="btn btn-secondary btn-sm"
+                        disabled=move || check_updates.pending().get()
+                        on:click=move |_| { check_updates.dispatch(()); }>
+                        {move || if check_updates.pending().get() { "Vérification…" } else { "Vérifier les mises à jour" }}
+                    </button>
+                    {move || match check_updates.value().get() {
+                        Some(Ok(res)) if res.error.is_some() => view! {
+                            <span class="form-help">{res.error.unwrap_or_default()}</span>
+                        }.into_any(),
+                        Some(Ok(res)) if res.update_available => view! {
+                            <span class="text-strong">
+                                {format!("Nouvelle version disponible : v{}", res.latest_version.unwrap_or_default())}
+                            </span>
+                        }.into_any(),
+                        Some(Ok(res)) => view! {
+                            <span class="form-help">
+                                {format!("À jour (v{}).", res.latest_version.unwrap_or(res.current_version))}
+                            </span>
+                        }.into_any(),
+                        Some(Err(err)) => view! { <span class="form-error">{err.message()}</span> }.into_any(),
+                        None => ().into_any(),
+                    }}
+                </div>
+            })}
+            <details class="settings-help-details">
+                <summary class="settings-help-details__summary">
+                    "Procédures de maintenance (clé de chiffrement & mise à jour)"
+                </summary>
+                <div class="settings-help-details__body">
+                    <p class="form-help">
+                        "Rotation de la clé : arrêter le central, puis lancer "
+                        <code>"flux-de-fichiers rotate-secret"</code>
+                        " ; une copie de l'ancienne clé et de la base est rangée dans /config/backups."
+                    </p>
+                    <p class="form-help">
+                        "Version disponible : désactivée par défaut ; activez la vérification facultative dans Paramètres → Réseau."
+                    </p>
+                    <p class="form-help">
+                        "Mettre à jour : sauvegarder /config, tirer la nouvelle image puis redémarrer le conteneur du central, ensuite celui de chaque worker. Les migrations de la base s'appliquent au démarrage."
+                    </p>
+                </div>
+            </details>
+        </div>
     }
     .into_any();
     view! {

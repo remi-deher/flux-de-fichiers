@@ -2,6 +2,7 @@
 
 use super::ai_model::AiModelField;
 use super::ai_oauth::AiOauthPanel;
+use super::ai_status::AiStatusPanel;
 use crate::api;
 use crate::ui::{SectionHeader, Tag, TagTone, Toasts};
 use flux_shared::ai::{
@@ -43,6 +44,7 @@ pub fn AiSettingsSection() -> impl IntoView {
                 }.into_any(),
             }}
         </section>
+        <AiStatusPanel />
     }
 }
 
@@ -305,7 +307,7 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
                         prop:checked=move || allow_write_tools.get()
                         on:change=move |ev| allow_write_tools.set(event_target_checked(&ev))
                     />
-                    <span>"Autoriser les outils de création et modification (sinon lecture, diagnostic et simulation uniquement)"</span>
+                    <span>"Autoriser les outils de création et modification, chaque écriture demandant votre confirmation dans le tiroir (sinon lecture, diagnostic et simulation uniquement)"</span>
                 </label>
                 <div class="form-group">
                     <label for="ai-max-rounds" class="form-label">"Tours d'outils maximum par question (1–10)"</label>

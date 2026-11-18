@@ -123,6 +123,14 @@ est devant l'écran) ; le MCP externe garde « pas de file d'approbation » (dé
    autre), un compte a au plus 3 runs actifs, et un client qui se reconnecte reprend après
    `Last-Event-ID`. Un `GET` (`EventSource`) évite d'écrire un lecteur de flux `fetch` en WASM.
    `POST /api/v1/ai/chat` reste disponible et partage la même boucle.
+   **Texte au fil de l'eau.** Pour un run, la requête au fournisseur est faite en mode flux et le
+   texte arrive en évènements `delta` (regroupés : environ 24 caractères ou 60 ms). Chaque
+   fournisseur a son format (SSE OpenAI et Anthropic, JSON ligne par ligne d'Ollama, SSE
+   « responses » de ChatGPT) : un assembleur (`src/ai/streaming.rs`) relit le flux et reconstitue le
+   corps de la réponse non diffusée, de sorte que l'analyse des appels d'outils reste unique. Un
+   serveur qui ignore `stream` et répond en JSON est lu d'un bloc. Le texte d'un tour qui se
+   termine par un appel d'outil est oublié par l'interface ; la réponse finale est celle de `done`.
+   `/ai/chat` n'a personne à qui diffuser et reste d'un bloc.
 2. **Contexte automatique.** Le client envoie un contexte typé (`AiContext` : écran, type et
    identifiant de l'objet ouvert) à la place d'une phrase libre ; le serveur le met dans l'invite
    système et demande de lire l'objet par les outils. Aucun contenu n'est joint côté client.
@@ -132,20 +140,43 @@ est devant l'écran) ; le MCP externe garde « pas de file d'approbation » (dé
    suspendue en mémoire, aucun état de conversation n'est sérialisé. `POST
    /api/v1/ai/runs/{id}/actions/{action}` (`approve` vrai ou faux) exécute ou refuse l'action puis
    reprend. Les droits du compte restent vérifiés à l'exécution.
-4. **Scripts locaux.** L'assistant sait écrire et corriger un script (interpréteurs de
-   `ScriptInterpreter` uniquement). Le code n'atteint jamais la base sans geste humain : il arrive
-   comme **brouillon** dans l'éditeur (diff avec l'existant), et l'enregistrement reste le bouton
-   de l'utilisateur. L'assistant n'a **aucun outil** qui enregistre ou exécute un script, même
-   en mode écriture : un script s'exécute sur les workers, sans isolation.
-5. **Historique.** Conversations par compte (`ai_conversations`, `ai_messages`), texte utilisateur
-   et assistant seulement (aucun résultat d'outil), chiffré au repos par `SecretBox`, conservé
-   30 jours et 50 conversations par compte, supprimable depuis le tiroir.
-6. **Diagnostic proactif.** Réglage **désactivé par défaut** : résumé des échecs récents, calculé en
-   tâche de fond au plus une fois par heure et seulement si de nouveaux échecs existent, affiché
-   dans Activité. Aucun appel au fournisseur sans ce réglage.
-7. **Quotas, cache, état.** Quota quotidien de requêtes par compte et global (réglable), catalogue
-   de modèles mis en cache 10 min, et état du fournisseur (dernier succès, dernière erreur,
-   latence, consommation du quota) exposé dans Paramètres > Assistant IA.
+4. **Scripts locaux** (précision de l'utilisateur, 18 nov. 2026 : l'assistant doit pouvoir agir
+   sur l'instance). Il tourne dans le central et appelle les mêmes outils que le MCP : aucune
+   ouverture supplémentaire du backend n'est nécessaire pour créer ou modifier un script
+   (`upsert_local_script`) ou le supprimer (`delete_local_item`). Ces écritures passent par la
+   **confirmation du point 3, avec le code complet affiché** (jusqu'à 20 000 caractères, le reste
+   des champs masqués comme les autres actions), et seulement si le mode écriture est activé.
+   Seuls les interpréteurs de `ScriptInterpreter` sont acceptés. **Exécuter ou tester** un script
+   n'est pas offert à l'assistant : il tourne sur un worker, sans isolation, et un essai à blanc
+   demande un travail à part (tâche d'essai sur un worker, entrée d'exemple, sortie bornée).
+5. **Historique.** Conversations par compte (`ai_conversations`, `ai_messages`, migration 0025),
+   texte utilisateur et assistant seulement (aucun résultat d'outil). Titre et messages sont
+   chiffrés au repos par `SecretBox`, le propriétaire servant de donnée associée : une ligne copiée
+   vers un autre compte ne se déchiffre pas, et la rotation de clé locale les re-chiffre. Conservés
+   30 jours après le dernier échange, 50 conversations au plus par compte (purge à chaque
+   enregistrement). Seuls les runs enregistrent : `conversation_id` dans la requête poursuit une
+   conversation, la réponse (`done`) renvoie l'identifiant. `GET /api/v1/ai/conversations`,
+   `GET` et `DELETE` sur `/{id}`, `DELETE` sur la collection ; un compte ne voit que les siennes
+   (404 sinon). Le client n'envoie au central que les 24 derniers messages.
+6. **Diagnostic proactif.** Réglage **désactivé par défaut** (`PUT /api/v1/ai/diagnosis`, admin).
+   Activé, une boucle de fond du central (passage toutes les 10 min) résume les tâches en échec
+   des dernières 24 h : appel au fournisseur **au plus une fois par heure et seulement si les
+   échecs ont changé** ; sans échec, le texte est local, sans appel. Le calcul est un tour de
+   conversation **sans run**, donc avec les seuls outils en lecture, sous un compte interne
+   (`system:diagnosis`) dont les appels comptent dans les quotas et l'audit. La synthèse reste
+   **en mémoire** (elle cite des noms de fichiers) et est recalculée après un redémarrage s'il y a
+   encore des échecs. `GET /api/v1/ai/diagnosis` (droit de voir les tâches) l'expose, `POST
+   .../refresh` (admin) la recalcule ; Activité > Tâches l'affiche, Paramètres > Assistant IA
+   l'active.
+7. **Quotas, cache, état.** Une « question » est une conversation lancée (run ou `/ai/chat`) ;
+   elle est comptée par jour (UTC) et par compte dans `ai_usage` (migration 0026, purgée après
+   14 jours). Deux plafonds réglables par un administrateur, `GET/PUT /api/v1/ai/quotas` : par
+   compte et global, `0` laissant la limite ouverte (réglage par défaut) ; au-delà, `429`. Le
+   premier modèle choisi automatiquement est gardé 10 min par fournisseur et compte (vidé quand les
+   réglages ou la connexion changent, ou après un test réussi). `GET /api/v1/ai/health` (admin)
+   donne le dernier succès (date, latence), la dernière erreur et la consommation du jour, **depuis
+   le démarrage du central** (en mémoire). Paramètres > Assistant IA affiche cet état et règle les
+   quotas.
 
 ## Questions ouvertes
 

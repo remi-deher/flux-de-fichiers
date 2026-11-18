@@ -1,5 +1,6 @@
 //! Assistant IA intégré au poste de pilotage (tiroir global, suggestions contextuelles et historique).
 
+mod history;
 mod run;
 
 use crate::api;
@@ -209,7 +210,7 @@ fn route_context(route: &Route) -> AiContext {
     }
 }
 
-fn render_blocks(text: &str) -> AnyView {
+pub(crate) fn render_blocks(text: &str) -> AnyView {
     let blocks = parse_message_blocks(text);
     if blocks.is_empty() {
         return view! { <p class="text-dim">"(Réponse vide)"</p> }.into_any();
@@ -256,20 +257,35 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
     let pending = RwSignal::new(false);
     let steps = RwSignal::new(Vec::<run::LiveStep>::new());
     let run_id = RwSignal::new(None::<String>);
+    let confirmation = RwSignal::new(None::<run::PendingAction>);
+    // Réponse en cours d'écriture, affichée au fil de l'eau.
+    let streamed = RwSignal::new(String::new());
+    // Conversation de l'historique en cours (créée par le central au premier échange).
+    let conversation_id = RwSignal::new(None::<String>);
+    let history_open = RwSignal::new(false);
+    let history_reload = RwSignal::new(0u64);
 
     // Termine la conversation en cours (réponse, échec ou perte du flux).
     let finish = move |outcome: Result<flux_shared::ai::AiChatResponse, String>| {
         steps.set(Vec::new());
+        streamed.set(String::new());
+        confirmation.set(None);
         run_id.set(None);
         pending.set(false);
         match outcome {
-            Ok(reply) => messages.update(|list| {
-                list.push(TimelineItem {
-                    role: AiChatRole::Assistant,
-                    content: reply.reply,
-                    tool_calls: reply.tool_calls,
+            Ok(reply) => {
+                if reply.conversation_id.is_some() {
+                    conversation_id.set(reply.conversation_id);
+                    history_reload.update(|n| *n = n.wrapping_add(1));
+                }
+                messages.update(|list| {
+                    list.push(TimelineItem {
+                        role: AiChatRole::Assistant,
+                        content: reply.reply,
+                        tool_calls: reply.tool_calls,
+                    });
                 });
-            }),
+            }
             Err(message) => error_msg.set(Some(message)),
         }
     };
@@ -302,7 +318,8 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
         error_msg.set(None);
         pending.set(true);
         let request = AiChatRequest {
-            messages: wire_messages,
+            messages: history::wire_window(wire_messages),
+            conversation_id: conversation_id.get_untracked(),
             context_hint: hint,
             context: Some(route_context(&router.current())),
         };
@@ -333,7 +350,15 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
                     match event {
                         AiRunEvent::Done { response } => finish(Ok(response)),
                         AiRunEvent::Failed { message } => finish(Err(message)),
-                        progress => steps.update(|list| run::apply_event(list, &progress)),
+                        progress => {
+                            streamed.update(|text| {
+                                *text = run::streamed_after(std::mem::take(text), &progress);
+                            });
+                            confirmation.update(|current| {
+                                *current = run::pending_after(current.take(), &progress);
+                            });
+                            steps.update(|list| run::apply_event(list, &progress));
+                        }
                     }
                 },
                 move || {
@@ -351,6 +376,20 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
         if let Some(id) = run_id.get_untracked() {
             leptos::task::spawn_local(async move { run::cancel(&id).await });
         }
+    };
+
+    // Autorise ou refuse l'action en attente ; le run reprend dès que le central a la réponse.
+    let answer = move |approve: bool| {
+        let (Some(id), Some(action)) = (run_id.get_untracked(), confirmation.get_untracked())
+        else {
+            return;
+        };
+        confirmation.set(None);
+        leptos::task::spawn_local(async move {
+            if let Err(err) = run::decide(&id, &action.action_id, approve).await {
+                error_msg.set(Some(err.message()));
+            }
+        });
     };
 
     Effect::new(move |_| {
@@ -371,18 +410,55 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
         send(text, None);
     };
 
-    let header_actions = view! {
-        <button
-            type="button"
-            class="btn btn-secondary btn-sm"
-            disabled=move || messages.with(Vec::is_empty) && error_msg.get().is_none()
-            on:click=move |_| {
-                messages.set(Vec::new());
-                error_msg.set(None);
+    let new_conversation = move || {
+        messages.set(Vec::new());
+        error_msg.set(None);
+        conversation_id.set(None);
+    };
+    let open_conversation = Callback::new(move |id: String| {
+        leptos::task::spawn_local(async move {
+            match history::load(&id).await {
+                Ok(conversation) => {
+                    messages.set(
+                        conversation
+                            .messages
+                            .into_iter()
+                            .map(|message| TimelineItem {
+                                role: message.role,
+                                content: message.content,
+                                tool_calls: Vec::new(),
+                            })
+                            .collect(),
+                    );
+                    error_msg.set(None);
+                    conversation_id.set(Some(conversation.id));
+                    history_open.set(false);
+                }
+                Err(err) => error_msg.set(Some(err.message())),
             }
-        >
-            "Effacer"
-        </button>
+        });
+    });
+
+    let header_actions = view! {
+        <div class="cluster">
+            <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                aria-pressed=move || history_open.get().to_string()
+                on:click=move |_| history_open.update(|open| *open = !*open)
+            >
+                "Historique"
+            </button>
+            <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                disabled=move || pending.get()
+                    || (messages.with(Vec::is_empty) && error_msg.get().is_none())
+                on:click=move |_| new_conversation()
+            >
+                "Nouvelle"
+            </button>
+        </div>
     }
     .into_any();
 
@@ -448,6 +524,15 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
                         }.into_any()
                     }
                 }}
+
+                <Show when=move || history_open.get()>
+                    <history::AiHistoryPanel
+                        reload=history_reload
+                        current=conversation_id
+                        on_open=open_conversation
+                        on_current_deleted=Callback::new(move |()| new_conversation())
+                    />
+                </Show>
 
                 <div class="ai-chat__prompts" role="group" aria-label="Suggestions contextuelles">
                     {move || {
@@ -518,7 +603,42 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
                                 {pending.get().then(|| view! {
                                     <article class="ai-chat__msg ai-chat__msg--assistant">
                                         <span class="ai-chat__msg-role">"Assistant"</span>
-                                        <p class="text-dim text-sm">"Analyse en cours…"</p>
+                                        {move || {
+                                            let text = streamed.get();
+                                            if text.trim().is_empty() {
+                                                view! {
+                                                    <p class="text-dim text-sm">
+                                                        {if confirmation.get().is_some() {
+                                                            "En attente de votre autorisation…"
+                                                        } else {
+                                                            "Analyse en cours…"
+                                                        }}
+                                                    </p>
+                                                }.into_any()
+                                            } else {
+                                                view! {
+                                                    <div class="ai-chat__msg-body">{render_blocks(&text)}</div>
+                                                }.into_any()
+                                            }
+                                        }}
+                                        {move || confirmation.get().map(|action| view! {
+                                            <div class="diagnostic-box" role="alertdialog" aria-label="Autoriser l'action">
+                                                <div>
+                                                    <div class="diagnostic-box__title">
+                                                        {format!("Autoriser l'action « {} » ?", action.tool_name)}
+                                                    </div>
+                                                    <pre class="ai-chat__code"><code>{action.summary}</code></pre>
+                                                    <div class="cluster">
+                                                        <button type="button" class="btn btn-primary btn-sm" on:click=move |_| answer(true)>
+                                                            "Autoriser"
+                                                        </button>
+                                                        <button type="button" class="btn btn-secondary btn-sm" on:click=move |_| answer(false)>
+                                                            "Refuser"
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        })}
                                         <div class="ai-chat__tools" aria-label="Outils en cours">
                                             {move || steps.get().into_iter().map(|step| {
                                                 let (state_label, is_err) = match &step.trace {

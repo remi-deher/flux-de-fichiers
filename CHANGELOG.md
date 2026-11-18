@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.45.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.44.0...v0.45.0) (2026-11-18)
+
+
+### Features
+
+* **logs:** journal applicatif dans Activité et modèle ChatGPT automatique ([46e7401](https://github.com/remi-deher/flux-de-fichiers/commit/46e7401a3ce4cdc20440c2d33acb5bc0493deb41))
+* **logs:** journal applicatif dans Activité et modèle ChatGPT automatique ([537f7bb](https://github.com/remi-deher/flux-de-fichiers/commit/537f7bb43e94e309405a9a4dd2ecb0876741fb25))
+
 ## [0.44.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.43.0...v0.44.0) (2026-11-18)
 
 

@@ -1,7 +1,8 @@
-//! Formulaire d'une bibliothèque : nom, flux et chemins par worker.
+//! Formulaire d'une bibliothèque : nom, flux et chemins par worker avec sélecteur d'arborescence.
 
 use super::draft::{LibraryDraft, access_label};
 use crate::api;
+use crate::ui::FolderTreePicker;
 use flux_shared::flows::FlowRecord;
 use flux_shared::libraries::{Library, LibraryAccess, LibraryWrite};
 use flux_shared::workers::Worker;
@@ -17,6 +18,56 @@ async fn save(id: Option<Uuid>, body: LibraryWrite) -> Result<Library, api::ApiE
     }
 }
 
+fn access_value(access: LibraryAccess) -> &'static str {
+    match access {
+        LibraryAccess::Read => "read",
+        LibraryAccess::ReadWrite => "read_write",
+    }
+}
+
+fn parse_access(raw: &str) -> LibraryAccess {
+    if raw == "read" {
+        LibraryAccess::Read
+    } else {
+        LibraryAccess::ReadWrite
+    }
+}
+
+fn initial_worker_selection(
+    draft: &LibraryDraft,
+    workers: &[Worker],
+) -> (String, String, LibraryAccess) {
+    let candidate = workers
+        .iter()
+        .find(|worker| {
+            !draft
+                .workers
+                .iter()
+                .any(|entry| entry.worker_id == worker.id)
+        })
+        .or_else(|| workers.first());
+    let Some(worker) = candidate else {
+        return (String::new(), String::new(), LibraryAccess::ReadWrite);
+    };
+    if let Some(existing) = draft
+        .workers
+        .iter()
+        .find(|entry| entry.worker_id == worker.id)
+    {
+        (
+            worker.id.to_string(),
+            existing.local_path.clone(),
+            existing.access,
+        )
+    } else {
+        (
+            worker.id.to_string(),
+            String::new(),
+            LibraryAccess::ReadWrite,
+        )
+    }
+}
+
 #[component]
 pub fn LibraryForm(
     draft: LibraryDraft,
@@ -24,11 +75,16 @@ pub fn LibraryForm(
     workers: Vec<Worker>,
     on_done: Callback<()>,
 ) -> impl IntoView {
+    let (init_worker, init_path, init_access) = initial_worker_selection(&draft, &workers);
     let draft = RwSignal::new(draft);
     let feedback = RwSignal::new(None::<String>);
-    let new_worker = RwSignal::new(String::new());
-    let new_path = RwSignal::new(String::new());
-    let new_access = RwSignal::new(LibraryAccess::ReadWrite);
+    let new_worker = RwSignal::new(init_worker);
+    let new_path = RwSignal::new(init_path);
+    let new_access = RwSignal::new(init_access);
+    let detected_writable = RwSignal::new(None::<bool>);
+    let browse_tick = RwSignal::new(0_u32);
+
+    let worker_list = StoredValue::new(workers.clone());
     let worker_names = StoredValue::new(
         workers
             .iter()
@@ -41,6 +97,18 @@ pub fn LibraryForm(
             .iter()
             .find(|(candidate, _)| *candidate == id)
             .map_or_else(|| id.to_string(), |(_, name)| name.clone())
+    };
+    let selected_worker_id = Signal::derive(move || new_worker.get().parse::<Uuid>().ok());
+    let browse_signal = Signal::derive(move || browse_tick.get());
+    let is_editing_existing_worker = move || {
+        let Some(wid) = selected_worker_id.get() else {
+            return false;
+        };
+        draft
+            .get()
+            .workers
+            .iter()
+            .any(|entry| entry.worker_id == wid)
     };
 
     let submit = Action::new_local(move |(id, body): &(Option<Uuid>, LibraryWrite)| {
@@ -62,29 +130,99 @@ pub fn LibraryForm(
         None => {}
     });
 
+    let on_worker_change = move |raw: String| {
+        new_worker.set(raw.clone());
+        detected_writable.set(None);
+        feedback.set(None);
+        if let Ok(wid) = raw.parse::<Uuid>()
+            && let Some(existing) = draft
+                .get_untracked()
+                .workers
+                .into_iter()
+                .find(|entry| entry.worker_id == wid)
+        {
+            new_path.set(existing.local_path);
+            new_access.set(existing.access);
+        } else {
+            new_path.set(String::new());
+            new_access.set(LibraryAccess::ReadWrite);
+        }
+    };
+
+    let on_tree_select = Callback::new(move |(path, writable): (String, bool)| {
+        new_path.set(path.clone());
+        detected_writable.set(Some(writable));
+        let next_access = if writable {
+            LibraryAccess::ReadWrite
+        } else {
+            LibraryAccess::Read
+        };
+        new_access.set(next_access);
+        draft.update(|value| {
+            value.apply_suggested_name(&path);
+            if let Ok(wid) = new_worker.get_untracked().parse::<Uuid>()
+                && value.workers.iter().any(|entry| entry.worker_id == wid)
+            {
+                let _ = value.set_or_add_worker(wid, &path, next_access);
+            }
+        });
+        feedback.set(None);
+    });
+
     let add_worker = move |_| {
         let Ok(worker_id) = new_worker.get_untracked().parse::<Uuid>() else {
             feedback.set(Some("Choisissez un worker.".into()));
             return;
         };
+        let path_value = new_path.get_untracked();
+        let access_value_sel = new_access.get_untracked();
         let mut result = Ok(());
         draft.update(|value| {
-            result = value.add_worker(
-                worker_id,
-                &new_path.get_untracked(),
-                new_access.get_untracked(),
-            )
+            value.apply_suggested_name(&path_value);
+            result = value.set_or_add_worker(worker_id, &path_value, access_value_sel);
         });
         match result {
             Ok(()) => {
-                new_path.set(String::new());
                 feedback.set(None);
+                detected_writable.set(None);
+                let next_unassigned = worker_list
+                    .read_value()
+                    .iter()
+                    .find(|candidate| {
+                        !draft
+                            .get_untracked()
+                            .workers
+                            .iter()
+                            .any(|entry| entry.worker_id == candidate.id)
+                    })
+                    .map(|candidate| candidate.id);
+                if let Some(next_id) = next_unassigned {
+                    new_worker.set(next_id.to_string());
+                    new_path.set(String::new());
+                    new_access.set(LibraryAccess::ReadWrite);
+                } else {
+                    new_path.set(String::new());
+                }
             }
             Err(message) => feedback.set(Some(message.into())),
         }
     };
+
     let on_submit = move |event: leptos::ev::SubmitEvent| {
         event.prevent_default();
+        let pending_worker = new_worker.get_untracked().parse::<Uuid>().ok();
+        let pending_path = new_path.get_untracked();
+        let pending_access = new_access.get_untracked();
+        let mut commit_result = Ok(());
+        draft.update(|value| {
+            value.apply_suggested_name(&pending_path);
+            commit_result =
+                value.commit_pending_worker(pending_worker, &pending_path, pending_access);
+        });
+        if let Err(message) = commit_result {
+            feedback.set(Some(message.into()));
+            return;
+        }
         let current = draft.get_untracked();
         match current.to_write() {
             Ok(body) => {
@@ -101,6 +239,7 @@ pub fn LibraryForm(
                 <div class="form-group">
                     <label for="library-name" class="form-label">"Nom"</label>
                     <input id="library-name" class="form-input" maxlength="80"
+                        placeholder="Ex. Films 4K"
                         prop:value=move || draft.get().name
                         on:input=move |event| draft.update(|value| value.name = event_target_value(&event)) />
                 </div>
@@ -120,59 +259,146 @@ pub fn LibraryForm(
                 </div>
             </div>
 
-            <p class="inspection-panel__title">"Workers"</p>
+            <p class="inspection-panel__title">"Workers configurés"</p>
             <ul class="library-worker-list">
                 {move || {
                     let entries = draft.get().workers;
                     if entries.is_empty() {
-                        return view! { <li class="text-dim">"Aucun worker : la bibliothèque n'est pas traitée."</li> }.into_any();
+                        return view! {
+                            <li class="text-dim text-sm">
+                                "Aucun worker ajouté pour l'instant : choisissez un dossier ci-dessous."
+                            </li>
+                        }.into_any();
                     }
                     entries.into_iter().map(|entry| {
                         let id = entry.worker_id;
+                        let name = worker_name(id);
+                        let row_path = entry.local_path.clone();
+                        let row_access = entry.access;
                         view! {
                             <li class="library-worker-row">
-                                <span class="text-strong">{worker_name(id)}</span>
+                                <span class="text-strong">{name.clone()}</span>
                                 <span class="library-worker-path">{entry.local_path}</span>
-                                <span class="status-pill info">{access_label(entry.access)}</span>
-                                <button type="button" class="btn btn-secondary btn-sm"
-                                    on:click=move |_| draft.update(|value| value.remove_worker(id))>"Retirer"</button>
+                                <div class="library-worker-row__controls">
+                                    <select
+                                        class="form-select library-worker-access-select"
+                                        aria-label=format!("Accès pour {name}")
+                                        prop:value=access_value(row_access)
+                                        on:change=move |event| {
+                                            let next = parse_access(&event_target_value(&event));
+                                            draft.update(|value| value.update_worker_access(id, next));
+                                            if new_worker.get_untracked() == id.to_string() {
+                                                new_access.set(next);
+                                            }
+                                        }
+                                    >
+                                        <option value="read_write">{access_label(LibraryAccess::ReadWrite)}</option>
+                                        <option value="read">{access_label(LibraryAccess::Read)}</option>
+                                    </select>
+                                    <button
+                                        type="button"
+                                        class="btn btn-secondary btn-sm"
+                                        on:click=move |_| {
+                                            new_path.set(row_path.clone());
+                                            new_access.set(row_access);
+                                            new_worker.set(id.to_string());
+                                            detected_writable.set(None);
+                                            browse_tick.update(|v| *v = v.wrapping_add(1));
+                                            feedback.set(None);
+                                        }
+                                    >
+                                        "Parcourir"
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-secondary btn-sm"
+                                        on:click=move |_| {
+                                            draft.update(|value| value.remove_worker(id));
+                                            if new_worker.get_untracked() == id.to_string() {
+                                                new_path.set(String::new());
+                                                detected_writable.set(None);
+                                            }
+                                        }
+                                    >
+                                        "Retirer"
+                                    </button>
+                                </div>
                             </li>
                         }
                     }).collect_view().into_any()
                 }}
             </ul>
-            <div>
+
+            <div class="library-worker-editor">
+                <p class="inspection-panel__title">"Sélectionner un dossier sur un worker"</p>
                 <div class="form-group">
                     <label for="library-worker" class="form-label">"Worker"</label>
                     <select id="library-worker" class="form-select"
-                        on:change=move |event| new_worker.set(event_target_value(&event))>
+                        prop:value=move || new_worker.get()
+                        on:change=move |event| on_worker_change(event_target_value(&event))>
                         <option value="">"Choisir un worker"</option>
                         {workers.into_iter().map(|worker| view! {
                             <option value=worker.id.to_string()>{worker.name}</option>
                         }).collect_view()}
                     </select>
                 </div>
+
                 <div class="form-group">
                     <label for="library-path" class="form-label">"Chemin sur ce worker"</label>
-                    <input id="library-path" class="form-input" placeholder="/mnt/medias/films"
-                        prop:value=move || new_path.get()
-                        on:input=move |event| new_path.set(event_target_value(&event)) />
-                    <p class="form-help">"Chemin absolu tel que ce worker le voit."</p>
+                    <div class="copy-input-row">
+                        <input id="library-path" class="form-input" placeholder="/mnt/medias/films"
+                            prop:value=move || new_path.get()
+                            on:input=move |event| {
+                                detected_writable.set(None);
+                                new_path.set(event_target_value(&event));
+                            } />
+                        <button
+                            type="button"
+                            class="btn btn-secondary btn-sm"
+                            disabled=move || selected_worker_id.get().is_none()
+                            on:click=move |_| browse_tick.update(|v| *v = v.wrapping_add(1))
+                        >
+                            "Ouvrir"
+                        </button>
+                    </div>
+                    <p class="form-help">
+                        "Choisissez un dossier dans l'arborescence ci-dessous ou saisissez un chemin absolu."
+                    </p>
                 </div>
+
+                <FolderTreePicker
+                    worker_id=selected_worker_id
+                    selected_path=new_path
+                    on_select=on_tree_select
+                    navigate_tick=browse_signal
+                />
+
                 <div class="form-group">
                     <label for="library-access" class="form-label">"Accès"</label>
                     <select id="library-access" class="form-select"
-                        on:change=move |event| new_access.set(if event_target_value(&event) == "read" {
-                            LibraryAccess::Read
-                        } else {
-                            LibraryAccess::ReadWrite
-                        })>
+                        prop:value=move || access_value(new_access.get())
+                        on:change=move |event| new_access.set(parse_access(&event_target_value(&event)))>
                         <option value="read_write">{access_label(LibraryAccess::ReadWrite)}</option>
                         <option value="read">{access_label(LibraryAccess::Read)}</option>
                     </select>
+                    {move || {
+                        (detected_writable.get() == Some(false)
+                            && new_access.get() == LibraryAccess::ReadWrite)
+                            .then(|| view! {
+                                <p class="form-help library-access-warning">
+                                    "Attention : ce dossier apparaît en lecture seule sur ce worker ; l'écriture risque d'échouer."
+                                </p>
+                            })
+                    }}
                 </div>
                 <div class="form-group">
-                    <button type="button" class="btn btn-secondary" on:click=add_worker>"Ajouter le worker"</button>
+                    <button type="button" class="btn btn-secondary" on:click=add_worker>
+                        {move || if is_editing_existing_worker() {
+                            "Mettre à jour ce worker"
+                        } else {
+                            "Ajouter le worker"
+                        }}
+                    </button>
                 </div>
             </div>
 

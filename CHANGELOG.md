@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.48.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.47.0...v0.48.0) (2026-11-18)
+
+
+### Features
+
+* **ui:** accessibilité WCAG 2.2 AA, cibles tactiles et éditeur de flux au clavier ([474c3b4](https://github.com/remi-deher/flux-de-fichiers/commit/474c3b42a876016620faeb597dc818a3a247660d))
+* **ui:** accessibilité WCAG 2.2 AA, cibles tactiles et éditeur de flux au clavier ([1c6edf7](https://github.com/remi-deher/flux-de-fichiers/commit/1c6edf7b3f561abce8eb03c80da3e052ecf85b56))
+
 ## [0.47.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.46.0...v0.47.0) (2026-11-18)
 
 

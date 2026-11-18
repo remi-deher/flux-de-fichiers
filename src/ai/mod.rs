@@ -1,8 +1,10 @@
 //! Assistant IA intégré au central : orchestration LLM multi-fournisseurs branchée sur les outils MCP (ADR 0015).
 
+pub mod oauth;
 mod provider;
 pub mod settings;
 
+use crate::net_policy::OutboundPolicy;
 use crate::{
     api::{AdminAuth, AnyAuth, AppState},
     auth::{self, Principal},
@@ -10,12 +12,13 @@ use crate::{
     mcp::{self, protocol::McpTool},
     runtime_settings,
 };
-use axum::{Json, extract::State};
+use axum::{Json, extract::State, http::StatusCode};
 use flux_shared::{
     Permission,
     ai::{
-        AiChatRequest, AiChatResponse, AiChatRole, AiClientStatus, AiSettingsView, AiTestRequest,
-        AiTestResponse, AiToolCallTrace, MAX_CHAT_MESSAGES, UpdateAiSettingsRequest,
+        AiChatRequest, AiChatResponse, AiChatRole, AiClientStatus, AiOauthDeviceCode,
+        AiOauthPollResponse, AiProvider, AiSettingsView, AiTestRequest, AiTestResponse,
+        AiToolCallTrace, MAX_CHAT_MESSAGES, UpdateAiSettingsRequest,
     },
     mcp::McpAuditOutcome,
 };
@@ -76,6 +79,73 @@ fn truncate_tool_output(raw: String) -> String {
     }
 }
 
+/// Construit le point d'accès du fournisseur ; pour une connexion OAuth, le jeton d'accès est
+/// rafraîchi au besoin (`Conflict` si la connexion est absente ou à refaire).
+async fn resolve_endpoint(
+    state: &AppState,
+    provider: AiProvider,
+    base_url: String,
+    model: String,
+    api_key: Option<String>,
+    policy: OutboundPolicy,
+) -> AppResult<ProviderEndpoint> {
+    if !provider.uses_oauth() {
+        return Ok(ProviderEndpoint {
+            provider,
+            base_url,
+            model,
+            api_key,
+            account_id: None,
+        });
+    }
+    let tokens =
+        oauth::fresh_tokens(&state.pool, &state.config, oauth::OAUTH_ISSUER, policy).await?;
+    Ok(ProviderEndpoint {
+        provider,
+        base_url,
+        model,
+        api_key: Some(tokens.access_token),
+        account_id: tokens.account_id,
+    })
+}
+
+async fn integration_policy(state: &AppState) -> OutboundPolicy {
+    runtime_settings::load_effective(&state.pool, &state.config)
+        .await
+        .integration_policy()
+}
+
+/// Démarre la connexion OAuth et renvoie le code à valider (`POST /api/v1/ai/oauth/start`).
+pub async fn oauth_start(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+) -> AppResult<Json<AiOauthDeviceCode>> {
+    let policy = integration_policy(&state).await;
+    Ok(Json(
+        oauth::start(&state.pool, oauth::OAUTH_ISSUER, policy).await?,
+    ))
+}
+
+/// Interroge la connexion OAuth en cours (`POST /api/v1/ai/oauth/poll`).
+pub async fn oauth_poll(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+) -> AppResult<Json<AiOauthPollResponse>> {
+    let policy = integration_policy(&state).await;
+    Ok(Json(
+        oauth::poll(&state.pool, &state.config, oauth::OAUTH_ISSUER, policy).await?,
+    ))
+}
+
+/// Oublie la connexion OAuth enregistrée (`DELETE /api/v1/ai/oauth`).
+pub async fn oauth_disconnect(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+) -> AppResult<StatusCode> {
+    oauth::disconnect(&state.pool, &state.config).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Retourne l'état public léger de l'assistant IA pour la session active (`GET /api/v1/ai/status`).
 pub async fn client_status(
     State(state): State<AppState>,
@@ -120,16 +190,29 @@ pub async fn test_connection(
         }
         None => saved.api_key,
     };
-    let runtime = runtime_settings::load_effective(&state.pool, &state.config).await;
-    let endpoint = ProviderEndpoint {
-        provider: request.provider,
+    let policy = integration_policy(&state).await;
+    let endpoint = match resolve_endpoint(
+        &state,
+        request.provider,
         base_url,
-        model: request.model.trim().to_owned(),
+        request.model.trim().to_owned(),
         api_key,
+        policy,
+    )
+    .await
+    {
+        Ok(endpoint) => endpoint,
+        Err(AppError::Conflict) => {
+            return Ok(Json(AiTestResponse {
+                reachable: false,
+                latency_ms: 0,
+                available_models: Vec::new(),
+                message: "Aucun compte connecté : utilisez « Se connecter avec ChatGPT ».".into(),
+            }));
+        }
+        Err(err) => return Err(err),
     };
-    Ok(Json(
-        provider::test_connection(&endpoint, runtime.integration_policy()).await,
-    ))
+    Ok(Json(provider::test_connection(&endpoint, policy).await))
 }
 
 /// Exécute un tour conversationnel avec résolution multi-tours des outils MCP (`POST /api/v1/ai/chat`).
@@ -158,14 +241,16 @@ pub async fn chat(
         return Err(AppError::Conflict);
     }
 
-    let runtime = runtime_settings::load_effective(&state.pool, &state.config).await;
-    let policy = runtime.integration_policy();
-    let endpoint = ProviderEndpoint {
-        provider: ai_cfg.provider,
-        base_url: ai_cfg.base_url.clone(),
-        model: ai_cfg.model.clone(),
-        api_key: ai_cfg.api_key.clone(),
-    };
+    let policy = integration_policy(&state).await;
+    let endpoint = resolve_endpoint(
+        &state,
+        ai_cfg.provider,
+        ai_cfg.base_url.clone(),
+        ai_cfg.model.clone(),
+        ai_cfg.api_key.clone(),
+        policy,
+    )
+    .await?;
     let tools = available_tools_for_assistant(&principal, ai_cfg.allow_write_tools);
     let system_prompt = build_system_prompt(
         &principal,
@@ -574,6 +659,155 @@ mod tests {
         let worker_res = app.oneshot(worker_req).await?;
         assert_eq!(worker_res.status(), StatusCode::FORBIDDEN);
 
+        server_task.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn chatgpt_oauth_chat_requires_connection_sends_account_and_can_disconnect()
+    -> anyhow::Result<()> {
+        let mock_llm = axum::Router::new().route(
+            "/responses",
+            post(
+                |headers: axum::http::HeaderMap, Json(body): Json<Value>| async move {
+                    let header = |name: &str| {
+                        headers
+                            .get(name)
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or_default()
+                            .to_owned()
+                    };
+                    assert_eq!(header("authorization"), "Bearer access-1");
+                    assert_eq!(header("chatgpt-account-id"), "acct-1");
+                    assert_eq!(body["stream"], true);
+                    assert_eq!(body["store"], false);
+                    assert!(body["instructions"].as_str().is_some_and(|s| !s.is_empty()));
+                    let events = [
+                        json!({
+                            "type": "response.output_item.done",
+                            "item": { "type": "message", "content": [{ "type": "output_text", "text": "Bonjour ChatGPT" }] }
+                        }),
+                        json!({ "type": "response.completed" }),
+                    ];
+                    let sse: String = events.iter().map(|e| format!("data: {e}\n\n")).collect();
+                    ([("content-type", "text/event-stream")], sse)
+                },
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let mock_addr = listener.local_addr()?;
+        let server_task = tokio::spawn(async move {
+            let _ = axum::serve(listener, mock_llm).await;
+        });
+
+        let (app, state, _dir) = test_app().await?;
+        let admin = issue_key_header(&state.pool, "oauth-admin", Role::Admin).await?;
+        let worker = issue_key_header(&state.pool, "oauth-worker", Role::Worker).await?;
+        let call = |method: &'static str, uri: &'static str, auth: &str, body: Body| {
+            let request = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("authorization", auth)
+                .header("content-type", "application/json")
+                .body(body);
+            let app = app.clone();
+            async move { anyhow::Ok(app.oneshot(request?).await?) }
+        };
+        let chat_body = || -> anyhow::Result<Body> {
+            Ok(Body::from(serde_json::to_vec(&AiChatRequest {
+                messages: vec![AiChatMessage {
+                    role: AiChatRole::User,
+                    content: "Salut".into(),
+                }],
+                context_hint: None,
+            })?))
+        };
+
+        let settings = Body::from(serde_json::to_vec(&UpdateAiSettingsRequest {
+            enabled: true,
+            provider: AiProvider::ChatGptOauth,
+            base_url: format!("http://{mock_addr}"),
+            model: "gpt-test".into(),
+            api_key: None,
+            allow_write_tools: false,
+            max_tool_rounds: 3,
+        })?);
+        assert_eq!(
+            call("PUT", "/api/v1/ai/settings", &admin, settings)
+                .await?
+                .status(),
+            StatusCode::OK
+        );
+
+        // Aucune connexion : l'assistant n'est pas disponible.
+        assert_eq!(
+            call("POST", "/api/v1/ai/chat", &admin, chat_body()?)
+                .await?
+                .status(),
+            StatusCode::CONFLICT
+        );
+
+        let tokens = oauth::OauthTokens {
+            access_token: "access-1".into(),
+            refresh_token: "refresh-1".into(),
+            expires_at: 4_000_000_000,
+            account_id: Some("acct-1".into()),
+            email: Some("remi@example.test".into()),
+            plan: Some("plus".into()),
+        };
+        settings::save_oauth_tokens(&state.pool, &state.config, Some(&tokens)).await?;
+
+        let view = call("GET", "/api/v1/ai/settings", &admin, Body::empty()).await?;
+        let view: AiSettingsView =
+            serde_json::from_slice(&axum::body::to_bytes(view.into_body(), 16_384).await?)?;
+        assert_eq!(
+            view.oauth_account.and_then(|a| a.email).as_deref(),
+            Some("remi@example.test")
+        );
+
+        let chat = call("POST", "/api/v1/ai/chat", &admin, chat_body()?).await?;
+        assert_eq!(chat.status(), StatusCode::OK);
+        let chat: AiChatResponse =
+            serde_json::from_slice(&axum::body::to_bytes(chat.into_body(), 65_536).await?)?;
+        assert_eq!(chat.reply, "Bonjour ChatGPT");
+        assert_eq!(chat.provider, AiProvider::ChatGptOauth);
+
+        let test_body = Body::from(serde_json::to_vec(&AiTestRequest {
+            provider: AiProvider::ChatGptOauth,
+            base_url: format!("http://{mock_addr}"),
+            model: "gpt-test".into(),
+            api_key: None,
+        })?);
+        let tested = call("POST", "/api/v1/ai/test", &admin, test_body).await?;
+        let tested: AiTestResponse =
+            serde_json::from_slice(&axum::body::to_bytes(tested.into_body(), 16_384).await?)?;
+        assert!(tested.reachable);
+
+        // Seul un administrateur gère la connexion.
+        assert_eq!(
+            call("POST", "/api/v1/ai/oauth/start", &worker, Body::empty())
+                .await?
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            call("DELETE", "/api/v1/ai/oauth", &worker, Body::empty())
+                .await?
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            call("DELETE", "/api/v1/ai/oauth", &admin, Body::empty())
+                .await?
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            call("POST", "/api/v1/ai/chat", &admin, chat_body()?)
+                .await?
+                .status(),
+            StatusCode::CONFLICT
+        );
         server_task.abort();
         Ok(())
     }

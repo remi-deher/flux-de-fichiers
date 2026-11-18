@@ -3,6 +3,7 @@
 mod account;
 mod accounts;
 mod ai;
+mod ai_oauth;
 mod keys;
 mod mcp_audit;
 mod network;

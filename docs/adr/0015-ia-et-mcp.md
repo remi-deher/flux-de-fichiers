@@ -107,6 +107,46 @@ quatre fichiers les plus récents (4 Mio chacun, jamais un fichier entier), du p
 plus ancien, avec filtre de niveau minimal et recherche (message, module, champs). Journal du
 central uniquement ; les workers gardent le leur.
 
+## Évolutions de l'assistant intégré (18 nov. 2026)
+
+Décisions de l'utilisateur du 18 nov. 2026 : streaming, contexte automatique, validation des
+écritures, historique, diagnostic proactif, quotas/cache/état du fournisseur, et aide à l'écriture
+des **scripts locaux** de la librairie. Les moteurs en ligne de commande dans l'image et la création
+de plugins restent exclus. Ces évolutions ne concernent que l'**assistant intégré** (un utilisateur
+est devant l'écran) ; le MCP externe garde « pas de file d'approbation » (décision du 18 nov.).
+
+1. **Conversations en tâche de fond (« runs »).** `POST /api/v1/ai/runs` lance la boucle de
+   conversation et renvoie `202` avec un identifiant ; `GET /api/v1/ai/runs/{id}/events` publie
+   ses évènements en SSE (`tool_started`, `tool_finished`, `done`, `failed`, plus `delta` et
+   `confirmation` aux étapes suivantes) et `DELETE /api/v1/ai/runs/{id}` l'interrompt. Les
+   évènements restent **en mémoire** (jamais en base), un run appartient à un compte (404 pour un
+   autre), un compte a au plus 3 runs actifs, et un client qui se reconnecte reprend après
+   `Last-Event-ID`. Un `GET` (`EventSource`) évite d'écrire un lecteur de flux `fetch` en WASM.
+   `POST /api/v1/ai/chat` reste disponible et partage la même boucle.
+2. **Contexte automatique.** Le client envoie un contexte typé (`AiContext` : écran, type et
+   identifiant de l'objet ouvert) à la place d'une phrase libre ; le serveur le met dans l'invite
+   système et demande de lire l'objet par les outils. Aucun contenu n'est joint côté client.
+3. **Validation des écritures.** Un outil d'écriture demandé par le modèle n'est jamais exécuté
+   directement : le run publie `confirmation` (outil, arguments sans secrets, aperçu — diff pour un
+   flux) et **attend** la réponse du compte (délai de 10 min, puis refus). La tâche du run reste
+   suspendue en mémoire, aucun état de conversation n'est sérialisé. `POST
+   /api/v1/ai/runs/{id}/actions/{action}` (`approve` vrai ou faux) exécute ou refuse l'action puis
+   reprend. Les droits du compte restent vérifiés à l'exécution.
+4. **Scripts locaux.** L'assistant sait écrire et corriger un script (interpréteurs de
+   `ScriptInterpreter` uniquement). Le code n'atteint jamais la base sans geste humain : il arrive
+   comme **brouillon** dans l'éditeur (diff avec l'existant), et l'enregistrement reste le bouton
+   de l'utilisateur. L'assistant n'a **aucun outil** qui enregistre ou exécute un script, même
+   en mode écriture : un script s'exécute sur les workers, sans isolation.
+5. **Historique.** Conversations par compte (`ai_conversations`, `ai_messages`), texte utilisateur
+   et assistant seulement (aucun résultat d'outil), chiffré au repos par `SecretBox`, conservé
+   30 jours et 50 conversations par compte, supprimable depuis le tiroir.
+6. **Diagnostic proactif.** Réglage **désactivé par défaut** : résumé des échecs récents, calculé en
+   tâche de fond au plus une fois par heure et seulement si de nouveaux échecs existent, affiché
+   dans Activité. Aucun appel au fournisseur sans ce réglage.
+7. **Quotas, cache, état.** Quota quotidien de requêtes par compte et global (réglable), catalogue
+   de modèles mis en cache 10 min, et état du fournisseur (dernier succès, dernière erreur,
+   latence, consommation du quota) exposé dans Paramètres > Assistant IA.
+
 ## Questions ouvertes
 
 - **Qui génère les suggestions** : le client MCP externe (le central ne fait qu'exposer des

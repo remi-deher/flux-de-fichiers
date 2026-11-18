@@ -2,6 +2,7 @@
 
 pub mod oauth;
 mod provider;
+pub mod run;
 pub mod settings;
 
 use crate::net_policy::OutboundPolicy;
@@ -12,22 +13,34 @@ use crate::{
     mcp::{self, protocol::McpTool},
     runtime_settings,
 };
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::{HeaderMap, StatusCode},
+    response::sse::{Event, KeepAlive, Sse},
+};
 use flux_shared::{
     Permission,
     ai::{
-        AiChatRequest, AiChatResponse, AiChatRole, AiClientStatus, AiOauthDeviceCode,
-        AiOauthPollResponse, AiProvider, AiSettingsView, AiTestRequest, AiTestResponse,
-        AiToolCallTrace, MAX_CHAT_MESSAGES, UpdateAiSettingsRequest,
+        AiChatRequest, AiChatResponse, AiChatRole, AiClientStatus, AiContext, AiOauthDeviceCode,
+        AiOauthPollResponse, AiProvider, AiRunEvent, AiRunStarted, AiSettingsView, AiTestRequest,
+        AiTestResponse, AiToolCallTrace, MAX_CHAT_MESSAGES, UpdateAiSettingsRequest,
     },
     mcp::McpAuditOutcome,
 };
+use futures_util::Stream;
 use provider::{ConversationEntry, ModelTurnResponse, ProviderEndpoint};
 use serde_json::json;
-use std::time::Instant;
+use std::{
+    convert::Infallible,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 const MAX_TOOL_RESULT_CHARS: usize = 12_000;
 const MAX_TOOL_CALLS_PER_ROUND: usize = 8;
+const SSE_KEEP_ALIVE: Duration = Duration::from_secs(15);
+const MAX_CONTEXT_FIELD_CHARS: usize = 128;
 
 fn is_tool_read_only(tool: &McpTool) -> bool {
     tool.annotations
@@ -46,6 +59,7 @@ fn build_system_prompt(
     principal: &Principal,
     allow_write: bool,
     context_hint: Option<&str>,
+    context: Option<&AiContext>,
 ) -> String {
     let mode = if allow_write {
         "Lecture et actions d'écriture autorisées (dans les limites des droits du compte)."
@@ -66,7 +80,34 @@ fn build_system_prompt(
         prompt.push_str("\nContexte courant de l'interface : ");
         prompt.push_str(hint);
     }
+    if let Some(context) = context {
+        prompt.push_str(&describe_context(context));
+    }
     prompt
+}
+
+/// Garde les caractères sûrs d'un champ de contexte : il finit dans l'invite système.
+fn clean_context_field(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| !c.is_control() && *c != '`')
+        .take(MAX_CONTEXT_FIELD_CHARS)
+        .collect()
+}
+
+/// Phrase d'invite décrivant l'écran et l'objet ouverts (la lecture passe par les outils).
+fn describe_context(context: &AiContext) -> String {
+    let mut text = format!(
+        "\nÉcran ouvert : `{}`.",
+        clean_context_field(&context.screen)
+    );
+    if let Some(object) = &context.object {
+        text.push_str(&format!(
+            " Objet affiché : {} `{}` ; lis-le avec tes outils avant de répondre sur « ce flux », « cette tâche » ou équivalent.",
+            object.kind.label(),
+            clean_context_field(&object.id)
+        ));
+    }
+    text
 }
 
 fn truncate_tool_output(raw: String) -> String {
@@ -236,14 +277,9 @@ pub async fn test_connection(
     Ok(Json(provider::test_connection(&endpoint, policy).await))
 }
 
-/// Exécute un tour conversationnel avec résolution multi-tours des outils MCP (`POST /api/v1/ai/chat`).
-pub async fn chat(
-    State(state): State<AppState>,
-    AnyAuth(principal): AnyAuth,
-    Json(request): Json<AiChatRequest>,
-) -> AppResult<Json<AiChatResponse>> {
-    auth::require(&principal, Permission::ViewOverview)?;
-    if request.messages.is_empty()
+/// Rejette une conversation vide, trop longue ou qui ne se termine pas par une question.
+fn validate_chat_request(request: &AiChatRequest) -> AppResult<()> {
+    let invalid = request.messages.is_empty()
         || request.messages.len() > MAX_CHAT_MESSAGES
         || request
             .messages
@@ -252,19 +288,55 @@ pub async fn chat(
         || !matches!(
             request.messages.last().map(|m| m.role),
             Some(AiChatRole::User)
-        )
-    {
-        return Err(AppError::Invalid);
+        );
+    if invalid {
+        Err(AppError::Invalid)
+    } else {
+        Ok(())
     }
+}
 
+/// Message montré à l'utilisateur quand une conversation échoue.
+fn failure_message(error: &AppError) -> &'static str {
+    match error {
+        AppError::Conflict => {
+            "L'assistant IA n'est pas encore activé ou configuré (ou le compte ChatGPT doit être reconnecté)."
+        }
+        AppError::Internal => {
+            "Le fournisseur IA a échoué : consultez Activité > Journal pour le détail."
+        }
+        _ => "Requête refusée.",
+    }
+}
+
+/// Exécute un tour conversationnel avec résolution multi-tours des outils MCP (`POST /api/v1/ai/chat`).
+pub async fn chat(
+    State(state): State<AppState>,
+    AnyAuth(principal): AnyAuth,
+    Json(request): Json<AiChatRequest>,
+) -> AppResult<Json<AiChatResponse>> {
+    auth::require(&principal, Permission::ViewOverview)?;
+    validate_chat_request(&request)?;
+    converse(&state, &principal, request, &|_| {})
+        .await
+        .map(Json)
+}
+
+/// Boucle de conversation partagée par `/ai/chat` et les runs ; `emit` reçoit l'avancement des outils.
+async fn converse(
+    state: &AppState,
+    principal: &Principal,
+    request: AiChatRequest,
+    emit: &(dyn Fn(AiRunEvent) + Send + Sync),
+) -> AppResult<AiChatResponse> {
     let ai_cfg = settings::load_effective(&state.pool, &state.config).await;
     if !ai_cfg.enabled || !ai_cfg.as_client_status().available {
         return Err(AppError::Conflict);
     }
 
-    let policy = integration_policy(&state).await;
+    let policy = integration_policy(state).await;
     let mut endpoint = resolve_endpoint(
-        &state,
+        state,
         ai_cfg.provider,
         ai_cfg.base_url.clone(),
         ai_cfg.model.clone(),
@@ -275,11 +347,12 @@ pub async fn chat(
     if ai_cfg.provider.has_automatic_model() && endpoint.model.trim().is_empty() {
         endpoint.model = first_available_model(&endpoint, policy).await?;
     }
-    let tools = available_tools_for_assistant(&principal, ai_cfg.allow_write_tools);
+    let tools = available_tools_for_assistant(principal, ai_cfg.allow_write_tools);
     let system_prompt = build_system_prompt(
-        &principal,
+        principal,
         ai_cfg.allow_write_tools,
         request.context_hint.as_deref(),
+        request.context.as_ref(),
     );
 
     let mut entries = provider::initial_entries(&request.messages);
@@ -297,13 +370,13 @@ pub async fn chat(
 
         match turn {
             ModelTurnResponse::FinalText(reply) => {
-                return Ok(Json(AiChatResponse {
+                return Ok(AiChatResponse {
                     reply,
                     model: endpoint.model.clone(),
                     provider: ai_cfg.provider,
                     tool_calls: traces,
                     rounds_used,
-                }));
+                });
             }
             ModelTurnResponse::ToolCalls {
                 assistant_content,
@@ -315,8 +388,14 @@ pub async fn chat(
                     calls: calls.clone(),
                 });
                 for call in calls {
+                    emit(AiRunEvent::ToolStarted {
+                        tool_name: call.name.clone(),
+                    });
                     let (content, is_error, trace) =
-                        execute_assistant_tool(&state, &principal, &tools, &call).await;
+                        execute_assistant_tool(state, principal, &tools, &call).await;
+                    emit(AiRunEvent::ToolFinished {
+                        trace: trace.clone(),
+                    });
                     traces.push(trace);
                     entries.push(ConversationEntry::ToolResult {
                         call_id: call.id,
@@ -345,13 +424,87 @@ pub async fn chat(
             .unwrap_or_else(|| "Nombre maximal d'étapes d'outils atteint.".to_owned()),
     };
 
-    Ok(Json(AiChatResponse {
+    Ok(AiChatResponse {
         reply,
         model: endpoint.model.clone(),
         provider: ai_cfg.provider,
         tool_calls: traces,
         rounds_used,
-    }))
+    })
+}
+
+/// Lance une conversation en tâche de fond (`POST /api/v1/ai/runs`) ; l'avancement se lit en SSE.
+pub async fn start_run(
+    State(state): State<AppState>,
+    AnyAuth(principal): AnyAuth,
+    Json(request): Json<AiChatRequest>,
+) -> AppResult<(StatusCode, Json<AiRunStarted>)> {
+    auth::require(&principal, Permission::ViewOverview)?;
+    validate_chat_request(&request)?;
+    let ai_cfg = settings::load_effective(&state.pool, &state.config).await;
+    if !ai_cfg.enabled || !ai_cfg.as_client_status().available {
+        return Err(AppError::Conflict);
+    }
+    let (run_id, run) = state
+        .ai_runs
+        .create(&principal.id)
+        .ok_or(AppError::RateLimited)?;
+    let task_run = Arc::clone(&run);
+    let handle = tokio::spawn(async move {
+        let emit = |event: AiRunEvent| task_run.publish(event);
+        let last = match converse(&state, &principal, request, &emit).await {
+            Ok(response) => AiRunEvent::Done { response },
+            Err(error) => AiRunEvent::Failed {
+                message: failure_message(&error).to_owned(),
+            },
+        };
+        task_run.publish(last);
+    });
+    run.attach_abort(handle.abort_handle());
+    Ok((StatusCode::ACCEPTED, Json(AiRunStarted { run_id })))
+}
+
+/// Évènements d'un run (SSE) ; reprend après `Last-Event-ID` en cas de reconnexion.
+pub async fn run_events(
+    State(state): State<AppState>,
+    AnyAuth(principal): AnyAuth,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    let run = state
+        .ai_runs
+        .get(&run_id, &principal.id)
+        .ok_or(AppError::NotFound)?;
+    let first = headers
+        .get("last-event-id")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .map_or(0, |last| last.saturating_add(1));
+    let stream = futures_util::stream::unfold((run, first), |(run, index)| async move {
+        let event = run.next_event(index).await?;
+        let sse = Event::default()
+            .id(index.to_string())
+            .json_data(&event)
+            .unwrap_or_else(|_| Event::default().data("{}"));
+        Some((Ok(sse), (run, index + 1)))
+    });
+    Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(SSE_KEEP_ALIVE)))
+}
+
+/// Interrompt un run (`DELETE /api/v1/ai/runs/{id}`).
+pub async fn cancel_run(
+    State(state): State<AppState>,
+    AnyAuth(principal): AnyAuth,
+    Path(run_id): Path<String>,
+) -> AppResult<StatusCode> {
+    let run = state
+        .ai_runs
+        .get(&run_id, &principal.id)
+        .ok_or(AppError::NotFound)?;
+    run.cancel(AiRunEvent::Failed {
+        message: "Conversation interrompue.".to_owned(),
+    });
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn execute_assistant_tool(
@@ -483,7 +636,7 @@ mod tests {
     };
     use flux_shared::{
         Role,
-        ai::{AiChatMessage, AiProvider},
+        ai::{AiChatMessage, AiContextKind, AiContextObject, AiProvider},
     };
     use serde_json::Value;
     use sqlx::sqlite::SqlitePoolOptions;
@@ -652,6 +805,7 @@ mod tests {
                     content: "Liste les bibliothèques".into(),
                 }],
                 context_hint: Some("Écran /libraries".into()),
+                context: None,
             })?))?;
         let chat_res = app.clone().oneshot(chat_req).await?;
         assert_eq!(chat_res.status(), StatusCode::OK);
@@ -686,9 +840,152 @@ mod tests {
                     content: "Bonjour".into(),
                 }],
                 context_hint: None,
+                context: None,
             })?))?;
         let worker_res = app.oneshot(worker_req).await?;
         assert_eq!(worker_res.status(), StatusCode::FORBIDDEN);
+
+        server_task.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn runs_stream_tool_steps_then_the_final_reply_and_stay_private() -> anyhow::Result<()> {
+        let mock_llm = axum::Router::new().route(
+            "/v1/chat/completions",
+            post(|Json(body): Json<Value>| async move {
+                let messages = body["messages"].as_array().cloned().unwrap_or_default();
+                let system = messages
+                    .first()
+                    .and_then(|m| m["content"].as_str())
+                    .unwrap_or_default()
+                    .to_owned();
+                let after_tool = messages.iter().any(|m| m["role"] == "tool");
+                if after_tool {
+                    let seen = system.contains("flux `f1`");
+                    Json(json!({ "choices": [{ "message": {
+                        "role": "assistant",
+                        "content": format!("Contexte reçu : {seen}")
+                    }}]}))
+                } else {
+                    Json(json!({ "choices": [{ "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "type": "function",
+                            "function": { "name": "list_libraries", "arguments": "{}" }
+                        }]
+                    }}]}))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let mock_addr = listener.local_addr()?;
+        let server_task = tokio::spawn(async move {
+            let _ = axum::serve(listener, mock_llm).await;
+        });
+
+        let (app, state, _dir) = test_app().await?;
+        let admin = issue_key_header(&state.pool, "run-admin", Role::Admin).await?;
+        let other = issue_key_header(&state.pool, "run-other", Role::Admin).await?;
+        let call = |method: &'static str, uri: String, auth: String, body: Body| {
+            let request = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("authorization", auth)
+                .header("content-type", "application/json")
+                .body(body);
+            let app = app.clone();
+            async move { anyhow::Ok(app.oneshot(request?).await?) }
+        };
+        let settings = Body::from(serde_json::to_vec(&UpdateAiSettingsRequest {
+            enabled: true,
+            provider: AiProvider::OpenAiCompatible,
+            base_url: format!("http://{mock_addr}/v1"),
+            model: "mock-model".into(),
+            api_key: Some("sk-secret-value".into()),
+            allow_write_tools: false,
+            max_tool_rounds: 3,
+        })?);
+        let saved = call("PUT", "/api/v1/ai/settings".into(), admin.clone(), settings).await?;
+        assert_eq!(saved.status(), StatusCode::OK);
+
+        let request = AiChatRequest {
+            messages: vec![AiChatMessage {
+                role: AiChatRole::User,
+                content: "Que contient ce flux ?".into(),
+            }],
+            context_hint: None,
+            context: Some(AiContext {
+                screen: "/app/flows/f1".into(),
+                object: Some(AiContextObject {
+                    kind: AiContextKind::Flow,
+                    id: "f1".into(),
+                }),
+            }),
+        };
+        let started = call(
+            "POST",
+            "/api/v1/ai/runs".into(),
+            admin.clone(),
+            Body::from(serde_json::to_vec(&request)?),
+        )
+        .await?;
+        assert_eq!(started.status(), StatusCode::ACCEPTED);
+        let started: AiRunStarted =
+            serde_json::from_slice(&axum::body::to_bytes(started.into_body(), 4096).await?)?;
+
+        let events_uri = format!("/api/v1/ai/runs/{}/events", started.run_id);
+        let hidden = call("GET", events_uri.clone(), other.clone(), Body::empty()).await?;
+        assert_eq!(hidden.status(), StatusCode::NOT_FOUND);
+        let hidden_cancel = call(
+            "DELETE",
+            format!("/api/v1/ai/runs/{}", started.run_id),
+            other,
+            Body::empty(),
+        )
+        .await?;
+        assert_eq!(hidden_cancel.status(), StatusCode::NOT_FOUND);
+
+        let stream = call("GET", events_uri.clone(), admin.clone(), Body::empty()).await?;
+        assert_eq!(stream.status(), StatusCode::OK);
+        let raw = axum::body::to_bytes(stream.into_body(), 1 << 20).await?;
+        let events = String::from_utf8(raw.to_vec())?
+            .lines()
+            .filter_map(|line| line.strip_prefix("data:"))
+            .map(|data| serde_json::from_str::<AiRunEvent>(data.trim()))
+            .collect::<Result<Vec<_>, _>>()?;
+        assert!(matches!(
+            &events[0],
+            AiRunEvent::ToolStarted { tool_name } if tool_name == "list_libraries"
+        ));
+        assert!(matches!(
+            &events[1],
+            AiRunEvent::ToolFinished { trace } if trace.outcome == "ok"
+        ));
+        match &events[2] {
+            AiRunEvent::Done { response } => {
+                assert_eq!(response.reply, "Contexte reçu : true");
+                assert_eq!(response.rounds_used, 2);
+            }
+            other => anyhow::bail!("évènement final inattendu : {other:?}"),
+        }
+        assert_eq!(events.len(), 3);
+
+        // Une reconnexion reprend après le dernier évènement lu.
+        let resumed = {
+            let request = Request::builder()
+                .uri(events_uri)
+                .header("authorization", &admin)
+                .header("last-event-id", "1")
+                .body(Body::empty())?;
+            app.clone().oneshot(request).await?
+        };
+        let raw = axum::body::to_bytes(resumed.into_body(), 1 << 20).await?;
+        let text = String::from_utf8(raw.to_vec())?;
+        assert_eq!(text.matches("data:").count(), 1);
+        assert!(text.contains("\"type\":\"done\""));
 
         server_task.abort();
         Ok(())
@@ -700,12 +997,18 @@ mod tests {
         let mock_llm = axum::Router::new()
             .route(
                 "/models",
-                axum::routing::get(|headers: axum::http::HeaderMap| async move {
+                axum::routing::get(|headers: axum::http::HeaderMap, uri: axum::http::Uri| async move {
                     assert_eq!(
                         headers
                             .get("chatgpt-account-id")
                             .and_then(|v| v.to_str().ok()),
                         Some("acct-1")
+                    );
+                    // Le backend Codex masque les modèles dont la version minimale n'est pas atteinte.
+                    assert_eq!(
+                        uri.query(),
+                        Some("client_version=0.170.0"),
+                        "version de client annoncée à /models"
                     );
                     Json(json!({ "models": [
                         { "slug": "interdit", "visibility": "hide", "priority": 0 },
@@ -770,6 +1073,7 @@ mod tests {
                     content: "Salut".into(),
                 }],
                 context_hint: None,
+                context: None,
             })?))
         };
 

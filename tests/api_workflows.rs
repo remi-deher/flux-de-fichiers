@@ -298,6 +298,9 @@ async fn json_routes_reject_oversized_bodies_and_transfers_do_not() -> anyhow::R
     assert!(TRANSFER_TIMEOUT > JSON_API_TIMEOUT);
     assert_eq!(JSON_BODY_LIMIT, 16 * 1024);
     assert!(is_long_running_route("/api/v1/jobs/events"));
+    assert!(is_long_running_route("/api/v1/ai/runs/abc/events"));
+    assert!(!is_long_running_route("/api/v1/ai/runs/abc"));
+    assert!(!is_long_running_route("/api/v1/ai/runs//events"));
     assert!(is_long_running_route(
         "/api/v1/jobs/11111111-1111-1111-1111-111111111111/result"
     ));

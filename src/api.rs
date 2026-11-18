@@ -394,6 +394,12 @@ fn json_routes() -> Router<AppState> {
             get(crate::ai::get_settings).put(crate::ai::update_settings),
         )
         .route("/api/v1/ai/test", post(crate::ai::test_connection))
+        .route("/api/v1/ai/oauth/start", post(crate::ai::oauth_start))
+        .route("/api/v1/ai/oauth/poll", post(crate::ai::oauth_poll))
+        .route(
+            "/api/v1/ai/oauth",
+            axum::routing::delete(crate::ai::oauth_disconnect),
+        )
         .route("/api/v1/auth/logout", post(session::logout))
         .route("/api/v1/jobs", get(jobs::list).post(jobs::create))
         .route("/api/v1/jobs/stats", get(jobs::stats))

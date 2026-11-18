@@ -2,6 +2,7 @@
 
 use flux_shared::libraries::{
     LIBRARY_NAME_MAX, Library, LibraryAccess, LibraryWorkerPath, LibraryWrite,
+    suggested_library_name_from_path,
 };
 use uuid::Uuid;
 
@@ -25,7 +26,29 @@ impl LibraryDraft {
     }
 
     /// Ajoute le chemin d'un worker ; refuse un worker déjà présent ou un chemin non absolu.
+    #[cfg(test)]
     pub fn add_worker(
+        &mut self,
+        worker_id: Uuid,
+        path: &str,
+        access: LibraryAccess,
+    ) -> Result<(), &'static str> {
+        if self
+            .workers
+            .iter()
+            .any(|entry| entry.worker_id == worker_id)
+        {
+            return Err("Ce worker a déjà un chemin pour cette bibliothèque.");
+        }
+        self.set_or_add_worker(worker_id, path, access)
+    }
+
+    pub fn remove_worker(&mut self, worker_id: Uuid) {
+        self.workers.retain(|entry| entry.worker_id != worker_id);
+    }
+
+    /// Ajoute un worker ou met à jour son chemin et son droit s'il est déjà associé.
+    pub fn set_or_add_worker(
         &mut self,
         worker_id: Uuid,
         path: &str,
@@ -35,23 +58,57 @@ impl LibraryDraft {
         if !path.starts_with('/') {
             return Err("Le chemin doit être absolu (commencer par /).");
         }
-        if self
+        if let Some(existing) = self
             .workers
-            .iter()
-            .any(|entry| entry.worker_id == worker_id)
+            .iter_mut()
+            .find(|entry| entry.worker_id == worker_id)
         {
-            return Err("Ce worker a déjà un chemin pour cette bibliothèque.");
+            existing.local_path = path.to_owned();
+            existing.access = access;
+        } else {
+            self.workers.push(LibraryWorkerPath {
+                worker_id,
+                local_path: path.to_owned(),
+                access,
+            });
         }
-        self.workers.push(LibraryWorkerPath {
-            worker_id,
-            local_path: path.to_owned(),
-            access,
-        });
         Ok(())
     }
 
-    pub fn remove_worker(&mut self, worker_id: Uuid) {
-        self.workers.retain(|entry| entry.worker_id != worker_id);
+    /// Met à jour le droit d'accès d'un worker déjà rattaché.
+    pub fn update_worker_access(&mut self, worker_id: Uuid, access: LibraryAccess) {
+        if let Some(existing) = self
+            .workers
+            .iter_mut()
+            .find(|entry| entry.worker_id == worker_id)
+        {
+            existing.access = access;
+        }
+    }
+
+    /// Pré-remplit le nom s'il est encore vide à partir du dossier choisi.
+    pub fn apply_suggested_name(&mut self, folder_path: &str) {
+        if self.name.trim().is_empty()
+            && let Some(suggested) = suggested_library_name_from_path(folder_path)
+        {
+            self.name = suggested;
+        }
+    }
+
+    /// Valide et rattache le worker en cours de saisie si un chemin a été renseigné avant l'enregistrement.
+    pub fn commit_pending_worker(
+        &mut self,
+        worker_id: Option<Uuid>,
+        path: &str,
+        access: LibraryAccess,
+    ) -> Result<(), &'static str> {
+        if path.trim().is_empty() {
+            return Ok(());
+        }
+        let Some(worker_id) = worker_id else {
+            return Err("Choisissez un worker.");
+        };
+        self.set_or_add_worker(worker_id, path, access)
     }
 
     /// Corps envoyé au central, ou la première erreur de saisie.
@@ -197,5 +254,52 @@ mod tests {
                 missing_worker: 2,
             }
         );
+    }
+
+    #[test]
+    fn set_or_add_update_access_suggest_name_and_commit_pending_behave_cleanly() {
+        let mut draft = LibraryDraft::default();
+        let worker_id = Uuid::from_u128(1);
+
+        draft.apply_suggested_name("/mnt");
+        assert!(draft.name.is_empty());
+        draft.apply_suggested_name("/mnt/medias/Films 4K");
+        assert_eq!(draft.name, "Films 4K");
+        draft.apply_suggested_name("/mnt/medias/Séries");
+        assert_eq!(draft.name, "Films 4K");
+
+        assert!(
+            draft
+                .commit_pending_worker(None, "/mnt/medias/Films 4K", LibraryAccess::Read)
+                .is_err()
+        );
+        assert_eq!(
+            draft.commit_pending_worker(Some(worker_id), "   ", LibraryAccess::Read),
+            Ok(())
+        );
+        assert!(draft.workers.is_empty());
+
+        assert_eq!(
+            draft.commit_pending_worker(
+                Some(worker_id),
+                " /mnt/medias/Films 4K ",
+                LibraryAccess::ReadWrite,
+            ),
+            Ok(())
+        );
+        assert_eq!(draft.workers.len(), 1);
+        assert_eq!(draft.workers[0].local_path, "/mnt/medias/Films 4K");
+        assert_eq!(draft.workers[0].access, LibraryAccess::ReadWrite);
+
+        draft.update_worker_access(worker_id, LibraryAccess::Read);
+        assert_eq!(draft.workers[0].access, LibraryAccess::Read);
+
+        assert_eq!(
+            draft.set_or_add_worker(worker_id, "/data/Films", LibraryAccess::ReadWrite),
+            Ok(())
+        );
+        assert_eq!(draft.workers.len(), 1);
+        assert_eq!(draft.workers[0].local_path, "/data/Films");
+        assert_eq!(draft.workers[0].access, LibraryAccess::ReadWrite);
     }
 }

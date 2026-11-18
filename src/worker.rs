@@ -25,6 +25,12 @@ use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
+const REMOTE_BROWSE_WAIT_MS: u64 = 10_000;
+const REMOTE_BROWSE_HTTP_TIMEOUT: Duration = Duration::from_secs(20);
+const REMOTE_BROWSE_REPORT_TIMEOUT: Duration = Duration::from_secs(10);
+const REMOTE_BROWSE_RETRY_DELAY: Duration = Duration::from_secs(2);
+
+#[derive(Clone)]
 pub struct WorkerConfig {
     pub url: reqwest::Url,
     pub key: String,
@@ -68,6 +74,7 @@ impl WorkerConfig {
         })
     }
 }
+#[derive(Clone)]
 struct WorkerLoop {
     client: Client,
     config: WorkerConfig,
@@ -400,6 +407,65 @@ pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
 }
 
 impl WorkerLoop {
+    /// Répond aux demandes d'exploration de dossiers relayées par le central.
+    async fn respond_to_browse_requests(&self, worker_id: Uuid) {
+        let query = format!(
+            "/api/v1/worker/filesystem/pending?worker_id={worker_id}&wait_ms={REMOTE_BROWSE_WAIT_MS}"
+        );
+        loop {
+            let fetch = self
+                .request(reqwest::Method::GET, &query)
+                .timeout(REMOTE_BROWSE_HTTP_TIMEOUT)
+                .send();
+            let response = tokio::select! {
+                res = fetch => res,
+                _ = crate::api::shutdown_signal() => return,
+            };
+            let tasks = match response {
+                Ok(resp) if resp.status().is_success() => resp
+                    .json::<Vec<crate::domain::WorkerBrowseTask>>()
+                    .await
+                    .unwrap_or_default(),
+                _ => {
+                    tokio::select! {
+                        _ = tokio::time::sleep(REMOTE_BROWSE_RETRY_DELAY) => continue,
+                        _ = crate::api::shutdown_signal() => return,
+                    }
+                }
+            };
+            for task in tasks {
+                let report = match crate::filesystem_browser::browse_local(
+                    worker_id,
+                    task.path.as_deref(),
+                    None,
+                )
+                .await
+                {
+                    Ok(listing) => crate::domain::WorkerBrowseReport {
+                        request_id: task.request_id,
+                        worker_id,
+                        listing: Some(listing),
+                        error: None,
+                    },
+                    Err(err) => crate::domain::WorkerBrowseReport {
+                        request_id: task.request_id,
+                        worker_id,
+                        listing: None,
+                        error: Some(
+                            crate::filesystem_browser::error_code_for_report(&err).to_owned(),
+                        ),
+                    },
+                };
+                let _ = self
+                    .request(reqwest::Method::POST, "/api/v1/worker/filesystem")
+                    .timeout(REMOTE_BROWSE_REPORT_TIMEOUT)
+                    .json(&report)
+                    .send()
+                    .await;
+            }
+        }
+    }
+
     /// Enregistre le worker puis réclame des tâches jusqu'à l'arrêt.
     async fn work(&self) -> anyhow::Result<()> {
         let runner = self;
@@ -430,73 +496,84 @@ impl WorkerLoop {
         runner.status.mark_registered();
         runner.status.mark_central_reachable(true);
         runner.purge_orphaned_work_artifacts().await;
-        let mut was_disconnected = false;
-        let mut idle_polls: u32 = 0;
-        loop {
-            let telemetry = if idle_polls.is_multiple_of(30) {
-                Some(probe.sample())
-            } else {
-                None
-            };
-            idle_polls = idle_polls.wrapping_add(1);
-            let attempt = async {
-                let claim = runner
-                    .request(reqwest::Method::POST, "/api/v1/claims")
-                    .timeout(Duration::from_secs(10))
-                    .json(&ClaimRequest {
-                        worker_id: worker.id,
-                        telemetry,
-                    })
-                    .send()
-                    .await?
-                    .error_for_status()?
-                    .json::<Option<Claim>>()
-                    .await?;
-                Ok::<_, anyhow::Error>(claim)
-            };
-            let claim = tokio::select! { result=attempt=>result, _=crate::api::shutdown_signal()=>return Ok(()) };
-            runner.status.mark_central_reachable(claim.is_ok());
-            match claim {
-                Ok(Some(mut claim)) => {
-                    if was_disconnected {
-                        runner.purge_orphaned_work_artifacts().await;
-                        was_disconnected = false;
+        let browse_responder = {
+            let browse_runner = runner.clone();
+            tokio::spawn(async move {
+                browse_runner.respond_to_browse_requests(worker.id).await;
+            })
+        };
+        let outcome: anyhow::Result<()> = async {
+            let mut was_disconnected = false;
+            let mut idle_polls: u32 = 0;
+            loop {
+                let telemetry = if idle_polls.is_multiple_of(30) {
+                    Some(probe.sample())
+                } else {
+                    None
+                };
+                idle_polls = idle_polls.wrapping_add(1);
+                let attempt = async {
+                    let claim = runner
+                        .request(reqwest::Method::POST, "/api/v1/claims")
+                        .timeout(Duration::from_secs(10))
+                        .json(&ClaimRequest {
+                            worker_id: worker.id,
+                            telemetry,
+                        })
+                        .send()
+                        .await?
+                        .error_for_status()?
+                        .json::<Option<Claim>>()
+                        .await?;
+                    Ok::<_, anyhow::Error>(claim)
+                };
+                let claim = tokio::select! { result=attempt=>result, _=crate::api::shutdown_signal()=>return Ok(()) };
+                runner.status.mark_central_reachable(claim.is_ok());
+                match claim {
+                    Ok(Some(mut claim)) => {
+                        if was_disconnected {
+                            runner.purge_orphaned_work_artifacts().await;
+                            was_disconnected = false;
+                        }
+                        if let Err(error) = crate::flows::unseal_claim_secrets_for_worker(
+                            &mut claim,
+                            &runner.config.key,
+                        ) {
+                            tracing::error!(job_id = %claim.job_id, error = %error, "impossible de déchiffrer les secrets du bail");
+                            let _ = runner
+                                .request(
+                                    reqwest::Method::POST,
+                                    &format!("/api/v1/jobs/{}/failure", claim.job_id),
+                                )
+                                .timeout(Duration::from_secs(10))
+                                .json(&Failure {
+                                    worker_id: worker.id,
+                                    lease_token: claim.lease_token,
+                                    lease_epoch: claim.lease_epoch,
+                                    error_code: JobErrorCode::TransferFailed.as_str().to_owned(),
+                                })
+                                .send()
+                                .await;
+                        } else {
+                            runner.execute(claim, worker.id).await?;
+                        }
                     }
-                    if let Err(error) = crate::flows::unseal_claim_secrets_for_worker(
-                        &mut claim,
-                        &runner.config.key,
-                    ) {
-                        tracing::error!(job_id = %claim.job_id, error = %error, "impossible de déchiffrer les secrets du bail");
-                        let _ = runner
-                            .request(
-                                reqwest::Method::POST,
-                                &format!("/api/v1/jobs/{}/failure", claim.job_id),
-                            )
-                            .timeout(Duration::from_secs(10))
-                            .json(&Failure {
-                                worker_id: worker.id,
-                                lease_token: claim.lease_token,
-                                lease_epoch: claim.lease_epoch,
-                                error_code: JobErrorCode::TransferFailed.as_str().to_owned(),
-                            })
-                            .send()
-                            .await;
-                    } else {
-                        runner.execute(claim, worker.id).await?;
+                    Ok(None) => {
+                        if was_disconnected {
+                            runner.purge_orphaned_work_artifacts().await;
+                            was_disconnected = false;
+                        }
+                    }
+                    Err(_) => {
+                        was_disconnected = true;
+                        tracing::warn!("central unavailable; retrying");
                     }
                 }
-                Ok(None) => {
-                    if was_disconnected {
-                        runner.purge_orphaned_work_artifacts().await;
-                        was_disconnected = false;
-                    }
-                }
-                Err(_) => {
-                    was_disconnected = true;
-                    tracing::warn!("central unavailable; retrying");
-                }
+                tokio::select! { _=tokio::time::sleep(Duration::from_secs(1))=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
             }
-            tokio::select! { _=tokio::time::sleep(Duration::from_secs(1))=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
         }
+        .await;
+        browse_responder.abort();
+        outcome
     }
 }

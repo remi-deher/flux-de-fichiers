@@ -7,6 +7,7 @@ pub mod config;
 pub mod domain;
 pub mod enrollment;
 pub mod error;
+pub mod filesystem_browser;
 pub mod flows;
 pub mod instance;
 pub mod job_runner;

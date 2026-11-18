@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-pub const CARD_WIDTH: f64 = 248.0;
-pub const CARD_HEIGHT: f64 = 92.0;
-pub const COL_STRIDE: f64 = 296.0;
-pub const ROW_STRIDE: f64 = 148.0;
+pub const CARD_WIDTH: f64 = 264.0;
+pub const CARD_HEIGHT: f64 = 104.0;
+pub const COL_STRIDE: f64 = 312.0;
+pub const ROW_STRIDE: f64 = 164.0;
 pub const ORIGIN_X: f64 = 72.0;
 pub const ORIGIN_Y: f64 = 64.0;
 #[cfg(test)]

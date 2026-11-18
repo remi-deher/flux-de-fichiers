@@ -478,6 +478,10 @@ fn ai_chat_routes() -> Router<AppState> {
         .route("/api/v1/ai/chat", post(crate::ai::chat))
         .route("/api/v1/ai/runs", post(crate::ai::start_run))
         .route(
+            "/api/v1/ai/runs/{id}/actions/{action}",
+            post(crate::ai::decide_action),
+        )
+        .route(
             "/api/v1/ai/runs/{id}",
             axum::routing::delete(crate::ai::cancel_run),
         )

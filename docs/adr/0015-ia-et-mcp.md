@@ -132,11 +132,15 @@ est devant l'écran) ; le MCP externe garde « pas de file d'approbation » (dé
    suspendue en mémoire, aucun état de conversation n'est sérialisé. `POST
    /api/v1/ai/runs/{id}/actions/{action}` (`approve` vrai ou faux) exécute ou refuse l'action puis
    reprend. Les droits du compte restent vérifiés à l'exécution.
-4. **Scripts locaux.** L'assistant sait écrire et corriger un script (interpréteurs de
-   `ScriptInterpreter` uniquement). Le code n'atteint jamais la base sans geste humain : il arrive
-   comme **brouillon** dans l'éditeur (diff avec l'existant), et l'enregistrement reste le bouton
-   de l'utilisateur. L'assistant n'a **aucun outil** qui enregistre ou exécute un script, même
-   en mode écriture : un script s'exécute sur les workers, sans isolation.
+4. **Scripts locaux** (précision de l'utilisateur, 18 nov. 2026 : l'assistant doit pouvoir agir
+   sur l'instance). Il tourne dans le central et appelle les mêmes outils que le MCP : aucune
+   ouverture supplémentaire du backend n'est nécessaire pour créer ou modifier un script
+   (`upsert_local_script`) ou le supprimer (`delete_local_item`). Ces écritures passent par la
+   **confirmation du point 3, avec le code complet affiché** (jusqu'à 20 000 caractères, le reste
+   des champs masqués comme les autres actions), et seulement si le mode écriture est activé.
+   Seuls les interpréteurs de `ScriptInterpreter` sont acceptés. **Exécuter ou tester** un script
+   n'est pas offert à l'assistant : il tourne sur un worker, sans isolation, et un essai à blanc
+   demande un travail à part (tâche d'essai sur un worker, entrée d'exemple, sortie bornée).
 5. **Historique.** Conversations par compte (`ai_conversations`, `ai_messages`), texte utilisateur
    et assistant seulement (aucun résultat d'outil), chiffré au repos par `SecretBox`, conservé
    30 jours et 50 conversations par compte, supprimable depuis le tiroir.

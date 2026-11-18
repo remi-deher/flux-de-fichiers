@@ -1,6 +1,7 @@
 //! Assistant IA intégré au central : orchestration LLM multi-fournisseurs branchée sur les outils MCP (ADR 0015).
 
 pub mod oauth;
+mod preview;
 mod provider;
 pub mod run;
 pub mod settings;
@@ -22,14 +23,16 @@ use axum::{
 use flux_shared::{
     Permission,
     ai::{
-        AiChatRequest, AiChatResponse, AiChatRole, AiClientStatus, AiContext, AiOauthDeviceCode,
-        AiOauthPollResponse, AiProvider, AiRunEvent, AiRunStarted, AiSettingsView, AiTestRequest,
-        AiTestResponse, AiToolCallTrace, MAX_CHAT_MESSAGES, UpdateAiSettingsRequest,
+        AiActionDecision, AiChatRequest, AiChatResponse, AiChatRole, AiClientStatus, AiContext,
+        AiOauthDeviceCode, AiOauthPollResponse, AiProvider, AiRunEvent, AiRunStarted,
+        AiSettingsView, AiTestRequest, AiTestResponse, AiToolCallTrace, MAX_CHAT_MESSAGES,
+        UpdateAiSettingsRequest,
     },
     mcp::McpAuditOutcome,
 };
 use futures_util::Stream;
 use provider::{ConversationEntry, ModelTurnResponse, ProviderEndpoint};
+use run::Run;
 use serde_json::json;
 use std::{
     convert::Infallible,
@@ -40,6 +43,8 @@ use std::{
 const MAX_TOOL_RESULT_CHARS: usize = 12_000;
 const MAX_TOOL_CALLS_PER_ROUND: usize = 8;
 const SSE_KEEP_ALIVE: Duration = Duration::from_secs(15);
+const CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(600);
+const DECLINED_OUTCOME: &str = "declined";
 const MAX_CONTEXT_FIELD_CHARS: usize = 128;
 
 fn is_tool_read_only(tool: &McpTool) -> bool {
@@ -62,7 +67,7 @@ fn build_system_prompt(
     context: Option<&AiContext>,
 ) -> String {
     let mode = if allow_write {
-        "Lecture et actions d'écriture autorisées (dans les limites des droits du compte)."
+        "Lecture et actions d'écriture autorisées dans les limites des droits du compte ; chaque écriture est d'abord soumise à la confirmation de l'utilisateur, qui peut la refuser."
     } else {
         "Mode lecture seule : aucune création, modification ou suppression n'est exécutée."
     };
@@ -317,17 +322,18 @@ pub async fn chat(
 ) -> AppResult<Json<AiChatResponse>> {
     auth::require(&principal, Permission::ViewOverview)?;
     validate_chat_request(&request)?;
-    converse(&state, &principal, request, &|_| {})
-        .await
-        .map(Json)
+    converse(&state, &principal, request, None).await.map(Json)
 }
 
-/// Boucle de conversation partagée par `/ai/chat` et les runs ; `emit` reçoit l'avancement des outils.
+/// Boucle de conversation partagée par `/ai/chat` et les runs.
+///
+/// Un `run` reçoit l'avancement des outils et peut demander confirmation avant une écriture ;
+/// sans run (`/ai/chat`), personne ne peut confirmer : seuls les outils en lecture sont proposés.
 async fn converse(
     state: &AppState,
     principal: &Principal,
     request: AiChatRequest,
-    emit: &(dyn Fn(AiRunEvent) + Send + Sync),
+    run: Option<&Run>,
 ) -> AppResult<AiChatResponse> {
     let ai_cfg = settings::load_effective(&state.pool, &state.config).await;
     if !ai_cfg.enabled || !ai_cfg.as_client_status().available {
@@ -347,10 +353,11 @@ async fn converse(
     if ai_cfg.provider.has_automatic_model() && endpoint.model.trim().is_empty() {
         endpoint.model = first_available_model(&endpoint, policy).await?;
     }
-    let tools = available_tools_for_assistant(principal, ai_cfg.allow_write_tools);
+    let writes_allowed = ai_cfg.allow_write_tools && run.is_some();
+    let tools = available_tools_for_assistant(principal, writes_allowed);
     let system_prompt = build_system_prompt(
         principal,
-        ai_cfg.allow_write_tools,
+        writes_allowed,
         request.context_hint.as_deref(),
         request.context.as_ref(),
     );
@@ -388,14 +395,20 @@ async fn converse(
                     calls: calls.clone(),
                 });
                 for call in calls {
-                    emit(AiRunEvent::ToolStarted {
-                        tool_name: call.name.clone(),
-                    });
+                    publish(
+                        run,
+                        AiRunEvent::ToolStarted {
+                            tool_name: call.name.clone(),
+                        },
+                    );
                     let (content, is_error, trace) =
-                        execute_assistant_tool(state, principal, &tools, &call).await;
-                    emit(AiRunEvent::ToolFinished {
-                        trace: trace.clone(),
-                    });
+                        execute_with_confirmation(state, principal, &tools, &call, run).await;
+                    publish(
+                        run,
+                        AiRunEvent::ToolFinished {
+                            trace: trace.clone(),
+                        },
+                    );
                     traces.push(trace);
                     entries.push(ConversationEntry::ToolResult {
                         call_id: call.id,
@@ -433,6 +446,66 @@ async fn converse(
     })
 }
 
+fn publish(run: Option<&Run>, event: AiRunEvent) {
+    if let Some(run) = run {
+        run.publish(event);
+    }
+}
+
+/// Exécute un outil ; une écriture attend d'abord l'autorisation de l'utilisateur (aperçu sans secrets).
+async fn execute_with_confirmation(
+    state: &AppState,
+    principal: &Principal,
+    tools: &[McpTool],
+    call: &provider::ToolCallRequest,
+    run: Option<&Run>,
+) -> (String, bool, AiToolCallTrace) {
+    let needs_confirmation = tools
+        .iter()
+        .find(|tool| tool.name == call.name)
+        .is_some_and(|tool| !is_tool_read_only(tool));
+    let (Some(run), true) = (run, needs_confirmation) else {
+        return execute_assistant_tool(state, principal, tools, call).await;
+    };
+    let action_id = uuid::Uuid::new_v4().to_string();
+    run.publish(AiRunEvent::Confirmation {
+        action_id: action_id.clone(),
+        tool_name: call.name.clone(),
+        summary: preview::action_preview(&call.arguments),
+    });
+    let started = Instant::now();
+    let approved = run.await_decision(&action_id, CONFIRMATION_TIMEOUT).await;
+    run.publish(AiRunEvent::ActionResolved {
+        action_id,
+        approved,
+    });
+    if approved {
+        return execute_assistant_tool(state, principal, tools, call).await;
+    }
+    let elapsed = started.elapsed().as_millis();
+    let message = "Action refusée par l'utilisateur (ou sans réponse dans le délai).";
+    mcp::audit::log_event(
+        &state.pool,
+        principal,
+        &call.name,
+        mcp::audit::summarize_target(&call.arguments).as_deref(),
+        McpAuditOutcome::Forbidden,
+        Some(message),
+        i64::try_from(elapsed).unwrap_or(0),
+    )
+    .await;
+    (
+        message.to_owned(),
+        true,
+        AiToolCallTrace {
+            tool_name: call.name.clone(),
+            read_only: false,
+            outcome: DECLINED_OUTCOME.to_owned(),
+            duration_ms: u64::try_from(elapsed).unwrap_or(0),
+        },
+    )
+}
+
 /// Lance une conversation en tâche de fond (`POST /api/v1/ai/runs`) ; l'avancement se lit en SSE.
 pub async fn start_run(
     State(state): State<AppState>,
@@ -451,8 +524,7 @@ pub async fn start_run(
         .ok_or(AppError::RateLimited)?;
     let task_run = Arc::clone(&run);
     let handle = tokio::spawn(async move {
-        let emit = |event: AiRunEvent| task_run.publish(event);
-        let last = match converse(&state, &principal, request, &emit).await {
+        let last = match converse(&state, &principal, request, Some(&task_run)).await {
             Ok(response) => AiRunEvent::Done { response },
             Err(error) => AiRunEvent::Failed {
                 message: failure_message(&error).to_owned(),
@@ -489,6 +561,24 @@ pub async fn run_events(
         Some((Ok(sse), (run, index + 1)))
     });
     Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(SSE_KEEP_ALIVE)))
+}
+
+/// Réponse de l'utilisateur à une demande de confirmation (`POST /api/v1/ai/runs/{id}/actions/{action}`).
+pub async fn decide_action(
+    State(state): State<AppState>,
+    AnyAuth(principal): AnyAuth,
+    Path((run_id, action_id)): Path<(String, String)>,
+    Json(decision): Json<AiActionDecision>,
+) -> AppResult<StatusCode> {
+    let run = state
+        .ai_runs
+        .get(&run_id, &principal.id)
+        .ok_or(AppError::NotFound)?;
+    if run.resolve(&action_id, decision.approve) {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(AppError::NotFound)
+    }
 }
 
 /// Interrompt un run (`DELETE /api/v1/ai/runs/{id}`).
@@ -636,7 +726,7 @@ mod tests {
     };
     use flux_shared::{
         Role,
-        ai::{AiChatMessage, AiContextKind, AiContextObject, AiProvider},
+        ai::{AiActionDecision, AiChatMessage, AiContextKind, AiContextObject, AiProvider},
     };
     use serde_json::Value;
     use sqlx::sqlite::SqlitePoolOptions;
@@ -986,6 +1076,185 @@ mod tests {
         let text = String::from_utf8(raw.to_vec())?;
         assert_eq!(text.matches("data:").count(), 1);
         assert!(text.contains("\"type\":\"done\""));
+
+        server_task.abort();
+        Ok(())
+    }
+
+    /// Lit un flux SSE jusqu'à ce que `until` soit vrai sur les évènements reçus, ou jusqu'à sa fin.
+    async fn read_events(
+        stream: &mut (impl futures_util::Stream<Item = Result<axum::body::Bytes, axum::Error>> + Unpin),
+        until: impl Fn(&[AiRunEvent]) -> bool,
+    ) -> anyhow::Result<Vec<AiRunEvent>> {
+        use futures_util::StreamExt;
+        let mut raw = String::new();
+        let parse = |raw: &str| -> anyhow::Result<Vec<AiRunEvent>> {
+            raw.lines()
+                .filter_map(|line| line.strip_prefix("data:"))
+                .map(|data| Ok(serde_json::from_str::<AiRunEvent>(data.trim())?))
+                .collect()
+        };
+        while let Some(chunk) = stream.next().await {
+            raw.push_str(&String::from_utf8(chunk?.to_vec())?);
+            if until(&parse(&raw)?) {
+                break;
+            }
+        }
+        parse(&raw)
+    }
+
+    #[tokio::test]
+    async fn writes_wait_for_confirmation_and_declining_skips_the_tool() -> anyhow::Result<()> {
+        let mock_llm = axum::Router::new().route(
+            "/v1/chat/completions",
+            post(|Json(body): Json<Value>| async move {
+                let messages = body["messages"].as_array().cloned().unwrap_or_default();
+                let tool_result = messages
+                    .iter()
+                    .find(|m| m["role"] == "tool")
+                    .and_then(|m| m["content"].as_str())
+                    .map(str::to_owned);
+                match tool_result {
+                    Some(result) => Json(json!({ "choices": [{ "message": {
+                        "role": "assistant",
+                        "content": format!("Résultat de l'outil : {result}")
+                    }}]})),
+                    None => Json(json!({ "choices": [{ "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "upsert_local_script",
+                                "arguments": "{\"name\":\"Nettoyage\",\"interpreter\":\"sh\",\"code\":\"echo bonjour\",\"token\":\"ne-pas-montrer\"}"
+                            }
+                        }]
+                    }}]})),
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let mock_addr = listener.local_addr()?;
+        let server_task = tokio::spawn(async move {
+            let _ = axum::serve(listener, mock_llm).await;
+        });
+
+        let (app, state, _dir) = test_app().await?;
+        let admin = issue_key_header(&state.pool, "confirm-admin", Role::Admin).await?;
+        let call = |method: &'static str, uri: String, body: Body| {
+            let request = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("authorization", &admin)
+                .header("content-type", "application/json")
+                .body(body);
+            let app = app.clone();
+            async move { anyhow::Ok(app.oneshot(request?).await?) }
+        };
+        let settings = Body::from(serde_json::to_vec(&UpdateAiSettingsRequest {
+            enabled: true,
+            provider: AiProvider::OpenAiCompatible,
+            base_url: format!("http://{mock_addr}/v1"),
+            model: "mock-model".into(),
+            api_key: Some("sk-secret-value".into()),
+            allow_write_tools: true,
+            max_tool_rounds: 3,
+        })?);
+        assert_eq!(
+            call("PUT", "/api/v1/ai/settings".into(), settings)
+                .await?
+                .status(),
+            StatusCode::OK
+        );
+        let question = || -> anyhow::Result<Body> {
+            Ok(Body::from(serde_json::to_vec(&AiChatRequest {
+                messages: vec![AiChatMessage {
+                    role: AiChatRole::User,
+                    content: "Crée un script de nettoyage".into(),
+                }],
+                context_hint: None,
+                context: None,
+            })?))
+        };
+
+        // Sans run, personne ne peut confirmer : l'écriture n'est même pas proposée au modèle.
+        let chat = call("POST", "/api/v1/ai/chat".into(), question()?).await?;
+        let chat: AiChatResponse =
+            serde_json::from_slice(&axum::body::to_bytes(chat.into_body(), 65_536).await?)?;
+        assert_eq!(chat.tool_calls[0].outcome, "blocked_write_mode");
+
+        for approve in [true, false] {
+            let started = call("POST", "/api/v1/ai/runs".into(), question()?).await?;
+            let started: AiRunStarted =
+                serde_json::from_slice(&axum::body::to_bytes(started.into_body(), 4096).await?)?;
+            let stream = call(
+                "GET",
+                format!("/api/v1/ai/runs/{}/events", started.run_id),
+                Body::empty(),
+            )
+            .await?;
+            let mut stream = stream.into_body().into_data_stream();
+            let waiting = read_events(&mut stream, |events| {
+                events
+                    .iter()
+                    .any(|e| matches!(e, AiRunEvent::Confirmation { .. }))
+            })
+            .await?;
+            let Some(AiRunEvent::Confirmation {
+                action_id,
+                tool_name,
+                summary,
+            }) = waiting.last().cloned()
+            else {
+                anyhow::bail!("confirmation attendue, reçu {waiting:?}");
+            };
+            assert_eq!(tool_name, "upsert_local_script");
+            assert!(summary.contains("echo bonjour") && summary.contains("Nettoyage"));
+            assert!(!summary.contains("ne-pas-montrer"));
+            // Le run est suspendu : aucun outil n'a fini.
+            assert!(
+                !waiting
+                    .iter()
+                    .any(|e| matches!(e, AiRunEvent::ToolFinished { .. }))
+            );
+
+            let decision = Body::from(serde_json::to_vec(&AiActionDecision { approve })?);
+            let uri = format!("/api/v1/ai/runs/{}/actions/{action_id}", started.run_id);
+            assert_eq!(
+                call("POST", uri.clone(), decision).await?.status(),
+                StatusCode::NO_CONTENT
+            );
+            // Une action déjà résolue ne peut pas être rejouée.
+            let again = Body::from(serde_json::to_vec(&AiActionDecision { approve: true })?);
+            assert_eq!(
+                call("POST", uri, again).await?.status(),
+                StatusCode::NOT_FOUND
+            );
+
+            let mut all = waiting;
+            all.extend(read_events(&mut stream, |_| false).await?);
+            let resolved = all.iter().any(|e| {
+                matches!(e, AiRunEvent::ActionResolved { approved, .. } if *approved == approve)
+            });
+            assert!(resolved, "ActionResolved({approve}) attendu dans {all:?}");
+            let finished = all
+                .iter()
+                .find_map(|e| match e {
+                    AiRunEvent::ToolFinished { trace } => Some(trace.clone()),
+                    _ => None,
+                })
+                .ok_or_else(|| anyhow::anyhow!("outil non terminé"))?;
+            if approve {
+                assert_eq!(finished.outcome, "ok", "{all:?}");
+            } else {
+                assert_eq!(finished.outcome, "declined");
+                assert!(matches!(
+                    all.last(),
+                    Some(AiRunEvent::Done { response }) if response.reply.contains("refusée")
+                ));
+            }
+        }
 
         server_task.abort();
         Ok(())

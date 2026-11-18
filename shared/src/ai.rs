@@ -337,6 +337,13 @@ pub struct AiRunStarted {
     pub run_id: String,
 }
 
+/// Réponse de l'utilisateur à une demande de confirmation (`POST /api/v1/ai/runs/{id}/actions/{action}`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiActionDecision {
+    pub approve: bool,
+}
+
 /// Évènement publié par `GET /api/v1/ai/runs/{id}/events` (SSE, un évènement par message).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -349,6 +356,15 @@ pub enum AiRunEvent {
     ToolStarted { tool_name: String },
     /// Un outil a fini (succès, erreur ou refus).
     ToolFinished { trace: AiToolCallTrace },
+    /// Une action d'écriture attend la réponse de l'utilisateur ; le run est suspendu.
+    Confirmation {
+        action_id: String,
+        tool_name: String,
+        /// Arguments de l'outil, secrets masqués.
+        summary: String,
+    },
+    /// L'action a été autorisée ou refusée (ou le délai est écoulé : refus).
+    ActionResolved { action_id: String, approved: bool },
     /// Réponse finale ; clôt le flux.
     Done { response: AiChatResponse },
     /// Échec de la conversation ; clôt le flux.

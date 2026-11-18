@@ -1,4 +1,5 @@
-//! Fiche d'une tâche : état, erreur, métadonnées entrée/sortie, étapes exécutées et relance.
+//! Fiche d'une tâche : onglet Information (cartes Détails / Traitement / Stockage + aperçu
+//! des étapes) et onglet Étapes exécutées (journal détaillé).
 
 use super::model::{
     error_label, format_size_delta, resolve_library_label, short_digest, status_label, status_tone,
@@ -22,6 +23,13 @@ fn row(label: &'static str, value: String) -> impl IntoView {
     }
 }
 
+fn mono_row(label: &'static str, value: String) -> impl IntoView {
+    view! {
+        <div class="detail-term">{label}</div>
+        <div class="detail-val text-mono">{value}</div>
+    }
+}
+
 fn optional(value: Option<String>) -> String {
     value.unwrap_or_else(|| "—".into())
 }
@@ -42,7 +50,10 @@ fn format_output_summary(source_bytes: Option<i64>, output_bytes: Option<i64>) -
 #[component]
 pub fn JobDetail(
     job: Job,
+    tab: RwSignal<usize>,
     libraries: Signal<HashMap<Uuid, String>>,
+    workers: Signal<HashMap<Uuid, String>>,
+    flows: Signal<HashMap<String, String>>,
     can_manage: bool,
     on_changed: Callback<Job>,
 ) -> impl IntoView {
@@ -68,10 +79,15 @@ pub fn JobDetail(
         }
     });
 
-    let flow = match (&job.flow_id, job.flow_version) {
-        (Some(id), Some(version)) => format!("{id} (version {version})"),
+    let flow_id = job.flow_id.clone();
+    let flow_version = job.flow_version;
+    let flow_label = Signal::derive(move || match (&flow_id, flow_version) {
+        (Some(id), Some(version)) => {
+            let name = flows.get().get(id).cloned().unwrap_or_else(|| id.clone());
+            format!("{name} (v{version})")
+        }
         _ => "Aucun (opération par défaut)".into(),
-    };
+    });
     let download = (job.status == JobStatus::Succeeded).then(|| {
         let href = format!("/api/v1/jobs/{}/output", job.id);
         let name = job.output_name.clone().unwrap_or_else(|| "resultat".into());
@@ -86,7 +102,17 @@ pub fn JobDetail(
     let short_id: String = job.id.to_string().chars().take(SHORT_ID_CHARS).collect();
     let diagnostic = job.error_code.map(error_label);
     let library_id = job.library_id;
-    let library_name = move || optional(resolve_library_label(library_id, &libraries.get()));
+    let library_name =
+        Signal::derive(move || optional(resolve_library_label(library_id, &libraries.get())));
+    let worker_id = job.worker_id;
+    let worker_label = Signal::derive(move || match worker_id {
+        Some(id) => workers
+            .get()
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| id.to_string()),
+        None => "—".into(),
+    });
     let source_meta = match (job.source_bytes, job.source_sha256.as_deref()) {
         (Some(bytes), Some(_)) => format!(
             "{} · empreinte {}",
@@ -99,79 +125,162 @@ pub fn JobDetail(
     };
     let output_size = format_output_summary(job.source_bytes, job.output_bytes);
     let output_sha = short_digest(job.output_sha256.as_deref());
+    let output_meta = if output_size != "—" && output_sha != "—" {
+        format!("{output_size} · empreinte {output_sha}")
+    } else {
+        output_size
+    };
+    let source_name = job.source_name.clone();
+    let output_name = optional(job.output_name.clone());
+    let created_at = format::datetime(job.created_at);
+    let updated_at = format::datetime(job.updated_at);
+    let attempts_label = format!("{} sur {MAX_ATTEMPTS}", job.attempts);
+    let error_text = optional(job.error_code.map(|code| error_label(code).to_owned()));
+    let job_status = job.status;
+    let job_warning = job.warning;
+    let id_text = job.id.to_string();
 
     view! {
         <div class="inspection-panel">
-            <div class="inspection-banner">
-                <StatusBadge label=status_label(job.status) variant=status_tone(job.status) />
-                {job.warning.then(|| view! {
-                    <Tag label="Avertissement / repli" tone=TagTone::Warning />
-                })}
-                <span class="text-mono text-xs text-dim">{format!("#{short_id}")}</span>
-            </div>
-            {diagnostic.map(|reason| view! {
-                <div class="diagnostic-box" role="alert">
-                    <Icon name=IconName::Alert size=16 />
-                    <div>
-                        <div class="diagnostic-box__title">"Diagnostic d'échec"</div>
-                        <div class="diagnostic-box__message">{reason}</div>
+            {move || match tab.get() {
+                0 => view! {
+                    <div class="inspection-banner">
+                        <StatusBadge label=status_label(job_status) variant=status_tone(job_status) />
+                        {job_warning.then(|| view! {
+                            <Tag label="Avertissement / repli" tone=TagTone::Warning />
+                        })}
+                        <span class="text-mono text-xs text-dim">{format!("#{short_id}")}</span>
                     </div>
-                </div>
-            })}
-            <div class="detail-grid">
-                {row("Identifiant", job.id.to_string())}
-                <div class="detail-term">"Bibliothèque"</div>
-                <div class="detail-val">{library_name}</div>
-                {row("Tentatives", format!("{} sur {MAX_ATTEMPTS}", job.attempts))}
-                {row("Erreur", optional(job.error_code.map(|code| error_label(code).to_owned())))}
-                {row("Flux", flow)}
-                {row("Worker", optional(job.worker_id.map(|id| id.to_string())))}
-                {row("Source", source_meta)}
-                {row("Fichier produit", optional(job.output_name.clone()))}
-                {row("Taille produite", output_size)}
-                {row("Empreinte produite", output_sha)}
-                {row("Créée", format::datetime(job.created_at))}
-                {row("Mise à jour", format::datetime(job.updated_at))}
-            </div>
-            <div class="pack-components">
-                <h3 class="form-label">"Étapes exécutées"</h3>
-                {move || match steps.get() {
-                    None => view! { <p class="text-dim text-sm">"Chargement des étapes…"</p> }.into_any(),
-                    Some(Err(error)) => view! { <p class="form-error text-sm">{error.message()}</p> }.into_any(),
-                    Some(Ok(list)) if list.is_empty() => {
-                        view! { <p class="text-dim text-sm">"Aucune étape enregistrée pour cette tâche."</p> }.into_any()
-                    }
-                    Some(Ok(list)) => view! {
-                        <ol class="step-list">
-                            {list.into_iter().map(|step| view! {
-                                <li class="step-item">
-                                    <div class="step-item__head">
-                                        <span class="text-mono text-xs text-dim">{format!("#{}", step.step_index + 1)}</span>
-                                        <Tag label=step.block_kind tone=TagTone::Mono />
-                                        <StatusBadge
-                                            label=step_status_label(step.status)
-                                            variant=step_status_tone(step.status)
-                                        />
-                                        {step.operation_id.map(|op| view! {
-                                            <span class="text-mono text-xs text-dim">{op}</span>
-                                        })}
-                                    </div>
-                                    <div class="step-item__meta text-xs text-dim">
-                                        <span>{format!("Nœud : {}", step.node_id)}</span>
-                                    </div>
-                                    {step.message.map(|msg| view! {
-                                        <p class="step-item__msg text-sm">{msg}</p>
-                                    })}
-                                    {step.output_excerpt.filter(|s| !s.trim().is_empty()).map(|excerpt| view! {
-                                        <pre class="step-excerpt">{excerpt}</pre>
-                                    })}
-                                </li>
-                            }).collect_view()}
-                        </ol>
-                    }
-                    .into_any(),
-                }}
-            </div>
+                    {diagnostic.map(|reason| view! {
+                        <div class="diagnostic-box" role="alert">
+                            <Icon name=IconName::Alert size=16 />
+                            <div>
+                                <div class="diagnostic-box__title">"Diagnostic d'échec"</div>
+                                <div class="diagnostic-box__message">{reason}</div>
+                            </div>
+                        </div>
+                    })}
+                    <div class="inspection-panel__section">
+                        <p class="inspection-panel__title">"Détails"</p>
+                        <div class="detail-grid">
+                            {mono_row("Nom", source_name.clone())}
+                            <div class="detail-term">"Flow"</div>
+                            <div class="detail-val">{flow_label}</div>
+                            <div class="detail-term">"Bibliothèque"</div>
+                            <div class="detail-val">{library_name}</div>
+                            {mono_row("Identifiant", id_text.clone())}
+                        </div>
+                    </div>
+                    <div class="inspection-panel__section">
+                        <p class="inspection-panel__title">"Traitement"</p>
+                        <div class="detail-grid">
+                            <div class="detail-term">"Statut"</div>
+                            <div class="detail-val">
+                                <StatusBadge label=status_label(job_status) variant=status_tone(job_status) />
+                            </div>
+                            <div class="detail-term">"Worker"</div>
+                            <div class="detail-val">{worker_label}</div>
+                            {row("Tentatives", attempts_label.clone())}
+                            {row("Erreur", error_text.clone())}
+                        </div>
+                    </div>
+                    <div class="inspection-panel__section">
+                        <p class="inspection-panel__title">"Stockage"</p>
+                        <div class="detail-grid">
+                            {mono_row("Fichier produit", output_name.clone())}
+                            {row("Date de création", created_at.clone())}
+                            {row("Dernière mise à jour", updated_at.clone())}
+                            {row("Taille originale", source_meta.clone())}
+                            {row("Taille produite", output_meta.clone())}
+                        </div>
+                    </div>
+                    <div class="inspection-panel__section">
+                        <p class="inspection-panel__title">"Étapes"</p>
+                        {move || match steps.get() {
+                            None => view! { <p class="text-dim text-sm">"Chargement des étapes…"</p> }.into_any(),
+                            Some(Err(error)) => view! { <p class="form-error text-sm">{error.message()}</p> }.into_any(),
+                            Some(Ok(list)) if list.is_empty() => {
+                                view! { <p class="text-dim text-sm">"Aucune étape enregistrée pour cette tâche."</p> }.into_any()
+                            }
+                            Some(Ok(list)) => view! {
+                                <div class="table-wrapper no-margin-top">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>"#"</th>
+                                                <th>"Nom / Bloc"</th>
+                                                <th>"Élément de Flow"</th>
+                                                <th>"Statut"</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {list.into_iter().map(|step| {
+                                                let op = step.operation_id.unwrap_or_else(|| step.block_kind.clone());
+                                                view! {
+                                                    <tr>
+                                                        <td class="text-mono">{format!("#{}", step.step_index + 1)}</td>
+                                                        <td class="text-mono">{step.node_id}</td>
+                                                        <td class="text-mono">{op}</td>
+                                                        <td>
+                                                            <StatusBadge
+                                                                label=step_status_label(step.status)
+                                                                variant=step_status_tone(step.status)
+                                                            />
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            }).collect_view()}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                            .into_any(),
+                        }}
+                    </div>
+                }.into_any(),
+                _ => view! {
+                    <div class="inspection-panel__section">
+                        <p class="inspection-panel__title">"Étapes exécutées"</p>
+                        {move || match steps.get() {
+                            None => view! { <p class="text-dim text-sm">"Chargement des étapes…"</p> }.into_any(),
+                            Some(Err(error)) => view! { <p class="form-error text-sm">{error.message()}</p> }.into_any(),
+                            Some(Ok(list)) if list.is_empty() => {
+                                view! { <p class="text-dim text-sm">"Aucune étape enregistrée pour cette tâche."</p> }.into_any()
+                            }
+                            Some(Ok(list)) => view! {
+                                <ol class="step-list">
+                                    {list.into_iter().map(|step| view! {
+                                        <li class="step-item">
+                                            <div class="step-item__head">
+                                                <span class="text-mono text-xs text-dim">{format!("#{}", step.step_index + 1)}</span>
+                                                <Tag label=step.block_kind tone=TagTone::Mono />
+                                                <StatusBadge
+                                                    label=step_status_label(step.status)
+                                                    variant=step_status_tone(step.status)
+                                                />
+                                                {step.operation_id.map(|op| view! {
+                                                    <span class="text-mono text-xs text-dim">{op}</span>
+                                                })}
+                                            </div>
+                                            <div class="step-item__meta text-xs text-dim">
+                                                <span>{format!("Nœud : {}", step.node_id)}</span>
+                                            </div>
+                                            {step.message.map(|msg| view! {
+                                                <p class="step-item__msg text-sm">{msg}</p>
+                                            })}
+                                            {step.output_excerpt.filter(|s| !s.trim().is_empty()).map(|excerpt| view! {
+                                                <pre class="step-excerpt">{excerpt}</pre>
+                                            })}
+                                        </li>
+                                    }).collect_view()}
+                                </ol>
+                            }
+                            .into_any(),
+                        }}
+                    </div>
+                }.into_any(),
+            }}
+            <p class="form-help" role="status">{move || feedback.get()}</p>
             <div class="inspection-drawer__actions">
                 {download}
                 {retryable.then(|| view! {
@@ -186,7 +295,6 @@ pub fn JobDetail(
                     </button>
                 })}
             </div>
-            <p class="form-help" role="status">{move || feedback.get()}</p>
         </div>
     }
 }

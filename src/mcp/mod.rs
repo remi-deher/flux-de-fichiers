@@ -1,5 +1,6 @@
 //! Serveur MCP natif (Streamable HTTP JSON-RPC 2.0 sur `/mcp`, ADR 0015).
 
+mod audit;
 mod protocol;
 mod tools_flows;
 mod tools_libraries;
@@ -8,25 +9,30 @@ mod tools_system;
 
 use crate::{
     api::{
-        AnyAuth, AppState, OPENAPI_SPEC, ViewFlowsAuth, ViewLibrariesAuth, ViewPluginsAuth, flows,
-        libraries, plugins,
+        AnyAuth, AppState, ManageApiKeysAuth, OPENAPI_SPEC, ViewFlowsAuth, ViewLibrariesAuth,
+        ViewPluginsAuth, flows, libraries, plugins,
     },
     auth::Principal,
-    error::AppError,
+    error::{AppError, AppResult},
+    repository,
 };
 use axum::{
     Json,
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use flux_shared::{Permission, Role};
+use flux_shared::{
+    Permission, Role,
+    mcp::{McpAuditListResponse, McpAuditOutcome},
+};
 use protocol::{
     ERR_INVALID_PARAMS, ERR_INVALID_REQUEST, ERR_METHOD_NOT_FOUND, JsonRpcRequest, JsonRpcResponse,
     McpResource, McpTool, McpToolResult, PROTOCOL_VERSION, SERVER_NAME,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::time::Instant;
 
 fn tool_required_permissions(name: &str) -> &'static [Permission] {
     match name {
@@ -196,6 +202,24 @@ pub async fn handle_post(
         ))
         .into_response());
     }
+    if let Err(err) = audit::check_mcp_rate_limit(&principal.id) {
+        let method_name = if req.method.is_empty() {
+            "mcp"
+        } else {
+            req.method.as_str()
+        };
+        audit::log_event(
+            &state.pool,
+            &principal,
+            method_name,
+            None,
+            McpAuditOutcome::RateLimited,
+            Some("Débit maximal par clé dépassé (120 req/min)"),
+            0,
+        )
+        .await;
+        return Err(err);
+    }
 
     let Some(id) = req.id else {
         // Notification JSON-RPC (ex. notifications/initialized)
@@ -223,11 +247,13 @@ pub async fn handle_post(
             let params_val = req.params.unwrap_or(Value::Null);
             match serde_json::from_value::<ToolCallParams>(params_val) {
                 Ok(params) => {
+                    let started = Instant::now();
                     let args = if params.arguments.is_null() {
                         json!({})
                     } else {
                         params.arguments
                     };
+                    let target_summary = audit::summarize_target(&args);
                     let missing_perm = tool_required_permissions(&params.name)
                         .iter()
                         .any(|&perm| !principal.allows(perm));
@@ -238,8 +264,27 @@ pub async fn handle_post(
                     } else {
                         call_tool(&params.name, args, &state, &principal).await
                     };
+                    let duration_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(0);
                     match outcome {
                         Some(result) => {
+                            let audit_outcome = if missing_perm {
+                                McpAuditOutcome::Forbidden
+                            } else if result.is_error {
+                                McpAuditOutcome::Error
+                            } else {
+                                McpAuditOutcome::Ok
+                            };
+                            let err_summary = audit::summarize_tool_error(&result);
+                            audit::log_event(
+                                &state.pool,
+                                &principal,
+                                &params.name,
+                                target_summary.as_deref(),
+                                audit_outcome,
+                                err_summary.as_deref(),
+                                duration_ms,
+                            )
+                            .await;
                             tracing::info!(
                                 principal_id = %principal.id,
                                 role = %principal.role.as_str(),
@@ -250,37 +295,87 @@ pub async fn handle_post(
                             let val = serde_json::to_value(result).unwrap_or(Value::Null);
                             JsonRpcResponse::ok(id, val)
                         }
-                        None => JsonRpcResponse::err(
-                            id,
-                            ERR_METHOD_NOT_FOUND,
-                            format!("outil inconnu : {}", params.name),
-                        ),
+                        None => {
+                            audit::log_event(
+                                &state.pool,
+                                &principal,
+                                &params.name,
+                                target_summary.as_deref(),
+                                McpAuditOutcome::Error,
+                                Some("outil inconnu"),
+                                duration_ms,
+                            )
+                            .await;
+                            JsonRpcResponse::err(
+                                id,
+                                ERR_METHOD_NOT_FOUND,
+                                format!("outil inconnu : {}", params.name),
+                            )
+                        }
                     }
                 }
-                Err(err) => JsonRpcResponse::err(
-                    id,
-                    ERR_INVALID_PARAMS,
-                    format!("paramètres invalides : {err}"),
-                ),
+                Err(err) => {
+                    let msg = format!("paramètres invalides : {err}");
+                    audit::log_event(
+                        &state.pool,
+                        &principal,
+                        "tools/call",
+                        None,
+                        McpAuditOutcome::Error,
+                        audit::summarize_error_text(&msg).as_deref(),
+                        0,
+                    )
+                    .await;
+                    JsonRpcResponse::err(id, ERR_INVALID_PARAMS, msg)
+                }
             }
         }
         "resources/list" => JsonRpcResponse::ok(id, json!({ "resources": all_resources() })),
         "resources/read" => {
             let params_val = req.params.unwrap_or(Value::Null);
             match serde_json::from_value::<ResourceReadParams>(params_val) {
-                Ok(params) => match read_resource(&params.uri, &state, &principal).await {
-                    Ok((text, mime_type)) => JsonRpcResponse::ok(
-                        id,
-                        json!({
-                            "contents": [{
-                                "uri": params.uri,
-                                "mimeType": mime_type,
-                                "text": text
-                            }]
-                        }),
-                    ),
-                    Err(msg) => JsonRpcResponse::err(id, ERR_INVALID_PARAMS, msg),
-                },
+                Ok(params) => {
+                    let started = Instant::now();
+                    let result = read_resource(&params.uri, &state, &principal).await;
+                    let duration_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(0);
+                    match result {
+                        Ok((text, mime_type)) => {
+                            audit::log_event(
+                                &state.pool,
+                                &principal,
+                                "resources/read",
+                                Some(&params.uri),
+                                McpAuditOutcome::Ok,
+                                None,
+                                duration_ms,
+                            )
+                            .await;
+                            JsonRpcResponse::ok(
+                                id,
+                                json!({
+                                    "contents": [{
+                                        "uri": params.uri,
+                                        "mimeType": mime_type,
+                                        "text": text
+                                    }]
+                                }),
+                            )
+                        }
+                        Err(msg) => {
+                            audit::log_event(
+                                &state.pool,
+                                &principal,
+                                "resources/read",
+                                Some(&params.uri),
+                                McpAuditOutcome::Error,
+                                audit::summarize_error_text(&msg).as_deref(),
+                                duration_ms,
+                            )
+                            .await;
+                            JsonRpcResponse::err(id, ERR_INVALID_PARAMS, msg)
+                        }
+                    }
+                }
                 Err(err) => JsonRpcResponse::err(
                     id,
                     ERR_INVALID_PARAMS,
@@ -296,6 +391,30 @@ pub async fn handle_post(
     };
 
     Ok(Json(response).into_response())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditQuery {
+    pub limit: Option<i64>,
+    pub key_id: Option<String>,
+    pub outcome: Option<String>,
+}
+
+/// Historique des appels MCP (`GET /api/v1/mcp/audit`), réservé aux administrateurs.
+pub async fn list_audit(
+    State(state): State<AppState>,
+    _auth: ManageApiKeysAuth,
+    Query(query): Query<AuditQuery>,
+) -> AppResult<Json<McpAuditListResponse>> {
+    let outcome = match query.outcome.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(raw) => Some(McpAuditOutcome::parse(raw).ok_or(AppError::Invalid)?),
+    };
+    let limit = query.limit.unwrap_or(repository::DEFAULT_AUDIT_LIMIT);
+    let response =
+        repository::list_mcp_audit(&state.pool, limit, query.key_id.as_deref(), outcome).await?;
+    Ok(Json(response))
 }
 
 /// `GET /mcp` : le serveur n'émet pas de flux SSE non sollicité.
@@ -565,6 +684,153 @@ mod tests {
         )?;
         assert_eq!(scan_again_val["createdJobs"], 0);
         assert_eq!(scan_again_val["skippedExisting"], 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mcp_records_audit_history_masks_secrets_and_enforces_rate_limit() -> anyhow::Result<()>
+    {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let (app, state, _dir) = test_app().await?;
+        let admin_key = api_keys::issue(&state.pool, "admin-audit", Role::Admin).await?;
+        let mcp_key = api_keys::issue_with_scopes(
+            &state.pool,
+            "scoped-audit-mcp",
+            Role::Mcp,
+            Some(&[Permission::ViewFlows, Permission::ManagePlugins]),
+        )
+        .await?;
+
+        // 1. Succès (`list_flows`) et erreur avec secret potentiel (`save_plugin_settings` sur plugin inconnu)
+        let (st_ok, _) = mcp_call(
+            &app,
+            &mcp_key.raw,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 100,
+                "method": "tools/call",
+                "params": { "name": "list_flows", "arguments": {} }
+            }),
+        )
+        .await?;
+        assert_eq!(st_ok, StatusCode::OK);
+
+        let (st_err, _) = mcp_call(
+            &app,
+            &mcp_key.raw,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 101,
+                "method": "tools/call",
+                "params": {
+                    "name": "save_plugin_settings",
+                    "arguments": {
+                        "id": "plugin.radarr",
+                        "settings": { "apiKey": "radarr-top-secret-key" }
+                    }
+                }
+            }),
+        )
+        .await?;
+        assert_eq!(st_err, StatusCode::OK);
+
+        // 2. Appel interdit (`scan_library` non inclus dans la portée)
+        let (st_forbidden, _) = mcp_call(
+            &app,
+            &mcp_key.raw,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 102,
+                "method": "tools/call",
+                "params": { "name": "scan_library", "arguments": { "id": "lib-1" } }
+            }),
+        )
+        .await?;
+        assert_eq!(st_forbidden, StatusCode::OK);
+
+        // 3. Une clé MCP ne peut pas consulter l'historique d'audit ; seul l'admin le peut.
+        let forbidden_audit = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/mcp/audit")
+                    .header("authorization", format!("Bearer {}", mcp_key.raw))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(forbidden_audit.status(), StatusCode::FORBIDDEN);
+
+        let admin_audit = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/mcp/audit?limit=10")
+                    .header("authorization", format!("Bearer {}", admin_key.raw))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(admin_audit.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(admin_audit.into_body(), usize::MAX).await?;
+        let audit_json: Value = serde_json::from_slice(&body)?;
+        assert_eq!(audit_json["total"], 3);
+        let text_dump = audit_json.to_string();
+        assert!(!text_dump.contains("radarr-top-secret-key"));
+        assert!(text_dump.contains("plugin.radarr"));
+
+        let filtered = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/mcp/audit?outcome=forbidden")
+                    .header("authorization", format!("Bearer {}", admin_key.raw))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(filtered.status(), StatusCode::OK);
+        let filtered_json: Value =
+            serde_json::from_slice(&axum::body::to_bytes(filtered.into_body(), usize::MAX).await?)?;
+        assert_eq!(filtered_json["total"], 1);
+        assert_eq!(filtered_json["entries"][0]["toolName"], "scan_library");
+        assert_eq!(filtered_json["entries"][0]["outcome"], "forbidden");
+
+        // 4. Dépassement du plafond de requêtes MCP -> HTTP 429 + événement `rate_limited`.
+        for seq in 4..=audit::MCP_RATE_LIMIT_MAX {
+            let (st_ping, _) = mcp_call(
+                &app,
+                &mcp_key.raw,
+                json!({ "jsonrpc": "2.0", "id": seq, "method": "ping" }),
+            )
+            .await?;
+            assert_eq!(st_ping, StatusCode::OK);
+        }
+        let (st_limited, _) = mcp_call(
+            &app,
+            &mcp_key.raw,
+            json!({ "jsonrpc": "2.0", "id": 999, "method": "ping" }),
+        )
+        .await?;
+        assert_eq!(st_limited, StatusCode::TOO_MANY_REQUESTS);
+
+        let limited_audit = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/mcp/audit?outcome=rate_limited")
+                    .header("authorization", format!("Bearer {}", admin_key.raw))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(limited_audit.status(), StatusCode::OK);
+        let limited_json: Value = serde_json::from_slice(
+            &axum::body::to_bytes(limited_audit.into_body(), usize::MAX).await?,
+        )?;
+        assert_eq!(limited_json["total"], 1);
+        assert_eq!(limited_json["entries"][0]["outcome"], "rate_limited");
         Ok(())
     }
 }

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT sha256 FROM plugin_release_pins WHERE scope = ?1 AND version = ?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "sha256",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "81bf7cd44e9b1bf34eed61c45fb31c4a2e742f10dc8f33b053f9949f77d4c0d0"
+}

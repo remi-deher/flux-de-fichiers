@@ -157,6 +157,22 @@ pub fn mask(stored: &Value, secret_names: &HashSet<String>) -> (Value, HashSet<S
     (Value::Object(public), set)
 }
 
+/// Déchiffre les champs secrets d'un objet de réglages de plugin pour un usage serveur ponctuel.
+pub fn decrypt_all(
+    secrets: &SecretBox,
+    plugin_id: &str,
+    stored: &Value,
+) -> AppResult<Map<String, Value>> {
+    let mut out = as_object(stored);
+    for (name, field) in out.iter_mut() {
+        if let Some(text) = field.as_str().filter(|t| is_encrypted(t)) {
+            let plain = secrets.decrypt(text, &plugin_secret_aad(plugin_id, name))?;
+            *field = Value::String(plain);
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

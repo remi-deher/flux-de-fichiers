@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT status AS \"status: JobStatus\", COUNT(*) AS \"count!: i64\" FROM jobs WHERE worker_id=?1 GROUP BY status",
+  "describe": {
+    "columns": [
+      {
+        "name": "status: JobStatus",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "count!: i64",
+        "ordinal": 1,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "91c3d03738a28900bd878a927253f64070d13422c8e0e005e9b7b9ae22fc2690"
+}

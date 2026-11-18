@@ -186,6 +186,167 @@ pub async fn save_settings(
     })))
 }
 
+fn find_setting_str(map: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|k| map.get(*k).and_then(|v| v.as_str()))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+}
+
+/// Teste la connectivité réseau et l'authentification d'un plugin API (Sonarr, Radarr, Jellyfin, etc.).
+pub async fn test_connection(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    _auth: ManagePluginsAuth,
+    body: axum::body::Bytes,
+) -> AppResult<Json<plugins::PluginConnectionTestResult>> {
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    if !plugins::is_valid_repository_id(&id) || !s.catalog_cache.plugin_exists(&roots, &id).await {
+        return Err(AppError::NotFound);
+    }
+    let schema_fields = s.catalog_cache.settings_fields(&roots, &id).await;
+    let secrets = SecretBox::open(&s.config.config_dir)?;
+    let saved_raw = parse_saved(
+        crate::repository::get_plugin_settings(&s.pool, &id)
+            .await?
+            .as_deref(),
+    );
+    let mut merged = plugins::decrypt_all(&secrets, &id, &saved_raw)?;
+    if !body.is_empty() {
+        let overrides: Value = serde_json::from_slice(&body).map_err(|_| AppError::Invalid)?;
+        let Some(obj) = overrides.as_object() else {
+            return Err(AppError::Invalid);
+        };
+        for (k, v) in obj {
+            let is_empty_str = v.as_str().is_some_and(|s| s.trim().is_empty());
+            if !is_empty_str {
+                merged.insert(k.clone(), v.clone());
+            }
+        }
+    }
+
+    let url_field = schema_fields
+        .iter()
+        .find(|f| f.field_type == plugins::SettingsFieldType::Url)
+        .map(|f| f.name.as_str());
+    let base_url = url_field
+        .and_then(|name| find_setting_str(&merged, &[name]))
+        .or_else(|| find_setting_str(&merged, &["url", "baseUrl", "endpoint", "webhookUrl"]));
+    let Some(base_url) = base_url else {
+        return Ok(Json(plugins::PluginConnectionTestResult {
+            ok: false,
+            status_code: None,
+            latency_ms: 0,
+            message: "Aucune URL configurée pour ce plugin.".to_owned(),
+        }));
+    };
+
+    let (probe_path, auth_header) = match id.as_str() {
+        "plugin.sonarr" | "plugin.radarr" => ("/api/v3/system/status", Some("X-Api-Key")),
+        "plugin.jellyfin" | "plugin.emby" => ("/System/Info", Some("X-Emby-Token")),
+        "plugin.plex" => ("/identity", Some("X-Plex-Token")),
+        _ => ("", None),
+    };
+    let target_url = if probe_path.is_empty() {
+        base_url
+    } else {
+        format!("{}{probe_path}", base_url.trim_end_matches('/'))
+    };
+
+    let effective = crate::runtime_settings::load_effective(&s.pool, &s.config).await;
+    let policy = effective.integration_policy();
+    let Ok(parsed_url) = reqwest::Url::parse(target_url.trim()) else {
+        return Ok(Json(plugins::PluginConnectionTestResult {
+            ok: false,
+            status_code: None,
+            latency_ms: 0,
+            message: "URL invalide.".to_owned(),
+        }));
+    };
+    let (_, addresses) = match crate::net_policy::resolve_checked(&parsed_url, policy).await {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            return Ok(Json(plugins::PluginConnectionTestResult {
+                ok: false,
+                status_code: None,
+                latency_ms: 0,
+                message: format!("Adresse refusée par la politique réseau ({err})."),
+            }));
+        }
+    };
+    let client = match crate::net_policy::build_pinned_client(
+        &parsed_url,
+        &addresses,
+        std::time::Duration::from_secs(5),
+    ) {
+        Ok(client) => client,
+        Err(_) => {
+            return Ok(Json(plugins::PluginConnectionTestResult {
+                ok: false,
+                status_code: None,
+                latency_ms: 0,
+                message: "Impossible d'initialiser la connexion sortante.".to_owned(),
+            }));
+        }
+    };
+    let token = find_setting_str(&merged, &["apiKey", "token", "secret", "authToken"]);
+    let mut req = client.get(parsed_url);
+    if let Some(tok) = token {
+        if let Some(header_name) = auth_header {
+            req = req.header(header_name, tok);
+        } else {
+            req = req.bearer_auth(tok);
+        }
+    }
+    let started = std::time::Instant::now();
+    match req.send().await {
+        Ok(resp) => {
+            let latency_ms = started.elapsed().as_millis() as u64;
+            let code = resp.status().as_u16();
+            let ok = resp.status().is_success();
+            let message = if ok {
+                format!("Connexion réussie (HTTP {code}) en {latency_ms} ms.")
+            } else {
+                format!("Le service a répondu avec le code HTTP {code}.")
+            };
+            Ok(Json(plugins::PluginConnectionTestResult {
+                ok,
+                status_code: Some(code),
+                latency_ms,
+                message,
+            }))
+        }
+        Err(_) => Ok(Json(plugins::PluginConnectionTestResult {
+            ok: false,
+            status_code: None,
+            latency_ms: started.elapsed().as_millis() as u64,
+            message: "Service injoignable ou délai dépassé.".to_owned(),
+        })),
+    }
+}
+
+/// Retourne les couples `(tool_id, version)` actifs du catalogue pour la purge côté worker.
+pub async fn worker_active_tools(
+    State(s): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> AppResult<Json<Vec<crate::domain::ToolRequirement>>> {
+    crate::auth::authorize_worker(&s.pool, &headers).await?;
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
+    let list = s
+        .catalog_cache
+        .tools_status(&roots, &cache_mgr)
+        .await
+        .into_iter()
+        .map(|tool| crate::domain::ToolRequirement {
+            tool_id: tool.id,
+            version: tool.version,
+        })
+        .collect();
+    Ok(Json(list))
+}
+
 /// Liste l'ensemble des dépôts configurés.
 pub async fn list_repositories(
     State(s): State<AppState>,

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id AS \"id!: Uuid\" FROM libraries WHERE scan_interval_minutes > 0 AND flow_id IS NOT NULL AND (last_scanned_at IS NULL OR datetime(last_scanned_at, '+' || scan_interval_minutes || ' minutes') <= datetime('now'))",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "14ca6e8071b484ba6eb787d71f03082288db4dba08c5cb628c43779ddc9d24c0"
+}

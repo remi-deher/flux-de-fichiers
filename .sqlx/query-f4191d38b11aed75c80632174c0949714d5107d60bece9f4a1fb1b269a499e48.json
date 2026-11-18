@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE workers SET max_concurrency = ?2, schedule_json = ?3 WHERE id = ?1 RETURNING id AS \"id!: Uuid\", name, last_seen AS \"last_seen: DateTime<Utc>\", version, remote_addr, telemetry_json, max_concurrency AS \"max_concurrency: i32\", schedule_json",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "last_seen: DateTime<Utc>",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "version",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "remote_addr",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "telemetry_json",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "max_concurrency: i32",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "schedule_json",
+        "ordinal": 7,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "f4191d38b11aed75c80632174c0949714d5107d60bece9f4a1fb1b269a499e48"
+}

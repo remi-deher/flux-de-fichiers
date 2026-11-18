@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO plugin_settings (plugin_id, settings, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(plugin_id) DO UPDATE SET settings = ?2, updated_at = datetime('now')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "b779596c9d42f48513cbee42d9bcf632ae236d982f3398fe3eb7f1705d5ecc47"
+}

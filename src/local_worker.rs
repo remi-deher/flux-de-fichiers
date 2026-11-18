@@ -9,7 +9,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
 const IDLE_POLL_INTERVAL: Duration = Duration::from_secs(1);
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 
 pub async fn run(state: AppState) {
     let worker_name = std::env::var("LOCAL_WORKER_NAME")
@@ -45,19 +45,43 @@ pub async fn run(state: AppState) {
         }
     }
 
+    let mut active = tokio::task::JoinSet::new();
     loop {
-        let claim = tokio::select! {
-            result = repository::claim(&state.pool, worker.id) => result,
-            _ = api::shutdown_signal() => return,
-        };
-        match claim {
-            Ok(Some(claim)) => execute(&state, worker.id, claim).await,
-            Ok(None) => {}
-            Err(error) => tracing::warn!(error=%error, "local worker claim failed"),
+        while active.try_join_next().is_some() {}
+        let max_concurrency = repository::get_worker(&state.pool, worker.id)
+            .await
+            .map(|w| w.max_concurrency)
+            .unwrap_or(worker.max_concurrency);
+        while (active.len() as i32) < max_concurrency {
+            let claim = tokio::select! {
+                result = repository::claim(&state.pool, worker.id) => result,
+                _ = api::shutdown_signal() => {
+                    active.abort_all();
+                    return;
+                }
+            };
+            match claim {
+                Ok(Some(claim)) => {
+                    let st = state.clone();
+                    let wid = worker.id;
+                    active.spawn(async move {
+                        execute(&st, wid, claim).await;
+                    });
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    tracing::warn!(error=%error, "local worker claim failed");
+                    break;
+                }
+            }
         }
         tokio::select! {
             _ = tokio::time::sleep(IDLE_POLL_INTERVAL) => {},
-            _ = api::shutdown_signal() => return,
+            Some(_) = active.join_next(), if !active.is_empty() => {},
+            _ = api::shutdown_signal() => {
+                active.abort_all();
+                return;
+            }
         }
     }
 }

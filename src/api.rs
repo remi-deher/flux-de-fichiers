@@ -114,6 +114,7 @@ pub struct AppState {
     pub catalog_cache: crate::plugins::CatalogCache,
     pub event_history: EventHistory,
     pub browse_broker: crate::filesystem_browser::RemoteBrowseBroker,
+    pub pending_worker_setup: Arc<tokio::sync::Mutex<Option<installation::PendingWorkerSetup>>>,
 }
 
 impl AppState {
@@ -130,6 +131,7 @@ impl AppState {
             catalog_cache: crate::plugins::CatalogCache::new(),
             event_history: EventHistory::new(),
             browse_broker: crate::filesystem_browser::RemoteBrowseBroker::new(),
+            pending_worker_setup: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -272,6 +274,7 @@ fn json_routes() -> Router<AppState> {
             "/api/v1/plugins/{id}/settings",
             get(plugins::get_settings).put(plugins::save_settings),
         )
+        .route("/api/v1/plugins/{id}/test", post(plugins::test_connection))
         .route("/api/v1/tools", get(plugins::tools))
         .route("/api/v1/tools/{id}", get(plugins::tool_detail))
         .route(
@@ -279,6 +282,7 @@ fn json_routes() -> Router<AppState> {
             get(plugins::tool_distribution),
         )
         .route("/api/v1/tools/{id}/install", post(plugins::install_tool))
+        .route("/api/v1/worker/tools", get(plugins::worker_active_tools))
         .route(
             "/api/v1/worker/tools/{id}/distribution",
             get(plugins::worker_tool_distribution),
@@ -323,7 +327,34 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/setup/status", get(setup::status))
         .route("/api/v1/setup/central", post(setup::setup_central))
         .route("/api/v1/setup/worker", post(installation::setup_worker))
+        .route(
+            "/api/v1/setup/worker-request",
+            get(installation::setup_worker_request_status)
+                .post(installation::start_setup_worker_request)
+                .delete(installation::cancel_setup_worker_request),
+        )
         .route("/api/v1/workers/enroll", post(installation::enroll))
+        .route(
+            "/api/v1/workers/enrollment-window",
+            post(installation::set_enrollment_window),
+        )
+        .route(
+            "/api/v1/workers/requests",
+            get(installation::list_enrollment_requests)
+                .post(installation::submit_enrollment_request),
+        )
+        .route(
+            "/api/v1/workers/requests/{id}",
+            get(installation::poll_enrollment_request),
+        )
+        .route(
+            "/api/v1/workers/requests/{id}/approve",
+            post(installation::approve_enrollment_request),
+        )
+        .route(
+            "/api/v1/workers/requests/{id}/reject",
+            post(installation::reject_enrollment_request),
+        )
         .route("/api/v1/instance/status", get(installation::status))
         .route(
             crate::worker_view::OVERVIEW_PATH,
@@ -348,13 +379,17 @@ fn json_routes() -> Router<AppState> {
         )
         .route("/api/v1/system/status", get(system::status))
         .route("/api/v1/system/settings", put(system::update_settings))
+        .route("/api/v1/system/updates", get(system::updates))
         .route("/api/v1/system/hardware", get(system::hardware))
         .route("/api/v1/system/diagnostics", post(diagnostics::diagnostics))
         .route("/api/v1/accounts/{id}", put(accounts::update))
         .route("/api/v1/api-keys", get(keys::list).post(keys::create))
         .route("/api/v1/api-keys/{id}", axum::routing::delete(keys::revoke))
+        .route("/api/v1/mcp/audit", get(crate::mcp::list_audit))
         .route("/api/v1/auth/logout", post(session::logout))
         .route("/api/v1/jobs", get(jobs::list).post(jobs::create))
+        .route("/api/v1/jobs/stats", get(jobs::stats))
+        .route("/api/v1/jobs/batch", post(jobs::batch))
         .route(
             "/api/v1/jobs/{id}",
             get(jobs::get_job).delete(jobs::delete_job),
@@ -364,10 +399,16 @@ fn json_routes() -> Router<AppState> {
             get(jobs::steps).post(jobs::report_steps),
         )
         .route("/api/v1/jobs/{id}/retry", post(jobs::retry))
+        .route("/api/v1/jobs/{id}/cancel", post(jobs::cancel))
+        .route("/api/v1/jobs/{id}/priority", put(jobs::update_priority))
         .route("/api/v1/workers", get(jobs::workers).post(register))
         .route(
             "/api/v1/workers/{id}",
             axum::routing::delete(jobs::delete_worker),
+        )
+        .route(
+            "/api/v1/workers/{id}/settings",
+            put(jobs::update_worker_settings),
         )
         .route("/api/v1/claims", post(claim))
         .route("/api/v1/jobs/{id}/heartbeat", post(jobs::heartbeat))
@@ -496,7 +537,7 @@ const SQLITE_BUSY_TIMEOUT_SECS: u64 = 15;
 const SQLITE_ACQUIRE_TIMEOUT_SECS: u64 = 15;
 const SQLITE_MAX_CONNECTIONS: u32 = 16;
 
-fn client_remote_addr(
+pub(crate) fn client_remote_addr(
     headers: &HeaderMap,
     connect_info: Option<Extension<ConnectInfo<std::net::SocketAddr>>>,
 ) -> Option<String> {
@@ -647,13 +688,41 @@ async fn claim(
 
 /// Intervalle entre deux synchronisations automatiques des dépôts de plugins.
 const PLUGIN_SYNC_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+/// Intervalle entre deux vérifications des scans planifiés de bibliothèques.
+const LIBRARY_SCAN_TICK: Duration = Duration::from_secs(60);
 
 /// Synchronise les dépôts de plugins au démarrage, puis à intervalle régulier.
 async fn plugin_sync_loop(state: AppState) {
     loop {
         crate::plugins::sync_enabled_repositories(&state.pool, &state.config).await;
         state.catalog_cache.invalidate().await;
+        let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
+        let cache = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
+        let keep: Vec<(String, String)> = state
+            .catalog_cache
+            .tools_status(&roots, &cache)
+            .await
+            .into_iter()
+            .map(|t| (t.id, t.version))
+            .collect();
+        if !keep.is_empty()
+            && let Ok(pruned) = cache.prune_unused(&keep)
+            && pruned > 0
+        {
+            tracing::info!(
+                pruned,
+                "anciennes versions d'outils purgées du cache central"
+            );
+        }
         tokio::time::sleep(PLUGIN_SYNC_INTERVAL).await;
+    }
+}
+
+/// Exécute périodiquement les scans de bibliothèques configurés avec un intervalle.
+async fn library_scan_loop(state: AppState) {
+    loop {
+        tokio::time::sleep(LIBRARY_SCAN_TICK).await;
+        libraries::run_scheduled_scans(&state).await;
     }
 }
 
@@ -709,6 +778,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         Err(error) => tracing::warn!(error = %error, "clé de chiffrement indisponible"),
     }
     let plugin_sync = tokio::spawn(plugin_sync_loop(state.clone()));
+    let lib_scans = tokio::spawn(library_scan_loop(state.clone()));
     let app = router(state);
     tracing::info!(%addr, "central started");
     if let Some((cert, key)) = tls {
@@ -734,6 +804,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         .await?;
     }
     plugin_sync.abort();
+    lib_scans.abort();
     pool.close().await;
     Ok(())
 }

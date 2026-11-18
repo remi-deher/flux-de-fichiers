@@ -1,8 +1,8 @@
 //! Brouillon d'une bibliothèque en cours d'édition, sans DOM.
 
 use flux_shared::libraries::{
-    LIBRARY_NAME_MAX, Library, LibraryAccess, LibraryWorkerPath, LibraryWrite,
-    suggested_library_name_from_path,
+    LIBRARY_NAME_MAX, Library, LibraryAccess, LibraryOutputPolicy, LibraryWorkerPath, LibraryWrite,
+    MAX_SCAN_INTERVAL_MINUTES, suggested_library_name_from_path,
 };
 use uuid::Uuid;
 
@@ -13,6 +13,11 @@ pub struct LibraryDraft {
     pub name: String,
     pub flow_id: Option<String>,
     pub workers: Vec<LibraryWorkerPath>,
+    pub scan_interval_minutes: i32,
+    pub include_extensions_text: String,
+    pub exclude_patterns_text: String,
+    pub min_file_mb: u64,
+    pub output_policy: LibraryOutputPolicy,
 }
 
 impl LibraryDraft {
@@ -22,6 +27,11 @@ impl LibraryDraft {
             name: library.name.clone(),
             flow_id: library.flow_id.clone(),
             workers: library.workers.clone(),
+            scan_interval_minutes: library.scan_interval_minutes,
+            include_extensions_text: library.include_extensions.join(", "),
+            exclude_patterns_text: library.exclude_patterns.join(", "),
+            min_file_mb: library.min_file_bytes / (1024 * 1024),
+            output_policy: library.output_policy,
         }
     }
 
@@ -117,10 +127,24 @@ impl LibraryDraft {
         if name.is_empty() || name.chars().count() > LIBRARY_NAME_MAX {
             return Err("Le nom doit compter de 1 à 80 caractères.");
         }
+        let split_list = |raw: &str| -> Vec<String> {
+            raw.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect()
+        };
         Ok(LibraryWrite {
             name: name.to_owned(),
             flow_id: self.flow_id.clone().filter(|id| !id.is_empty()),
             workers: self.workers.clone(),
+            scan_interval_minutes: self
+                .scan_interval_minutes
+                .clamp(0, MAX_SCAN_INTERVAL_MINUTES),
+            include_extensions: split_list(&self.include_extensions_text),
+            exclude_patterns: split_list(&self.exclude_patterns_text),
+            min_file_bytes: self.min_file_mb.saturating_mul(1024 * 1024),
+            output_policy: self.output_policy,
         })
     }
 }
@@ -216,34 +240,31 @@ mod tests {
     #[test]
     fn library_counts_tracks_ready_and_flow_bound_libraries() {
         let now = chrono::Utc::now();
-        let ready = Library {
+        let make = |name: &str, flow_id: Option<&str>, workers: Vec<LibraryWorkerPath>| Library {
             id: Uuid::nil(),
-            name: "Films".into(),
-            flow_id: Some("remux".into()),
-            workers: vec![LibraryWorkerPath {
+            name: name.into(),
+            flow_id: flow_id.map(str::to_owned),
+            workers,
+            scan_interval_minutes: 0,
+            last_scanned_at: None,
+            include_extensions: Vec::new(),
+            exclude_patterns: Vec::new(),
+            min_file_bytes: 0,
+            output_policy: LibraryOutputPolicy::OutputDir,
+            created_at: now,
+            updated_at: now,
+        };
+        let ready = make(
+            "Films",
+            Some("remux"),
+            vec![LibraryWorkerPath {
                 worker_id: Uuid::nil(),
                 local_path: "/media/films".into(),
                 access: LibraryAccess::ReadWrite,
             }],
-            created_at: now,
-            updated_at: now,
-        };
-        let flow_only = Library {
-            id: Uuid::nil(),
-            name: "Séries".into(),
-            flow_id: Some("remux".into()),
-            workers: Vec::new(),
-            created_at: now,
-            updated_at: now,
-        };
-        let empty = Library {
-            id: Uuid::nil(),
-            name: "Archives".into(),
-            flow_id: None,
-            workers: Vec::new(),
-            created_at: now,
-            updated_at: now,
-        };
+        );
+        let flow_only = make("Séries", Some("remux"), Vec::new());
+        let empty = make("Archives", None, Vec::new());
         assert_eq!(library_counts(&[]), LibraryCounts::default());
         assert_eq!(
             library_counts(&[ready, flow_only, empty]),

@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT v.flow_id AS id, v.name, v.description, v.file_mask, COALESCE(f.is_default, 0) AS \"is_default!: bool\", v.definition, v.version, v.created_at AS \"created_at: DateTime<Utc>\", v.created_at AS \"updated_at: DateTime<Utc>\" FROM flow_versions v LEFT JOIN flows f ON f.id = v.flow_id WHERE v.flow_id=?1 AND v.version=?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "description",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "file_mask",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_default!: bool",
+        "ordinal": 4,
+        "type_info": "Null"
+      },
+      {
+        "name": "definition",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "version",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at: DateTime<Utc>",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at: DateTime<Utc>",
+        "ordinal": 8,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      null,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "cf69176f86ffe0d5de8955e2187dce7c1299543f2db6731e3b2d043d51c42eba"
+}

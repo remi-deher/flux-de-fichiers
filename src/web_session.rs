@@ -38,18 +38,18 @@ pub async fn create(
     let token_hash = digest(&token);
     let csrf_hash = digest(&csrf_token);
     let expires_at = Utc::now() + Duration::seconds(ttl_seconds);
-    sqlx::query("DELETE FROM sessions WHERE datetime(expires_at) <= datetime('now')")
+    sqlx::query!("DELETE FROM sessions WHERE datetime(expires_at) <= datetime('now')")
         .execute(pool)
         .await?;
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO sessions(token_hash, expires_at, csrf_hash, account_id) VALUES (?1, ?2, ?3, ?4)",
+        token_hash,
+        expires_at,
+        csrf_hash,
+        account_id,
     )
-    .bind(&token_hash)
-    .bind(expires_at)
-    .bind(&csrf_hash)
-    .bind(account_id)
-        .execute(pool)
-        .await?;
+    .execute(pool)
+    .await?;
     Ok(WebSession {
         token,
         csrf_token,
@@ -104,18 +104,18 @@ pub fn session_token_hash(headers: &HeaderMap) -> AppResult<String> {
 pub async fn from_headers(pool: &SqlitePool, headers: &HeaderMap) -> AppResult<ValidatedSession> {
     let token = cookie(headers, SESSION_COOKIE).ok_or(AppError::Unauthorized)?;
     let token_hash = digest(token);
-    let row: Option<(String, DateTime<Utc>, String)> = sqlx::query_as(
-        "SELECT csrf_hash, expires_at, account_id FROM sessions WHERE token_hash=?1 AND csrf_hash IS NOT NULL AND account_id IS NOT NULL AND datetime(expires_at) > datetime('now')",
+    let row = sqlx::query!(
+        r#"SELECT csrf_hash AS "csrf_hash!: String", expires_at AS "expires_at: DateTime<Utc>", account_id AS "account_id!: String" FROM sessions WHERE token_hash=?1 AND csrf_hash IS NOT NULL AND account_id IS NOT NULL AND datetime(expires_at) > datetime('now')"#,
+        token_hash,
     )
-    .bind(&token_hash)
     .fetch_optional(pool)
     .await?;
-    let (csrf_hash, expires_at, account_id) = row.ok_or(AppError::Unauthorized)?;
+    let row = row.ok_or(AppError::Unauthorized)?;
     Ok(ValidatedSession {
         token_hash,
-        csrf_hash,
-        expires_at,
-        account_id,
+        csrf_hash: row.csrf_hash,
+        expires_at: row.expires_at,
+        account_id: row.account_id,
     })
 }
 
@@ -145,10 +145,12 @@ pub fn validate_csrf_cookie<'a>(
 }
 
 pub async fn revoke(pool: &SqlitePool, session: &ValidatedSession) -> AppResult<()> {
-    sqlx::query("DELETE FROM sessions WHERE token_hash=?1")
-        .bind(&session.token_hash)
-        .execute(pool)
-        .await?;
+    sqlx::query!(
+        "DELETE FROM sessions WHERE token_hash=?1",
+        session.token_hash
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

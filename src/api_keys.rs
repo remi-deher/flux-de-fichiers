@@ -87,12 +87,25 @@ pub async fn issue_with_scopes(
     role: Role,
     scopes: Option<&[Permission]>,
 ) -> AppResult<IssuedKey> {
+    issue_with_executor(pool, name, role, scopes).await
+}
+
+/// Variante générique sur exécuteur SQLx (pool ou transaction SQL).
+pub async fn issue_with_executor<'e, E>(
+    executor: E,
+    name: &str,
+    role: Role,
+    scopes: Option<&[Permission]>,
+) -> AppResult<IssuedKey>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
     let name = validate_name(name)?;
     let validated_scopes = validate_scopes(role, scopes)?;
     let id = random_hex(KEY_ID_BYTES);
     let secret = random_hex(KEY_SECRET_BYTES);
     let record = repository::insert_api_key(
-        pool,
+        executor,
         &id,
         &name,
         &hash_secret(&secret),

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO job_steps (job_id, step_index, node_id, block_kind, operation_id, status, message, output_excerpt) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "3eede4a7e2f7f8a267aaf74dc28a318a3e692651ee6729b7d970bd25555327b7"
+}

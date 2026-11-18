@@ -45,32 +45,31 @@ pub async fn rotate_values(
 ) -> AppResult<RotationReport> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let mut report = RotationReport::default();
-    let settings: Vec<(String, String)> =
-        sqlx::query_as("SELECT plugin_id, settings FROM plugin_settings")
+    let settings =
+        sqlx::query!(r#"SELECT plugin_id AS "plugin_id!: String", settings FROM plugin_settings"#)
             .fetch_all(&mut *tx)
             .await?;
-    for (plugin_id, stored) in settings {
-        if let Some((rewritten, count)) = plugins::rotate_settings(old, new, &plugin_id, &stored)? {
-            sqlx::query("UPDATE plugin_settings SET settings = ?1 WHERE plugin_id = ?2")
-                .bind(rewritten)
-                .bind(&plugin_id)
-                .execute(&mut *tx)
-                .await?;
+    for row in settings {
+        if let Some((rewritten, count)) =
+            plugins::rotate_settings(old, new, &row.plugin_id, &row.settings)?
+        {
+            sqlx::query!(
+                "UPDATE plugin_settings SET settings = ?1 WHERE plugin_id = ?2",
+                rewritten,
+                row.plugin_id
+            )
+            .execute(&mut *tx)
+            .await?;
             report.plugin_values += count;
         }
     }
-    for store in &repository::DEFINITION_STORES {
-        let definitions: Vec<(String, i64, String)> =
-            sqlx::query_as(store.select).fetch_all(&mut *tx).await?;
+    for store in repository::DEFINITION_STORES {
+        let definitions = store.fetch_definitions(&mut *tx).await?;
         for (flow_id, rowid, definition) in definitions {
             if let Some((rewritten, count)) =
                 flows::rotate_definition(old, new, &flow_id, &definition)?
             {
-                sqlx::query(store.update)
-                    .bind(rewritten)
-                    .bind(rowid)
-                    .execute(&mut *tx)
-                    .await?;
+                store.update_definition(&mut *tx, rowid, &rewritten).await?;
                 report.flow_values += count;
             }
         }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM job_steps WHERE job_id=?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "0c32244c33b84b18a6085702f71cb05b00c402b43b3b41af48bbfcea3e4cd23f"
+}

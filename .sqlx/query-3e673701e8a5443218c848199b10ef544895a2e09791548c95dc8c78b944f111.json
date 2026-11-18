@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id AS \"id!: Uuid\", name, last_seen AS \"last_seen: DateTime<Utc>\", version, remote_addr, telemetry_json, max_concurrency AS \"max_concurrency: i32\", schedule_json FROM workers WHERE name=?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "last_seen: DateTime<Utc>",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "version",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "remote_addr",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "telemetry_json",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "max_concurrency: i32",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "schedule_json",
+        "ordinal": 7,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "3e673701e8a5443218c848199b10ef544895a2e09791548c95dc8c78b944f111"
+}

@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO plugin_repositories (id, name, index_url, is_official, enabled) VALUES (?1, ?2, ?3, 0, 1) RETURNING id AS \"id!: String\", name, index_url, is_official AS \"is_official: bool\", enabled AS \"enabled: bool\", last_synced_at, created_at",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "index_url",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_official: bool",
+        "ordinal": 3,
+        "type_info": "Bool"
+      },
+      {
+        "name": "enabled: bool",
+        "ordinal": 4,
+        "type_info": "Bool"
+      },
+      {
+        "name": "last_synced_at",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 6,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "65484da0cd4744e9869db06d6dcea808971a1a39d7d3af5003059ee3b41e133a"
+}

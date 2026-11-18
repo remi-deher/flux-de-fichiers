@@ -190,6 +190,58 @@ impl ToolCacheManager {
         PathBuf::from(binary_relative_path)
     }
 
+    /// Supprime du cache les versions d'outils qui ne figurent plus dans `keep` (`(tool_id, version)`).
+    /// Ignore les répertoires temporaires (`.tmp-*`) modifiés récemment afin de ne pas gêner une extraction en cours.
+    pub fn prune_unused(&self, keep: &[(String, String)]) -> std::io::Result<usize> {
+        if !self.cache_root.is_dir() {
+            return Ok(0);
+        }
+        let mut pruned = 0usize;
+        for tool_entry in std::fs::read_dir(&self.cache_root)? {
+            let Ok(tool_entry) = tool_entry else { continue };
+            let tool_path = tool_entry.path();
+            if !tool_path.is_dir() {
+                continue;
+            }
+            let Some(tool_id) = tool_path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if tool_id.starts_with(".tmp") {
+                continue;
+            }
+            let mut remaining = 0usize;
+            for version_entry in std::fs::read_dir(&tool_path)? {
+                let Ok(version_entry) = version_entry else {
+                    continue;
+                };
+                let ver_path = version_entry.path();
+                if !ver_path.is_dir() {
+                    continue;
+                }
+                let Some(version) = ver_path.file_name().and_then(|s| s.to_str()) else {
+                    remaining += 1;
+                    continue;
+                };
+                if version.starts_with(".tmp") {
+                    remaining += 1;
+                    continue;
+                }
+                let retained = keep.iter().any(|(id, ver)| id == tool_id && ver == version);
+                if retained {
+                    remaining += 1;
+                } else if std::fs::remove_dir_all(&ver_path).is_ok() {
+                    pruned += 1;
+                } else {
+                    remaining += 1;
+                }
+            }
+            if remaining == 0 {
+                let _ = std::fs::remove_dir(&tool_path);
+            }
+        }
+        Ok(pruned)
+    }
+
     /// Extrait nativement une archive en mémoire (tar.gz), vérifie les empreintes SHA-256,
     /// attribue les permissions 0755 et crée le marqueur `.ready`.
     /// L'opération utilise un répertoire temporaire et un renommage atomique (zéro verrou .lock).
@@ -744,6 +796,25 @@ mod tests {
         let result = manager.extract_and_install("app.ffmpeg", "1.0.0", &artifact, &archive_bytes);
         assert!(matches!(result, Err(AppError::ChecksumMismatch { .. })));
         assert!(!manager.is_ready("app.ffmpeg", "1.0.0", "x86_64"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_prune_unused_removes_only_stale_tool_versions() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let tmp = tempdir()?;
+        let manager = ToolCacheManager::new(tmp.path());
+        std::fs::create_dir_all(manager.tool_dir("app.ffmpeg", "7.0.0", "x86_64"))?;
+        std::fs::create_dir_all(manager.tool_dir("app.ffmpeg", "7.1.0", "x86_64"))?;
+        std::fs::create_dir_all(manager.tool_dir("app.old", "1.0.0", "x86_64"))?;
+        std::fs::create_dir_all(tmp.path().join(".tmp-active"))?;
+
+        let pruned = manager.prune_unused(&[("app.ffmpeg".into(), "7.1.0".into())])?;
+        assert_eq!(pruned, 2);
+        assert!(manager.tool_dir("app.ffmpeg", "7.1.0", "x86_64").is_dir());
+        assert!(!manager.tool_dir("app.ffmpeg", "7.0.0", "x86_64").exists());
+        assert!(!tmp.path().join("app.old").exists());
+        assert!(tmp.path().join(".tmp-active").is_dir());
         Ok(())
     }
 }

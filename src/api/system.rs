@@ -10,10 +10,43 @@ use crate::{
 };
 use axum::{Json, extract::State};
 pub use flux_shared::system::{
-    HardwareStatus, KeySource, NetworkStatus, StorageStatus, SystemStatus,
+    HardwareStatus, KeySource, NetworkStatus, StorageStatus, SystemStatus, UpdateCheckStatus,
     UpdateSystemSettingsRequest, VolumeSpace,
 };
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::LazyLock,
+    time::{Duration, Instant},
+};
+
+const GITHUB_RELEASES_API: &str =
+    "https://api.github.com/repos/remi-deher/flux-de-fichiers/releases/latest";
+const UPDATE_CHECK_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
+const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
+
+struct CachedUpdateCheck {
+    fetched_at: Instant,
+    status: UpdateCheckStatus,
+}
+
+static UPDATE_CACHE: LazyLock<tokio::sync::Mutex<Option<CachedUpdateCheck>>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(None));
+
+/// Compare deux étiquettes semver (`v0.41.0` et `0.42.0`) ; retourne `true` si `latest > current`.
+pub fn is_newer_version(current: &str, latest: &str) -> bool {
+    let parse = |raw: &str| -> Option<(u64, u64, u64)> {
+        let clean = raw.trim().trim_start_matches('v').split('-').next()?;
+        let mut parts = clean.split('.');
+        let major = parts.next()?.parse().ok()?;
+        let minor = parts.next()?.parse().ok()?;
+        let patch = parts.next()?.parse().ok()?;
+        Some((major, minor, patch))
+    };
+    match (parse(current), parse(latest)) {
+        (Some(cur), Some(lat)) => lat > cur,
+        _ => false,
+    }
+}
 
 /// Chemin du fichier SQLite d'une URL de base (`sqlite:///config/flux.db?mode=rwc`) ; `None` en mémoire.
 pub fn database_file(database_url: &str) -> Option<PathBuf> {
@@ -100,6 +133,7 @@ fn build_system_status(effective: &EffectiveRuntimeSettings, secrets: &SecretBox
         storage: storage_status(&effective.config),
         smtp: effective.smtp_status.clone(),
         outbound: effective.outbound,
+        check_updates_enabled: effective.check_updates_enabled,
     }
 }
 
@@ -123,9 +157,125 @@ pub async fn update_settings(
     Ok(Json(build_system_status(&effective, &secrets)))
 }
 
+#[derive(serde::Deserialize)]
+struct GithubLatestRelease {
+    tag_name: String,
+    html_url: Option<String>,
+}
+
+/// Vérifie la dernière version publiée sur GitHub si l'administrateur a activé l'option.
+pub async fn updates(State(state): State<AppState>, _auth: AdminAuth) -> Json<UpdateCheckStatus> {
+    let current = env!("CARGO_PKG_VERSION").to_owned();
+    let effective = runtime_settings::load_effective(&state.pool, &state.config).await;
+    if !effective.check_updates_enabled {
+        return Json(UpdateCheckStatus {
+            enabled: false,
+            current_version: current,
+            latest_version: None,
+            update_available: false,
+            release_url: None,
+            checked_at: None,
+            error: None,
+        });
+    }
+    {
+        let cache = UPDATE_CACHE.lock().await;
+        if let Some(cached) = cache.as_ref()
+            && cached.fetched_at.elapsed() < UPDATE_CHECK_CACHE_TTL
+        {
+            return Json(cached.status.clone());
+        }
+    }
+    let client = reqwest::Client::builder()
+        .timeout(UPDATE_CHECK_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build();
+    let result = match client {
+        Ok(client) => {
+            let resp = client
+                .get(GITHUB_RELEASES_API)
+                .header(
+                    reqwest::header::USER_AGENT,
+                    format!("flux-de-fichiers/{current}"),
+                )
+                .send()
+                .await;
+            match resp {
+                Ok(r) if r.status().is_success() => match r.json::<GithubLatestRelease>().await {
+                    Ok(rel) => {
+                        let latest = rel.tag_name.trim_start_matches('v').to_owned();
+                        let update_available = is_newer_version(&current, &latest);
+                        UpdateCheckStatus {
+                            enabled: true,
+                            current_version: current,
+                            latest_version: Some(latest),
+                            update_available,
+                            release_url: rel.html_url,
+                            checked_at: Some(chrono::Utc::now()),
+                            error: None,
+                        }
+                    }
+                    Err(_) => UpdateCheckStatus {
+                        enabled: true,
+                        current_version: current,
+                        latest_version: None,
+                        update_available: false,
+                        release_url: None,
+                        checked_at: Some(chrono::Utc::now()),
+                        error: Some("Réponse GitHub illisible".to_owned()),
+                    },
+                },
+                Ok(r) => UpdateCheckStatus {
+                    enabled: true,
+                    current_version: current,
+                    latest_version: None,
+                    update_available: false,
+                    release_url: None,
+                    checked_at: Some(chrono::Utc::now()),
+                    error: Some(format!("HTTP {}", r.status().as_u16())),
+                },
+                Err(_) => UpdateCheckStatus {
+                    enabled: true,
+                    current_version: current,
+                    latest_version: None,
+                    update_available: false,
+                    release_url: None,
+                    checked_at: Some(chrono::Utc::now()),
+                    error: Some("Dépôt GitHub injoignable".to_owned()),
+                },
+            }
+        }
+        Err(_) => UpdateCheckStatus {
+            enabled: true,
+            current_version: current,
+            latest_version: None,
+            update_available: false,
+            release_url: None,
+            checked_at: Some(chrono::Utc::now()),
+            error: Some("Client HTTP indisponible".to_owned()),
+        },
+    };
+    if result.error.is_none() {
+        let mut cache = UPDATE_CACHE.lock().await;
+        *cache = Some(CachedUpdateCheck {
+            fetched_at: Instant::now(),
+            status: result.clone(),
+        });
+    }
+    Json(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_newer_version_compares_semver_triplets() {
+        assert!(is_newer_version("0.41.0", "0.42.0"));
+        assert!(is_newer_version("v0.41.0", "0.41.1"));
+        assert!(!is_newer_version("0.41.0", "0.41.0"));
+        assert!(!is_newer_version("0.42.0", "0.41.9"));
+    }
 
     #[test]
     fn test_database_file_is_read_from_sqlite_urls() {

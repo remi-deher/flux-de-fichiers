@@ -72,6 +72,17 @@ pub enum ToolStatus {
     NotInstalled,
 }
 
+/// Résultat du test de connectivité d'un plugin configuré par API HTTP.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginConnectionTestResult {
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_code: Option<u16>,
+    pub latency_ms: u64,
+    pub message: String,
+}
+
 const fn default_true() -> bool {
     true
 }

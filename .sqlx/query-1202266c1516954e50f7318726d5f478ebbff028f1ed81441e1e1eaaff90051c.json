@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT j.library_id AS \"library_id: Uuid\", COALESCE(l.name, 'Sans bibliothèque') AS \"library_name!: String\", COALESCE(SUM(CASE WHEN j.status = 'succeeded' THEN 1 ELSE 0 END), 0) AS \"succeeded_count!: i64\", COALESCE(SUM(CASE WHEN j.status = 'failed' THEN 1 ELSE 0 END), 0) AS \"failed_count!: i64\", COALESCE(SUM(CASE WHEN j.status = 'succeeded' AND j.source_bytes IS NOT NULL AND j.output_bytes IS NOT NULL THEN j.source_bytes ELSE 0 END), 0) AS \"source_bytes!: i64\", COALESCE(SUM(CASE WHEN j.status = 'succeeded' AND j.source_bytes IS NOT NULL AND j.output_bytes IS NOT NULL THEN j.output_bytes ELSE 0 END), 0) AS \"output_bytes!: i64\" FROM jobs j LEFT JOIN libraries l ON l.id = j.library_id GROUP BY j.library_id, COALESCE(l.name, 'Sans bibliothèque') ORDER BY (COALESCE(SUM(CASE WHEN j.status = 'succeeded' AND j.source_bytes IS NOT NULL AND j.output_bytes IS NOT NULL THEN j.source_bytes ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN j.status = 'succeeded' AND j.source_bytes IS NOT NULL AND j.output_bytes IS NOT NULL THEN j.output_bytes ELSE 0 END), 0)) DESC, 2 ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "library_id: Uuid",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "library_name!: String",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "succeeded_count!: i64",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "failed_count!: i64",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "source_bytes!: i64",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "output_bytes!: i64",
+        "ordinal": 5,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1202266c1516954e50f7318726d5f478ebbff028f1ed81441e1e1eaaff90051c"
+}

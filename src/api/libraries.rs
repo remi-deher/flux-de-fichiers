@@ -211,7 +211,7 @@ pub async fn scan_library_inner(
     id: Uuid,
     req: LibraryScanRequest,
 ) -> AppResult<LibraryScanResult> {
-    repository::get_library(&s.pool, id).await?;
+    let library = repository::get_library(&s.pool, id).await?;
     if let Some(worker) = req.target_worker_id
         && !repository::worker_exists(&s.pool, worker).await?
     {
@@ -224,6 +224,9 @@ pub async fn scan_library_inner(
     let mut skipped_existing = 0usize;
     let mut created_files = Vec::new();
     for file in files {
+        if !crate::domain::library_accepts_file(&library, &file.name, file.bytes) {
+            continue;
+        }
         let path = storage::input_path(&s.config.input_dir, &file.name).await?;
         let (hash, bytes) = storage::fingerprint(&path, s.config.max_file_bytes).await?;
         if repository::has_library_file_job(&s.pool, id, &file.name, &hash).await? {
@@ -246,6 +249,9 @@ pub async fn scan_library_inner(
         created_jobs += 1;
         created_files.push(file.name);
     }
+    if !req.dry_run {
+        let _ = repository::touch_library_scanned(&s.pool, id).await;
+    }
     Ok(LibraryScanResult {
         library_id: id,
         dry_run: req.dry_run,
@@ -254,6 +260,28 @@ pub async fn scan_library_inner(
         skipped_existing,
         created_files,
     })
+}
+
+/// Exécute les scans automatiques échus pour toutes les bibliothèques planifiées.
+pub async fn run_scheduled_scans(s: &AppState) {
+    let Ok(due) = repository::due_scheduled_libraries(&s.pool).await else {
+        return;
+    };
+    for lib_id in due {
+        match scan_library_inner(s, lib_id, LibraryScanRequest::default()).await {
+            Ok(res) if res.created_jobs > 0 => {
+                tracing::info!(
+                    library_id = %lib_id,
+                    created_jobs = res.created_jobs,
+                    "scan planifié : nouvelles tâches créées"
+                );
+            }
+            Ok(_) => {}
+            Err(err) => {
+                tracing::warn!(library_id = %lib_id, error = %err, "échec du scan planifié");
+            }
+        }
+    }
 }
 
 /// Supprime un fichier média présent dans le dossier d'entrée (`input_dir`).

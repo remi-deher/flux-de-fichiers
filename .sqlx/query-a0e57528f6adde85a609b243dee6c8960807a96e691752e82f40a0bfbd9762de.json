@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT output_name FROM jobs WHERE id=?1 AND status=?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "output_name",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "a0e57528f6adde85a609b243dee6c8960807a96e691752e82f40a0bfbd9762de"
+}

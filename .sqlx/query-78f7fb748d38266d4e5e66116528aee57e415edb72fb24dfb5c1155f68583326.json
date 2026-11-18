@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT is_official AS \"is_official: bool\" FROM plugin_repositories WHERE id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "is_official: bool",
+        "ordinal": 0,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "78f7fb748d38266d4e5e66116528aee57e415edb72fb24dfb5c1155f68583326"
+}

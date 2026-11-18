@@ -351,6 +351,8 @@ mod tests {
             version: None,
             remote_addr: None,
             telemetry: None,
+            max_concurrency: 1,
+            schedule: None,
         }
     }
 

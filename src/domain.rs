@@ -3,16 +3,20 @@ use uuid::Uuid;
 
 pub use flux_shared::flows::{FlowRecord, FlowVersionSummary, UpdateFlowRequest};
 pub use flux_shared::jobs::{
-    Job, JobErrorCode, JobEvent, JobEventType, JobStatus, JobStepLog, JobStepStatus, MAX_ATTEMPTS,
-    MediaFile, NewJob,
+    JOB_PRIORITY_MAX, JOB_PRIORITY_MIN, Job, JobBatchAction, JobBatchRequest, JobBatchResult,
+    JobErrorCode, JobEvent, JobEventType, JobStatus, JobStepLog, JobStepStatus, JobStorageStats,
+    LibraryJobStats, MAX_ATTEMPTS, MediaFile, NewJob, UpdateJobPriorityRequest,
 };
 
 pub use flux_shared::libraries::{
     DirectoryEntry, DirectoryListing, LIBRARY_NAME_MAX, LIBRARY_PATH_MAX, Library, LibraryAccess,
-    LibraryWorkerPath, LibraryWrite, MediaFileEntry, RootShortcut, WorkerBrowseReport,
-    WorkerBrowseTask,
+    LibraryOutputPolicy, LibraryWorkerPath, LibraryWrite, MAX_SCAN_INTERVAL_MINUTES,
+    MediaFileEntry, RootShortcut, WorkerBrowseReport, WorkerBrowseTask, library_accepts_file,
 };
-pub use flux_shared::workers::{SystemConfig, Worker};
+pub use flux_shared::workers::{
+    SystemConfig, UpdateWorkerSettingsRequest, WORKER_MAX_CONCURRENCY, WORKER_MIN_CONCURRENCY,
+    Worker, WorkerSchedule,
+};
 
 pub const LEASE_SECONDS: i64 = 120;
 
@@ -151,6 +155,7 @@ mod tests {
             (JobStatus::Running, "running"),
             (JobStatus::Succeeded, "succeeded"),
             (JobStatus::Failed, "failed"),
+            (JobStatus::Canceled, "canceled"),
         ];
         for (status, label) in cases {
             assert_eq!(status.as_str(), label);
@@ -161,7 +166,7 @@ mod tests {
             assert_eq!(serde_json::from_str::<JobStatus>(&json)?, status);
         }
         assert!("pending".parse::<JobStatus>().is_err());
-        assert!("canceled".parse::<JobStatus>().is_err());
+        assert!("cancelled".parse::<JobStatus>().is_err());
         Ok(())
     }
 

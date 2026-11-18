@@ -206,6 +206,7 @@ pub async fn call(
                 name: parsed.name,
                 flow_id: parsed.flow_id,
                 workers: parsed.workers,
+                ..LibraryWrite::default()
             };
             libraries::update(
                 State(state.clone()),

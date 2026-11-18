@@ -97,13 +97,12 @@ pub async fn update_worker_settings(
     if !(WORKER_MIN_CONCURRENCY..=WORKER_MAX_CONCURRENCY).contains(&max_concurrency) {
         return Err(AppError::Invalid);
     }
-    if let Some(sched) = schedule {
-        if sched.start_hour >= 24
+    if let Some(sched) = schedule
+        && (sched.start_hour >= 24
             || sched.end_hour >= 24
-            || sched.days.iter().any(|day| !(1..=7).contains(day))
-        {
-            return Err(AppError::Invalid);
-        }
+            || sched.days.iter().any(|day| !(1..=7).contains(day)))
+    {
+        return Err(AppError::Invalid);
     }
     let schedule_json = schedule
         .filter(|s| s.enabled || !s.days.is_empty() || s.start_hour != 0 || s.end_hour != 0)

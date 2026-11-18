@@ -16,6 +16,7 @@ mod state;
 mod versions;
 
 pub use editor::FlowEditor;
+pub(crate) use presentation::NodeDomain;
 
 use crate::route::{Link, Route, encode_segment, use_router};
 use crate::ui::filters::{Filters, FlowFilter, flow_filter};

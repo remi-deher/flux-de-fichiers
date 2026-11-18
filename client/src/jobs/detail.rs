@@ -89,12 +89,12 @@ pub fn JobDetail(
     let library_name = move || optional(resolve_library_label(library_id, &libraries.get()));
     let source_meta = match (job.source_bytes, job.source_sha256.as_deref()) {
         (Some(bytes), Some(_)) => format!(
-            "{} · sha256 {}",
+            "{} · empreinte {}",
             format_bytes(bytes.unsigned_abs()),
             short_digest(job.source_sha256.as_deref())
         ),
         (Some(bytes), None) => format_bytes(bytes.unsigned_abs()),
-        (None, Some(_)) => format!("sha256 {}", short_digest(job.source_sha256.as_deref())),
+        (None, Some(_)) => format!("empreinte {}", short_digest(job.source_sha256.as_deref())),
         (None, None) => "—".into(),
     };
     let output_size = format_output_summary(job.source_bytes, job.output_bytes);
@@ -129,7 +129,7 @@ pub fn JobDetail(
                 {row("Source", source_meta)}
                 {row("Fichier produit", optional(job.output_name.clone()))}
                 {row("Taille produite", output_size)}
-                {row("SHA-256 produit", output_sha)}
+                {row("Empreinte produite", output_sha)}
                 {row("Créée", format::datetime(job.created_at))}
                 {row("Mise à jour", format::datetime(job.updated_at))}
             </div>

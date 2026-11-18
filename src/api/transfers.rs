@@ -90,7 +90,7 @@ fn extension_for_name(name: &str) -> &str {
 pub async fn output(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
-    _auth: super::AdminAuth,
+    _auth: super::ViewJobsAuth,
 ) -> AppResult<Response> {
     let name = repository::succeeded_output_name(&s.pool, id)
         .await?
@@ -113,7 +113,7 @@ pub async fn output(
 pub async fn delete_output(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
-    _auth: super::AdminAuth,
+    _auth: super::ManageJobsAuth,
 ) -> AppResult<StatusCode> {
     let previous = repository::clear_job_output_name(&s.pool, id).await?;
     if let Some(name) = previous

@@ -1,6 +1,6 @@
 //! Gestionnaires HTTP des bibliothèques déclarées, upload de médias et scan.
 
-use super::{AdminAuth, AppState, ViewLibrariesAuth};
+use super::{AppState, ManageLibrariesAuth, ViewLibrariesAuth};
 use crate::{
     domain::{Job, JobEventType, JobStatus, Library, LibraryWrite, MediaFile},
     error::{AppError, AppResult},
@@ -62,7 +62,7 @@ pub async fn list(
 
 pub async fn create(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ManageLibrariesAuth,
     Json(payload): Json<LibraryWrite>,
 ) -> AppResult<(StatusCode, Json<Library>)> {
     let library = repository::insert_library(&s.pool, payload).await?;
@@ -80,7 +80,7 @@ pub async fn get(
 pub async fn update(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
-    _auth: AdminAuth,
+    _auth: ManageLibrariesAuth,
     Json(payload): Json<LibraryWrite>,
 ) -> AppResult<Json<Library>> {
     Ok(Json(
@@ -91,7 +91,7 @@ pub async fn update(
 pub async fn delete(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
-    _auth: AdminAuth,
+    _auth: ManageLibrariesAuth,
 ) -> AppResult<StatusCode> {
     repository::delete_library(&s.pool, id).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -149,7 +149,7 @@ async fn write_input_stream(
 pub async fn upload_file(
     State(s): State<AppState>,
     Path(name): Path<String>,
-    _auth: AdminAuth,
+    _auth: ManageLibrariesAuth,
     body: Body,
 ) -> AppResult<(StatusCode, Json<UploadedMediaFile>)> {
     let uploaded =
@@ -161,7 +161,7 @@ pub async fn upload_file(
 pub async fn upload_to_library(
     State(s): State<AppState>,
     Path((id, name)): Path<(Uuid, String)>,
-    _auth: AdminAuth,
+    _auth: ManageLibrariesAuth,
     body: Body,
 ) -> AppResult<(StatusCode, Json<LibraryUploadResult>)> {
     repository::get_library(&s.pool, id).await?;
@@ -236,7 +236,7 @@ pub async fn scan_library_inner(
 pub async fn delete_file(
     State(s): State<AppState>,
     Path(name): Path<String>,
-    _auth: AdminAuth,
+    _auth: ManageLibrariesAuth,
 ) -> AppResult<StatusCode> {
     let path = storage::input_path(&s.config.input_dir, &name).await?;
     tokio::fs::remove_file(path).await?;
@@ -247,7 +247,7 @@ pub async fn delete_file(
 pub async fn scan(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
-    _auth: AdminAuth,
+    _auth: ManageLibrariesAuth,
     payload: Option<Json<LibraryScanRequest>>,
 ) -> AppResult<Json<LibraryScanResult>> {
     let req = payload.map(|Json(req)| req).unwrap_or_default();

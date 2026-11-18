@@ -75,6 +75,36 @@ permission_auth!(
     Permission::ManageAccounts
 );
 permission_auth!(
+    /// Peut gérer les clés d'API.
+    ManageApiKeysAuth,
+    Permission::ManageApiKeys
+);
+permission_auth!(
+    /// Peut gérer les tâches (création, relance, suppression).
+    ManageJobsAuth,
+    Permission::ManageJobs
+);
+permission_auth!(
+    /// Peut gérer les workers.
+    ManageWorkersAuth,
+    Permission::ManageWorkers
+);
+permission_auth!(
+    /// Peut gérer les bibliothèques et déposer/supprimer des médias.
+    ManageLibrariesAuth,
+    Permission::ManageLibraries
+);
+permission_auth!(
+    /// Peut créer, modifier, restaurer et supprimer des flux.
+    ManageFlowsAuth,
+    Permission::ManageFlows
+);
+permission_auth!(
+    /// Peut gérer les dépôts, réglages de plugins, outils et packs.
+    ManagePluginsAuth,
+    Permission::ManagePlugins
+);
+permission_auth!(
     /// Peut consulter la vue d'ensemble et la configuration système.
     ViewOverviewAuth,
     Permission::ViewOverview

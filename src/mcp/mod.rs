@@ -8,10 +8,10 @@ mod tools_system;
 
 use crate::{
     api::{
-        AdminAuth, AppState, OPENAPI_SPEC, ViewFlowsAuth, ViewLibrariesAuth, ViewPluginsAuth,
-        flows, libraries, plugins,
+        AnyAuth, AppState, OPENAPI_SPEC, ViewFlowsAuth, ViewLibrariesAuth, ViewPluginsAuth, flows,
+        libraries, plugins,
     },
-    auth::{self, Principal},
+    auth::Principal,
     error::AppError,
 };
 use axum::{
@@ -20,7 +20,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use flux_shared::Permission;
+use flux_shared::{Permission, Role};
 use protocol::{
     ERR_INVALID_PARAMS, ERR_INVALID_REQUEST, ERR_METHOD_NOT_FOUND, JsonRpcRequest, JsonRpcResponse,
     McpResource, McpTool, McpToolResult, PROTOCOL_VERSION, SERVER_NAME,
@@ -28,13 +28,60 @@ use protocol::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-fn all_tools() -> Vec<McpTool> {
+fn tool_required_permissions(name: &str) -> &'static [Permission] {
+    match name {
+        "list_blocks" | "list_flows" | "get_flow" | "list_flow_versions" | "get_flow_version"
+        | "validate_flow" => &[Permission::ViewFlows],
+        "save_flow" | "delete_flow" | "restore_flow_version" => &[Permission::ManageFlows],
+        "list_repositories" | "get_repository" | "list_catalog" | "get_plugin" | "list_tools"
+        | "get_tool" | "get_pack" | "list_local_catalog" => &[Permission::ViewPlugins],
+        "add_repository"
+        | "sync_repository"
+        | "toggle_repository"
+        | "delete_repository"
+        | "get_plugin_settings"
+        | "save_plugin_settings"
+        | "install_tool"
+        | "install_pack"
+        | "upload_local_resource"
+        | "upsert_local_script"
+        | "create_local_block_template"
+        | "create_local_flow_template"
+        | "create_local_pack"
+        | "delete_local_item" => &[Permission::ManagePlugins],
+        "list_libraries" | "get_library" | "list_input_files" => &[Permission::ViewLibraries],
+        "create_library" | "update_library" | "delete_library" | "delete_input_file" => {
+            &[Permission::ManageLibraries]
+        }
+        "scan_library" => &[Permission::ManageLibraries, Permission::ManageJobs],
+        "list_jobs" | "get_job" | "get_job_steps" => &[Permission::ViewJobs],
+        "create_job" | "retry_job" | "delete_job" | "delete_job_output" => {
+            &[Permission::ManageJobs]
+        }
+        "get_system_status" | "update_system_settings" | "run_diagnostics" => {
+            &[Permission::ManageSettings]
+        }
+        "get_instance_status" | "get_system_hardware" => &[Permission::ViewOverview],
+        "list_workers" => &[Permission::ViewWorkers],
+        "delete_worker" => &[Permission::ManageWorkers],
+        _ => &[Permission::ManageSettings],
+    }
+}
+
+fn allowed_tools(principal: &Principal) -> Vec<McpTool> {
     let mut tools = Vec::new();
     tools.extend(tools_flows::tools());
     tools.extend(tools_plugins::tools());
     tools.extend(tools_libraries::tools());
     tools.extend(tools_system::tools());
     tools
+        .into_iter()
+        .filter(|tool| {
+            tool_required_permissions(tool.name)
+                .iter()
+                .all(|&perm| principal.allows(perm))
+        })
+        .collect()
 }
 
 fn all_resources() -> Vec<McpResource> {
@@ -134,10 +181,12 @@ async fn read_resource(
 /// Point d'entrée Streamable HTTP (`POST /mcp`).
 pub async fn handle_post(
     State(state): State<AppState>,
-    AdminAuth(principal): AdminAuth,
+    AnyAuth(principal): AnyAuth,
     Json(req): Json<JsonRpcRequest>,
 ) -> Result<Response, AppError> {
-    auth::require(&principal, Permission::ManageSettings)?;
+    if !matches!(principal.role, Role::Admin | Role::Mcp) {
+        return Err(AppError::Forbidden);
+    }
     if req.jsonrpc != "2.0" {
         let id = req.id.unwrap_or(Value::Null);
         return Ok(Json(JsonRpcResponse::err(
@@ -169,7 +218,7 @@ pub async fn handle_post(
             }),
         ),
         "ping" => JsonRpcResponse::ok(id, json!({})),
-        "tools/list" => JsonRpcResponse::ok(id, json!({ "tools": all_tools() })),
+        "tools/list" => JsonRpcResponse::ok(id, json!({ "tools": allowed_tools(&principal) })),
         "tools/call" => {
             let params_val = req.params.unwrap_or(Value::Null);
             match serde_json::from_value::<ToolCallParams>(params_val) {
@@ -179,7 +228,17 @@ pub async fn handle_post(
                     } else {
                         params.arguments
                     };
-                    match call_tool(&params.name, args, &state, &principal).await {
+                    let missing_perm = tool_required_permissions(&params.name)
+                        .iter()
+                        .any(|&perm| !principal.allows(perm));
+                    let outcome = if missing_perm {
+                        Some(McpToolResult::error(
+                            "Forbidden: portée de clé insuffisante pour cet outil",
+                        ))
+                    } else {
+                        call_tool(&params.name, args, &state, &principal).await
+                    };
+                    match outcome {
                         Some(result) => {
                             tracing::info!(
                                 principal_id = %principal.id,
@@ -354,6 +413,44 @@ mod tests {
         assert!(tools.iter().any(|t| t["name"] == "run_diagnostics"));
         assert!(tools.iter().any(|t| t["name"] == "get_instance_status"));
         assert!(tools.iter().any(|t| t["name"] == "delete_worker"));
+
+        // Une clé MCP avec portée restreinte aux flux ne voit que les outils de flux et ne peut pas créer de bibliothèque.
+        let scoped_key = api_keys::issue_with_scopes(
+            &state.pool,
+            "flows-only",
+            Role::Mcp,
+            Some(&[Permission::ViewFlows, Permission::ManageFlows]),
+        )
+        .await?;
+        let (st_scoped_list, scoped_list) = mcp_call(
+            &app,
+            &scoped_key.raw,
+            json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/list" }),
+        )
+        .await?;
+        assert_eq!(st_scoped_list, StatusCode::OK);
+        let scoped_tools = scoped_list["result"]["tools"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("missing scoped tools array"))?;
+        assert!(scoped_tools.iter().any(|t| t["name"] == "save_flow"));
+        assert!(!scoped_tools.iter().any(|t| t["name"] == "create_library"));
+
+        let (st_forbidden, forbidden_call) = mcp_call(
+            &app,
+            &scoped_key.raw,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {
+                    "name": "create_library",
+                    "arguments": { "name": "Interdit", "workers": [] }
+                }
+            }),
+        )
+        .await?;
+        assert_eq!(st_forbidden, StatusCode::OK);
+        assert_eq!(forbidden_call["result"]["isError"], true);
         Ok(())
     }
 

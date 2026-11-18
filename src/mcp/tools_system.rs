@@ -3,16 +3,18 @@
 use super::protocol::{McpTool, McpToolResult, empty_schema, obj_schema, parse_args};
 use crate::{
     api::{
-        AdminAuth, AppState, ViewOverviewAuth, ViewWorkersAuth, diagnostics, installation, jobs,
-        system,
+        AdminAuth, AppState, ManageWorkersAuth, ViewOverviewAuth, ViewWorkersAuth, diagnostics,
+        installation, jobs, system,
     },
-    auth::Principal,
+    auth::{self, Principal},
 };
 use axum::{
     extract::{Json, Path, State},
     http::HeaderMap,
 };
-use flux_shared::{diagnostics::DiagnosticsRequest, system::UpdateSystemSettingsRequest};
+use flux_shared::{
+    Permission, diagnostics::DiagnosticsRequest, system::UpdateSystemSettingsRequest,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -88,9 +90,14 @@ pub async fn call(
         "get_system_status" => system::status(State(state.clone()), AdminAuth(principal.clone()))
             .await
             .map(|Json(v)| McpToolResult::json(&v)),
-        "get_instance_status" => installation::status(State(state.clone()))
-            .await
-            .map(|Json(v)| McpToolResult::json(&v)),
+        "get_instance_status" => {
+            if let Err(err) = auth::require(principal, Permission::ViewOverview) {
+                return Some(McpToolResult::error(format!("{err:?}")));
+            }
+            installation::status(State(state.clone()))
+                .await
+                .map(|Json(v)| McpToolResult::json(&v))
+        }
         "update_system_settings" => {
             let req: UpdateSystemSettingsRequest = match parse_args(args) {
                 Ok(req) => req,
@@ -133,9 +140,13 @@ pub async fn call(
                 Ok(parsed) => parsed,
                 Err(msg) => return Some(McpToolResult::error(msg)),
             };
-            jobs::delete_worker(State(state.clone()), Path(id), AdminAuth(principal.clone()))
-                .await
-                .map(|_| McpToolResult::json(&json!({ "id": id, "deleted": true })))
+            jobs::delete_worker(
+                State(state.clone()),
+                Path(id),
+                ManageWorkersAuth(principal.clone()),
+            )
+            .await
+            .map(|_| McpToolResult::json(&json!({ "id": id, "deleted": true })))
         }
         _ => return None,
     };

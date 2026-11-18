@@ -1,6 +1,6 @@
 //! Gestionnaires HTTP pour les plugins, le catalogue et les outils distribués.
 
-use super::{AdminAuth, AppState, ViewPluginsAuth};
+use super::{AppState, ManagePluginsAuth, ViewPluginsAuth};
 use crate::{
     error::{AppError, AppResult},
     plugins::{self, CatalogEntry, ToolStatusSummary},
@@ -54,7 +54,7 @@ pub async fn tools(
 pub async fn tool_distribution(
     State(s): State<AppState>,
     Path(id): Path<String>,
-    _auth: AdminAuth,
+    _auth: ManagePluginsAuth,
 ) -> AppResult<Json<Value>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     Ok(Json(plugins::read_distribution(&roots, &id)?))
@@ -75,7 +75,7 @@ pub async fn worker_tool_distribution(
 pub async fn install_tool(
     State(s): State<AppState>,
     Path(id): Path<String>,
-    _auth: AdminAuth,
+    _auth: ManagePluginsAuth,
 ) -> AppResult<Json<Value>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     let entry = plugins::list_catalog(&roots)
@@ -118,7 +118,7 @@ fn keys_of(value: &Value) -> Vec<String> {
 pub async fn get_settings(
     State(s): State<AppState>,
     Path(id): Path<String>,
-    _auth: AdminAuth,
+    _auth: ManagePluginsAuth,
 ) -> AppResult<Json<plugins::PluginSettingsView>> {
     let secrets = SecretBox::open(&s.config.config_dir)?;
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
@@ -156,7 +156,7 @@ pub async fn get_settings(
 pub async fn save_settings(
     State(s): State<AppState>,
     Path(id): Path<String>,
-    _auth: AdminAuth,
+    _auth: ManagePluginsAuth,
     Json(payload): Json<Value>,
 ) -> AppResult<Json<Value>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
@@ -216,7 +216,7 @@ pub async fn repository_detail(
 /// Ajoute un nouveau dépôt tiers de plugins ou flux.
 pub async fn add_repository(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ManagePluginsAuth,
     Json(payload): Json<plugins::CreateRepositoryRequest>,
 ) -> AppResult<Json<plugins::PluginRepository>> {
     let url = payload.index_url.trim();
@@ -246,7 +246,7 @@ pub async fn add_repository(
 pub async fn toggle_repository(
     State(s): State<AppState>,
     Path(id): Path<String>,
-    _auth: AdminAuth,
+    _auth: ManagePluginsAuth,
 ) -> AppResult<Json<Value>> {
     let new_state = crate::repository::toggle_plugin_repository(&s.pool, &id).await?;
     s.catalog_cache.invalidate().await;
@@ -260,7 +260,7 @@ pub async fn toggle_repository(
 pub async fn delete_repository(
     State(s): State<AppState>,
     Path(id): Path<String>,
-    _auth: AdminAuth,
+    _auth: ManagePluginsAuth,
 ) -> AppResult<Json<Value>> {
     crate::repository::delete_plugin_repository(&s.pool, &id).await?;
     s.catalog_cache.invalidate().await;
@@ -274,7 +274,7 @@ pub async fn delete_repository(
 pub async fn sync_repository(
     State(s): State<AppState>,
     Path(id): Path<String>,
-    _auth: AdminAuth,
+    _auth: ManagePluginsAuth,
 ) -> AppResult<Json<Value>> {
     let repo = crate::repository::get_plugin_repository(&s.pool, &id).await?;
     let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
@@ -347,7 +347,7 @@ pub async fn tool_detail(
 pub async fn install_pack(
     State(s): State<AppState>,
     Path(id): Path<String>,
-    _auth: AdminAuth,
+    _auth: ManagePluginsAuth,
 ) -> AppResult<Json<plugins::PackInstallResult>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);

@@ -89,7 +89,7 @@ pub fn error_label(code: JobErrorCode) -> &'static str {
         JobErrorCode::SourceIntegrity => "Source altérée pendant le transfert",
         JobErrorCode::TransferFailed => "Transfert interrompu",
         JobErrorCode::ProbeUnavailable => "Sonde requise absente sur le worker",
-        JobErrorCode::LeaseExpired => "Worker perdu (bail expiré)",
+        JobErrorCode::LeaseExpired => "Serveur déconnecté en cours de traitement",
         JobErrorCode::MissingSourceFingerprint => "Empreinte de la source manquante",
     }
 }

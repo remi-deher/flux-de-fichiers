@@ -20,7 +20,7 @@ use flux_shared::{
     mcp::McpAuditOutcome,
 };
 use provider::{ConversationEntry, ModelTurnResponse, ProviderEndpoint};
-use serde_json::{Value, json};
+use serde_json::json;
 use std::time::Instant;
 
 const MAX_TOOL_RESULT_CHARS: usize = 12_000;
@@ -376,6 +376,7 @@ mod tests {
         Role,
         ai::{AiChatMessage, AiProvider},
     };
+    use serde_json::Value;
     use sqlx::sqlite::SqlitePoolOptions;
     use std::sync::{
         Arc,

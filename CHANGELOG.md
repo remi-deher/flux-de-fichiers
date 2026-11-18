@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.40.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.39.0...v0.40.0) (2026-11-18)
+
+
+### Features
+
+* **ui:** refonte du drawer style FileFlows, fiche tâche à onglets et registre des flows ([14cb940](https://github.com/remi-deher/flux-de-fichiers/commit/14cb940149d21ee9ba503aff963758f4eb088c71))
+* **ui:** refonte du drawer style FileFlows, fiche tâche à onglets et registre des flows ([d48ea67](https://github.com/remi-deher/flux-de-fichiers/commit/d48ea671baa24e50723b774338b26c1da0713c66))
+
+
+### Bug Fixes
+
+* **ui:** supprime un emprunt superflu pour clippy ([72503df](https://github.com/remi-deher/flux-de-fichiers/commit/72503dfe53b50fe2c51306f13870411a9d27cb5f))
+
 ## [0.39.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.38.1...v0.39.0) (2026-11-18)
 
 

@@ -149,10 +149,14 @@ pub fn tools() -> Vec<McpTool> {
                     "id": { "type": "string" },
                     "name": { "type": "string" },
                     "description": { "type": "string" },
-                    "interpreter": { "type": "string" },
-                    "content": { "type": "string" }
+                    "interpreter": {
+                        "type": "string",
+                        "enum": ["sh", "bash", "python3", "node", "deno", "bun", "pwsh"]
+                    },
+                    "code": { "type": "string", "description": "Code source complet du script." },
+                    "filename": { "type": "string" }
                 }),
-                &["name", "interpreter", "content"],
+                &["name", "interpreter", "code"],
             ),
             true,
         ),
@@ -501,4 +505,43 @@ pub async fn call(
         _ => return None,
     };
     Some(result.unwrap_or_else(|err| McpToolResult::error(format!("{err:?}"))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flux_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
+
+    #[test]
+    fn the_script_tool_advertises_the_fields_its_handler_requires() -> anyhow::Result<()> {
+        let tool = tools()
+            .into_iter()
+            .find(|tool| tool.name == "upsert_local_script")
+            .ok_or_else(|| anyhow::anyhow!("outil absent"))?;
+        let required: Vec<&str> = tool.input_schema["required"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        assert_eq!(required, ["name", "interpreter", "code"]);
+        // Un modèle qui suit le schéma produit une requête que le gestionnaire accepte.
+        let request: UpsertLocalScriptRequest = parse_args(json!({
+            "name": "Nettoyage",
+            "interpreter": "python3",
+            "code": "print('ok')"
+        }))
+        .map_err(|message| anyhow::anyhow!(message))?;
+        assert_eq!(request.interpreter, ScriptInterpreter::Python3);
+        for interpreter in ScriptInterpreter::ALL {
+            let advertised = tool.input_schema["properties"]["interpreter"]["enum"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .any(|name| name == interpreter.executable());
+            assert!(advertised, "{interpreter:?} absent du schéma");
+        }
+        Ok(())
+    }
 }

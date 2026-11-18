@@ -9,7 +9,10 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::{Duration, Instant},
 };
-use tokio::{sync::Notify, task::AbortHandle};
+use tokio::{
+    sync::{Notify, oneshot},
+    task::AbortHandle,
+};
 
 /// Durée de conservation d'un run terminé : le temps de relire sa fin après une coupure réseau.
 const FINISHED_RUN_TTL: Duration = Duration::from_secs(600);
@@ -30,6 +33,8 @@ pub struct Run {
     finished_at: Mutex<Option<Instant>>,
     changed: Notify,
     abort: Mutex<Option<AbortHandle>>,
+    /// Actions d'écriture en attente de la réponse de l'utilisateur.
+    decisions: Mutex<HashMap<String, oneshot::Sender<bool>>>,
 }
 
 impl Run {
@@ -41,6 +46,7 @@ impl Run {
             finished_at: Mutex::new(None),
             changed: Notify::new(),
             abort: Mutex::new(None),
+            decisions: Mutex::new(HashMap::new()),
         }
     }
 
@@ -84,6 +90,23 @@ impl Run {
             }
             notified.await;
         }
+    }
+
+    /// Suspend le run jusqu'à la réponse de l'utilisateur à `action_id` : `true` pour autoriser.
+    /// Sans réponse dans `timeout`, ou si le run est interrompu, l'action est refusée.
+    pub async fn await_decision(&self, action_id: &str, timeout: Duration) -> bool {
+        let (sender, receiver) = oneshot::channel();
+        lock(&self.decisions).insert(action_id.to_owned(), sender);
+        let approved = matches!(tokio::time::timeout(timeout, receiver).await, Ok(Ok(true)));
+        lock(&self.decisions).remove(action_id);
+        approved
+    }
+
+    /// Transmet la réponse de l'utilisateur ; `false` si l'action n'attend (plus) de réponse.
+    pub fn resolve(&self, action_id: &str, approve: bool) -> bool {
+        lock(&self.decisions)
+            .remove(action_id)
+            .is_some_and(|sender| sender.send(approve).is_ok())
     }
 
     pub fn attach_abort(&self, handle: AbortHandle) {
@@ -205,6 +228,32 @@ mod tests {
         }
         assert!(runs.create("alice").is_none());
         assert!(runs.create("bob").is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_decision_resumes_the_waiting_run_and_silence_means_refusal() -> anyhow::Result<()> {
+        let runs = AiRuns::new();
+        let (_, run) = open(&runs, "alice")?;
+        let waiting = {
+            let run = Arc::clone(&run);
+            tokio::spawn(async move { run.await_decision("a1", Duration::from_secs(5)).await })
+        };
+        while !run.resolve("a1", true) {
+            tokio::task::yield_now().await;
+        }
+        assert!(waiting.await?);
+        // Une action déjà résolue, ou inconnue, n'attend plus rien.
+        assert!(!run.resolve("a1", true));
+        assert!(!run.await_decision("a2", Duration::from_millis(20)).await);
+        let refused = {
+            let run = Arc::clone(&run);
+            tokio::spawn(async move { run.await_decision("a3", Duration::from_secs(5)).await })
+        };
+        while !run.resolve("a3", false) {
+            tokio::task::yield_now().await;
+        }
+        assert!(!refused.await?);
         Ok(())
     }
 

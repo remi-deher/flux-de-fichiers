@@ -2,6 +2,7 @@
 //! dans un tiroir, relance manuelle (ADR 0012, 0014).
 
 mod detail;
+mod diagnosis;
 mod live;
 mod logs;
 pub mod model;
@@ -15,6 +16,7 @@ use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, MetricTone, StatItem, StatStrip, Toasts};
 use chrono::Utc;
 use detail::JobDetail;
+use diagnosis::AiDiagnosisCard;
 use flux_shared::flows::FlowRecord;
 use flux_shared::jobs::{Job, JobBatchAction, JobBatchRequest, JobBatchResult};
 use flux_shared::libraries::Library;
@@ -55,6 +57,9 @@ pub fn JobsPage(me: Me) -> impl IntoView {
     let can_logs =
         me.instance_kind == InstanceKind::Central && me.allows(Permission::ManageApiKeys);
     let active_tab = RwSignal::new(ActivityTab::Tasks);
+    // Le diagnostic IA n'existe que sur le central ; seul un administrateur le recalcule.
+    let is_central = me.instance_kind == InstanceKind::Central;
+    let can_refresh_diagnosis = is_central && me.allows(Permission::ManageSettings);
     view! {
         {can_logs.then(|| view! {
             <nav class="page-subnav" role="tablist" aria-label="Vues de l'activité">
@@ -76,7 +81,10 @@ pub fn JobsPage(me: Me) -> impl IntoView {
             </nav>
         })}
         {move || match active_tab.get() {
-            ActivityTab::Tasks => view! { <JobsTasks me=me.clone() /> }.into_any(),
+            ActivityTab::Tasks => view! {
+                {is_central.then(|| view! { <AiDiagnosisCard can_refresh=can_refresh_diagnosis /> })}
+                <JobsTasks me=me.clone() />
+            }.into_any(),
             ActivityTab::Logs => view! { <LogsPanel /> }.into_any(),
         }}
     }

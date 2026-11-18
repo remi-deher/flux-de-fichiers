@@ -275,6 +275,9 @@ pub struct AiChatRequest {
     /// Écran et objet ouverts ; le serveur en déduit quoi lire par ses outils.
     #[serde(default)]
     pub context: Option<AiContext>,
+    /// Conversation de l'historique à poursuivre ; absente pour en commencer une (runs seulement).
+    #[serde(default)]
+    pub conversation_id: Option<String>,
 }
 
 /// Réponse complète de l'assistant après résolution éventuelle des appels d'outils.
@@ -287,6 +290,103 @@ pub struct AiChatResponse {
     #[serde(default)]
     pub tool_calls: Vec<AiToolCallTrace>,
     pub rounds_used: u8,
+    /// Conversation de l'historique où l'échange a été enregistré (runs seulement).
+    #[serde(default)]
+    pub conversation_id: Option<String>,
+}
+
+/// Conversation de l'historique, sans ses messages.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConversationSummary {
+    pub id: String,
+    pub title: String,
+    /// Dernier échange, `AAAA-MM-JJ HH:MM:SS` (UTC).
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConversationList {
+    pub conversations: Vec<AiConversationSummary>,
+}
+
+/// Conversation de l'historique avec ses messages.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConversation {
+    pub id: String,
+    pub title: String,
+    pub messages: Vec<AiChatMessage>,
+}
+
+/// Plafond accepté pour un réglage de quota quotidien.
+pub const MAX_AI_DAILY_QUOTA: u32 = 100_000;
+
+/// Plafonds quotidiens de questions posées à l'assistant ; `0` laisse la limite ouverte.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiQuotaSettings {
+    /// Par compte et par jour (UTC).
+    #[serde(default)]
+    pub per_user_daily: u32,
+    /// Pour toute l'installation et par jour (UTC).
+    #[serde(default)]
+    pub global_daily: u32,
+}
+
+/// Dernière erreur d'un appel au fournisseur.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiHealthError {
+    /// RFC 3339, UTC.
+    pub at: String,
+    pub message: String,
+}
+
+/// État du fournisseur et consommation du jour (`GET /api/v1/ai/health`, depuis le dernier démarrage).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiHealth {
+    /// RFC 3339, UTC.
+    #[serde(default)]
+    pub last_success_at: Option<String>,
+    #[serde(default)]
+    pub last_latency_ms: Option<u64>,
+    #[serde(default)]
+    pub last_error: Option<AiHealthError>,
+    pub quota: AiQuotaSettings,
+    /// Questions posées aujourd'hui par toute l'installation.
+    pub requests_today: u32,
+    /// Questions posées aujourd'hui par le compte qui consulte.
+    pub your_requests_today: u32,
+}
+
+/// Synthèse des échecs récents de tâches, produite par l'assistant (diagnostic proactif).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiDiagnosisSummary {
+    pub text: String,
+    /// RFC 3339, UTC.
+    pub generated_at: String,
+    /// Tâches en échec sur la fenêtre analysée (24 h).
+    pub failures: u32,
+}
+
+/// État du diagnostic proactif (`GET /api/v1/ai/diagnosis`) ; la synthèse est gardée en mémoire.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiDiagnosis {
+    pub enabled: bool,
+    #[serde(default)]
+    pub summary: Option<AiDiagnosisSummary>,
+}
+
+/// Active ou coupe le diagnostic proactif (`PUT /api/v1/ai/diagnosis`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiDiagnosisSettings {
+    pub enabled: bool,
 }
 
 /// Objet de l'interface sur lequel porte la conversation.
@@ -337,6 +437,13 @@ pub struct AiRunStarted {
     pub run_id: String,
 }
 
+/// Réponse de l'utilisateur à une demande de confirmation (`POST /api/v1/ai/runs/{id}/actions/{action}`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiActionDecision {
+    pub approve: bool,
+}
+
 /// Évènement publié par `GET /api/v1/ai/runs/{id}/events` (SSE, un évènement par message).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -345,10 +452,22 @@ pub struct AiRunStarted {
     rename_all_fields = "camelCase"
 )]
 pub enum AiRunEvent {
+    /// Morceau de la réponse en cours d'écriture ; les morceaux d'un tour qui finit par un appel
+    /// d'outil sont à oublier, la réponse finale est celle de `Done`.
+    Delta { text: String },
     /// Un outil va être exécuté.
     ToolStarted { tool_name: String },
     /// Un outil a fini (succès, erreur ou refus).
     ToolFinished { trace: AiToolCallTrace },
+    /// Une action d'écriture attend la réponse de l'utilisateur ; le run est suspendu.
+    Confirmation {
+        action_id: String,
+        tool_name: String,
+        /// Arguments de l'outil, secrets masqués.
+        summary: String,
+    },
+    /// L'action a été autorisée ou refusée (ou le délai est écoulé : refus).
+    ActionResolved { action_id: String, approved: bool },
     /// Réponse finale ; clôt le flux.
     Done { response: AiChatResponse },
     /// Échec de la conversation ; clôt le flux.

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.46.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.45.1...v0.46.0) (2026-11-18)
+
+
+### Features
+
+* **ai:** conversation en direct (runs SSE) et contexte automatique ([860a387](https://github.com/remi-deher/flux-de-fichiers/commit/860a38797110bc8c2803993bbab62bcafcc38827))
+* **ai:** suivre la conversation de l'assistant en direct et lui joindre l'écran ouvert ([9abbea3](https://github.com/remi-deher/flux-de-fichiers/commit/9abbea336e2753011a91d9d64b5b7eeac4f583da))
+
+
+### Bug Fixes
+
+* **ai:** lister les modèles ChatGPT avec une version de client Codex ([9a7e3ec](https://github.com/remi-deher/flux-de-fichiers/commit/9a7e3ecbb8640bcea4dcb7ac145e01bfaf5ef698))
+* **ai:** lister les modèles ChatGPT avec une version de client Codex et afficher la raison d'une liste vide ([89e35ba](https://github.com/remi-deher/flux-de-fichiers/commit/89e35bacfc4ca2722edd7fe4932149a12d96d3a0))
+
 ## [0.45.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.45.0...v0.45.1) (2026-11-18)
 
 

@@ -5,6 +5,7 @@ mod accounts;
 mod ai;
 mod ai_model;
 mod ai_oauth;
+mod ai_status;
 mod keys;
 mod mcp_audit;
 mod network;

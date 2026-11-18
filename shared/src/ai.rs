@@ -320,6 +320,48 @@ pub struct AiConversation {
     pub messages: Vec<AiChatMessage>,
 }
 
+/// Plafond accepté pour un réglage de quota quotidien.
+pub const MAX_AI_DAILY_QUOTA: u32 = 100_000;
+
+/// Plafonds quotidiens de questions posées à l'assistant ; `0` laisse la limite ouverte.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiQuotaSettings {
+    /// Par compte et par jour (UTC).
+    #[serde(default)]
+    pub per_user_daily: u32,
+    /// Pour toute l'installation et par jour (UTC).
+    #[serde(default)]
+    pub global_daily: u32,
+}
+
+/// Dernière erreur d'un appel au fournisseur.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiHealthError {
+    /// RFC 3339, UTC.
+    pub at: String,
+    pub message: String,
+}
+
+/// État du fournisseur et consommation du jour (`GET /api/v1/ai/health`, depuis le dernier démarrage).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiHealth {
+    /// RFC 3339, UTC.
+    #[serde(default)]
+    pub last_success_at: Option<String>,
+    #[serde(default)]
+    pub last_latency_ms: Option<u64>,
+    #[serde(default)]
+    pub last_error: Option<AiHealthError>,
+    pub quota: AiQuotaSettings,
+    /// Questions posées aujourd'hui par toute l'installation.
+    pub requests_today: u32,
+    /// Questions posées aujourd'hui par le compte qui consulte.
+    pub your_requests_today: u32,
+}
+
 /// Objet de l'interface sur lequel porte la conversation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

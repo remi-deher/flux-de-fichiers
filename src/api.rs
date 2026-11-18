@@ -116,6 +116,8 @@ pub struct AppState {
     pub browse_broker: crate::filesystem_browser::RemoteBrowseBroker,
     pub pending_worker_setup: Arc<tokio::sync::Mutex<Option<installation::PendingWorkerSetup>>>,
     pub ai_runs: crate::ai::run::AiRuns,
+    pub ai_health: crate::ai::health::AiHealthTracker,
+    pub ai_models: crate::ai::health::ModelCache,
 }
 
 impl AppState {
@@ -134,6 +136,8 @@ impl AppState {
             browse_broker: crate::filesystem_browser::RemoteBrowseBroker::new(),
             pending_worker_setup: Arc::new(tokio::sync::Mutex::new(None)),
             ai_runs: crate::ai::run::AiRuns::new(),
+            ai_health: crate::ai::health::AiHealthTracker::new(),
+            ai_models: crate::ai::health::ModelCache::new(),
         }
     }
 
@@ -404,6 +408,11 @@ fn json_routes() -> Router<AppState> {
             get(crate::ai::get_settings).put(crate::ai::update_settings),
         )
         .route("/api/v1/ai/test", post(crate::ai::test_connection))
+        .route("/api/v1/ai/health", get(crate::ai::get_health))
+        .route(
+            "/api/v1/ai/quotas",
+            get(crate::ai::get_quotas).put(crate::ai::update_quotas),
+        )
         .route("/api/v1/ai/oauth/start", post(crate::ai::oauth_start))
         .route("/api/v1/ai/oauth/poll", post(crate::ai::oauth_poll))
         .route(

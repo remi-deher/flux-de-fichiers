@@ -153,9 +153,15 @@ est devant l'écran) ; le MCP externe garde « pas de file d'approbation » (dé
 6. **Diagnostic proactif.** Réglage **désactivé par défaut** : résumé des échecs récents, calculé en
    tâche de fond au plus une fois par heure et seulement si de nouveaux échecs existent, affiché
    dans Activité. Aucun appel au fournisseur sans ce réglage.
-7. **Quotas, cache, état.** Quota quotidien de requêtes par compte et global (réglable), catalogue
-   de modèles mis en cache 10 min, et état du fournisseur (dernier succès, dernière erreur,
-   latence, consommation du quota) exposé dans Paramètres > Assistant IA.
+7. **Quotas, cache, état.** Une « question » est une conversation lancée (run ou `/ai/chat`) ;
+   elle est comptée par jour (UTC) et par compte dans `ai_usage` (migration 0026, purgée après
+   14 jours). Deux plafonds réglables par un administrateur, `GET/PUT /api/v1/ai/quotas` : par
+   compte et global, `0` laissant la limite ouverte (réglage par défaut) ; au-delà, `429`. Le
+   premier modèle choisi automatiquement est gardé 10 min par fournisseur et compte (vidé quand les
+   réglages ou la connexion changent, ou après un test réussi). `GET /api/v1/ai/health` (admin)
+   donne le dernier succès (date, latence), la dernière erreur et la consommation du jour, **depuis
+   le démarrage du central** (en mémoire). Paramètres > Assistant IA affiche cet état et règle les
+   quotas.
 
 ## Questions ouvertes
 

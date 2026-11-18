@@ -1,11 +1,13 @@
 //! Assistant IA intégré au central : orchestration LLM multi-fournisseurs branchée sur les outils MCP (ADR 0015).
 
+pub mod health;
 pub mod history;
 pub mod oauth;
 mod preview;
 mod provider;
 pub mod run;
 pub mod settings;
+pub mod usage;
 
 use crate::net_policy::OutboundPolicy;
 use crate::secrets::SecretBox;
@@ -26,9 +28,9 @@ use flux_shared::{
     Permission,
     ai::{
         AiActionDecision, AiChatRequest, AiChatResponse, AiChatRole, AiClientStatus, AiContext,
-        AiConversation, AiConversationList, AiOauthDeviceCode, AiOauthPollResponse, AiProvider,
-        AiRunEvent, AiRunStarted, AiSettingsView, AiTestRequest, AiTestResponse, AiToolCallTrace,
-        MAX_CHAT_MESSAGES, UpdateAiSettingsRequest,
+        AiConversation, AiConversationList, AiHealth, AiOauthDeviceCode, AiOauthPollResponse,
+        AiProvider, AiQuotaSettings, AiRunEvent, AiRunStarted, AiSettingsView, AiTestRequest,
+        AiTestResponse, AiToolCallTrace, MAX_CHAT_MESSAGES, UpdateAiSettingsRequest,
     },
     mcp::McpAuditOutcome,
 };
@@ -157,25 +159,39 @@ async fn resolve_endpoint(
     })
 }
 
-/// Premier modèle proposé au compte, quand aucun modèle n'est choisi (comme Codex CLI).
+/// Premier modèle proposé au compte, quand aucun modèle n'est choisi (comme Codex CLI) ;
+/// gardé quelques minutes pour ne pas lire `/models` à chaque question.
 async fn first_available_model(
+    state: &AppState,
     endpoint: &ProviderEndpoint,
     policy: OutboundPolicy,
 ) -> AppResult<String> {
+    let key = format!(
+        "{}|{}|{}",
+        endpoint.provider,
+        endpoint.base_url,
+        endpoint.account_id.as_deref().unwrap_or_default()
+    );
+    if let Some(model) = state.ai_models.get(&key) {
+        return Ok(model);
+    }
     let models = provider::list_chatgpt_models(endpoint, policy)
         .await
         .map_err(|err| {
             tracing::warn!(provider = %endpoint.provider, error = %err, "liste des modèles indisponible");
+            state.ai_health.record_failure(&err);
             AppError::Internal
         })?;
-    models
+    let first = models
         .into_iter()
         .next()
         .map(|model| model.id)
         .ok_or_else(|| {
             tracing::warn!(provider = %endpoint.provider, "aucun modèle proposé à ce compte");
             AppError::Internal
-        })
+        })?;
+    state.ai_models.put(&key, &first);
+    Ok(first)
 }
 
 async fn integration_policy(state: &AppState) -> OutboundPolicy {
@@ -201,9 +217,9 @@ pub async fn oauth_poll(
     _auth: AdminAuth,
 ) -> AppResult<Json<AiOauthPollResponse>> {
     let policy = integration_policy(&state).await;
-    Ok(Json(
-        oauth::poll(&state.pool, &state.config, oauth::OAUTH_ISSUER, policy).await?,
-    ))
+    let polled = oauth::poll(&state.pool, &state.config, oauth::OAUTH_ISSUER, policy).await?;
+    state.ai_models.clear();
+    Ok(Json(polled))
 }
 
 /// Oublie la connexion OAuth enregistrée (`DELETE /api/v1/ai/oauth`).
@@ -212,6 +228,7 @@ pub async fn oauth_disconnect(
     _auth: AdminAuth,
 ) -> AppResult<StatusCode> {
     oauth::disconnect(&state.pool, &state.config).await?;
+    state.ai_models.clear();
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -241,6 +258,7 @@ pub async fn update_settings(
     Json(request): Json<UpdateAiSettingsRequest>,
 ) -> AppResult<Json<AiSettingsView>> {
     let effective = settings::update(&state.pool, &state.config, request).await?;
+    state.ai_models.clear();
     Ok(Json(effective.as_view()))
 }
 
@@ -281,7 +299,77 @@ pub async fn test_connection(
         }
         Err(err) => return Err(err),
     };
-    Ok(Json(provider::test_connection(&endpoint, policy).await))
+    let tested = provider::test_connection(&endpoint, policy).await;
+    if tested.reachable {
+        // Un test réussi rafraîchit aussi le modèle choisi automatiquement.
+        state.ai_models.clear();
+    }
+    Ok(Json(tested))
+}
+
+/// État du fournisseur et consommation du jour (`GET /api/v1/ai/health`).
+pub async fn get_health(
+    State(state): State<AppState>,
+    AdminAuth(principal): AdminAuth,
+) -> AppResult<Json<AiHealth>> {
+    let (last_success, last_error) = state.ai_health.snapshot();
+    let (requests_today, your_requests_today) =
+        usage::requests_today(&state.pool, &principal.id).await?;
+    Ok(Json(AiHealth {
+        last_success_at: last_success.as_ref().map(|(at, _)| at.clone()),
+        last_latency_ms: last_success.map(|(_, latency)| latency),
+        last_error,
+        quota: usage::load_quotas(&state.pool).await,
+        requests_today,
+        your_requests_today,
+    }))
+}
+
+/// Plafonds quotidiens (`GET /api/v1/ai/quotas`).
+pub async fn get_quotas(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+) -> AppResult<Json<AiQuotaSettings>> {
+    Ok(Json(usage::load_quotas(&state.pool).await))
+}
+
+/// Règle les plafonds quotidiens (`PUT /api/v1/ai/quotas`) ; `0` laisse la limite ouverte.
+pub async fn update_quotas(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Json(request): Json<AiQuotaSettings>,
+) -> AppResult<Json<AiQuotaSettings>> {
+    usage::save_quotas(&state.pool, request).await.map(Json)
+}
+
+/// Vérifie que l'assistant est utilisable et compte la question dans les quotas du jour.
+async fn admit(state: &AppState, principal: &Principal) -> AppResult<()> {
+    let ai_cfg = settings::load_effective(&state.pool, &state.config).await;
+    if !ai_cfg.enabled || !ai_cfg.as_client_status().available {
+        return Err(AppError::Conflict);
+    }
+    let quotas = usage::load_quotas(&state.pool).await;
+    usage::record_question(&state.pool, &principal.id, quotas).await
+}
+
+/// Un tour de modèle, dont le résultat alimente l'état du fournisseur.
+async fn timed_turn(
+    state: &AppState,
+    endpoint: &ProviderEndpoint,
+    system_prompt: &str,
+    entries: &[ConversationEntry],
+    tools: &[McpTool],
+    policy: OutboundPolicy,
+) -> Result<ModelTurnResponse, String> {
+    let started = Instant::now();
+    let result = provider::complete_turn(endpoint, system_prompt, entries, tools, policy).await;
+    match &result {
+        Ok(_) => state
+            .ai_health
+            .record_success(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)),
+        Err(error) => state.ai_health.record_failure(error),
+    }
+    result
 }
 
 /// Rejette une conversation vide, trop longue ou qui ne se termine pas par une question.
@@ -312,6 +400,9 @@ fn failure_message(error: &AppError) -> &'static str {
         AppError::Internal => {
             "Le fournisseur IA a échoué : consultez Activité > Journal pour le détail."
         }
+        AppError::RateLimited => {
+            "Quota quotidien de questions atteint (réglable dans Paramètres > Assistant IA)."
+        }
         _ => "Requête refusée.",
     }
 }
@@ -324,6 +415,7 @@ pub async fn chat(
 ) -> AppResult<Json<AiChatResponse>> {
     auth::require(&principal, Permission::ViewOverview)?;
     validate_chat_request(&request)?;
+    admit(&state, &principal).await?;
     converse(&state, &principal, request, None).await.map(Json)
 }
 
@@ -353,7 +445,7 @@ async fn converse(
     )
     .await?;
     if ai_cfg.provider.has_automatic_model() && endpoint.model.trim().is_empty() {
-        endpoint.model = first_available_model(&endpoint, policy).await?;
+        endpoint.model = first_available_model(state, &endpoint, policy).await?;
     }
     let writes_allowed = ai_cfg.allow_write_tools && run.is_some();
     let tools = available_tools_for_assistant(principal, writes_allowed);
@@ -370,7 +462,7 @@ async fn converse(
 
     for _round in 0..ai_cfg.max_tool_rounds {
         rounds_used += 1;
-        let turn = provider::complete_turn(&endpoint, &system_prompt, &entries, &tools, policy)
+        let turn = timed_turn(state, &endpoint, &system_prompt, &entries, &tools, policy)
             .await
             .map_err(|err| {
                 tracing::warn!(provider = %ai_cfg.provider, error = %err, "échec d'appel LLM");
@@ -426,7 +518,7 @@ async fn converse(
 
     // Dernier tour sans outil pour obtenir une synthèse finale si le budget de tours est épuisé.
     rounds_used += 1;
-    let final_reply = provider::complete_turn(&endpoint, &system_prompt, &entries, &[], policy)
+    let final_reply = timed_turn(state, &endpoint, &system_prompt, &entries, &[], policy)
         .await
         .map_err(|err| {
             tracing::warn!(provider = %ai_cfg.provider, error = %err, "échec de synthèse finale LLM");
@@ -590,14 +682,17 @@ pub async fn start_run(
 ) -> AppResult<(StatusCode, Json<AiRunStarted>)> {
     auth::require(&principal, Permission::ViewOverview)?;
     validate_chat_request(&request)?;
-    let ai_cfg = settings::load_effective(&state.pool, &state.config).await;
-    if !ai_cfg.enabled || !ai_cfg.as_client_status().available {
-        return Err(AppError::Conflict);
-    }
     let (run_id, run) = state
         .ai_runs
         .create(&principal.id)
         .ok_or(AppError::RateLimited)?;
+    if let Err(error) = admit(&state, &principal).await {
+        // Un run refusé ne doit pas compter parmi les runs actifs du compte.
+        run.publish(AiRunEvent::Failed {
+            message: failure_message(&error).to_owned(),
+        });
+        return Err(error);
+    }
     let task_run = Arc::clone(&run);
     let question = request
         .messages
@@ -1527,23 +1622,186 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn quotas_stop_questions_and_health_reports_the_provider_state() -> anyhow::Result<()> {
+        let healthy = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let healthy_in_mock = Arc::clone(&healthy);
+        let mock_llm = axum::Router::new().route(
+            "/v1/chat/completions",
+            post(move || {
+                let ok = healthy_in_mock.load(Ordering::SeqCst);
+                async move {
+                    if ok {
+                        (
+                            StatusCode::OK,
+                            Json(json!({ "choices": [{ "message": {
+                                "role": "assistant", "content": "Bonjour"
+                            }}]})),
+                        )
+                    } else {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({ "error": "panne du fournisseur" })),
+                        )
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let mock_addr = listener.local_addr()?;
+        let server_task = tokio::spawn(async move {
+            let _ = axum::serve(listener, mock_llm).await;
+        });
+
+        let (app, state, _dir) = test_app().await?;
+        let admin = issue_key_header(&state.pool, "quota-admin", Role::Admin).await?;
+        let worker = issue_key_header(&state.pool, "quota-worker", Role::Worker).await?;
+        let call = |method: &'static str, uri: &'static str, auth: &str, body: Body| {
+            let request = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("authorization", auth)
+                .header("content-type", "application/json")
+                .body(body);
+            let app = app.clone();
+            async move { anyhow::Ok(app.oneshot(request?).await?) }
+        };
+        let settings = Body::from(serde_json::to_vec(&UpdateAiSettingsRequest {
+            enabled: true,
+            provider: AiProvider::OpenAiCompatible,
+            base_url: format!("http://{mock_addr}/v1"),
+            model: "mock-model".into(),
+            api_key: Some("sk-secret-value".into()),
+            allow_write_tools: false,
+            max_tool_rounds: 2,
+        })?);
+        assert_eq!(
+            call("PUT", "/api/v1/ai/settings", &admin, settings)
+                .await?
+                .status(),
+            StatusCode::OK
+        );
+        let question = || -> anyhow::Result<Body> {
+            Ok(Body::from(serde_json::to_vec(&AiChatRequest {
+                messages: vec![AiChatMessage {
+                    role: AiChatRole::User,
+                    content: "Bonjour".into(),
+                }],
+                context_hint: None,
+                context: None,
+                conversation_id: None,
+            })?))
+        };
+        let health = || async {
+            let res = call("GET", "/api/v1/ai/health", &admin, Body::empty()).await?;
+            anyhow::Ok(serde_json::from_slice::<AiHealth>(
+                &axum::body::to_bytes(res.into_body(), 16_384).await?,
+            )?)
+        };
+
+        // Les réglages de quota sont réservés aux administrateurs et bornés.
+        let quotas = |per_user: u32, global: u32| {
+            Body::from(
+                serde_json::to_vec(&AiQuotaSettings {
+                    per_user_daily: per_user,
+                    global_daily: global,
+                })
+                .unwrap_or_default(),
+            )
+        };
+        assert_eq!(
+            call("PUT", "/api/v1/ai/quotas", &worker, quotas(1, 0))
+                .await?
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            call(
+                "PUT",
+                "/api/v1/ai/quotas",
+                &admin,
+                quotas(usage::MAX_DAILY_QUOTA + 1, 0)
+            )
+            .await?
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            call("PUT", "/api/v1/ai/quotas", &admin, quotas(2, 0))
+                .await?
+                .status(),
+            StatusCode::OK
+        );
+
+        // Question 1 : le fournisseur est en panne, l'erreur est visible dans l'état.
+        let failed = call("POST", "/api/v1/ai/chat", &admin, question()?).await?;
+        assert_eq!(failed.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let after_failure = health().await?;
+        assert!(after_failure.last_success_at.is_none());
+        assert!(
+            after_failure
+                .last_error
+                .is_some_and(|e| e.message.contains("500"))
+        );
+        assert_eq!(after_failure.requests_today, 1);
+
+        // Question 2 : le fournisseur répond ; le succès et sa latence sont enregistrés.
+        healthy.store(true, Ordering::SeqCst);
+        let ok = call("POST", "/api/v1/ai/chat", &admin, question()?).await?;
+        assert_eq!(ok.status(), StatusCode::OK);
+        let after_success = health().await?;
+        assert!(after_success.last_success_at.is_some());
+        assert!(after_success.last_latency_ms.is_some());
+        assert!(
+            after_success.last_error.is_some(),
+            "la dernière erreur reste visible"
+        );
+        assert_eq!(after_success.your_requests_today, 2);
+        assert_eq!(after_success.quota.per_user_daily, 2);
+
+        // Question 3 : le plafond du compte est atteint, par le chat comme par un run.
+        let limited = call("POST", "/api/v1/ai/chat", &admin, question()?).await?;
+        assert_eq!(limited.status(), StatusCode::TOO_MANY_REQUESTS);
+        let limited_run = call("POST", "/api/v1/ai/runs", &admin, question()?).await?;
+        assert_eq!(limited_run.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(health().await?.requests_today, 2);
+
+        // Remise à zéro de la limite : les questions repassent.
+        assert_eq!(
+            call("PUT", "/api/v1/ai/quotas", &admin, quotas(0, 0))
+                .await?
+                .status(),
+            StatusCode::OK
+        );
+        let again = call("POST", "/api/v1/ai/chat", &admin, question()?).await?;
+        assert_eq!(again.status(), StatusCode::OK);
+
+        server_task.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn chatgpt_oauth_chat_requires_connection_sends_account_and_can_disconnect()
     -> anyhow::Result<()> {
+        let models_hits = Arc::new(AtomicUsize::new(0));
+        let hits_in_mock = Arc::clone(&models_hits);
         let mock_llm = axum::Router::new()
             .route(
                 "/models",
-                axum::routing::get(|headers: axum::http::HeaderMap| async move {
-                    assert_eq!(
-                        headers
-                            .get("chatgpt-account-id")
-                            .and_then(|v| v.to_str().ok()),
-                        Some("acct-1")
-                    );
-                    Json(json!({ "models": [
-                        { "slug": "interdit", "visibility": "hide", "priority": 0 },
-                        { "slug": "gpt-second", "visibility": "list", "priority": 2 },
-                        { "slug": "gpt-auto", "visibility": "list", "priority": 1 },
-                    ]}))
+                axum::routing::get(move |headers: axum::http::HeaderMap| {
+                    hits_in_mock.fetch_add(1, Ordering::SeqCst);
+                    async move {
+                        assert_eq!(
+                            headers
+                                .get("chatgpt-account-id")
+                                .and_then(|v| v.to_str().ok()),
+                            Some("acct-1")
+                        );
+                        Json(json!({ "models": [
+                            { "slug": "interdit", "visibility": "hide", "priority": 0 },
+                            { "slug": "gpt-second", "visibility": "list", "priority": 2 },
+                            { "slug": "gpt-auto", "visibility": "list", "priority": 1 },
+                        ]}))
+                    }
                 }),
             )
             .route(
@@ -1656,6 +1914,11 @@ mod tests {
         assert_eq!(chat.reply, "Bonjour ChatGPT");
         assert_eq!(chat.provider, AiProvider::ChatGptOauth);
         assert_eq!(chat.model, "gpt-auto");
+        // Le modèle choisi automatiquement est gardé : une 2e question ne relit pas /models.
+        assert_eq!(models_hits.load(Ordering::SeqCst), 1);
+        let again = call("POST", "/api/v1/ai/chat", &admin, chat_body()?).await?;
+        assert_eq!(again.status(), StatusCode::OK);
+        assert_eq!(models_hits.load(Ordering::SeqCst), 1);
 
         let test_body = Body::from(serde_json::to_vec(&AiTestRequest {
             provider: AiProvider::ChatGptOauth,

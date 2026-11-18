@@ -2,6 +2,7 @@
 
 use super::ai_model::AiModelField;
 use super::ai_oauth::AiOauthPanel;
+use super::ai_status::AiStatusPanel;
 use crate::api;
 use crate::ui::{SectionHeader, Tag, TagTone, Toasts};
 use flux_shared::ai::{
@@ -43,6 +44,7 @@ pub fn AiSettingsSection() -> impl IntoView {
                 }.into_any(),
             }}
         </section>
+        <AiStatusPanel />
     }
 }
 

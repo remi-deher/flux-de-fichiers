@@ -6,247 +6,26 @@
 use super::presentation::{node_summary, output_presentation};
 use super::state::Editor;
 use crate::ui::{Icon, IconName, Tag, TagTone};
-use flux_shared::flows::{
-    ConditionConfig, FlowConnection, FlowGraph, FlowNode, OwnedBlockSpec, evaluate_condition,
-    find_owned,
+use flux_shared::flow_analysis::simulate_flow_with;
+pub use flux_shared::flow_analysis::{
+    SimulationInput, SimulationPreset, SimulationReport, SimulationStatus,
 };
+use flux_shared::flows::{FlowGraph, OwnedBlockSpec};
 use leptos::prelude::*;
-use serde_json::{Value, json};
-use std::collections::HashSet;
 
-const MAX_SIMULATION_STEPS: usize = 64;
 const JSON_EDITOR_ROWS: u32 = 6;
 
-/// Exemples prêts à l'emploi de documents JSON de sonde pour tester un flux.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SimulationPreset {
-    StructuredTracks,
-    DocumentMetadata,
-    Minimal,
+trait SimulationStatusTone {
+    fn tone(self) -> TagTone;
 }
 
-impl SimulationPreset {
-    pub const ALL: [Self; 3] = [
-        Self::StructuredTracks,
-        Self::DocumentMetadata,
-        Self::Minimal,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::StructuredTracks => "Pistes structurées",
-            Self::DocumentMetadata => "Document / Livre",
-            Self::Minimal => "JSON vide",
-        }
-    }
-
-    pub fn input(self) -> SimulationInput {
-        let (file_name, sample) = match self {
-            Self::StructuredTracks => (
-                "exemple.bin",
-                json!({
-                    "format": "container",
-                    "tracks": [
-                        { "type": "video", "codec": "h264", "properties": { "width": 1920, "height": 1080 } },
-                        { "type": "audio", "codec": "aac", "properties": { "language": "fre" } }
-                    ]
-                }),
-            ),
-            Self::DocumentMetadata => (
-                "document.epub",
-                json!({
-                    "format": "epub",
-                    "pages": 320,
-                    "metadata": { "language": "fre", "author": "Exemple" }
-                }),
-            ),
-            Self::Minimal => ("fichier.dat", json!({})),
-        };
-        SimulationInput {
-            file_name: file_name.to_owned(),
-            probe_json: serde_json::to_string_pretty(&sample).unwrap_or_else(|_| "{}".to_owned()),
-        }
-    }
-}
-
-/// Entrée fictive utilisée pour simuler le routage d'un flux sur un document de sonde quelconque.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SimulationInput {
-    pub file_name: String,
-    pub probe_json: String,
-}
-
-impl Default for SimulationInput {
-    fn default() -> Self {
-        SimulationPreset::StructuredTracks.input()
-    }
-}
-
-impl SimulationInput {
-    /// Construit un arbre JSON de sonde utilisable par `flux_shared::flows::evaluate_condition`.
-    pub fn to_probe_value(&self) -> Result<Value, String> {
-        let mut parsed: Value = serde_json::from_str(&self.probe_json)
-            .map_err(|err| format!("JSON de sonde invalide : {err}"))?;
-        if let Some(obj) = parsed.as_object_mut()
-            && !self.file_name.trim().is_empty()
-            && !obj.contains_key("file_name")
-        {
-            obj.insert(
-                "file_name".to_owned(),
-                Value::String(self.file_name.trim().to_owned()),
-            );
-        }
-        Ok(parsed)
-    }
-}
-
-/// Statut final d'une simulation de flux.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SimulationStatus {
-    Complete,
-    IncompletePath,
-    CycleDetected,
-    NoEntry,
-}
-
-impl SimulationStatus {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Complete => "Chemin complet",
-            Self::IncompletePath => "Impasse (liaison manquante)",
-            Self::CycleDetected => "Boucle détectée",
-            Self::NoEntry => "Aucun point d'entrée",
-        }
-    }
-
-    pub const fn tone(self) -> TagTone {
+impl SimulationStatusTone for SimulationStatus {
+    fn tone(self) -> TagTone {
         match self {
             Self::Complete => TagTone::Success,
             Self::IncompletePath => TagTone::Warning,
             Self::CycleDetected | Self::NoEntry => TagTone::Danger,
         }
-    }
-}
-
-/// Une étape traversée pendant la simulation.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SimulationStep {
-    pub index: usize,
-    pub node_id: String,
-    pub node_name: String,
-    pub block_kind: String,
-    pub detail: String,
-    pub port_taken: Option<String>,
-    pub next_edge: Option<FlowConnection>,
-}
-
-/// Résultat complet d'une simulation de graphe.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SimulationReport {
-    pub status: SimulationStatus,
-    pub steps: Vec<SimulationStep>,
-    pub warnings: Vec<String>,
-}
-
-impl SimulationReport {
-    pub fn visited_nodes(&self, limit: Option<usize>) -> HashSet<String> {
-        let take = limit.map_or(self.steps.len(), |idx| (idx + 1).min(self.steps.len()));
-        self.steps
-            .iter()
-            .take(take)
-            .map(|s| s.node_id.clone())
-            .collect()
-    }
-
-    pub fn active_node(&self, cursor: Option<usize>) -> Option<&str> {
-        match cursor {
-            Some(idx) => self.steps.get(idx).map(|s| s.node_id.as_str()),
-            None => self.steps.last().map(|s| s.node_id.as_str()),
-        }
-    }
-
-    pub fn edge_is_active(&self, edge: &FlowConnection, cursor: Option<usize>) -> bool {
-        let limit = cursor.map_or(self.steps.len(), |idx| idx.min(self.steps.len()));
-        self.steps
-            .iter()
-            .take(limit)
-            .any(|step| step.next_edge.as_ref() == Some(edge))
-    }
-}
-
-fn is_condition_node(node: &FlowNode, spec: Option<&OwnedBlockSpec>) -> bool {
-    let has_branch_ports = spec.is_some_and(|s| s.ports.len() >= 2);
-    has_branch_ports
-        || node.kind.as_str().ends_with("condition")
-        || (node.config.get("property").is_some()
-            && node.config.get("operator").is_some()
-            && node.config.get("target").is_some())
-}
-
-fn evaluate_node_condition(node: &FlowNode, probe_info: &Value) -> (bool, String) {
-    let config = ConditionConfig {
-        property: node
-            .config
-            .get("property")
-            .and_then(Value::as_str)
-            .unwrap_or("any")
-            .trim()
-            .to_owned(),
-        operator: node
-            .config
-            .get("operator")
-            .and_then(Value::as_str)
-            .unwrap_or("eq")
-            .trim()
-            .to_owned(),
-        target: node
-            .config
-            .get("target")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_owned(),
-    };
-    let result = evaluate_condition(&config, probe_info);
-    let verdict = if result { "Vrai" } else { "Faux" };
-    (
-        result,
-        format!(
-            "{} {} {} → {verdict}",
-            config.property, config.operator, config.target
-        ),
-    )
-}
-
-fn find_entry_node<'a>(graph: &'a FlowGraph, catalog: &[OwnedBlockSpec]) -> Option<&'a FlowNode> {
-    if let Some(input_node) = graph.nodes.iter().find(|node| {
-        let spec = find_owned(catalog, &node.kind);
-        spec.is_some_and(|s| !s.has_input)
-            || node.kind.as_str() == "file-input"
-            || node.kind.as_str() == "block.core.file-input"
-    }) {
-        return Some(input_node);
-    }
-    graph
-        .nodes
-        .iter()
-        .find(|node| graph.incoming(&node.id).next().is_none())
-        .or_else(|| graph.nodes.first())
-}
-
-fn pick_outgoing<'a>(
-    graph: &'a FlowGraph,
-    node_id: &str,
-    port: Option<&str>,
-) -> Option<&'a FlowConnection> {
-    match port {
-        Some(desired) => graph
-            .outgoing(node_id)
-            .find(|conn| conn.port.as_deref() == Some(desired)),
-        None => graph
-            .outgoing(node_id)
-            .find(|conn| conn.port.is_none())
-            .or_else(|| graph.outgoing(node_id).next()),
     }
 }
 
@@ -256,117 +35,9 @@ pub fn simulate_flow(
     catalog: &[OwnedBlockSpec],
     input: &SimulationInput,
 ) -> SimulationReport {
-    let Some(entry) = find_entry_node(graph, catalog) else {
-        return SimulationReport {
-            status: SimulationStatus::NoEntry,
-            steps: Vec::new(),
-            warnings: vec!["Le flux ne contient aucun bloc à simuler.".to_owned()],
-        };
-    };
-
-    let mut visited = HashSet::new();
-    let mut steps = Vec::new();
-    let mut warnings = Vec::new();
-    let probe_info = match input.to_probe_value() {
-        Ok(value) => value,
-        Err(err) => {
-            warnings.push(err);
-            json!({ "file_name": input.file_name.trim() })
-        }
-    };
-    let mut current_id = Some(entry.id.clone());
-
-    while let Some(node_id) = current_id {
-        if steps.len() >= MAX_SIMULATION_STEPS || !visited.insert(node_id.clone()) {
-            warnings.push(format!(
-                "Boucle ou limite atteinte sur le bloc « {node_id} »."
-            ));
-            return SimulationReport {
-                status: SimulationStatus::CycleDetected,
-                steps,
-                warnings,
-            };
-        }
-
-        let Some(node) = graph.node(&node_id) else {
-            warnings.push(format!("Bloc introuvable : {node_id}"));
-            return SimulationReport {
-                status: SimulationStatus::IncompletePath,
-                steps,
-                warnings,
-            };
-        };
-
-        let spec = find_owned(catalog, &node.kind);
-        if spec.is_some_and(|s| !s.missing_fields(&node.config).is_empty()) {
-            warnings.push(format!(
-                "« {} » a au moins un paramètre requis non renseigné.",
-                node.name
-            ));
-        }
-
-        let (selected_port, detail) = if is_condition_node(node, spec) {
-            let (matched, note) = evaluate_node_condition(node, &probe_info);
-            let port_key = if matched { "true" } else { "false" };
-            (Some(port_key.to_owned()), note)
-        } else {
-            let summary = node_summary(node, spec).unwrap_or_else(|| "Étape exécutée".to_owned());
-            (None, summary)
-        };
-
-        let is_terminal = spec.is_some_and(|s| s.terminal)
-            || node.kind.as_str() == "file-output"
-            || node.kind.as_str() == "block.core.file-output";
-
-        let next_edge = if is_terminal {
-            None
-        } else {
-            pick_outgoing(graph, &node.id, selected_port.as_deref()).cloned()
-        };
-
-        let next_id = next_edge.as_ref().map(|e| e.to.clone());
-        let index = steps.len();
-        steps.push(SimulationStep {
-            index,
-            node_id: node.id.clone(),
-            node_name: node.name.clone(),
-            block_kind: node.kind.as_str().to_owned(),
-            detail,
-            port_taken: selected_port.clone(),
-            next_edge,
-        });
-
-        if is_terminal {
-            return SimulationReport {
-                status: SimulationStatus::Complete,
-                steps,
-                warnings,
-            };
-        }
-
-        if next_id.is_none() {
-            let port_note = selected_port
-                .as_deref()
-                .map(|p| format!(" sur la sortie « {} »", output_presentation(p).label))
-                .unwrap_or_default();
-            warnings.push(format!(
-                "Aucune liaison sortante depuis « {} »{}.",
-                node.name, port_note
-            ));
-            return SimulationReport {
-                status: SimulationStatus::IncompletePath,
-                steps,
-                warnings,
-            };
-        }
-        current_id = next_id;
-    }
-
-    SimulationReport {
-        status: SimulationStatus::Complete,
-        steps,
-        warnings,
-    }
+    simulate_flow_with(graph, catalog, input, &node_summary, &|port| {
+        output_presentation(port).label.to_owned()
+    })
 }
 
 /// Panneau latéral de simulation interactive du flux dans l'éditeur.
@@ -533,7 +204,8 @@ pub fn FlowSimulationPanel(editor: Editor) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::flows::FlowBlockKind;
+    use flux_shared::flows::{FlowBlockKind, FlowConnection};
+    use serde_json::json;
 
     fn test_catalog() -> Vec<OwnedBlockSpec> {
         vec![

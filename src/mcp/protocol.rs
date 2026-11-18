@@ -59,12 +59,76 @@ pub const ERR_INVALID_REQUEST: i64 = -32600;
 pub const ERR_METHOD_NOT_FOUND: i64 = -32601;
 pub const ERR_INVALID_PARAMS: i64 = -32602;
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolAnnotations {
+    pub read_only_hint: bool,
+    pub destructive_hint: bool,
+    pub idempotent_hint: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpTool {
     pub name: &'static str,
     pub description: &'static str,
     pub input_schema: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<McpToolAnnotations>,
+}
+
+impl McpTool {
+    pub const fn read_only(
+        name: &'static str,
+        description: &'static str,
+        input_schema: Value,
+    ) -> Self {
+        Self {
+            name,
+            description,
+            input_schema,
+            annotations: Some(McpToolAnnotations {
+                read_only_hint: true,
+                destructive_hint: false,
+                idempotent_hint: true,
+            }),
+        }
+    }
+
+    pub const fn write(
+        name: &'static str,
+        description: &'static str,
+        input_schema: Value,
+        idempotent_hint: bool,
+    ) -> Self {
+        Self {
+            name,
+            description,
+            input_schema,
+            annotations: Some(McpToolAnnotations {
+                read_only_hint: false,
+                destructive_hint: false,
+                idempotent_hint,
+            }),
+        }
+    }
+
+    pub const fn destructive(
+        name: &'static str,
+        description: &'static str,
+        input_schema: Value,
+    ) -> Self {
+        Self {
+            name,
+            description,
+            input_schema,
+            annotations: Some(McpToolAnnotations {
+                read_only_hint: false,
+                destructive_hint: true,
+                idempotent_hint: false,
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -108,6 +172,33 @@ pub struct McpResource {
     pub name: &'static str,
     pub description: &'static str,
     pub mime_type: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct McpPromptArgument {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct McpPrompt {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub arguments: &'static [McpPromptArgument],
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct McpPromptMessage {
+    pub role: &'static str,
+    pub content: McpPromptText,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct McpPromptText {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub text: String,
 }
 
 pub fn obj_schema(properties: Value, required: &[&str]) -> Value {

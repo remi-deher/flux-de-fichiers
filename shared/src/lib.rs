@@ -4,9 +4,11 @@
 //! le frontend pour ne montrer que ce que l'utilisateur peut faire (ADR 0011).
 
 pub mod accounts;
+pub mod ai;
 pub mod app;
 pub mod base64;
 pub mod diagnostics;
+pub mod flow_analysis;
 pub mod flows;
 pub mod format;
 pub mod jobs;

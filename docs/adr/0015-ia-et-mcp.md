@@ -44,6 +44,16 @@ l'utilisateur du 14 nov. 2026 :
 
 - **Pas de file d'approbation humaine** : les appels MCP autorisés par la clé s'exécutent directement sans mise en attente de validation manuelle ; la traçabilité repose sur un **journal d'audit persistant** (`mcp_audit_log`, consultable via `GET /api/v1/mcp/audit` et Paramètres > Clés d'API).
 - **Limitation de débit par clé** : fenêtre glissante de 120 requêtes par minute sur `/mcp` par identifiant de clé (`429 Too Many Requests` + consignation `rate_limited` dans l'historique).
+- **Protocole MCP complet et simulation/diagnostic** :
+  - `annotations` standard (`readOnlyHint`, `destructiveHint`, `idempotentHint`) sur tous les outils MCP ;
+  - couverture étendue (`simulate_flow` via `flux_shared::flow_analysis`, `diff_flow_versions`, `diagnose_job`, `cancel_job`, `batch_jobs`, `update_job_priority`, `get_job_stats`, `browse_filesystem`, `test_plugin_connection`, `update_worker_settings`, gestion de l'enrôlement) ;
+  - ressources enrichies (`flux://workers`, `flux://jobs/recent`, `flux://jobs/stats`, `flux://system/hardware`), capacité `prompts` (`diagnose_failures`, `design_flow`, `audit_libraries`) et extrait `.mcp.json` clé-en-main affiché à la création d'une clé `mcp`.
+- **Assistant IA intégré dans l'interface web** :
+  - fournisseurs supportés : **Ollama** (local/LAN), **OpenAI / API compatible** et **Anthropic Claude** ;
+  - clé d'API optionnelle chiffrée au repos via `SecretBox` (`instance_settings`, incluse dans la rotation de clé locale) et jamais exposée au navigateur ;
+  - requêtes sortantes protégées par `net_policy` (épinglage DNS anti-SSRF) ;
+  - orchestration serveur multi-tours (`/api/v1/ai/chat`) réutilisant directement les outils MCP avec les droits de l'utilisateur connecté, bridée par défaut aux outils en lecture seule (`readOnlyHint`, bascule explicite dans Paramètres > Assistant IA) et consignée dans `mcp_audit_log` ;
+  - intégration UI : onglet `Paramètres > Assistant IA`, tiroir global dans la barre supérieure et `Ctrl+K`, suggestions contextuelles par écran et raccourcis « Analyser avec l'IA » dans le détail d'une tâche et l'atelier de flux.
 
 ## Questions ouvertes
 

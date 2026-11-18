@@ -172,7 +172,7 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 
 - [x] Enrôlement par demande à approuver et fenêtre d'ouverture de 15 minutes : [ADR 0016](adr/0016-enrolement-par-approbation.md) implémenté.
 - [x] Époque des baux (*fencing*) : `jobs.lease_epoch` vérifié sur `/heartbeat`, `/progress`, `/steps`, `/failure`, `/source` et `/result` (`409 Conflict` si incohérent).
-- [x] IA et MCP ([ADR 0015](adr/0015-ia-et-mcp.md)) : serveur Streamable HTTP sur `/mcp`, pas de file d'approbation humaine (décision du 18 nov. 2026), journal d'audit persistant (`mcp_audit_log`, `GET /api/v1/mcp/audit`, tableau dans Paramètres > Clés d'API) et limitation de débit par clé (120 req/min).
+- [x] IA et MCP ([ADR 0015](adr/0015-ia-et-mcp.md)) : serveur Streamable HTTP sur `/mcp` (outils complets dont `simulate_flow`, `diff_flow_versions`, `diagnose_job`, `annotations`, ressources système/workers/stats, `prompts/list` + `prompts/get`, extrait `.mcp.json` dans Paramètres > Clés d'API), sans file d'approbation humaine, avec journal d'audit persistant (`mcp_audit_log`, `GET /api/v1/mcp/audit`) et limitation de débit (120 req/min) ; assistant LLM intégré dans l'interface web (`Ollama`, `OpenAI / API compatible`, `Anthropic Claude`, clé chiffrée au repos via `SecretBox`, `Paramètres > Assistant IA`, tiroir global et raccourcis contextuels tâches/flux branchés sur les outils MCP).
 
 ### 5. Hygiène et process
 

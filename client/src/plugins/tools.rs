@@ -302,7 +302,7 @@ pub fn ToolsSection(
                                                 <Tag label="Choix actuel" tone=TagTone::Success />
                                             })}
                                             {pending_contract.then(|| view! {
-                                                <Tag label="Contrat en attente" tone=TagTone::Warning />
+                                                <Tag label="Bientôt disponible" tone=TagTone::Warning />
                                             })}
                                         </div>
                                     </ResourceCard>

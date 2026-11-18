@@ -4,8 +4,8 @@ use crate::{
     error::{AppError, AppResult},
     worker_view::AccountCopy,
 };
-use flux_shared::Role;
 pub use flux_shared::accounts::{Account, ApiKeyRecord};
+use flux_shared::{Permission, Role};
 use sqlx::{FromRow, SqlitePool};
 use uuid::Uuid;
 
@@ -297,32 +297,71 @@ pub async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> AppResult
     Ok(())
 }
 
+#[derive(FromRow)]
+struct ApiKeyRow {
+    id: String,
+    name: String,
+    role: String,
+    scopes: Option<String>,
+    created_at: String,
+    last_used_at: Option<String>,
+    revoked_at: Option<String>,
+}
+
+impl ApiKeyRow {
+    fn into_record(self) -> AppResult<ApiKeyRecord> {
+        let scopes = match self.scopes {
+            Some(raw) => Some(
+                serde_json::from_str::<Vec<Permission>>(&raw).map_err(|_| AppError::Internal)?,
+            ),
+            None => None,
+        };
+        Ok(ApiKeyRecord {
+            id: self.id,
+            name: self.name,
+            role: self.role,
+            scopes,
+            created_at: self.created_at,
+            last_used_at: self.last_used_at,
+            revoked_at: self.revoked_at,
+        })
+    }
+}
+
 pub async fn insert_api_key(
     pool: &SqlitePool,
     id: &str,
     name: &str,
     key_hash: &str,
     role: Role,
+    scopes: Option<&[Permission]>,
 ) -> AppResult<ApiKeyRecord> {
-    Ok(sqlx::query_as::<_, ApiKeyRecord>(
-        "INSERT INTO api_keys (id, name, key_hash, role) VALUES (?1, ?2, ?3, ?4) \
-         RETURNING id, name, role, created_at, last_used_at, revoked_at",
+    let scopes_json = scopes
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|_| AppError::Invalid)?;
+    let row = sqlx::query_as::<_, ApiKeyRow>(
+        "INSERT INTO api_keys (id, name, key_hash, role, scopes) VALUES (?1, ?2, ?3, ?4, ?5) \
+         RETURNING id, name, role, scopes, created_at, last_used_at, revoked_at",
     )
     .bind(id)
     .bind(name)
     .bind(key_hash)
     .bind(role.as_str())
+    .bind(scopes_json)
     .fetch_one(pool)
-    .await?)
+    .await?;
+    row.into_record()
 }
 
 pub async fn list_api_keys(pool: &SqlitePool) -> AppResult<Vec<ApiKeyRecord>> {
-    Ok(sqlx::query_as::<_, ApiKeyRecord>(
-        "SELECT id, name, role, created_at, last_used_at, revoked_at FROM api_keys \
+    let rows = sqlx::query_as::<_, ApiKeyRow>(
+        "SELECT id, name, role, scopes, created_at, last_used_at, revoked_at FROM api_keys \
          ORDER BY revoked_at IS NOT NULL, created_at DESC",
     )
     .fetch_all(pool)
-    .await?)
+    .await?;
+    rows.into_iter().map(ApiKeyRow::into_record).collect()
 }
 
 /// Clé non révoquée et son haché, pour la vérification.
@@ -335,31 +374,34 @@ pub async fn find_active_api_key(
         id: String,
         name: String,
         role: String,
+        scopes: Option<String>,
         created_at: String,
         last_used_at: Option<String>,
         revoked_at: Option<String>,
         key_hash: String,
     }
-    Ok(sqlx::query_as::<_, Row>(
-        "SELECT id, name, role, created_at, last_used_at, revoked_at, key_hash \
+    let Some(row) = sqlx::query_as::<_, Row>(
+        "SELECT id, name, role, scopes, created_at, last_used_at, revoked_at, key_hash \
          FROM api_keys WHERE id = ?1 AND revoked_at IS NULL",
     )
     .bind(id)
     .fetch_optional(pool)
     .await?
-    .map(|row| {
-        (
-            ApiKeyRecord {
-                id: row.id,
-                name: row.name,
-                role: row.role,
-                created_at: row.created_at,
-                last_used_at: row.last_used_at,
-                revoked_at: row.revoked_at,
-            },
-            row.key_hash,
-        )
-    }))
+    else {
+        return Ok(None);
+    };
+    let key_hash = row.key_hash;
+    let record = ApiKeyRow {
+        id: row.id,
+        name: row.name,
+        role: row.role,
+        scopes: row.scopes,
+        created_at: row.created_at,
+        last_used_at: row.last_used_at,
+        revoked_at: row.revoked_at,
+    }
+    .into_record()?;
+    Ok(Some((record, key_hash)))
 }
 
 /// Délai minimal entre deux mises à jour de la dernière utilisation d'une clé.

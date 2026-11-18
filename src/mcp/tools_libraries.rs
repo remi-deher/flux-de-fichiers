@@ -3,15 +3,16 @@
 use super::protocol::{McpTool, McpToolResult, empty_schema, obj_schema, parse_args, req_str};
 use crate::{
     api::{
-        AdminAuth, AppState, ViewJobsAuth, ViewLibrariesAuth, jobs,
+        AppState, ManageJobsAuth, ManageLibrariesAuth, ViewJobsAuth, ViewLibrariesAuth, jobs,
         libraries::{self, LibraryScanRequest},
         transfers,
     },
-    auth::Principal,
+    auth::{self, Principal},
     domain::{LibraryWrite, NewJob},
     repository,
 };
 use axum::extract::{Json, Path, State};
+use flux_shared::Permission;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -20,17 +21,17 @@ pub fn tools() -> Vec<McpTool> {
     vec![
         McpTool {
             name: "list_libraries",
-            description: "Liste toutes les bibliothèques et leurs chemins par worker.",
+            description: "Liste les bibliothèques média configurées et leurs dossiers.",
             input_schema: empty_schema(),
         },
         McpTool {
             name: "get_library",
-            description: "Lit le détail d'une bibliothèque par son UUID.",
+            description: "Affiche le détail d'une bibliothèque média.",
             input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
         },
         McpTool {
             name: "create_library",
-            description: "Crée une nouvelle bibliothèque avec son flux associé et ses chemins workers.",
+            description: "Crée une nouvelle bibliothèque média et lui associe un flux.",
             input_schema: obj_schema(
                 json!({
                     "name": { "type": "string" },
@@ -42,7 +43,7 @@ pub fn tools() -> Vec<McpTool> {
         },
         McpTool {
             name: "update_library",
-            description: "Met à jour une bibliothèque existante.",
+            description: "Modifie une bibliothèque média existante.",
             input_schema: obj_schema(
                 json!({
                     "id": { "type": "string" },
@@ -55,12 +56,12 @@ pub fn tools() -> Vec<McpTool> {
         },
         McpTool {
             name: "delete_library",
-            description: "Supprime une bibliothèque par son UUID.",
+            description: "Supprime une bibliothèque média.",
             input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
         },
         McpTool {
             name: "scan_library",
-            description: "Scanne le dossier d'entrée et crée les tâches manquantes pour la bibliothèque.",
+            description: "Analyse les fichiers disponibles et lance le traitement des nouveaux médias.",
             input_schema: obj_schema(
                 json!({
                     "id": { "type": "string" },
@@ -73,17 +74,17 @@ pub fn tools() -> Vec<McpTool> {
         },
         McpTool {
             name: "list_input_files",
-            description: "Liste les fichiers médias disponibles dans le dossier d'entrée (input_dir).",
+            description: "Liste les fichiers médias en attente dans le dossier d'entrée.",
             input_schema: empty_schema(),
         },
         McpTool {
             name: "delete_input_file",
-            description: "Supprime un fichier média du dossier d'entrée (input_dir).",
+            description: "Supprime un fichier média du dossier d'entrée.",
             input_schema: obj_schema(json!({ "name": { "type": "string" } }), &["name"]),
         },
         McpTool {
             name: "create_job",
-            description: "Soumet un fichier existant en tâche (associé à une bibliothèque et/ou un flux).",
+            description: "Lance le traitement d'un fichier existant (pour une bibliothèque ou un flux).",
             input_schema: obj_schema(
                 json!({
                     "sourceName": { "type": "string" },
@@ -101,12 +102,12 @@ pub fn tools() -> Vec<McpTool> {
         },
         McpTool {
             name: "get_job",
-            description: "Lit l'état détaillé d'une tâche par son UUID.",
+            description: "Affiche l'état détaillé d'une tâche.",
             input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
         },
         McpTool {
             name: "get_job_steps",
-            description: "Lit le journal détaillé des étapes/blocs exécutés pour une tâche.",
+            description: "Affiche le détail étape par étape d'une tâche (utile pour diagnostiquer un échec).",
             input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
         },
         McpTool {
@@ -116,12 +117,12 @@ pub fn tools() -> Vec<McpTool> {
         },
         McpTool {
             name: "delete_job",
-            description: "Annule ou supprime une tâche qui n'est pas en cours d'exécution.",
+            description: "Annule ou supprime une tâche qui n'est pas en cours.",
             input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
         },
         McpTool {
             name: "delete_job_output",
-            description: "Supprime le fichier de sortie produit par une tâche terminée.",
+            description: "Supprime le fichier produit par une tâche terminée.",
             input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
         },
     ]
@@ -190,7 +191,7 @@ pub async fn call(
             };
             libraries::create(
                 State(state.clone()),
-                AdminAuth(principal.clone()),
+                ManageLibrariesAuth(principal.clone()),
                 Json(req),
             )
             .await
@@ -209,7 +210,7 @@ pub async fn call(
             libraries::update(
                 State(state.clone()),
                 Path(parsed.id),
-                AdminAuth(principal.clone()),
+                ManageLibrariesAuth(principal.clone()),
                 Json(write),
             )
             .await
@@ -220,11 +221,20 @@ pub async fn call(
                 Ok(parsed) => parsed,
                 Err(msg) => return Some(McpToolResult::error(msg)),
             };
-            libraries::delete(State(state.clone()), Path(id), AdminAuth(principal.clone()))
-                .await
-                .map(|_| McpToolResult::json(&json!({ "id": id, "deleted": true })))
+            libraries::delete(
+                State(state.clone()),
+                Path(id),
+                ManageLibrariesAuth(principal.clone()),
+            )
+            .await
+            .map(|_| McpToolResult::json(&json!({ "id": id, "deleted": true })))
         }
         "scan_library" => {
+            if let Err(err) = auth::require(principal, Permission::ManageLibraries)
+                .and_then(|()| auth::require(principal, Permission::ManageJobs))
+            {
+                return Some(McpToolResult::error(format!("{err:?}")));
+            }
             let parsed: ScanLibraryArgs = match parse_args(args) {
                 Ok(parsed) => parsed,
                 Err(msg) => return Some(McpToolResult::error(msg)),
@@ -254,7 +264,7 @@ pub async fn call(
             libraries::delete_file(
                 State(state.clone()),
                 Path(file_name.clone()),
-                AdminAuth(principal.clone()),
+                ManageLibrariesAuth(principal.clone()),
             )
             .await
             .map(|_| McpToolResult::json(&json!({ "name": file_name, "deleted": true })))
@@ -266,13 +276,16 @@ pub async fn call(
             };
             jobs::create(
                 State(state.clone()),
-                AdminAuth(principal.clone()),
+                ManageJobsAuth(principal.clone()),
                 Json(req),
             )
             .await
             .map(|(_, Json(v))| McpToolResult::json(&v))
         }
         "list_jobs" => {
+            if let Err(err) = auth::require(principal, Permission::ViewJobs) {
+                return Some(McpToolResult::error(format!("{err:?}")));
+            }
             let parsed: ListJobsArgs = match parse_args(args) {
                 Ok(parsed) => parsed,
                 Err(msg) => return Some(McpToolResult::error(msg)),
@@ -313,27 +326,39 @@ pub async fn call(
                 Ok(parsed) => parsed,
                 Err(msg) => return Some(McpToolResult::error(msg)),
             };
-            jobs::retry(State(state.clone()), Path(id), AdminAuth(principal.clone()))
-                .await
-                .map(|Json(v)| McpToolResult::json(&v))
+            jobs::retry(
+                State(state.clone()),
+                Path(id),
+                ManageJobsAuth(principal.clone()),
+            )
+            .await
+            .map(|Json(v)| McpToolResult::json(&v))
         }
         "delete_job" => {
             let IdArg { id } = match parse_args(args) {
                 Ok(parsed) => parsed,
                 Err(msg) => return Some(McpToolResult::error(msg)),
             };
-            jobs::delete_job(State(state.clone()), Path(id), AdminAuth(principal.clone()))
-                .await
-                .map(|_| McpToolResult::json(&json!({ "id": id, "deleted": true })))
+            jobs::delete_job(
+                State(state.clone()),
+                Path(id),
+                ManageJobsAuth(principal.clone()),
+            )
+            .await
+            .map(|_| McpToolResult::json(&json!({ "id": id, "deleted": true })))
         }
         "delete_job_output" => {
             let IdArg { id } = match parse_args(args) {
                 Ok(parsed) => parsed,
                 Err(msg) => return Some(McpToolResult::error(msg)),
             };
-            transfers::delete_output(State(state.clone()), Path(id), AdminAuth(principal.clone()))
-                .await
-                .map(|_| McpToolResult::json(&json!({ "id": id, "outputDeleted": true })))
+            transfers::delete_output(
+                State(state.clone()),
+                Path(id),
+                ManageJobsAuth(principal.clone()),
+            )
+            .await
+            .map(|_| McpToolResult::json(&json!({ "id": id, "outputDeleted": true })))
         }
         _ => return None,
     };

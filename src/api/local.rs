@@ -1,6 +1,6 @@
 //! Gestionnaires HTTP de la librairie locale (`/api/v1/local`) : scripts, ressources, modèles et packs maison.
 
-use super::{AdminAuth, AnyAuth, AppState, ViewLibrariesAuth, transfers};
+use super::{AnyAuth, AppState, ManagePluginsAuth, ViewLibrariesAuth, transfers};
 use crate::{
     error::{AppError, AppResult},
     plugins,
@@ -58,7 +58,7 @@ pub async fn download_resource(
 
 pub async fn upsert_script(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ManagePluginsAuth,
     Json(req): Json<UpsertLocalScriptRequest>,
 ) -> AppResult<Json<LocalScriptSummary>> {
     let local_dir = plugins::local_catalog_dir(&s.config);
@@ -71,7 +71,7 @@ pub async fn upsert_script(
 
 pub async fn upload_resource(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ManagePluginsAuth,
     Json(req): Json<UploadLocalResourceRequest>,
 ) -> AppResult<Json<LocalResourceSummary>> {
     let local_dir = plugins::local_catalog_dir(&s.config);
@@ -85,7 +85,7 @@ pub async fn upload_resource(
 
 pub async fn create_block_template(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ManagePluginsAuth,
     Json(req): Json<CreateBlockTemplateRequest>,
 ) -> AppResult<Json<LocalBlockTemplate>> {
     let local_dir = plugins::local_catalog_dir(&s.config);
@@ -99,7 +99,7 @@ pub async fn create_block_template(
 
 pub async fn create_flow_template(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ManagePluginsAuth,
     Json(req): Json<CreateFlowTemplateRequest>,
 ) -> AppResult<Json<LocalFlowTemplate>> {
     let local_dir = plugins::local_catalog_dir(&s.config);
@@ -113,7 +113,7 @@ pub async fn create_flow_template(
 
 pub async fn create_pack(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ManagePluginsAuth,
     Json(req): Json<CreateLocalPackRequest>,
 ) -> AppResult<Json<CatalogEntry>> {
     let local_dir = plugins::local_catalog_dir(&s.config);
@@ -126,7 +126,7 @@ pub async fn create_pack(
 
 pub async fn delete_item(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ManagePluginsAuth,
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     let local_dir = plugins::local_catalog_dir(&s.config);

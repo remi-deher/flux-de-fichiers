@@ -5,7 +5,7 @@ use crate::{
     repository::{self, ApiKeyRecord},
 };
 use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
-use flux_shared::Role;
+use flux_shared::{Permission, Role};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use subtle::ConstantTimeEq;
@@ -53,12 +53,53 @@ fn validate_name(name: &str) -> AppResult<String> {
     Ok(name.to_owned())
 }
 
-/// Crée une clé nommée ; elle n'est jamais relisible ensuite.
+fn validate_scopes(
+    role: Role,
+    scopes: Option<&[Permission]>,
+) -> AppResult<Option<Vec<Permission>>> {
+    let Some(raw) = scopes else {
+        return Ok(None);
+    };
+    let mut deduped = Vec::with_capacity(raw.len());
+    for &perm in raw {
+        if !role.allows(perm) {
+            return Err(AppError::Invalid);
+        }
+        if !deduped.contains(&perm) {
+            deduped.push(perm);
+        }
+    }
+    if deduped.is_empty() {
+        return Err(AppError::Invalid);
+    }
+    Ok(Some(deduped))
+}
+
+/// Crée une clé nommée avec portée complète du rôle ; elle n'est jamais relisible ensuite.
 pub async fn issue(pool: &SqlitePool, name: &str, role: Role) -> AppResult<IssuedKey> {
+    issue_with_scopes(pool, name, role, None).await
+}
+
+/// Crée une clé nommée avec une portée explicite (ou complète si `None`).
+pub async fn issue_with_scopes(
+    pool: &SqlitePool,
+    name: &str,
+    role: Role,
+    scopes: Option<&[Permission]>,
+) -> AppResult<IssuedKey> {
     let name = validate_name(name)?;
+    let validated_scopes = validate_scopes(role, scopes)?;
     let id = random_hex(KEY_ID_BYTES);
     let secret = random_hex(KEY_SECRET_BYTES);
-    let record = repository::insert_api_key(pool, &id, &name, &hash_secret(&secret), role).await?;
+    let record = repository::insert_api_key(
+        pool,
+        &id,
+        &name,
+        &hash_secret(&secret),
+        role,
+        validated_scopes.as_deref(),
+    )
+    .await?;
     Ok(IssuedKey {
         record,
         raw: format!("{KEY_PREFIX}{id}_{secret}"),
@@ -73,7 +114,15 @@ pub async fn install_known_key(
     role: Role,
 ) -> AppResult<ApiKeyRecord> {
     let (id, secret) = parse(raw).ok_or(AppError::Invalid)?;
-    repository::insert_api_key(pool, id, &validate_name(name)?, &hash_secret(secret), role).await
+    repository::insert_api_key(
+        pool,
+        id,
+        &validate_name(name)?,
+        &hash_secret(secret),
+        role,
+        None,
+    )
+    .await
 }
 
 /// Clé non révoquée correspondant à la valeur présentée ; la dernière utilisation est mise à jour.

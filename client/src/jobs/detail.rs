@@ -5,6 +5,7 @@ use super::model::{
     error_label, format_size_delta, priority_label, resolve_library_label, short_digest,
     status_label, status_tone, step_status_label, step_status_tone,
 };
+use crate::ai::AiAssistantState;
 use crate::ui::{Icon, IconName, StatusBadge, Tag, TagTone, Toasts};
 use crate::{api, format};
 use flux_shared::format::format_bytes;
@@ -175,6 +176,10 @@ pub fn JobDetail(
     let job_status = job.status;
     let job_warning = job.warning;
     let id_text = job.id.to_string();
+    let ai_id_text = id_text.clone();
+    let ai_state = use_context::<AiAssistantState>();
+    let ai_source = source_name.clone();
+    let ai_short_id = short_id.clone();
 
     view! {
         <div class="inspection-panel">
@@ -340,6 +345,22 @@ pub fn JobDetail(
             }}
             <p class="form-help" role="status">{move || feedback.get()}</p>
             <div class="inspection-drawer__actions">
+                {ai_state.map(|ai| {
+                    let prompt = format!(
+                        "Diagnostique la tâche #{ai_short_id} ({ai_source}) avec `diagnose_job` : explique l'état, la cause probable d'échec ou d'avertissement et les actions recommandées."
+                    );
+                    let hint = Some(format!("Tâche {ai_id_text} — fichier {ai_source}"));
+                    view! {
+                        <button
+                            type="button"
+                            class="btn btn-secondary"
+                            on:click=move |_| ai.ask(prompt.clone(), hint.clone())
+                        >
+                            <Icon name=IconName::Sparkles size=ACTION_ICON_SIZE />
+                            <span>"Analyser avec l'IA"</span>
+                        </button>
+                    }
+                })}
                 {download}
                 {retryable.then(|| view! {
                     <button

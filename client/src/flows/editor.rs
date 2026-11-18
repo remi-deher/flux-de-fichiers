@@ -6,6 +6,7 @@ use super::palette::Palette;
 use super::presentation::{DiagnosticLevel, FlowDiagnostic, diagnose_graph};
 use super::state::{Editor, incomplete_blocks};
 use super::versions::FlowVersions;
+use crate::ai::AiAssistantState;
 use crate::api;
 use crate::route::{Link, Route, encode_segment, use_router};
 use crate::ui::{Icon, IconName, Toasts};
@@ -106,6 +107,8 @@ fn FlowCommandBar(
             editor.open_simulation();
         }
     };
+
+    let ai_state = use_context::<AiAssistantState>();
 
     view! {
         <header class="flow-command-bar" role="toolbar" aria-label="Commandes de l'atelier">
@@ -264,6 +267,30 @@ fn FlowCommandBar(
                     <Icon name=IconName::Sliders size=CMD_ICON_SIZE />
                     <span>"Réglages"</span>
                 </button>
+
+                {ai_state.map(|ai| view! {
+                    <button
+                        type="button"
+                        class="btn btn-secondary btn-sm flow-cmd-btn"
+                        title="Analyser ou optimiser ce flux avec l'assistant IA"
+                        on:click=move |_| {
+                            let record = meta.get_untracked();
+                            let prompt = if record.id.is_empty() {
+                                "Quels blocs et bonnes pratiques recommandes-tu pour structurer ce nouveau flux ?".to_owned()
+                            } else {
+                                format!(
+                                    "Analyse le flux `{}` (id: `{}`), vérifie sa validité avec `validate_flow` / `simulate_flow` et propose d'éventuelles améliorations.",
+                                    record.name, record.id
+                                )
+                            };
+                            let hint = Some(format!("Atelier de flux — {} ({})", record.name, record.id));
+                            ai.ask(prompt, hint);
+                        }
+                    >
+                        <Icon name=IconName::Sparkles size=CMD_ICON_SIZE />
+                        <span>"Assistant IA"</span>
+                    </button>
+                })}
             </div>
 
             <div class="flow-island flow-island--publish">

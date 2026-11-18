@@ -176,6 +176,8 @@ impl AppState {
 
 /// Budget des routes JSON, y compris l'empreinte SHA-256 de `POST /api/v1/jobs`.
 pub const JSON_API_TIMEOUT: Duration = Duration::from_secs(60);
+/// Budget de l'assistant IA intégré (boucles multi-tours et modèles locaux Ollama).
+pub const AI_CHAT_TIMEOUT: Duration = Duration::from_secs(180);
 /// Budget des transferts de fichiers et du flux SSE, déjà borné dans `receive`.
 pub const TRANSFER_TIMEOUT: Duration = Duration::from_secs(3600);
 pub const JSON_BODY_LIMIT: usize = 16 * 1024;
@@ -386,6 +388,12 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/api-keys", get(keys::list).post(keys::create))
         .route("/api/v1/api-keys/{id}", axum::routing::delete(keys::revoke))
         .route("/api/v1/mcp/audit", get(crate::mcp::list_audit))
+        .route("/api/v1/ai/status", get(crate::ai::client_status))
+        .route(
+            "/api/v1/ai/settings",
+            get(crate::ai::get_settings).put(crate::ai::update_settings),
+        )
+        .route("/api/v1/ai/test", post(crate::ai::test_connection))
         .route("/api/v1/auth/logout", post(session::logout))
         .route("/api/v1/jobs", get(jobs::list).post(jobs::create))
         .route("/api/v1/jobs/stats", get(jobs::stats))
@@ -448,8 +456,19 @@ fn transfer_routes() -> Router<AppState> {
         ))
 }
 
+fn ai_chat_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/ai/chat", post(crate::ai::chat))
+        .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT))
+        .layer(tower_http::timeout::TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            AI_CHAT_TIMEOUT,
+        ))
+}
+
 pub fn router(state: AppState) -> Router {
     json_routes()
+        .merge(ai_chat_routes())
         .merge(transfer_routes())
         .fallback(spa_fallback)
         .layer(axum::middleware::map_response(|response: axum::response::Response| async move {

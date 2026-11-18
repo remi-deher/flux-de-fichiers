@@ -3,14 +3,14 @@
 use flux_shared::flows::{FlowGraph, FlowNode, layout};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 pub const CARD_WIDTH: f64 = 264.0;
 pub const CARD_HEIGHT: f64 = 104.0;
 pub const COL_STRIDE: f64 = 312.0;
 pub const ROW_STRIDE: f64 = 164.0;
-pub const ORIGIN_X: f64 = 72.0;
-pub const ORIGIN_Y: f64 = 64.0;
+pub const ORIGIN_X: f64 = 360.0;
+pub const ORIGIN_Y: f64 = 96.0;
 #[cfg(test)]
 pub const BOARD_PAD: f64 = 120.0;
 pub const ZOOM_MIN: f64 = 0.25;
@@ -24,6 +24,9 @@ const MIN_BOARD_HEIGHT: f64 = 380.0;
 const FIT_PADDING: f64 = 48.0;
 const FIT_MAX_ZOOM: f64 = 1.0;
 const MINIMAP_PAD: f64 = 80.0;
+const PORT_OFFSET_TRUE: f64 = -0.25;
+const PORT_OFFSET_FALSE: f64 = 0.25;
+const PORT_OFFSET_NEUTRAL: f64 = 0.0;
 
 /// Caméra 2D du canevas infini : décalage en pixels écran et facteur de zoom.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -118,33 +121,66 @@ impl PlacedNode {
     }
 }
 
-/// Calcule une disposition topologique centrée par niveau.
+fn port_order_offset(port: Option<&str>) -> f64 {
+    match port {
+        Some("true") => PORT_OFFSET_TRUE,
+        Some("false") => PORT_OFFSET_FALSE,
+        _ => PORT_OFFSET_NEUTRAL,
+    }
+}
+
+fn node_barycenter(
+    graph: &FlowGraph,
+    node_id: &str,
+    positions: &HashMap<String, Point>,
+) -> Option<f64> {
+    let mut sum = 0.0;
+    let mut count = 0usize;
+    for edge in graph.incoming(node_id) {
+        if let Some(parent) = positions.get(&edge.from) {
+            sum += parent.x + port_order_offset(edge.port.as_deref()) * COL_STRIDE;
+            count += 1;
+        }
+    }
+    (count > 0).then(|| sum / count as f64)
+}
+
+/// Calcule une disposition topologique centrée par niveau, triée par barycentre parent et port.
 pub fn default_positions(graph: &FlowGraph) -> HashMap<String, Point> {
     let grid = layout(graph);
-    let mut layer_counts: HashMap<usize, usize> = HashMap::new();
-    for pos in grid.values() {
-        *layer_counts.entry(pos.layer).or_insert(0) += 1;
+    let mut by_layer: BTreeMap<usize, Vec<(usize, String)>> = BTreeMap::new();
+    for (order, node) in graph.nodes.iter().enumerate() {
+        if let Some(pos) = grid.get(&node.id) {
+            by_layer
+                .entry(pos.layer)
+                .or_default()
+                .push((order, node.id.clone()));
+        }
     }
-    let max_in_rank = layer_counts.values().copied().max().unwrap_or(1);
+    let max_in_rank = by_layer.values().map(Vec::len).max().unwrap_or(1);
     let total_width = max_in_rank as f64 * COL_STRIDE;
+    let mut positions: HashMap<String, Point> = HashMap::with_capacity(graph.nodes.len());
 
-    graph
-        .nodes
-        .iter()
-        .filter_map(|node| {
-            let pos = grid.get(&node.id)?;
-            let count_in_rank = layer_counts.get(&pos.layer).copied().unwrap_or(1);
-            let rank_width = count_in_rank as f64 * COL_STRIDE;
-            let offset_x = (total_width - rank_width) / 2.0;
-            Some((
-                node.id.clone(),
+    for (layer, mut layer_nodes) in by_layer {
+        layer_nodes.sort_by(|(ord_a, id_a), (ord_b, id_b)| {
+            let key_a = node_barycenter(graph, id_a, &positions).unwrap_or(f64::INFINITY);
+            let key_b = node_barycenter(graph, id_b, &positions).unwrap_or(f64::INFINITY);
+            key_a.total_cmp(&key_b).then_with(|| ord_a.cmp(ord_b))
+        });
+        let rank_width = layer_nodes.len() as f64 * COL_STRIDE;
+        let offset_x = (total_width - rank_width) / 2.0;
+        let y = ORIGIN_Y + layer as f64 * ROW_STRIDE;
+        for (slot, (_, id)) in layer_nodes.into_iter().enumerate() {
+            positions.insert(
+                id,
                 Point {
-                    x: ORIGIN_X + offset_x + pos.slot as f64 * COL_STRIDE,
-                    y: ORIGIN_Y + pos.layer as f64 * ROW_STRIDE,
+                    x: ORIGIN_X + offset_x + slot as f64 * COL_STRIDE,
+                    y,
                 },
-            ))
-        })
-        .collect()
+            );
+        }
+    }
+    positions
 }
 
 fn extra_position(extra: &serde_json::Map<String, Value>) -> Option<Point> {
@@ -697,5 +733,66 @@ mod tests {
             viewport_svg_transform(vp),
             "translate(-120.50 84.25) scale(1.3000)"
         );
+    }
+
+    #[test]
+    fn default_positions_unscrambles_crossed_branches_and_ports() {
+        let catalog = test_catalog();
+        let mut graph = FlowGraph::default();
+        let input = graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            json!({}),
+            &catalog,
+        );
+        let cond = graph.append(
+            FlowBlockKind::parse("block.core.condition"),
+            "Si",
+            json!({}),
+            &catalog,
+        );
+        // Insérer sciemment "false" avant "true", puis ses enfants dans l'ordre inverse.
+        let no = graph.append(
+            FlowBlockKind::parse("block.core.webhook"),
+            "Non",
+            json!({}),
+            &catalog,
+        );
+        let yes = graph.append(
+            FlowBlockKind::parse("block.video.remux-mkv"),
+            "Oui",
+            json!({}),
+            &catalog,
+        );
+        let no_child = graph.append(
+            FlowBlockKind::parse("block.core.file-output"),
+            "Fin non",
+            json!({}),
+            &catalog,
+        );
+        let yes_child = graph.append(
+            FlowBlockKind::parse("block.core.webhook"),
+            "Fin oui",
+            json!({}),
+            &catalog,
+        );
+        graph.connections.clear();
+        assert_eq!(graph.connect(&input, None, &cond, &catalog), Ok(()));
+        assert_eq!(
+            graph.connect(&cond, Some("false".into()), &no, &catalog),
+            Ok(())
+        );
+        assert_eq!(
+            graph.connect(&cond, Some("true".into()), &yes, &catalog),
+            Ok(())
+        );
+        assert_eq!(graph.connect(&no, None, &no_child, &catalog), Ok(()));
+        assert_eq!(graph.connect(&yes, None, &yes_child, &catalog), Ok(()));
+
+        let positions = default_positions(&graph);
+        assert!(positions[&input].x >= ORIGIN_X);
+        assert_eq!(positions[&input].y, ORIGIN_Y);
+        assert!(positions[&yes].x < positions[&no].x);
+        assert!(positions[&yes_child].x < positions[&no_child].x);
     }
 }

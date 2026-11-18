@@ -40,12 +40,22 @@ pub fn model_choices(
     choices
 }
 
+/// Aide affichée sous la saisie libre : la raison fournie par le fournisseur, si on la connaît.
+fn unavailable_help(issue: Option<&str>) -> String {
+    match issue {
+        Some(reason) => format!("Liste indisponible, saisie manuelle : {reason}"),
+        None => "Liste indisponible : saisie manuelle. Connectez-vous ou testez la connexion pour obtenir la liste.".to_owned(),
+    }
+}
+
 /// Liste déroulante des modèles proposés ; saisie libre seulement tant qu'aucune liste n'est connue
 /// (fournisseur injoignable, compte non connecté, serveur sans catalogue).
 #[component]
 pub fn AiModelField(
     model: RwSignal<String>,
     catalog: RwSignal<Vec<AiModelOption>>,
+    /// Pourquoi la liste est vide, quand le fournisseur a répondu par une erreur.
+    issue: RwSignal<Option<String>>,
     provider: RwSignal<AiProvider>,
     loading: Signal<bool>,
 ) -> impl IntoView {
@@ -62,9 +72,9 @@ pub fn AiModelField(
                         current.default_model()
                     };
                     let help = if loading.get() {
-                        "Chargement des modèles proposés…"
+                        "Chargement des modèles proposés…".to_owned()
                     } else {
-                        "Liste indisponible : saisie manuelle. Connectez-vous ou testez la connexion pour obtenir la liste."
+                        unavailable_help(issue.get().as_deref())
                     };
                     view! {
                         <input
@@ -113,6 +123,12 @@ mod tests {
             AiModelOption::new("a", None),
             AiModelOption::new("b", Some("B")),
         ]
+    }
+
+    #[test]
+    fn unavailable_help_reports_the_provider_reason() {
+        assert!(unavailable_help(None).contains("testez la connexion"));
+        assert!(unavailable_help(Some("ChatGPT HTTP 400")).ends_with("ChatGPT HTTP 400"));
     }
 
     #[test]

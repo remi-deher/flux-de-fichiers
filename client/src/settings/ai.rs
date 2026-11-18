@@ -60,6 +60,8 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
     let test_result = RwSignal::new(None::<Result<AiTestResponse, String>>);
     // Modèles proposés par le fournisseur pour la connexion en cours de saisie.
     let catalog = RwSignal::new(Vec::<AiModelOption>::new());
+    // Raison pour laquelle la liste est vide (affichée sous le champ du modèle).
+    let catalog_issue = RwSignal::new(None::<String>);
     // Le diagnostic n'est montré que pour un test demandé ; le chargement de la liste est silencieux.
     let announce_test = RwSignal::new(false);
     let api_key_set = initial.api_key_set;
@@ -96,6 +98,7 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
             let announce = announce_test.get_untracked();
             match result {
                 Ok(res) => {
+                    catalog_issue.set((!res.reachable).then(|| res.message.clone()));
                     catalog.set(if res.reachable {
                         res.available_models.clone()
                     } else {
@@ -106,6 +109,7 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
                     }
                 }
                 Err(err) => {
+                    catalog_issue.set(Some(err.message().to_owned()));
                     catalog.set(Vec::new());
                     if announce {
                         test_result.set(Some(Err(err.message())));
@@ -243,6 +247,7 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
                     <AiModelField
                         model=model
                         catalog=catalog
+                        issue=catalog_issue
                         provider=provider
                         loading=Signal::derive(move || test.pending().get())
                     />

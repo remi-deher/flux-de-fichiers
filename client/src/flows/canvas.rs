@@ -752,14 +752,16 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                     event.prevent_default();
                     editor.end_drag();
                     let catalog = editor.catalog.get_untracked();
+                    let kind_enum = FlowBlockKind::parse(&kind);
+                    let accepts_input = find_owned(&catalog, &kind_enum).is_none_or(|spec| spec.has_input);
+                    if !accepts_input && let Some(existing) = editor.existing_entry_id() {
+                        editor.select_node(Some(existing), true);
+                        Toasts::notify_error("Ce flux possède déjà un bloc d'entrée.");
+                        return;
+                    }
                     let mut created = String::new();
                     editor.mutate_graph(|graph| {
-                        created = graph.append(
-                            FlowBlockKind::parse(&kind),
-                            &label,
-                            defaults,
-                            &catalog,
-                        );
+                        created = graph.append(kind_enum, &label, defaults, &catalog);
                     });
                     let snap = editor.snap_to_grid.get_untracked() ^ event.alt_key();
                     let drop_pt = board_ref.get().map(|board| {
@@ -1039,6 +1041,8 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                     || node.kind.as_str().to_owned(),
                                     |s| s.label.clone(),
                                 );
+                                let show_kind_label =
+                                    !node.name.trim().eq_ignore_ascii_case(kind_label.trim());
                                 let domain = NodeDomain::from_spec(spec, category);
                                 let domain_label = domain.label();
                                 let incomplete =
@@ -1093,10 +1097,15 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                             .map_or((ORIGIN_X, ORIGIN_Y), |p| (p.x, p.y))
                                     });
                                     format!(
-                                        "left:{x}px;top:{y}px;width:{CARD_WIDTH}px;min-height:{CARD_HEIGHT}px;--node-accent:{accent_var};"
+                                        "left:{x}px;top:{y}px;width:{CARD_WIDTH}px;height:{CARD_HEIGHT}px;--node-accent:{accent_var};"
                                     )
                                 });
-                                let subtitle = format!("{category} · {kind_label}");
+                                let subtitle = spec
+                                    .and_then(|s| {
+                                        (!s.description.trim().is_empty())
+                                            .then(|| s.description.clone())
+                                    })
+                                    .unwrap_or_else(|| domain.default_hint().to_owned());
 
                                 view! {
                                     <DragItem
@@ -1231,7 +1240,9 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                 </span>
                                                 <div class="canvas-node__meta">
                                                     <span class="canvas-node__domain">{domain_label}</span>
-                                                    <span class="canvas-node__kind">{kind_label}</span>
+                                                    {show_kind_label.then(|| view! {
+                                                        <span class="canvas-node__kind">{kind_label}</span>
+                                                    })}
                                                 </div>
                                                 <span class="canvas-node__step text-mono" title="Numéro d'étape">{format!("#{step_num}")}</span>
                                                 {incomplete.then(|| view! {
@@ -1406,7 +1417,7 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                                                                     .get_untracked(),
                                                                                                 Point {
                                                                                                     x: pt.x,
-                                                                                                    y: pt.y + 12.0,
+                                                                                                    y: pt.y,
                                                                                                 },
                                                                                             )
                                                                                         })
@@ -1462,7 +1473,7 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                             height="100%"
                             aria-label="Liaisons du graphe"
                         >
-                            <g attr:transform=move || viewport_svg_transform(editor.viewport.get())>
+                            <g transform=move || viewport_svg_transform(editor.viewport.get())>
                                 {wires_view}
                                 {ghost_wire_view}
                             </g>

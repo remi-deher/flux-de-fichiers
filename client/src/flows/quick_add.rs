@@ -139,7 +139,7 @@ pub fn QuickAddPopover(editor: Editor, board_ref: NodeRef<leptos::html::Div>) ->
 
     move || {
         let state = editor.quick_add.get()?;
-        let requires_input = state.branch.is_some();
+        let requires_input = state.branch.is_some() || editor.has_entry_node();
         let source_kind = state.branch.as_ref().and_then(|branch| {
             editor
                 .graph

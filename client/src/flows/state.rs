@@ -18,6 +18,20 @@ const HISTORY_MAX_LEN: usize = 60;
 const DUPLICATE_OFFSET: f64 = 36.0;
 const LAYOUT_STORAGE_PREFIX: &str = "flux.flow-layout.";
 
+/// Identifiant du premier bloc d'entrée (`!has_input`) présent dans le graphe.
+pub fn find_entry_node_id(graph: &FlowGraph, catalog: &[OwnedBlockSpec]) -> Option<String> {
+    graph
+        .nodes
+        .iter()
+        .find(|node| find_owned(catalog, &node.kind).is_some_and(|spec| !spec.has_input))
+        .map(|node| node.id.clone())
+}
+
+/// Indique si le graphe contient déjà un bloc d'entrée (`!has_input`).
+pub fn graph_has_entry(graph: &FlowGraph, catalog: &[OwnedBlockSpec]) -> bool {
+    find_entry_node_id(graph, catalog).is_some()
+}
+
 /// Pile bornée d'instantanés du graphe pour Annuler (`Ctrl+Z`) / Rétablir (`Ctrl+Maj+Z`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct HistoryStack {
@@ -491,8 +505,33 @@ impl Editor {
         self.quick_add.set(Some(state));
     }
 
+    /// Retourne l'identifiant du bloc d'entrée existant si le flux en possède déjà un.
+    pub fn existing_entry_id(&self) -> Option<String> {
+        let catalog = self.catalog.get_untracked();
+        self.graph
+            .with_untracked(|graph| find_entry_node_id(graph, &catalog))
+    }
+
+    /// Indique de manière réactive si le graphe possède déjà un bloc d'entrée (`!has_input`).
+    pub fn has_entry_node(&self) -> bool {
+        let catalog = self.catalog.get_untracked();
+        self.graph.with(|graph| graph_has_entry(graph, &catalog))
+    }
+
+    fn guard_single_entry(&self, has_input: bool) -> Result<(), GraphError> {
+        if has_input {
+            return Ok(());
+        }
+        if let Some(existing) = self.existing_entry_id() {
+            self.select_node(Some(existing), !self.palette_pinned.get_untracked());
+            return Err(GraphError::InvalidPort);
+        }
+        Ok(())
+    }
+
     /// Crée et place le bloc choisi depuis Quick-Add, en raccordant la branche éventuelle.
     pub fn complete_quick_add(&self, spec: &OwnedBlockSpec) -> Result<String, GraphError> {
+        self.guard_single_entry(spec.has_input)?;
         let Some(state) = self.quick_add.get_untracked() else {
             return Err(GraphError::UnknownNode);
         };
@@ -590,6 +629,7 @@ impl Editor {
 
     /// Ajoute un bloc depuis la palette, ou l'insère sur la branche ciblée si active.
     pub fn add_or_insert_block(&self, spec: &OwnedBlockSpec) -> Result<String, GraphError> {
+        self.guard_single_entry(spec.has_input)?;
         let defaults = spec.default_config();
         let catalog = self.catalog.get_untracked();
         let target = self.branch_target.get_untracked();
@@ -1250,5 +1290,42 @@ mod tests {
         assert!(editor.palette_open.get_untracked());
         assert!(!editor.inspector_open.get_untracked());
         assert!(editor.branch_target.get_untracked().is_none());
+    }
+
+    #[test]
+    fn duplicate_entry_block_is_refused() {
+        let catalog = test_catalog();
+        let Some(entry_spec) = catalog.iter().find(|s| !s.has_input).cloned() else {
+            panic!("bloc d'entrée absent du catalogue de test");
+        };
+        let editor = Editor::for_flow(Some("flow.entry".into()), FlowGraph::default());
+        editor.catalog.set(catalog);
+
+        assert!(!editor.has_entry_node());
+        let Ok(first_id) = editor.add_or_insert_block(&entry_spec) else {
+            panic!("le premier bloc d'entrée aurait dû être accepté");
+        };
+        assert!(editor.has_entry_node());
+
+        editor.clear_selection();
+        let err = editor.add_or_insert_block(&entry_spec);
+        assert_eq!(err, Err(GraphError::InvalidPort));
+        assert_eq!(editor.graph.get_untracked().nodes.len(), 1);
+        assert_eq!(editor.selected.get_untracked(), Some(first_id.clone()));
+
+        editor.open_quick_add(QuickAddState {
+            anchor: Point { x: 100.0, y: 100.0 },
+            board_pos: None,
+            branch: None,
+        });
+        assert_eq!(
+            editor.complete_quick_add(&entry_spec),
+            Err(GraphError::InvalidPort)
+        );
+        assert_eq!(editor.graph.get_untracked().nodes.len(), 1);
+
+        editor.remove_node(&first_id);
+        assert!(!editor.has_entry_node());
+        assert!(editor.add_or_insert_block(&entry_spec).is_ok());
     }
 }

@@ -120,10 +120,14 @@ async fn first_available_model(
             tracing::warn!(provider = %endpoint.provider, error = %err, "liste des modèles indisponible");
             AppError::Internal
         })?;
-    models.into_iter().next().ok_or_else(|| {
-        tracing::warn!(provider = %endpoint.provider, "aucun modèle proposé à ce compte");
-        AppError::Internal
-    })
+    models
+        .into_iter()
+        .next()
+        .map(|model| model.id)
+        .ok_or_else(|| {
+            tracing::warn!(provider = %endpoint.provider, "aucun modèle proposé à ce compte");
+            AppError::Internal
+        })
 }
 
 async fn integration_policy(state: &AppState) -> OutboundPolicy {
@@ -627,7 +631,14 @@ mod tests {
         let test_body: AiTestResponse =
             serde_json::from_slice(&axum::body::to_bytes(test_res.into_body(), 16_384).await?)?;
         assert!(test_body.reachable);
-        assert_eq!(test_body.available_models, vec!["mock-model"]);
+        assert_eq!(
+            test_body
+                .available_models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            ["mock-model"]
+        );
 
         // 3. Appel chat : exécute list_libraries (ok) et bloque delete_library (blocked_write_mode)
         let chat_req = Request::builder()
@@ -822,7 +833,14 @@ mod tests {
         let tested: AiTestResponse =
             serde_json::from_slice(&axum::body::to_bytes(tested.into_body(), 16_384).await?)?;
         assert!(tested.reachable);
-        assert_eq!(tested.available_models, ["gpt-auto", "gpt-second"]);
+        assert_eq!(
+            tested
+                .available_models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            ["gpt-auto", "gpt-second"]
+        );
 
         // Seul un administrateur gère la connexion.
         assert_eq!(

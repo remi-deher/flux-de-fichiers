@@ -127,6 +127,15 @@ pub fn groups() -> Vec<(&'static str, Vec<Screen>)> {
     ]
 }
 
+/// Version affichée dans la barre latérale : celle du serveur, sinon la version compilée.
+fn displayed_version(me: &Me) -> String {
+    if me.version.is_empty() {
+        env!("CARGO_PKG_VERSION").to_owned()
+    } else {
+        me.version.clone()
+    }
+}
+
 /// L'écran (ou sa section) est-il visible pour ces droits, sur cette installation ?
 pub fn allowed(me: &Me, route: &Route) -> bool {
     let section = route.section();
@@ -258,6 +267,7 @@ fn Sidebar(me: Me, jobs: Signal<Vec<Job>>, workers: Signal<Vec<Worker>>) -> impl
     let initials = user_initials(&user_name);
     let user_role = role_label(me.role);
     let node_badge = instance_role_badge(me.instance_kind);
+    let app_version = displayed_version(&me);
     view! {
         <aside class="application-sidebar" class:is-collapsed=move || collapsed.get()
             class:is-open=move || drawer.is_some_and(|open| open.get()) aria-label="Navigation principale">
@@ -270,7 +280,7 @@ fn Sidebar(me: Me, jobs: Signal<Vec<Job>>, workers: Signal<Vec<Worker>>) -> impl
                         <span class="brand-name">"Flux de Fichiers"</span>
                         <div class="brand-meta">
                             <span class="brand-node-badge">{node_badge}</span>
-                            <span class="brand-version">{format!("v{}", env!("CARGO_PKG_VERSION"))}</span>
+                            <span class="brand-version">{format!("v{app_version}")}</span>
                         </div>
                     </div>
                 </a>

@@ -121,7 +121,8 @@ pub async fn hardware(
 
 fn build_system_status(effective: &EffectiveRuntimeSettings, secrets: &SecretBox) -> SystemStatus {
     SystemStatus {
-        version: env!("CARGO_PKG_VERSION").to_owned(),
+        version: crate::version::app_version().to_owned(),
+        build_version: crate::version::BUILD_VERSION.to_owned(),
         key_id: secrets.key_id().to_owned(),
         key_source: if std::env::var(KEY_FILE_ENV).is_ok() {
             KeySource::External
@@ -165,7 +166,7 @@ struct GithubLatestRelease {
 
 /// Vérifie la dernière version publiée sur GitHub si l'administrateur a activé l'option.
 pub async fn updates(State(state): State<AppState>, _auth: AdminAuth) -> Json<UpdateCheckStatus> {
-    let current = env!("CARGO_PKG_VERSION").to_owned();
+    let current = crate::version::app_version().to_owned();
     let effective = runtime_settings::load_effective(&state.pool, &state.config).await;
     if !effective.check_updates_enabled {
         return Json(UpdateCheckStatus {

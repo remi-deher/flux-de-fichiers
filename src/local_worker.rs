@@ -19,7 +19,7 @@ pub async fn run(state: AppState) {
     let worker = match repository::register_with_metadata(
         &state.pool,
         &worker_name,
-        Some(env!("CARGO_PKG_VERSION")),
+        Some(crate::version::app_version()),
         Some("local"),
         Some(&initial_snapshot),
     )

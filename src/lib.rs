@@ -29,6 +29,7 @@ pub mod storage;
 pub mod telemetry;
 pub mod tool_run;
 pub mod tools_cache;
+pub mod version;
 pub mod web_session;
 pub mod worker;
 pub mod worker_accounts;

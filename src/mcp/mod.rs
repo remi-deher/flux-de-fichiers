@@ -310,7 +310,7 @@ pub async fn handle_post(
                 },
                 "serverInfo": {
                     "name": SERVER_NAME,
-                    "version": env!("CARGO_PKG_VERSION")
+                    "version": crate::version::app_version()
                 }
             }),
         ),

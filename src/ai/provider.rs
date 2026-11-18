@@ -8,7 +8,7 @@ use crate::{
     mcp::protocol::McpTool,
     net_policy::{NetPolicyError, OutboundPolicy, build_pinned_client, resolve_checked},
 };
-use flux_shared::ai::{AiChatMessage, AiChatRole, AiProvider, AiTestResponse};
+use flux_shared::ai::{AiChatMessage, AiChatRole, AiModelOption, AiProvider, AiTestResponse};
 use reqwest::{Client, Url};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
@@ -22,7 +22,6 @@ const MAX_PROVIDER_ERROR_CHARS: usize = 240;
 const CHATGPT_ORIGINATOR: &str = "flux_de_fichiers";
 const CHATGPT_ACCOUNT_HEADER: &str = "chatgpt-account-id";
 const SSE_DATA_PREFIX: &str = "data:";
-const CHATGPT_CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const CHATGPT_MODEL_VISIBLE: &str = "list";
 
 #[derive(Clone, Debug)]
@@ -144,8 +143,8 @@ fn truncate_error(raw: &str) -> String {
 }
 
 /// Modèles proposés au compte ChatGPT, du plus prioritaire au moins prioritaire.
-fn parse_chatgpt_models(body: &Value) -> Vec<String> {
-    let mut visible: Vec<(i64, String)> = body
+fn parse_chatgpt_models(body: &Value) -> Vec<AiModelOption> {
+    let mut visible: Vec<(i64, AiModelOption)> = body
         .get("models")
         .and_then(Value::as_array)
         .into_iter()
@@ -158,20 +157,26 @@ fn parse_chatgpt_models(body: &Value) -> Vec<String> {
         })
         .filter_map(|model| {
             let slug = model.get("slug").and_then(Value::as_str)?.trim();
+            let display = model.get("display_name").and_then(Value::as_str);
             let priority = model.get("priority").and_then(Value::as_i64);
-            (!slug.is_empty()).then(|| (priority.unwrap_or(i64::MAX), slug.to_owned()))
+            (!slug.is_empty()).then(|| {
+                (
+                    priority.unwrap_or(i64::MAX),
+                    AiModelOption::new(slug, display),
+                )
+            })
         })
         .collect();
-    visible.sort();
-    visible.dedup();
-    visible.into_iter().map(|(_, slug)| slug).collect()
+    visible.sort_by(|a, b| (a.0, &a.1.id).cmp(&(b.0, &b.1.id)));
+    visible.dedup_by(|a, b| a.1.id == b.1.id);
+    visible.into_iter().map(|(_, option)| option).collect()
 }
 
 /// Liste les modèles que le compte ChatGPT connecté peut utiliser (`GET …/models`).
 pub async fn list_chatgpt_models(
     endpoint: &ProviderEndpoint,
     policy: OutboundPolicy,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<AiModelOption>, String> {
     let token = endpoint
         .api_key
         .as_deref()
@@ -179,8 +184,9 @@ pub async fn list_chatgpt_models(
         .filter(|t| !t.is_empty())
         .ok_or_else(|| "Compte ChatGPT non connecté".to_owned())?;
     let target = format!(
-        "{}?client_version={CHATGPT_CLIENT_VERSION}",
-        join_base(&endpoint.base_url, "/models")
+        "{}?client_version={}",
+        join_base(&endpoint.base_url, "/models"),
+        crate::version::app_version()
     );
     let (url, client) = pinned_client_for(&target, policy, LLM_TEST_TIMEOUT)
         .await
@@ -229,9 +235,9 @@ async fn test_chatgpt(
                 format!(
                     "Compte ChatGPT connecté · {} modèle(s) · automatique : « {} ».",
                     models.len(),
-                    models[0]
+                    models[0].id
                 )
-            } else if models.iter().any(|model| model == wanted) {
+            } else if models.iter().any(|model| model.id == wanted) {
                 format!(
                     "Compte ChatGPT connecté · {} modèle(s) · modèle sélectionné disponible.",
                     models.len()
@@ -321,7 +327,9 @@ pub async fn test_connection(
             let models = extract_models(endpoint.provider, &body);
             let model_found = !endpoint.model.trim().is_empty()
                 && (models.is_empty()
-                    || models.iter().any(|candidate| candidate == &endpoint.model));
+                    || models
+                        .iter()
+                        .any(|candidate| candidate.id == endpoint.model));
             let message = if models.is_empty() {
                 "Connexion établie (aucun modèle listé par le serveur).".into()
             } else if model_found {
@@ -352,29 +360,31 @@ pub async fn test_connection(
     }
 }
 
-fn extract_models(provider: AiProvider, body: &Value) -> Vec<String> {
+fn extract_models(provider: AiProvider, body: &Value) -> Vec<AiModelOption> {
     let items = match provider {
         AiProvider::Ollama => body.get("models").and_then(Value::as_array),
         AiProvider::OpenAiCompatible | AiProvider::Anthropic | AiProvider::ChatGptOauth => {
             body.get("data").and_then(Value::as_array)
         }
     };
-    let mut names: Vec<String> = items
+    let mut models: Vec<AiModelOption> = items
         .into_iter()
         .flatten()
         .filter_map(|item| {
-            item.get("name")
+            let id = item
+                .get("name")
                 .or_else(|| item.get("id"))
                 .and_then(Value::as_str)
                 .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(ToOwned::to_owned)
+                .filter(|s| !s.is_empty())?;
+            let display = item.get("display_name").and_then(Value::as_str);
+            Some(AiModelOption::new(id, display))
         })
         .collect();
-    names.sort();
-    names.dedup();
-    names.truncate(MAX_DETECTED_MODELS);
-    names
+    models.sort_by(|a, b| a.id.cmp(&b.id));
+    models.dedup_by(|a, b| a.id == b.id);
+    models.truncate(MAX_DETECTED_MODELS);
+    models
 }
 
 fn openai_tool_definitions(tools: &[McpTool]) -> Vec<Value> {
@@ -1210,7 +1220,30 @@ mod tests {
             { "slug": "sans-priorite" },
             { "slug": "  " },
         ]});
-        assert_eq!(parse_chatgpt_models(&body), ["a", "b", "sans-priorite"]);
+        let ids = |models: Vec<AiModelOption>| -> Vec<String> {
+            models.into_iter().map(|model| model.id).collect()
+        };
+        assert_eq!(
+            ids(parse_chatgpt_models(&body)),
+            ["a", "b", "sans-priorite"]
+        );
         assert!(parse_chatgpt_models(&json!({})).is_empty());
+        let named = json!({ "models": [{ "slug": "g", "display_name": "GPT" }] });
+        assert_eq!(parse_chatgpt_models(&named)[0].label, "GPT · g");
+    }
+
+    #[test]
+    fn listed_models_are_sorted_deduplicated_and_labelled() {
+        let ollama = json!({ "models": [{ "name": "b" }, { "name": "a" }, { "name": "b" }] });
+        let ids: Vec<_> = extract_models(AiProvider::Ollama, &ollama)
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(ids, ["a", "b"]);
+        let anthropic = json!({ "data": [{ "id": "claude-x", "display_name": "Claude X" }] });
+        assert_eq!(
+            extract_models(AiProvider::Anthropic, &anthropic)[0].label,
+            "Claude X · claude-x"
+        );
     }
 }

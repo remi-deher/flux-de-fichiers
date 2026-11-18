@@ -210,6 +210,7 @@ async fn test_viewer_can_look_but_not_change_anything() -> anyhow::Result<()> {
 
     let me = call(&app, "GET", "/api/v1/me", Some(&viewer), None).await?;
     assert_eq!(me.body["role"], "viewer");
+    assert_eq!(me.body["version"], flux_de_fichiers::version::app_version());
     let permissions: Vec<String> = me.body["permissions"]
         .as_array()
         .map(|list| {

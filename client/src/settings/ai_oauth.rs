@@ -114,7 +114,7 @@ pub fn AiOauthPanel(account: RwSignal<Option<AiOauthAccount>>) -> impl IntoView 
             <span class="form-label">"Connexion ChatGPT"</span>
             {move || match (account.get(), code.get()) {
                 (Some(connected), _) => view! {
-                    <div class="cluster-end">
+                    <div class="cluster cluster-wrap">
                         <Tag label="Connecté" tone=TagTone::Success />
                         <span class="text-mono">{account_label(&connected)}</span>
                         <button type="button" class="btn btn-secondary" on:click=disconnect>
@@ -149,7 +149,7 @@ pub fn AiOauthPanel(account: RwSignal<Option<AiOauthAccount>>) -> impl IntoView 
                     </button>
                 }.into_any(),
             }}
-            <p class="text-dim">
+            <p class="form-help">
                 "Utilise votre abonnement ChatGPT, comme Codex CLI : aucune clé d'API. Cet accès n'est pas une API publique garantie et reste soumis aux conditions d'OpenAI. Les jetons sont chiffrés au repos et jamais exposés au navigateur."
             </p>
             {move || feedback.get().map(|err| view! {

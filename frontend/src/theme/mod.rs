@@ -83,6 +83,7 @@ mod tests {
         assert!(styles.contains(".application-shell.is-workbench .app-topbar {"));
         assert!(styles.contains(".auth-role-grid {"));
         assert!(styles.contains(".diagnostic-box {"));
+        assert!(styles.contains(".ai-chat__messages {"));
     }
 
     /// Vérifie qu'une feuille CSS a ses accolades équilibrées et aucune imbrication hors `@media`/`@keyframes`.

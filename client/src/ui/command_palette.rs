@@ -3,9 +3,11 @@
 use super::icon::{Icon, IconName};
 use super::search::matches;
 use super::toast::Toasts;
+use crate::ai::AiAssistantState;
 use crate::route::{Route, use_router};
 use crate::shell::{allowed, groups};
 use crate::theme::{Theme, set_theme};
+use flux_shared::InstanceKind;
 use flux_shared::session::Me;
 use leptos::prelude::*;
 
@@ -23,6 +25,7 @@ pub struct CommandItem {
     pub icon: IconName,
     pub route: Option<Route>,
     pub theme: Option<Theme>,
+    pub open_ai: bool,
 }
 
 fn theme_label(theme: Theme) -> &'static str {
@@ -47,6 +50,7 @@ pub fn available_commands(me: &Me) -> Vec<CommandItem> {
                     icon: screen.icon,
                     route: Some(screen.route),
                     theme: None,
+                    open_ai: false,
                 });
             }
         }
@@ -60,6 +64,19 @@ pub fn available_commands(me: &Me) -> Vec<CommandItem> {
             icon: IconName::Plus,
             route: Some(Route::NewFlow),
             theme: None,
+            open_ai: false,
+        });
+    }
+    if me.instance_kind == InstanceKind::Central {
+        commands.push(CommandItem {
+            id: "action:assistant-ai".to_owned(),
+            group: "Actions",
+            label: "Ouvrir l'assistant IA",
+            hint: "Copilote et diagnostic MCP",
+            icon: IconName::Sparkles,
+            route: None,
+            theme: None,
+            open_ai: true,
         });
     }
     for theme in Theme::ALL {
@@ -71,6 +88,7 @@ pub fn available_commands(me: &Me) -> Vec<CommandItem> {
             icon: IconName::Sliders,
             route: None,
             theme: Some(theme),
+            open_ai: false,
         });
     }
     commands
@@ -126,6 +144,7 @@ impl CommandPaletteState {
 #[component]
 pub fn CommandPalette(me: Me) -> impl IntoView {
     let state = use_context::<CommandPaletteState>().unwrap_or_else(CommandPaletteState::install);
+    let ai_state = use_context::<AiAssistantState>();
     let router = use_router();
     let all_commands = StoredValue::new(available_commands(&me));
     let query = RwSignal::new(String::new());
@@ -163,6 +182,11 @@ pub fn CommandPalette(me: Me) -> impl IntoView {
         if let Some(theme) = cmd.theme {
             set_theme(theme);
             Toasts::notify_info(format!("{} activé.", cmd.label));
+        }
+        if cmd.open_ai
+            && let Some(ai) = ai_state
+        {
+            ai.show();
         }
     };
 
@@ -287,8 +311,11 @@ mod tests {
                 .any(|cmd| cmd.route == Some(Route::Libraries))
         );
 
+        assert!(admin_cmds.iter().any(|cmd| cmd.open_ai));
+
         let worker = me(Role::Admin, InstanceKind::Worker);
         let worker_cmds = available_commands(&worker);
+        assert!(!worker_cmds.iter().any(|cmd| cmd.open_ai));
         assert!(
             !worker_cmds
                 .iter()

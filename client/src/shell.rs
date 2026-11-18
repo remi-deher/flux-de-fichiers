@@ -1,6 +1,7 @@
 //! Coque de l'application : barre latérale (marque, navigation par groupes, compteurs live, thème, déconnexion)
 //! et barre du haut (filtre instantané, période, workers en ligne et action contextuelle).
 
+use crate::ai::{AiAssistantDrawer, AiAssistantState};
 use crate::route::{Link, Route, use_router};
 use crate::settings::{logout, role_label};
 use crate::theme::ThemePicker;
@@ -386,6 +387,8 @@ fn Topbar(me: Me, workers: Signal<Option<Vec<Worker>>>) -> impl IntoView {
         }
     });
     let central = me.instance_kind == InstanceKind::Central && me.allows(Permission::ViewWorkers);
+    let central_ai = me.instance_kind == InstanceKind::Central;
+    let ai_state = central_ai.then(use_context::<AiAssistantState>).flatten();
     view! {
         <header class="app-topbar" role="banner">
             <div class="topbar-container">
@@ -431,6 +434,18 @@ fn Topbar(me: Me, workers: Signal<Option<Vec<Worker>>>) -> impl IntoView {
                 <div class="topbar-actions">
                     <FilterSheet route=Signal::derive(move || router.current()) />
                     {central.then(|| view! { <WorkersPill workers=workers /> })}
+                    {ai_state.map(|ai| view! {
+                        <button
+                            type="button"
+                            class="btn btn-secondary btn-sm ai-trigger-btn"
+                            title="Ouvrir l'assistant IA intégré"
+                            aria-expanded=move || ai.open.get().to_string()
+                            on:click=move |_| ai.toggle()
+                        >
+                            <Icon name=IconName::Sparkles size=15 />
+                            <span>"Assistant IA"</span>
+                        </button>
+                    })}
                     <TopbarActionSlot />
                 </div>
             </div>
@@ -447,6 +462,10 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
     TopbarAction::install();
     Toasts::install();
     CommandPaletteState::install();
+    let is_central = me.instance_kind == InstanceKind::Central;
+    if is_central {
+        AiAssistantState::install();
+    }
     let reload = use_context::<crate::jobs::LiveJobs>().map(|live| live.reload);
     let can_central_workers =
         me.instance_kind == InstanceKind::Central && me.allows(Permission::ViewWorkers);
@@ -508,7 +527,8 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
                 </div>
             </div>
         </div>
-        <CommandPalette me=me />
+        <CommandPalette me=me.clone() />
+        {is_central.then(|| view! { <AiAssistantDrawer me=me /> })}
         <ToastViewport />
     }
 }

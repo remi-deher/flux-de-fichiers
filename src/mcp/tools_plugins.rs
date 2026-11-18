@@ -16,20 +16,20 @@ use serde_json::{Value, json};
 
 pub fn tools() -> Vec<McpTool> {
     vec![
-        McpTool {
-            name: "list_repositories",
-            description: "Liste les dépôts de plugins configurés.",
-            input_schema: empty_schema(),
-        },
-        McpTool {
-            name: "get_repository",
-            description: "Lit le détail d'un dépôt de plugins et ses entrées synchronisées.",
-            input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-        },
-        McpTool {
-            name: "add_repository",
-            description: "Ajoute un dépôt de plugins distant (URL vers index.json) et le synchronise.",
-            input_schema: obj_schema(
+        McpTool::read_only(
+            "list_repositories",
+            "Liste les dépôts de plugins configurés.",
+            empty_schema(),
+        ),
+        McpTool::read_only(
+            "get_repository",
+            "Lit le détail d'un dépôt de plugins et ses entrées synchronisées.",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+        ),
+        McpTool::write(
+            "add_repository",
+            "Ajoute un dépôt de plugins distant (URL vers index.json) et le synchronise.",
+            obj_schema(
                 json!({
                     "id": { "type": "string" },
                     "name": { "type": "string" },
@@ -37,82 +37,99 @@ pub fn tools() -> Vec<McpTool> {
                 }),
                 &["name", "indexUrl"],
             ),
-        },
-        McpTool {
-            name: "sync_repository",
-            description: "Synchronise immédiatement un dépôt de plugins.",
-            input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-        },
-        McpTool {
-            name: "toggle_repository",
-            description: "Active ou désactive un dépôt de plugins.",
-            input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-        },
-        McpTool {
-            name: "delete_repository",
-            description: "Supprime un dépôt de plugins non officiel.",
-            input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-        },
-        McpTool {
-            name: "list_catalog",
-            description: "Liste les plugins, packs, flux modèles et scripts du catalogue synchronisé.",
-            input_schema: empty_schema(),
-        },
-        McpTool {
-            name: "get_plugin",
-            description: "Lit le détail d'un plugin (blocs exposés, dépendances, paramètres).",
-            input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-        },
-        McpTool {
-            name: "get_plugin_settings",
-            description: "Lit les réglages d'un plugin (les secrets sont masqués).",
-            input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-        },
-        McpTool {
-            name: "save_plugin_settings",
-            description: "Enregistre les réglages d'un plugin (les secrets sont chiffrés en base).",
-            input_schema: obj_schema(
+            false,
+        ),
+        McpTool::write(
+            "sync_repository",
+            "Synchronise immédiatement un dépôt de plugins.",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+            true,
+        ),
+        McpTool::write(
+            "toggle_repository",
+            "Active ou désactive un dépôt de plugins.",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+            false,
+        ),
+        McpTool::destructive(
+            "delete_repository",
+            "Supprime un dépôt de plugins non officiel.",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+        ),
+        McpTool::read_only(
+            "list_catalog",
+            "Liste les plugins, packs, flux modèles et scripts du catalogue synchronisé.",
+            empty_schema(),
+        ),
+        McpTool::read_only(
+            "get_plugin",
+            "Lit le détail d'un plugin (blocs exposés, dépendances, paramètres).",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+        ),
+        McpTool::read_only(
+            "get_plugin_settings",
+            "Lit les réglages d'un plugin (les secrets sont masqués).",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+        ),
+        McpTool::write(
+            "save_plugin_settings",
+            "Enregistre les réglages d'un plugin (les secrets sont chiffrés en base).",
+            obj_schema(
                 json!({
                     "id": { "type": "string" },
                     "settings": { "type": "object" }
                 }),
                 &["id", "settings"],
             ),
-        },
-        McpTool {
-            name: "list_tools",
-            description: "Liste les applications/outils distribués et leur état d'installation.",
-            input_schema: empty_schema(),
-        },
-        McpTool {
-            name: "get_tool",
-            description: "Lit le détail d'une application distribuée (artefacts, SHA-256, compatibilité).",
-            input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-        },
-        McpTool {
-            name: "install_tool",
-            description: "Télécharge, vérifie (SHA-256) et installe une application distribuée dans le cache.",
-            input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-        },
-        McpTool {
-            name: "get_pack",
-            description: "Lit le détail d'un pack (composants et plan d'installation).",
-            input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-        },
-        McpTool {
-            name: "install_pack",
-            description: "Installe un pack du catalogue et ses outils requis.",
-            input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-        },
-        McpTool {
-            name: "list_local_catalog",
-            description: "Liste le catalogue local (scripts, ressources, modèles de blocs/flux, packs).",
-            input_schema: empty_schema(),
-        },
-        McpTool {
-            name: "upload_local_resource",
-            description: "Dépose une ressource locale (contenu encodé en base64).",
-            input_schema: obj_schema(
+            true,
+        ),
+        McpTool::read_only(
+            "test_plugin_connection",
+            "Teste la connectivité réseau et les identifiants d'un plugin API (Sonarr, Radarr, Jellyfin, Plex, Emby, etc.).",
+            obj_schema(
+                json!({
+                    "id": { "type": "string" },
+                    "settings": { "type": "object" }
+                }),
+                &["id"],
+            ),
+        ),
+        McpTool::read_only(
+            "list_tools",
+            "Liste les applications/outils distribués et leur état d'installation.",
+            empty_schema(),
+        ),
+        McpTool::read_only(
+            "get_tool",
+            "Lit le détail d'une application distribuée (artefacts, SHA-256, compatibilité).",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+        ),
+        McpTool::write(
+            "install_tool",
+            "Télécharge, vérifie (SHA-256) et installe une application distribuée dans le cache.",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+            true,
+        ),
+        McpTool::read_only(
+            "get_pack",
+            "Lit le détail d'un pack (composants et plan d'installation).",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+        ),
+        McpTool::write(
+            "install_pack",
+            "Installe un pack du catalogue et ses outils requis.",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+            true,
+        ),
+        McpTool::read_only(
+            "list_local_catalog",
+            "Liste le catalogue local (scripts, ressources, modèles de blocs/flux, packs).",
+            empty_schema(),
+        ),
+        McpTool::write(
+            "upload_local_resource",
+            "Dépose une ressource locale (contenu encodé en base64).",
+            obj_schema(
                 json!({
                     "id": { "type": "string" },
                     "name": { "type": "string" },
@@ -122,11 +139,12 @@ pub fn tools() -> Vec<McpTool> {
                 }),
                 &["name", "filename", "contentBase64"],
             ),
-        },
-        McpTool {
-            name: "upsert_local_script",
-            description: "Crée ou met à jour un script local exécutable dans les flux.",
-            input_schema: obj_schema(
+            true,
+        ),
+        McpTool::write(
+            "upsert_local_script",
+            "Crée ou met à jour un script local exécutable dans les flux.",
+            obj_schema(
                 json!({
                     "id": { "type": "string" },
                     "name": { "type": "string" },
@@ -136,11 +154,12 @@ pub fn tools() -> Vec<McpTool> {
                 }),
                 &["name", "interpreter", "content"],
             ),
-        },
-        McpTool {
-            name: "create_local_block_template",
-            description: "Enregistre un modèle de bloc local.",
-            input_schema: obj_schema(
+            true,
+        ),
+        McpTool::write(
+            "create_local_block_template",
+            "Enregistre un modèle de bloc local.",
+            obj_schema(
                 json!({
                     "id": { "type": "string" },
                     "name": { "type": "string" },
@@ -149,11 +168,12 @@ pub fn tools() -> Vec<McpTool> {
                 }),
                 &["name", "block"],
             ),
-        },
-        McpTool {
-            name: "create_local_flow_template",
-            description: "Enregistre un modèle de flux local.",
-            input_schema: obj_schema(
+            false,
+        ),
+        McpTool::write(
+            "create_local_flow_template",
+            "Enregistre un modèle de flux local.",
+            obj_schema(
                 json!({
                     "id": { "type": "string" },
                     "name": { "type": "string" },
@@ -162,11 +182,12 @@ pub fn tools() -> Vec<McpTool> {
                 }),
                 &["name", "definition"],
             ),
-        },
-        McpTool {
-            name: "create_local_pack",
-            description: "Crée un pack local regroupant des scripts, ressources et modèles.",
-            input_schema: obj_schema(
+            false,
+        ),
+        McpTool::write(
+            "create_local_pack",
+            "Crée un pack local regroupant des scripts, ressources et modèles.",
+            obj_schema(
                 json!({
                     "id": { "type": "string" },
                     "name": { "type": "string" },
@@ -175,12 +196,13 @@ pub fn tools() -> Vec<McpTool> {
                 }),
                 &["name", "components"],
             ),
-        },
-        McpTool {
-            name: "delete_local_item",
-            description: "Supprime un élément du catalogue local par son identifiant.",
-            input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-        },
+            false,
+        ),
+        McpTool::destructive(
+            "delete_local_item",
+            "Supprime un élément du catalogue local par son identifiant.",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+        ),
     ]
 }
 
@@ -188,6 +210,13 @@ pub fn tools() -> Vec<McpTool> {
 struct SaveSettingsArgs {
     id: String,
     settings: Value,
+}
+
+#[derive(Deserialize)]
+struct TestConnectionArgs {
+    id: String,
+    #[serde(default)]
+    settings: Option<Value>,
 }
 
 pub async fn call(
@@ -308,6 +337,27 @@ pub async fn call(
                 Path(parsed.id),
                 ManagePluginsAuth(principal.clone()),
                 Json(parsed.settings),
+            )
+            .await
+            .map(|Json(v)| McpToolResult::json(&v))
+        }
+        "test_plugin_connection" => {
+            let parsed: TestConnectionArgs = match parse_args(args) {
+                Ok(parsed) => parsed,
+                Err(msg) => return Some(McpToolResult::error(msg)),
+            };
+            let body = match parsed.settings {
+                Some(val) => match serde_json::to_vec(&val) {
+                    Ok(bytes) => axum::body::Bytes::from(bytes),
+                    Err(err) => return Some(McpToolResult::error(err.to_string())),
+                },
+                None => axum::body::Bytes::new(),
+            };
+            plugins::test_connection(
+                State(state.clone()),
+                Path(parsed.id),
+                ManagePluginsAuth(principal.clone()),
+                body,
             )
             .await
             .map(|Json(v)| McpToolResult::json(&v))

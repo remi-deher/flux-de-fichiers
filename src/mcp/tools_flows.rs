@@ -1,85 +1,121 @@
-//! Outils MCP pour la gestion des flux de traitement et de leurs blocs.
+//! Outils MCP pour la gestion, la simulation et l'analyse différentielle des flux de traitement.
 
 use super::protocol::{McpTool, McpToolResult, empty_schema, obj_schema, parse_args, req_str};
 use crate::{
     api::{AppState, ManageFlowsAuth, ViewFlowsAuth, flows},
-    auth::Principal,
+    auth::{self, Principal},
     domain::UpdateFlowRequest,
+    repository,
 };
 use axum::extract::{Json, Path, State};
+use flux_shared::{
+    Permission,
+    flow_analysis::{SimulationPreset, diff_flow_graphs, simulate_flow_basic},
+    flows::FlowGraph,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 pub fn tools() -> Vec<McpTool> {
     vec![
-        McpTool {
-            name: "list_blocks",
-            description: "Liste le catalogue des blocs de flux disponibles avec leurs champs et ports.",
-            input_schema: empty_schema(),
-        },
-        McpTool {
-            name: "list_flows",
-            description: "Liste tous les flux configurés (les secrets webhook restent masqués).",
-            input_schema: empty_schema(),
-        },
-        McpTool {
-            name: "get_flow",
-            description: "Lit la définition détaillée d'un flux par son identifiant.",
-            input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-        },
-        McpTool {
-            name: "save_flow",
-            description: "Crée ou met à jour un flux (nouvelle version immuable).",
-            input_schema: obj_schema(
+        McpTool::read_only(
+            "list_blocks",
+            "Liste le catalogue des blocs de flux disponibles avec leurs champs et ports.",
+            empty_schema(),
+        ),
+        McpTool::read_only(
+            "list_flows",
+            "Liste tous les flux configurés (les secrets webhook restent masqués).",
+            empty_schema(),
+        ),
+        McpTool::read_only(
+            "get_flow",
+            "Lit la définition détaillée d'un flux par son identifiant.",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+        ),
+        McpTool::write(
+            "save_flow",
+            "Crée ou met à jour un flux (nouvelle version immuable).",
+            obj_schema(
                 json!({
                     "id": { "type": "string" },
                     "name": { "type": "string" },
+                    "description": { "type": "string" },
+                    "fileMask": { "type": "string" },
                     "isDefault": { "type": "boolean" },
                     "definition": { "type": "object" }
                 }),
                 &["id", "name", "definition"],
             ),
-        },
-        McpTool {
-            name: "delete_flow",
-            description: "Supprime un flux par son identifiant.",
-            input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-        },
-        McpTool {
-            name: "list_flow_versions",
-            description: "Liste les versions figées d'un flux.",
-            input_schema: obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-        },
-        McpTool {
-            name: "get_flow_version",
-            description: "Lit une version figée spécifique d'un flux.",
-            input_schema: obj_schema(
+            true,
+        ),
+        McpTool::destructive(
+            "delete_flow",
+            "Supprime un flux par son identifiant.",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+        ),
+        McpTool::read_only(
+            "list_flow_versions",
+            "Liste les versions figées d'un flux.",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+        ),
+        McpTool::read_only(
+            "get_flow_version",
+            "Lit une version figée spécifique d'un flux.",
+            obj_schema(
                 json!({
                     "id": { "type": "string" },
                     "version": { "type": "integer" }
                 }),
                 &["id", "version"],
             ),
-        },
-        McpTool {
-            name: "validate_flow",
-            description: "Valide un graphe de flux (blocs connus, champs requis, absence de cycle) avant sauvegarde.",
-            input_schema: obj_schema(
+        ),
+        McpTool::read_only(
+            "validate_flow",
+            "Valide un graphe de flux (blocs connus, champs requis, absence de cycle) avant sauvegarde.",
+            obj_schema(
                 json!({ "definition": { "type": "object" } }),
                 &["definition"],
             ),
-        },
-        McpTool {
-            name: "restore_flow_version",
-            description: "Restaure une version figée d'un flux en tant que nouvelle version courante.",
-            input_schema: obj_schema(
+        ),
+        McpTool::read_only(
+            "simulate_flow",
+            "Simule à sec le parcours d'un flux (fourni en JSON ou via flowId) sur un profil de sonde avant de l'enregistrer.",
+            obj_schema(
+                json!({
+                    "flowId": { "type": "string" },
+                    "definition": { "type": "object" },
+                    "preset": { "type": "string", "enum": ["structured_tracks", "document_metadata", "minimal"] },
+                    "fileName": { "type": "string" },
+                    "probeJson": { "type": ["object", "string"] }
+                }),
+                &[],
+            ),
+        ),
+        McpTool::read_only(
+            "diff_flow_versions",
+            "Compare deux versions figées d'un flux (ou les deux dernières par défaut) et résume nœuds/liaisons modifiés.",
+            obj_schema(
+                json!({
+                    "id": { "type": "string" },
+                    "fromVersion": { "type": "integer" },
+                    "toVersion": { "type": "integer" }
+                }),
+                &["id"],
+            ),
+        ),
+        McpTool::write(
+            "restore_flow_version",
+            "Restaure une version figée d'un flux en tant que nouvelle version courante.",
+            obj_schema(
                 json!({
                     "id": { "type": "string" },
                     "version": { "type": "integer" }
                 }),
                 &["id", "version"],
             ),
-        },
+            false,
+        ),
     ]
 }
 
@@ -101,6 +137,116 @@ struct SaveFlowArgs {
 struct FlowVersionArgs {
     id: String,
     version: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SimulateFlowArgs {
+    #[serde(default)]
+    flow_id: Option<String>,
+    #[serde(default)]
+    definition: Option<Value>,
+    #[serde(default)]
+    preset: Option<SimulationPreset>,
+    #[serde(default)]
+    file_name: Option<String>,
+    #[serde(default)]
+    probe_json: Option<Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiffFlowVersionsArgs {
+    id: String,
+    #[serde(default)]
+    from_version: Option<i64>,
+    #[serde(default)]
+    to_version: Option<i64>,
+}
+
+async fn run_simulate_flow(
+    args: SimulateFlowArgs,
+    state: &AppState,
+    principal: &Principal,
+) -> Result<McpToolResult, crate::error::AppError> {
+    auth::require(principal, Permission::ViewFlows)?;
+    let graph = match (args.definition, args.flow_id.as_deref()) {
+        (Some(def), _) => match def {
+            Value::String(raw) => FlowGraph::parse(&raw),
+            other => serde_json::from_value(other).map_err(|_| crate::error::AppError::Invalid)?,
+        },
+        (None, Some(id)) => {
+            let flow = repository::get_flow(&state.pool, id.trim()).await?;
+            FlowGraph::parse(&flow.definition)
+        }
+        (None, None) => {
+            return Ok(McpToolResult::error(
+                "paramètre requis : fournissez `definition` ou `flowId`",
+            ));
+        }
+    };
+
+    let mut input = args
+        .preset
+        .unwrap_or(SimulationPreset::StructuredTracks)
+        .input();
+    if let Some(name) = args
+        .file_name
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+    {
+        input.file_name = name;
+    }
+    if let Some(probe) = args.probe_json {
+        input.probe_json = match probe {
+            Value::String(s) => s,
+            other => other.to_string(),
+        };
+    }
+
+    let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
+    let catalog = state.catalog_cache.blocks(&roots).await;
+    let report = simulate_flow_basic(&graph, &catalog, &input);
+    Ok(McpToolResult::json(&report))
+}
+
+async fn run_diff_flow_versions(
+    args: DiffFlowVersionsArgs,
+    state: &AppState,
+    principal: &Principal,
+) -> Result<McpToolResult, crate::error::AppError> {
+    auth::require(principal, Permission::ViewFlows)?;
+    let versions = repository::list_flow_versions(&state.pool, &args.id).await?;
+    let to_ver = match args.to_version {
+        Some(v) => v,
+        None => versions
+            .first()
+            .map(|v| v.version)
+            .ok_or(crate::error::AppError::NotFound)?,
+    };
+    let from_ver = match args.from_version {
+        Some(v) => v,
+        None => versions
+            .iter()
+            .find(|v| v.version < to_ver)
+            .map(|v| v.version)
+            .unwrap_or(to_ver),
+    };
+
+    let before_record = repository::get_flow_version(&state.pool, &args.id, from_ver).await?;
+    let after_record = repository::get_flow_version(&state.pool, &args.id, to_ver).await?;
+    let diff = diff_flow_graphs(
+        &FlowGraph::parse(&before_record.definition),
+        &FlowGraph::parse(&after_record.definition),
+    );
+    Ok(McpToolResult::json(&json!({
+        "flowId": args.id,
+        "fromVersion": from_ver,
+        "toVersion": to_ver,
+        "nameChanged": before_record.name != after_record.name,
+        "fileMaskChanged": before_record.file_mask != after_record.file_mask,
+        "diff": diff,
+    })))
 }
 
 pub async fn call(
@@ -205,6 +351,20 @@ pub async fn call(
             )
             .await
             .map(|Json(v)| McpToolResult::json(&v))
+        }
+        "simulate_flow" => {
+            let parsed: SimulateFlowArgs = match parse_args(args) {
+                Ok(parsed) => parsed,
+                Err(msg) => return Some(McpToolResult::error(msg)),
+            };
+            run_simulate_flow(parsed, state, principal).await
+        }
+        "diff_flow_versions" => {
+            let parsed: DiffFlowVersionsArgs = match parse_args(args) {
+                Ok(parsed) => parsed,
+                Err(msg) => return Some(McpToolResult::error(msg)),
+            };
+            run_diff_flow_versions(parsed, state, principal).await
         }
         "restore_flow_version" => {
             let parsed: FlowVersionArgs = match parse_args(args) {

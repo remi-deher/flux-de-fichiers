@@ -801,27 +801,27 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
             _ => "Fenêtre d'acceptation fermée".to_owned(),
         };
         let reqs = state.requests;
-        let header_actions = can_manage
-            .then(|| {
-                view! {
-                    <div class="cluster">
+        let header_actions = if can_manage {
+            view! {
+                <div class="cluster">
+                    <button type="button" class="btn btn-secondary btn-sm"
+                        disabled=move || toggle_window.pending().get()
+                        on:click=move |_| { toggle_window.dispatch(true); }>
+                        {if state.window.open { "Prolonger (15 min)" } else { "Ouvrir (15 min)" }}
+                    </button>
+                    {state.window.open.then(|| view! {
                         <button type="button" class="btn btn-secondary btn-sm"
                             disabled=move || toggle_window.pending().get()
-                            on:click=move |_| { toggle_window.dispatch(true); }>
-                            {if state.window.open { "Prolonger (15 min)" } else { "Ouvrir (15 min)" }}
+                            on:click=move |_| { toggle_window.dispatch(false); }>
+                            "Fermer"
                         </button>
-                        {state.window.open.then(|| view! {
-                            <button type="button" class="btn btn-secondary btn-sm"
-                                disabled=move || toggle_window.pending().get()
-                                on:click=move |_| { toggle_window.dispatch(false); }>
-                                "Fermer"
-                            </button>
-                        })}
-                    </div>
-                }
-                .into_any()
-            })
-            .unwrap_or_else(|| ().into_any());
+                    })}
+                </div>
+            }
+            .into_any()
+        } else {
+            ().into_any()
+        };
         Some(view! {
             <section class="section-panel">
                 <SectionHeader

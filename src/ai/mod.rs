@@ -2101,22 +2101,30 @@ mod tests {
         let mock_llm = axum::Router::new()
             .route(
                 "/models",
-                axum::routing::get(move |headers: axum::http::HeaderMap| {
-                    hits_in_mock.fetch_add(1, Ordering::SeqCst);
-                    async move {
-                        assert_eq!(
-                            headers
-                                .get("chatgpt-account-id")
-                                .and_then(|v| v.to_str().ok()),
-                            Some("acct-1")
-                        );
-                        Json(json!({ "models": [
-                            { "slug": "interdit", "visibility": "hide", "priority": 0 },
-                            { "slug": "gpt-second", "visibility": "list", "priority": 2 },
-                            { "slug": "gpt-auto", "visibility": "list", "priority": 1 },
-                        ]}))
-                    }
-                }),
+                axum::routing::get(
+                    move |headers: axum::http::HeaderMap, uri: axum::http::Uri| {
+                        hits_in_mock.fetch_add(1, Ordering::SeqCst);
+                        async move {
+                            assert_eq!(
+                                headers
+                                    .get("chatgpt-account-id")
+                                    .and_then(|v| v.to_str().ok()),
+                                Some("acct-1")
+                            );
+                            // Le backend Codex masque les modèles dont la version minimale n'est pas atteinte.
+                            assert_eq!(
+                                uri.query(),
+                                Some("client_version=0.170.0"),
+                                "version de client annoncée à /models"
+                            );
+                            Json(json!({ "models": [
+                                { "slug": "interdit", "visibility": "hide", "priority": 0 },
+                                { "slug": "gpt-second", "visibility": "list", "priority": 2 },
+                                { "slug": "gpt-auto", "visibility": "list", "priority": 1 },
+                            ]}))
+                        }
+                    },
+                ),
             )
             .route(
             "/responses",

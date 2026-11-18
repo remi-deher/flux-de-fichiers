@@ -26,6 +26,9 @@ const CHATGPT_ORIGINATOR: &str = "flux_de_fichiers";
 const CHATGPT_ACCOUNT_HEADER: &str = "chatgpt-account-id";
 const SSE_DATA_PREFIX: &str = "data:";
 const CHATGPT_MODEL_VISIBLE: &str = "list";
+/// Version de Codex annoncée à `/models` : le backend ne renvoie que les modèles dont la version
+/// minimale du client est atteinte, et notre propre version (0.x de Flux) est très en deçà.
+const CHATGPT_CODEX_CLIENT_VERSION: &str = "0.170.0";
 
 #[derive(Clone, Debug)]
 pub struct ProviderEndpoint {
@@ -189,7 +192,7 @@ pub async fn list_chatgpt_models(
     let target = format!(
         "{}?client_version={}",
         join_base(&endpoint.base_url, "/models"),
-        crate::version::app_version()
+        CHATGPT_CODEX_CLIENT_VERSION
     );
     let (url, client) = pinned_client_for(&target, policy, LLM_TEST_TIMEOUT)
         .await

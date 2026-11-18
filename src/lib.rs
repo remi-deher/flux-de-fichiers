@@ -13,6 +13,7 @@ pub mod flows;
 pub mod instance;
 pub mod job_runner;
 pub mod local_worker;
+pub mod logs;
 pub mod mail;
 pub mod mcp;
 pub mod media;

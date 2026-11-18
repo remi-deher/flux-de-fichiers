@@ -1,5 +1,6 @@
 use super::{
-    AdminAuth, AppState, ViewJobsAuth, ViewLibrariesAuth, ViewOverviewAuth, ViewWorkersAuth,
+    AppState, ManageJobsAuth, ManageWorkersAuth, ViewJobsAuth, ViewLibrariesAuth, ViewOverviewAuth,
+    ViewWorkersAuth,
 };
 use crate::{
     domain::*,
@@ -28,7 +29,7 @@ pub async fn files(
 
 pub async fn create(
     State(s): State<AppState>,
-    _auth: AdminAuth,
+    _auth: ManageJobsAuth,
     Json(r): Json<NewJob>,
 ) -> AppResult<(StatusCode, Json<Job>)> {
     let path = storage::input_path(&s.config.input_dir, &r.source_name).await?;
@@ -165,7 +166,7 @@ pub async fn get_job(
 pub async fn delete_job(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
-    _auth: AdminAuth,
+    _auth: ManageJobsAuth,
 ) -> AppResult<StatusCode> {
     repository::delete_job(&s.pool, id).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -174,7 +175,7 @@ pub async fn delete_job(
 pub async fn retry(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
-    _auth: AdminAuth,
+    _auth: ManageJobsAuth,
 ) -> AppResult<Json<Job>> {
     let job = repository::retry_job(&s.pool, id).await?;
     s.notify_job_event(JobEventType::JobRetried, job.id, JobStatus::Queued, None);
@@ -190,7 +191,7 @@ pub async fn workers(
 pub async fn delete_worker(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
-    _auth: AdminAuth,
+    _auth: ManageWorkersAuth,
 ) -> AppResult<StatusCode> {
     repository::delete_worker(&s.pool, id).await?;
     Ok(StatusCode::NO_CONTENT)

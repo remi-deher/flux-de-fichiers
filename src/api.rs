@@ -16,8 +16,9 @@ pub(crate) mod transfers;
 mod worker_view;
 use crate::{config::Config, domain::*, error::AppResult, repository};
 pub use auth::{
-    AdminAuth, AnyAuth, ManageAccountsAuth, ViewFlowsAuth, ViewJobsAuth, ViewLibrariesAuth,
-    ViewOverviewAuth, ViewPluginsAuth, ViewWorkersAuth,
+    AdminAuth, AnyAuth, ManageAccountsAuth, ManageApiKeysAuth, ManageFlowsAuth, ManageJobsAuth,
+    ManageLibrariesAuth, ManagePluginsAuth, ManageWorkersAuth, ViewFlowsAuth, ViewJobsAuth,
+    ViewLibrariesAuth, ViewOverviewAuth, ViewPluginsAuth, ViewWorkersAuth,
 };
 use axum::{
     Router,

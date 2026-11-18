@@ -1,6 +1,6 @@
 //! Contrat des comptes, des clés d'API et de la connexion (ADR 0011, 0014).
 
-use crate::Role;
+use crate::{Permission, Role};
 use serde::{Deserialize, Serialize};
 
 /// Un compte humain. Le haché du mot de passe n'en fait jamais partie.
@@ -17,12 +17,13 @@ pub struct Account {
 
 /// Clé d'API telle que listée : jamais son secret ni son haché.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct ApiKeyRecord {
     pub id: String,
     pub name: String,
     pub role: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<Vec<Permission>>,
     pub created_at: String,
     pub last_used_at: Option<String>,
     pub revoked_at: Option<String>,
@@ -50,6 +51,8 @@ pub struct UpdateAccountRequest {
 pub struct CreateKeyRequest {
     pub name: String,
     pub role: String,
+    #[serde(default)]
+    pub scopes: Option<Vec<Permission>>,
 }
 
 /// Clé créée : `key` n'est renvoyée qu'ici.

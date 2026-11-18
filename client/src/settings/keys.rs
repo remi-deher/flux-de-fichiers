@@ -4,13 +4,26 @@ use super::account::role_label;
 use crate::api;
 use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, Icon, IconName, SectionHeader, Toasts};
-use flux_shared::Role;
 use flux_shared::accounts::{ApiKeyRecord, CreateKeyRequest, CreatedKey};
+use flux_shared::{Permission, Role};
 use leptos::prelude::*;
 
 const KEYS_PATH: &str = "/api/v1/api-keys";
 /// Rôles possibles d'une clé : `worker` pour les nœuds, `mcp` pour l'automatisation MCP.
 const KEY_ROLES: [Role; 4] = [Role::Admin, Role::Mcp, Role::Worker, Role::Viewer];
+
+fn format_scope_summary(scopes: &Option<Vec<Permission>>) -> String {
+    match scopes {
+        None => "Complète".to_owned(),
+        Some(list) if list.is_empty() => "Aucune".to_owned(),
+        Some(list) if list.len() <= 2 => list
+            .iter()
+            .map(|p| p.label())
+            .collect::<Vec<_>>()
+            .join(", "),
+        Some(list) => format!("{} droits", list.len()),
+    }
+}
 
 #[component]
 pub fn KeysSection() -> impl IntoView {
@@ -23,6 +36,8 @@ pub fn KeysSection() -> impl IntoView {
     let revealed = RwSignal::new(None::<String>);
     let creating = RwSignal::new(false);
     let (name, role) = (RwSignal::new(String::new()), RwSignal::new(Role::Worker));
+    let full_scope = RwSignal::new(true);
+    let selected_scopes = RwSignal::new(Role::Worker.permissions());
     let create = Action::new_local(move |request: &CreateKeyRequest| {
         let request = request.clone();
         async move { api::post::<CreateKeyRequest, CreatedKey>(KEYS_PATH, Some(&request)).await }
@@ -37,6 +52,8 @@ pub fn KeysSection() -> impl IntoView {
             creating.set(false);
             revealed.set(Some(created.key));
             name.set(String::new());
+            full_scope.set(true);
+            selected_scopes.set(role.get_untracked().permissions());
             feedback.set(None);
             Toasts::notify_success("Clé d'API créée.");
             refresh();
@@ -111,18 +128,20 @@ pub fn KeysSection() -> impl IntoView {
             <div class="table-wrapper">
                 <table class="data-table" aria-label="Clés d'API">
                     <thead><tr>
-                        <th scope="col">"Nom"</th><th scope="col">"Rôle"</th><th scope="col">"Dernier usage"</th>
-                        <th scope="col">"État"</th><th scope="col" class="cell-end">"Action"</th>
+                        <th scope="col">"Nom"</th><th scope="col">"Rôle"</th><th scope="col">"Droits d'accès"</th>
+                        <th scope="col">"Dernier usage"</th><th scope="col">"État"</th><th scope="col" class="cell-end">"Action"</th>
                     </tr></thead>
                     <tbody>
                         {move || visible_rows.get().1.into_iter().map(|key| {
                             let id = key.id.clone();
                             let revoked = key.revoked_at.is_some();
                             let role = Role::parse(&key.role).map_or(key.role.clone(), |role| role_label(role).to_owned());
+                            let scope_text = format_scope_summary(&key.scopes);
                             view! {
                                 <tr>
                                     <td class="text-strong">{key.name.clone()}</td>
                                     <td>{role}</td>
+                                    <td class="text-dim">{scope_text}</td>
                                     <td class="text-dim">{key.last_used_at.clone().unwrap_or_else(|| "Jamais".into())}</td>
                                     <td><span class=if revoked { "status-pill danger" } else { "status-pill success" }>
                                         {if revoked { "Révoquée" } else { "Active" }}</span></td>
@@ -139,7 +158,26 @@ pub fn KeysSection() -> impl IntoView {
             <Drawer open=creating eyebrow="Clés d'API" title="Nouvelle clé".to_owned()>
             <form class="inspection-panel" on:submit=move |event| {
                 event.prevent_default();
-                create.dispatch(CreateKeyRequest { name: name.get_untracked(), role: role.get_untracked().as_str().into() });
+                let current_role = role.get_untracked();
+                let scopes = if full_scope.get_untracked() || current_role == Role::Worker {
+                    None
+                } else {
+                    let chosen: Vec<Permission> = selected_scopes
+                        .get_untracked()
+                        .into_iter()
+                        .filter(|perm| current_role.allows(*perm))
+                        .collect();
+                    if chosen.is_empty() {
+                        Toasts::set_error(feedback, "Sélectionnez au moins un droit d'accès.");
+                        return;
+                    }
+                    Some(chosen)
+                };
+                create.dispatch(CreateKeyRequest {
+                    name: name.get_untracked(),
+                    role: current_role.as_str().into(),
+                    scopes,
+                });
             }>
                 <div class="form-group">
                     <label for="key-name" class="form-label">"Nom de la clé"</label>
@@ -150,13 +188,64 @@ pub fn KeysSection() -> impl IntoView {
                 <div class="form-group">
                     <label for="key-role" class="form-label">"Rôle"</label>
                     <select id="key-role" class="form-select" on:change=move |event| {
-                        role.set(Role::parse(&event_target_value(&event)).unwrap_or(Role::Worker));
+                        let next = Role::parse(&event_target_value(&event)).unwrap_or(Role::Worker);
+                        role.set(next);
+                        selected_scopes.set(next.permissions());
                     }>
                         {KEY_ROLES.into_iter().map(|choice| view! {
                             <option value=choice.as_str() selected=choice == Role::Worker>{role_label(choice)}</option>
                         }).collect_view()}
                     </select>
                 </div>
+                {move || (role.get() != Role::Worker).then(|| {
+                    let role_perms = role.get().permissions();
+                    view! {
+                        <div class="form-group">
+                            <span class="form-label">"Droits d'accès"</span>
+                            <label class="form-check">
+                                <input type="checkbox"
+                                    prop:checked=move || full_scope.get()
+                                    on:change=move |event| full_scope.set(event_target_checked(&event)) />
+                                <span>"Tous les droits du rôle"</span>
+                            </label>
+                            {move || (!full_scope.get()).then(|| {
+                                let perms = role_perms.clone();
+                                view! {
+                                    <div class="cluster">
+                                        <button type="button" class="btn btn-secondary btn-sm"
+                                            on:click={
+                                                let all = perms.clone();
+                                                move |_| selected_scopes.set(all.clone())
+                                            }>"Tout cocher"</button>
+                                        <button type="button" class="btn btn-secondary btn-sm"
+                                            on:click=move |_| selected_scopes.set(Vec::new())>"Tout décocher"</button>
+                                    </div>
+                                    <div class="stack-xs">
+                                        {perms.into_iter().map(|perm| view! {
+                                            <label class="form-check">
+                                                <input type="checkbox"
+                                                    prop:checked=move || selected_scopes.get().contains(&perm)
+                                                    on:change=move |event| {
+                                                        let checked = event_target_checked(&event);
+                                                        selected_scopes.update(|list| {
+                                                            if checked {
+                                                                if !list.contains(&perm) {
+                                                                    list.push(perm);
+                                                                }
+                                                            } else {
+                                                                list.retain(|item| *item != perm);
+                                                            }
+                                                        });
+                                                    } />
+                                                <span>{perm.label()}</span>
+                                            </label>
+                                        }).collect_view()}
+                                    </div>
+                                }
+                            })}
+                        </div>
+                    }
+                })}
                 <div class="inspection-drawer__actions">
                     <button type="submit" class="btn btn-primary" disabled=move || create.pending().get()>"Créer la clé"</button>
                 </div>

@@ -98,6 +98,27 @@ impl Permission {
             Self::WorkerProtocol => "worker_protocol",
         }
     }
+
+    /// Libellé lisible en français pour la sélection de portée des clés d'API.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ViewOverview => "Vue d'ensemble",
+            Self::ViewJobs => "Voir les tâches",
+            Self::ManageJobs => "Gérer les tâches",
+            Self::ViewWorkers => "Voir les workers",
+            Self::ManageWorkers => "Gérer les workers",
+            Self::ViewLibraries => "Voir les bibliothèques",
+            Self::ManageLibraries => "Gérer les bibliothèques",
+            Self::ViewFlows => "Voir les flux",
+            Self::ManageFlows => "Gérer les flux",
+            Self::ViewPlugins => "Voir les extensions",
+            Self::ManagePlugins => "Gérer les extensions",
+            Self::ManageSettings => "Gérer les réglages",
+            Self::ManageAccounts => "Gérer les comptes",
+            Self::ManageApiKeys => "Gérer les clés d'API",
+            Self::WorkerProtocol => "Protocole worker",
+        }
+    }
 }
 
 /// Rôle d'un compte ou d'une clé d'API.

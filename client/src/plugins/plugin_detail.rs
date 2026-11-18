@@ -89,8 +89,8 @@ fn BlocksTab(blocks: Vec<OwnedBlockSpec>) -> impl IntoView {
                             <Tag label=kind tone=TagTone::Mono />
                             <Tag label=category tone=TagTone::Primary />
                             {domain.map(|d| view! { <Tag label=d tone=TagTone::Neutral /> })}
-                            {(!has_input).then(|| view! { <Tag label="Point d'entrée" tone=TagTone::Success /> })}
-                            {terminal.then(|| view! { <Tag label="Terminal" tone=TagTone::Warning /> })}
+                            {(!has_input).then(|| view! { <Tag label="Début de flux" tone=TagTone::Success /> })}
+                            {terminal.then(|| view! { <Tag label="Fin de flux" tone=TagTone::Warning /> })}
                         </div>
                         {(!description.is_empty()).then(|| view! {
                             <p class="step-item__msg text-sm">{description}</p>

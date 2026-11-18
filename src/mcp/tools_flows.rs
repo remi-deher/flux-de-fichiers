@@ -2,7 +2,7 @@
 
 use super::protocol::{McpTool, McpToolResult, empty_schema, obj_schema, parse_args, req_str};
 use crate::{
-    api::{AdminAuth, AppState, ViewFlowsAuth, flows},
+    api::{AppState, ManageFlowsAuth, ViewFlowsAuth, flows},
     auth::Principal,
     domain::UpdateFlowRequest,
 };
@@ -148,7 +148,7 @@ pub async fn call(
             flows::save_flow(
                 State(state.clone()),
                 Path(parsed.id),
-                AdminAuth(principal.clone()),
+                ManageFlowsAuth(principal.clone()),
                 Json(req),
             )
             .await
@@ -162,7 +162,7 @@ pub async fn call(
             flows::delete_flow(
                 State(state.clone()),
                 Path(id.clone()),
-                AdminAuth(principal.clone()),
+                ManageFlowsAuth(principal.clone()),
             )
             .await
             .map(|_| McpToolResult::json(&json!({ "id": id, "deleted": true })))
@@ -214,7 +214,7 @@ pub async fn call(
             flows::restore_version(
                 State(state.clone()),
                 Path((parsed.id, parsed.version)),
-                AdminAuth(principal.clone()),
+                ManageFlowsAuth(principal.clone()),
             )
             .await
             .map(|Json(v)| McpToolResult::json(&v))

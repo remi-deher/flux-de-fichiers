@@ -79,18 +79,18 @@ fn DistributionTab(
                 <div class="detail-val text-mono">{ver}</div>
             })}
             {detail.release_status.map(|status| view! {
-                <div class="detail-term">"Publication"</div>
+                <div class="detail-term">"Disponibilité"</div>
                 <div class="detail-val text-mono">{status}</div>
             })}
             {detail.distribution_mode.map(|mode| view! {
-                <div class="detail-term">"Mode"</div>
+                <div class="detail-term">"Installation"</div>
                 <div class="detail-val text-mono">{mode}</div>
             })}
         </div>
         <div class="pack-components">
-            <h3 class="form-label">"Artefacts déclarés"</h3>
+            <h3 class="form-label">"Paquets disponibles"</h3>
             {if detail.artifacts.is_empty() {
-                view! { <p class="text-dim text-sm">"Aucun contrat de distribution déclaré."</p> }.into_any()
+                view! { <p class="text-dim text-sm">"Aucun paquet disponible pour le moment."</p> }.into_any()
             } else {
                 view! {
                     <ul class="step-list">
@@ -127,7 +127,7 @@ fn DistributionTab(
             </div>
         })}
         {(!installable && detail.summary.status == ToolStatus::NotInstalled).then(|| view! {
-            <p class="text-dim text-sm">"Contrat en attente : aucun binaire distribuable pour cet hôte."</p>
+            <p class="text-dim text-sm">"Bientôt disponible : aucun paquet téléchargeable pour cet appareil."</p>
         })}
         <p class="form-help" role="status">{move || feedback.get()}</p>
     }

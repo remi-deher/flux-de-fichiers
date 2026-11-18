@@ -56,7 +56,7 @@ pub struct InstanceStatus {
 pub async fn status(State(state): State<AppState>) -> AppResult<Json<InstanceStatus>> {
     Ok(Json(InstanceStatus {
         instance_kind: InstanceKind::Central,
-        version: env!("CARGO_PKG_VERSION"),
+        version: crate::version::app_version(),
         installed: repository::account_count(&state.pool).await? > 0,
     }))
 }
@@ -302,7 +302,7 @@ pub async fn start_setup_worker_request(
         &central,
         &WorkerEnrollmentRequestInput {
             worker_name: worker_name.clone(),
-            version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+            version: Some(crate::version::app_version().to_owned()),
             secret_hash,
         },
     )

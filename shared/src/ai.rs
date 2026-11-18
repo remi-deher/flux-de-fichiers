@@ -198,13 +198,34 @@ pub struct AiTestRequest {
     pub api_key: Option<String>,
 }
 
+/// Modèle proposé par le fournisseur pour la connexion testée.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiModelOption {
+    /// Identifiant envoyé au fournisseur (`gpt-4o`, `qwen2.5:7b`…).
+    pub id: String,
+    /// Nom affiché ; l'identifiant quand le fournisseur n'en donne pas.
+    pub label: String,
+}
+
+impl AiModelOption {
+    pub fn new(id: impl Into<String>, label: Option<&str>) -> Self {
+        let id = id.into();
+        let label = label
+            .map(str::trim)
+            .filter(|text| !text.is_empty() && *text != id)
+            .map_or_else(|| id.clone(), |text| format!("{text} · {id}"));
+        Self { id, label }
+    }
+}
+
 /// Résultat d'un test de connexion au fournisseur LLM.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiTestResponse {
     pub reachable: bool,
     pub latency_ms: u64,
-    pub available_models: Vec<String>,
+    pub available_models: Vec<AiModelOption>,
     pub message: String,
 }
 
@@ -268,6 +289,17 @@ pub struct AiChatResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_option_label_shows_the_name_only_when_it_adds_information() {
+        assert_eq!(AiModelOption::new("gpt-5", None).label, "gpt-5");
+        assert_eq!(AiModelOption::new("gpt-5", Some("gpt-5")).label, "gpt-5");
+        assert_eq!(AiModelOption::new("gpt-5", Some("  ")).label, "gpt-5");
+        assert_eq!(
+            AiModelOption::new("gpt-5", Some("GPT-5")).label,
+            "GPT-5 · gpt-5"
+        );
+    }
 
     #[test]
     fn providers_round_trip_and_expose_defaults() {

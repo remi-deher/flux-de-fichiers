@@ -84,6 +84,19 @@ que par clé d'API. Premier fournisseur : **ChatGPT** (`chatgpt_oauth`), même f
 - **Hors périmètre** : Anthropic (OAuth réservé à Claude Code par ses conditions) et OAuth
   générique configurable, non retenus pour l'instant.
 
+## Catalogue de modèles proposés (18 nov. 2026)
+
+Le modèle ne se saisit plus à la main : l'écran Paramètres > Assistant IA affiche une liste
+déroulante des modèles que le fournisseur propose pour la connexion en cours (principe du
+catalogue « observé » de `encoding-central`). `POST /api/v1/ai/test` renvoie
+`availableModels: [{id, label}]` (`/api/tags` pour Ollama, `/models` pour OpenAI/compatible et
+Anthropic, `/backend-api/codex/models` pour ChatGPT, trié par priorité). La liste se charge
+d'elle-même à l'ouverture, au changement de fournisseur et à la connexion du compte, sans
+afficher d'échec tant que l'utilisateur n'a pas demandé de test. Un modèle enregistré qui n'est
+plus proposé reste visible, marqué « non proposé ». La saisie libre n'apparaît que lorsqu'aucune
+liste n'est disponible (fournisseur injoignable, identifiants absents). Pas de cache serveur :
+l'appel est rare, réservé aux administrateurs, borné à 40 modèles et 12 s.
+
 ## Journal applicatif dans Activité (18 nov. 2026)
 
 Les erreurs du central (dont les échecs d'appel au fournisseur IA) n'allaient que dans

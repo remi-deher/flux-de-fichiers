@@ -159,7 +159,7 @@ async fn status(State(web): Web) -> Json<WorkerStatus> {
         instance_kind: InstanceKind::Worker,
         name: state.name.clone(),
         central_url: state.central_url.clone(),
-        version: env!("CARGO_PKG_VERSION"),
+        version: crate::version::app_version(),
         registered: state.registered.load(Ordering::Relaxed),
         central_reachable: state.central_reachable.load(Ordering::Relaxed),
     })
@@ -235,13 +235,16 @@ async fn logout(State(web): Web, headers: HeaderMap) -> AppResult<Response> {
 
 async fn me(State(web): Web, headers: HeaderMap) -> AppResult<Json<session::MeResponse>> {
     let account = web.authorize(&headers, &Method::GET, Permission::ViewOverview)?;
-    Ok(Json(session::MeResponse::new(
-        session::CallerKind::Account,
-        account.username,
-        account.role,
-        InstanceKind::Worker,
-        Some(web.status.name.clone()),
-    )))
+    Ok(Json(
+        session::MeResponse::new(
+            session::CallerKind::Account,
+            account.username,
+            account.role,
+            InstanceKind::Worker,
+            Some(web.status.name.clone()),
+        )
+        .with_version(crate::version::app_version()),
+    ))
 }
 
 async fn overview(

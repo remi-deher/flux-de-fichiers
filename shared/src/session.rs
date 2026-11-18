@@ -29,6 +29,9 @@ pub struct Me {
     pub permissions: Vec<Permission>,
     pub instance_kind: InstanceKind,
     pub instance_name: Option<String>,
+    /// Version de la release exécutée par le serveur (vide pour un serveur plus ancien).
+    #[serde(default)]
+    pub version: String,
 }
 
 impl Me {
@@ -47,7 +50,15 @@ impl Me {
             permissions: role.permissions(),
             instance_kind,
             instance_name,
+            version: String::new(),
         }
+    }
+
+    /// Ajoute la version du serveur à l'identité renvoyée.
+    #[must_use]
+    pub fn with_version(mut self, version: impl Into<String>) -> Self {
+        self.version = version.into();
+        self
     }
 
     pub fn allows(&self, permission: Permission) -> bool {

@@ -1,11 +1,12 @@
 //! Réglages de l'assistant IA intégré (Ollama, OpenAI/compatible, Anthropic Claude).
 
+use super::ai_model::AiModelField;
 use super::ai_oauth::AiOauthPanel;
 use crate::api;
 use crate::ui::{SectionHeader, Tag, TagTone, Toasts};
 use flux_shared::ai::{
-    AiProvider, AiSettingsView, AiTestRequest, AiTestResponse, DEFAULT_MAX_TOOL_ROUNDS,
-    MAX_TOOL_ROUNDS, MIN_TOOL_ROUNDS, UpdateAiSettingsRequest,
+    AiModelOption, AiProvider, AiSettingsView, AiTestRequest, AiTestResponse,
+    DEFAULT_MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MIN_TOOL_ROUNDS, UpdateAiSettingsRequest,
 };
 use leptos::ev;
 use leptos::prelude::*;
@@ -57,6 +58,10 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
     let max_tool_rounds = RwSignal::new(initial.max_tool_rounds.to_string());
     let feedback = RwSignal::new(None::<String>);
     let test_result = RwSignal::new(None::<Result<AiTestResponse, String>>);
+    // Modèles proposés par le fournisseur pour la connexion en cours de saisie.
+    let catalog = RwSignal::new(Vec::<AiModelOption>::new());
+    // Le diagnostic n'est montré que pour un test demandé ; le chargement de la liste est silencieux.
+    let announce_test = RwSignal::new(false);
     let api_key_set = initial.api_key_set;
     let oauth_account = RwSignal::new(initial.oauth_account.clone());
     let uses_oauth = move || provider.get().uses_oauth();
@@ -88,11 +93,67 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
 
     Effect::new(move |_| {
         if let Some(result) = test.value().get() {
+            let announce = announce_test.get_untracked();
             match result {
-                Ok(res) => test_result.set(Some(Ok(res))),
-                Err(err) => test_result.set(Some(Err(err.message()))),
+                Ok(res) => {
+                    catalog.set(if res.reachable {
+                        res.available_models.clone()
+                    } else {
+                        Vec::new()
+                    });
+                    if announce {
+                        test_result.set(Some(Ok(res)));
+                    }
+                }
+                Err(err) => {
+                    catalog.set(Vec::new());
+                    if announce {
+                        test_result.set(Some(Err(err.message())));
+                    }
+                }
             }
         }
+    });
+
+    let build_api_key_payload = move || {
+        if clear_api_key.get_untracked() {
+            Some(String::new())
+        } else {
+            let entered = api_key.get_untracked();
+            let trimmed = entered.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_owned())
+        }
+    };
+
+    let test_request = move || AiTestRequest {
+        provider: provider.get_untracked(),
+        base_url: base_url.get_untracked().trim().to_owned(),
+        model: model.get_untracked().trim().to_owned(),
+        api_key: build_api_key_payload(),
+    };
+
+    // Inutile d'interroger un fournisseur dont on n'a pas encore les identifiants.
+    let can_list_models = move || {
+        let current = provider.get_untracked();
+        if current.uses_oauth() {
+            oauth_account.get_untracked().is_some()
+        } else if current.requires_api_key() {
+            api_key_set || !api_key.get_untracked().trim().is_empty()
+        } else {
+            true
+        }
+    };
+    let load_models = move || {
+        if can_list_models() && !test.pending().get_untracked() {
+            announce_test.set(false);
+            test.dispatch(test_request());
+        }
+    };
+    // Au chargement, au changement de fournisseur et à la connexion d'un compte.
+    Effect::new(move |_| {
+        provider.track();
+        oauth_account.track();
+        load_models();
     });
 
     let on_provider_change = move |ev| {
@@ -108,16 +169,7 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
             model.set(next.default_model().to_owned());
         }
         test_result.set(None);
-    };
-
-    let build_api_key_payload = move || {
-        if clear_api_key.get_untracked() {
-            Some(String::new())
-        } else {
-            let entered = api_key.get_untracked();
-            let trimmed = entered.trim();
-            (!trimmed.is_empty()).then(|| trimmed.to_owned())
-        }
+        catalog.set(Vec::new());
     };
 
     let submit = move |ev: ev::SubmitEvent| {
@@ -188,23 +240,12 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
                         />
                     </div>
 
-                    <div class="form-group">
-                        <label for="ai-model" class="form-label">"Modèle"</label>
-                        <input
-                            id="ai-model"
-                            class="form-input text-mono"
-                            placeholder=move || {
-                                let current = provider.get();
-                                if current.has_automatic_model() {
-                                    "Automatique (premier modèle proposé au compte)"
-                                } else {
-                                    current.default_model()
-                                }
-                            }
-                            prop:value=move || model.get()
-                            on:input=move |ev| model.set(event_target_value(&ev))
-                        />
-                    </div>
+                    <AiModelField
+                        model=model
+                        catalog=catalog
+                        provider=provider
+                        loading=Signal::derive(move || test.pending().get())
+                    />
 
                     <Show when=move || !uses_oauth()>
                     <div class="form-group">
@@ -229,13 +270,15 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
                             disabled=move || clear_api_key.get()
                             prop:value=move || api_key.get()
                             on:input=move |ev| api_key.set(event_target_value(&ev))
+                            on:change=move |_| load_models()
                         />
                     </div>
                     </Show>
-                    <Show when=uses_oauth>
-                        <AiOauthPanel account=oauth_account />
-                    </Show>
                 </div>
+
+                <Show when=uses_oauth>
+                    <AiOauthPanel account=oauth_account />
+                </Show>
 
                 <Show when=move || api_key_set && !uses_oauth()>
                     <label class="flow-settings__toggle">
@@ -277,7 +320,6 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
                 Ok(info) => {
                     let tone = if info.reachable { TagTone::Success } else { TagTone::Danger };
                     let badge = if info.reachable { "Connecté" } else { "Échec" };
-                    let models = info.available_models.clone();
                     view! {
                         <div class="diagnostic-box" role="status">
                             <div>
@@ -286,22 +328,6 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
                                     <span>{format!(" · {} ms", info.latency_ms)}</span>
                                 </div>
                                 <div class="diagnostic-box__message">{info.message}</div>
-                                {(!models.is_empty()).then(|| view! {
-                                    <div class="ai-model-chips">
-                                        {models.into_iter().map(|candidate| {
-                                            let picked = candidate.clone();
-                                            view! {
-                                                <button
-                                                    type="button"
-                                                    class="ai-chat__chip text-mono"
-                                                    on:click=move |_| model.set(picked.clone())
-                                                >
-                                                    {candidate}
-                                                </button>
-                                            }
-                                        }).collect_view()}
-                                    </div>
-                                })}
                             </div>
                         </div>
                     }.into_any()
@@ -319,15 +345,11 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
                     class="btn btn-secondary"
                     disabled=move || test.pending().get()
                     on:click=move |_| {
-                        test.dispatch(AiTestRequest {
-                            provider: provider.get_untracked(),
-                            base_url: base_url.get_untracked().trim().to_owned(),
-                            model: model.get_untracked().trim().to_owned(),
-                            api_key: build_api_key_payload(),
-                        });
+                        announce_test.set(true);
+                        test.dispatch(test_request());
                     }
                 >
-                    {move || if test.pending().get() { "Test en cours…" } else { "Tester & lister les modèles" }}
+                    {move || if test.pending().get() { "Test en cours…" } else { "Tester & actualiser les modèles" }}
                 </button>
                 <button type="submit" class="btn btn-primary" disabled=move || save.pending().get()>
                     {move || if save.pending().get() { "Enregistrement…" } else { "Enregistrer" }}

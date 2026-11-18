@@ -112,16 +112,19 @@ pub async fn me(
     AnyAuth(principal): AnyAuth,
 ) -> AppResult<Json<MeResponse>> {
     let instance_name = repository::get_setting(&state.pool, repository::INSTANCE_NAME_KEY).await?;
-    Ok(Json(MeResponse::new(
-        match principal.kind {
-            PrincipalKind::Account => CallerKind::Account,
-            PrincipalKind::ApiKey => CallerKind::ApiKey,
-        },
-        principal.name.clone(),
-        principal.role,
-        InstanceKind::Central,
-        instance_name,
-    )))
+    Ok(Json(
+        MeResponse::new(
+            match principal.kind {
+                PrincipalKind::Account => CallerKind::Account,
+                PrincipalKind::ApiKey => CallerKind::ApiKey,
+            },
+            principal.name.clone(),
+            principal.role,
+            InstanceKind::Central,
+            instance_name,
+        )
+        .with_version(crate::version::app_version()),
+    ))
 }
 
 /// Change le mot de passe du compte connecté ; ses autres sessions sont fermées.

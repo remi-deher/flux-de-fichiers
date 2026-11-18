@@ -12,7 +12,6 @@ pub use system::duration_label;
 
 use crate::api;
 use crate::shell::instance_role_badge;
-use crate::ui::search::{matches, query};
 use crate::ui::{MetricTone, StatItem, StatStrip};
 use account::AccountSection;
 use accounts::AccountsSection;
@@ -33,8 +32,20 @@ enum Section {
     Account,
     Users,
     Keys,
-    System,
     Network,
+    System,
+}
+
+impl Section {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Account => "Mon compte",
+            Self::Users => "Utilisateurs",
+            Self::Keys => "Clés d'API",
+            Self::Network => "Réseau & Courriel",
+            Self::System => "Système",
+        }
+    }
 }
 
 fn sections(me: &Me) -> Vec<Section> {
@@ -50,11 +61,11 @@ fn sections(me: &Me) -> Vec<Section> {
             central && me.allows(Permission::ManageApiKeys),
         ),
         (
-            Section::System,
+            Section::Network,
             central && me.allows(Permission::ManageSettings),
         ),
         (
-            Section::Network,
+            Section::System,
             central && me.allows(Permission::ManageSettings),
         ),
     ]
@@ -63,51 +74,12 @@ fn sections(me: &Me) -> Vec<Section> {
     .collect()
 }
 
-fn section_matches(section: Section, text: &str) -> bool {
-    let keywords: &[&str] = match section {
-        Section::Account => &[
-            "mon compte",
-            "compte",
-            "identifiant",
-            "mot de passe",
-            "déconnecter",
-            "session",
-            "rôle",
-        ],
-        Section::Users => &["utilisateurs", "comptes", "permissions", "email", "rôle"],
-        Section::Keys => &["clés d'api", "api", "jeton", "token", "worker"],
-        Section::System => &[
-            "système",
-            "stockage",
-            "version",
-            "chiffrement",
-            "clé",
-            "base de données",
-            "volume",
-            "disque",
-            "mise à jour",
-        ],
-        Section::Network => &[
-            "réseau",
-            "configuration",
-            "tls",
-            "http",
-            "proxy",
-            "session",
-            "diagnostic",
-            "courriel",
-            "smtp",
-        ],
-    };
-    matches(keywords, text)
-}
-
 #[component]
 pub fn SettingsPage(me: Me) -> impl IntoView {
     let visible = sections(&me);
-    let can_users = visible.contains(&Section::Users);
-    let can_keys = visible.contains(&Section::Keys);
+    let show_tabs = visible.len() > 1;
     let can_settings = visible.contains(&Section::System);
+    let active_tab = RwSignal::new(visible.first().copied().unwrap_or(Section::Account));
 
     let status_reload = RwSignal::new(0u64);
     let status_resource = can_settings.then(|| {
@@ -186,23 +158,42 @@ pub fn SettingsPage(me: Me) -> impl IntoView {
         items
     });
 
-    let account_hidden = Signal::derive(move || !section_matches(Section::Account, &query()));
-    let system_hidden = Signal::derive(move || !section_matches(Section::System, &query()));
-    let network_hidden = Signal::derive(move || !section_matches(Section::Network, &query()));
-
     view! {
         <div class="tab-panel" role="tabpanel">
             <StatStrip aria_label="Synthèse de la configuration" items=stats />
-            <div class="settings-bento-grid">
-                <AccountSection me=me hidden=account_hidden />
-                {status_signal.map(|status| view! {
-                    <SystemSection status=status hidden=system_hidden />
-                    <ConfigurationCard status=status hidden=network_hidden on_saved=on_settings_saved />
-                    <DiagnosticsCard hidden=network_hidden />
-                })}
-            </div>
-            {can_users.then(|| view! { <AccountsSection /> })}
-            {can_keys.then(|| view! { <KeysSection /> })}
+            {show_tabs.then(|| view! {
+                <nav class="page-subnav" role="tablist" aria-label="Sections des paramètres">
+                    {visible.into_iter().map(|tab| {
+                        let is_active = move || active_tab.get() == tab;
+                        view! {
+                            <button
+                                type="button"
+                                role="tab"
+                                class="page-subnav__tab"
+                                class:is-active=is_active
+                                aria-selected=move || is_active().to_string()
+                                on:click=move |_| active_tab.set(tab)
+                            >
+                                {tab.label()}
+                            </button>
+                        }
+                    }).collect_view()}
+                </nav>
+            })}
+            {move || match active_tab.get() {
+                Section::Account => view! { <AccountSection me=me.clone() /> }.into_any(),
+                Section::Users => view! { <AccountsSection /> }.into_any(),
+                Section::Keys => view! { <KeysSection /> }.into_any(),
+                Section::Network => status_signal.map(|status| view! {
+                    <div class="settings-bento-grid">
+                        <ConfigurationCard status=status on_saved=on_settings_saved />
+                        <DiagnosticsCard />
+                    </div>
+                }).into_any(),
+                Section::System => status_signal.map(|status| view! {
+                    <SystemSection status=status />
+                }).into_any(),
+            }}
         </div>
     }
 }
@@ -244,11 +235,26 @@ mod tests {
     }
 
     #[test]
-    fn section_search_matches_relevant_keywords() {
-        assert!(section_matches(Section::Account, ""));
-        assert!(section_matches(Section::Account, "mot de passe"));
-        assert!(!section_matches(Section::Network, "mot de passe"));
-        assert!(section_matches(Section::Network, "tls"));
-        assert!(section_matches(Section::System, "chiffrement"));
+    fn every_section_has_a_readable_label() {
+        let labels: Vec<_> = [
+            Section::Account,
+            Section::Users,
+            Section::Keys,
+            Section::Network,
+            Section::System,
+        ]
+        .into_iter()
+        .map(Section::label)
+        .collect();
+        assert_eq!(
+            labels,
+            [
+                "Mon compte",
+                "Utilisateurs",
+                "Clés d'API",
+                "Réseau & Courriel",
+                "Système",
+            ]
+        );
     }
 }

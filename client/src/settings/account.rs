@@ -26,7 +26,7 @@ pub async fn logout() {
 }
 
 #[component]
-pub fn AccountSection(me: Me, hidden: Signal<bool>) -> impl IntoView {
+pub fn AccountSection(me: Me) -> impl IntoView {
     let (current, next, confirm) = (
         RwSignal::new(String::new()),
         RwSignal::new(String::new()),
@@ -52,7 +52,7 @@ pub fn AccountSection(me: Me, hidden: Signal<bool>) -> impl IntoView {
     });
     let can_change = me.kind == flux_shared::session::CallerKind::Account;
     view! {
-        <section class="section-panel settings-section" hidden=move || hidden.get()>
+        <section class="section-panel settings-section">
             <SectionHeader
                 title="Mon compte"
                 subtitle="Identité active et sécurité de connexion."

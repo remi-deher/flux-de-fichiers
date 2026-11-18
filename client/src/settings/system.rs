@@ -67,13 +67,12 @@ pub fn StatusSection(
     title: &'static str,
     subtitle: &'static str,
     status: Signal<Option<Result<SystemStatus, String>>>,
-    hidden: Signal<bool>,
     rows: fn(&SystemStatus) -> Vec<DetailRow>,
     #[prop(optional)] extra: Option<fn(&SystemStatus) -> AnyView>,
     #[prop(optional)] footer: Option<AnyView>,
 ) -> impl IntoView {
     view! {
-        <section class="settings-section section-panel" hidden=move || hidden.get()>
+        <section class="settings-section section-panel">
             <SectionHeader title=title subtitle=subtitle />
             {move || match status.get() {
                 None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),
@@ -181,10 +180,7 @@ fn system_rows(status: &SystemStatus) -> Vec<DetailRow> {
 }
 
 #[component]
-pub fn SystemSection(
-    status: Signal<Option<Result<SystemStatus, String>>>,
-    hidden: Signal<bool>,
-) -> impl IntoView {
+pub fn SystemSection(status: Signal<Option<Result<SystemStatus, String>>>) -> impl IntoView {
     let footer = view! {
         <details class="settings-help-details">
             <summary class="settings-help-details__summary">
@@ -208,7 +204,7 @@ pub fn SystemSection(
     .into_any();
     view! {
         <StatusSection title="Système & Stockage" subtitle="Versions, clé de chiffrement, base de données et espace disque."
-            status=status hidden=hidden rows=system_rows extra=volume_meter footer=footer />
+            status=status rows=system_rows extra=volume_meter footer=footer />
     }
 }
 

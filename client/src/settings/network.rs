@@ -307,11 +307,10 @@ fn SettingsRuntimeForm(initial: SystemStatus, on_saved: Callback<()>) -> impl In
 #[component]
 pub fn ConfigurationCard(
     status: Signal<Option<Result<SystemStatus, String>>>,
-    hidden: Signal<bool>,
     on_saved: Callback<()>,
 ) -> impl IntoView {
     view! {
-        <section class="section-panel settings-section" hidden=move || hidden.get()>
+        <section class="section-panel settings-section">
             <SectionHeader title="Configuration réseau & runtime" subtitle="Port HTTP, origine web, sessions, SMTP et politique de sortie." />
             {move || match status.get() {
                 None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),

@@ -33,7 +33,7 @@ fn CheckRow(check: DiagnosticCheck) -> impl IntoView {
 }
 
 #[component]
-pub fn DiagnosticsCard(hidden: Signal<bool>) -> impl IntoView {
+pub fn DiagnosticsCard() -> impl IntoView {
     let run = Action::new_local(|_: &()| async move {
         api::post::<_, DiagnosticsReport>(
             DIAGNOSTICS_PATH,
@@ -49,7 +49,7 @@ pub fn DiagnosticsCard(hidden: Signal<bool>) -> impl IntoView {
     }
     .into_any();
     view! {
-        <section class="section-panel settings-section" hidden=move || hidden.get()>
+        <section class="section-panel settings-section">
             <SectionHeader title="Diagnostic de l'installation"
                 subtitle="Cohérence de l'adresse publique, TLS, proxy, workers et courriel." actions=actions />
             {move || match run.value().get() {

@@ -166,7 +166,7 @@ pub fn QuickAddPopover(editor: Editor, board_ref: NodeRef<leptos::html::Div>) ->
                 style=style
                 role="dialog"
                 aria-label="Ajout rapide de composant"
-                on:mousedown=move |event| event.stop_propagation()
+                on:pointerdown=move |event| event.stop_propagation()
                 on:click=move |event| event.stop_propagation()
                 on:wheel=move |event| event.stop_propagation()
                 on:keydown=move |event| {

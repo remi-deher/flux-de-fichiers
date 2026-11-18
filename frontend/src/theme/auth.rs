@@ -83,7 +83,7 @@ pub const AUTH_CSS: &str = r#"
 }
 
 .auth-role-card__badge {
-  font-size: 0.6875rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -91,13 +91,13 @@ pub const AUTH_CSS: &str = r#"
 }
 
 .auth-role-card__title {
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-weight: 700;
   color: var(--text-main);
 }
 
 .auth-role-card__desc {
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   line-height: 1.45;
   color: var(--text-dim);
 }
@@ -115,9 +115,9 @@ pub const AUTH_CSS: &str = r#"
   width: 2.5rem;
   height: 2.5rem;
   border-radius: var(--radius-md);
-  background-color: var(--primary);
+  background-color: var(--primary-fill);
   color: var(--primary-contrast);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   font-weight: 800;
 }
 
@@ -127,7 +127,7 @@ pub const AUTH_CSS: &str = r#"
 }
 
 .auth-gate__title {
-  font-size: 1.375rem;
+  font-size: var(--font-size-2xl);
   font-weight: 700;
   color: var(--text-main);
 }
@@ -152,7 +152,7 @@ pub const AUTH_CSS: &str = r#"
   border-radius: var(--radius-sm);
   background-color: var(--warning-bg);
   color: var(--warning);
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   line-height: 1.45;
 }
 
@@ -165,6 +165,6 @@ pub const AUTH_CSS: &str = r#"
   min-height: 1.25rem;
   margin: var(--space-2) 0 0;
   color: var(--danger-text);
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
 }
 "#;

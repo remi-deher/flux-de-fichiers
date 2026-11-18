@@ -152,6 +152,27 @@ pub fn allowed(me: &Me, route: &Route) -> bool {
         })
 }
 
+/// Nom de l'application, suffixe du titre de chaque onglet.
+const APP_NAME: &str = "Flux de Fichiers";
+
+/// Titre de l'écran : `h1` de la page et début du titre de l'onglet (WCAG 2.4.2, 2.4.6).
+pub fn screen_title(route: &Route) -> &'static str {
+    match route {
+        Route::NewFlow => "Nouveau flux",
+        Route::FlowEditor(_) => "Éditeur de flux",
+        other => groups()
+            .into_iter()
+            .flat_map(|(_, screens)| screens)
+            .find(|entry| entry.route == *other)
+            .map_or("Vue d'ensemble", |entry| entry.label),
+    }
+}
+
+/// Titre du document pour un écran : « Écran — Flux de Fichiers ».
+pub fn document_title(route: &Route) -> String {
+    format!("{} — {APP_NAME}", screen_title(route))
+}
+
 fn search_placeholder(route: &Route) -> &'static str {
     let section = route.section();
     groups()
@@ -297,7 +318,7 @@ fn Sidebar(me: Me, jobs: Signal<Vec<Job>>, workers: Signal<Vec<Worker>>) -> impl
                 </button>
             </div>
             <nav class="tab-navigation" aria-label="Navigation principale par groupes métier">
-                <div class="tab-list" role="tablist">
+                <div class="tab-list">
                     {groups().into_iter().filter_map(|(label, screens)| {
                         let visible: Vec<Screen> = screens.into_iter().filter(|entry| allowed(&me, &entry.route)).collect();
                         (!visible.is_empty()).then(|| view! {
@@ -305,6 +326,7 @@ fn Sidebar(me: Me, jobs: Signal<Vec<Job>>, workers: Signal<Vec<Worker>>) -> impl
                             {visible.into_iter().map(|entry| {
                                 let section = entry.route.clone();
                                 let target = entry.route.clone();
+                                let current = Signal::derive(move || router.current().section() == section);
                                 let badge_slot = matches!(entry.route, Route::Jobs | Route::Workers).then(|| {
                                     let badge_route = entry.route.clone();
                                     move || {
@@ -317,13 +339,11 @@ fn Sidebar(me: Me, jobs: Signal<Vec<Job>>, workers: Signal<Vec<Worker>>) -> impl
                                     }
                                 });
                                 view! {
-                                    <button type="button" role="tab" class="tab-btn" title=entry.label
-                                        aria-selected=move || (router.current().section() == section).to_string()
-                                        on:click=move |_| router.go(target.clone())>
+                                    <Link to=target class="tab-btn" title=entry.label current=current>
                                         <Icon name=entry.icon size=18 class="tab-role-icon" />
                                         <span class="tab-btn-label">{entry.label}</span>
                                         {badge_slot}
-                                    </button>
+                                    </Link>
                                 }
                             }).collect_view()}
                         })
@@ -449,6 +469,7 @@ fn Topbar(me: Me, workers: Signal<Option<Vec<Worker>>>) -> impl IntoView {
                             type="button"
                             class="btn btn-secondary btn-sm ai-trigger-btn"
                             title="Ouvrir l'assistant IA intégré"
+                            aria-label="Assistant IA"
                             aria-expanded=move || ai.open.get().to_string()
                             on:click=move |_| ai.toggle()
                         >
@@ -518,6 +539,7 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
         }
     });
     let is_workbench = Signal::derive(move || is_workbench_route(&router.current()));
+    Effect::new(move |_| document().set_title(&document_title(&router.current())));
     view! {
         <a href="#main-content" class="skip-link">"Aller au contenu principal"</a>
         <div class="application-shell" class:is-workbench=is_workbench>
@@ -532,6 +554,7 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
                         class="main-content"
                         class:is-workbench=is_workbench
                     >
+                        <h1 class="visually-hidden">{move || screen_title(&router.current())}</h1>
                         {children()}
                     </main>
                 </div>
@@ -580,6 +603,25 @@ mod tests {
         assert_eq!(
             search_placeholder(&Route::FlowEditor("f".into())),
             "Filtrer les flux…"
+        );
+    }
+
+    #[test]
+    fn every_screen_has_a_title_for_its_heading_and_its_tab() {
+        assert_eq!(screen_title(&Route::Jobs), "Activité");
+        assert_eq!(screen_title(&Route::NewFlow), "Nouveau flux");
+        assert_eq!(
+            screen_title(&Route::FlowEditor("f".into())),
+            "Éditeur de flux"
+        );
+        for (_, screens) in groups() {
+            for entry in screens {
+                assert_eq!(screen_title(&entry.route), entry.label);
+            }
+        }
+        assert_eq!(
+            document_title(&Route::Overview),
+            "Vue d'ensemble — Flux de Fichiers"
         );
     }
 

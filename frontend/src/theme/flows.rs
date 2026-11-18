@@ -4,7 +4,7 @@ pub const FLOWS_CSS: &str = r#"
 /* --- Concepteur et Gestionnaire de Flux (Flows) --- */
 .form-input--code {
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   line-height: 1.5;
   resize: vertical;
 }
@@ -32,7 +32,7 @@ pub const FLOWS_CSS: &str = r#"
   border: 1px solid var(--border-color);
   border-left: 3px solid var(--step-accent, var(--primary));
   border-radius: var(--radius-sm);
-  font-size: 0.77rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--text-main);
   max-width: 190px;
@@ -63,7 +63,7 @@ pub const FLOWS_CSS: &str = r#"
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--step-accent, var(--primary)) 16%, transparent);
   color: var(--step-accent, var(--primary));
-  font-size: 0.68rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   line-height: 1;
   flex-shrink: 0;
@@ -78,7 +78,7 @@ pub const FLOWS_CSS: &str = r#"
 
 .pipeline-connector {
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: var(--font-size-xs);
   user-select: none;
 }
 
@@ -98,7 +98,7 @@ pub const FLOWS_CSS: &str = r#"
 .flow-workbench__feedback {
   margin: 0;
   padding: 0.45rem 1rem;
-  font-size: 0.8rem;
+  font-size: var(--font-size-xs);
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-card);
   color: var(--text-dim);
@@ -181,7 +181,7 @@ pub const FLOWS_CSS: &str = r#"
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-main);
-  font-size: 0.96rem;
+  font-size: var(--font-size-sm);
   font-weight: 700;
   padding: 0.12rem 0.45rem;
   border-radius: var(--radius-sm);
@@ -204,7 +204,7 @@ pub const FLOWS_CSS: &str = r#"
 }
 
 .flow-title-input {
-  font-size: 0.96rem;
+  font-size: var(--font-size-sm);
   font-weight: 700;
   padding: 0.18rem 0.5rem;
   border-radius: var(--radius-sm);
@@ -228,7 +228,7 @@ pub const FLOWS_CSS: &str = r#"
   gap: 0.35rem;
   padding: 0.12rem 0.5rem;
   border-radius: var(--radius-pill);
-  font-size: 0.72rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   border: 1px solid var(--border-color);
   background: var(--bg-subtle);
@@ -295,7 +295,7 @@ pub const FLOWS_CSS: &str = r#"
   border-radius: var(--radius-pill);
   background: var(--warning-bg);
   color: var(--warning);
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
 }
 
@@ -336,7 +336,7 @@ pub const FLOWS_CSS: &str = r#"
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.85rem;
+  font-size: var(--font-size-xs);
   color: var(--text-main);
   cursor: pointer;
 }
@@ -393,13 +393,13 @@ pub const FLOWS_CSS: &str = r#"
 
 .flow-diagnostics__title {
   margin: 0;
-  font-size: 0.88rem;
+  font-size: var(--font-size-sm);
   font-weight: 700;
   color: var(--text-main);
 }
 
 .flow-diagnostics__count {
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
 }
 
@@ -417,7 +417,7 @@ pub const FLOWS_CSS: &str = r#"
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   background: var(--bg-subtle);
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   color: var(--text-main);
 }
 
@@ -438,7 +438,7 @@ pub const FLOWS_CSS: &str = r#"
 }
 
 .flow-diagnostic-item__level {
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;

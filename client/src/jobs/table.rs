@@ -2,7 +2,7 @@
 
 use super::model::{error_label, priority_label, resolve_library_label, status_label, status_tone};
 use crate::format;
-use crate::ui::{ProgressBar, Registre, RegistreMessage, StatusBadge, Tag, TagTone};
+use crate::ui::{ProgressBar, Registre, RegistreMessage, StatusBadge, Tag, TagTone, on_activate};
 use flux_shared::jobs::{Job, JobStatus};
 use leptos::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -92,7 +92,9 @@ pub fn JobsTable(
                         let library_label = resolve_library_label(job.library_id, &libs_map);
                         view! {
                             <tr class="registre-row is-clickable" class:is-open=move || selected.get() == Some(id)
-                                on:click=move |_| on_open.run(id)>
+                                tabindex="0"
+                                on:click=move |_| on_open.run(id)
+                                on:keydown=on_activate(move || on_open.run(id))>
                                 {can_manage.then(|| view! {
                                     <td on:click=move |ev| ev.stop_propagation()>
                                         <input

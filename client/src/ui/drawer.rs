@@ -1,5 +1,6 @@
 //! Tiroir d'inspection : le gabarit `inspection-drawer` du thème, piloté par un signal.
 
+use super::focus::{trap_tab, use_modal_focus};
 use super::icon::{Icon, IconName};
 use leptos::ev;
 use leptos::prelude::*;
@@ -32,10 +33,8 @@ pub fn Drawer(
             close();
         }
     });
-    Effect::new(move |_| {
-        if open.get()
-            && let Some(panel) = panel_ref.get()
-        {
+    use_modal_focus(open.into(), move || {
+        if let Some(panel) = panel_ref.get() {
             let _ = panel.focus();
         }
     });
@@ -50,6 +49,11 @@ pub fn Drawer(
                 aria-modal="true"
                 aria-labelledby=label_id
                 tabindex="-1"
+                on:keydown=move |event| {
+                    if let Some(panel) = panel_ref.get() {
+                        trap_tab(&event, &panel);
+                    }
+                }
             >
                 <header class="inspection-drawer__header">
                     <div class="inspection-drawer__identity">

@@ -1,5 +1,6 @@
 //! Palette de commandes clavier (`Ctrl+K` / `Cmd+K`) pour naviguer et piloter l'interface.
 
+use super::focus::{trap_tab, use_modal_focus};
 use super::icon::{Icon, IconName};
 use super::search::matches;
 use super::toast::Toasts;
@@ -154,13 +155,12 @@ pub fn CommandPalette(me: Me) -> impl IntoView {
     let filtered =
         Memo::new(move |_| all_commands.with_value(|cmds| filter_commands(cmds, &query.get())));
 
-    Effect::new(move |_| {
-        if state.open.get() {
-            query.set(String::new());
-            active_index.set(0);
-            if let Some(input) = input_ref.get() {
-                let _ = input.focus();
-            }
+    let dialog_ref = NodeRef::<leptos::html::Div>::new();
+    use_modal_focus(state.open.into(), move || {
+        query.set(String::new());
+        active_index.set(0);
+        if let Some(input) = input_ref.get() {
+            let _ = input.focus();
         }
     });
 
@@ -192,7 +192,13 @@ pub fn CommandPalette(me: Me) -> impl IntoView {
 
     view! {
         <Show when=move || state.open.get()>
-            <div class="cmd-palette" role="dialog" aria-modal="true" aria-label="Palette de commandes">
+            <div class="cmd-palette" role="dialog" aria-modal="true" aria-label="Palette de commandes"
+                node_ref=dialog_ref
+                on:keydown=move |event| {
+                    if let Some(dialog) = dialog_ref.get() {
+                        trap_tab(&event, &dialog);
+                    }
+                }>
                 <button type="button" class="cmd-palette__scrim" aria-label="Fermer la palette"
                     on:click=move |_| state.hide()></button>
                 <div class="cmd-palette__dialog">

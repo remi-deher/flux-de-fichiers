@@ -1,5 +1,9 @@
 //! Plan interactif 2D du graphe : cartes librement déplaçables, zoom/pan, ports et minimap.
 
+use super::canvas_keys::{
+    DEFAULT_ZOOM, apply_board_key, board_dimensions, board_key, nudge, nudge_selection,
+    zoom_at_center,
+};
 use super::dnd::{BranchTarget, DragPayload, can_connect, connect_checked};
 use super::drag::{DragItem, is_related_inside_current_target};
 use super::geometry::{
@@ -9,13 +13,14 @@ use super::geometry::{
     screen_to_board, viewport_css_transform, viewport_svg_transform, visible_board_rect,
     zoom_around,
 };
+use super::pointer::{is_primary_press, release_implicit_capture};
 use super::presentation::{
     NodeDomain, PortPresentation, node_chips, node_output_ports, output_presentation,
 };
 use super::quick_add::QuickAddPopover;
 use super::state::{Editor, PendingWire, QuickAddState};
 use crate::route::{Link, Route};
-use crate::ui::{Icon, IconName, Toasts};
+use crate::ui::{Icon, IconName, Toasts, on_activate};
 use flux_shared::flows::{FlowBlockKind, FlowConnection, find_owned};
 use leptos::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -32,8 +37,19 @@ const WIRE_BADGE_OFFSET_Y: f64 = 13.0;
 const WIRE_INSERT_OFFSET_Y: f64 = 13.0;
 const ZOOM_PERCENT_SCALE: f64 = 100.0;
 const MINI_NODE_RX: f64 = 8.0;
-const DEFAULT_ZOOM: f64 = 1.0;
 const NODE_DRAG_THRESHOLD: f64 = 4.0;
+/// Identifiant de l'aide clavier du canevas, liée au plan et aux blocs par `aria-describedby`.
+const CANVAS_HELP_ID: &str = "flow-canvas-keyboard-help";
+/// Aide clavier lue par les lecteurs d'écran sur le plan et sur chaque bloc.
+const CANVAS_HELP_TEXT: &str = "Plan : flèches pour se déplacer, plus et moins pour zoomer, \
+     zéro pour revenir à 100 %. Bloc : Entrée pour le sélectionner et ouvrir ses réglages, \
+     flèches pour le déplacer (Maj pour aller plus vite), Suppr pour l'effacer. Liaison : \
+     activer une sortie, puis l'entrée du bloc visé ; Échap pour annuler.";
+/// Nom d'une liaison pour les lecteurs d'écran.
+const WIRE_LABEL: &str = "Liaison : Entrée pour la sélectionner, puis Suppr pour la retirer";
+/// Annonce d'une liaison ouverte au clavier.
+const KEYBOARD_WIRE_HINT: &str =
+    "Liaison commencée : activez l'entrée du bloc à relier, ou Échap pour annuler.";
 const WIRE_DRAG_THRESHOLD: f64 = 8.0;
 
 #[derive(Clone, Debug)]
@@ -71,15 +87,6 @@ fn board_local_point(board: &web_sys::HtmlDivElement, client_x: i32, client_y: i
         x: f64::from(client_x) - rect.left(),
         y: f64::from(client_y) - rect.top(),
     }
-}
-
-fn board_dimensions(board_ref: NodeRef<leptos::html::Div>) -> (f64, f64) {
-    board_ref.get().map_or((960.0, 640.0), |el| {
-        (
-            f64::from(el.client_width()).max(1.0),
-            f64::from(el.client_height()).max(1.0),
-        )
-    })
 }
 
 struct OutputSlotData {
@@ -214,7 +221,7 @@ fn WireActionPopover(
                 role="toolbar"
                 aria-label="Actions sur la liaison sélectionnée"
                 style=format!("left:{:.1}px;top:{:.1}px;", screen.x, screen.y)
-                on:mousedown=move |event| event.stop_propagation()
+                on:pointerdown=move |event| event.stop_propagation()
                 on:click=move |event| event.stop_propagation()
             >
                 <button
@@ -260,15 +267,7 @@ fn CanvasControlsBar(
     can_manage: bool,
 ) -> impl IntoView {
     let zoom_center = move |target_zoom: Option<f64>, delta: f64| {
-        let (vw, vh) = board_dimensions(board_ref);
-        let center = Point {
-            x: vw / 2.0,
-            y: vh / 2.0,
-        };
-        editor.viewport.update(|vp| {
-            let next = target_zoom.unwrap_or(vp.zoom + delta);
-            *vp = zoom_around(*vp, center, next);
-        });
+        zoom_at_center(editor, board_ref, target_zoom, delta);
     };
 
     let fit_all = move |_| {
@@ -483,7 +482,10 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
         })
     });
 
-    let _window_move = window_event_listener(leptos::ev::mousemove, move |event| {
+    let _window_move = window_event_listener(leptos::ev::pointermove, move |event| {
+        if !event.is_primary() {
+            return;
+        }
         let cx = f64::from(event.client_x());
         let cy = f64::from(event.client_y());
         if let Some(mut drag) = dragging_node.get_untracked() {
@@ -563,7 +565,25 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
         }
     });
 
-    let _window_up = window_event_listener(leptos::ev::mouseup, move |event| {
+    // Geste interrompu par le navigateur (appel entrant, défilement système) : tout s'arrête,
+    // le déplacement déjà fait est gardé, la liaison en cours est abandonnée.
+    let _window_cancel = window_event_listener(leptos::ev::pointercancel, move |event| {
+        if !event.is_primary() {
+            return;
+        }
+        if dragging_node.get_untracked().is_some_and(|drag| drag.moved) {
+            editor.commit_positions();
+        }
+        dragging_node.set(None);
+        marquee.set(None);
+        panning.set(None);
+        editor.pending_wire.set(None);
+    });
+
+    let _window_up = window_event_listener(leptos::ev::pointerup, move |event| {
+        if !event.is_primary() {
+            return;
+        }
         if let Some(drag) = dragging_node.get_untracked() {
             dragging_node.set(None);
             if drag.moved {
@@ -630,6 +650,7 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
 
     view! {
         <section class="flow-canvas-area" aria-label="Plan du graphe">
+            <p id=CANVAS_HELP_ID class="visually-hidden">{CANVAS_HELP_TEXT}</p>
             <CanvasToolbar editor=editor can_manage=can_manage />
             <div
                 node_ref=board_ref
@@ -643,9 +664,21 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                         vp.pan_x, vp.pan_y
                     )
                 }
-                on:mousedown=move |event| {
+                tabindex="0"
+                aria-label="Plan du flux"
+                aria-describedby=CANVAS_HELP_ID
+                on:keydown=move |event| {
+                    if event.target() != event.current_target() {
+                        return;
+                    }
+                    if let Some(action) = board_key(&event.key(), event.shift_key()) {
+                        event.prevent_default();
+                        apply_board_key(editor, board_ref, action);
+                    }
+                }
+                on:pointerdown=move |event| {
                     ignore_click_for_node.set(None);
-                    if event.button() != 0 {
+                    if !is_primary_press(&event) {
                         return;
                     }
                     if dragging_node.get_untracked().is_some() {
@@ -906,7 +939,7 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                         role="button"
                                         tabindex="0"
                                         aria-label="Insérer une étape sur cette liaison"
-                                        on:mousedown=move |event| event.stop_propagation()
+                                        on:pointerdown=move |event| event.stop_propagation()
                                         on:click=move |event| {
                                             event.stop_propagation();
                                             click_insert();
@@ -947,11 +980,20 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                         <path
                                             class="flow-wire__hit"
                                             d=d.clone()
-                                            on:mousedown=move |event| event.stop_propagation()
-                                            on:click=move |event| {
-                                                event.stop_propagation();
-                                                editor.selected_wire.set(Some(click_edge.clone()));
+                                            role="button"
+                                            tabindex="0"
+                                            aria-label=WIRE_LABEL
+                                            on:pointerdown=move |event| event.stop_propagation()
+                                            on:click={
+                                                let click_edge = click_edge.clone();
+                                                move |event| {
+                                                    event.stop_propagation();
+                                                    editor.selected_wire.set(Some(click_edge.clone()));
+                                                }
                                             }
+                                            on:keydown=on_activate(move || {
+                                                editor.selected_wire.set(Some(click_edge.clone()));
+                                            })
                                         />
                                         {(is_highlighted || sim_active).then(|| view! {
                                             <path
@@ -1077,6 +1119,8 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                 let drag_id = id.clone();
                                 let up_main_id = id.clone();
                                 let click_main_id = id.clone();
+                                let pressed_id = id.clone();
+                                let nudge_id = id.clone();
                                 let input_id = id.clone();
                                 let valid_id = id.clone();
                                 let dup_id = id.clone();
@@ -1129,8 +1173,8 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                             || s.origins.iter().any(|(id, _)| id == &dragging_check))
                                                 })
                                             })
-                                            on:mousedown=move |event| {
-                                                if event.button() != 0 {
+                                            on:pointerdown=move |event| {
+                                                if !is_primary_press(&event) {
                                                     return;
                                                 }
                                                 event.stop_propagation();
@@ -1159,7 +1203,7 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                     moved: false,
                                                 }));
                                             }
-                                            on:mouseup=move |event| {
+                                            on:pointerup=move |event| {
                                                 if editor.pending_wire.get_untracked().is_some()
                                                     && dragging_node.get_untracked().is_none()
                                                 {
@@ -1217,8 +1261,8 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                         }
                                                         title="Entrée du bloc"
                                                         aria-label="Relier à l'entrée de ce bloc"
-                                                        on:mousedown=move |event| event.stop_propagation()
-                                                        on:mouseup=move |event| {
+                                                        on:pointerdown=move |event| event.stop_propagation()
+                                                        on:pointerup=move |event| {
                                                             if editor.pending_wire.get_untracked().is_some() {
                                                                 event.stop_propagation();
                                                                 connect_to_node(up_target_id.clone());
@@ -1255,7 +1299,7 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                             class="header-icon-btn canvas-node__action-btn"
                                                             title="Dupliquer ce bloc"
                                                             aria-label="Dupliquer ce bloc"
-                                                            on:mousedown=move |event| event.stop_propagation()
+                                                            on:pointerdown=move |event| event.stop_propagation()
                                                             on:click=move |event| {
                                                                 event.stop_propagation();
                                                                 editor.duplicate_node(&dup_id);
@@ -1268,7 +1312,7 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                             class="header-icon-btn canvas-node__action-btn is-danger"
                                                             title="Supprimer ce bloc"
                                                             aria-label="Supprimer ce bloc"
-                                                            on:mousedown=move |event| event.stop_propagation()
+                                                            on:pointerdown=move |event| event.stop_propagation()
                                                             on:click=move |event| {
                                                                 event.stop_propagation();
                                                                 editor.remove_node(&remove_id);
@@ -1284,6 +1328,18 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                 <button
                                                     type="button"
                                                     class="canvas-node__main"
+                                                    aria-describedby=CANVAS_HELP_ID
+                                                    aria-pressed=move || editor.is_selected(&pressed_id).to_string()
+                                                    on:keydown=move |event| {
+                                                        if !can_manage {
+                                                            return;
+                                                        }
+                                                        if let Some(delta) = nudge(&event.key(), event.shift_key()) {
+                                                            event.prevent_default();
+                                                            event.stop_propagation();
+                                                            nudge_selection(editor, &nudge_id, delta);
+                                                        }
+                                                    }
                                                 >
                                                     <span class="canvas-node__title-row">
                                                         <span class="canvas-node__title">{node_name}</span>
@@ -1319,6 +1375,8 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                         let press_port = slot.port.clone();
                                                         let click_from = id.clone();
                                                         let click_port = slot.port.clone();
+                                                        let wire_from = id.clone();
+                                                        let wire_port = slot.port.clone();
                                                         let insert_from = id.clone();
                                                         let insert_port = slot.port.clone();
                                                         let existing_to = slot.existing_to;
@@ -1331,6 +1389,26 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                         let port_symbol = if is_pill { pres_symbol } else { "↓" };
                                                         let port_title = format!("Sortie : {} (cliquer ou glisser pour relier)", pres_label);
                                                         let port_aria = format!("Sortie {}", pres_label);
+                                                        // Ouvre une liaison depuis cette sortie ; elle suit ensuite le pointeur,
+                                                        // ou attend l'entrée choisie au clavier.
+                                                        let open_wire = Callback::new(move |(client_x, client_y): (f64, f64)| {
+                                                            let anchor = placed.with_untracked(|nodes| {
+                                                                nodes
+                                                                    .iter()
+                                                                    .find(|p| p.id == wire_from)
+                                                                    .map_or(Point { x: ORIGIN_X, y: ORIGIN_Y }, |p| {
+                                                                        p.out_port(port_idx, port_count)
+                                                                    })
+                                                            });
+                                                            editor.pending_wire.set(Some(PendingWire {
+                                                                from_id: wire_from.clone(),
+                                                                port: wire_port.clone(),
+                                                                start_anchor: anchor,
+                                                                start_client_x: client_x,
+                                                                start_client_y: client_y,
+                                                                cursor: anchor,
+                                                            }));
+                                                        });
                                                         view! {
                                                             <div class="canvas-output-slot" data-tone=pres_tone.as_attr()>
                                                                 <button
@@ -1339,12 +1417,13 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                                     class:canvas-port--pill=is_pill
                                                                     title=port_title
                                                                     aria-label=port_aria
-                                                                    on:mousedown=move |event| {
+                                                                    on:pointerdown=move |event| {
                                                                         event.stop_propagation();
                                                                         event.prevent_default();
-                                                                        if !can_manage || event.button() != 0 {
+                                                                        if !can_manage || !is_primary_press(&event) {
                                                                             return;
                                                                         }
+                                                                        release_implicit_capture(&event);
                                                                         let same = editor.pending_wire.get_untracked().is_some_and(|w| {
                                                                             w.from_id == press_from && w.port == press_port
                                                                         });
@@ -1352,23 +1431,11 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                                             wire_opened_on_press.set(false);
                                                                             return;
                                                                         }
-                                                                        let anchor = placed.with_untracked(|nodes| {
-                                                                            nodes
-                                                                                .iter()
-                                                                                .find(|p| p.id == press_from)
-                                                                                .map_or(Point { x: ORIGIN_X, y: ORIGIN_Y }, |p| {
-                                                                                    p.out_port(port_idx, port_count)
-                                                                                })
-                                                                        });
                                                                         wire_opened_on_press.set(true);
-                                                                        editor.pending_wire.set(Some(PendingWire {
-                                                                            from_id: press_from.clone(),
-                                                                            port: press_port.clone(),
-                                                                            start_anchor: anchor,
-                                                                            start_client_x: f64::from(event.client_x()),
-                                                                            start_client_y: f64::from(event.client_y()),
-                                                                            cursor: anchor,
-                                                                        }));
+                                                                        open_wire.run((
+                                                                            f64::from(event.client_x()),
+                                                                            f64::from(event.client_y()),
+                                                                        ));
                                                                     }
                                                                     on:click=move |event| {
                                                                         event.stop_propagation();
@@ -1384,6 +1451,10 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                                         });
                                                                         if same {
                                                                             editor.pending_wire.set(None);
+                                                                        } else {
+                                                                            // Activation au clavier (aucun appui de pointeur avant).
+                                                                            open_wire.run((0.0, 0.0));
+                                                                            Toasts::notify_info(KEYBOARD_WIRE_HINT);
                                                                         }
                                                                     }
                                                                 >
@@ -1398,7 +1469,7 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                                         class="canvas-port__add"
                                                                         title=format!("Insérer une étape sur « {} »", add_label)
                                                                         aria-label=format!("Insérer une étape sur {}", add_label)
-                                                                        on:mousedown=move |event| event.stop_propagation()
+                                                                        on:pointerdown=move |event| event.stop_propagation()
                                                                         on:click=move |event| {
                                                                             event.stop_propagation();
                                                                             let anchor = placed

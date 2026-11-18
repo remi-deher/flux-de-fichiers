@@ -1,12 +1,25 @@
 //! Styles de base et mise en page du shell applicatif en Rust typé.
 
 pub const BASE_CSS: &str = r#"
+/* --- Texte réservé aux technologies d'assistance (titre de page, libellés) --- */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* --- Skip Link (Accessibilité Clavier W3C) --- */
 .skip-link {
   position: absolute;
   top: -100px;
   left: 1rem;
-  background: var(--primary);
+  background: var(--primary-fill);
   color: var(--primary-contrast);
   padding: 0.5rem 1rem;
   border-radius: var(--radius-sm);
@@ -141,13 +154,13 @@ pub const BASE_CSS: &str = r#"
   width: 38px;
   height: 38px;
   border-radius: var(--radius-md);
-  background: var(--primary);
+  background: var(--primary-fill);
   color: var(--primary-contrast);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   letter-spacing: 0.5px;
   box-shadow: var(--shadow-sm);
   flex-shrink: 0;
@@ -161,7 +174,7 @@ pub const BASE_CSS: &str = r#"
 
 .brand-name {
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: var(--font-size-sm);
   white-space: nowrap;
 }
 
@@ -179,14 +192,14 @@ pub const BASE_CSS: &str = r#"
   border-radius: var(--radius-pill);
   background: var(--primary-bg);
   color: var(--primary);
-  font-size: 0.65rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .brand-version {
-  font-size: 0.72rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
 }
 
@@ -201,7 +214,7 @@ pub const BASE_CSS: &str = r#"
   border: 1px solid var(--border-color);
   background: var(--bg-subtle);
   color: var(--text-dim);
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   cursor: pointer;
   transition: border-color 0.15s ease, color 0.15s ease;
 }
@@ -219,7 +232,7 @@ pub const BASE_CSS: &str = r#"
 
 .sidebar-cmd-btn__kbd {
   font-family: var(--font-mono);
-  font-size: 0.6875rem;
+  font-size: var(--font-size-xs);
   padding: 0.05rem 0.35rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
@@ -243,7 +256,7 @@ pub const BASE_CSS: &str = r#"
 }
 
 .nav-group-label {
-  font-size: 0.6875rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -254,6 +267,7 @@ pub const BASE_CSS: &str = r#"
 
 .tab-btn {
   display: flex;
+  text-decoration: none;
   align-items: center;
   gap: 0.75rem;
   width: 100%;
@@ -263,7 +277,7 @@ pub const BASE_CSS: &str = r#"
   background: transparent;
   border: 1px solid transparent;
   color: var(--text-dim);
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   font-weight: 500;
   cursor: pointer;
   text-align: left;
@@ -282,7 +296,7 @@ pub const BASE_CSS: &str = r#"
   outline-offset: 1px;
 }
 
-.tab-btn[aria-selected="true"] {
+.tab-btn[aria-current="page"] {
   background-color: var(--primary-bg);
   color: var(--primary);
   font-weight: 600;
@@ -291,7 +305,7 @@ pub const BASE_CSS: &str = r#"
 }
 
 .tab-role-icon {
-  font-size: 1.125rem;
+  font-size: var(--font-size-lg);
   flex-shrink: 0;
 }
 
@@ -311,7 +325,7 @@ pub const BASE_CSS: &str = r#"
   height: 1.2rem;
   padding: 0 0.4rem;
   border-radius: var(--radius-pill);
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -368,7 +382,7 @@ pub const BASE_CSS: &str = r#"
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   flex-shrink: 0;
 }
@@ -381,7 +395,7 @@ pub const BASE_CSS: &str = r#"
 }
 
 .sidebar-user-name {
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--text-main);
   white-space: nowrap;
@@ -390,7 +404,7 @@ pub const BASE_CSS: &str = r#"
 }
 
 .sidebar-user-role {
-  font-size: 0.6875rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -408,7 +422,7 @@ pub const BASE_CSS: &str = r#"
   background: transparent;
   border: 1px solid var(--border-color);
   color: var(--text-dim);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   cursor: pointer;
   transition: all 0.2s ease-in-out;
 }
@@ -443,7 +457,7 @@ pub const BASE_CSS: &str = r#"
   border: 0;
   background: transparent;
   color: var(--text-dim);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   cursor: pointer;
 }
 
@@ -589,7 +603,7 @@ pub const BASE_CSS: &str = r#"
   align-items: stretch;
   min-height: 36px;
   background: var(--bg-subtle);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-md);
   color: var(--text-dim);
   box-sizing: border-box;
@@ -601,6 +615,15 @@ body[data-filter-sheet] .topbar-search {
   color: var(--text-main);
   border-color: var(--primary);
   background: var(--bg-card);
+}
+
+/* Champs sans bordure propre (recherche, palette, ajout rapide) : l'anneau de focus est porté par
+   leur conteneur, pour rester visible au clavier (WCAG 2.4.7). */
+.topbar-search:focus-within,
+.cmd-palette__header:focus-within,
+.flow-quick-add__search:focus-within {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
 }
 
 .search-capsule__query {
@@ -624,7 +647,7 @@ body[data-filter-sheet] .topbar-search {
   border: none;
   outline: none;
   color: var(--text-main);
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   font-family: inherit;
   padding: 0.1rem 0;
 }
@@ -643,7 +666,7 @@ body[data-filter-sheet] .topbar-search {
 
 /* Compteur de correspondances réactif (ex: 3 sur 12) */
 .search-match-count {
-  font-size: 0.6875rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   padding: 0.15rem 0.45rem;
   border-radius: 12px;
@@ -706,14 +729,14 @@ body[data-filter-sheet] .topbar-search {
   background: transparent;
   color: var(--primary);
   font: inherit;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   cursor: pointer;
 }
 
 .filter-sheet__label {
   margin: 0 0 0.4rem;
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: var(--text-dim);
   text-transform: uppercase;
@@ -793,6 +816,9 @@ body[data-filter-sheet] .topbar-search {
 
 /* Zone de contenu principale */
 .main-content {
+  /* Conteneur de requête : les grilles du contenu s'adaptent à la place réellement disponible
+     (barre latérale ouverte, repliée ou tiroir), pas à la largeur de la fenêtre. */
+  container-type: inline-size;
   flex: 1;
   padding: 1.5rem;
   max-width: 1400px;
@@ -890,13 +916,13 @@ body[data-filter-sheet] .topbar-search {
 }
 
 .stat-pill__label {
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--text-dim);
 }
 
 .stat-pill__value {
-  font-size: 1.25rem;
+  font-size: var(--font-size-xl);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.15;
@@ -916,7 +942,7 @@ body[data-filter-sheet] .topbar-search {
 }
 
 .stat-pill__detail {
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   font-weight: 500;
   color: var(--text-muted);
   white-space: nowrap;
@@ -932,7 +958,7 @@ body[data-filter-sheet] .topbar-search {
   background: var(--bg-subtle);
   color: var(--text-dim);
   font-family: var(--font-mono);
-  font-size: 0.6875rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   line-height: 1.2;
   cursor: pointer;
@@ -973,7 +999,7 @@ body[data-filter-sheet] .topbar-search {
   border-radius: var(--radius-pill);
   background-color: var(--bg-subtle);
   color: var(--text-dim);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   border: 1px solid var(--border-color);
 }
@@ -1042,7 +1068,7 @@ body[data-filter-sheet] .topbar-search {
   margin-bottom: 0;
 }
 
-@media (max-width: 960px) {
+@container (max-width: 720px) {
   .overview-grid-2col {
     grid-template-columns: 1fr;
   }
@@ -1058,7 +1084,7 @@ body[data-filter-sheet] .topbar-search {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
   margin-bottom: 0.35rem;
 }
@@ -1092,7 +1118,7 @@ body[data-filter-sheet] .topbar-search {
   display: flex;
   gap: 1.25rem;
   flex-wrap: wrap;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
   margin-bottom: var(--space-3);
 }
@@ -1126,7 +1152,7 @@ body[data-filter-sheet] .topbar-search {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
 }
 
 .storage-label {
@@ -1137,7 +1163,7 @@ body[data-filter-sheet] .topbar-search {
   font-weight: 600;
   color: var(--text-main);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
 }
 
 /* L'attribut hidden doit masquer l'élément même si un composant fixe display. */
@@ -1149,7 +1175,7 @@ body[data-filter-sheet] .topbar-search {
 .shell-footer {
   margin-top: auto;
   text-align: center;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
   border-top: 1px solid var(--border-color);
   padding: 1.25rem 1rem;
@@ -1290,6 +1316,28 @@ body[data-filter-sheet] .topbar-search {
   .main-content.is-workbench {
     padding: 0;
     height: 100dvh;
+  }
+}
+
+/* --- Barre du haut compacte (< 640px) : la recherche passe sur sa propre ligne, pleine largeur ;
+   les statuts secondaires cèdent la place (le compteur des workers reste dans la navigation). --- */
+@media (max-width: 640px) {
+  .topbar-container {
+    flex-wrap: wrap;
+    row-gap: 0.35rem;
+  }
+
+  .topbar-search-anchor {
+    order: 3;
+    flex: 1 0 100%;
+  }
+
+  .status-pill-link {
+    display: none;
+  }
+
+  .ai-trigger-btn > span {
+    display: none;
   }
 }
 "#;

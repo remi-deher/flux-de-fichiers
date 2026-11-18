@@ -113,6 +113,15 @@ pub async fn worker_exists(pool: &SqlitePool, id: Uuid) -> AppResult<bool> {
     Ok(exists)
 }
 
+pub async fn get_worker(pool: &SqlitePool, id: Uuid) -> AppResult<Worker> {
+    let row = sqlx::query_as::<_, WorkerRow>("SELECT * FROM workers WHERE id=?1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(row.into_worker())
+}
+
 pub async fn find_worker_by_name(pool: &SqlitePool, name: &str) -> AppResult<Option<Worker>> {
     let row = sqlx::query_as::<_, WorkerRow>("SELECT * FROM workers WHERE name=?1")
         .bind(name)

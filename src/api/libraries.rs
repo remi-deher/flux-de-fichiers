@@ -2,21 +2,45 @@
 
 use super::{AppState, ManageLibrariesAuth, ViewLibrariesAuth};
 use crate::{
-    domain::{Job, JobEventType, JobStatus, Library, LibraryWrite, MediaFile},
+    domain::{
+        DirectoryListing, Job, JobEventType, JobStatus, Library, LibraryWrite, MediaFile,
+        WorkerBrowseReport, WorkerBrowseTask,
+    },
     error::{AppError, AppResult},
-    repository, storage,
+    filesystem_browser, repository, storage,
 };
 use axum::{
     Json,
     body::Body,
-    extract::{Path, State},
-    http::StatusCode,
+    extract::{Path, Query, State},
+    http::{HeaderMap, StatusCode},
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
+
+const REMOTE_BROWSE_TIMEOUT: Duration = Duration::from_secs(8);
+const MAX_BROWSE_WAIT_MS: u64 = 15_000;
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowseQuery {
+    #[serde(alias = "worker_id")]
+    pub worker_id: Option<Uuid>,
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerPendingBrowseQuery {
+    #[serde(alias = "worker_id")]
+    pub worker_id: Uuid,
+    #[serde(default, alias = "wait_ms")]
+    pub wait_ms: Option<u64>,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -252,4 +276,67 @@ pub async fn scan(
 ) -> AppResult<Json<LibraryScanResult>> {
     let req = payload.map(|Json(req)| req).unwrap_or_default();
     Ok(Json(scan_library_inner(&s, id, req).await?))
+}
+
+/// Explore l'arborescence (dossiers et médias) d'un worker local ou distant en ligne.
+pub async fn browse(
+    State(s): State<AppState>,
+    Query(q): Query<BrowseQuery>,
+    _auth: ManageLibrariesAuth,
+) -> AppResult<Json<DirectoryListing>> {
+    let listing = match q.worker_id {
+        Some(worker_id) => {
+            let worker = repository::get_worker(&s.pool, worker_id).await?;
+            if worker.is_integrated() || worker.remote_addr.as_deref() == Some("local") {
+                filesystem_browser::browse_local(
+                    worker.id,
+                    q.path.as_deref(),
+                    Some(&s.config.input_dir),
+                )
+                .await?
+            } else {
+                if !worker.is_online(chrono::Utc::now()) {
+                    return Err(AppError::CentralUnavailable);
+                }
+                s.browse_broker
+                    .request(worker.id, q.path, REMOTE_BROWSE_TIMEOUT)
+                    .await?
+            }
+        }
+        None => {
+            filesystem_browser::browse_local(
+                Uuid::nil(),
+                q.path.as_deref(),
+                Some(&s.config.input_dir),
+            )
+            .await?
+        }
+    };
+    Ok(Json(listing))
+}
+
+/// Demande d'exploration en attente pour un worker distant authentifié.
+pub async fn worker_pending_browse(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<WorkerPendingBrowseQuery>,
+) -> AppResult<Json<Vec<WorkerBrowseTask>>> {
+    crate::auth::authorize_worker(&s.pool, &headers).await?;
+    let wait_ms = q.wait_ms.unwrap_or(0).min(MAX_BROWSE_WAIT_MS);
+    let tasks = s
+        .browse_broker
+        .take_for_worker(q.worker_id, Duration::from_millis(wait_ms))
+        .await;
+    Ok(Json(tasks))
+}
+
+/// Réception du résultat d'exploration envoyé par un worker distant.
+pub async fn worker_report_browse(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Json(report): Json<WorkerBrowseReport>,
+) -> AppResult<StatusCode> {
+    crate::auth::authorize_worker(&s.pool, &headers).await?;
+    let _ = s.browse_broker.complete(report).await;
+    Ok(StatusCode::NO_CONTENT)
 }

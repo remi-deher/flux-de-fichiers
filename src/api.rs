@@ -113,6 +113,7 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub catalog_cache: crate::plugins::CatalogCache,
     pub event_history: EventHistory,
+    pub browse_broker: crate::filesystem_browser::RemoteBrowseBroker,
 }
 
 impl AppState {
@@ -128,6 +129,7 @@ impl AppState {
             http_client,
             catalog_cache: crate::plugins::CatalogCache::new(),
             event_history: EventHistory::new(),
+            browse_broker: crate::filesystem_browser::RemoteBrowseBroker::new(),
         }
     }
 
@@ -212,6 +214,7 @@ fn json_routes() -> Router<AppState> {
             "/api/v1/libraries",
             get(libraries::list).post(libraries::create),
         )
+        .route("/api/v1/libraries/browse", get(libraries::browse))
         .route(
             "/api/v1/libraries/{id}",
             get(libraries::get)
@@ -219,6 +222,15 @@ fn json_routes() -> Router<AppState> {
                 .delete(libraries::delete),
         )
         .route("/api/v1/libraries/{id}/scan", post(libraries::scan))
+        .route(
+            "/api/v1/worker/filesystem/pending",
+            get(libraries::worker_pending_browse),
+        )
+        .route(
+            "/api/v1/worker/filesystem",
+            post(libraries::worker_report_browse)
+                .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
+        )
         .route("/api/v1/flows", get(flows::list_flows))
         .route("/api/v1/flows/blocks", get(flows::list_blocks))
         .route("/api/v1/flows/validate", post(flows::validate_flow))

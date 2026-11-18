@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.44.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.43.0...v0.44.0) (2026-11-18)
+
+
+### Features
+
+* **ai:** connexion OAuth ChatGPT pour l'assistant intégré ([3378a1b](https://github.com/remi-deher/flux-de-fichiers/commit/3378a1b3b554e3abb37e75d91dd6e124c07f3f62))
+* **ai:** connexion OAuth ChatGPT pour l'assistant intégré ([430ab2b](https://github.com/remi-deher/flux-de-fichiers/commit/430ab2bcd457bb063f237a7bfd427360e88ae5c1))
+
 ## [0.43.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.42.0...v0.43.0) (2026-11-18)
 
 

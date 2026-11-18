@@ -3,6 +3,7 @@
 
 mod detail;
 mod live;
+mod logs;
 pub mod model;
 pub mod table;
 
@@ -21,6 +22,7 @@ use flux_shared::session::Me;
 use flux_shared::workers::Worker;
 use flux_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
+use logs::LogsPanel;
 use model::{JOBS_PAGE_SIZE, may_have_more, merge_pages, summarize_jobs};
 use std::collections::{HashMap, HashSet};
 use table::JobsTable;
@@ -29,8 +31,59 @@ use uuid::Uuid;
 const JOBS_PATH: &str = "/api/v1/jobs";
 const JOBS_BATCH_PATH: &str = "/api/v1/jobs/batch";
 
+/// Vues de l'écran Activité.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActivityTab {
+    Tasks,
+    Logs,
+}
+
+impl ActivityTab {
+    const ALL: [Self; 2] = [Self::Tasks, Self::Logs];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Tasks => "Tâches",
+            Self::Logs => "Journal",
+        }
+    }
+}
+
 #[component]
 pub fn JobsPage(me: Me) -> impl IntoView {
+    // Le journal du central est réservé à ceux qui gèrent les clés (administrateurs).
+    let can_logs =
+        me.instance_kind == InstanceKind::Central && me.allows(Permission::ManageApiKeys);
+    let active_tab = RwSignal::new(ActivityTab::Tasks);
+    view! {
+        {can_logs.then(|| view! {
+            <nav class="page-subnav" role="tablist" aria-label="Vues de l'activité">
+                {ActivityTab::ALL.into_iter().map(|tab| {
+                    let is_active = move || active_tab.get() == tab;
+                    view! {
+                        <button
+                            type="button"
+                            role="tab"
+                            class="page-subnav__tab"
+                            class:is-active=is_active
+                            aria-selected=move || is_active().to_string()
+                            on:click=move |_| active_tab.set(tab)
+                        >
+                            {tab.label()}
+                        </button>
+                    }
+                }).collect_view()}
+            </nav>
+        })}
+        {move || match active_tab.get() {
+            ActivityTab::Tasks => view! { <JobsTasks me=me.clone() /> }.into_any(),
+            ActivityTab::Logs => view! { <LogsPanel /> }.into_any(),
+        }}
+    }
+}
+
+#[component]
+fn JobsTasks(me: Me) -> impl IntoView {
     let central = me.instance_kind == InstanceKind::Central;
     let can_manage = central && me.allows(Permission::ManageJobs);
     let can_workers = central && me.allows(Permission::ViewWorkers);

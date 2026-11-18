@@ -235,7 +235,7 @@ pub fn LibraryForm(
 
     view! {
         <form class="inspection-panel" on:submit=on_submit>
-            <div>
+            <div class="inspection-panel__section">
                 <div class="form-group">
                     <label for="library-name" class="form-label">"Nom"</label>
                     <input id="library-name" class="form-input" maxlength="80"
@@ -259,8 +259,9 @@ pub fn LibraryForm(
                 </div>
             </div>
 
-            <p class="inspection-panel__title">"Workers configurés"</p>
-            <ul class="library-worker-list">
+            <div class="inspection-panel__section">
+                <p class="inspection-panel__title">"Workers configurés"</p>
+                <ul class="library-worker-list">
                 {move || {
                     let entries = draft.get().workers;
                     if entries.is_empty() {
@@ -327,7 +328,8 @@ pub fn LibraryForm(
                         }
                     }).collect_view().into_any()
                 }}
-            </ul>
+                </ul>
+            </div>
 
             <div class="library-worker-editor">
                 <p class="inspection-panel__title">"Sélectionner un dossier sur un worker"</p>

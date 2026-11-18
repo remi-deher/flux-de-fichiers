@@ -23,12 +23,14 @@ use crate::ui::filters::{Filters, FlowFilter, flow_filter};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
-    EmptyState, Icon, IconName, MetricTone, ResourceCard, StatItem, StatStrip, StatusBadge, Tag,
-    TagTone, Toasts,
+    Drawer, Icon, IconName, MetricTone, Registre, RegistreMessage, StatItem, StatStrip,
+    StatusBadge, Tag, TagTone, Toasts,
 };
 use crate::{api, format};
 use flux_shared::Permission;
-use flux_shared::flows::{FlowGraph, FlowRecord, UpdateFlowRequest, new_flow_id};
+use flux_shared::flows::{
+    FlowGraph, FlowRecord, FlowVersionSummary, UpdateFlowRequest, new_flow_id,
+};
 use flux_shared::libraries::Library;
 use flux_shared::local::{CreateFlowTemplateRequest, LocalFlowTemplate, LocalLibrarySnapshot};
 use flux_shared::session::Me;
@@ -116,6 +118,15 @@ pub fn pipeline_preview_labels(graph_json: &str) -> Vec<String> {
         .0
         .into_iter()
         .map(|step| step.label)
+        .collect()
+}
+
+/// Noms des bibliothèques liées à un flux donné.
+pub fn bound_library_names(flow_id: &str, libraries: &[Library]) -> Vec<String> {
+    libraries
+        .iter()
+        .filter(|lib| lib.flow_id.as_deref() == Some(flow_id))
+        .map(|lib| lib.name.clone())
         .collect()
 }
 
@@ -211,31 +222,150 @@ fn FlowPipelinePreview(
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SelectedFlowEntry {
+    Flow(String),
+    Template(String),
+}
+
+fn flow_libs_label(bound_libraries: usize) -> String {
+    match bound_libraries {
+        0 => "Aucune bibliothèque".to_owned(),
+        1 => "1 bibliothèque".to_owned(),
+        count => format!("{count} bibliothèques"),
+    }
+}
+
 #[component]
-fn FlowCard(
+fn FlowPipelineSection(definition: String, empty_label: &'static str) -> impl IntoView {
+    let graph = FlowGraph::parse(&definition);
+    let (steps, total_blocks, _) = pipeline_preview_steps(&definition);
+    let extra_blocks = total_blocks.saturating_sub(steps.len());
+
+    view! {
+        <div class="inspection-panel__section">
+            <p class="inspection-panel__title">"Aperçu du pipeline"</p>
+            <FlowPipelinePreview
+                steps=steps
+                extra_blocks=extra_blocks
+                empty_label=empty_label
+                aria_label="Aperçu du pipeline"
+            />
+            {(!graph.nodes.is_empty()).then(|| {
+                let rows = graph
+                    .nodes
+                    .iter()
+                    .enumerate()
+                    .map(|(index, node)| {
+                        let targets: Vec<String> = graph
+                            .outgoing(&node.id)
+                            .map(|edge| {
+                                let dest = graph
+                                    .node(&edge.to)
+                                    .map_or(edge.to.as_str(), |target| target.name.as_str());
+                                match edge.port.as_deref() {
+                                    Some(port) => format!("{port} → {dest}"),
+                                    None => dest.to_owned(),
+                                }
+                            })
+                            .collect();
+                        let outputs_label = if targets.is_empty() {
+                            "—".to_owned()
+                        } else {
+                            targets.join(", ")
+                        };
+                        (
+                            format!("#{}", index + 1),
+                            node.name.clone(),
+                            node.kind.as_str().to_owned(),
+                            outputs_label,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                view! {
+                    <div class="table-wrapper no-margin-top">
+                        <table class="data-table" aria-label="Blocs du pipeline">
+                            <thead>
+                                <tr>
+                                    <th>"#"</th>
+                                    <th>"Bloc"</th>
+                                    <th>"Type"</th>
+                                    <th>"Sorties"</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {rows.into_iter().map(|(idx, name, kind, outputs)| view! {
+                                    <tr>
+                                        <td class="text-mono">{idx}</td>
+                                        <td class="text-strong">{name}</td>
+                                        <td class="text-mono text-dim">{kind}</td>
+                                        <td class="text-dim">{outputs}</td>
+                                    </tr>
+                                }).collect_view()}
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            })}
+        </div>
+    }
+}
+
+#[component]
+fn FlowDetailDrawer(
     flow: FlowRecord,
-    bound_libraries: usize,
+    bound_libs: Vec<String>,
+    tab: RwSignal<usize>,
     can_manage: bool,
     can_templates: bool,
-    on_removed: Callback<()>,
+    on_changed: Callback<()>,
+    on_closed: Callback<()>,
 ) -> impl IntoView {
-    let router = use_router();
-    let (steps, total_blocks, total_connections) = pipeline_preview_steps(&flow.definition);
-    let extra_blocks = total_blocks.saturating_sub(steps.len());
     let feedback = RwSignal::new(None::<String>);
-    let path = format!("{FLOWS_PATH}/{}", encode_segment(&flow.id));
+    let versions_reload = RwSignal::new(0_u32);
+    let stored_flow = StoredValue::new(flow.clone());
+    let stored_libs = StoredValue::new(bound_libs);
+
+    let versions_id = flow.id.clone();
+    let versions = LocalResource::new(move || {
+        versions_reload.track();
+        let path = format!("{FLOWS_PATH}/{}/versions", encode_segment(&versions_id));
+        async move { api::get::<Vec<FlowVersionSummary>>(&path).await }
+    });
+
+    let restore_id = flow.id.clone();
+    let restore = Action::new_local(move |version: &i64| {
+        let path = format!(
+            "{FLOWS_PATH}/{}/versions/{version}/restore",
+            encode_segment(&restore_id)
+        );
+        async move { api::post::<(), FlowRecord>(&path, None).await }
+    });
+    Effect::new(move |_| match restore.value().get() {
+        Some(Ok(restored)) => {
+            Toasts::notify_success(format!("Version v{} restaurée.", restored.version));
+            versions_reload.update(|v| *v = v.wrapping_add(1));
+            on_changed.run(());
+        }
+        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
+        None => {}
+    });
+
+    let delete_path = format!("{FLOWS_PATH}/{}", encode_segment(&flow.id));
     let remove = Action::new_local(move |_: &()| {
-        let path = path.clone();
+        let path = delete_path.clone();
         async move { api::delete(&path).await }
     });
     Effect::new(move |_| match remove.value().get() {
         Some(Ok(())) => {
             Toasts::notify_success("Flux supprimé.");
-            on_removed.run(());
+            on_closed.run(());
+            on_changed.run(());
         }
         Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
     });
+
     let dup_name = format!("{} (copie)", flow.name);
     let dup_req = UpdateFlowRequest {
         name: dup_name.clone(),
@@ -254,11 +384,12 @@ fn FlowCard(
     Effect::new(move |_| match duplicate.value().get() {
         Some(Ok(_)) => {
             Toasts::notify_success("Flux dupliqué.");
-            on_removed.run(());
+            on_changed.run(());
         }
         Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
     });
+
     let tpl_req = CreateFlowTemplateRequest {
         id: Some(flow_template_id(&flow.id)),
         name: flow.name.clone(),
@@ -280,91 +411,181 @@ fn FlowCard(
     Effect::new(move |_| match save_template.value().get() {
         Some(Ok(_)) => {
             Toasts::notify_success("Flux enregistré comme modèle.");
-            on_removed.run(());
+            on_changed.run(());
         }
         Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
     });
+
     let removable = can_manage && !flow.is_default;
-    let updated = format::datetime(flow.updated_at);
-    let description = flow.description.filter(|text| !text.trim().is_empty());
-    let editor_id = flow.id.clone();
-    let open_editor = Callback::new(move |()| router.go(Route::FlowEditor(editor_id.clone())));
-    let badge = flow
-        .is_default
-        .then(|| view! { <StatusBadge label="Défaut" variant="success" /> }.into_any());
-    let actions = view! {
-        <Link to=Route::FlowEditor(flow.id) class="btn btn-secondary btn-sm">"Ouvrir l'atelier"</Link>
-        {can_manage.then(|| view! {
-            <button type="button" class="btn btn-secondary btn-sm" disabled=move || duplicate.pending().get()
-                on:click=move |_| { duplicate.dispatch(()); }>"Dupliquer"</button>
-        })}
-        {can_templates.then(|| view! {
-            <button type="button" class="btn btn-secondary btn-sm" disabled=move || save_template.pending().get()
-                on:click=move |_| { save_template.dispatch(()); }>"Modèle"</button>
-        })}
-        {removable.then(|| view! {
-            <button type="button" class="btn btn-sm btn-danger-quiet" disabled=move || remove.pending().get()
-                on:click=move |_| { remove.dispatch(()); }>"Supprimer"</button>
-        })}
-    }
-    .into_any();
-    let libs_label = match bound_libraries {
-        0 => "Aucune bibliothèque".to_owned(),
-        1 => "1 bibliothèque".to_owned(),
-        count => format!("{count} bibliothèques"),
-    };
+    let flow_id = flow.id.clone();
 
     view! {
-        <ResourceCard
-            title=flow.name
-            subtitle=description
-            icon=IconName::Flows
-            tone=if flow.is_default { MetricTone::Success } else { MetricTone::Neutral }
-            badge=badge
-            on_click=Some(open_editor)
-            footer_meta=format!("{total_blocks} bloc(s) · {total_connections} liaison(s) · {updated}")
-            footer_actions=Some(actions)
-        >
-            <div class="cluster">
-                <Tag label=format!("v{}", flow.version) tone=TagTone::Mono />
-                <Tag label=flow.file_mask tone=TagTone::Primary />
-                <Tag
-                    label=libs_label
-                    tone={if bound_libraries > 0 { TagTone::Success } else { TagTone::Neutral }}
-                    icon=Some(IconName::Libraries)
-                />
-            </div>
-            <FlowPipelinePreview
-                steps=steps
-                extra_blocks=extra_blocks
-                empty_label="Pipeline vide"
-                aria_label="Aperçu du pipeline"
-            />
+        <div class="inspection-panel">
+            {move || match tab.get() {
+                0 => {
+                    let flow = stored_flow.get_value();
+                    let libs = stored_libs.get_value();
+                    let (_, total_blocks, total_connections) = pipeline_preview_steps(&flow.definition);
+                    let desc = flow
+                        .description
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|text| !text.is_empty())
+                        .unwrap_or("—")
+                        .to_owned();
+                    let libs_summary = if libs.is_empty() {
+                        "Aucune bibliothèque".to_owned()
+                    } else {
+                        libs.join(", ")
+                    };
+                    view! {
+                        <div class="inspection-panel__section">
+                            <p class="inspection-panel__title">"Général"</p>
+                            <div class="detail-grid">
+                                <div class="detail-term">"Nom"</div>
+                                <div class="detail-val">{flow.name}</div>
+                                <div class="detail-term">"Identifiant"</div>
+                                <div class="detail-val text-mono">{flow.id}</div>
+                                <div class="detail-term">"Description"</div>
+                                <div class="detail-val">{desc}</div>
+                                <div class="detail-term">"Version"</div>
+                                <div class="detail-val text-mono">{format!("v{}", flow.version)}</div>
+                                <div class="detail-term">"Masque de fichiers"</div>
+                                <div class="detail-val text-mono">{flow.file_mask}</div>
+                                <div class="detail-term">"Flux par défaut"</div>
+                                <div class="detail-val">{if flow.is_default { "Oui" } else { "Non" }}</div>
+                                <div class="detail-term">"Dernière modification"</div>
+                                <div class="detail-val">{format::datetime(flow.updated_at)}</div>
+                            </div>
+                        </div>
+
+                        <div class="inspection-panel__section">
+                            <p class="inspection-panel__title">"Utilisation & Structure"</p>
+                            <div class="detail-grid">
+                                <div class="detail-term">"Bibliothèques liées"</div>
+                                <div class="detail-val">{libs_summary}</div>
+                                <div class="detail-term">"Blocs"</div>
+                                <div class="detail-val">{total_blocks.to_string()}</div>
+                                <div class="detail-term">"Liaisons"</div>
+                                <div class="detail-val">{total_connections.to_string()}</div>
+                            </div>
+                        </div>
+
+                        <FlowPipelineSection
+                            definition=flow.definition
+                            empty_label="Pipeline vide"
+                        />
+                    }.into_any()
+                }
+                _ => {
+                    let current_version = stored_flow.get_value().version;
+                    const VERSION_HEADERS: [&str; 4] = ["Version", "Nom", "Enregistrée", "Action"];
+                    view! {
+                        <div class="inspection-panel__section">
+                            <p class="inspection-panel__title">"Historique des versions"</p>
+                            <Registre aria_label="Versions du flux" headers=VERSION_HEADERS.to_vec()>
+                                {move || match versions.get() {
+                                    None => view! {
+                                        <RegistreMessage span=VERSION_HEADERS.len() text="Chargement des versions…" />
+                                    }.into_any(),
+                                    Some(Err(error)) => view! {
+                                        <RegistreMessage span=VERSION_HEADERS.len() text=error.message() />
+                                    }.into_any(),
+                                    Some(Ok(list)) if list.is_empty() => view! {
+                                        <RegistreMessage span=VERSION_HEADERS.len() text="Aucune version enregistrée." />
+                                    }.into_any(),
+                                    Some(Ok(list)) => list.into_iter().map(|version| {
+                                        let number = version.version;
+                                        let is_current = number == current_version;
+                                        view! {
+                                            <tr>
+                                                <td class="text-mono">
+                                                    {format!("v{number}")}
+                                                    {is_current.then_some(" (courante)")}
+                                                </td>
+                                                <td>{version.name}</td>
+                                                <td class="text-dim">{format::datetime(version.created_at)}</td>
+                                                <td class="cell-end">
+                                                    {(can_manage && !is_current).then(|| view! {
+                                                        <button
+                                                            type="button"
+                                                            class="btn btn-secondary btn-sm"
+                                                            disabled=move || restore.pending().get()
+                                                            on:click=move |_| { restore.dispatch(number); }
+                                                        >
+                                                            "Restaurer"
+                                                        </button>
+                                                    })}
+                                                </td>
+                                            </tr>
+                                        }
+                                    }).collect_view().into_any(),
+                                }}
+                            </Registre>
+                        </div>
+                    }.into_any()
+                }
+            }}
+
             {move || feedback.get().map(|err| view! {
-                <p class="text-danger text-xs" role="status">{err}</p>
+                <p class="form-help text-danger" role="status">{err}</p>
             })}
-        </ResourceCard>
+
+            <div class="inspection-drawer__actions">
+                <Link to=Route::FlowEditor(flow_id) class="btn btn-primary">"Ouvrir l'atelier"</Link>
+                {can_manage.then(|| view! {
+                    <button
+                        type="button"
+                        class="btn btn-secondary"
+                        disabled=move || duplicate.pending().get()
+                        on:click=move |_| { duplicate.dispatch(()); }
+                    >
+                        "Dupliquer"
+                    </button>
+                })}
+                {can_templates.then(|| view! {
+                    <button
+                        type="button"
+                        class="btn btn-secondary"
+                        disabled=move || save_template.pending().get()
+                        on:click=move |_| { save_template.dispatch(()); }
+                    >
+                        "Enregistrer comme modèle"
+                    </button>
+                })}
+                {removable.then(|| view! {
+                    <button
+                        type="button"
+                        class="btn btn-danger-quiet"
+                        disabled=move || remove.pending().get()
+                        on:click=move |_| { remove.dispatch(()); }
+                    >
+                        "Supprimer"
+                    </button>
+                })}
+            </div>
+        </div>
     }
 }
 
 #[component]
-fn FlowTemplateCard(
+fn FlowTemplateDetailDrawer(
     template: LocalFlowTemplate,
     can_manage: bool,
     can_delete: bool,
     on_changed: Callback<()>,
+    on_closed: Callback<()>,
 ) -> impl IntoView {
     let router = use_router();
     let def_str = serde_json::to_string(&template.definition).unwrap_or_else(|_| "{}".into());
-    let (steps, total_blocks, total_connections) = pipeline_preview_steps(&def_str);
-    let extra_blocks = total_blocks.saturating_sub(steps.len());
+    let (_, total_blocks, total_connections) = pipeline_preview_steps(&def_str);
     let feedback = RwSignal::new(None::<String>);
 
     let name_for_create = template.name.clone();
     let desc_for_create = template.description.clone();
     let mask_for_create = template.file_mask.clone();
-    let def_for_create = def_str;
+    let def_for_create = def_str.clone();
     let create_from_tpl = Action::new_local(move |_: &()| {
         let suffix = (js_sys::Date::now() as u64 % ID_SUFFIX_MODULO).to_string();
         let id = new_flow_id(&name_for_create, &suffix);
@@ -381,6 +602,7 @@ fn FlowTemplateCard(
     Effect::new(move |_| match create_from_tpl.value().get() {
         Some(Ok(created)) => {
             Toasts::notify_success("Flux créé depuis le modèle.");
+            on_closed.run(());
             router.go(Route::FlowEditor(created.id));
         }
         Some(Err(error)) => Toasts::set_error(feedback, error.message()),
@@ -395,55 +617,82 @@ fn FlowTemplateCard(
     Effect::new(move |_| match remove.value().get() {
         Some(Ok(())) => {
             Toasts::notify_success("Modèle supprimé.");
+            on_closed.run(());
             on_changed.run(());
         }
         Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
     });
 
-    let badge = view! {
-        <Tag
-            label=if template.is_local { "Modèle local" } else { "Modèle catalogue" }
-            tone=if template.is_local { TagTone::Success } else { TagTone::Primary }
-        />
-    }
-    .into_any();
-    let actions = view! {
-        {can_manage.then(|| view! {
-            <button type="button" class="btn btn-primary btn-sm" disabled=move || create_from_tpl.pending().get()
-                on:click=move |_| { create_from_tpl.dispatch(()); }>"Utiliser ce modèle"</button>
-        })}
-        {(can_delete && template.is_local).then(|| view! {
-            <button type="button" class="btn btn-sm btn-danger-quiet" disabled=move || remove.pending().get()
-                on:click=move |_| { remove.dispatch(()); }>"Supprimer"</button>
-        })}
-    }
-    .into_any();
+    let desc = template
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .unwrap_or("—")
+        .to_owned();
 
     view! {
-        <ResourceCard
-            title=template.name
-            subtitle=template.description
-            icon=IconName::Layers
-            tone=MetricTone::Neutral
-            badge=Some(badge)
-            footer_meta=format!("{total_blocks} bloc(s) · {total_connections} liaison(s) · {}", template.id)
-            footer_actions=Some(actions)
-        >
-            <div class="cluster">
-                <Tag label=format!("v{}", template.version) tone=TagTone::Mono />
-                <Tag label=template.file_mask tone=TagTone::Primary />
+        <div class="inspection-panel">
+            <div class="inspection-panel__section">
+                <p class="inspection-panel__title">"Général"</p>
+                <div class="detail-grid">
+                    <div class="detail-term">"Nom"</div>
+                    <div class="detail-val">{template.name}</div>
+                    <div class="detail-term">"Identifiant"</div>
+                    <div class="detail-val text-mono">{template.id}</div>
+                    <div class="detail-term">"Origine"</div>
+                    <div class="detail-val">
+                        {if template.is_local { "Modèle local" } else { "Modèle catalogue" }}
+                    </div>
+                    <div class="detail-term">"Description"</div>
+                    <div class="detail-val">{desc}</div>
+                    <div class="detail-term">"Version"</div>
+                    <div class="detail-val text-mono">{format!("v{}", template.version)}</div>
+                    <div class="detail-term">"Masque de fichiers"</div>
+                    <div class="detail-val text-mono">{template.file_mask}</div>
+                </div>
             </div>
-            <FlowPipelinePreview
-                steps=steps
-                extra_blocks=extra_blocks
-                empty_label="Modèle vide"
-                aria_label="Aperçu du modèle"
-            />
+
+            <div class="inspection-panel__section">
+                <p class="inspection-panel__title">"Structure"</p>
+                <div class="detail-grid">
+                    <div class="detail-term">"Blocs"</div>
+                    <div class="detail-val">{total_blocks.to_string()}</div>
+                    <div class="detail-term">"Liaisons"</div>
+                    <div class="detail-val">{total_connections.to_string()}</div>
+                </div>
+            </div>
+
+            <FlowPipelineSection definition=def_str empty_label="Modèle vide" />
+
             {move || feedback.get().map(|err| view! {
-                <p class="text-danger text-xs" role="status">{err}</p>
+                <p class="form-help text-danger" role="status">{err}</p>
             })}
-        </ResourceCard>
+
+            <div class="inspection-drawer__actions">
+                {can_manage.then(|| view! {
+                    <button
+                        type="button"
+                        class="btn btn-primary"
+                        disabled=move || create_from_tpl.pending().get()
+                        on:click=move |_| { create_from_tpl.dispatch(()); }
+                    >
+                        "Utiliser ce modèle"
+                    </button>
+                })}
+                {(can_delete && template.is_local).then(|| view! {
+                    <button
+                        type="button"
+                        class="btn btn-danger-quiet"
+                        disabled=move || remove.pending().get()
+                        on:click=move |_| { remove.dispatch(()); }
+                    >
+                        "Supprimer"
+                    </button>
+                })}
+            </div>
+        </div>
     }
 }
 
@@ -460,6 +709,11 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
     let filters = use_context::<Filters>();
     let reload = RwSignal::new(0_u32);
     let view_mode = RwSignal::new(FlowsCatalogFilter::Flows);
+    let selected_entry = RwSignal::new(None::<SelectedFlowEntry>);
+    let flow_drawer_open = RwSignal::new(false);
+    let tpl_drawer_open = RwSignal::new(false);
+    let flow_tab = RwSignal::new(0_usize);
+
     let flows = LocalResource::new(move || {
         reload.track();
         api::get::<Vec<FlowRecord>>(FLOWS_PATH)
@@ -486,6 +740,44 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
             cb.run(());
         }
     });
+    let close_drawers = Callback::new(move |()| {
+        flow_drawer_open.set(false);
+        tpl_drawer_open.set(false);
+        selected_entry.set(None);
+    });
+    Effect::new(move |_| {
+        if !flow_drawer_open.get()
+            && matches!(
+                selected_entry.get_untracked(),
+                Some(SelectedFlowEntry::Flow(_))
+            )
+        {
+            selected_entry.set(None);
+        }
+    });
+    Effect::new(move |_| {
+        if !tpl_drawer_open.get()
+            && matches!(
+                selected_entry.get_untracked(),
+                Some(SelectedFlowEntry::Template(_))
+            )
+        {
+            selected_entry.set(None);
+        }
+    });
+
+    let open_flow = move |id: String| {
+        tpl_drawer_open.set(false);
+        flow_tab.set(0);
+        selected_entry.set(Some(SelectedFlowEntry::Flow(id)));
+        flow_drawer_open.set(true);
+    };
+    let open_template = move |id: String| {
+        flow_drawer_open.set(false);
+        selected_entry.set(Some(SelectedFlowEntry::Template(id)));
+        tpl_drawer_open.set(true);
+    };
+
     let router = use_router();
     if can_manage {
         provide_topbar_action(ActionSpec {
@@ -559,7 +851,17 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
         );
         items
     });
-    let grid = move || {
+
+    const HEADERS: [&str; 6] = [
+        "Flow",
+        "Masque",
+        "Structure",
+        "Bibliothèques",
+        "Mise à jour",
+        "Action",
+    ];
+
+    let registre_body = move || {
         let text = query();
         let active_filter = flow_filter();
         let mode = view_mode.get();
@@ -581,52 +883,97 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
             Vec::new()
         };
 
+        let render_template_rows = move |items: Vec<LocalFlowTemplate>| {
+            items
+                .into_iter()
+                .map(|tpl| {
+                    let def_str =
+                        serde_json::to_string(&tpl.definition).unwrap_or_else(|_| "{}".into());
+                    let (_, total_blocks, total_connections) = pipeline_preview_steps(&def_str);
+                    let tpl_id = tpl.id.clone();
+                    let row_id = tpl.id.clone();
+                    let inspect_id = tpl.id.clone();
+                    let desc = tpl
+                        .description
+                        .filter(|value| !value.trim().is_empty());
+                    view! {
+                        <tr
+                            class="registre-row is-clickable"
+                            class:is-open=move || {
+                                selected_entry.get()
+                                    == Some(SelectedFlowEntry::Template(row_id.clone()))
+                            }
+                            on:click=move |_| open_template(tpl_id.clone())
+                        >
+                            <td>
+                                <div class="cluster cluster-wrap">
+                                    <span class="text-strong">{tpl.name}</span>
+                                    <Tag
+                                        label=if tpl.is_local {
+                                            "Modèle local"
+                                        } else {
+                                            "Modèle catalogue"
+                                        }
+                                        tone=if tpl.is_local {
+                                            TagTone::Success
+                                        } else {
+                                            TagTone::Primary
+                                        }
+                                    />
+                                    <Tag label=format!("v{}", tpl.version) tone=TagTone::Mono />
+                                </div>
+                                {desc.map(|text| view! { <div class="text-dim text-xs">{text}</div> })}
+                            </td>
+                            <td>
+                                <Tag label=tpl.file_mask tone=TagTone::Primary />
+                            </td>
+                            <td class="text-dim">
+                                {format!("{total_blocks} bloc(s) · {total_connections} liaison(s)")}
+                            </td>
+                            <td class="text-dim">"—"</td>
+                            <td class="text-mono text-xs text-dim">{tpl.id}</td>
+                            <td class="cell-end">
+                                <button
+                                    type="button"
+                                    class="btn btn-secondary btn-sm"
+                                    on:click=move |ev| {
+                                        ev.stop_propagation();
+                                        open_template(inspect_id.clone());
+                                    }
+                                >
+                                    "Inspecter"
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                })
+                .collect_view()
+        };
+
         if mode == FlowsCatalogFilter::Templates {
             if shown_templates.is_empty() {
                 return view! {
-                    <div class="empty-state-panel">
-                        <EmptyState
-                            title="Aucun modèle de flow"
-                            message="Transformez un flow existant en modèle ou synchronisez un dépôt pour voir des modèles."
-                            icon_name=IconName::Layers
-                        />
-                    </div>
+                    <RegistreMessage
+                        span=HEADERS.len()
+                        text="Aucun modèle de flow. Transformez un flow en modèle ou synchronisez un dépôt."
+                    />
                 }
                 .into_any();
             }
-            return view! {
-                <div class="resource-grid">
-                    {shown_templates
-                        .into_iter()
-                        .map(|tpl| view! {
-                            <FlowTemplateCard
-                                template=tpl
-                                can_manage=can_manage
-                                can_delete=can_templates
-                                on_changed=on_removed
-                            />
-                        })
-                        .collect_view()}
-                </div>
-            }
-            .into_any();
+            return render_template_rows(shown_templates).into_any();
         }
 
         match flows.get() {
             None => view! {
-                <div class="empty-state-panel">
-                    <p class="text-dim">"Chargement des flux…"</p>
-                </div>
+                <RegistreMessage span=HEADERS.len() text="Chargement des flux…" />
             }
             .into_any(),
             Some(Err(error)) => view! {
-                <div class="empty-state-panel">
-                    <p class="form-error">{error.message()}</p>
-                </div>
+                <RegistreMessage span=HEADERS.len() text=error.message() />
             }
             .into_any(),
             Some(Ok(list)) => {
-                let shown: Vec<FlowRecord> = list
+                let shown_flows: Vec<FlowRecord> = list
                     .into_iter()
                     .filter(|flow| {
                         let usage_ok = !can_libraries
@@ -634,65 +981,168 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
                         usage_ok && matches(&[&flow.name, &flow.id, &flow.file_mask], &text)
                     })
                     .collect();
-                if shown.is_empty() && shown_templates.is_empty() {
+
+                if shown_flows.is_empty() && shown_templates.is_empty() {
                     let unfiltered = text.trim().is_empty() && active_filter == FlowFilter::All;
                     return view! {
-                        <div class="empty-state-panel">
-                            <EmptyState
-                                title=if unfiltered {
-                                    "Aucun flux installé"
-                                } else {
-                                    "Aucun flux correspondant"
-                                }
-                                message=if unfiltered {
-                                    "Créez un premier pipeline nodal pour automatiser le traitement de vos médias."
-                                } else {
-                                    "Ajustez vos filtres pour afficher un flux."
-                                }
-                                icon_name=IconName::Flows
-                            />
-                        </div>
+                        <RegistreMessage
+                            span=HEADERS.len()
+                            text=if unfiltered {
+                                "Aucun flux installé."
+                            } else {
+                                "Aucun flux correspondant aux filtres."
+                            }
+                        />
                     }
                     .into_any();
                 }
+
                 view! {
-                    <div class="resource-grid">
-                        {shown
-                            .into_iter()
-                            .map(|flow| {
-                                let bound_libraries = bound_library_count(&flow.id, &libs);
-                                view! {
-                                    <FlowCard
-                                        flow=flow
-                                        bound_libraries=bound_libraries
-                                        can_manage=can_manage
-                                        can_templates=can_templates
-                                        on_removed=on_removed
-                                    />
+                    {shown_flows.into_iter().map(|flow| {
+                        let (_, total_blocks, total_connections) =
+                            pipeline_preview_steps(&flow.definition);
+                        let bound_libraries = bound_library_count(&flow.id, &libs);
+                        let flow_id = flow.id.clone();
+                        let row_id = flow.id.clone();
+                        let editor_id = flow.id.clone();
+                        let desc = flow
+                            .description
+                            .filter(|value| !value.trim().is_empty());
+                        view! {
+                            <tr
+                                class="registre-row is-clickable"
+                                class:is-open=move || {
+                                    selected_entry.get()
+                                        == Some(SelectedFlowEntry::Flow(row_id.clone()))
                                 }
-                            })
-                            .collect_view()}
-                        {shown_templates
-                            .into_iter()
-                            .map(|tpl| view! {
-                                <FlowTemplateCard
-                                    template=tpl
-                                    can_manage=can_manage
-                                    can_delete=can_templates
-                                    on_changed=on_removed
-                                />
-                            })
-                            .collect_view()}
-                    </div>
+                                on:click=move |_| open_flow(flow_id.clone())
+                            >
+                                <td>
+                                    <div class="cluster cluster-wrap">
+                                        <span class="text-strong">{flow.name}</span>
+                                        {flow.is_default.then(|| view! {
+                                            <StatusBadge label="Défaut" variant="success" />
+                                        })}
+                                        <Tag label=format!("v{}", flow.version) tone=TagTone::Mono />
+                                    </div>
+                                    {desc.map(|text| view! { <div class="text-dim text-xs">{text}</div> })}
+                                </td>
+                                <td>
+                                    <Tag label=flow.file_mask tone=TagTone::Primary />
+                                </td>
+                                <td class="text-dim">
+                                    {format!("{total_blocks} bloc(s) · {total_connections} liaison(s)")}
+                                </td>
+                                <td>
+                                    <Tag
+                                        label=flow_libs_label(bound_libraries)
+                                        tone={if bound_libraries > 0 { TagTone::Success } else { TagTone::Neutral }}
+                                        icon=Some(IconName::Libraries)
+                                    />
+                                </td>
+                                <td class="text-dim">{format::datetime(flow.updated_at)}</td>
+                                <td class="cell-end">
+                                    <button
+                                        type="button"
+                                        class="btn btn-secondary btn-sm"
+                                        on:click=move |ev| {
+                                            ev.stop_propagation();
+                                            router.go(Route::FlowEditor(editor_id.clone()));
+                                        }
+                                    >
+                                        "Atelier"
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    }).collect_view()}
+                    {render_template_rows(shown_templates)}
                 }
                 .into_any()
             }
         }
     };
+
+    let flow_title = Signal::derive(move || match selected_entry.get() {
+        Some(SelectedFlowEntry::Flow(id)) => flows
+            .get()
+            .and_then(Result::ok)
+            .and_then(|list| list.into_iter().find(|f| f.id == id).map(|f| f.name))
+            .unwrap_or(id),
+        _ => String::new(),
+    });
+    let tpl_title = Signal::derive(move || match selected_entry.get() {
+        Some(SelectedFlowEntry::Template(id)) => local_snapshot
+            .get()
+            .and_then(Result::ok)
+            .and_then(|snap| {
+                snap.flow_templates
+                    .into_iter()
+                    .find(|t| t.id == id)
+                    .map(|t| t.name)
+            })
+            .unwrap_or(id),
+        _ => String::new(),
+    });
+
     view! {
         <div class="tab-panel" role="tabpanel">
             <StatStrip aria_label="Synthèse des flows" items=stats />
-            {grid}
+            <div class="registre">
+                <Registre aria_label="Catalogue des flows" headers=HEADERS.to_vec()>
+                    {registre_body}
+                </Registre>
+            </div>
+            <Drawer
+                open=flow_drawer_open
+                eyebrow="Flux"
+                title=flow_title
+                tabs=vec!["Information", "Versions"]
+                tab=flow_tab
+            >
+                {move || {
+                    let Some(SelectedFlowEntry::Flow(id)) = selected_entry.get() else {
+                        return None;
+                    };
+                    let flow = flows
+                        .get()
+                        .and_then(Result::ok)
+                        .and_then(|list| list.into_iter().find(|f| f.id == id))?;
+                    let libs = libraries.get().unwrap_or_default();
+                    let bound_libs = bound_library_names(&flow.id, &libs);
+                    Some(view! {
+                        <FlowDetailDrawer
+                            flow=flow
+                            bound_libs=bound_libs
+                            tab=flow_tab
+                            can_manage=can_manage
+                            can_templates=can_templates
+                            on_changed=on_removed
+                            on_closed=close_drawers
+                        />
+                    })
+                }}
+            </Drawer>
+            <Drawer open=tpl_drawer_open eyebrow="Modèle" title=tpl_title>
+                {move || {
+                    let Some(SelectedFlowEntry::Template(id)) = selected_entry.get() else {
+                        return None;
+                    };
+                    let template = local_snapshot
+                        .get()
+                        .and_then(Result::ok)
+                        .and_then(|snap| snap.flow_templates.into_iter().find(|t| t.id == id))?;
+                    Some(view! {
+                        <FlowTemplateDetailDrawer
+                            template=template
+                            can_manage=can_manage
+                            can_delete=can_templates
+                            on_changed=on_removed
+                            on_closed=close_drawers
+                        />
+                    })
+                }}
+            </Drawer>
         </div>
     }
 }
@@ -975,6 +1425,11 @@ mod tests {
 
         assert_eq!(bound_library_count("f1", &libraries), 2);
         assert_eq!(bound_library_count("f2", &libraries), 0);
+        assert_eq!(
+            bound_library_names("f1", &libraries),
+            vec!["Films", "Séries"]
+        );
+        assert!(bound_library_names("f2", &libraries).is_empty());
         assert_eq!(
             flow_usage_counts(&flows, &libraries),
             FlowUsageCounts {

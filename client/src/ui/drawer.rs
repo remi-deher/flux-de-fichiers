@@ -53,13 +53,26 @@ pub fn Drawer(
             >
                 <header class="inspection-drawer__header">
                     <div class="inspection-drawer__identity">
-                        <p class="inspection-drawer__eyebrow">{eyebrow}</p>
-                        <p id=title_id class="inspection-panel__title">{move || title.get()}</p>
+                        <span class="inspection-drawer__icon" aria-hidden="true">
+                            <Icon name=IconName::Layout size=18 />
+                        </span>
+                        <div class="inspection-drawer__title-group">
+                            <span class="inspection-drawer__eyebrow">{eyebrow}</span>
+                            <p id=title_id class="inspection-panel__title">{move || title.get()}</p>
+                        </div>
                     </div>
-                    {actions}
-                    <button type="button" class="header-icon-btn" aria-label="Fermer le tiroir" on:click=move |_| close()>
-                        <Icon name=IconName::Close size=18 />
-                    </button>
+                    <div class="inspection-drawer__header-actions">
+                        {actions}
+                        <button
+                            type="button"
+                            class="btn btn-secondary btn-sm inspection-drawer__close"
+                            aria-label="Fermer le tiroir"
+                            title="Fermer (Échap)"
+                            on:click=move |_| close()
+                        >
+                            "Fermer"
+                        </button>
+                    </div>
                 </header>
                 {has_tabs.then(|| view! {
                     <div class="inspection-drawer__subnav" role="tablist" aria-label="Sections du dossier">

@@ -45,6 +45,7 @@ pub fn JobsPage(me: Me) -> impl IntoView {
     );
     let selected = RwSignal::new(None::<Uuid>);
     let detail_open = RwSignal::new(false);
+    let job_tab = RwSignal::new(0_usize);
     let selected_library = RwSignal::new(None::<Uuid>);
     let first_page = LocalResource::new(move || {
         reload.track();
@@ -168,6 +169,7 @@ pub fn JobsPage(me: Me) -> impl IntoView {
         all_jobs.get().into_iter().find(|job| job.id == id)
     });
     let open = Callback::new(move |id: Uuid| {
+        job_tab.set(0);
         selected.set(Some(id));
         detail_open.set(true);
     });
@@ -264,11 +266,20 @@ pub fn JobsPage(me: Me) -> impl IntoView {
                     "Charger les tâches plus anciennes"
                 </button>
             })}
-            <Drawer open=detail_open eyebrow="Tâche" title=title>
+            <Drawer
+                open=detail_open
+                eyebrow="Tâche"
+                title=title
+                tabs=vec!["Information", "Étapes exécutées"]
+                tab=job_tab
+            >
                 {move || selected_job.get().map(|job| view! {
                     <JobDetail
                         job=job
+                        tab=job_tab
                         libraries=libraries_map
+                        workers=workers_map
+                        flows=flows_map
                         can_manage=can_manage
                         on_changed=refresh
                     />

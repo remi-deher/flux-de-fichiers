@@ -1,7 +1,7 @@
 //! Styles du kit de widgets : grille, coquille, états, listes, barres et progression.
 
 pub const WIDGETS_CSS: &str = r#"
-/* --- Grille de widgets : six colonnes, une seule sur petit écran --- */
+/* --- Grille de widgets : six colonnes, une seule dans un conteneur étroit --- */
 .widget-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -25,7 +25,8 @@ pub const WIDGETS_CSS: &str = r#"
 .widget--medium { grid-column: span 3; }
 .widget--large { grid-column: span 6; }
 
-@media (max-width: 960px) {
+/* Selon la place du conteneur (contenu de page ou tiroir), pas celle de la fenêtre. */
+@container (max-width: 720px) {
   .widget--small,
   .widget--medium,
   .widget--large {
@@ -54,7 +55,7 @@ pub const WIDGETS_CSS: &str = r#"
 .widget__title {
   flex: 1;
   min-width: 0;
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-weight: 700;
   color: var(--text-main);
 }
@@ -69,7 +70,7 @@ pub const WIDGETS_CSS: &str = r#"
 
 .widget__message {
   margin: 0;
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
 }
 
@@ -157,7 +158,7 @@ button.widget-row:hover {
 
 .widget-row__meta {
   flex: none;
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
 }
 
@@ -192,7 +193,7 @@ button.widget-row:hover {
   display: flex;
   justify-content: space-between;
   margin-top: 0.35rem;
-  font-size: 0.6875rem;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
 "#;

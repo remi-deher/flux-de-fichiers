@@ -9,7 +9,7 @@ pub const COMPONENTS_CSS: &str = r#"
   gap: 0.5rem;
   min-height: var(--touch-target-compact);
   padding: 0.5rem 1rem;
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
@@ -28,7 +28,7 @@ pub const COMPONENTS_CSS: &str = r#"
 }
 
 .btn-primary {
-  background-color: var(--primary);
+  background-color: var(--primary-fill);
   color: var(--primary-contrast);
   box-shadow: var(--shadow-sm);
 }
@@ -60,7 +60,7 @@ pub const COMPONENTS_CSS: &str = r#"
   gap: 0.75rem;
   padding: 0.6rem 0;
   border-top: 1px solid var(--border-color);
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
 }
 
 .settings-alert:first-child {
@@ -116,13 +116,13 @@ pub const COMPONENTS_CSS: &str = r#"
 }
 
 .btn-danger:hover:not(:disabled) {
-  background-color: var(--danger);
-  color: #ffffff;
+  background-color: var(--danger-fill);
+  color: var(--primary-contrast);
 }
 
 .btn-sm {
   padding: 0.3rem 0.65rem;
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
 }
 
 /* --- Badges et Pilules d'état (Status Pills) --- */
@@ -132,7 +132,7 @@ pub const COMPONENTS_CSS: &str = r#"
   gap: 0.35rem;
   padding: 0.2rem 0.6rem;
   border-radius: var(--radius-pill);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   line-height: 1;
 }
@@ -190,7 +190,7 @@ pub const COMPONENTS_CSS: &str = r#"
   width: 100%;
   border-collapse: collapse;
   text-align: left;
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
 }
 
 .data-table th,
@@ -204,7 +204,7 @@ pub const COMPONENTS_CSS: &str = r#"
   background-color: var(--bg-subtle);
   font-weight: 600;
   color: var(--text-dim);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -267,14 +267,14 @@ pub const COMPONENTS_CSS: &str = r#"
 
 .library-worker-path {
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
 }
 
 .form-input--key {
   flex: 1;
   font-family: var(--font-mono);
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
 }
 
 .inspection-drawer {
@@ -379,7 +379,7 @@ pub const COMPONENTS_CSS: &str = r#"
   padding: 0.15rem 0.55rem;
   border-radius: var(--radius-pill);
   background: var(--primary-bg);
-  font-size: 0.6875rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -428,7 +428,7 @@ pub const COMPONENTS_CSS: &str = r#"
   background: transparent;
   color: var(--text-dim);
   font: inherit;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   cursor: pointer;
 }
@@ -444,7 +444,7 @@ pub const COMPONENTS_CSS: &str = r#"
   background: transparent;
   color: var(--text-dim);
   font: inherit;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   cursor: pointer;
 }
@@ -467,6 +467,8 @@ pub const COMPONENTS_CSS: &str = r#"
 }
 
 .inspection-drawer__body {
+  /* Conteneur de requête : fiches et grilles se replient selon la largeur du tiroir. */
+  container-type: inline-size;
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -501,14 +503,14 @@ pub const COMPONENTS_CSS: &str = r#"
 
 .inspection-panel__title {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: var(--font-size-lg);
   line-height: 1.3;
   font-weight: 700;
   color: var(--text-main);
 }
 
 .inspection-panel .inspection-panel__title {
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -519,7 +521,7 @@ pub const COMPONENTS_CSS: &str = r#"
 
 .inspection-panel__facts {
   margin: 0;
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   color: var(--text-dim);
 }
@@ -578,13 +580,13 @@ pub const COMPONENTS_CSS: &str = r#"
 }
 
 .metric-label {
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--text-dim);
 }
 
 .metric-value {
-  font-size: 2rem;
+  font-size: var(--font-size-display);
   font-weight: 700;
   line-height: 1.1;
   color: var(--text-main);
@@ -615,12 +617,12 @@ pub const COMPONENTS_CSS: &str = r#"
 }
 
 .metric-subtitle {
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
 
 .card-caption {
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
   margin-top: 0.5rem;
   line-height: 1.45;
@@ -657,13 +659,13 @@ pub const COMPONENTS_CSS: &str = r#"
 }
 
 .section-title {
-  font-size: 1.25rem;
+  font-size: var(--font-size-xl);
   font-weight: 700;
   color: var(--text-main);
 }
 
 .section-subtitle {
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   color: var(--text-dim);
   margin-top: 0.25rem;
   line-height: 1.45;
@@ -676,14 +678,14 @@ pub const COMPONENTS_CSS: &str = r#"
 
 .form-label {
   display: block;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--text-main);
   margin-bottom: 0.35rem;
 }
 
 .form-help {
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
   margin-top: 0.35rem;
 }
@@ -693,17 +695,21 @@ pub const COMPONENTS_CSS: &str = r#"
   width: 100%;
   padding: 0.6rem 0.75rem;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-control);
   background-color: var(--bg-subtle);
   color: var(--text-main);
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   transition: border-color 0.15s ease-in-out;
   box-sizing: border-box;
 }
 
+/* Anneau de focus complet (WCAG 2.4.7 / 1.4.11) : la seule couleur de bordure ne suffit pas. */
+.form-input:focus-visible,
+.form-select:focus-visible,
 .form-input:focus,
 .form-select:focus {
-  outline: none;
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
   border-color: var(--primary);
   background-color: var(--bg-card);
 }
@@ -722,12 +728,12 @@ pub const COMPONENTS_CSS: &str = r#"
   padding: 0.875rem;
   overflow-x: auto;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
 }
 
 .code-snippet {
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   padding: 0.2rem 0.4rem;
   background-color: var(--bg-subtle);
   border: 1px solid var(--border-color);
@@ -738,7 +744,7 @@ pub const COMPONENTS_CSS: &str = r#"
   display: grid;
   grid-template-columns: 220px 1fr;
   gap: 0.75rem 1.5rem;
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
 }
 
 .detail-grid:has(> .detail-row) {
@@ -760,7 +766,7 @@ pub const COMPONENTS_CSS: &str = r#"
   border-bottom: none;
 }
 
-@media (max-width: 640px) {
+@container (max-width: 560px) {
   .detail-grid {
     grid-template-columns: 1fr;
     gap: 0.25rem;
@@ -788,7 +794,7 @@ pub const COMPONENTS_CSS: &str = r#"
   word-break: break-word;
 }
 
-@media (max-width: 640px) {
+@container (max-width: 560px) {
   .detail-row .detail-val {
     text-align: left;
   }
@@ -826,7 +832,7 @@ pub const COMPONENTS_CSS: &str = r#"
   padding: 0.7rem 1rem;
 }
 
-@media (max-width: 640px) {
+@container (max-width: 560px) {
   .inspection-drawer .detail-grid {
     grid-template-columns: 1fr;
   }
@@ -875,7 +881,7 @@ dialog.app-dialog::backdrop {
 }
 
 .dialog-title {
-  font-size: 1.25rem;
+  font-size: var(--font-size-xl);
   font-weight: 700;
 }
 
@@ -901,8 +907,8 @@ dialog.app-dialog::backdrop {
 .text-primary { color: var(--primary); }
 .text-mono { font-family: var(--font-mono); }
 .text-mono-strong { font-family: var(--font-mono); font-weight: 600; }
-.text-sm { font-size: 0.8125rem; }
-.text-xs { font-size: 0.75rem; color: var(--text-dim); }
+.text-sm { font-size: var(--font-size-xs); }
+.text-xs { font-size: var(--font-size-xs); color: var(--text-dim); }
 .cell-end { text-align: right; }
 .inline-actions { display: inline-flex; gap: 0.4rem; }
 .cluster { display: flex; align-items: center; gap: 0.5rem; }
@@ -911,7 +917,7 @@ dialog.app-dialog::backdrop {
 .cluster-spread { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
 .cluster-center { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
 .truncate {
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   font-family: var(--font-mono);
   max-width: 280px;
   overflow: hidden;
@@ -944,12 +950,12 @@ dialog.app-dialog::backdrop {
   align-items: center;
   justify-content: center;
 }
-.empty-state-title { margin: 0 0 0.5rem 0; font-size: 1.125rem; font-weight: 600; color: var(--text-main); }
-.empty-state-message { margin: 0 auto 1.25rem auto; max-width: 500px; font-size: 0.875rem; color: var(--text-muted); }
+.empty-state-title { margin: 0 0 0.5rem 0; font-size: var(--font-size-lg); font-weight: 600; color: var(--text-main); }
+.empty-state-message { margin: 0 auto 1.25rem auto; max-width: 500px; font-size: var(--font-size-sm); color: var(--text-muted); }
 .empty-state__action { display: flex; justify-content: center; gap: 0.5rem; }
 dialog.app-dialog.dialog-narrow { max-width: 540px; }
 .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
-.btn-danger-quiet { background: transparent; color: var(--danger-text); padding: 0.4rem 0.65rem; font-size: 0.75rem; margin-left: 0.5rem; }
+.btn-danger-quiet { background: transparent; color: var(--danger-text); padding: 0.4rem 0.65rem; font-size: var(--font-size-xs); margin-left: 0.5rem; }
 .btn-danger-quiet:hover:not(:disabled) { background: var(--danger-bg); color: var(--danger); }
 .is-filtered-out { display: none !important; }
 .no-margin-top { margin-top: 0; }
@@ -958,7 +964,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 .toast-notice {
   padding: 0.75rem 1rem;
   border-radius: var(--radius-sm);
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   margin: 1rem 1.5rem 0 1.5rem;
   display: none;
 }
@@ -1017,7 +1023,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 
 .live-progress__label {
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--text-dim);
   min-width: 2.5rem;
@@ -1053,7 +1059,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   border: 1px solid var(--border-color);
   box-shadow: var(--shadow-lg);
   color: var(--text-main);
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   line-height: 1.4;
   animation: toastSlideIn 0.22s var(--ease-out);
 }
@@ -1158,7 +1164,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   background: transparent;
   color: var(--text-main);
   font: inherit;
-  font-size: 0.9375rem;
+  font-size: var(--font-size-sm);
 }
 
 .cmd-palette__input::placeholder {
@@ -1178,7 +1184,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   padding: 1.5rem 1rem;
   text-align: center;
   color: var(--text-muted);
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
 }
 
 .cmd-palette__item {
@@ -1193,7 +1199,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   background: transparent;
   color: var(--text-main);
   font: inherit;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   text-align: left;
   cursor: pointer;
   transition: background-color 0.12s ease, border-color 0.12s ease;
@@ -1221,7 +1227,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 
 .cmd-palette__hint {
   color: var(--text-dim);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   white-space: nowrap;
 }
 
@@ -1232,7 +1238,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   background: var(--bg-subtle);
   border: 1px solid var(--border-color);
   color: var(--text-dim);
-  font-size: 0.6875rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1246,7 +1252,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   border-top: 1px solid var(--border-color);
   background: var(--bg-subtle);
   color: var(--text-muted);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
 }
 
 /* --- Sections ouvertes et tuiles de ressources unifiées --- */
@@ -1333,7 +1339,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 
 .resource-card__title {
   margin: 0;
-  font-size: 0.98rem;
+  font-size: var(--font-size-md);
   font-weight: 700;
   color: var(--text-main);
   overflow: hidden;
@@ -1342,7 +1348,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 }
 
 .resource-card__subtitle {
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
   line-height: 1.35;
 }
@@ -1372,7 +1378,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 }
 
 .resource-card__meta {
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
   min-width: 0;
   overflow: hidden;
@@ -1395,7 +1401,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   max-width: 100%;
   padding: 0.2rem 0.5rem;
   border-radius: var(--radius-sm);
-  font-size: 0.72rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   line-height: 1.25;
   border: 1px solid var(--border-subtle);
@@ -1435,7 +1441,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 
 .code-badge {
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   padding: 0.15rem 0.45rem;
   border-radius: var(--radius-sm);
   background: var(--bg-subtle);
@@ -1470,20 +1476,28 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 }
 
 .diagnostic-box__title {
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .diagnostic-box__message {
-  font-size: 0.85rem;
+  font-size: var(--font-size-xs);
   margin-top: 0.15rem;
 }
 
 .registre-row.is-clickable {
   cursor: pointer;
   transition: background-color 0.14s ease;
+}
+
+/* Lignes et cartes cliquables atteintes au clavier (tabindex="0") : anneau intérieur, pour ne pas
+   être rogné par le débordement du tableau ou de la grille. */
+.registre-row.is-clickable:focus-visible,
+.resource-card.is-clickable:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
 }
 
 .registre-row.is-clickable:hover {
@@ -1515,7 +1529,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   gap: 0.85rem;
 }
 
-@media (max-width: 960px) {
+@container (max-width: 720px) {
   .settings-bento-grid {
     grid-template-columns: 1fr;
   }
@@ -1531,7 +1545,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 
 .settings-help-details__summary {
   padding: 0.6rem 0.85rem;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--text-main);
   cursor: pointer;
@@ -1602,7 +1616,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   color: var(--text-dim);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   overflow-x: auto;
   max-height: 10rem;
   white-space: pre-wrap;
@@ -1644,7 +1658,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 
 .settings-fieldset__legend {
   padding: 0 0.35rem;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: var(--text-main);
 }
@@ -1674,7 +1688,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   display: flex;
   justify-content: space-between;
   gap: 0.5rem;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
 }
 
 .inspection-drawer__panel:focus-visible {
@@ -1694,7 +1708,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   width: auto;
   min-width: 10rem;
   padding: 0.3rem 0.55rem;
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
 }
 
 .library-worker-editor {
@@ -1736,7 +1750,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   border: 1px solid var(--border-color);
   background: var(--bg-subtle);
   color: var(--text-main);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   cursor: pointer;
   transition: border-color 0.14s ease, background-color 0.14s ease;
@@ -1753,7 +1767,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 }
 
 .folder-picker__ro-pill {
-  font-size: 0.65rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   padding: 0.05rem 0.3rem;
   border-radius: var(--radius-sm);
@@ -1784,7 +1798,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 
 .folder-picker__crumb-sep {
   color: var(--text-muted);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
 }
 
 .folder-picker__crumb {
@@ -1792,7 +1806,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   background: transparent;
   color: var(--text-dim);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   padding: 0.15rem 0.35rem;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -1823,7 +1837,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   background: var(--warning-bg);
   border: 1px solid var(--warning);
   color: var(--warning);
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
 }
 
 .folder-picker__error-text {
@@ -1845,7 +1859,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   padding: 0.9rem;
   text-align: center;
   color: var(--text-dim);
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
 }
 
 .folder-picker__row {
@@ -1911,7 +1925,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   text-align: left;
   padding: 0.25rem 0.2rem;
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
 }
 
 .folder-picker__icon {
@@ -1937,7 +1951,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 .folder-picker__file {
   padding-top: 0.35rem;
   padding-bottom: 0.35rem;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
 }
 
@@ -1949,7 +1963,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 }
 
 .folder-picker__badge {
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   padding: 0.1rem 0.4rem;
   border-radius: var(--radius-pill);
@@ -1972,7 +1986,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 
 .folder-picker__ext {
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   text-transform: uppercase;
   padding: 0.08rem 0.35rem;
   border-radius: var(--radius-sm);
@@ -1983,7 +1997,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 
 .folder-picker__size {
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
 
@@ -2018,7 +2032,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   align-items: center;
   gap: 0.45rem;
   flex-wrap: wrap;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
 }
 
@@ -2035,7 +2049,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   color: var(--text-main);
   border-radius: var(--radius-pill);
   padding: 0.35rem 0.7rem;
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   font-weight: 500;
   cursor: pointer;
   text-align: left;
@@ -2082,7 +2096,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
 }
 
 .ai-chat__msg-role {
-  font-size: 0.72rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -2093,7 +2107,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   color: var(--text-main);
   word-break: break-word;
@@ -2115,7 +2129,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   background: var(--bg-app);
   border: 1px solid var(--border-subtle);
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   overflow-x: auto;
   white-space: pre-wrap;
 }
@@ -2132,7 +2146,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   align-items: center;
   gap: 0.3rem;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--font-size-xs);
   padding: 0.15rem 0.45rem;
   border-radius: var(--radius-sm);
   background: var(--bg-subtle);

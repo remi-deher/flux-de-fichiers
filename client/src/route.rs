@@ -189,18 +189,44 @@ pub fn use_router() -> Router {
     use_context::<Router>().unwrap_or_else(Router::install)
 }
 
-/// Lien interne : change d'écran sans recharger la page.
+/// Bouton principal de la souris (`MouseEvent.button`).
+pub const PRIMARY_BUTTON: i16 = 0;
+
+/// Un clic simple reste dans l'application ; Ctrl, Cmd, Maj, Alt ou un autre bouton laissent le
+/// navigateur ouvrir le lien (nouvel onglet, nouvelle fenêtre, téléchargement).
+pub fn is_plain_click(button: i16, ctrl: bool, meta: bool, shift: bool, alt: bool) -> bool {
+    button == PRIMARY_BUTTON && !(ctrl || meta || shift || alt)
+}
+
+/// Lien interne : change d'écran sans recharger la page. `current` pose `aria-current="page"`
+/// sur l'entrée de l'écran affiché (WAI-ARIA, navigation par liens).
 #[component]
-pub fn Link(to: Route, #[prop(optional)] class: &'static str, children: Children) -> impl IntoView {
+pub fn Link(
+    to: Route,
+    #[prop(optional)] class: &'static str,
+    #[prop(optional, into)] current: Option<Signal<bool>>,
+    #[prop(optional)] title: Option<&'static str>,
+    children: Children,
+) -> impl IntoView {
     let router = use_router();
     let href = to.path();
     view! {
         <a
             href=href
             class=class
+            title=title
+            aria-current=move || current.is_some_and(|current| current.get()).then_some("page")
             on:click=move |event| {
-                event.prevent_default();
-                router.go(to.clone());
+                if is_plain_click(
+                    event.button(),
+                    event.ctrl_key(),
+                    event.meta_key(),
+                    event.shift_key(),
+                    event.alt_key(),
+                ) {
+                    event.prevent_default();
+                    router.go(to.clone());
+                }
             }
         >
             {children()}
@@ -241,6 +267,16 @@ mod tests {
         ));
         assert!(!needs_leave_confirmation(true, &editor, &editor));
         assert!(!needs_leave_confirmation(false, &editor, &Route::Flows));
+    }
+
+    #[test]
+    fn only_a_plain_primary_click_stays_in_the_application() {
+        assert!(is_plain_click(0, false, false, false, false));
+        assert!(!is_plain_click(1, false, false, false, false));
+        assert!(!is_plain_click(0, true, false, false, false));
+        assert!(!is_plain_click(0, false, true, false, false));
+        assert!(!is_plain_click(0, false, false, true, false));
+        assert!(!is_plain_click(0, false, false, false, true));
     }
 
     #[test]

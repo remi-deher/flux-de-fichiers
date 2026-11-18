@@ -56,7 +56,7 @@ pub const GRAPH_CSS: &str = r#"
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-dim);
-  font-size: 0.76rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
@@ -151,7 +151,7 @@ pub const GRAPH_CSS: &str = r#"
 
 .flow-palette__title {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: var(--font-size-sm);
   font-weight: 700;
   color: var(--text-main);
 }
@@ -166,7 +166,7 @@ pub const GRAPH_CSS: &str = r#"
   border-radius: var(--radius-pill);
   background: var(--bg-subtle);
   color: var(--text-dim);
-  font-size: 0.72rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
 }
 
@@ -190,7 +190,7 @@ pub const GRAPH_CSS: &str = r#"
   padding: 0.6rem 0.85rem;
   background: var(--primary-bg);
   border-bottom: 1px solid var(--border-highlight);
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   color: var(--text-main);
 }
 
@@ -219,7 +219,7 @@ pub const GRAPH_CSS: &str = r#"
   width: 100%;
   padding-left: 1.85rem;
   padding-right: 1.85rem;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
 }
 
 .flow-palette__search-clear {
@@ -245,7 +245,7 @@ pub const GRAPH_CSS: &str = r#"
 
 .flow-palette__empty {
   margin: 1rem 0;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
   text-align: center;
 }
@@ -260,7 +260,7 @@ pub const GRAPH_CSS: &str = r#"
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.72rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -275,7 +275,7 @@ pub const GRAPH_CSS: &str = r#"
   border-radius: var(--radius-pill);
   background: var(--bg-subtle);
   color: var(--text-muted);
-  font-size: 0.68rem;
+  font-size: var(--font-size-xs);
 }
 
 .flow-palette__list {
@@ -340,7 +340,7 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .flow-palette__card-title {
-  font-size: 0.8125rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -348,12 +348,12 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .flow-palette__card-meta {
-  font-size: 0.68rem;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
 
 .flow-palette__card-plus {
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-weight: 700;
   color: var(--text-muted);
 }
@@ -386,7 +386,7 @@ pub const GRAPH_CSS: &str = r#"
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
-  font-size: 0.8rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--text-main);
 }
@@ -408,6 +408,31 @@ pub const GRAPH_CSS: &str = r#"
 
 .flow-graph-board.is-panning {
   cursor: grabbing;
+}
+
+/* Le plan gère lui-même le glisser au doigt et au stylet (événements de pointeur) : le navigateur
+   ne doit ni défiler ni zoomer la page à sa place. */
+.flow-graph-board,
+.flow-graph-board * {
+  touch-action: none;
+}
+
+/* Sauf la recherche d'ajout rapide, posée sur le plan : sa liste doit défiler au doigt. */
+.flow-graph-board .flow-quick-add,
+.flow-graph-board .flow-quick-add * {
+  touch-action: auto;
+}
+
+/* Plan et liaisons atteints au clavier. */
+.flow-graph-board:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.flow-wire__hit:focus-visible {
+  outline: none;
+  stroke: var(--primary);
+  stroke-opacity: 0.45;
 }
 
 .flow-canvas__empty {
@@ -466,14 +491,14 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .canvas-drop-ghost__badge {
-  font-size: 0.68rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: var(--primary);
   letter-spacing: 0.02em;
 }
 
 .canvas-drop-ghost__title {
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   font-weight: 700;
   color: var(--text-main);
   white-space: nowrap;
@@ -563,7 +588,7 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .canvas-node__domain {
-  font-size: 0.62rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -571,7 +596,7 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .canvas-node__kind {
-  font-size: 0.68rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -579,7 +604,7 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .canvas-node__step {
-  font-size: 0.66rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: var(--text-muted);
   padding: 0.08rem 0.34rem;
@@ -617,7 +642,7 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .canvas-node__title {
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
@@ -634,12 +659,12 @@ pub const GRAPH_CSS: &str = r#"
   border-radius: 50%;
   background: var(--warning-bg);
   color: var(--warning);
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   font-weight: 800;
 }
 
 .canvas-node__subtitle {
-  font-size: 0.69rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -666,7 +691,7 @@ pub const GRAPH_CSS: &str = r#"
   background: var(--bg-subtle);
   border: 1px solid var(--border-subtle);
   font-family: var(--font-mono);
-  font-size: 0.67rem;
+  font-size: var(--font-size-xs);
   line-height: 1.25;
 }
 
@@ -777,7 +802,7 @@ pub const GRAPH_CSS: &str = r#"
   background: var(--bg-card);
   border: 1.5px solid var(--port-color);
   color: var(--port-color);
-  font-size: 0.72rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   line-height: 1;
   box-shadow: var(--shadow-sm);
@@ -787,7 +812,7 @@ pub const GRAPH_CSS: &str = r#"
 .canvas-port.is-output.canvas-port--pill {
   padding: 0 0.55rem;
   gap: 0.28rem;
-  font-size: 0.68rem;
+  font-size: var(--font-size-xs);
 }
 
 .canvas-port__label {
@@ -808,7 +833,7 @@ pub const GRAPH_CSS: &str = r#"
   border-radius: var(--radius-pill);
   background: var(--bg-card);
   color: var(--primary);
-  font-size: 0.85rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   line-height: 1;
   display: grid;
@@ -834,7 +859,7 @@ pub const GRAPH_CSS: &str = r#"
 
 .canvas-port__add:hover {
   transform: scale(1.12);
-  background: var(--primary);
+  background: var(--primary-fill);
   color: var(--primary-contrast);
 }
 
@@ -950,7 +975,7 @@ pub const GRAPH_CSS: &str = r#"
 
 .flow-wire__badge text {
   fill: var(--text-dim);
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
 }
 
@@ -992,15 +1017,15 @@ pub const GRAPH_CSS: &str = r#"
 
 .flow-wire__insert-plus {
   fill: var(--primary);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: 700;
   pointer-events: none;
 }
 
 .flow-wire__insert-btn:hover .flow-wire__insert-circle,
 .flow-wire__insert-btn:focus-visible .flow-wire__insert-circle {
-  fill: var(--primary);
-  stroke: var(--primary);
+  fill: var(--primary-fill);
+  stroke: var(--primary-fill);
 }
 
 .flow-wire__insert-btn:hover .flow-wire__insert-plus,
@@ -1043,7 +1068,7 @@ pub const GRAPH_CSS: &str = r#"
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
@@ -1066,7 +1091,7 @@ pub const GRAPH_CSS: &str = r#"
 
 .flow-control-btn--pct {
   height: 24px;
-  font-size: 0.66rem;
+  font-size: var(--font-size-xs);
   color: var(--text-dim);
 }
 
@@ -1118,7 +1143,7 @@ pub const GRAPH_CSS: &str = r#"
   border-radius: var(--radius-sm);
   background: var(--bg-subtle);
   color: var(--text-main);
-  font-size: 0.74rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   cursor: pointer;
 }
@@ -1190,7 +1215,7 @@ pub const GRAPH_CSS: &str = r#"
   border: 0;
   background: transparent;
   color: var(--text-main);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   outline: none;
 }
 
@@ -1207,7 +1232,7 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .flow-quick-add__group-label {
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1250,7 +1275,7 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .flow-quick-add__label {
-  font-size: 12.5px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--text-main);
   white-space: nowrap;
@@ -1259,14 +1284,14 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .flow-quick-add__cat {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
 
 .flow-quick-add__empty {
   padding: 14px 10px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
 
@@ -1338,7 +1363,7 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .flow-inspector__eyebrow {
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -1353,14 +1378,14 @@ pub const GRAPH_CSS: &str = r#"
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--node-accent, var(--primary)) 14%, transparent);
   color: var(--node-accent, var(--primary));
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   width: fit-content;
 }
 
 .flow-inspector__title {
   margin: 0;
-  font-size: 0.98rem;
+  font-size: var(--font-size-md);
   font-weight: 700;
   color: var(--text-main);
   overflow: hidden;
@@ -1387,7 +1412,7 @@ pub const GRAPH_CSS: &str = r#"
 
 .flow-inspector__section-title {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1470,7 +1495,7 @@ pub const GRAPH_CSS: &str = r#"
   border: 1px solid var(--warning);
   background: color-mix(in srgb, var(--warning) 10%, transparent);
   color: var(--text-main);
-  font-size: 0.8rem;
+  font-size: var(--font-size-xs);
 }
 
 .flow-sim__steps {
@@ -1507,7 +1532,7 @@ pub const GRAPH_CSS: &str = r#"
 
 .flow-sim__step-num {
   color: var(--text-dim);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
 }
 
 .flow-sim__step-meta {
@@ -1516,7 +1541,7 @@ pub const GRAPH_CSS: &str = r#"
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
-  font-size: 0.8rem;
+  font-size: var(--font-size-xs);
 }
 
 @media (max-width: 960px) {
@@ -1554,7 +1579,7 @@ pub const GRAPH_CSS: &str = r#"
   }
 }
 
-@media (max-width: 680px) {
+@media (max-width: 640px) {
   .flow-minimap-panel {
     width: 140px;
     right: 10px;

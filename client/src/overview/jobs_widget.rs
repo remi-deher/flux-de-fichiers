@@ -4,7 +4,7 @@ use crate::format;
 use crate::jobs::model::{status_label, status_tone};
 use crate::jobs::table::job_progress_cell;
 use crate::route::{Link, Route, use_router};
-use crate::ui::{Registre, RegistreMessage, SectionHeader, StatusBadge};
+use crate::ui::{Registre, RegistreMessage, SectionHeader, StatusBadge, on_activate};
 use flux_shared::jobs::{Job, JobStatus};
 use flux_shared::workers::Worker;
 use leptos::prelude::*;
@@ -152,7 +152,8 @@ pub fn JobsWidget(
                                     let status = job.status;
                                     let worker = worker_label(&workers, job.worker_id);
                                     view! {
-                                        <tr class="registre-row is-clickable" on:click=move |_| router.go(Route::Jobs)>
+                                        <tr class="registre-row is-clickable" tabindex="0" on:click=move |_| router.go(Route::Jobs)
+                                            on:keydown=on_activate(move || router.go(Route::Jobs))>
                                             <td class="text-strong truncate">{job.source_name}</td>
                                             <td class="text-dim truncate">{worker}</td>
                                             <td>{job_progress_cell(id, status, live_progress)}</td>
@@ -172,7 +173,8 @@ pub fn JobsWidget(
                                     let status = job.status;
                                     let worker = worker_label(&workers, job.worker_id);
                                     view! {
-                                        <tr class="registre-row is-clickable" on:click=move |_| router.go(Route::Jobs)>
+                                        <tr class="registre-row is-clickable" tabindex="0" on:click=move |_| router.go(Route::Jobs)
+                                            on:keydown=on_activate(move || router.go(Route::Jobs))>
                                             <td class="text-strong truncate">{job.source_name}</td>
                                             <td><StatusBadge label=status_label(status) variant=status_tone(status) /></td>
                                             <td class="text-dim truncate">{worker}</td>
@@ -191,7 +193,8 @@ pub fn JobsWidget(
                                 rows.into_iter().map(|job| {
                                     let status = job.status;
                                     view! {
-                                        <tr class="registre-row is-clickable" on:click=move |_| router.go(Route::Jobs)>
+                                        <tr class="registre-row is-clickable" tabindex="0" on:click=move |_| router.go(Route::Jobs)
+                                            on:keydown=on_activate(move || router.go(Route::Jobs))>
                                             <td class="text-strong truncate">{job.source_name}</td>
                                             <td><StatusBadge label=status_label(status) variant=status_tone(status) /></td>
                                             <td class="text-dim">{job.attempts}</td>

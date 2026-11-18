@@ -1,5 +1,6 @@
 //! Composants génériques de tuile (`ResourceCard`) et d'étiquette (`Tag`), partagés par les grilles.
 
+use super::focus::on_activate;
 use super::icon::{Icon, IconName};
 use super::metric_card::MetricTone;
 use leptos::prelude::*;
@@ -65,11 +66,17 @@ pub fn ResourceCard(
             class:is-clickable=clickable
             class:is-open=move || active.is_some_and(|sig| sig.get())
             data-tone=tone.as_attr()
+            tabindex=clickable.then_some("0")
             on:click=move |_| {
                 if let Some(cb) = on_click {
                     cb.run(());
                 }
             }
+            on:keydown=on_activate(move || {
+                if let Some(cb) = on_click {
+                    cb.run(());
+                }
+            })
         >
             <div class="resource-card__head">
                 <span class="resource-card__icon" aria-hidden="true">

@@ -1,6 +1,7 @@
 //! Flux : liste, création et éditeur (graphe, réglages générés, liaisons) (ADR 0014).
 
 mod canvas;
+mod canvas_keys;
 mod dnd;
 mod drag;
 mod editor;
@@ -8,6 +9,7 @@ mod fields;
 mod geometry;
 mod inspector;
 mod palette;
+mod pointer;
 mod presentation;
 mod quick_add;
 mod script_inspector;
@@ -24,7 +26,7 @@ use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
     Drawer, Icon, IconName, MetricTone, Registre, RegistreMessage, StatItem, StatStrip,
-    StatusBadge, Tag, TagTone, Toasts,
+    StatusBadge, Tag, TagTone, Toasts, on_activate,
 };
 use crate::{api, format};
 use flux_shared::Permission;
@@ -903,7 +905,12 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
                                 selected_entry.get()
                                     == Some(SelectedFlowEntry::Template(row_id.clone()))
                             }
-                            on:click=move |_| open_template(tpl_id.clone())
+                            tabindex="0"
+                            on:click={
+                                let tpl_id = tpl_id.clone();
+                                move |_| open_template(tpl_id.clone())
+                            }
+                            on:keydown=on_activate(move || open_template(tpl_id.clone()))
                         >
                             <td>
                                 <div class="cluster cluster-wrap">
@@ -1015,7 +1022,12 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
                                     selected_entry.get()
                                         == Some(SelectedFlowEntry::Flow(row_id.clone()))
                                 }
-                                on:click=move |_| open_flow(flow_id.clone())
+                                tabindex="0"
+                                on:click={
+                                    let flow_id = flow_id.clone();
+                                    move |_| open_flow(flow_id.clone())
+                                }
+                                on:keydown=on_activate(move || open_flow(flow_id.clone()))
                             >
                                 <td>
                                     <div class="cluster cluster-wrap">

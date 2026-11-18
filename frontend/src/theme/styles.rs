@@ -1,6 +1,28 @@
 //! Générateur de styles globaux et design tokens CSS en Rust typé.
 
-use super::tokens::{DARK_THEME, LIGHT_THEME, ThemeTokens};
+use super::tokens::{
+    DARK_THEME, LIGHT_THEME, ROOT_FONT_PERCENT, ROOT_FONT_PX, TYPE_SCALE, ThemeTokens,
+};
+
+/// Déclarations `--font-size-*` de l'échelle typographique, en `rem` (suivent la racine).
+fn type_scale_css() -> String {
+    TYPE_SCALE
+        .iter()
+        .map(|step| {
+            format!(
+                "  --font-size-{}: {}rem;\n",
+                step.name,
+                format_rem(step.px / ROOT_FONT_PX)
+            )
+        })
+        .collect()
+}
+
+/// Valeur `rem` sur six décimales au plus, sans zéros inutiles.
+fn format_rem(value: f64) -> String {
+    let text = format!("{value:.6}");
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
 
 /// Déclarations de variables CSS pour un jeu de jetons (clair ou sombre).
 fn theme_vars_css(theme: &ThemeTokens) -> String {
@@ -13,10 +35,12 @@ fn theme_vars_css(theme: &ThemeTokens) -> String {
   --border-color: {border_color};
   --border-subtle: {border_subtle};
   --border-highlight: {border_highlight};
+  --border-control: {border_control};
   --text-main: {text_main};
   --text-dim: {text_dim};
   --text-muted: {text_muted};
   --primary: {primary};
+  --primary-fill: {primary_fill};
   --primary-contrast: {primary_contrast};
   --primary-bg: {primary_bg};
   --accent: {accent};
@@ -27,6 +51,7 @@ fn theme_vars_css(theme: &ThemeTokens) -> String {
   --danger: {danger};
   --danger-bg: {danger_bg};
   --danger-text: {danger_text};
+  --danger-fill: {danger_fill};
   --info: {info};
   --info-bg: {info_bg};
   --shadow-sm: {shadow_sm};
@@ -41,10 +66,12 @@ fn theme_vars_css(theme: &ThemeTokens) -> String {
         border_color = theme.border_color,
         border_subtle = theme.border_subtle,
         border_highlight = theme.border_highlight,
+        border_control = theme.border_control,
         text_main = theme.text_main,
         text_dim = theme.text_dim,
         text_muted = theme.text_muted,
         primary = theme.primary,
+        primary_fill = theme.primary_fill,
         primary_contrast = theme.primary_contrast,
         primary_bg = theme.primary_bg,
         accent = theme.accent,
@@ -55,6 +82,7 @@ fn theme_vars_css(theme: &ThemeTokens) -> String {
         danger = theme.danger,
         danger_bg = theme.danger_bg,
         danger_text = theme.danger_text,
+        danger_fill = theme.danger_fill,
         info = theme.info,
         info_bg = theme.info_bg,
         shadow_sm = theme.shadow_sm,
@@ -80,6 +108,9 @@ pub fn generate_global_tokens_css() -> String {
   /* --- Cibles tactiles minimales (Google M3 48px & Apple HIG 44px) --- */
   --touch-target-min: 48px;
   --touch-target-compact: 44px;
+  /* Plancher WCAG 2.5.8 d'une cible au pointeur fin, et taille des cases à cocher. */
+  --touch-target-pointer: 24px;
+  --control-check-size: 16px;
 
   /* --- Échelle d'espacement (mise en page aérée) --- */
   --space-1: 0.5rem;
@@ -87,6 +118,8 @@ pub fn generate_global_tokens_css() -> String {
   --space-3: 1.5rem;
   --space-4: 2rem;
 
+  /* --- Échelle typographique (12 px au minimum) --- */
+{type_scale}
   /* --- Rayons, courbes et typographie --- */
   --radius-sm: {radius_sm};
   --radius-md: {radius_md};
@@ -121,17 +154,26 @@ pub fn generate_global_tokens_css() -> String {
   padding: 0;
 }}
 
+html {{
+  font-size: {root_percent};
+}}
+
 html, body {{
   background-color: var(--bg-app);
   color: var(--text-main);
   font-family: var(--font-sans);
-  font-size: 14px;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
   text-rendering: optimizeLegibility;
+}}
+
+/* Le corps prend sa taille de l'échelle ; `html` garde la racine en pourcentage (sinon `1rem`
+   y vaudrait la préférence du navigateur entière). */
+body {{
+  font-size: var(--font-size-md);
 }}
 
 /* --- Rendu tactile mobile & suppression des reflets parasites (Apple/Google) --- */
@@ -156,6 +198,8 @@ button, a, select, input {{
   }}
 }}
 "#,
+        type_scale = type_scale_css(),
+        root_percent = ROOT_FONT_PERCENT,
         radius_sm = DARK_THEME.radius_sm,
         radius_md = DARK_THEME.radius_md,
         radius_lg = DARK_THEME.radius_lg,
@@ -186,7 +230,14 @@ mod tests {
         assert!(res.contains("--bg-elevated: #0e1117;"));
         assert!(res.contains("--shadow-glow:"));
         assert!(res.contains("--ease-out:"));
-        assert!(res.contains("--primary: #6366f1;"));
+        assert!(res.contains("--font-size-xs: 0.857143rem;"));
+        assert!(res.contains("--font-size-md: 1rem;"));
+        assert!(res.contains("font-size: 87.5%;"));
+        assert!(res.contains("--touch-target-pointer: 24px;"));
+        assert!(res.contains("--primary: #818cf8;"));
+        assert!(res.contains("--primary-fill: #4f46e5;"));
+        assert!(res.contains("--danger-fill: #dc2626;"));
+        assert!(res.contains("--border-control: #626d84;"));
         assert!(res.contains("--danger-text: #f87171;"));
         assert!(res.contains("--danger-text: #b91c1c;"));
         assert!(res.contains("font-variant-numeric: tabular-nums;"));

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.38.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.38.0...v0.38.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **flows:** synchronisation SVG pan/zoom, tri anti-croisement et cartes compactes ([fd2eeb3](https://github.com/remi-deher/flux-de-fichiers/commit/fd2eeb331940fb9d85a9dab063e44fa4fc81a519))
+* **flows:** synchronisation SVG pan/zoom, tri anti-croisement et cartes compactes ([b4d7758](https://github.com/remi-deher/flux-de-fichiers/commit/b4d77588ca5a6e4565d45f386aba9183f8a7368a))
+
 ## [0.38.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.37.0...v0.38.0) (2026-11-18)
 
 

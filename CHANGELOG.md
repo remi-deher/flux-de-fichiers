@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.43.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.42.0...v0.43.0) (2026-11-18)
+
+
+### Features
+
+* protocole MCP enrichi, simulation dry-run et assistant IA web ([07dbbde](https://github.com/remi-deher/flux-de-fichiers/commit/07dbbde2fcb2fb95e6750bad22cc161911079f3b))
+* protocole MCP enrichi, simulation dry-run et assistant IA web ([a508e93](https://github.com/remi-deher/flux-de-fichiers/commit/a508e93f868869e28e29d7f46c96bcb9c42a5f9e))
+
+
+### Bug Fixes
+
+* **ai:** retirer un import inutilisé hors tests ([3fa07e8](https://github.com/remi-deher/flux-de-fichiers/commit/3fa07e890b3210dc5c0d47a8a2ed688c6c84d790))
+* **client:** simplifier l'appel use_context dans la barre supérieure ([3d01ac2](https://github.com/remi-deher/flux-de-fichiers/commit/3d01ac21a625d3b11d7a2c480a7c628990d5a977))
+
 ## [0.42.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.41.0...v0.42.0) (2026-11-18)
 
 

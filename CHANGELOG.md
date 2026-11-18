@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.38.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.37.0...v0.38.0) (2026-11-18)
+
+
+### Features
+
+* **flows:** refonte studio spatial à îlots flottants et cartes nodales modulaires ([d6ba253](https://github.com/remi-deher/flux-de-fichiers/commit/d6ba25337275db83f267135eb35f2a43e48967a5))
+* **flows:** refonte studio spatial à îlots flottants et cartes nodales modulaires ([d04cca3](https://github.com/remi-deher/flux-de-fichiers/commit/d04cca3bd6f8c1dd424c2fb4719b9df5b97c434e))
+
 ## [0.37.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.36.0...v0.37.0) (2026-11-18)
 
 

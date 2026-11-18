@@ -17,6 +17,7 @@ Ce guide se consulte à la demande. Le README reste la référence d'utilisation
 | Interface (client Leptos WASM, ADR 0014) | `client/src/` (un dossier par écran), contrat dans `shared/src/` | `docs/adr/0014-client-leptos-wasm.md`, `Dockerfile` |
 | Catalogue plugins (sections, propriétaire des blocs, dépendances) | `shared/src/plugins/vocab.rs`, `src/plugins/mod.rs`, `client/src/plugins/` | `docs/architecture/deux-depots.md`, `src/api/plugins.rs` |
 | Paramètres (compte, thème, comptes, clés, système) | `client/src/settings/`, `client/src/theme.rs` | `src/api/system.rs`, `tests/system_status.rs` |
+| Assistant IA (fournisseurs, connexion OAuth, outils MCP) | `src/ai/` (`provider.rs`, `oauth.rs`, `settings.rs`), `shared/src/ai.rs`, `client/src/settings/ai.rs` | `src/mcp/`, `docs/adr/0015-ia-et-mcp.md` ; tests : `cargo test -p flux-shared -p flux-de-fichiers --lib ai` |
 | Rôle de l'installation, enrôlement d'un worker | `src/instance.rs`, `src/worker_settings.rs`, `src/api/installation.rs` | `src/worker_http.rs`, `src/api/worker_view.rs`, `tests/installation_api.rs`, `tests/worker_web.rs`, `docs/adr/0011-installation-comptes-et-noeuds.md` |
 | Secrets chiffrés, rotation de clé, mot de passe oublié | `src/secrets.rs`, `src/secret_rotation.rs`, `src/account_admin.rs` | `tests/secret_rotation.rs`, `tests/password_reset.rs`, `docs/adr/0011-installation-comptes-et-noeuds.md` |
 | Configuration, TLS | `src/config.rs`, `tests/configuration.rs` | `compose.yaml`, `deploy/` ; déploiement dans le README |

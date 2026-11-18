@@ -55,6 +55,30 @@ l'utilisateur du 14 nov. 2026 :
   - orchestration serveur multi-tours (`/api/v1/ai/chat`) réutilisant directement les outils MCP avec les droits de l'utilisateur connecté, bridée par défaut aux outils en lecture seule (`readOnlyHint`, bascule explicite dans Paramètres > Assistant IA) et consignée dans `mcp_audit_log` ;
   - intégration UI : onglet `Paramètres > Assistant IA`, tiroir global dans la barre supérieure et `Ctrl+K`, suggestions contextuelles par écran et raccourcis « Analyser avec l'IA » dans le détail d'une tâche et l'atelier de flux.
 
+## Connexion OAuth par abonnement (18 nov. 2026)
+
+Comme les agents CLI, l'assistant intégré peut s'authentifier par **connexion OAuth** plutôt
+que par clé d'API. Premier fournisseur : **ChatGPT** (`chatgpt_oauth`), même flux que Codex CLI.
+
+- **Flux « device code »** : `POST /api/v1/ai/oauth/start` renvoie un code et l'URL de
+  validation ; l'administrateur valide depuis n'importe quel appareil (pas de redirection
+  locale, compatible reverse proxy et LAN) ; `POST /api/v1/ai/oauth/poll` récupère les jetons
+  une fois le code validé ; `DELETE /api/v1/ai/oauth` déconnecte. Routes réservées aux
+  administrateurs.
+- **Jetons** : chiffrés au repos par `SecretBox` (AAD `system:ai:oauth`), inclus dans la
+  rotation de clé locale, jamais renvoyés au navigateur (la vue ne porte que e-mail et offre).
+  Rafraîchissement automatique du jeton d'accès avant chaque tour, sérialisé par un verrou
+  (le jeton de refresh est rotatif) ; `409` quand la connexion est absente ou à refaire.
+- **Inférence** : API Responses du fournisseur en flux SSE (`/backend-api/codex/responses`),
+  avec l'identifiant de compte du jeton ; mêmes outils MCP, même bridage lecture seule et
+  même journal d'audit que les autres fournisseurs. Appels sortants sous `net_policy`.
+- **Réserve** : ce n'est pas une API publique garantie. Le flux, l'identifiant de client public
+  de Codex CLI et le modèle par défaut (`gpt-5-codex`, modifiable) peuvent changer côté
+  fournisseur ; l'usage reste soumis à ses conditions. La clé d'API OpenAI/compatible demeure
+  l'option stable.
+- **Hors périmètre** : Anthropic (OAuth réservé à Claude Code par ses conditions) et OAuth
+  générique configurable, non retenus pour l'instant.
+
 ## Questions ouvertes
 
 - **Qui génère les suggestions** : le client MCP externe (le central ne fait qu'exposer des

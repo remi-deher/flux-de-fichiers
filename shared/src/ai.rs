@@ -6,6 +6,7 @@ use std::fmt;
 pub const DEFAULT_OLLAMA_URL: &str = "http://127.0.0.1:11434";
 pub const DEFAULT_OPENAI_URL: &str = "https://api.openai.com/v1";
 pub const DEFAULT_ANTHROPIC_URL: &str = "https://api.anthropic.com";
+pub const DEFAULT_CHATGPT_URL: &str = "https://chatgpt.com/backend-api/codex";
 pub const DEFAULT_MAX_TOOL_ROUNDS: u8 = 5;
 pub const MIN_TOOL_ROUNDS: u8 = 1;
 pub const MAX_TOOL_ROUNDS: u8 = 10;
@@ -19,16 +20,24 @@ pub enum AiProvider {
     Ollama,
     OpenAiCompatible,
     Anthropic,
+    /// Abonnement ChatGPT via connexion OAuth (flux device code, comme Codex CLI).
+    ChatGptOauth,
 }
 
 impl AiProvider {
-    pub const ALL: [Self; 3] = [Self::Ollama, Self::OpenAiCompatible, Self::Anthropic];
+    pub const ALL: [Self; 4] = [
+        Self::Ollama,
+        Self::OpenAiCompatible,
+        Self::Anthropic,
+        Self::ChatGptOauth,
+    ];
 
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Ollama => "ollama",
             Self::OpenAiCompatible => "open_ai_compatible",
             Self::Anthropic => "anthropic",
+            Self::ChatGptOauth => "chatgpt_oauth",
         }
     }
 
@@ -37,6 +46,7 @@ impl AiProvider {
             "ollama" => Some(Self::Ollama),
             "open_ai_compatible" | "openai_compatible" | "openai" => Some(Self::OpenAiCompatible),
             "anthropic" => Some(Self::Anthropic),
+            "chatgpt_oauth" => Some(Self::ChatGptOauth),
             _ => None,
         }
     }
@@ -46,6 +56,7 @@ impl AiProvider {
             Self::Ollama => "Ollama (local / LAN)",
             Self::OpenAiCompatible => "OpenAI / API compatible",
             Self::Anthropic => "Anthropic Claude",
+            Self::ChatGptOauth => "ChatGPT (connexion OAuth, abonnement)",
         }
     }
 
@@ -54,6 +65,7 @@ impl AiProvider {
             Self::Ollama => DEFAULT_OLLAMA_URL,
             Self::OpenAiCompatible => DEFAULT_OPENAI_URL,
             Self::Anthropic => DEFAULT_ANTHROPIC_URL,
+            Self::ChatGptOauth => DEFAULT_CHATGPT_URL,
         }
     }
 
@@ -62,12 +74,59 @@ impl AiProvider {
             Self::Ollama => "qwen2.5:7b",
             Self::OpenAiCompatible => "gpt-4o-mini",
             Self::Anthropic => "claude-3-5-sonnet-latest",
+            Self::ChatGptOauth => "gpt-5-codex",
         }
     }
 
     pub const fn requires_api_key(self) -> bool {
         matches!(self, Self::OpenAiCompatible | Self::Anthropic)
     }
+
+    /// Le fournisseur s'authentifie par une connexion OAuth plutôt que par une clé d'API.
+    pub const fn uses_oauth(self) -> bool {
+        matches!(self, Self::ChatGptOauth)
+    }
+}
+
+/// Compte rattaché à une connexion OAuth (aucun jeton n'est jamais exposé).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiOauthAccount {
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub plan: Option<String>,
+}
+
+/// Code à saisir sur la page de vérification du fournisseur (`POST /api/v1/ai/oauth/start`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiOauthDeviceCode {
+    pub user_code: String,
+    pub verification_url: String,
+    pub interval_seconds: u64,
+    pub expires_in_seconds: u64,
+}
+
+/// Avancement d'une connexion OAuth en cours.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiOauthPollStatus {
+    /// L'utilisateur n'a pas encore validé le code.
+    Pending,
+    /// Connexion terminée, jetons enregistrés.
+    Connected,
+    /// Le code a expiré ou aucune connexion n'est en cours.
+    Expired,
+}
+
+/// Réponse d'interrogation de la connexion en cours (`POST /api/v1/ai/oauth/poll`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiOauthPollResponse {
+    pub status: AiOauthPollStatus,
+    #[serde(default)]
+    pub account: Option<AiOauthAccount>,
 }
 
 impl fmt::Display for AiProvider {
@@ -85,6 +144,9 @@ pub struct AiSettingsView {
     pub base_url: String,
     pub model: String,
     pub api_key_set: bool,
+    /// Compte connecté par OAuth, s'il y en a un.
+    #[serde(default)]
+    pub oauth_account: Option<AiOauthAccount>,
     pub allow_write_tools: bool,
     pub max_tool_rounds: u8,
 }
@@ -97,6 +159,7 @@ impl Default for AiSettingsView {
             base_url: DEFAULT_OLLAMA_URL.to_owned(),
             model: AiProvider::Ollama.default_model().to_owned(),
             api_key_set: false,
+            oauth_account: None,
             allow_write_tools: false,
             max_tool_rounds: DEFAULT_MAX_TOOL_ROUNDS,
         }
@@ -216,5 +279,8 @@ mod tests {
         assert!(!AiProvider::Ollama.requires_api_key());
         assert!(AiProvider::OpenAiCompatible.requires_api_key());
         assert!(AiProvider::Anthropic.requires_api_key());
+        assert!(!AiProvider::ChatGptOauth.requires_api_key());
+        assert!(AiProvider::ChatGptOauth.uses_oauth());
+        assert!(!AiProvider::Anthropic.uses_oauth());
     }
 }

@@ -388,9 +388,7 @@ fn Topbar(me: Me, workers: Signal<Option<Vec<Worker>>>) -> impl IntoView {
     });
     let central = me.instance_kind == InstanceKind::Central && me.allows(Permission::ViewWorkers);
     let central_ai = me.instance_kind == InstanceKind::Central;
-    let ai_state = central_ai
-        .then(|| use_context::<AiAssistantState>())
-        .flatten();
+    let ai_state = central_ai.then(use_context::<AiAssistantState>).flatten();
     view! {
         <header class="app-topbar" role="banner">
             <div class="topbar-container">

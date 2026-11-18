@@ -28,6 +28,8 @@ pub struct Principal {
     pub id: String,
     pub name: String,
     pub role: Role,
+    /// Portée explicite pour une clé d'API (`None` = toutes les permissions du rôle).
+    pub scopes: Option<Vec<Permission>>,
     /// Empreinte de la session web, pour l'exclure d'une fermeture de sessions.
     pub session_hash: Option<String>,
 }
@@ -35,6 +37,10 @@ pub struct Principal {
 impl Principal {
     pub fn allows(&self, permission: Permission) -> bool {
         self.role.allows(permission)
+            && self
+                .scopes
+                .as_ref()
+                .is_none_or(|scopes| scopes.contains(&permission))
     }
 }
 
@@ -64,6 +70,7 @@ async fn authenticate_bearer(pool: &SqlitePool, headers: &HeaderMap) -> AppResul
         id: record.id,
         name: record.name,
         role: Role::parse(&record.role).ok_or(AppError::Internal)?,
+        scopes: record.scopes,
         session_hash: None,
     })
 }
@@ -95,6 +102,7 @@ pub async fn authenticate(
         id: account.id,
         name: account.username,
         role: account.role,
+        scopes: None,
         session_hash: Some(session.token_hash),
     })
 }
@@ -214,12 +222,26 @@ mod tests {
             id: "1".into(),
             name: "admin".into(),
             role: Role::Admin,
+            scopes: None,
             session_hash: None,
         };
         let worker = Principal {
             role: Role::Worker,
             ..admin.clone()
         };
+        let scoped = Principal {
+            kind: PrincipalKind::ApiKey,
+            id: "2".into(),
+            name: "scoped".into(),
+            role: Role::Mcp,
+            scopes: Some(vec![Permission::ViewFlows, Permission::ManageFlows]),
+            session_hash: None,
+        };
+        assert!(require(&scoped, Permission::ManageFlows).is_ok());
+        assert!(matches!(
+            require(&scoped, Permission::ManageSettings),
+            Err(AppError::Forbidden)
+        ));
         assert!(require(&admin, Permission::ManageApiKeys).is_ok());
         assert!(matches!(
             require(&worker, Permission::ManageApiKeys),

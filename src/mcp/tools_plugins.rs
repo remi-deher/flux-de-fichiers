@@ -2,7 +2,7 @@
 
 use super::protocol::{McpTool, McpToolResult, empty_schema, obj_schema, parse_args, req_str};
 use crate::{
-    api::{AdminAuth, AnyAuth, AppState, ViewPluginsAuth, local, plugins},
+    api::{AnyAuth, AppState, ManagePluginsAuth, ViewPluginsAuth, local, plugins},
     auth::Principal,
     plugins::CreateRepositoryRequest,
 };
@@ -222,7 +222,7 @@ pub async fn call(
             };
             plugins::add_repository(
                 State(state.clone()),
-                AdminAuth(principal.clone()),
+                ManagePluginsAuth(principal.clone()),
                 Json(req),
             )
             .await
@@ -233,27 +233,39 @@ pub async fn call(
                 Ok(id) => id.to_owned(),
                 Err(msg) => return Some(McpToolResult::error(msg)),
             };
-            plugins::sync_repository(State(state.clone()), Path(id), AdminAuth(principal.clone()))
-                .await
-                .map(|Json(v)| McpToolResult::json(&v))
+            plugins::sync_repository(
+                State(state.clone()),
+                Path(id),
+                ManagePluginsAuth(principal.clone()),
+            )
+            .await
+            .map(|Json(v)| McpToolResult::json(&v))
         }
         "toggle_repository" => {
             let id = match req_str(&args, "id") {
                 Ok(id) => id.to_owned(),
                 Err(msg) => return Some(McpToolResult::error(msg)),
             };
-            plugins::toggle_repository(State(state.clone()), Path(id), AdminAuth(principal.clone()))
-                .await
-                .map(|Json(v)| McpToolResult::json(&v))
+            plugins::toggle_repository(
+                State(state.clone()),
+                Path(id),
+                ManagePluginsAuth(principal.clone()),
+            )
+            .await
+            .map(|Json(v)| McpToolResult::json(&v))
         }
         "delete_repository" => {
             let id = match req_str(&args, "id") {
                 Ok(id) => id.to_owned(),
                 Err(msg) => return Some(McpToolResult::error(msg)),
             };
-            plugins::delete_repository(State(state.clone()), Path(id), AdminAuth(principal.clone()))
-                .await
-                .map(|Json(v)| McpToolResult::json(&v))
+            plugins::delete_repository(
+                State(state.clone()),
+                Path(id),
+                ManagePluginsAuth(principal.clone()),
+            )
+            .await
+            .map(|Json(v)| McpToolResult::json(&v))
         }
         "list_catalog" => {
             plugins::catalog(State(state.clone()), ViewPluginsAuth(principal.clone()))
@@ -278,9 +290,13 @@ pub async fn call(
                 Ok(id) => id.to_owned(),
                 Err(msg) => return Some(McpToolResult::error(msg)),
             };
-            plugins::get_settings(State(state.clone()), Path(id), AdminAuth(principal.clone()))
-                .await
-                .map(|Json(v)| McpToolResult::json(&v))
+            plugins::get_settings(
+                State(state.clone()),
+                Path(id),
+                ManagePluginsAuth(principal.clone()),
+            )
+            .await
+            .map(|Json(v)| McpToolResult::json(&v))
         }
         "save_plugin_settings" => {
             let parsed: SaveSettingsArgs = match parse_args(args) {
@@ -290,7 +306,7 @@ pub async fn call(
             plugins::save_settings(
                 State(state.clone()),
                 Path(parsed.id),
-                AdminAuth(principal.clone()),
+                ManagePluginsAuth(principal.clone()),
                 Json(parsed.settings),
             )
             .await
@@ -317,9 +333,13 @@ pub async fn call(
                 Ok(id) => id.to_owned(),
                 Err(msg) => return Some(McpToolResult::error(msg)),
             };
-            plugins::install_tool(State(state.clone()), Path(id), AdminAuth(principal.clone()))
-                .await
-                .map(|Json(v)| McpToolResult::json(&v))
+            plugins::install_tool(
+                State(state.clone()),
+                Path(id),
+                ManagePluginsAuth(principal.clone()),
+            )
+            .await
+            .map(|Json(v)| McpToolResult::json(&v))
         }
         "get_pack" => {
             let id = match req_str(&args, "id") {
@@ -339,9 +359,13 @@ pub async fn call(
                 Ok(id) => id.to_owned(),
                 Err(msg) => return Some(McpToolResult::error(msg)),
             };
-            plugins::install_pack(State(state.clone()), Path(id), AdminAuth(principal.clone()))
-                .await
-                .map(|Json(v)| McpToolResult::json(&v))
+            plugins::install_pack(
+                State(state.clone()),
+                Path(id),
+                ManagePluginsAuth(principal.clone()),
+            )
+            .await
+            .map(|Json(v)| McpToolResult::json(&v))
         }
         "list_local_catalog" => local::snapshot(State(state.clone()), AnyAuth(principal.clone()))
             .await
@@ -353,7 +377,7 @@ pub async fn call(
             };
             local::upload_resource(
                 State(state.clone()),
-                AdminAuth(principal.clone()),
+                ManagePluginsAuth(principal.clone()),
                 Json(req),
             )
             .await
@@ -366,7 +390,7 @@ pub async fn call(
             };
             local::upsert_script(
                 State(state.clone()),
-                AdminAuth(principal.clone()),
+                ManagePluginsAuth(principal.clone()),
                 Json(req),
             )
             .await
@@ -379,7 +403,7 @@ pub async fn call(
             };
             local::create_block_template(
                 State(state.clone()),
-                AdminAuth(principal.clone()),
+                ManagePluginsAuth(principal.clone()),
                 Json(req),
             )
             .await
@@ -392,7 +416,7 @@ pub async fn call(
             };
             local::create_flow_template(
                 State(state.clone()),
-                AdminAuth(principal.clone()),
+                ManagePluginsAuth(principal.clone()),
                 Json(req),
             )
             .await
@@ -405,7 +429,7 @@ pub async fn call(
             };
             local::create_pack(
                 State(state.clone()),
-                AdminAuth(principal.clone()),
+                ManagePluginsAuth(principal.clone()),
                 Json(req),
             )
             .await
@@ -416,9 +440,13 @@ pub async fn call(
                 Ok(id) => id.to_owned(),
                 Err(msg) => return Some(McpToolResult::error(msg)),
             };
-            local::delete_item(State(state.clone()), AdminAuth(principal.clone()), Path(id))
-                .await
-                .map(|Json(v)| McpToolResult::json(&v))
+            local::delete_item(
+                State(state.clone()),
+                ManagePluginsAuth(principal.clone()),
+                Path(id),
+            )
+            .await
+            .map(|Json(v)| McpToolResult::json(&v))
         }
         _ => return None,
     };

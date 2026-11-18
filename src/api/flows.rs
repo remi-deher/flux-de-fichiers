@@ -1,6 +1,6 @@
 //! Gestionnaires HTTP pour l'API REST des flux de traitement (Flows).
 
-use super::{AdminAuth, AppState, ViewFlowsAuth};
+use super::{AppState, ManageFlowsAuth, ViewFlowsAuth};
 use crate::{
     domain::UpdateFlowRequest,
     error::{AppError, AppResult},
@@ -69,7 +69,7 @@ pub async fn get_version(
 pub async fn save_flow(
     State(s): State<AppState>,
     Path(id): Path<String>,
-    _auth: AdminAuth,
+    _auth: ManageFlowsAuth,
     Json(payload): Json<UpdateFlowRequest>,
 ) -> AppResult<(
     StatusCode,
@@ -121,7 +121,7 @@ pub async fn save_flow(
 pub async fn delete_flow(
     State(s): State<AppState>,
     Path(id): Path<String>,
-    _auth: AdminAuth,
+    _auth: ManageFlowsAuth,
 ) -> AppResult<StatusCode> {
     repository::delete_flow(&s.pool, &id).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -253,7 +253,7 @@ pub async fn validate_flow(
 pub async fn restore_version(
     State(s): State<AppState>,
     Path((id, version)): Path<(String, i64)>,
-    _auth: AdminAuth,
+    _auth: ManageFlowsAuth,
 ) -> AppResult<Json<crate::domain::FlowRecord>> {
     let frozen = repository::get_flow_version(&s.pool, &id, version).await?;
     let req = UpdateFlowRequest {

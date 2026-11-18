@@ -180,7 +180,11 @@ pub struct UpdateCheckStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemStatus {
+    /// Version de la release exécutée.
     pub version: String,
+    /// Version compilée dans le binaire : témoin de cohérence avec l'interface WASM.
+    #[serde(default)]
+    pub build_version: String,
     pub key_id: String,
     pub key_source: KeySource,
     /// Taille de la base SQLite et de son journal ; `None` pour une base en mémoire.
@@ -193,6 +197,17 @@ pub struct SystemStatus {
     pub outbound: OutboundPolicyStatus,
     #[serde(default)]
     pub check_updates_enabled: bool,
+}
+
+impl SystemStatus {
+    /// Version compilée du serveur ; `version` pour un serveur qui ne la renseigne pas.
+    pub fn build(&self) -> &str {
+        if self.build_version.is_empty() {
+            &self.version
+        } else {
+            &self.build_version
+        }
+    }
 }
 
 /// Corps de mise à jour des réglages réseau, sessions, SMTP et politique sortante (`PUT /api/v1/system/settings`).

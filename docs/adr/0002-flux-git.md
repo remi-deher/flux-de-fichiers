@@ -71,8 +71,11 @@ PR de release sur `main` (version de `Cargo.toml`, `Cargo.lock`,
 
 ## Limites connues
 
-- Le binaire promu affiche la version de `Cargo.toml` au moment du build sur
-  `test` (`--version`). Le tag de l'image fait foi.
+- Le binaire est compilé sur `test`, avant que release-please n'avance `Cargo.toml` : sa version
+  compilée est celle de la release précédente. La promotion ajoute donc une couche minimale
+  (`ENV FLUX_VERSION`, libellé `org.opencontainers.image.version`, aucune compilation) et
+  l'application affiche `FLUX_VERSION` ; la version compilée ne sert que de repli et de
+  témoin de cohérence avec l'interface WASM. Le condensat de `X.Y.Z` diffère de `test-<sha>`.
 - Les PR et pushes faits par `GITHUB_TOKEN` ne déclenchent pas d'autre workflow :
   d'où `RELEASE_TOKEN`. Si le secret est absent ou expiré, les PR de la chaîne
   restent sans vérifications ; le renouveler dans les secrets du dépôt.

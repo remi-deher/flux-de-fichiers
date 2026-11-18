@@ -506,7 +506,7 @@ impl WorkerLoop {
                     .timeout(Duration::from_secs(10))
                     .json(&Register {
                         name: runner.config.name.clone(),
-                        version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+                        version: Some(crate::version::app_version().to_owned()),
                         telemetry: Some(probe.sample()),
                     })
                     .send()
@@ -545,7 +545,7 @@ impl WorkerLoop {
                         .timeout(Duration::from_secs(10))
                         .json(&Register {
                             name: runner.config.name.clone(),
-                            version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+                            version: Some(crate::version::app_version().to_owned()),
                             telemetry: Some(probe.sample()),
                         })
                         .send()

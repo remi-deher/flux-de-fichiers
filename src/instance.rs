@@ -112,7 +112,7 @@ async fn rotate_secret() -> anyhow::Result<()> {
 
 pub async fn run(argument: Option<&str>, operand: Option<&str>) -> anyhow::Result<()> {
     if argument == Some("--version") {
-        println!("{}", env!("CARGO_PKG_VERSION"));
+        println!("{}", crate::version::app_version());
         return Ok(());
     }
     if argument == Some("rotate-secret") {

@@ -125,7 +125,11 @@ async fn test_admin_reads_the_system_status() -> anyhow::Result<()> {
 
     let (status, _, body) = call(&app, "GET", "/api/v1/system/status", Some(&admin), None).await?;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(body["version"], flux_de_fichiers::version::app_version());
+    assert_eq!(
+        body["buildVersion"],
+        flux_de_fichiers::version::BUILD_VERSION
+    );
     assert_eq!(body["keySource"], "local");
     let key_id = body["keyId"].as_str().unwrap_or_default();
     assert_eq!(key_id.len(), KEY_ID_HEX_LEN);

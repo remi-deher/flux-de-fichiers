@@ -332,6 +332,6 @@ pub async fn system_config(
     Ok(Json(SystemConfig {
         max_file_bytes: s.config.max_file_bytes,
         local_worker: s.config.local_worker,
-        version: env!("CARGO_PKG_VERSION").to_owned(),
+        version: crate::version::app_version().to_owned(),
     }))
 }

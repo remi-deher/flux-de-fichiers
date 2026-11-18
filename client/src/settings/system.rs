@@ -8,7 +8,8 @@ use leptos::prelude::*;
 
 const SYSTEM_UPDATES_PATH: &str = "/api/v1/system/updates";
 
-/// Version de l'interface WASM actuellement chargée dans le navigateur.
+/// Version compilée dans l'interface WASM chargée dans le navigateur (témoin de cohérence : la
+/// version de la release affichée vient du serveur, voir `flux_de_fichiers::version`).
 const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const SECONDS_PER_MINUTE: i64 = 60;
 const SECONDS_PER_HOUR: i64 = 60 * SECONDS_PER_MINUTE;
@@ -22,7 +23,21 @@ pub fn key_source_label(source: KeySource) -> &'static str {
 }
 
 pub fn is_version_coherent(status: &SystemStatus) -> bool {
-    status.version == CLIENT_VERSION
+    status.build() == CLIENT_VERSION
+}
+
+/// Version de l'interface : celle de la release quand l'interface correspond au serveur, sinon
+/// la version compilée du navigateur (cache périmé).
+fn displayed_interface_version(release: &str, server_build: &str, client_build: &str) -> String {
+    if server_build == client_build {
+        release.to_owned()
+    } else {
+        client_build.to_owned()
+    }
+}
+
+fn interface_version(status: &SystemStatus) -> String {
+    displayed_interface_version(&status.version, status.build(), CLIENT_VERSION)
 }
 
 /// Ligne d'une grille de détails : terme et valeur, la valeur éventuellement en chasse fixe.
@@ -161,11 +176,8 @@ fn volume_meter(status: &SystemStatus) -> AnyView {
 fn system_rows(status: &SystemStatus) -> Vec<DetailRow> {
     vec![
         DetailRow::mono("Version du central", status.version.clone()),
-        DetailRow::mono("Version de l'interface", CLIENT_VERSION),
-        DetailRow::text(
-            "Cohérence",
-            coherence_label(&status.version, CLIENT_VERSION),
-        ),
+        DetailRow::mono("Version de l'interface", interface_version(status)),
+        DetailRow::text("Cohérence", coherence_label(status.build(), CLIENT_VERSION)),
         DetailRow::mono("Clé de chiffrement", status.key_id.clone()),
         DetailRow::text("Origine de la clé", key_source_label(status.key_source)),
         DetailRow::text(
@@ -251,6 +263,20 @@ pub fn SystemSection(status: Signal<Option<Result<SystemStatus, String>>>) -> im
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interface_shows_the_release_version_when_it_matches_the_server_build() {
+        // Image promue : binaire compilé en 0.44.0, release 0.45.0.
+        assert_eq!(
+            displayed_interface_version("0.45.0", "0.44.0", "0.44.0"),
+            "0.45.0"
+        );
+        // Navigateur resté sur une ancienne interface : sa propre version est montrée.
+        assert_eq!(
+            displayed_interface_version("0.45.0", "0.44.0", "0.43.0"),
+            "0.43.0"
+        );
+    }
 
     #[test]
     fn a_version_mismatch_is_called_out() {

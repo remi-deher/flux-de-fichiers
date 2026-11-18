@@ -343,7 +343,7 @@ fn FlowDetailDrawer(
     });
     Effect::new(move |_| match restore.value().get() {
         Some(Ok(restored)) => {
-            Toasts::notify_success(&format!("Version v{} restaurée.", restored.version));
+            Toasts::notify_success(format!("Version v{} restaurée.", restored.version));
             versions_reload.update(|v| *v = v.wrapping_add(1));
             on_changed.run(());
         }

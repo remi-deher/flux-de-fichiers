@@ -272,6 +272,9 @@ pub struct AiChatRequest {
     pub messages: Vec<AiChatMessage>,
     #[serde(default)]
     pub context_hint: Option<String>,
+    /// Écran et objet ouverts ; le serveur en déduit quoi lire par ses outils.
+    #[serde(default)]
+    pub context: Option<AiContext>,
 }
 
 /// Réponse complète de l'assistant après résolution éventuelle des appels d'outils.
@@ -286,9 +289,110 @@ pub struct AiChatResponse {
     pub rounds_used: u8,
 }
 
+/// Objet de l'interface sur lequel porte la conversation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiContextKind {
+    Flow,
+    Job,
+    Library,
+    Plugin,
+    Worker,
+}
+
+impl AiContextKind {
+    /// Nom de l'objet, tel que présenté au modèle.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Flow => "flux",
+            Self::Job => "tâche",
+            Self::Library => "bibliothèque",
+            Self::Plugin => "plugin",
+            Self::Worker => "worker",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiContextObject {
+    pub kind: AiContextKind,
+    pub id: String,
+}
+
+/// Contexte typé joint à une question : l'écran ouvert et, s'il y en a un, l'objet affiché.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiContext {
+    /// Chemin de l'écran (`/app/flows`), sans contenu.
+    pub screen: String,
+    #[serde(default)]
+    pub object: Option<AiContextObject>,
+}
+
+/// Réponse de `POST /api/v1/ai/runs` : conversation lancée en tâche de fond.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiRunStarted {
+    pub run_id: String,
+}
+
+/// Évènement publié par `GET /api/v1/ai/runs/{id}/events` (SSE, un évènement par message).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum AiRunEvent {
+    /// Un outil va être exécuté.
+    ToolStarted { tool_name: String },
+    /// Un outil a fini (succès, erreur ou refus).
+    ToolFinished { trace: AiToolCallTrace },
+    /// Réponse finale ; clôt le flux.
+    Done { response: AiChatResponse },
+    /// Échec de la conversation ; clôt le flux.
+    Failed { message: String },
+}
+
+impl AiRunEvent {
+    /// Dernier évènement d'un flux.
+    pub const fn is_final(&self) -> bool {
+        matches!(self, Self::Done { .. } | Self::Failed { .. })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_events_are_tagged_and_final_ones_close_the_stream() -> Result<(), serde_json::Error> {
+        let started = AiRunEvent::ToolStarted {
+            tool_name: "list_workers".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&started)?,
+            serde_json::json!({ "type": "tool_started", "toolName": "list_workers" })
+        );
+        assert!(!started.is_final());
+        assert!(
+            AiRunEvent::Failed {
+                message: "x".into()
+            }
+            .is_final()
+        );
+        let context = AiContext {
+            screen: "/app/flows".into(),
+            object: Some(AiContextObject {
+                kind: AiContextKind::Flow,
+                id: "f1".into(),
+            }),
+        };
+        let back: AiContext = serde_json::from_str(&serde_json::to_string(&context)?)?;
+        assert_eq!(back, context);
+        Ok(())
+    }
 
     #[test]
     fn model_option_label_shows_the_name_only_when_it_adds_information() {

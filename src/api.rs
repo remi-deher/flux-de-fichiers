@@ -115,6 +115,7 @@ pub struct AppState {
     pub event_history: EventHistory,
     pub browse_broker: crate::filesystem_browser::RemoteBrowseBroker,
     pub pending_worker_setup: Arc<tokio::sync::Mutex<Option<installation::PendingWorkerSetup>>>,
+    pub ai_runs: crate::ai::run::AiRuns,
 }
 
 impl AppState {
@@ -132,6 +133,7 @@ impl AppState {
             event_history: EventHistory::new(),
             browse_broker: crate::filesystem_browser::RemoteBrowseBroker::new(),
             pending_worker_setup: Arc::new(tokio::sync::Mutex::new(None)),
+            ai_runs: crate::ai::run::AiRuns::new(),
         }
     }
 
@@ -186,9 +188,16 @@ pub const LARGE_JSON_BODY_LIMIT: usize = 1024 * 1024;
 /// Limite pour l'import base64 de ressources locales (`MAX_RESOURCE_BYTES` = 5 Mio ~ 6,7 Mio en base64).
 pub const LOCAL_RESOURCE_BODY_LIMIT: usize = 10 * 1024 * 1024;
 
+/// `/api/v1/ai/runs/{id}/events` : flux SSE d'une conversation de l'assistant.
+fn is_ai_run_events_route(path: &str) -> bool {
+    path.strip_prefix("/api/v1/ai/runs/")
+        .and_then(|rest| rest.strip_suffix("/events"))
+        .is_some_and(|id| !id.is_empty() && !id.contains('/'))
+}
+
 /// Routes dont la réponse peut durer bien au-delà d'un appel JSON.
 pub fn is_long_running_route(path: &str) -> bool {
-    if path == "/api/v1/jobs/events" {
+    if path == "/api/v1/jobs/events" || is_ai_run_events_route(path) {
         return true;
     }
     let Some(rest) = path.strip_prefix("/api/v1/jobs/") else {
@@ -439,6 +448,7 @@ fn json_routes() -> Router<AppState> {
 fn transfer_routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/jobs/events", get(jobs::events))
+        .route("/api/v1/ai/runs/{id}/events", get(crate::ai::run_events))
         .route(
             "/api/v1/jobs/{id}/output",
             get(transfers::output).delete(transfers::delete_output),
@@ -466,6 +476,11 @@ fn transfer_routes() -> Router<AppState> {
 fn ai_chat_routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/ai/chat", post(crate::ai::chat))
+        .route("/api/v1/ai/runs", post(crate::ai::start_run))
+        .route(
+            "/api/v1/ai/runs/{id}",
+            axum::routing::delete(crate::ai::cancel_run),
+        )
         .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT))
         .layer(tower_http::timeout::TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,

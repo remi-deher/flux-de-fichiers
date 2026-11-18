@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM password_reset_tokens WHERE account_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "b93f98d6adf67c146e985b0c2fa534c3b3b0c6bf646ea597502417bf97e9f8a5"
+}

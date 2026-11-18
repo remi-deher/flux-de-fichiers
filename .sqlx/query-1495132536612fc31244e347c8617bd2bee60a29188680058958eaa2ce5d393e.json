@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM mcp_audit_log WHERE id <= (SELECT id FROM mcp_audit_log ORDER BY id DESC LIMIT 1 OFFSET ?1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1495132536612fc31244e347c8617bd2bee60a29188680058958eaa2ce5d393e"
+}

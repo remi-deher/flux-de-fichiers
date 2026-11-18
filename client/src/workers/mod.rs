@@ -2,12 +2,13 @@
 
 use crate::route::{Link, Route};
 use crate::settings::duration_label;
+use crate::sleep::sleep;
 use crate::ui::filters::{Filters, Presence, presence};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
-    Drawer, EmptyState, Icon, IconName, MetricTone, ResourceCard, StatItem, StatStrip, StatusBadge,
-    Tag, TagTone, Toasts,
+    Drawer, EmptyState, Icon, IconName, MetricTone, ResourceCard, SectionHeader, StatItem,
+    StatStrip, StatusBadge, Tag, TagTone, Toasts,
 };
 use crate::{api, format};
 use chrono::{DateTime, Utc};
@@ -15,13 +16,47 @@ use flux_shared::Permission;
 use flux_shared::jobs::{Job, JobStatus};
 use flux_shared::libraries::Library;
 use flux_shared::session::Me;
-use flux_shared::workers::{Liveness, Worker};
+use flux_shared::workers::{
+    EnrollmentWindowStatus, Liveness, UpdateWorkerSettingsRequest, WORKER_MAX_CONCURRENCY,
+    WORKER_MIN_CONCURRENCY, Worker, WorkerEnrollmentList, WorkerEnrollmentSummary, WorkerSchedule,
+};
 use leptos::prelude::*;
+use serde::Serialize;
 use uuid::Uuid;
 
 const WORKERS_PATH: &str = "/api/v1/workers";
+const WORKER_REQUESTS_PATH: &str = "/api/v1/workers/requests";
+const WORKER_ENROLLMENT_WINDOW_PATH: &str = "/api/v1/workers/enrollment-window";
 const LIBRARIES_PATH: &str = "/api/v1/libraries";
 const JOBS_PATH: &str = "/api/v1/jobs?limit=200";
+const REQUESTS_POLL_MS: i32 = 3000;
+
+#[derive(Serialize)]
+struct EnrollmentWindowBody {
+    open: bool,
+}
+
+/// Service `compose` d'un worker distant par approbation (aucune clé ni secret à copier).
+pub fn enroll_approval_compose() -> &'static str {
+    "services:
+  flux-worker:
+    image: mrcryllix/flux-de-fichiers:latest
+    restart: unless-stopped
+    ports:
+      - \"3001:3000\"
+    volumes:
+      - flux-worker:/config
+      - /chemin/data:/data
+volumes:
+  flux-worker:
+"
+}
+
+/// Libellé du temps restant avant expiration d'une fenêtre ou d'une demande.
+pub fn remaining_label(expires_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
+    let secs = (expires_at - now).num_seconds().max(0);
+    duration_label(secs)
+}
 
 /// Service `compose` d'un worker distant ; la clé vient d'un fichier, jamais d'une valeur en clair.
 pub fn enroll_compose(origin: &str) -> String {
@@ -249,6 +284,29 @@ fn WorkerDetail(worker: Worker, can_manage: bool, on_removed: Callback<()>) -> i
         Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
     });
+    let initial_sched = worker.schedule.clone().unwrap_or(WorkerSchedule {
+        enabled: false,
+        start_hour: 22,
+        end_hour: 6,
+        days: Vec::new(),
+    });
+    let concurrency_val = RwSignal::new(worker.max_concurrency);
+    let sched_enabled = RwSignal::new(initial_sched.enabled);
+    let sched_start = RwSignal::new(initial_sched.start_hour);
+    let sched_end = RwSignal::new(initial_sched.end_hour);
+    let save_settings = Action::new_local(move |req: &UpdateWorkerSettingsRequest| {
+        let path = format!("{WORKERS_PATH}/{id}/settings");
+        let req = req.clone();
+        async move { api::put::<UpdateWorkerSettingsRequest, Worker>(&path, &req).await }
+    });
+    Effect::new(move |_| match save_settings.value().get() {
+        Some(Ok(_)) => {
+            Toasts::notify_success("Réglages du worker enregistrés.");
+            on_removed.run(());
+        }
+        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
+        None => {}
+    });
     let removable = can_manage && liveness != Liveness::Online && !worker.is_integrated();
     view! {
         <div class="inspection-panel">
@@ -265,7 +323,67 @@ fn WorkerDetail(worker: Worker, can_manage: bool, on_removed: Callback<()>) -> i
                 <div class="detail-term">"Dernier contact"</div><div class="detail-val">{format::datetime(worker.last_seen)}</div>
                 <div class="detail-term">"Ancienneté"</div>
                 <div class="detail-val" class:text-danger=liveness == Liveness::Silent>{age}</div>
+                <div class="detail-term">"Concurrence max"</div><div class="detail-val">{format!("{} tâche(s)", worker.max_concurrency)}</div>
             </div>
+            {can_manage.then(|| view! {
+                <form class="inspection-panel__section" on:submit=move |ev| {
+                    ev.prevent_default();
+                    let schedule = sched_enabled.get_untracked().then(|| WorkerSchedule {
+                        enabled: true,
+                        start_hour: sched_start.get_untracked().min(23),
+                        end_hour: sched_end.get_untracked().min(23),
+                        days: Vec::new(),
+                    });
+                    save_settings.dispatch(UpdateWorkerSettingsRequest {
+                        max_concurrency: concurrency_val.get_untracked().clamp(WORKER_MIN_CONCURRENCY, WORKER_MAX_CONCURRENCY),
+                        schedule,
+                    });
+                }>
+                    <p class="inspection-panel__title">"Ordonnancement & concurrence"</p>
+                    <div class="form-group">
+                        <label class="form-label" for="worker-concurrency">"Tâches simultanées (1 à 16)"</label>
+                        <input id="worker-concurrency" type="number" class="form-input"
+                            min=WORKER_MIN_CONCURRENCY max=WORKER_MAX_CONCURRENCY
+                            prop:value=move || concurrency_val.get().to_string()
+                            on:input=move |ev| {
+                                if let Ok(v) = event_target_value(&ev).parse::<i32>() {
+                                    concurrency_val.set(v);
+                                }
+                            } />
+                    </div>
+                    <label class="cluster">
+                        <input type="checkbox"
+                            prop:checked=move || sched_enabled.get()
+                            on:change=move |ev| sched_enabled.set(event_target_checked(&ev)) />
+                        <span>"Limiter l'activité à une plage horaire (heure locale)"</span>
+                    </label>
+                    {move || sched_enabled.get().then(|| view! {
+                        <div class="cluster">
+                            <label class="form-label" for="worker-sched-start">"De (h)"</label>
+                            <input id="worker-sched-start" type="number" class="form-input" min="0" max="23"
+                                prop:value=move || sched_start.get().to_string()
+                                on:input=move |ev| {
+                                    if let Ok(v) = event_target_value(&ev).parse::<u8>() {
+                                        sched_start.set(v);
+                                    }
+                                } />
+                            <label class="form-label" for="worker-sched-end">"À (h)"</label>
+                            <input id="worker-sched-end" type="number" class="form-input" min="0" max="23"
+                                prop:value=move || sched_end.get().to_string()
+                                on:input=move |ev| {
+                                    if let Ok(v) = event_target_value(&ev).parse::<u8>() {
+                                        sched_end.set(v);
+                                    }
+                                } />
+                        </div>
+                    })}
+                    <div class="inspection-drawer__actions">
+                        <button type="submit" class="btn btn-primary btn-sm" disabled=move || save_settings.pending().get()>
+                            "Enregistrer les réglages"
+                        </button>
+                    </div>
+                </form>
+            })}
             {match telemetry {
                 Some(t) => view! { <WorkerTelemetrySection telemetry=t /> }.into_any(),
                 None => view! {
@@ -326,12 +444,92 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
             }
         }
     });
+    let enrollment_reload = RwSignal::new(0_u32);
+    let enrollment_state = LocalResource::new(move || {
+        reload.track();
+        enrollment_reload.track();
+        async move {
+            api::get::<WorkerEnrollmentList>(WORKER_REQUESTS_PATH)
+                .await
+                .unwrap_or_default()
+        }
+    });
+    let polling_requests = RwSignal::new(false);
+    Effect::new(move |_| {
+        let open = enrollment_state.get().is_some_and(|list| list.window.open);
+        if can_manage && open && !polling_requests.get_untracked() {
+            polling_requests.set(true);
+            leptos::task::spawn_local(async move {
+                loop {
+                    sleep(REQUESTS_POLL_MS).await;
+                    let still_open = enrollment_state
+                        .get_untracked()
+                        .is_some_and(|list| list.window.open);
+                    if !still_open {
+                        break;
+                    }
+                    enrollment_reload.update(|c| *c = c.wrapping_add(1));
+                }
+                polling_requests.set(false);
+            });
+        }
+    });
+    let toggle_window = Action::new_local(move |open: &bool| {
+        let body = EnrollmentWindowBody { open: *open };
+        async move {
+            api::post::<EnrollmentWindowBody, EnrollmentWindowStatus>(
+                WORKER_ENROLLMENT_WINDOW_PATH,
+                Some(&body),
+            )
+            .await
+        }
+    });
+    Effect::new(move |_| match toggle_window.value().get() {
+        Some(Ok(status)) => {
+            if status.open {
+                Toasts::notify_success("Fenêtre d'acceptation ouverte pour 15 minutes.");
+            } else {
+                Toasts::notify_success("Fenêtre d'acceptation fermée.");
+            }
+            enrollment_reload.update(|c| *c = c.wrapping_add(1));
+        }
+        Some(Err(error)) => Toasts::notify_error(error.message()),
+        None => {}
+    });
+    let approve_request = Action::new_local(move |id: &Uuid| {
+        let path = format!("{WORKER_REQUESTS_PATH}/{id}/approve");
+        async move { api::post::<(), WorkerEnrollmentSummary>(&path, None).await }
+    });
+    Effect::new(move |_| match approve_request.value().get() {
+        Some(Ok(summary)) => {
+            Toasts::notify_success(format!(
+                "Worker « {} » approuvé : il se connecte dans un instant.",
+                summary.worker_name
+            ));
+            reload.update(|c| *c = c.wrapping_add(1));
+        }
+        Some(Err(error)) => Toasts::notify_error(error.message()),
+        None => {}
+    });
+    let reject_request = Action::new_local(move |id: &Uuid| {
+        let path = format!("{WORKER_REQUESTS_PATH}/{id}/reject");
+        async move { api::post::<(), WorkerEnrollmentSummary>(&path, None).await }
+    });
+    Effect::new(move |_| match reject_request.value().get() {
+        Some(Ok(summary)) => {
+            Toasts::notify_success(format!("Demande de « {} » refusée.", summary.worker_name));
+            enrollment_reload.update(|c| *c = c.wrapping_add(1));
+        }
+        Some(Err(error)) => Toasts::notify_error(error.message()),
+        None => {}
+    });
+
     let selected = RwSignal::new(None::<Uuid>);
     let detail_open = RwSignal::new(false);
     let enroll_open = RwSignal::new(false);
     if can_manage {
         provide_topbar_action(ActionSpec {
-            label: "Enrôler un worker",
+            label: "Ajouter un worker",
             on_click: Callback::new(move |()| enroll_open.set(true)),
         });
     }
@@ -551,6 +749,12 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                                 >
                                     <div class="cluster cluster-wrap">
                                         <Tag label=role_label tone=role_tone />
+                                        {(worker.max_concurrency > 1).then(|| view! {
+                                            <Tag label=format!("{}× simult.", worker.max_concurrency) tone=TagTone::Neutral />
+                                        })}
+                                        {worker.schedule.as_ref().filter(|s| s.enabled).map(|s| view! {
+                                            <Tag label=format!("{:02}h–{:02}h", s.start_hour, s.end_hour) tone=TagTone::Mono />
+                                        })}
                                         <Tag
                                             label=libs_label
                                             tone={if mounted_libs > 0 { TagTone::Success } else { TagTone::Warning }}
@@ -583,30 +787,147 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
             .map(|worker| worker.name)
             .unwrap_or_default()
     });
+    let enrollment_panel = move || {
+        let state = enrollment_state.get().unwrap_or_default();
+        if !state.window.open && state.requests.is_empty() {
+            return None;
+        }
+        let now = Utc::now();
+        let window_text = match state.window.expires_at {
+            Some(exp) if state.window.open => format!(
+                "Fenêtre d'acceptation ouverte (expire dans {})",
+                remaining_label(exp, now)
+            ),
+            _ => "Fenêtre d'acceptation fermée".to_owned(),
+        };
+        let reqs = state.requests;
+        let header_actions = if can_manage {
+            view! {
+                <div class="cluster">
+                    <button type="button" class="btn btn-secondary btn-sm"
+                        disabled=move || toggle_window.pending().get()
+                        on:click=move |_| { toggle_window.dispatch(true); }>
+                        {if state.window.open { "Prolonger (15 min)" } else { "Ouvrir (15 min)" }}
+                    </button>
+                    {state.window.open.then(|| view! {
+                        <button type="button" class="btn btn-secondary btn-sm"
+                            disabled=move || toggle_window.pending().get()
+                            on:click=move |_| { toggle_window.dispatch(false); }>
+                            "Fermer"
+                        </button>
+                    })}
+                </div>
+            }
+            .into_any()
+        } else {
+            ().into_any()
+        };
+        Some(view! {
+            <section class="section-panel">
+                <SectionHeader
+                    title="Demandes en attente"
+                    subtitle=window_text
+                    actions=header_actions
+                />
+                <div class="registre">
+                    {if reqs.is_empty() {
+                        view! {
+                            <p class="form-help">"Aucune demande reçue pour le moment. Sur le nouveau worker, choisissez « Enrôler un worker » et saisissez l'adresse de ce central."</p>
+                        }.into_any()
+                    } else {
+                        view! {
+                            <div class="table-wrapper">
+                                <table class="data-table" aria-label="Demandes d'enrôlement en attente">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">"Worker"</th>
+                                            <th scope="col">"Adresse"</th>
+                                            <th scope="col">"Version"</th>
+                                            <th scope="col">"Expiration"</th>
+                                            <th scope="col" class="cell-end">"Action"</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {reqs.into_iter().map(|req| {
+                                            let req_id = req.id;
+                                            let version_tag = req.worker_version.unwrap_or_else(|| "—".to_owned());
+                                            let addr_tag = req.source_addr.unwrap_or_else(|| "—".to_owned());
+                                            let exp_label = remaining_label(req.expires_at, now);
+                                            view! {
+                                                <tr>
+                                                    <td class="text-strong">{req.worker_name}</td>
+                                                    <td class="text-dim">{addr_tag}</td>
+                                                    <td class="text-dim">{version_tag}</td>
+                                                    <td class="text-dim">{format!("dans {exp_label}")}</td>
+                                                    <td class="cell-end">
+                                                        {can_manage.then(|| view! {
+                                                            <div class="cluster">
+                                                                <button type="button" class="btn btn-primary btn-sm"
+                                                                    disabled=move || approve_request.pending().get() || reject_request.pending().get()
+                                                                    on:click=move |_| { approve_request.dispatch(req_id); }>
+                                                                    "Approuver"
+                                                                </button>
+                                                                <button type="button" class="btn btn-danger-quiet btn-sm"
+                                                                    disabled=move || approve_request.pending().get() || reject_request.pending().get()
+                                                                    on:click=move |_| { reject_request.dispatch(req_id); }>
+                                                                    "Refuser"
+                                                                </button>
+                                                            </div>
+                                                        })}
+                                                    </td>
+                                                </tr>
+                                            }
+                                        }).collect_view()}
+                                    </tbody>
+                                </table>
+                            </div>
+                        }.into_any()
+                    }}
+                </div>
+            </section>
+        })
+    };
     view! {
         <div class="tab-panel" role="tabpanel">
             <StatStrip aria_label="Synthèse des workers" items=stats />
+            {enrollment_panel}
             {grid}
             <Drawer open=detail_open eyebrow="Worker" title=title>
                 {move || selected_worker.get().map(|worker| view! { <WorkerDetail worker=worker can_manage=can_manage on_removed=on_removed /> })}
             </Drawer>
-            <Drawer open=enroll_open eyebrow="Infrastructure" title="Enrôler un worker">
+            <Drawer open=enroll_open eyebrow="Infrastructure" title="Ajouter un worker">
                 <div class="inspection-panel">
-                    <ol class="form-help">
-                        <li>"Créez une clé d'API de rôle worker (Paramètres → Clés d'API) ; elle ne s'affiche qu'une fois."</li>
-                        <li>"Enregistrez-la dans le fichier "<code>"/config/worker_key"</code>" du volume de configuration du worker."</li>
-                        <li>"Démarrez le service suivant sur l'hôte distant :"</li>
-                    </ol>
-                    <pre class="code-block-wrapper"><code>{enroll_compose(&origin())}</code></pre>
-                    <p class="form-help">
-                        "Autre voie (ADR 0011) : ouvrir l'adresse d'une installation vierge, choisir « Enrôler un worker » et saisir l'adresse du central avec un compte administrateur."
-                    </p>
-                    <div class="inspection-drawer__actions">
-                        <Link to=Route::Settings class="btn btn-secondary">
-                            <Icon name=IconName::Key size=15 />
-                            <span>"Ouvrir Paramètres & Clés d'API"</span>
-                        </Link>
+                    <div class="inspection-panel__section">
+                        <p class="inspection-panel__title">"Enrôlement par approbation (recommandé)"</p>
+                        <ol class="form-help">
+                            <li>"Ouvrez la fenêtre d'acceptation ci-dessous (valable 15 minutes)."</li>
+                            <li>"Démarrez un conteneur vierge, ouvrez son interface et choisissez « Enrôler un worker »."</li>
+                            <li>"Saisissez l'adresse de ce central ("<code>{origin()}</code>") puis approuvez la demande affichée ici."</li>
+                        </ol>
+                        <div class="inspection-drawer__actions">
+                            <button type="button" class="btn btn-primary"
+                                disabled=move || toggle_window.pending().get()
+                                on:click=move |_| { toggle_window.dispatch(true); }>
+                                "Ouvrir la fenêtre d'acceptation (15 min)"
+                            </button>
+                        </div>
+                        <pre class="code-block-wrapper"><code>{enroll_approval_compose()}</code></pre>
                     </div>
+                    <details class="inspection-panel__section">
+                        <summary class="form-help">"Méthode manuelle avec clé d'API (`compose` / `/config/worker_key`)"</summary>
+                        <ol class="form-help">
+                            <li>"Créez une clé d'API de rôle worker (Paramètres → Clés d'API) ; elle ne s'affiche qu'une fois."</li>
+                            <li>"Enregistrez-la dans le fichier "<code>"/config/worker_key"</code>" du volume de configuration du worker."</li>
+                            <li>"Démarrez le service suivant sur l'hôte distant :"</li>
+                        </ol>
+                        <pre class="code-block-wrapper"><code>{enroll_compose(&origin())}</code></pre>
+                        <div class="inspection-drawer__actions">
+                            <Link to=Route::Settings class="btn btn-secondary">
+                                <Icon name=IconName::Key size=15 />
+                                <span>"Ouvrir Paramètres & Clés d'API"</span>
+                            </Link>
+                        </div>
+                    </details>
                 </div>
             </Drawer>
         </div>
@@ -627,6 +948,22 @@ mod tests {
         assert!(compose.contains("CENTRAL_URL: https://flux.example"));
         assert!(compose.contains("WORKER_KEY_FILE: /config/worker_key"));
         assert!(!compose.contains("WORKER_KEY:"));
+        let approval_compose = enroll_approval_compose();
+        assert!(!approval_compose.contains("WORKER_KEY"));
+        assert!(!approval_compose.contains("ADMIN"));
+    }
+
+    #[test]
+    fn remaining_label_formats_positive_and_past_expirations() {
+        let now = DateTime::<Utc>::UNIX_EPOCH + chrono::Duration::seconds(10_000);
+        assert_eq!(
+            remaining_label(now + chrono::Duration::seconds(900), now),
+            "15 min"
+        );
+        assert_eq!(
+            remaining_label(now - chrono::Duration::seconds(30), now),
+            "0 s"
+        );
     }
 
     #[test]
@@ -647,6 +984,8 @@ mod tests {
                 version: None,
                 remote_addr: None,
                 telemetry: None,
+                max_concurrency: 1,
+                schedule: None,
             },
             Worker {
                 id: Uuid::from_u128(2),
@@ -655,6 +994,8 @@ mod tests {
                 version: None,
                 remote_addr: None,
                 telemetry: None,
+                max_concurrency: 1,
+                schedule: None,
             },
             Worker {
                 id: Uuid::from_u128(3),
@@ -663,6 +1004,8 @@ mod tests {
                 version: None,
                 remote_addr: None,
                 telemetry: None,
+                max_concurrency: 1,
+                schedule: None,
             },
         ];
         let jobs = vec![Job {
@@ -685,6 +1028,7 @@ mod tests {
             library_id: None,
             flow_id: Some("f1".into()),
             flow_version: Some(1),
+            priority: 0,
             created_at: now,
             updated_at: now,
         }];

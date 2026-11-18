@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO library_workers (library_id, worker_id, local_path, access) VALUES (?1, ?2, ?3, ?4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "f837df051b65a5a1d8a8db2c1b0e88c261eaa3bf035ccd3522c7f27a9a3e669e"
+}

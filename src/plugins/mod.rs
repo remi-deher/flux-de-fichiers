@@ -45,12 +45,13 @@ pub use sync::{
 
 pub use flux_shared::plugins::vocab::{self, CatalogCapability, CatalogItemType, PluginCategory};
 pub use flux_shared::plugins::{
-    CatalogEntry, CreateRepositoryRequest, PackDetailView, PluginCompatibility, PluginDependency,
-    PluginDetailView, PluginRepository, PluginSettingsView, RepositoryDetailView,
-    ToolArtifactSummary, ToolDetailView, ToolStatus, ToolStatusSummary,
+    CatalogEntry, CreateRepositoryRequest, PackDetailView, PluginCompatibility,
+    PluginConnectionTestResult, PluginDependency, PluginDetailView, PluginRepository,
+    PluginSettingsView, RepositoryDetailView, ToolArtifactSummary, ToolDetailView, ToolStatus,
+    ToolStatusSummary,
 };
 pub use secret_settings::{
-    mask, migrate_plaintext, plugin_secret_aad, rotate_settings, seal, secret_names,
+    decrypt_all, mask, migrate_plaintext, plugin_secret_aad, rotate_settings, seal, secret_names,
 };
 pub use settings::{
     ResolvedSettingsField, SettingsField, SettingsFieldType, SettingsSchema, resolve_setting_value,

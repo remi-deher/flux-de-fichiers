@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM worker_enrollment_requests WHERE expires_at <= ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "e963ed322631fc06ed576a5f55e7d58e94b83b826d48e8a292e0a633bd9ed53b"
+}

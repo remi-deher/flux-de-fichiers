@@ -20,7 +20,7 @@ use crate::{api, format};
 use draft::{LibraryDraft, access_label, is_ready, library_counts};
 use flux_shared::Permission;
 use flux_shared::flows::FlowRecord;
-use flux_shared::libraries::Library;
+use flux_shared::libraries::{Library, LibraryOutputPolicy};
 use flux_shared::local::LocalLibrarySnapshot;
 use flux_shared::session::Me;
 use flux_shared::workers::Worker;
@@ -271,6 +271,13 @@ fn MediaLibrariesSection(
                                 .map(|entry| (entry.local_path.clone(), access_label(entry.access)))
                                 .collect();
                             let bound_flow = flow_name(&library.flow_id);
+                            let scan_badge = (library.scan_interval_minutes > 0)
+                                .then(|| format!("Auto {} min", library.scan_interval_minutes));
+                            let policy_badge = match library.output_policy {
+                                LibraryOutputPolicy::OutputDir => None,
+                                LibraryOutputPolicy::ReplaceWithBackup => Some("Remplace (.bak)"),
+                                LibraryOutputPolicy::ReplaceInPlace => Some("Remplace sur place"),
+                            };
                             let updated = format::datetime(library.updated_at);
                             let open_edit = can_manage.then(|| {
                                 let draft = draft.clone();
@@ -311,6 +318,12 @@ fn MediaLibrariesSection(
                                             tone={if has_flow { TagTone::Primary } else { TagTone::Neutral }}
                                             icon=Some(IconName::Flows)
                                         />
+                                        {scan_badge.map(|label| view! {
+                                            <Tag label=label tone=TagTone::Success icon=Some(IconName::Refresh) />
+                                        })}
+                                        {policy_badge.map(|label| view! {
+                                            <Tag label=label tone=TagTone::Neutral />
+                                        })}
                                         {if paths_preview.is_empty() {
                                             view! { <Tag label="Aucun chemin configuré" tone=TagTone::Warning /> }.into_any()
                                         } else {

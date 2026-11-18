@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE workers SET last_seen=datetime('now'), remote_addr=COALESCE(?2, remote_addr), telemetry_json=COALESCE(?3, telemetry_json) WHERE id=?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "39c6d7ef1ecdb7499faa25d32f0d695881ffed07a10f79e740ed7cdebf728edb"
+}

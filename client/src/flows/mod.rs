@@ -1396,31 +1396,24 @@ mod tests {
             updated_at: now,
         };
         let flows = [make_flow("f1"), make_flow("f2"), make_flow("f3")];
+        let make_lib = |name: &str, flow_id: Option<&str>| Library {
+            id: uuid::Uuid::nil(),
+            name: name.into(),
+            flow_id: flow_id.map(str::to_owned),
+            workers: Vec::new(),
+            scan_interval_minutes: 0,
+            last_scanned_at: None,
+            include_extensions: Vec::new(),
+            exclude_patterns: Vec::new(),
+            min_file_bytes: 0,
+            output_policy: flux_shared::libraries::LibraryOutputPolicy::OutputDir,
+            created_at: now,
+            updated_at: now,
+        };
         let libraries = [
-            Library {
-                id: uuid::Uuid::nil(),
-                name: "Films".into(),
-                flow_id: Some("f1".into()),
-                workers: Vec::new(),
-                created_at: now,
-                updated_at: now,
-            },
-            Library {
-                id: uuid::Uuid::nil(),
-                name: "Séries".into(),
-                flow_id: Some("f1".into()),
-                workers: Vec::new(),
-                created_at: now,
-                updated_at: now,
-            },
-            Library {
-                id: uuid::Uuid::nil(),
-                name: "Orpheline".into(),
-                flow_id: None,
-                workers: Vec::new(),
-                created_at: now,
-                updated_at: now,
-            },
+            make_lib("Films", Some("f1")),
+            make_lib("Séries", Some("f1")),
+            make_lib("Orpheline", None),
         ];
 
         assert_eq!(bound_library_count("f1", &libraries), 2);

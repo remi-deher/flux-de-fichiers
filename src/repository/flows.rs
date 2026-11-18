@@ -2,71 +2,124 @@ use crate::{
     domain::{FlowRecord, FlowVersionSummary, UpdateFlowRequest},
     error::{AppError, AppResult},
 };
-use sqlx::SqlitePool;
-
-/// Flow par défaut retenu pour une nouvelle tâche (le plus récent s'il y en avait plusieurs).
-pub(super) const DEFAULT_FLOW_SQL: &str =
-    "SELECT * FROM flows WHERE is_default=1 ORDER BY updated_at DESC LIMIT 1";
-
-/// Projection d'une version figée dans la forme d'un flow, lisible après suppression du flow.
-const FLOW_VERSION_SQL: &str = "SELECT v.flow_id AS id, v.name, v.description, v.file_mask, \
-            COALESCE(f.is_default, 0) AS is_default, v.definition, v.version, \
-            v.created_at, v.created_at AS updated_at \
-     FROM flow_versions v LEFT JOIN flows f ON f.id = v.flow_id \
-     WHERE v.flow_id=?1 AND v.version=?2";
+use chrono::{DateTime, Utc};
+use sqlx::{Executor, Sqlite, SqlitePool};
 
 /// Table qui stocke une définition de flow dont les secrets peuvent être rechiffrés.
-pub struct DefinitionStore {
+#[derive(Clone, Copy)]
+pub enum DefinitionStore {
+    Flows,
+    FlowVersions,
+}
+
+impl DefinitionStore {
     /// Renvoie `(flow_id, rowid, definition)`.
-    pub select: &'static str,
-    /// Paramètres : `?1` définition, `?2` rowid.
-    pub update: &'static str,
+    pub async fn fetch_definitions<'e, E>(
+        self,
+        executor: E,
+    ) -> AppResult<Vec<(String, i64, String)>>
+    where
+        E: Executor<'e, Database = Sqlite>,
+    {
+        let rows = match self {
+            Self::Flows => {
+                sqlx::query!(r#"SELECT id AS "id!: String", rowid AS "rowid!: i64", definition AS "definition!: String" FROM flows"#)
+                    .fetch_all(executor)
+                    .await?
+                    .into_iter()
+                    .map(|row| (row.id, row.rowid, row.definition))
+                    .collect()
+            }
+            Self::FlowVersions => {
+                sqlx::query!(r#"SELECT flow_id AS "id!: String", rowid AS "rowid!: i64", definition AS "definition!: String" FROM flow_versions"#)
+                    .fetch_all(executor)
+                    .await?
+                    .into_iter()
+                    .map(|row| (row.id, row.rowid, row.definition))
+                    .collect()
+            }
+        };
+        Ok(rows)
+    }
+
+    pub async fn update_definition<'e, E>(
+        self,
+        executor: E,
+        rowid: i64,
+        definition: &str,
+    ) -> AppResult<()>
+    where
+        E: Executor<'e, Database = Sqlite>,
+    {
+        match self {
+            Self::Flows => {
+                sqlx::query!(
+                    "UPDATE flows SET definition=?1 WHERE rowid=?2",
+                    definition,
+                    rowid
+                )
+                .execute(executor)
+                .await?;
+            }
+            Self::FlowVersions => {
+                sqlx::query!(
+                    "UPDATE flow_versions SET definition=?1 WHERE rowid=?2",
+                    definition,
+                    rowid
+                )
+                .execute(executor)
+                .await?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Définition courante et versions figées : toutes deux portent des secrets scellés.
-pub const DEFINITION_STORES: [DefinitionStore; 2] = [
-    DefinitionStore {
-        select: "SELECT id, rowid, definition FROM flows",
-        update: "UPDATE flows SET definition=?1 WHERE rowid=?2",
-    },
-    DefinitionStore {
-        select: "SELECT flow_id, rowid, definition FROM flow_versions",
-        update: "UPDATE flow_versions SET definition=?1 WHERE rowid=?2",
-    },
-];
+pub const DEFINITION_STORES: [DefinitionStore; 2] =
+    [DefinitionStore::Flows, DefinitionStore::FlowVersions];
 
 pub async fn list_flows(pool: &SqlitePool) -> AppResult<Vec<FlowRecord>> {
-    let flows =
-        sqlx::query_as::<_, FlowRecord>("SELECT * FROM flows ORDER BY is_default DESC, name ASC")
-            .fetch_all(pool)
-            .await?;
+    let flows = sqlx::query_as!(
+        FlowRecord,
+        r#"SELECT id AS "id!: String", name, description, file_mask, is_default AS "is_default: bool", definition, version, created_at AS "created_at: DateTime<Utc>", updated_at AS "updated_at: DateTime<Utc>" FROM flows ORDER BY is_default DESC, name ASC"#,
+    )
+    .fetch_all(pool)
+    .await?;
     Ok(flows)
 }
 
 pub async fn get_flow(pool: &SqlitePool, id: &str) -> AppResult<FlowRecord> {
-    sqlx::query_as::<_, FlowRecord>("SELECT * FROM flows WHERE id=?1")
-        .bind(id)
-        .fetch_optional(pool)
-        .await?
-        .ok_or(AppError::NotFound)
+    sqlx::query_as!(
+        FlowRecord,
+        r#"SELECT id AS "id!: String", name, description, file_mask, is_default AS "is_default: bool", definition, version, created_at AS "created_at: DateTime<Utc>", updated_at AS "updated_at: DateTime<Utc>" FROM flows WHERE id=?1"#,
+        id,
+    )
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)
 }
 
 /// Version figée d'un flow, telle qu'enregistrée au moment où une tâche l'a retenue.
 pub async fn get_flow_version(pool: &SqlitePool, id: &str, version: i64) -> AppResult<FlowRecord> {
-    sqlx::query_as::<_, FlowRecord>(FLOW_VERSION_SQL)
-        .bind(id)
-        .bind(version)
-        .fetch_optional(pool)
-        .await?
-        .ok_or(AppError::NotFound)
+    sqlx::query_as!(
+        FlowRecord,
+        r#"SELECT v.flow_id AS id, v.name, v.description, v.file_mask, COALESCE(f.is_default, 0) AS "is_default!: bool", v.definition, v.version, v.created_at AS "created_at: DateTime<Utc>", v.created_at AS "updated_at: DateTime<Utc>" FROM flow_versions v LEFT JOIN flows f ON f.id = v.flow_id WHERE v.flow_id=?1 AND v.version=?2"#,
+        id,
+        version,
+    )
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)
 }
 
 /// Versions figées d'un flux, de la plus récente à la plus ancienne (aussi après suppression).
 pub async fn list_flow_versions(pool: &SqlitePool, id: &str) -> AppResult<Vec<FlowVersionSummary>> {
-    let versions = sqlx::query_as::<_, FlowVersionSummary>(
-        "SELECT version, name, created_at FROM flow_versions WHERE flow_id=?1 ORDER BY version DESC",
+    let versions = sqlx::query_as!(
+        FlowVersionSummary,
+        r#"SELECT version, name, created_at AS "created_at: DateTime<Utc>" FROM flow_versions WHERE flow_id=?1 ORDER BY version DESC"#,
+        id,
     )
-    .bind(id)
     .fetch_all(pool)
     .await?;
     if versions.is_empty() {
@@ -75,11 +128,22 @@ pub async fn list_flow_versions(pool: &SqlitePool, id: &str) -> AppResult<Vec<Fl
     Ok(versions)
 }
 
-pub async fn default_flow(pool: &SqlitePool) -> AppResult<Option<FlowRecord>> {
-    let flow = sqlx::query_as::<_, FlowRecord>(DEFAULT_FLOW_SQL)
-        .fetch_optional(pool)
-        .await?;
+/// Flow par défaut retenu pour une nouvelle tâche (le plus récent s'il y en avait plusieurs).
+pub(super) async fn default_flow_with<'e, E>(executor: E) -> AppResult<Option<FlowRecord>>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let flow = sqlx::query_as!(
+        FlowRecord,
+        r#"SELECT id AS "id!: String", name, description, file_mask, is_default AS "is_default: bool", definition, version, created_at AS "created_at: DateTime<Utc>", updated_at AS "updated_at: DateTime<Utc>" FROM flows WHERE is_default=1 ORDER BY updated_at DESC LIMIT 1"#,
+    )
+    .fetch_optional(executor)
+    .await?;
     Ok(flow)
+}
+
+pub async fn default_flow(pool: &SqlitePool) -> AppResult<Option<FlowRecord>> {
+    default_flow_with(pool).await
 }
 
 /// Contenu versionné d'un flow ; `is_default` n'en fait pas partie.
@@ -110,69 +174,59 @@ pub async fn save_flow(
     payload: &UpdateFlowRequest,
 ) -> AppResult<FlowRecord> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let latest: Option<(i64, String, Option<String>, String, String)> = sqlx::query_as(
+    let latest = sqlx::query!(
         "SELECT version, name, description, file_mask, definition FROM flow_versions \
          WHERE flow_id=?1 ORDER BY version DESC LIMIT 1",
+        id,
     )
-    .bind(id)
     .fetch_optional(&mut *tx)
     .await?;
-    let latest = latest.map(|(version, name, description, file_mask, definition)| {
+    let latest = latest.map(|row| {
         let content = VersionContent {
-            name,
-            description,
-            file_mask,
-            definition,
+            name: row.name,
+            description: row.description,
+            file_mask: row.file_mask,
+            definition: row.definition,
         };
-        (version, content)
+        (row.version, content)
     });
     let content = VersionContent::from(payload);
     let version = match latest {
         Some((version, previous)) if previous == content => version,
         latest => {
             let next = latest.map_or(0, |(version, _)| version) + 1;
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO flow_versions \
                  (flow_id, version, name, description, file_mask, definition) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                id,
+                next,
+                content.name,
+                content.description,
+                content.file_mask,
+                content.definition,
             )
-            .bind(id)
-            .bind(next)
-            .bind(&content.name)
-            .bind(&content.description)
-            .bind(&content.file_mask)
-            .bind(&content.definition)
             .execute(&mut *tx)
             .await?;
             next
         }
     };
     if payload.is_default {
-        sqlx::query("UPDATE flows SET is_default=0")
+        sqlx::query!("UPDATE flows SET is_default=0")
             .execute(&mut *tx)
             .await?;
     }
-    let flow = sqlx::query_as::<_, FlowRecord>(
-        "INSERT INTO flows \
-         (id, name, description, file_mask, is_default, definition, version, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now')) \
-         ON CONFLICT(id) DO UPDATE SET \
-            name=excluded.name, \
-            description=excluded.description, \
-            file_mask=excluded.file_mask, \
-            is_default=excluded.is_default, \
-            definition=excluded.definition, \
-            version=excluded.version, \
-            updated_at=datetime('now') \
-         RETURNING *",
+    let flow = sqlx::query_as!(
+        FlowRecord,
+        r#"INSERT INTO flows (id, name, description, file_mask, is_default, definition, version, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now')) ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, file_mask=excluded.file_mask, is_default=excluded.is_default, definition=excluded.definition, version=excluded.version, updated_at=datetime('now') RETURNING id AS "id!: String", name, description, file_mask, is_default AS "is_default: bool", definition, version, created_at AS "created_at: DateTime<Utc>", updated_at AS "updated_at: DateTime<Utc>""#,
+        id,
+        payload.name,
+        payload.description,
+        payload.file_mask,
+        payload.is_default,
+        payload.definition,
+        version,
     )
-    .bind(id)
-    .bind(&payload.name)
-    .bind(&payload.description)
-    .bind(&payload.file_mask)
-    .bind(payload.is_default)
-    .bind(&payload.definition)
-    .bind(version)
     .fetch_one(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -182,21 +236,22 @@ pub async fn save_flow(
 /// Supprime un flow ; ses versions restent pour les tâches qui les ont retenues.
 pub async fn delete_flow(pool: &SqlitePool, id: &str) -> AppResult<()> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let is_default: Option<bool> = sqlx::query_scalar("SELECT is_default FROM flows WHERE id=?1")
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await?;
+    let is_default: Option<bool> = sqlx::query_scalar!(
+        r#"SELECT is_default AS "is_default: bool" FROM flows WHERE id=?1"#,
+        id
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
     match is_default {
         Some(true) => Err(AppError::Conflict),
         Some(false) => {
-            sqlx::query(
+            sqlx::query!(
                 "UPDATE libraries SET flow_id=NULL, updated_at=datetime('now') WHERE flow_id=?1",
+                id
             )
-            .bind(id)
             .execute(&mut *tx)
             .await?;
-            sqlx::query("DELETE FROM flows WHERE id=?1")
-                .bind(id)
+            sqlx::query!("DELETE FROM flows WHERE id=?1", id)
                 .execute(&mut *tx)
                 .await?;
             tx.commit().await?;

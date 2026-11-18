@@ -300,3 +300,48 @@ async fn test_diagnostics_are_admin_only_and_list_every_check() -> anyhow::Resul
     assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
     Ok(())
 }
+
+#[tokio::test]
+async fn test_updates_check_is_disabled_by_default_and_can_be_toggled() -> anyhow::Result<()> {
+    let (app, _dir) = app().await?;
+    let (status, headers, _) = call(
+        &app,
+        "POST",
+        "/api/v1/setup/central",
+        None,
+        Some(serde_json::json!({"name": "Central", "username": "admin-upd", "password": PASSWORD})),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    let admin = cookies_of(&headers);
+
+    let (status, _, body) = call(&app, "GET", "/api/v1/system/updates", Some(&admin), None).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["enabled"], false);
+    assert_eq!(body["updateAvailable"], false);
+
+    let (status, _, updated) = call(
+        &app,
+        "PUT",
+        "/api/v1/system/settings",
+        Some(&admin),
+        Some(serde_json::json!({
+            "webOrigin": null,
+            "sessionTtlSeconds": 28800,
+            "smtpEnabled": false,
+            "smtpHost": null,
+            "smtpPort": null,
+            "smtpTls": "starttls",
+            "smtpUsername": null,
+            "smtpPassword": null,
+            "smtpFrom": null,
+            "allowPrivatePluginHosts": false,
+            "blockPrivateIntegrationHosts": false,
+            "checkUpdatesEnabled": true
+        })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(updated["checkUpdatesEnabled"], true);
+    Ok(())
+}

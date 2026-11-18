@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM password_reset_tokens WHERE expires_at <= datetime('now')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "2a200d5a569edb18f62d908a49c145709d13516bba1e041ca43a7c83f669b8f7"
+}

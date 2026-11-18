@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) AS \"count!: i64\" FROM mcp_audit_log WHERE (?1 IS NULL OR key_id = ?1) AND (?2 IS NULL OR outcome = ?2)",
+  "describe": {
+    "columns": [
+      {
+        "name": "count!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "79da11cfab65c58da5a672b1ce8938f41c0ba30751918e12217bcfa0daf3d159"
+}

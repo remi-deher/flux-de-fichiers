@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE worker_enrollment_requests SET status = ?1 WHERE id = ?2 AND status = 'pending' AND expires_at > ?3 RETURNING id AS \"id!: Uuid\", worker_name, worker_version, source_addr, secret_hash, status, created_at AS \"created_at: DateTime<Utc>\", expires_at AS \"expires_at: DateTime<Utc>\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "worker_name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "worker_version",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_addr",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "secret_hash",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "status",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at: DateTime<Utc>",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "expires_at: DateTime<Utc>",
+        "ordinal": 7,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1a161bcc655713acb9c28949651c7fbd68ea4b975d8118713b9e3427899e96f8"
+}

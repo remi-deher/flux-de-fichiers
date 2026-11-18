@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO plugin_release_pins (scope, version, sha256, source_url) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(scope, version) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "55ae72132de473f0ea51325c744cf459d8d6b7cc301b30edd1afc7b06497d0d6"
+}

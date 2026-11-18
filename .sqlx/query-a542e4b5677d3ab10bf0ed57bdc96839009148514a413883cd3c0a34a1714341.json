@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id AS \"id!: Uuid\", worker_name, worker_version, source_addr, secret_hash, status, created_at AS \"created_at: DateTime<Utc>\", expires_at AS \"expires_at: DateTime<Utc>\" FROM worker_enrollment_requests WHERE status = 'pending' AND expires_at > ?1 ORDER BY created_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "worker_name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "worker_version",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_addr",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "secret_hash",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "status",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at: DateTime<Utc>",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "expires_at: DateTime<Utc>",
+        "ordinal": 7,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a542e4b5677d3ab10bf0ed57bdc96839009148514a413883cd3c0a34a1714341"
+}

@@ -317,6 +317,32 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/stats:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Statistiques globales et économies d'espace disque agrégées par bibliothèque
+      responses:
+        '200': {description: Bilan volumétrique global et par bibliothèque}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/batch:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Appliquer une action par lot (relancer, annuler ou supprimer) à une sélection de tâches
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids, action]
+              properties:
+                ids:
+                  type: array
+                  items: {type: string, format: uuid}
+                action: {type: string, enum: [retry, cancel, delete]}
+      responses:
+        '200': {description: Bilan de l'opération par lot}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/jobs/{id}:
     parameters: [{$ref: '#/components/parameters/JobId'}]
     get:
@@ -340,6 +366,41 @@ paths:
       responses:
         '200':
           description: Tâche remise en file
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Job'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/cancel:
+    parameters: [{$ref: '#/components/parameters/JobId'}]
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Annuler une tâche en attente ou en cours (invalide son bail)
+      responses:
+        '200':
+          description: Tâche annulée
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Job'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/priority:
+    parameters: [{$ref: '#/components/parameters/JobId'}]
+    put:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Ajuster la priorité d'une tâche en file (-100 à 100)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [priority]
+              properties:
+                priority: {type: integer, minimum: -100, maximum: 100}
+      responses:
+        '200':
+          description: Priorité mise à jour
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Job'}
@@ -472,6 +533,19 @@ paths:
         '200': {description: Réglages enregistrés, secrets exclus de la réponse}
         '413': {description: Réglages trop volumineux}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/plugins/{id}/test:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Tester la connexion réseau et les identifiants d'un plugin API
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Résultat détaillé du test de connexion}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/tools:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
@@ -506,6 +580,13 @@ paths:
       responses:
         '200': {description: Outil prêt}
         '502': {description: Archive injoignable}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/worker/tools:
+    get:
+      security: [{ApiKey: []}]
+      summary: Lister les versions d'outils actives dans le catalogue pour la purge du cache worker
+      responses:
+        '200': {description: Couples (tool_id, version) actifs}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/worker/tools/{id}/distribution:
     get:
@@ -752,6 +833,104 @@ paths:
       responses:
         '202': {description: Enrôlement fait, l'installation redémarre en worker}
         '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/setup/worker-request:
+    get:
+      security: []
+      summary: Consulter l'état d'une demande d'enrôlement par approbation en cours
+      responses:
+        '200': {description: État de la demande}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      security: []
+      summary: Lancer une demande d'enrôlement par approbation (ADR 0016) depuis une installation vierge
+      parameters: [{$ref: '#/components/parameters/OriginHeader'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [central_url, worker_name]
+              properties:
+                central_url: {type: string}
+                worker_name: {type: string}
+      responses:
+        '202': {description: Demande soumise au central, attente d'approbation administrateur}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+    delete:
+      security: []
+      summary: Annuler une demande d'enrôlement en attente côté worker
+      parameters: [{$ref: '#/components/parameters/OriginHeader'}]
+      responses:
+        '204': {description: Demande annulée}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/workers/enrollment-window:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Ouvrir (15 min) ou fermer la fenêtre d'acceptation des demandes d'enrôlement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [open]
+              properties:
+                open: {type: boolean}
+      responses:
+        '200': {description: État de la fenêtre d'enrôlement}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/workers/requests:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Lister la fenêtre et les demandes d'enrôlement en attente (administrateur)
+      responses:
+        '200': {description: Liste des demandes en attente}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      security: []
+      summary: Soumettre une demande d'enrôlement d'un worker lorsque la fenêtre est ouverte
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [worker_name, secret_hash]
+              properties:
+                worker_name: {type: string}
+                worker_version: {type: [string, 'null']}
+                secret_hash: {type: string}
+      responses:
+        '201': {description: Demande enregistrée}
+        '403': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/workers/requests/{id}:
+    get:
+      security: []
+      summary: Relever l'état d'une demande et récupérer la clé à usage unique si approuvée
+      parameters: [{in: path, name: id, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: État de la demande (avec clé unique si approved)}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/workers/requests/{id}/approve:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Approuver une demande d'enrôlement en attente
+      parameters: [{in: path, name: id, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Demande approuvée}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/workers/requests/{id}/reject:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Refuser une demande d'enrôlement en attente
+      parameters: [{in: path, name: id, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Demande refusée}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/workers/enroll:
     post:
@@ -1022,6 +1201,14 @@ paths:
                           availableBytes: {type: integer}
         '403': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/system/updates:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Vérifier la dernière version publiée sur GitHub (désactivé par défaut, opt-in réseau)
+      responses:
+        '200': {description: État de vérification et éventuelle mise à jour disponible}
+        '403': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/system/hardware:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
@@ -1153,6 +1340,27 @@ paths:
       responses:
         '204': {description: Clé révoquée}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/mcp/audit:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Consulter l'historique des appels MCP (administrateur seulement)
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200}
+        - in: query
+          name: keyId
+          required: false
+          schema: {type: string}
+        - in: query
+          name: outcome
+          required: false
+          schema: {type: string, enum: [ok, error, forbidden, rate_limited]}
+      responses:
+        '200': {description: Liste paginée des événements d'audit MCP}
+        '403': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/auth/logout:
     post:
       security: [{WebSession: []}]
@@ -1197,6 +1405,28 @@ paths:
       responses:
         '200':
           description: Worker enregistré
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Worker'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/workers/{id}/settings:
+    put:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Configurer la concurrence maximale (1..16) et la fenêtre horaire d'un worker
+      parameters: [{in: path, name: id, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [max_concurrency]
+              properties:
+                max_concurrency: {type: integer, minimum: 1, maximum: 16}
+                schedule: {type: [object, 'null']}
+      responses:
+        '200':
+          description: Réglages worker mis à jour
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Worker'}
@@ -1373,11 +1603,13 @@ components:
         lease_token: {type: string, format: uuid, writeOnly: true}
     Worker:
       type: object
-      required: [id, name, last_seen]
+      required: [id, name, last_seen, max_concurrency]
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
         last_seen: {type: string, format: date-time}
+        max_concurrency: {type: integer, minimum: 1, maximum: 16}
+        schedule: {type: [object, 'null']}
     LibraryWorkerPath:
       type: object
       required: [worker_id, local_path, access]
@@ -1394,9 +1626,18 @@ components:
         workers:
           type: array
           items: {$ref: '#/components/schemas/LibraryWorkerPath'}
+        scan_interval_minutes: {type: integer, minimum: 0, maximum: 10080}
+        include_extensions:
+          type: array
+          items: {type: string}
+        exclude_patterns:
+          type: array
+          items: {type: string}
+        min_file_bytes: {type: integer, minimum: 0}
+        output_policy: {type: string, enum: [output_dir, replace_with_backup, replace_in_place]}
     Library:
       type: object
-      required: [id, name, flow_id, workers, created_at, updated_at]
+      required: [id, name, flow_id, workers, scan_interval_minutes, include_extensions, exclude_patterns, min_file_bytes, output_policy, created_at, updated_at]
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
@@ -1404,6 +1645,16 @@ components:
         workers:
           type: array
           items: {$ref: '#/components/schemas/LibraryWorkerPath'}
+        scan_interval_minutes: {type: integer, minimum: 0, maximum: 10080}
+        last_scanned_at: {type: [string, 'null'], format: date-time}
+        include_extensions:
+          type: array
+          items: {type: string}
+        exclude_patterns:
+          type: array
+          items: {type: string}
+        min_file_bytes: {type: integer, minimum: 0}
+        output_policy: {type: string, enum: [output_dir, replace_with_backup, replace_in_place]}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     Claim:
@@ -1425,8 +1676,9 @@ components:
         source_bytes: {type: [integer, 'null']}
         target_worker_id: {type: [string, 'null'], format: uuid}
         worker_id: {type: [string, 'null'], format: uuid}
-        status: {type: string, enum: [queued, running, succeeded, failed]}
+        status: {type: string, enum: [queued, running, succeeded, failed, canceled]}
         attempts: {type: integer, minimum: 0, maximum: 3}
+        priority: {type: integer, minimum: -100, maximum: 100}
         leased_until: {type: [string, 'null'], format: date-time}
         output_name: {type: [string, 'null']}
         output_sha256: {type: [string, 'null']}

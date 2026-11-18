@@ -87,6 +87,7 @@ struct SettingsFormInput<'a> {
     smtp_from: &'a str,
     allow_private_plugin_hosts: bool,
     block_private_integration_hosts: bool,
+    check_updates_enabled: bool,
 }
 
 fn build_settings_request(
@@ -133,6 +134,7 @@ fn build_settings_request(
         smtp_from: trimmed_optional(input.smtp_from),
         allow_private_plugin_hosts: input.allow_private_plugin_hosts,
         block_private_integration_hosts: input.block_private_integration_hosts,
+        check_updates_enabled: input.check_updates_enabled,
     })
 }
 
@@ -152,6 +154,7 @@ fn SettingsRuntimeForm(initial: SystemStatus, on_saved: Callback<()>) -> impl In
     let allow_private_plugin_hosts = RwSignal::new(initial.outbound.allow_private_plugin_hosts);
     let block_private_integration_hosts =
         RwSignal::new(initial.outbound.block_private_integration_hosts);
+    let check_updates_enabled = RwSignal::new(initial.check_updates_enabled);
     let feedback = RwSignal::new(None::<String>);
 
     let save = Action::new_local(
@@ -191,6 +194,7 @@ fn SettingsRuntimeForm(initial: SystemStatus, on_saved: Callback<()>) -> impl In
                 smtp_from: &smtp_from.get_untracked(),
                 allow_private_plugin_hosts: allow_private_plugin_hosts.get_untracked(),
                 block_private_integration_hosts: block_private_integration_hosts.get_untracked(),
+                check_updates_enabled: check_updates_enabled.get_untracked(),
             }) {
                 Ok(req) => {
                     feedback.set(None);
@@ -289,6 +293,12 @@ fn SettingsRuntimeForm(initial: SystemStatus, on_saved: Callback<()>) -> impl In
                         prop:checked=move || block_private_integration_hosts.get()
                         on:change=move |ev| block_private_integration_hosts.set(event_target_checked(&ev)) />
                     <span>"Bloquer les adresses privées pour les intégrations (webhooks, services externes)"</span>
+                </label>
+                <label class="flow-settings__toggle">
+                    <input type="checkbox"
+                        prop:checked=move || check_updates_enabled.get()
+                        on:change=move |ev| check_updates_enabled.set(event_target_checked(&ev)) />
+                    <span>"Vérifier automatiquement les mises à jour publiées sur GitHub (facultatif)"</span>
                 </label>
             </fieldset>
 

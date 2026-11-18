@@ -46,7 +46,7 @@ pub fn access_error(error: &ApiError) -> String {
         (_, Some("invalid_input")) => "Vérifiez les champs : identifiant de 3 à 40 caractères (lettres, chiffres, . - _), mot de passe d'au moins 8 caractères, nom de worker (lettres, chiffres, . - _) et adresse sans chemin.".into(),
         (_, Some("already_configured")) => "Cette installation est déjà configurée : rechargez la page.".into(),
         (_, Some("not_found")) => "La réinitialisation par courriel n'est pas disponible sur ce central.".into(),
-        (_, Some("forbidden")) => "Requête refusée : le compte doit être administrateur et l'origine autorisée.".into(),
+        (_, Some("forbidden")) => "Requête refusée : sur le central, ouvrez d'abord la fenêtre d'ajout de worker (écran Workers), ou vérifiez vos droits administrateur.".into(),
         (_, Some("central_unavailable")) => "Central injoignable : vérifiez son adresse.".into(),
         _ => error.message(),
     }

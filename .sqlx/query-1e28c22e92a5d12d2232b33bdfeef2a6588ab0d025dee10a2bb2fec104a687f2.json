@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE libraries SET flow_id=NULL, updated_at=datetime('now') WHERE flow_id=?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1e28c22e92a5d12d2232b33bdfeef2a6588ab0d025dee10a2bb2fec104a687f2"
+}

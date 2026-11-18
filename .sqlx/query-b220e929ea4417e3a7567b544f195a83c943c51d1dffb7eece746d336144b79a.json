@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT settings FROM plugin_settings WHERE plugin_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "settings",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b220e929ea4417e3a7567b544f195a83c943c51d1dffb7eece746d336144b79a"
+}

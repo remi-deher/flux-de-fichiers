@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT flow_id AS \"id!: String\", rowid AS \"rowid!: i64\", definition AS \"definition!: String\" FROM flow_versions",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "rowid!: i64",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "definition!: String",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1d5e4c953805489542a98399c1a4cfa65c52f668f7a173365ccd57fe8e5ce840"
+}

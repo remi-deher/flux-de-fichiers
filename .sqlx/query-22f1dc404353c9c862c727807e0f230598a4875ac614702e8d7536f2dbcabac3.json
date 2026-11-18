@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO worker_enrollment_requests (id, worker_name, worker_version, source_addr, secret_hash, status, created_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "22f1dc404353c9c862c727807e0f230598a4875ac614702e8d7536f2dbcabac3"
+}

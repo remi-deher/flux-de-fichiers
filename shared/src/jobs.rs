@@ -26,7 +26,7 @@ pub fn source_working_filename(source_name: &str) -> String {
     }
 }
 
-/// Statuts persistés par `jobs.status` (CHECK SQL : queued, running, succeeded, failed).
+/// Statuts persistés par `jobs.status` (CHECK SQL : queued, running, succeeded, failed, canceled).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::Type), sqlx(rename_all = "snake_case"))]
 #[serde(rename_all = "snake_case")]
@@ -35,6 +35,7 @@ pub enum JobStatus {
     Running,
     Succeeded,
     Failed,
+    Canceled,
 }
 
 impl JobStatus {
@@ -44,6 +45,7 @@ impl JobStatus {
             Self::Running => "running",
             Self::Succeeded => "succeeded",
             Self::Failed => "failed",
+            Self::Canceled => "canceled",
         }
     }
 }
@@ -63,6 +65,7 @@ impl FromStr for JobStatus {
             "running" => Ok(Self::Running),
             "succeeded" => Ok(Self::Succeeded),
             "failed" => Ok(Self::Failed),
+            "canceled" => Ok(Self::Canceled),
             _ => Err(()),
         }
     }
@@ -248,6 +251,8 @@ pub struct Job {
     /// Flow et version figés à la création de la tâche (aucun si pas de flow par défaut).
     pub flow_id: Option<String>,
     pub flow_version: Option<i64>,
+    #[serde(default)]
+    pub priority: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -266,6 +271,10 @@ pub struct JobEvent {
     pub error_code: Option<JobErrorCode>,
 }
 
+/// Priorité minimale et maximale admise sur une tâche.
+pub const JOB_PRIORITY_MIN: i32 = -100;
+pub const JOB_PRIORITY_MAX: i32 = 100;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct NewJob {
     pub source_name: String,
@@ -274,6 +283,58 @@ pub struct NewJob {
     pub library_id: Option<Uuid>,
     #[serde(default)]
     pub flow_id: Option<String>,
+    #[serde(default)]
+    pub priority: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobBatchAction {
+    Retry,
+    Cancel,
+    Delete,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobBatchRequest {
+    pub ids: Vec<Uuid>,
+    pub action: JobBatchAction,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobBatchResult {
+    pub updated: usize,
+    pub skipped: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateJobPriorityRequest {
+    pub priority: i32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryJobStats {
+    pub library_id: Option<Uuid>,
+    pub library_name: String,
+    pub succeeded_count: i64,
+    pub failed_count: i64,
+    pub source_bytes: i64,
+    pub output_bytes: i64,
+    pub saved_bytes: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobStorageStats {
+    pub total_jobs: i64,
+    pub succeeded_jobs: i64,
+    pub failed_jobs: i64,
+    pub canceled_jobs: i64,
+    pub total_source_bytes: i64,
+    pub total_output_bytes: i64,
+    pub saved_bytes: i64,
+    pub by_library: Vec<LibraryJobStats>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -288,6 +349,11 @@ impl Job {
         self.status == JobStatus::Failed
             && self.error_code == Some(JobErrorCode::LeaseExpired)
             && self.attempts < MAX_ATTEMPTS
+    }
+
+    /// Annulable à la main : tâche en attente ou en cours d'exécution.
+    pub fn is_cancelable(&self) -> bool {
+        matches!(self.status, JobStatus::Queued | JobStatus::Running)
     }
 }
 
@@ -317,6 +383,7 @@ mod tests {
             library_id: None,
             flow_id: None,
             flow_version: None,
+            priority: 0,
             created_at: now,
             updated_at: now,
         }

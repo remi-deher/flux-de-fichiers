@@ -6,6 +6,59 @@ use uuid::Uuid;
 
 pub const LIBRARY_NAME_MAX: usize = 80;
 pub const LIBRARY_PATH_MAX: usize = 512;
+pub const MAX_SCAN_INTERVAL_MINUTES: i32 = 7 * 24 * 60;
+
+/// Stratégie de publication du fichier produit pour une bibliothèque.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::Type), sqlx(rename_all = "snake_case"))]
+#[serde(rename_all = "snake_case")]
+pub enum LibraryOutputPolicy {
+    /// Place le résultat dans le dossier de sortie dédié (défaut).
+    #[default]
+    OutputDir,
+    /// Remplace la source en conservant une copie `.bak`.
+    ReplaceWithBackup,
+    /// Remplace directement le fichier source après validation.
+    ReplaceInPlace,
+}
+
+impl LibraryOutputPolicy {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OutputDir => "output_dir",
+            Self::ReplaceWithBackup => "replace_with_backup",
+            Self::ReplaceInPlace => "replace_in_place",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "output_dir" => Some(Self::OutputDir),
+            "replace_with_backup" => Some(Self::ReplaceWithBackup),
+            "replace_in_place" => Some(Self::ReplaceInPlace),
+            _ => None,
+        }
+    }
+}
+
+/// Règles d'automatisation et de filtrage d'une bibliothèque.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryAutomation {
+    /// `0` = scan manuel uniquement ; sinon intervalle en minutes.
+    #[serde(default)]
+    pub scan_interval_minutes: i32,
+    #[serde(default)]
+    pub last_scanned_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub include_extensions: Vec<String>,
+    #[serde(default)]
+    pub exclude_patterns: Vec<String>,
+    #[serde(default)]
+    pub min_file_bytes: u64,
+    #[serde(default)]
+    pub output_policy: LibraryOutputPolicy,
+}
 
 /// Accès d'un worker au dossier de la bibliothèque.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,25 +77,47 @@ pub struct LibraryWorkerPath {
     pub access: LibraryAccess,
 }
 
-/// Bibliothèque déclarée : un nom, un flux, des workers.
+/// Bibliothèque déclarée : un nom, un flux, des workers, et règles d'automatisation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Library {
     pub id: Uuid,
     pub name: String,
     pub flow_id: Option<String>,
     pub workers: Vec<LibraryWorkerPath>,
+    #[serde(default)]
+    pub scan_interval_minutes: i32,
+    #[serde(default)]
+    pub last_scanned_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub include_extensions: Vec<String>,
+    #[serde(default)]
+    pub exclude_patterns: Vec<String>,
+    #[serde(default)]
+    pub min_file_bytes: u64,
+    #[serde(default)]
+    pub output_policy: LibraryOutputPolicy,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 /// Création ou remplacement d'une bibliothèque.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct LibraryWrite {
     pub name: String,
     #[serde(default)]
     pub flow_id: Option<String>,
     #[serde(default)]
     pub workers: Vec<LibraryWorkerPath>,
+    #[serde(default)]
+    pub scan_interval_minutes: i32,
+    #[serde(default)]
+    pub include_extensions: Vec<String>,
+    #[serde(default)]
+    pub exclude_patterns: Vec<String>,
+    #[serde(default)]
+    pub min_file_bytes: u64,
+    #[serde(default)]
+    pub output_policy: LibraryOutputPolicy,
 }
 
 /// Raccourci vers une racine ou un point de montage détecté sur un worker.
@@ -116,6 +191,66 @@ const GENERIC_MOUNT_NAMES: &[&str] = &[
     "mnt", "media", "medias", "data", "input", "srv", "volumes", "var", "tmp", "home",
 ];
 
+/// Correspondance simple d'un motif avec jokers `*` (insensible à la casse).
+pub fn wildcard_matches_ci(pattern: &str, text: &str) -> bool {
+    let pat = pattern.trim().to_ascii_lowercase();
+    if pat.is_empty() {
+        return false;
+    }
+    let hay = text.to_ascii_lowercase();
+    if !pat.contains('*') {
+        return hay.contains(&pat);
+    }
+    let parts: Vec<&str> = pat.split('*').collect();
+    let mut cursor = 0_usize;
+    for (idx, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if idx == 0 && !pat.starts_with('*') {
+            if !hay[cursor..].starts_with(part) {
+                return false;
+            }
+            cursor += part.len();
+        } else if idx == parts.len() - 1 && !pat.ends_with('*') {
+            return hay[cursor..].ends_with(part);
+        } else if let Some(pos) = hay[cursor..].find(part) {
+            cursor += pos + part.len();
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+/// Vérifie si un fichier `(nom, taille)` satisfait les règles d'inclusion/exclusion d'une bibliothèque.
+pub fn library_accepts_file(library: &Library, file_name: &str, bytes: u64) -> bool {
+    if bytes < library.min_file_bytes {
+        return false;
+    }
+    if !library.include_extensions.is_empty() {
+        let ext = file_name
+            .rsplit('.')
+            .next()
+            .filter(|_| file_name.contains('.'))
+            .map(|s| s.trim().trim_start_matches('.').to_ascii_lowercase())
+            .unwrap_or_default();
+        let allowed = library.include_extensions.iter().any(|candidate| {
+            candidate
+                .trim()
+                .trim_start_matches('.')
+                .eq_ignore_ascii_case(&ext)
+        });
+        if !allowed {
+            return false;
+        }
+    }
+    !library
+        .exclude_patterns
+        .iter()
+        .any(|pat| wildcard_matches_ci(pat, file_name))
+}
+
 /// Indique si l'extension (sans le point initial, insensible à la casse) correspond à un média ou sous-titre.
 pub fn is_media_extension(ext: &str) -> bool {
     let normalized = ext.trim().to_ascii_lowercase();
@@ -171,5 +306,30 @@ mod tests {
         assert_eq!(suggested_library_name_from_path("films"), None);
         let overlong = format!("/mnt/{}", "a".repeat(LIBRARY_NAME_MAX + 1));
         assert_eq!(suggested_library_name_from_path(&overlong), None);
+    }
+
+    #[test]
+    fn library_rules_filter_extensions_patterns_and_min_size() {
+        let now = Utc::now();
+        let lib = Library {
+            id: Uuid::nil(),
+            name: "Films".into(),
+            flow_id: None,
+            workers: Vec::new(),
+            scan_interval_minutes: 15,
+            last_scanned_at: None,
+            include_extensions: vec!["mkv".into(), ".mp4".into()],
+            exclude_patterns: vec!["*sample*".into(), "trailer".into()],
+            min_file_bytes: 1_000,
+            output_policy: LibraryOutputPolicy::OutputDir,
+            created_at: now,
+            updated_at: now,
+        };
+        assert!(library_accepts_file(&lib, "Film.2026.MKV", 5_000));
+        assert!(library_accepts_file(&lib, "Episode.mp4", 1_000));
+        assert!(!library_accepts_file(&lib, "Film.avi", 5_000));
+        assert!(!library_accepts_file(&lib, "Film.sample.mkv", 5_000));
+        assert!(!library_accepts_file(&lib, "Movie-Trailer.mp4", 5_000));
+        assert!(!library_accepts_file(&lib, "Tiny.mkv", 999));
     }
 }

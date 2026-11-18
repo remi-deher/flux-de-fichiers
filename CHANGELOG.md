@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.46.0...v0.47.0) (2026-11-18)
+
+
+### Features
+
+* **ai:** réponse de l'assistant au fil de l'écriture (empilée sur [#296](https://github.com/remi-deher/flux-de-fichiers/issues/296)) ([f6db212](https://github.com/remi-deher/flux-de-fichiers/commit/f6db212a0b647cb9fd76fbcc51e5dfc9ee94abcf))
+
 ## [0.46.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.45.1...v0.46.0) (2026-11-18)
 
 

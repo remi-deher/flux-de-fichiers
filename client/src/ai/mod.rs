@@ -258,6 +258,8 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
     let steps = RwSignal::new(Vec::<run::LiveStep>::new());
     let run_id = RwSignal::new(None::<String>);
     let confirmation = RwSignal::new(None::<run::PendingAction>);
+    // Réponse en cours d'écriture, affichée au fil de l'eau.
+    let streamed = RwSignal::new(String::new());
     // Conversation de l'historique en cours (créée par le central au premier échange).
     let conversation_id = RwSignal::new(None::<String>);
     let history_open = RwSignal::new(false);
@@ -266,6 +268,7 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
     // Termine la conversation en cours (réponse, échec ou perte du flux).
     let finish = move |outcome: Result<flux_shared::ai::AiChatResponse, String>| {
         steps.set(Vec::new());
+        streamed.set(String::new());
         confirmation.set(None);
         run_id.set(None);
         pending.set(false);
@@ -348,6 +351,9 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
                         AiRunEvent::Done { response } => finish(Ok(response)),
                         AiRunEvent::Failed { message } => finish(Err(message)),
                         progress => {
+                            streamed.update(|text| {
+                                *text = run::streamed_after(std::mem::take(text), &progress);
+                            });
                             confirmation.update(|current| {
                                 *current = run::pending_after(current.take(), &progress);
                             });
@@ -597,13 +603,24 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
                                 {pending.get().then(|| view! {
                                     <article class="ai-chat__msg ai-chat__msg--assistant">
                                         <span class="ai-chat__msg-role">"Assistant"</span>
-                                        <p class="text-dim text-sm">
-                                            {move || if confirmation.get().is_some() {
-                                                "En attente de votre autorisation…"
+                                        {move || {
+                                            let text = streamed.get();
+                                            if text.trim().is_empty() {
+                                                view! {
+                                                    <p class="text-dim text-sm">
+                                                        {if confirmation.get().is_some() {
+                                                            "En attente de votre autorisation…"
+                                                        } else {
+                                                            "Analyse en cours…"
+                                                        }}
+                                                    </p>
+                                                }.into_any()
                                             } else {
-                                                "Analyse en cours…"
-                                            }}
-                                        </p>
+                                                view! {
+                                                    <div class="ai-chat__msg-body">{render_blocks(&text)}</div>
+                                                }.into_any()
+                                            }
+                                        }}
                                         {move || confirmation.get().map(|action| view! {
                                             <div class="diagnostic-box" role="alertdialog" aria-label="Autoriser l'action">
                                                 <div>

@@ -8,6 +8,7 @@ mod preview;
 mod provider;
 pub mod run;
 pub mod settings;
+mod streaming;
 pub mod usage;
 
 use crate::net_policy::OutboundPolicy;
@@ -45,6 +46,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use streaming::DeltaSink;
 
 const MAX_TOOL_RESULT_CHARS: usize = 12_000;
 const MAX_TOOL_CALLS_PER_ROUND: usize = 8;
@@ -394,9 +396,11 @@ async fn timed_turn(
     entries: &[ConversationEntry],
     tools: &[McpTool],
     policy: OutboundPolicy,
+    on_delta: DeltaSink<'_>,
 ) -> Result<ModelTurnResponse, String> {
     let started = Instant::now();
-    let result = provider::complete_turn(endpoint, system_prompt, entries, tools, policy).await;
+    let result =
+        provider::complete_turn(endpoint, system_prompt, entries, tools, policy, on_delta).await;
     match &result {
         Ok(_) => state
             .ai_health
@@ -490,18 +494,37 @@ async fn converse(
         request.context.as_ref(),
     );
 
+    // Le texte n'est diffusé que pour un run : seul un run a quelqu'un qui l'écoute.
+    let stream_text = |text: &str| {
+        publish(
+            run,
+            AiRunEvent::Delta {
+                text: text.to_owned(),
+            },
+        );
+    };
+    let on_delta: DeltaSink<'_> = run.map(|_| &stream_text as &(dyn Fn(&str) + Send + Sync));
+
     let mut entries = provider::initial_entries(&request.messages);
     let mut traces: Vec<AiToolCallTrace> = Vec::new();
     let mut rounds_used: u8 = 0;
 
     for _round in 0..ai_cfg.max_tool_rounds {
         rounds_used += 1;
-        let turn = timed_turn(state, &endpoint, &system_prompt, &entries, &tools, policy)
-            .await
-            .map_err(|err| {
-                tracing::warn!(provider = %ai_cfg.provider, error = %err, "échec d'appel LLM");
-                AppError::Internal
-            })?;
+        let turn = timed_turn(
+            state,
+            &endpoint,
+            &system_prompt,
+            &entries,
+            &tools,
+            policy,
+            on_delta,
+        )
+        .await
+        .map_err(|err| {
+            tracing::warn!(provider = %ai_cfg.provider, error = %err, "échec d'appel LLM");
+            AppError::Internal
+        })?;
 
         match turn {
             ModelTurnResponse::FinalText(reply) => {
@@ -552,12 +575,20 @@ async fn converse(
 
     // Dernier tour sans outil pour obtenir une synthèse finale si le budget de tours est épuisé.
     rounds_used += 1;
-    let final_reply = timed_turn(state, &endpoint, &system_prompt, &entries, &[], policy)
-        .await
-        .map_err(|err| {
-            tracing::warn!(provider = %ai_cfg.provider, error = %err, "échec de synthèse finale LLM");
-            AppError::Internal
-        })?;
+    let final_reply = timed_turn(
+        state,
+        &endpoint,
+        &system_prompt,
+        &entries,
+        &[],
+        policy,
+        on_delta,
+    )
+    .await
+    .map_err(|err| {
+        tracing::warn!(provider = %ai_cfg.provider, error = %err, "échec de synthèse finale LLM");
+        AppError::Internal
+    })?;
     let reply = match final_reply {
         ModelTurnResponse::FinalText(text) => text,
         ModelTurnResponse::ToolCalls {
@@ -940,6 +971,7 @@ async fn execute_assistant_tool(
 mod tests {
     use super::*;
     use crate::{api::router, api_keys, config::Config, repository};
+    use axum::response::IntoResponse;
     use axum::{
         body::Body,
         http::{Request, StatusCode},
@@ -1946,6 +1978,116 @@ mod tests {
         // Le travail de fond passe par les quotas.
         let usage_today = usage::requests_today(&state.pool, "system:diagnosis").await?;
         assert_eq!(usage_today.1, 1);
+
+        server_task.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn runs_publish_the_reply_as_it_is_written_and_chat_stays_whole() -> anyhow::Result<()> {
+        let mock_llm = axum::Router::new().route(
+            "/v1/chat/completions",
+            post(|Json(body): Json<Value>| async move {
+                let pieces = [
+                    "Bonjour ",
+                    "tout ",
+                    "le monde, voici une réponse assez longue pour être découpée.",
+                ];
+                if body["stream"] == true {
+                    let sse: String = pieces
+                        .iter()
+                        .map(|piece| {
+                            format!(
+                                "data: {}\n\n",
+                                json!({ "choices": [{ "delta": { "content": piece } }] })
+                            )
+                        })
+                        .chain(std::iter::once("data: [DONE]\n\n".to_owned()))
+                        .collect();
+                    ([("content-type", "text/event-stream")], sse).into_response()
+                } else {
+                    Json(json!({ "choices": [{ "message": {
+                        "role": "assistant", "content": pieces.concat()
+                    }}]}))
+                    .into_response()
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let mock_addr = listener.local_addr()?;
+        let server_task = tokio::spawn(async move {
+            let _ = axum::serve(listener, mock_llm).await;
+        });
+
+        let (app, state, _dir) = test_app().await?;
+        let admin = issue_key_header(&state.pool, "stream-admin", Role::Admin).await?;
+        let call = |method: &'static str, uri: String, body: Body| {
+            let request = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("authorization", &admin)
+                .header("content-type", "application/json")
+                .body(body);
+            let app = app.clone();
+            async move { anyhow::Ok(app.oneshot(request?).await?) }
+        };
+        let settings = Body::from(serde_json::to_vec(&UpdateAiSettingsRequest {
+            enabled: true,
+            provider: AiProvider::OpenAiCompatible,
+            base_url: format!("http://{mock_addr}/v1"),
+            model: "mock-model".into(),
+            api_key: Some("sk-secret-value".into()),
+            allow_write_tools: false,
+            max_tool_rounds: 2,
+        })?);
+        assert_eq!(
+            call("PUT", "/api/v1/ai/settings".into(), settings)
+                .await?
+                .status(),
+            StatusCode::OK
+        );
+        let question = || -> anyhow::Result<Body> {
+            Ok(Body::from(serde_json::to_vec(&AiChatRequest {
+                messages: vec![AiChatMessage {
+                    role: AiChatRole::User,
+                    content: "Bonjour".into(),
+                }],
+                context_hint: None,
+                context: None,
+                conversation_id: None,
+            })?))
+        };
+        let expected = "Bonjour tout le monde, voici une réponse assez longue pour être découpée.";
+
+        let started = call("POST", "/api/v1/ai/runs".into(), question()?).await?;
+        let started: AiRunStarted =
+            serde_json::from_slice(&axum::body::to_bytes(started.into_body(), 4096).await?)?;
+        let stream = call(
+            "GET",
+            format!("/api/v1/ai/runs/{}/events", started.run_id),
+            Body::empty(),
+        )
+        .await?;
+        let mut stream = stream.into_body().into_data_stream();
+        let events = read_events(&mut stream, |_| false).await?;
+        let streamed: String = events
+            .iter()
+            .filter_map(|event| match event {
+                AiRunEvent::Delta { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(streamed, expected);
+        assert!(matches!(
+            events.last(),
+            Some(AiRunEvent::Done { response }) if response.reply == expected
+        ));
+
+        // Le chat sans run n'a personne à qui diffuser : réponse d'un bloc, sans flux.
+        let chat = call("POST", "/api/v1/ai/chat".into(), question()?).await?;
+        let chat: AiChatResponse =
+            serde_json::from_slice(&axum::body::to_bytes(chat.into_body(), 65_536).await?)?;
+        assert_eq!(chat.reply, expected);
 
         server_task.abort();
         Ok(())

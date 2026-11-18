@@ -452,6 +452,9 @@ pub struct AiActionDecision {
     rename_all_fields = "camelCase"
 )]
 pub enum AiRunEvent {
+    /// Morceau de la réponse en cours d'écriture ; les morceaux d'un tour qui finit par un appel
+    /// d'outil sont à oublier, la réponse finale est celle de `Done`.
+    Delta { text: String },
     /// Un outil va être exécuté.
     ToolStarted { tool_name: String },
     /// Un outil a fini (succès, erreur ou refus).

@@ -42,6 +42,17 @@ pub fn pending_after(current: Option<PendingAction>, event: &AiRunEvent) -> Opti
     }
 }
 
+/// Texte affiché pendant la réponse après `event` : il s'allonge avec les morceaux reçus et repart
+/// de zéro quand un outil démarre (le texte d'un tour qui appelle un outil n'est pas la réponse).
+pub fn streamed_after(mut current: String, event: &AiRunEvent) -> String {
+    match event {
+        AiRunEvent::Delta { text } => current.push_str(text),
+        AiRunEvent::ToolStarted { .. } => current.clear(),
+        _ => {}
+    }
+    current
+}
+
 /// Étape d'outil affichée pendant la réponse : en cours tant que `trace` est vide.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LiveStep {
@@ -68,7 +79,8 @@ pub fn apply_event(steps: &mut Vec<LiveStep>, event: &AiRunEvent) {
                 }),
             }
         }
-        AiRunEvent::Confirmation { .. }
+        AiRunEvent::Delta { .. }
+        | AiRunEvent::Confirmation { .. }
         | AiRunEvent::ActionResolved { .. }
         | AiRunEvent::Done { .. }
         | AiRunEvent::Failed { .. } => {}
@@ -192,6 +204,25 @@ mod tests {
             steps[0].trace.as_ref().map(|t| t.outcome.as_str()),
             Some("error")
         );
+    }
+
+    #[test]
+    fn streamed_text_grows_with_deltas_and_restarts_when_a_tool_starts() {
+        let delta = |text: &str| AiRunEvent::Delta { text: text.into() };
+        let mut text = String::new();
+        for event in [delta("Je "), delta("regarde")] {
+            text = streamed_after(text, &event);
+        }
+        assert_eq!(text, "Je regarde");
+        text = streamed_after(
+            text,
+            &AiRunEvent::ToolStarted {
+                tool_name: "list_jobs".into(),
+            },
+        );
+        assert!(text.is_empty());
+        text = streamed_after(text, &delta("Voici"));
+        assert_eq!(text, "Voici");
     }
 
     #[test]

@@ -123,6 +123,14 @@ est devant l'écran) ; le MCP externe garde « pas de file d'approbation » (dé
    autre), un compte a au plus 3 runs actifs, et un client qui se reconnecte reprend après
    `Last-Event-ID`. Un `GET` (`EventSource`) évite d'écrire un lecteur de flux `fetch` en WASM.
    `POST /api/v1/ai/chat` reste disponible et partage la même boucle.
+   **Texte au fil de l'eau.** Pour un run, la requête au fournisseur est faite en mode flux et le
+   texte arrive en évènements `delta` (regroupés : environ 24 caractères ou 60 ms). Chaque
+   fournisseur a son format (SSE OpenAI et Anthropic, JSON ligne par ligne d'Ollama, SSE
+   « responses » de ChatGPT) : un assembleur (`src/ai/streaming.rs`) relit le flux et reconstitue le
+   corps de la réponse non diffusée, de sorte que l'analyse des appels d'outils reste unique. Un
+   serveur qui ignore `stream` et répond en JSON est lu d'un bloc. Le texte d'un tour qui se
+   termine par un appel d'outil est oublié par l'interface ; la réponse finale est celle de `done`.
+   `/ai/chat` n'a personne à qui diffuser et reste d'un bloc.
 2. **Contexte automatique.** Le client envoie un contexte typé (`AiContext` : écran, type et
    identifiant de l'objet ouvert) à la place d'une phrase libre ; le serveur le met dans l'invite
    système et demande de lire l'objet par les outils. Aucun contenu n'est joint côté client.

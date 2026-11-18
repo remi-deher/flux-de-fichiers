@@ -3,6 +3,9 @@
 //! Mutualise l'épinglage DNS anti-SSRF (`net_policy`) et normalise les échanges multi-tours
 //! avec appels d'outils (`function calling`).
 
+use super::streaming::{
+    AnthropicStream, DeltaSink, OllamaStream, OpenAiStream, ResponsesStream, read_response,
+};
 use crate::{
     error::{AppError, AppResult},
     mcp::protocol::McpTool,
@@ -126,7 +129,7 @@ fn apply_bearer_if_present(
     }
 }
 
-fn truncate_error(raw: &str) -> String {
+pub(super) fn truncate_error(raw: &str) -> String {
     let clean: String = raw
         .lines()
         .map(str::trim)
@@ -433,19 +436,20 @@ pub async fn complete_turn(
     entries: &[ConversationEntry],
     tools: &[McpTool],
     policy: OutboundPolicy,
+    on_delta: DeltaSink<'_>,
 ) -> Result<ModelTurnResponse, String> {
     match endpoint.provider {
         AiProvider::Ollama => {
-            complete_ollama(endpoint, system_prompt, entries, tools, policy).await
+            complete_ollama(endpoint, system_prompt, entries, tools, policy, on_delta).await
         }
         AiProvider::OpenAiCompatible => {
-            complete_openai(endpoint, system_prompt, entries, tools, policy).await
+            complete_openai(endpoint, system_prompt, entries, tools, policy, on_delta).await
         }
         AiProvider::Anthropic => {
-            complete_anthropic(endpoint, system_prompt, entries, tools, policy).await
+            complete_anthropic(endpoint, system_prompt, entries, tools, policy, on_delta).await
         }
         AiProvider::ChatGptOauth => {
-            complete_chatgpt(endpoint, system_prompt, entries, tools, policy).await
+            complete_chatgpt(endpoint, system_prompt, entries, tools, policy, on_delta).await
         }
     }
 }
@@ -546,6 +550,7 @@ async fn complete_ollama(
     entries: &[ConversationEntry],
     tools: &[McpTool],
     policy: OutboundPolicy,
+    on_delta: DeltaSink<'_>,
 ) -> Result<ModelTurnResponse, String> {
     let target = join_base(&endpoint.base_url, "/api/chat");
     let (url, client) = pinned_client_for(&target, policy, LLM_REQUEST_TIMEOUT)
@@ -554,7 +559,7 @@ async fn complete_ollama(
     let mut payload = json!({
         "model": endpoint.model,
         "messages": build_ollama_messages(system_prompt, entries),
-        "stream": false,
+        "stream": on_delta.is_some(),
     });
     if !tools.is_empty() {
         payload["tools"] = Value::Array(openai_tool_definitions(tools));
@@ -566,20 +571,14 @@ async fn complete_ollama(
             truncate_error(&err.to_string())
         )
     })?;
-    let status = resp.status();
-    let body: Value = resp.json().await.map_err(|err| {
-        format!(
-            "Réponse Ollama invalide : {}",
-            truncate_error(&err.to_string())
-        )
-    })?;
-    if !status.is_success() {
-        return Err(format!(
-            "Ollama HTTP {} : {}",
-            status.as_u16(),
-            truncate_error(&body.to_string())
-        ));
-    }
+    let body = read_response(
+        resp,
+        "Ollama",
+        "Réponse Ollama invalide",
+        on_delta.map(|_| OllamaStream::default()),
+        on_delta,
+    )
+    .await?;
     let message = body
         .get("message")
         .ok_or("Champ `message` absent d'Ollama")?;
@@ -625,6 +624,7 @@ async fn complete_openai(
     entries: &[ConversationEntry],
     tools: &[McpTool],
     policy: OutboundPolicy,
+    on_delta: DeltaSink<'_>,
 ) -> Result<ModelTurnResponse, String> {
     let target = openai_endpoint(&endpoint.base_url, "chat/completions");
     let (url, client) = pinned_client_for(&target, policy, LLM_REQUEST_TIMEOUT)
@@ -634,6 +634,9 @@ async fn complete_openai(
         "model": endpoint.model,
         "messages": build_openai_messages(system_prompt, entries),
     });
+    if on_delta.is_some() {
+        payload["stream"] = json!(true);
+    }
     if !tools.is_empty() {
         payload["tools"] = Value::Array(openai_tool_definitions(tools));
         payload["tool_choice"] = json!("auto");
@@ -645,20 +648,14 @@ async fn complete_openai(
             truncate_error(&err.to_string())
         )
     })?;
-    let status = resp.status();
-    let body: Value = resp.json().await.map_err(|err| {
-        format!(
-            "Réponse OpenAI invalide : {}",
-            truncate_error(&err.to_string())
-        )
-    })?;
-    if !status.is_success() {
-        return Err(format!(
-            "Fournisseur HTTP {} : {}",
-            status.as_u16(),
-            truncate_error(&body.to_string())
-        ));
-    }
+    let body = read_response(
+        resp,
+        "Fournisseur",
+        "Réponse OpenAI invalide",
+        on_delta.map(|_| OpenAiStream::default()),
+        on_delta,
+    )
+    .await?;
     let message = body
         .get("choices")
         .and_then(Value::as_array)
@@ -759,6 +756,7 @@ async fn complete_anthropic(
     entries: &[ConversationEntry],
     tools: &[McpTool],
     policy: OutboundPolicy,
+    on_delta: DeltaSink<'_>,
 ) -> Result<ModelTurnResponse, String> {
     let key = endpoint
         .api_key
@@ -776,6 +774,9 @@ async fn complete_anthropic(
         "max_tokens": ANTHROPIC_MAX_TOKENS,
         "messages": build_anthropic_messages(entries),
     });
+    if on_delta.is_some() {
+        payload["stream"] = json!(true);
+    }
     if !tools.is_empty() {
         payload["tools"] = Value::Array(anthropic_tool_definitions(tools));
     }
@@ -792,20 +793,14 @@ async fn complete_anthropic(
                 truncate_error(&err.to_string())
             )
         })?;
-    let status = resp.status();
-    let body: Value = resp.json().await.map_err(|err| {
-        format!(
-            "Réponse Anthropic invalide : {}",
-            truncate_error(&err.to_string())
-        )
-    })?;
-    if !status.is_success() {
-        return Err(format!(
-            "Anthropic HTTP {} : {}",
-            status.as_u16(),
-            truncate_error(&body.to_string())
-        ));
-    }
+    let body = read_response(
+        resp,
+        "Anthropic",
+        "Réponse Anthropic invalide",
+        on_delta.map(|_| AnthropicStream::default()),
+        on_delta,
+    )
+    .await?;
     let blocks = body
         .get("content")
         .and_then(Value::as_array)
@@ -988,6 +983,7 @@ async fn complete_chatgpt(
     entries: &[ConversationEntry],
     tools: &[McpTool],
     policy: OutboundPolicy,
+    on_delta: DeltaSink<'_>,
 ) -> Result<ModelTurnResponse, String> {
     let token = endpoint
         .api_key
@@ -1026,21 +1022,15 @@ async fn complete_chatgpt(
             truncate_error(&err.to_string())
         )
     })?;
-    let status = resp.status();
-    let body = resp.text().await.map_err(|err| {
-        format!(
-            "Réponse ChatGPT illisible : {}",
-            truncate_error(&err.to_string())
-        )
-    })?;
-    if !status.is_success() {
-        return Err(format!(
-            "ChatGPT HTTP {} : {}",
-            status.as_u16(),
-            truncate_error(&body)
-        ));
-    }
-    parse_responses_sse(&body)
+    let body = read_response(
+        resp,
+        "ChatGPT",
+        "Réponse ChatGPT illisible",
+        Some(ResponsesStream::default()),
+        on_delta,
+    )
+    .await?;
+    parse_responses_sse(body.as_str().unwrap_or_default())
 }
 
 #[cfg(test)]

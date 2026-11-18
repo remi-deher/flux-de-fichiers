@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.45.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.45.0...v0.45.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **version:** afficher la version de la release et lister les modèles IA proposés ([cdb0cdd](https://github.com/remi-deher/flux-de-fichiers/commit/cdb0cdd6d027b5da0a46636b247dd552769f9d98))
+* **version:** afficher la version de la release et lister les modèles IA proposés ([d2296d1](https://github.com/remi-deher/flux-de-fichiers/commit/d2296d182dc195fe7a2493e55bc96c2362d5df0a))
+
 ## [0.45.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.44.0...v0.45.0) (2026-11-18)
 
 

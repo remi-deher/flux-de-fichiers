@@ -1,18 +1,20 @@
 //! Assistant IA intégré au poste de pilotage (tiroir global, suggestions contextuelles et historique).
 
+mod run;
+
 use crate::api;
 use crate::route::{Route, use_router};
 use crate::ui::{Drawer, Icon, IconName, Tag, TagTone};
 use flux_shared::Permission;
 use flux_shared::ai::{
-    AiChatMessage, AiChatRequest, AiChatResponse, AiChatRole, AiClientStatus, AiToolCallTrace,
+    AiChatMessage, AiChatRequest, AiChatRole, AiClientStatus, AiContext, AiContextKind,
+    AiContextObject, AiRunEvent, AiToolCallTrace,
 };
 use flux_shared::session::Me;
 use leptos::ev;
 use leptos::prelude::*;
 
 const AI_STATUS_PATH: &str = "/api/v1/ai/status";
-const AI_CHAT_PATH: &str = "/api/v1/ai/chat";
 const HEADER_ICON_SIZE: u32 = 14;
 
 /// État global du tiroir assistant IA, partagé via le contexte Leptos sur le central.
@@ -192,10 +194,18 @@ pub fn starter_prompts(route: &Route) -> Vec<(&'static str, String)> {
     }
 }
 
-fn route_context_hint(route: &Route) -> String {
-    match route {
-        Route::FlowEditor(id) => format!("Écran actif : éditeur du flux `{id}` ({})", route.path()),
-        _ => format!("Écran actif : {}", route.path()),
+/// Écran et objet ouverts, joints à chaque question pour que l'assistant sache de quoi on parle.
+fn route_context(route: &Route) -> AiContext {
+    let object = match route {
+        Route::FlowEditor(id) => Some(AiContextObject {
+            kind: AiContextKind::Flow,
+            id: id.clone(),
+        }),
+        _ => None,
+    };
+    AiContext {
+        screen: route.path(),
+        object,
     }
 }
 
@@ -243,10 +253,33 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
         async move { api::get::<AiClientStatus>(AI_STATUS_PATH).await }
     });
 
-    let send_action = Action::new_local(move |(text, hint): &(String, Option<String>)| {
+    let pending = RwSignal::new(false);
+    let steps = RwSignal::new(Vec::<run::LiveStep>::new());
+    let run_id = RwSignal::new(None::<String>);
+
+    // Termine la conversation en cours (réponse, échec ou perte du flux).
+    let finish = move |outcome: Result<flux_shared::ai::AiChatResponse, String>| {
+        steps.set(Vec::new());
+        run_id.set(None);
+        pending.set(false);
+        match outcome {
+            Ok(reply) => messages.update(|list| {
+                list.push(TimelineItem {
+                    role: AiChatRole::Assistant,
+                    content: reply.reply,
+                    tool_calls: reply.tool_calls,
+                });
+            }),
+            Err(message) => error_msg.set(Some(message)),
+        }
+    };
+
+    let send = move |text: String, hint: Option<String>| {
         let user_text = text.trim().to_owned();
-        let hint = hint.clone();
-        let history: Vec<AiChatMessage> = messages.with_untracked(|items| {
+        if pending.get_untracked() || user_text.is_empty() {
+            return;
+        }
+        let mut wire_messages: Vec<AiChatMessage> = messages.with_untracked(|items| {
             items
                 .iter()
                 .map(|item| AiChatMessage {
@@ -255,71 +288,87 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
                 })
                 .collect()
         });
+        wire_messages.push(AiChatMessage {
+            role: AiChatRole::User,
+            content: user_text.clone(),
+        });
         messages.update(|list| {
             list.push(TimelineItem {
                 role: AiChatRole::User,
-                content: user_text.clone(),
+                content: user_text,
                 tool_calls: Vec::new(),
             });
         });
         error_msg.set(None);
-        let mut wire_messages = history;
-        wire_messages.push(AiChatMessage {
-            role: AiChatRole::User,
-            content: user_text,
-        });
-        let req = AiChatRequest {
+        pending.set(true);
+        let request = AiChatRequest {
             messages: wire_messages,
             context_hint: hint,
+            context: Some(route_context(&router.current())),
         };
-        async move { api::post::<AiChatRequest, AiChatResponse>(AI_CHAT_PATH, Some(&req)).await }
-    });
-
-    Effect::new(move |_| {
-        if let Some(result) = send_action.value().get() {
-            match result {
-                Ok(reply) => {
-                    messages.update(|list| {
-                        list.push(TimelineItem {
-                            role: AiChatRole::Assistant,
-                            content: reply.reply,
-                            tool_calls: reply.tool_calls,
-                        });
-                    });
-                }
+        leptos::task::spawn_local(async move {
+            let id = match run::start(&request).await {
+                Ok(id) => id,
                 Err(err) => {
                     let message = if err.code() == Some("conflict") {
                         "L'assistant IA n'est pas encore activé ou configuré.".to_owned()
                     } else {
                         err.message()
                     };
-                    error_msg.set(Some(message));
+                    finish(Err(message));
+                    return;
                 }
-            }
+            };
+            run_id.set(Some(id.clone()));
+            let current = id.clone();
+            let is_current =
+                move || run_id.try_get_untracked().flatten().as_deref() == Some(&current);
+            let lost_is_current = is_current.clone();
+            run::follow(
+                &id,
+                move |event| {
+                    if !is_current() {
+                        return;
+                    }
+                    match event {
+                        AiRunEvent::Done { response } => finish(Ok(response)),
+                        AiRunEvent::Failed { message } => finish(Err(message)),
+                        progress => steps.update(|list| run::apply_event(list, &progress)),
+                    }
+                },
+                move || {
+                    if lost_is_current() {
+                        finish(Err(
+                            "Connexion à la conversation perdue : réessayez.".to_owned()
+                        ));
+                    }
+                },
+            );
+        });
+    };
+
+    let stop = move |_| {
+        if let Some(id) = run_id.get_untracked() {
+            leptos::task::spawn_local(async move { run::cancel(&id).await });
         }
-    });
+    };
 
     Effect::new(move |_| {
         if state.open.get()
             && let Some((prompt, custom_hint)) = state.pending.get()
         {
             state.pending.set(None);
-            let hint = custom_hint.or_else(|| Some(route_context_hint(&router.current())));
-            send_action.dispatch((prompt, hint));
+            send(prompt, custom_hint);
         }
     });
 
     let submit_current = move || {
-        if send_action.pending().get_untracked() {
-            return;
-        }
         let text = input.get_untracked();
         if text.trim().is_empty() {
             return;
         }
         input.set(String::new());
-        let hint = Some(route_context_hint(&router.current()));
-        send_action.dispatch((text, hint));
+        send(text, None);
     };
 
     let header_actions = view! {
@@ -414,11 +463,8 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
                                 <button
                                     type="button"
                                     class="ai-chat__chip"
-                                    disabled=move || !is_ready || send_action.pending().get()
-                                    on:click=move |_| {
-                                        let hint = Some(route_context_hint(&router.current()));
-                                        send_action.dispatch((prompt_copy.clone(), hint));
-                                    }
+                                    disabled=move || !is_ready || pending.get()
+                                    on:click=move |_| send(prompt_copy.clone(), None)
                                 >
                                     {label}
                                 </button>
@@ -430,7 +476,7 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
                 <div class="ai-chat__messages" role="log" aria-live="polite">
                     {move || {
                         let items = messages.get();
-                        if items.is_empty() && !send_action.pending().get() {
+                        if items.is_empty() && !pending.get() {
                             return view! {
                                 <p class="text-dim text-sm">
                                     "Posez une question sur vos tâches, flux, bibliothèques ou workers."
@@ -469,10 +515,24 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
                                         </article>
                                     }
                                 }).collect_view()}
-                                {send_action.pending().get().then(|| view! {
+                                {pending.get().then(|| view! {
                                     <article class="ai-chat__msg ai-chat__msg--assistant">
                                         <span class="ai-chat__msg-role">"Assistant"</span>
                                         <p class="text-dim text-sm">"Analyse en cours…"</p>
+                                        <div class="ai-chat__tools" aria-label="Outils en cours">
+                                            {move || steps.get().into_iter().map(|step| {
+                                                let (state_label, is_err) = match &step.trace {
+                                                    None => ("en cours…".to_owned(), false),
+                                                    Some(t) => (format!("{} · {} ms", t.outcome, t.duration_ms), t.outcome != "ok"),
+                                                };
+                                                view! {
+                                                    <span class="ai-chat__tool-pill" class:is-error=is_err>
+                                                        <span>{step.tool_name}</span>
+                                                        <span>{state_label}</span>
+                                                    </span>
+                                                }
+                                            }).collect_view()}
+                                        </div>
                                     </article>
                                 })}
                             </>
@@ -495,7 +555,7 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
                         class="form-input ai-chat__textarea"
                         placeholder="Ex. : Pourquoi la dernière tâche a échoué ?"
                         disabled=move || {
-                            send_action.pending().get()
+                            pending.get()
                                 || !status_resource
                                     .get()
                                     .and_then(Result::ok)
@@ -511,11 +571,16 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
                         }
                     ></textarea>
                     <div class="cluster-end">
+                        <Show when=move || pending.get()>
+                            <button type="button" class="btn btn-secondary btn-sm" on:click=stop>
+                                "Arrêter"
+                            </button>
+                        </Show>
                         <button
                             type="submit"
                             class="btn btn-primary btn-sm"
                             disabled=move || {
-                                send_action.pending().get()
+                                pending.get()
                                     || input.get().trim().is_empty()
                                     || !status_resource
                                         .get()
@@ -523,7 +588,7 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
                                         .is_some_and(|st| st.available)
                             }
                         >
-                            {move || if send_action.pending().get() { "Réflexion…" } else { "Envoyer" }}
+                            {move || if pending.get() { "Réflexion…" } else { "Envoyer" }}
                         </button>
                     </div>
                 </form>

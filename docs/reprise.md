@@ -165,13 +165,14 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 - [x] Repli automatique GPU → CPU quand l'encodeur matériel échoue (#133).
 - [x] Moteur 100 % déclaratif par contrats ([ADR 0017](adr/0017-moteur-generique-et-contrats.md)) : `OperationRegistry`, exécuteurs génériques `binary_runner` / `http_runner` et `script_runner` (`kind: "script"`, routage `nextPort`, `workingFile`, fusion `mediaInfo`, `Skip`, `stopPipeline`), installation déclarative de packs. Côté `flux-de-fichiers-plugins` : schémas, `build_index.py`, `check_catalogue.py` et `scaffold.py script` alignés sur `type: "script"`.
 - [x] Chiffrement par clé de worker et par bail des secrets transmis sur `/api/v1/claims` (`Claim.sealed_secrets`, dérivation `SecretBox::for_worker_lease` liée à `(job_id, lease_epoch)`).
-- [ ] Requêtes SQL vérifiées à la compilation (`sqlx::query!` + `.sqlx`) : non activé car `sqlx-cli` est absent localement et le `Dockerfile` construit sans base active ni cache `.sqlx/` (`SQLX_OFFLINE`) ; le durcissement du pool SQLite (`busy_timeout` / `acquire_timeout` 15 s, `max_connections` 16, `temp_store = MEMORY`, `cache_size = -16000`, `wal_autocheckpoint = 1000`) et les index (`jobs_worker_recent_idx`, `jobs_flow_idx`) ont été appliqués dans `src/api.rs` et `migrations/0016_hardening_and_settings.sql`.
+- [x] Requêtes SQL vérifiées à la compilation (`sqlx::query!` / `query_as!` / `query_scalar!` + cache hors-ligne `.sqlx/` pour `Dockerfile` avec `SQLX_OFFLINE=true`).
+- [x] Automatisation des bibliothèques (scans planifiés, extensions incluses, motifs exclus, taille minimale, politique de sortie), gestion avancée des tâches (annulation active, lots, priorités, concurrence et plages horaires des workers, statistiques d'économies disque), purge automatique du cache d'outils, test de connexion des plugins API et vérification facultative des mises à jour GitHub.
 
 ### 4. À cadrer avec Remi avant de coder
 
-- [ ] Enrôlement par demande à approuver : [ADR 0016](adr/0016-enrolement-par-approbation.md) (proposé, simplifiable via jeton/identifiants sans manipulation) ; en attente de validation finale.
+- [x] Enrôlement par demande à approuver et fenêtre d'ouverture de 15 minutes : [ADR 0016](adr/0016-enrolement-par-approbation.md) implémenté.
 - [x] Époque des baux (*fencing*) : `jobs.lease_epoch` vérifié sur `/heartbeat`, `/progress`, `/steps`, `/failure`, `/source` et `/result` (`409 Conflict` si incohérent).
-- [ ] IA et MCP : [ADR 0015](adr/0015-ia-et-mcp.md) rédigé (proposé), mis de côté pour le moment.
+- [x] IA et MCP ([ADR 0015](adr/0015-ia-et-mcp.md)) : serveur Streamable HTTP sur `/mcp`, pas de file d'approbation humaine (décision du 18 nov. 2026), journal d'audit persistant (`mcp_audit_log`, `GET /api/v1/mcp/audit`, tableau dans Paramètres > Clés d'API) et limitation de débit par clé (120 req/min).
 
 ### 5. Hygiène et process
 

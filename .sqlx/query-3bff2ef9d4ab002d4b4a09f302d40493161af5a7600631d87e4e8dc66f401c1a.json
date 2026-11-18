@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE instance_settings SET value = ?1 WHERE key = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "3bff2ef9d4ab002d4b4a09f302d40493161af5a7600631d87e4e8dc66f401c1a"
+}

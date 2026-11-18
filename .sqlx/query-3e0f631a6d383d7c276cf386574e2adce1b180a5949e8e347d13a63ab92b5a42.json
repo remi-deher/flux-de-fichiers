@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id AS \"id!: i64\", key_id, key_name, role, tool_name, target_summary, outcome AS \"outcome: McpAuditOutcome\", error_message, duration_ms, created_at AS \"created_at: DateTime<Utc>\" FROM mcp_audit_log WHERE (?1 IS NULL OR key_id = ?1) AND (?2 IS NULL OR outcome = ?2) ORDER BY created_at DESC, id DESC LIMIT ?3",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "key_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "key_name",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "role",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "tool_name",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "target_summary",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "outcome: McpAuditOutcome",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "error_message",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "duration_ms",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at: DateTime<Utc>",
+        "ordinal": 9,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "3e0f631a6d383d7c276cf386574e2adce1b180a5949e8e347d13a63ab92b5a42"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE flows SET definition=?1 WHERE rowid=?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "9a1fc7bd6cb6c2eafaa148fcd6fc0c6b4a95e067d5742e34808c13a06e0addc2"
+}

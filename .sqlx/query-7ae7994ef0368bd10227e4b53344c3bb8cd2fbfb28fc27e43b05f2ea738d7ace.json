@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT version, name, description, file_mask, definition FROM flow_versions WHERE flow_id=?1 ORDER BY version DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "version",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "description",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "file_mask",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "definition",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "7ae7994ef0368bd10227e4b53344c3bb8cd2fbfb28fc27e43b05f2ea738d7ace"
+}

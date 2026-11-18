@@ -253,19 +253,15 @@ pub fn rotate_definition(
 /// Chiffre au démarrage les en-têtes encore en clair des flux et de leurs versions.
 pub async fn migrate_flow_secrets(pool: &SqlitePool, secrets: &SecretBox) -> AppResult<usize> {
     let mut migrated = 0;
-    for store in &DEFINITION_STORES {
-        let rows: Vec<(String, i64, String)> = sqlx::query_as(store.select).fetch_all(pool).await?;
+    for store in DEFINITION_STORES {
+        let rows = store.fetch_definitions(pool).await?;
         for (id, rowid, definition) in rows {
             if !has_webhook_headers(&definition) {
                 continue;
             }
             let sealed = seal_definition(secrets, &id, &definition, None)?;
             if sealed != definition {
-                sqlx::query(store.update)
-                    .bind(&sealed)
-                    .bind(rowid)
-                    .execute(pool)
-                    .await?;
+                store.update_definition(pool, rowid, &sealed).await?;
                 migrated += 1;
             }
         }

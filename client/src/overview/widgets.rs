@@ -14,16 +14,23 @@ pub enum Widget {
     Metrics,
     Attention,
     RecentJobs,
+    StorageSavings,
 }
 
 impl Widget {
-    pub const ALL: [Self; 3] = [Self::Metrics, Self::Attention, Self::RecentJobs];
+    pub const ALL: [Self; 4] = [
+        Self::Metrics,
+        Self::Attention,
+        Self::RecentJobs,
+        Self::StorageSavings,
+    ];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Metrics => "Chiffres clés",
             Self::Attention => "À surveiller",
             Self::RecentJobs => "Tâches",
+            Self::StorageSavings => "Économies de stockage",
         }
     }
 }

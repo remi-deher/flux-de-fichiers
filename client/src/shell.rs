@@ -614,6 +614,8 @@ mod tests {
             version: None,
             remote_addr: None,
             telemetry: None,
+            max_concurrency: 1,
+            schedule: None,
         };
         let offline = Worker {
             id: uuid::Uuid::from_u128(2),
@@ -622,6 +624,8 @@ mod tests {
             version: None,
             remote_addr: None,
             telemetry: None,
+            max_concurrency: 1,
+            schedule: None,
         };
         assert_eq!(workers_alert_badge(&[], now), None);
         assert_eq!(

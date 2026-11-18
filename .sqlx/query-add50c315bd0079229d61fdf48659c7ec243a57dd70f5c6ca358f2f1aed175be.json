@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM library_workers WHERE worker_id=?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "add50c315bd0079229d61fdf48659c7ec243a57dd70f5c6ca358f2f1aed175be"
+}

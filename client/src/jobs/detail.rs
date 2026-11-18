@@ -2,13 +2,13 @@
 //! des étapes) et onglet Étapes exécutées (journal détaillé).
 
 use super::model::{
-    error_label, format_size_delta, resolve_library_label, short_digest, status_label, status_tone,
-    step_status_label, step_status_tone,
+    error_label, format_size_delta, priority_label, resolve_library_label, short_digest,
+    status_label, status_tone, step_status_label, step_status_tone,
 };
 use crate::ui::{Icon, IconName, StatusBadge, Tag, TagTone, Toasts};
 use crate::{api, format};
 use flux_shared::format::format_bytes;
-use flux_shared::jobs::{Job, JobStatus, JobStepLog, MAX_ATTEMPTS};
+use flux_shared::jobs::{Job, JobStatus, JobStepLog, MAX_ATTEMPTS, UpdateJobPriorityRequest};
 use leptos::prelude::*;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -78,6 +78,39 @@ pub fn JobDetail(
             }
         }
     });
+    let cancel = Action::new_local(move |id: &uuid::Uuid| {
+        let path = format!("/api/v1/jobs/{id}/cancel");
+        async move { api::post::<(), Job>(&path, None).await }
+    });
+    Effect::new(move |_| {
+        if let Some(result) = cancel.value().get() {
+            match result {
+                Ok(job) => {
+                    Toasts::set_success(feedback, "Tâche annulée.");
+                    on_changed.run(job);
+                }
+                Err(error) => Toasts::set_error(feedback, error.message()),
+            }
+        }
+    });
+    let set_priority = Action::new_local(move |priority: &i32| {
+        let path = format!("/api/v1/jobs/{job_id}/priority");
+        let req = UpdateJobPriorityRequest {
+            priority: *priority,
+        };
+        async move { api::put::<UpdateJobPriorityRequest, Job>(&path, &req).await }
+    });
+    Effect::new(move |_| {
+        if let Some(result) = set_priority.value().get() {
+            match result {
+                Ok(job) => {
+                    Toasts::set_success(feedback, "Priorité mise à jour.");
+                    on_changed.run(job);
+                }
+                Err(error) => Toasts::set_error(feedback, error.message()),
+            }
+        }
+    });
 
     let flow_id = job.flow_id.clone();
     let flow_version = job.flow_version;
@@ -99,6 +132,9 @@ pub fn JobDetail(
         }
     });
     let retryable = can_manage && job.is_retryable();
+    let cancelable = can_manage && job.is_cancelable();
+    let can_prioritize = can_manage && job.status == JobStatus::Queued;
+    let job_priority = job.priority;
     let short_id: String = job.id.to_string().chars().take(SHORT_ID_CHARS).collect();
     let diagnostic = job.error_code.map(error_label);
     let library_id = job.library_id;
@@ -180,6 +216,28 @@ pub fn JobDetail(
                             </div>
                             <div class="detail-term">"Worker"</div>
                             <div class="detail-val">{worker_label}</div>
+                            <div class="detail-term">"Priorité"</div>
+                            <div class="detail-val">
+                                {if can_prioritize {
+                                    view! {
+                                        <select class="form-select"
+                                            prop:value=move || job_priority.to_string()
+                                            disabled=move || set_priority.pending().get()
+                                            on:change=move |ev| {
+                                                if let Ok(val) = event_target_value(&ev).parse::<i32>() {
+                                                    set_priority.dispatch(val);
+                                                }
+                                            }>
+                                            <option value="-10">"Basse (-10)"</option>
+                                            <option value="0">"Normale (0)"</option>
+                                            <option value="10">"Haute (+10)"</option>
+                                            <option value="20">"Urgente (+20)"</option>
+                                        </select>
+                                    }.into_any()
+                                } else {
+                                    view! { <span>{priority_label(job_priority)}</span> }.into_any()
+                                }}
+                            </div>
                             {row("Tentatives", attempts_label.clone())}
                             {row("Erreur", error_text.clone())}
                         </div>
@@ -292,6 +350,16 @@ pub fn JobDetail(
                     >
                         <Icon name=IconName::Refresh size=ACTION_ICON_SIZE />
                         <span>"Relancer"</span>
+                    </button>
+                })}
+                {cancelable.then(|| view! {
+                    <button
+                        type="button"
+                        class="btn btn-danger"
+                        disabled=move || cancel.pending().get()
+                        on:click=move |_| { cancel.dispatch(job_id); }
+                    >
+                        <span>"Annuler la tâche"</span>
                     </button>
                 })}
             </div>

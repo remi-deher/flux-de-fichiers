@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE accounts SET role = ?1, disabled = ?2, version = version + 1, updated_at = datetime('now') WHERE id = ?3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "874185297df0b8b225af17f86d149dea478f694faeae98125ce3df3570b2d310"
+}

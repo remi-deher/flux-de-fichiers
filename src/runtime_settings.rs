@@ -49,6 +49,8 @@ struct PersistedRuntimeSettings {
     allow_private_plugin_hosts: Option<bool>,
     #[serde(default)]
     block_private_integration_hosts: Option<bool>,
+    #[serde(default)]
+    check_updates_enabled: Option<bool>,
 }
 
 /// Vue effective résolue (base SQLite si présente, sinon configuration de démarrage).
@@ -57,6 +59,7 @@ pub struct EffectiveRuntimeSettings {
     pub config: Config,
     pub smtp_status: SmtpStatus,
     pub outbound: OutboundPolicyStatus,
+    pub check_updates_enabled: bool,
 }
 
 impl EffectiveRuntimeSettings {
@@ -175,6 +178,7 @@ fn resolve_effective(
         config: effective,
         smtp_status,
         outbound,
+        check_updates_enabled: persisted.check_updates_enabled.unwrap_or(false),
     }
 }
 
@@ -247,6 +251,7 @@ pub async fn update(
         smtp,
         allow_private_plugin_hosts: Some(request.allow_private_plugin_hosts),
         block_private_integration_hosts: Some(request.block_private_integration_hosts),
+        check_updates_enabled: Some(request.check_updates_enabled),
     };
     let encoded = serde_json::to_string(&next).map_err(|_| AppError::Internal)?;
     repository::set_setting(pool, RUNTIME_SETTINGS_KEY, &encoded).await?;
@@ -259,11 +264,12 @@ pub async fn rotate_secrets_in_tx(
     old: &SecretBox,
     new: &SecretBox,
 ) -> AppResult<usize> {
-    let raw: Option<String> =
-        sqlx::query_scalar("SELECT value FROM instance_settings WHERE key = ?1")
-            .bind(RUNTIME_SETTINGS_KEY)
-            .fetch_optional(&mut **tx)
-            .await?;
+    let raw: Option<String> = sqlx::query_scalar!(
+        "SELECT value FROM instance_settings WHERE key = ?1",
+        RUNTIME_SETTINGS_KEY
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
     let Some(raw) = raw else {
         return Ok(0);
     };
@@ -278,11 +284,13 @@ pub async fn rotate_secrets_in_tx(
     let clear = old.decrypt(enc, SMTP_PASSWORD_AAD)?;
     smtp.password_enc = Some(new.encrypt(&clear, SMTP_PASSWORD_AAD)?);
     let updated = serde_json::to_string(&persisted).map_err(|_| AppError::Internal)?;
-    sqlx::query("UPDATE instance_settings SET value = ?1 WHERE key = ?2")
-        .bind(updated)
-        .bind(RUNTIME_SETTINGS_KEY)
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query!(
+        "UPDATE instance_settings SET value = ?1 WHERE key = ?2",
+        updated,
+        RUNTIME_SETTINGS_KEY
+    )
+    .execute(&mut **tx)
+    .await?;
     Ok(1)
 }
 
@@ -340,6 +348,7 @@ mod tests {
                 smtp_from: Some("Flux <noreply@exemple.fr>".into()),
                 allow_private_plugin_hosts: true,
                 block_private_integration_hosts: true,
+                check_updates_enabled: true,
             },
         )
         .await?;
@@ -376,6 +385,7 @@ mod tests {
                 smtp_from: Some("Flux <noreply@exemple.fr>".into()),
                 allow_private_plugin_hosts: false,
                 block_private_integration_hosts: false,
+                check_updates_enabled: false,
             },
         )
         .await?;

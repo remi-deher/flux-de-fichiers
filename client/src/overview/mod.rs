@@ -11,7 +11,8 @@ use crate::ui::filters::{Filters, JobStateFilter};
 use crate::ui::{EmptyState, Icon, IconName, MetricTone, SectionHeader, StatItem, StatStrip};
 use crate::{api, format};
 use chrono::Utc;
-use flux_shared::jobs::Job;
+use flux_shared::format::format_bytes;
+use flux_shared::jobs::{Job, JobStorageStats};
 use flux_shared::libraries::Library;
 use flux_shared::session::Me;
 use flux_shared::workers::{Worker, WorkerOverview};
@@ -21,6 +22,7 @@ use summary::{Summary, alerts, ratio_percent};
 use widgets::{Widget, WidgetLayout, WidgetPicker};
 
 const JOBS_PATH: &str = "/api/v1/jobs?limit=200";
+const JOBS_STATS_PATH: &str = "/api/v1/jobs/stats";
 const WORKERS_PATH: &str = "/api/v1/workers";
 const LIBRARIES_PATH: &str = "/api/v1/libraries";
 const WORKER_OVERVIEW_PATH: &str = "/api/v1/worker/overview";
@@ -70,6 +72,7 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
     let filters = use_context::<Filters>();
     let live_progress = use_context::<LiveJobs>().map(|live| live.progress);
     let jobs = LocalResource::new(|| api::get::<Vec<Job>>(JOBS_PATH));
+    let job_stats = LocalResource::new(|| api::get::<JobStorageStats>(JOBS_STATS_PATH));
     let workers = LocalResource::new(|| api::get::<Vec<Worker>>(WORKERS_PATH));
     let libraries = LocalResource::new(|| api::get::<Vec<Library>>(LIBRARIES_PATH));
     let layout = RwSignal::new(WidgetLayout::restore());
@@ -78,6 +81,7 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
             {move || {
                 let layout_now = layout.get();
                 let jobs_list = jobs.get().and_then(Result::ok).unwrap_or_default();
+                let storage_stats = job_stats.get().and_then(Result::ok).unwrap_or_default();
                 let workers_list = workers.get().and_then(Result::ok).unwrap_or_default();
                 let libraries_list = libraries.get().and_then(Result::ok).unwrap_or_default();
                 let now = Utc::now();
@@ -158,6 +162,62 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                             />
                         })}
                     </div>
+                    {layout_now.is_visible(Widget::StorageSavings).then(|| {
+                        let saved = storage_stats.saved_bytes;
+                        let saved_label = if saved >= 0 {
+                            format!("{} économisés", format_bytes(saved.unsigned_abs()))
+                        } else {
+                            format!("+{} utilisés", format_bytes(saved.unsigned_abs()))
+                        };
+                        let pct_detail = if storage_stats.total_source_bytes > 0 {
+                            let pct = ((saved as f64 / storage_stats.total_source_bytes as f64) * 100.0).round() as i64;
+                            format!("{pct} % sur {}", format_bytes(storage_stats.total_source_bytes.unsigned_abs()))
+                        } else {
+                            "Aucune tâche mesurée".to_owned()
+                        };
+                        view! {
+                            <section class="section-panel">
+                                <SectionHeader title="Économies de stockage" subtitle=format!("{saved_label} ({pct_detail})") />
+                                {if storage_stats.by_library.is_empty() {
+                                    view! { <EmptyState title="Aucune statistique" message="Les gains d'espace disque apparaîtront après les premières tâches réussies." icon_name=IconName::Libraries /> }.into_any()
+                                } else {
+                                    view! {
+                                        <div class="table-wrapper">
+                                            <table class="data-table" aria-label="Économies de stockage par bibliothèque">
+                                                <thead>
+                                                    <tr>
+                                                        <th scope="col">"Bibliothèque"</th>
+                                                        <th scope="col">"Réussies"</th>
+                                                        <th scope="col">"Entrée"</th>
+                                                        <th scope="col">"Sortie"</th>
+                                                        <th scope="col" class="cell-end">"Gain"</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {storage_stats.by_library.into_iter().map(|row| {
+                                                        let gain = if row.saved_bytes >= 0 {
+                                                            format!("-{}", format_bytes(row.saved_bytes.unsigned_abs()))
+                                                        } else {
+                                                            format!("+{}", format_bytes(row.saved_bytes.unsigned_abs()))
+                                                        };
+                                                        view! {
+                                                            <tr>
+                                                                <td class="text-strong">{row.library_name}</td>
+                                                                <td>{row.succeeded_count}</td>
+                                                                <td class="text-dim">{format_bytes(row.source_bytes.unsigned_abs())}</td>
+                                                                <td class="text-dim">{format_bytes(row.output_bytes.unsigned_abs())}</td>
+                                                                <td class="cell-end text-strong">{gain}</td>
+                                                            </tr>
+                                                        }
+                                                    }).collect_view()}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    }.into_any()
+                                }}
+                            </section>
+                        }
+                    })}
                 }
             }}
         </div>

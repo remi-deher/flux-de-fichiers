@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.41.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.40.0...v0.41.0) (2026-11-18)
+
+
+### Features
+
+* **ui:** organise la page Paramètres en onglets horizontaux ([bc3e8ed](https://github.com/remi-deher/flux-de-fichiers/commit/bc3e8ed2cb309a6e9c8844ce8b33f451289055e2))
+* **ui:** organise la page Paramètres en onglets horizontaux ([1d70fb2](https://github.com/remi-deher/flux-de-fichiers/commit/1d70fb241ddc84324def21f88d904dc6030eb84f))
+
 ## [0.40.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.39.0...v0.40.0) (2026-11-18)
 
 

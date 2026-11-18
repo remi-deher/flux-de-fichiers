@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE flows SET is_default=0",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "0bcb9aecc8b93e3226c4dbf368b68e57d04f7d27210629c8c9d29c0c8f1cb814"
+}

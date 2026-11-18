@@ -40,18 +40,20 @@ l'utilisateur du 14 nov. 2026 :
    fournisseur d'IA (voir questions) ; tant qu'il n'est pas choisi, le MCP n'expose que les
    outils déterministes (analyser, appliquer une proposition fournie par le client).
 
+## Décisions complétées (18 nov. 2026)
+
+- **Pas de file d'approbation humaine** : les appels MCP autorisés par la clé s'exécutent directement sans mise en attente de validation manuelle ; la traçabilité repose sur un **journal d'audit persistant** (`mcp_audit_log`, consultable via `GET /api/v1/mcp/audit` et Paramètres > Clés d'API).
+- **Limitation de débit par clé** : fenêtre glissante de 120 requêtes par minute sur `/mcp` par identifiant de clé (`429 Too Many Requests` + consignation `rate_limited` dans l'historique).
+
 ## Questions ouvertes
 
 - **Qui génère les suggestions** : le client MCP externe (le central ne fait qu'exposer des
   outils, aucun modèle embarqué) ou un fournisseur configuré dans le central (clé d'API,
   modèle local) ? Le choix change le périmètre : le premier est bien plus simple et ne fait
   voyager aucune donnée hors de l'installation.
-- Faut-il une **validation humaine** dans l'interface avant d'appliquer une suggestion ou une
-  création de bibliothèque ou de plugin ?
 - Créer un **plugin** : générer un manifeste et des blocs (JSON, dépôt `flux-de-fichiers-plugins`)
   seulement, ou aussi du code exécutable ? Le second est exclu tant que les plugins ne sont pas
   isolés.
-- Limites de débit et de coût par clé.
 
 ## Conséquences
 

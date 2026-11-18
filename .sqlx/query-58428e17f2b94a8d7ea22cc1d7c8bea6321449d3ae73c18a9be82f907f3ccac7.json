@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT library_id AS \"library_id!: Uuid\", worker_id AS \"worker_id!: Uuid\", local_path, access AS \"access: LibraryAccess\" FROM library_workers ORDER BY local_path",
+  "describe": {
+    "columns": [
+      {
+        "name": "library_id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "worker_id!: Uuid",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "local_path",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "access: LibraryAccess",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "58428e17f2b94a8d7ea22cc1d7c8bea6321449d3ae73c18a9be82f907f3ccac7"
+}

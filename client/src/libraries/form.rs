@@ -4,7 +4,7 @@ use super::draft::{LibraryDraft, access_label};
 use crate::api;
 use crate::ui::FolderTreePicker;
 use flux_shared::flows::FlowRecord;
-use flux_shared::libraries::{Library, LibraryAccess, LibraryWrite};
+use flux_shared::libraries::{Library, LibraryAccess, LibraryOutputPolicy, LibraryWrite};
 use flux_shared::workers::Worker;
 use leptos::prelude::*;
 use uuid::Uuid;
@@ -256,6 +256,61 @@ pub fn LibraryForm(
                             <option value=flow.id.clone()>{format!("{} (v{})", flow.name, flow.version)}</option>
                         }).collect_view()}
                     </select>
+                </div>
+                <div class="form-group">
+                    <label for="library-scan-interval" class="form-label">"Scan automatique"</label>
+                    <select id="library-scan-interval" class="form-select"
+                        prop:value=move || draft.get().scan_interval_minutes.to_string()
+                        on:change=move |event| draft.update(|value| {
+                            if let Ok(mins) = event_target_value(&event).parse::<i32>() {
+                                value.scan_interval_minutes = mins;
+                            }
+                        })>
+                        <option value="0">"Manuel uniquement"</option>
+                        <option value="5">"Toutes les 5 minutes"</option>
+                        <option value="15">"Toutes les 15 minutes"</option>
+                        <option value="60">"Toutes les heures"</option>
+                        <option value="360">"Toutes les 6 heures"</option>
+                        <option value="1440">"Une fois par jour"</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="library-output-policy" class="form-label">"Stratégie de sortie"</label>
+                    <select id="library-output-policy" class="form-select"
+                        prop:value=move || draft.get().output_policy.as_str().to_owned()
+                        on:change=move |event| draft.update(|value| {
+                            if let Some(policy) = LibraryOutputPolicy::parse(&event_target_value(&event)) {
+                                value.output_policy = policy;
+                            }
+                        })>
+                        <option value="output_dir">"Dossier de sortie dédié (défaut)"</option>
+                        <option value="replace_with_backup">"Remplacer la source (avec sauvegarde .bak)"</option>
+                        <option value="replace_in_place">"Remplacer la source directement"</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="library-include-ext" class="form-label">"Extensions incluses (facultatif)"</label>
+                    <input id="library-include-ext" class="form-input"
+                        placeholder="Ex. mkv, mp4, avi (vide = toutes)"
+                        prop:value=move || draft.get().include_extensions_text
+                        on:input=move |event| draft.update(|value| value.include_extensions_text = event_target_value(&event)) />
+                </div>
+                <div class="form-group">
+                    <label for="library-exclude-pat" class="form-label">"Motifs exclus (facultatif)"</label>
+                    <input id="library-exclude-pat" class="form-input"
+                        placeholder="Ex. *sample*, trailer, *.part"
+                        prop:value=move || draft.get().exclude_patterns_text
+                        on:input=move |event| draft.update(|value| value.exclude_patterns_text = event_target_value(&event)) />
+                </div>
+                <div class="form-group">
+                    <label for="library-min-size" class="form-label">"Taille minimale (Mo)"</label>
+                    <input id="library-min-size" type="number" min="0" class="form-input"
+                        prop:value=move || draft.get().min_file_mb.to_string()
+                        on:input=move |event| draft.update(|value| {
+                            if let Ok(mb) = event_target_value(&event).parse::<u64>() {
+                                value.min_file_mb = mb;
+                            }
+                        }) />
                 </div>
             </div>
 

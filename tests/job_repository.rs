@@ -403,6 +403,7 @@ async fn jobs_freeze_library_flow_record_steps_and_clear_output_explicitly() -> 
                 local_path: "/srv/series".into(),
                 access: flux_de_fichiers::domain::LibraryAccess::ReadWrite,
             }],
+            ..Default::default()
         },
     )
     .await?;
@@ -494,5 +495,148 @@ async fn jobs_freeze_library_flow_record_steps_and_clear_output_explicitly() -> 
         repository::succeeded_output_name(&pool, job.id).await?,
         None
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn priority_cancellation_batch_concurrency_schedule_and_stats() -> anyhow::Result<()> {
+    let pool = pool().await?;
+    let worker = repository::register(&pool, "worker-sched").await?;
+    assert_eq!(worker.max_concurrency, 1);
+
+    let low = repository::insert_job_with_priority(
+        &pool,
+        "low.mkv",
+        None,
+        &"11".repeat(32),
+        1_000,
+        None,
+        None,
+        -10,
+    )
+    .await?;
+    let high = repository::insert_job_with_priority(
+        &pool,
+        "high.mkv",
+        None,
+        &"22".repeat(32),
+        2_000,
+        None,
+        None,
+        20,
+    )
+    .await?;
+    let third = repository::insert_job_with_priority(
+        &pool,
+        "third.mkv",
+        None,
+        &"33".repeat(32),
+        500,
+        None,
+        None,
+        5,
+    )
+    .await?;
+
+    // La priorité la plus haute est réclamée en premier.
+    let first_claim = repository::claim(&pool, worker.id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("high priority claim expected"))?;
+    assert_eq!(first_claim.job_id, high.id);
+
+    // Concurrence max = 1 bloque une deuxième réclamation.
+    assert!(repository::claim(&pool, worker.id).await?.is_none());
+
+    // Passer la concurrence à 2 débloque la tâche suivante (third, priorité 5 > -10).
+    let updated_worker = repository::update_worker_settings(&pool, worker.id, 2, None).await?;
+    assert_eq!(updated_worker.max_concurrency, 2);
+    let second_claim = repository::claim(&pool, worker.id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("second concurrent claim expected"))?;
+    assert_eq!(second_claim.job_id, third.id);
+
+    // Annuler une tâche en cours invalide son bail immédiatement.
+    let canceled_running = repository::cancel_job(&pool, third.id).await?;
+    assert_eq!(canceled_running.status, JobStatus::Canceled);
+    let stale_lease = LeaseRequest {
+        worker_id: worker.id,
+        lease_token: second_claim.lease_token,
+        lease_epoch: second_claim.lease_epoch,
+        telemetry: None,
+    };
+    assert!(matches!(
+        repository::heartbeat(&pool, third.id, &stale_lease).await,
+        Err(AppError::Conflict)
+    ));
+
+    // Changer la priorité d'une tâche en attente puis la publier en succès.
+    let reprioritized = repository::update_job_priority(&pool, low.id, 15).await?;
+    assert_eq!(reprioritized.priority, 15);
+    let high_lease = LeaseRequest {
+        worker_id: worker.id,
+        lease_token: first_claim.lease_token,
+        lease_epoch: first_claim.lease_epoch,
+        telemetry: None,
+    };
+    repository::publish_succeeded(
+        &pool,
+        high.id,
+        &high_lease,
+        repository::PublishedOutput {
+            name: "high.hevc.mkv",
+            sha256: &"44".repeat(32),
+            bytes: 1_200,
+            warning: false,
+        },
+        async { Ok(()) },
+    )
+    .await?;
+
+    // Fenêtre horaire restrictive : bloque claim en dehors du créneau.
+    use chrono::Timelike;
+    let current_hour = chrono::Local::now().hour() as u8;
+    let blocked_start = (current_hour + 2) % 24;
+    let blocked_end = (current_hour + 3) % 24;
+    repository::update_worker_settings(
+        &pool,
+        worker.id,
+        2,
+        Some(&flux_de_fichiers::domain::WorkerSchedule {
+            enabled: true,
+            start_hour: blocked_start,
+            end_hour: blocked_end,
+            days: Vec::new(),
+        }),
+    )
+    .await?;
+    assert!(repository::claim(&pool, worker.id).await?.is_none());
+
+    // Statistiques d'économie d'espace disque.
+    let stats = repository::job_storage_stats(&pool).await?;
+    assert_eq!(stats.total_jobs, 3);
+    assert_eq!(stats.succeeded_jobs, 1);
+    assert_eq!(stats.canceled_jobs, 1);
+    assert_eq!(stats.total_source_bytes, 2_000);
+    assert_eq!(stats.total_output_bytes, 1_200);
+    assert_eq!(stats.saved_bytes, 800);
+
+    // Action par lot : annulation de low + suppression de third (high ignorée car succeeded).
+    let (batch_cancel, events) = repository::batch_jobs(
+        &pool,
+        &[low.id, high.id],
+        flux_de_fichiers::domain::JobBatchAction::Cancel,
+    )
+    .await?;
+    assert_eq!(batch_cancel.updated, 1);
+    assert_eq!(batch_cancel.skipped, 1);
+    assert_eq!(events.len(), 1);
+    let (batch_del, _) = repository::batch_jobs(
+        &pool,
+        &[third.id, low.id],
+        flux_de_fichiers::domain::JobBatchAction::Delete,
+    )
+    .await?;
+    assert_eq!(batch_del.updated, 2);
+    assert_eq!(batch_del.skipped, 0);
     Ok(())
 }

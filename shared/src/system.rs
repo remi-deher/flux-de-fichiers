@@ -33,6 +33,43 @@ pub struct SetupWorkerRequest {
     pub worker_name: String,
 }
 
+/// Demande d'enrôlement d'une installation vierge par approbation sur le central (ADR 0016).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupWorkerApprovalRequest {
+    pub central_url: String,
+    #[serde(default)]
+    pub worker_name: String,
+}
+
+/// État courant d'une demande d'enrôlement par approbation côté installation vierge.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerSetupRequestState {
+    #[default]
+    Idle,
+    Pending,
+    Approved,
+    Rejected,
+    Expired,
+    Error,
+}
+
+/// Statut renvoyé au navigateur pendant l'attente d'approbation sur le central.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupWorkerRequestStatus {
+    pub state: WorkerSetupRequestState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub central_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+}
+
 /// Origine de la clé de chiffrement : fichier local de `/config`, ou fichier fourni par l'orchestrateur.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -123,6 +160,23 @@ pub struct OutboundPolicyStatus {
     pub block_private_integration_hosts: bool,
 }
 
+/// Résultat de la vérification facultative des mises à jour publiées sur GitHub.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCheckStatus {
+    pub enabled: bool,
+    pub current_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_version: Option<String>,
+    pub update_available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemStatus {
@@ -137,6 +191,8 @@ pub struct SystemStatus {
     pub smtp: SmtpStatus,
     #[serde(default)]
     pub outbound: OutboundPolicyStatus,
+    #[serde(default)]
+    pub check_updates_enabled: bool,
 }
 
 /// Corps de mise à jour des réglages réseau, sessions, SMTP et politique sortante (`PUT /api/v1/system/settings`).
@@ -156,6 +212,8 @@ pub struct UpdateSystemSettingsRequest {
     pub smtp_from: Option<String>,
     pub allow_private_plugin_hosts: bool,
     pub block_private_integration_hosts: bool,
+    #[serde(default)]
+    pub check_updates_enabled: bool,
 }
 
 /// Charge matérielle du central, relevée à la demande (`GET /api/v1/system/hardware`).

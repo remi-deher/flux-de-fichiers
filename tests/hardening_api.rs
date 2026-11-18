@@ -534,6 +534,7 @@ async fn system_settings_can_be_updated_and_smtp_password_stays_hidden() -> anyh
         smtp_from: Some("Flux <noreply@flux.example>".into()),
         allow_private_plugin_hosts: true,
         block_private_integration_hosts: true,
+        check_updates_enabled: false,
     };
 
     // Un worker ne peut pas modifier les réglages système.

@@ -7,16 +7,21 @@ use crate::ui::{Icon, IconName};
 use flux_shared::InstanceKind;
 use flux_shared::accounts::LoginRequest;
 use flux_shared::session::{Me, SessionInfo};
-use flux_shared::system::{SetupRequest, SetupStatus, SetupWorkerRequest};
+use flux_shared::system::{
+    SetupRequest, SetupStatus, SetupWorkerApprovalRequest, SetupWorkerRequest,
+    SetupWorkerRequestStatus, WorkerSetupRequestState,
+};
 use leptos::prelude::*;
 
 const SETUP_CENTRAL_PATH: &str = "/api/v1/setup/central";
 const SETUP_WORKER_PATH: &str = "/api/v1/setup/worker";
+const SETUP_WORKER_REQUEST_PATH: &str = "/api/v1/setup/worker-request";
 const SETUP_STATUS_PATH: &str = "/api/v1/setup/status";
 const LOGIN_PATH: &str = "/api/v1/auth/login";
 /// Redémarrage d'une installation devenue worker : une vérification par seconde, 30 au plus.
 const WORKER_START_POLL_MS: i32 = 1000;
 const WORKER_START_MAX_POLLS: usize = 30;
+const WORKER_APPROVAL_POLL_MS: i32 = 1500;
 
 /// Champ de formulaire lié à un signal texte.
 #[component]
@@ -197,21 +202,130 @@ async fn wait_for_worker() -> Option<String> {
 
 #[component]
 pub fn WorkerSetupForm(goto: Callback<Gate>) -> impl IntoView {
-    let (central_url, username, password, worker_name) = (
-        RwSignal::new(String::new()),
-        RwSignal::new(String::new()),
-        RwSignal::new(String::new()),
-        RwSignal::new(String::new()),
-    );
+    let (central_url, worker_name) = (RwSignal::new(String::new()), RwSignal::new(String::new()));
+    let (legacy_username, legacy_password) =
+        (RwSignal::new(String::new()), RwSignal::new(String::new()));
     let feedback = RwSignal::new(None::<String>);
-    let submit = Action::new_local(move |request: &SetupWorkerRequest| {
+    let pending_status = RwSignal::new(None::<SetupWorkerRequestStatus>);
+    let polling_active = RwSignal::new(false);
+
+    let start_polling = move || {
+        if polling_active.get_untracked() {
+            return;
+        }
+        polling_active.set(true);
+        leptos::task::spawn_local(async move {
+            loop {
+                match api::get::<SetupWorkerRequestStatus>(SETUP_WORKER_REQUEST_PATH).await {
+                    Ok(status) => match status.state {
+                        WorkerSetupRequestState::Pending => {
+                            pending_status.set(Some(status));
+                        }
+                        WorkerSetupRequestState::Approved => {
+                            pending_status.set(Some(status));
+                            if let Some(name) = wait_for_worker().await {
+                                goto.run(Gate::Login {
+                                    instance_name: Some(name),
+                                    password_reset_enabled: false,
+                                });
+                            } else {
+                                feedback.set(Some(
+                                    "Enrôlement approuvé, mais l'installation n'a pas redémarré : rechargez la page."
+                                        .into(),
+                                ));
+                            }
+                            break;
+                        }
+                        WorkerSetupRequestState::Rejected => {
+                            pending_status.set(None);
+                            feedback.set(Some(
+                                "La demande d'enrôlement a été refusée sur le central.".into(),
+                            ));
+                            break;
+                        }
+                        WorkerSetupRequestState::Expired => {
+                            pending_status.set(None);
+                            feedback.set(Some(
+                                "La demande d'enrôlement a expiré : relancez une demande.".into(),
+                            ));
+                            break;
+                        }
+                        WorkerSetupRequestState::Error => {
+                            pending_status.set(None);
+                            let code = status
+                                .error_code
+                                .unwrap_or_else(|| "internal_error".to_owned());
+                            feedback.set(Some(access_error(&api::ApiError::Rejected {
+                                status: 400,
+                                code,
+                            })));
+                            break;
+                        }
+                        WorkerSetupRequestState::Idle => {
+                            pending_status.set(None);
+                            break;
+                        }
+                    },
+                    Err(err) => {
+                        pending_status.set(None);
+                        feedback.set(Some(access_error(&err)));
+                        break;
+                    }
+                }
+                sleep(WORKER_APPROVAL_POLL_MS).await;
+            }
+            polling_active.set(false);
+        });
+    };
+
+    leptos::task::spawn_local(async move {
+        if let Ok(status) = api::get::<SetupWorkerRequestStatus>(SETUP_WORKER_REQUEST_PATH).await
+            && status.state == WorkerSetupRequestState::Pending
+        {
+            pending_status.set(Some(status));
+            start_polling();
+        }
+    });
+
+    let submit_approval = Action::new_local(move |request: &SetupWorkerApprovalRequest| {
+        let request = request.clone();
+        async move {
+            api::post::<SetupWorkerApprovalRequest, SetupWorkerRequestStatus>(
+                SETUP_WORKER_REQUEST_PATH,
+                Some(&request),
+            )
+            .await
+        }
+    });
+    Effect::new(move |_| match submit_approval.value().get() {
+        Some(Ok(status)) => {
+            feedback.set(None);
+            pending_status.set(Some(status));
+            start_polling();
+        }
+        Some(Err(error)) => feedback.set(Some(access_error(&error))),
+        None => {}
+    });
+
+    let cancel_approval =
+        Action::new_local(move |()| async move { api::delete(SETUP_WORKER_REQUEST_PATH).await });
+    Effect::new(move |_| match cancel_approval.value().get() {
+        Some(Ok(())) => {
+            pending_status.set(None);
+            feedback.set(None);
+        }
+        Some(Err(error)) => feedback.set(Some(access_error(&error))),
+        None => {}
+    });
+
+    let submit_legacy = Action::new_local(move |request: &SetupWorkerRequest| {
         let request = request.clone();
         async move {
             api::post_empty(SETUP_WORKER_PATH, Some(&request)).await?;
             Ok::<_, api::ApiError>(wait_for_worker().await)
         }
     });
-    Effect::new(move |_| match submit.value().get() {
+    Effect::new(move |_| match submit_legacy.value().get() {
         Some(Ok(Some(name))) => goto.run(Gate::Login {
             instance_name: Some(name),
             password_reset_enabled: false,
@@ -222,28 +336,77 @@ pub fn WorkerSetupForm(goto: Callback<Gate>) -> impl IntoView {
         Some(Err(error)) => feedback.set(Some(access_error(&error))),
         None => {}
     });
+
     view! {
         <GateCard title="Enrôlement du worker" subtitle="Rattachez cette installation à un central existant.">
-            <form class="auth-gate__form" on:submit=move |event| {
-                event.prevent_default();
-                submit.dispatch(SetupWorkerRequest {
-                    central_url: central_url.get_untracked(),
-                    username: username.get_untracked(),
-                    password: password.get_untracked(),
-                    worker_name: worker_name.get_untracked(),
-                });
-                password.set(String::new());
-            }>
-                <Field id="worker-url" label="Adresse du central" value=central_url help="Adresse seule, sans chemin, par exemple http://central:3000." />
-                <Field id="worker-username" label="Identifiant administrateur du central" value=username autocomplete="username" />
-                <Field id="worker-password" label="Mot de passe" value=password kind="password" autocomplete="current-password" help="Utilisé une seule fois pour créer la clé du worker ; il n'est pas conservé." />
-                <Field id="worker-name" label="Nom du worker" value=worker_name help="Lettres, chiffres, point, tiret et tiret bas." />
-                <p class="form-error" role="alert">{move || feedback.get()}</p>
-                                    <button type="submit" class="btn btn-primary auth-gate__submit" disabled=move || submit.pending().get()>
-                        {move || if submit.pending().get() { "Enrôlement et redémarrage…" } else { "Rattacher" }}
-                    </button>
-                    <button type="button" class="btn btn-secondary auth-gate__submit" on:click=move |_| goto.run(Gate::ChooseRole)>"Retour"</button>
-            </form>
+            {move || {
+                if let Some(status) = pending_status.get() {
+                    let target = status.central_url.unwrap_or_default();
+                    let name = status.worker_name.unwrap_or_else(|| "worker".to_owned());
+                    let state_label = if status.state == WorkerSetupRequestState::Approved {
+                        "Demande approuvée, bascule en worker…"
+                    } else {
+                        "En attente d'approbation sur le central…"
+                    };
+                    view! {
+                        <div class="auth-gate__form">
+                            <p class="auth-gate__notice">
+                                <strong>{state_label}</strong><br />
+                                "Ouvrez l'écran Workers sur "<code>{target}</code>" et approuvez le nœud "<strong>{name}</strong>"."
+                            </p>
+                            <p class="form-error" role="alert">{move || feedback.get()}</p>
+                            <button type="button" class="btn btn-secondary auth-gate__submit"
+                                disabled=move || cancel_approval.pending().get() || status.state == WorkerSetupRequestState::Approved
+                                on:click=move |_| { cancel_approval.dispatch(()); }>
+                                "Annuler la demande"
+                            </button>
+                        </div>
+                    }
+                    .into_any()
+                } else {
+                    view! {
+                        <div class="stack">
+                            <form class="auth-gate__form" on:submit=move |event| {
+                                event.prevent_default();
+                                feedback.set(None);
+                                submit_approval.dispatch(SetupWorkerApprovalRequest {
+                                    central_url: central_url.get_untracked(),
+                                    worker_name: worker_name.get_untracked(),
+                                });
+                            }>
+                                <Field id="worker-url" label="Adresse du central" value=central_url help="Adresse seule, sans chemin, par exemple http://central:3000. Ouvrez d'abord l'ajout de worker sur le central." />
+                                <Field id="worker-name" label="Nom du worker (facultatif)" value=worker_name required=false help="Nom d'hôte par défaut. Lettres, chiffres, point, tiret et tiret bas." />
+                                <p class="form-error" role="alert">{move || feedback.get()}</p>
+                                <button type="submit" class="btn btn-primary auth-gate__submit" disabled=move || submit_approval.pending().get()>
+                                    {move || if submit_approval.pending().get() { "Envoi de la demande…" } else { "Demander l'enrôlement" }}
+                                </button>
+                                <button type="button" class="btn btn-secondary auth-gate__submit" on:click=move |_| goto.run(Gate::ChooseRole)>"Retour"</button>
+                            </form>
+                            <details class="auth-gate__fallback">
+                                <summary class="form-help">"Enrôlement direct avec identifiants administrateur (secours)"</summary>
+                                <form class="auth-gate__form" on:submit=move |event| {
+                                    event.prevent_default();
+                                    feedback.set(None);
+                                    submit_legacy.dispatch(SetupWorkerRequest {
+                                        central_url: central_url.get_untracked(),
+                                        username: legacy_username.get_untracked(),
+                                        password: legacy_password.get_untracked(),
+                                        worker_name: worker_name.get_untracked(),
+                                    });
+                                    legacy_password.set(String::new());
+                                }>
+                                    <Field id="worker-legacy-username" label="Identifiant administrateur du central" value=legacy_username autocomplete="username" />
+                                    <Field id="worker-legacy-password" label="Mot de passe" value=legacy_password kind="password" autocomplete="current-password" help="Utilisé une seule fois ; non conservé." />
+                                    <button type="submit" class="btn btn-secondary auth-gate__submit" disabled=move || submit_legacy.pending().get()>
+                                        {move || if submit_legacy.pending().get() { "Enrôlement et redémarrage…" } else { "Rattacher avec identifiants" }}
+                                    </button>
+                                </form>
+                            </details>
+                        </div>
+                    }
+                    .into_any()
+                }
+            }}
         </GateCard>
     }
 }

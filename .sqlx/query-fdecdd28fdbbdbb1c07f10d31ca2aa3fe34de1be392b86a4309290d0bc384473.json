@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO flow_versions (flow_id, version, name, description, file_mask, definition) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "fdecdd28fdbbdbb1c07f10d31ca2aa3fe34de1be392b86a4309290d0bc384473"
+}

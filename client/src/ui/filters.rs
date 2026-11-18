@@ -68,7 +68,7 @@ impl JobStateFilter {
         match self {
             Self::Any => true,
             Self::Active => matches!(job.status, JobStatus::Queued | JobStatus::Running),
-            Self::Completed => job.status == JobStatus::Succeeded,
+            Self::Completed => matches!(job.status, JobStatus::Succeeded | JobStatus::Canceled),
             Self::Failed => job.status == JobStatus::Failed,
         }
     }

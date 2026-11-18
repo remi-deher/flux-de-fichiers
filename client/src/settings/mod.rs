@@ -3,6 +3,7 @@
 mod account;
 mod accounts;
 mod keys;
+mod mcp_audit;
 mod network;
 mod network_diagnostics;
 pub mod system;
@@ -20,6 +21,7 @@ use flux_shared::system::{KeySource, SystemStatus};
 use flux_shared::{InstanceKind, Permission};
 use keys::KeysSection;
 use leptos::prelude::*;
+use mcp_audit::McpAuditSection;
 use network::ConfigurationCard;
 use network_diagnostics::DiagnosticsCard;
 use system::{SystemSection, is_version_coherent};
@@ -183,7 +185,12 @@ pub fn SettingsPage(me: Me) -> impl IntoView {
             {move || match active_tab.get() {
                 Section::Account => view! { <AccountSection me=me.clone() /> }.into_any(),
                 Section::Users => view! { <AccountsSection /> }.into_any(),
-                Section::Keys => view! { <KeysSection /> }.into_any(),
+                Section::Keys => view! {
+                    <div class="stack-md">
+                        <KeysSection />
+                        <McpAuditSection />
+                    </div>
+                }.into_any(),
                 Section::Network => status_signal.map(|status| view! {
                     <div class="settings-bento-grid">
                         <ConfigurationCard status=status on_saved=on_settings_saved />

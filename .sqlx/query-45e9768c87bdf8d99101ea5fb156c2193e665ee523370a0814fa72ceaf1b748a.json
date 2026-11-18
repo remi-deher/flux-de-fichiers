@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id AS \"id!: i64\", job_id AS \"job_id!: Uuid\", step_index AS \"step_index: i32\", node_id, block_kind, operation_id, status AS \"status: JobStepStatus\", message, output_excerpt, created_at AS \"created_at: DateTime<Utc>\" FROM job_steps WHERE job_id=?1 ORDER BY step_index, id",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "job_id!: Uuid",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "step_index: i32",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "node_id",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "block_kind",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "operation_id",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "status: JobStepStatus",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "message",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "output_excerpt",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at: DateTime<Utc>",
+        "ordinal": 9,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "45e9768c87bdf8d99101ea5fb156c2193e665ee523370a0814fa72ceaf1b748a"
+}

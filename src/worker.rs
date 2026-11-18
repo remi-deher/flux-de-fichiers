@@ -104,7 +104,7 @@ impl WorkerLoop {
     async fn heartbeat(&self, claim: &Claim, worker: Uuid) -> anyhow::Result<()> {
         let probe = crate::telemetry::TelemetryProbe::with_storage_path(&self.config.work_dir);
         loop {
-            tokio::time::sleep(Duration::from_secs(20)).await;
+            tokio::time::sleep(Duration::from_secs(10)).await;
             self.request(
                 reqwest::Method::POST,
                 &format!("/api/v1/jobs/{}/heartbeat", claim.job_id),
@@ -366,6 +366,35 @@ impl WorkerLoop {
                 }
             }
         }
+        self.prune_stale_tools_cache().await;
+    }
+
+    /// Interroge le central sur les versions actives d'outils et purge les versions obsolètes du cache local.
+    async fn prune_stale_tools_cache(&self) {
+        let Ok(resp) = self
+            .request(reqwest::Method::GET, "/api/v1/worker/tools")
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+        else {
+            return;
+        };
+        if !resp.status().is_success() {
+            return;
+        }
+        let Ok(active) = resp.json::<Vec<crate::domain::ToolRequirement>>().await else {
+            return;
+        };
+        let keep: Vec<(String, String)> = active
+            .into_iter()
+            .map(|req| (req.tool_id, req.version))
+            .collect();
+        let cache = crate::tools_cache::ToolCacheManager::new(&self.config.tools_cache_dir);
+        if let Ok(pruned) = cache.prune_unused(&keep)
+            && pruned > 0
+        {
+            tracing::info!(pruned, "anciennes versions d'outils purgées du cache");
+        }
     }
 }
 
@@ -505,71 +534,113 @@ impl WorkerLoop {
         let outcome: anyhow::Result<()> = async {
             let mut was_disconnected = false;
             let mut idle_polls: u32 = 0;
+            let mut max_concurrency = worker.max_concurrency.max(1);
+            let mut active = tokio::task::JoinSet::new();
             loop {
+                while active.try_join_next().is_some() {}
+                if idle_polls > 0
+                    && idle_polls.is_multiple_of(30)
+                    && let Ok(resp) = runner
+                        .request(reqwest::Method::POST, "/api/v1/workers")
+                        .timeout(Duration::from_secs(10))
+                        .json(&Register {
+                            name: runner.config.name.clone(),
+                            version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+                            telemetry: Some(probe.sample()),
+                        })
+                        .send()
+                        .await
+                    && let Ok(updated) = resp.json::<Worker>().await
+                {
+                    max_concurrency = updated.max_concurrency.max(1);
+                }
                 let telemetry = if idle_polls.is_multiple_of(30) {
                     Some(probe.sample())
                 } else {
                     None
                 };
                 idle_polls = idle_polls.wrapping_add(1);
-                let attempt = async {
-                    let claim = runner
-                        .request(reqwest::Method::POST, "/api/v1/claims")
-                        .timeout(Duration::from_secs(10))
-                        .json(&ClaimRequest {
-                            worker_id: worker.id,
-                            telemetry,
-                        })
-                        .send()
-                        .await?
-                        .error_for_status()?
-                        .json::<Option<Claim>>()
-                        .await?;
-                    Ok::<_, anyhow::Error>(claim)
-                };
-                let claim = tokio::select! { result=attempt=>result, _=crate::api::shutdown_signal()=>return Ok(()) };
-                runner.status.mark_central_reachable(claim.is_ok());
-                match claim {
-                    Ok(Some(mut claim)) => {
-                        if was_disconnected {
-                            runner.purge_orphaned_work_artifacts().await;
-                            was_disconnected = false;
+                while (active.len() as i32) < max_concurrency {
+                    let attempt = async {
+                        let claim = runner
+                            .request(reqwest::Method::POST, "/api/v1/claims")
+                            .timeout(Duration::from_secs(10))
+                            .json(&ClaimRequest {
+                                worker_id: worker.id,
+                                telemetry: telemetry.clone(),
+                            })
+                            .send()
+                            .await?
+                            .error_for_status()?
+                            .json::<Option<Claim>>()
+                            .await?;
+                        Ok::<_, anyhow::Error>(claim)
+                    };
+                    let claim = tokio::select! {
+                        result = attempt => result,
+                        _ = crate::api::shutdown_signal() => {
+                            active.abort_all();
+                            return Ok(());
                         }
-                        if let Err(error) = crate::flows::unseal_claim_secrets_for_worker(
-                            &mut claim,
-                            &runner.config.key,
-                        ) {
-                            tracing::error!(job_id = %claim.job_id, error = %error, "impossible de déchiffrer les secrets du bail");
-                            let _ = runner
-                                .request(
-                                    reqwest::Method::POST,
-                                    &format!("/api/v1/jobs/{}/failure", claim.job_id),
-                                )
-                                .timeout(Duration::from_secs(10))
-                                .json(&Failure {
-                                    worker_id: worker.id,
-                                    lease_token: claim.lease_token,
-                                    lease_epoch: claim.lease_epoch,
-                                    error_code: JobErrorCode::TransferFailed.as_str().to_owned(),
-                                })
-                                .send()
-                                .await;
-                        } else {
-                            runner.execute(claim, worker.id).await?;
+                    };
+                    runner.status.mark_central_reachable(claim.is_ok());
+                    match claim {
+                        Ok(Some(mut claim)) => {
+                            if was_disconnected {
+                                runner.purge_orphaned_work_artifacts().await;
+                                was_disconnected = false;
+                            }
+                            if let Err(error) = crate::flows::unseal_claim_secrets_for_worker(
+                                &mut claim,
+                                &runner.config.key,
+                            ) {
+                                tracing::error!(job_id = %claim.job_id, error = %error, "impossible de déchiffrer les secrets du bail");
+                                let _ = runner
+                                    .request(
+                                        reqwest::Method::POST,
+                                        &format!("/api/v1/jobs/{}/failure", claim.job_id),
+                                    )
+                                    .timeout(Duration::from_secs(10))
+                                    .json(&Failure {
+                                        worker_id: worker.id,
+                                        lease_token: claim.lease_token,
+                                        lease_epoch: claim.lease_epoch,
+                                        error_code: JobErrorCode::TransferFailed.as_str().to_owned(),
+                                    })
+                                    .send()
+                                    .await;
+                            } else {
+                                let spawned_runner = runner.clone();
+                                let wid = worker.id;
+                                active.spawn(async move {
+                                    if let Err(err) = spawned_runner.execute(claim, wid).await {
+                                        tracing::warn!(error = %err, "worker execute task exited with error");
+                                    }
+                                });
+                            }
                         }
-                    }
-                    Ok(None) => {
-                        if was_disconnected {
-                            runner.purge_orphaned_work_artifacts().await;
-                            was_disconnected = false;
+                        Ok(None) => {
+                            if was_disconnected {
+                                runner.purge_orphaned_work_artifacts().await;
+                                was_disconnected = false;
+                            }
+                            break;
                         }
-                    }
-                    Err(_) => {
-                        was_disconnected = true;
-                        tracing::warn!("central unavailable; retrying");
+                        Err(_) => {
+                            was_disconnected = true;
+                            tracing::warn!("central unavailable; retrying");
+                            break;
+                        }
                     }
                 }
-                tokio::select! { _=tokio::time::sleep(Duration::from_secs(1))=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(1)) => {},
+                    Some(_) = active.join_next(), if !active.is_empty() => {},
+                    _ = crate::api::shutdown_signal() => {
+                        active.abort_all();
+                        return Ok(());
+                    }
+                }
             }
         }
         .await;

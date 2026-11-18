@@ -89,13 +89,7 @@ fn FlowCommandBar(
         editing_title.set(false);
     };
 
-    let toggle_palette = move || {
-        if editor.palette_open.get_untracked() {
-            editor.close_right_panel();
-        } else {
-            editor.focus_palette_search();
-        }
-    };
+    let toggle_palette = move || editor.toggle_palette();
 
     let toggle_settings = move || {
         if editor.settings_open.get_untracked() {
@@ -115,7 +109,7 @@ fn FlowCommandBar(
 
     view! {
         <header class="flow-command-bar" role="toolbar" aria-label="Commandes de l'atelier">
-            <div class="flow-command-bar__lead">
+            <div class="flow-island flow-island--identity">
                 <Link to=Route::Flows class="header-icon-btn">
                     <span title="Retour aux flux" aria-label="Retour aux flux">
                         <Icon name=IconName::ChevronLeft size=CHEVRON_ICON_SIZE />
@@ -201,32 +195,25 @@ fn FlowCommandBar(
                             <span class="status-dot" aria-hidden="true"></span>
                             <span>{move || if editor.dirty.get() { "Modifié" } else { "Enregistré" }}</span>
                         </span>
-                        <span class="flow-pill flow-pill--count">
-                            {move || {
-                                let count = editor.graph.with(|g| g.nodes.len());
-                                if count <= 1 {
-                                    format!("{count} bloc")
-                                } else {
-                                    format!("{count} blocs")
-                                }
-                            }}
-                        </span>
                     </div>
                 </div>
             </div>
 
-            <div class="flow-command-bar__actions">
+            <div class="flow-island flow-island--tools">
                 {can_manage.then(|| view! {
-                    <button
-                        type="button"
-                        class="btn btn-secondary btn-sm flow-cmd-btn"
-                        aria-pressed=move || editor.palette_open.get().to_string()
-                        title="Afficher / masquer les composants (Ctrl+B ou /)"
-                        on:click=move |_| toggle_palette()
-                    >
-                        <Icon name=IconName::Plus size=CMD_ICON_SIZE />
-                        <span>"Composants"</span>
-                    </button>
+                    <>
+                        <button
+                            type="button"
+                            class="btn btn-secondary btn-sm flow-cmd-btn"
+                            aria-pressed=move || editor.palette_open.get().to_string()
+                            title="Afficher / masquer les composants (Ctrl+B ou /)"
+                            on:click=move |_| toggle_palette()
+                        >
+                            <Icon name=IconName::Plus size=CMD_ICON_SIZE />
+                            <span>"Composants"</span>
+                        </button>
+                        <span class="flow-island__sep" aria-hidden="true"></span>
+                    </>
                 })}
 
                 <button
@@ -277,7 +264,19 @@ fn FlowCommandBar(
                     <Icon name=IconName::Sliders size=CMD_ICON_SIZE />
                     <span>"Réglages"</span>
                 </button>
+            </div>
 
+            <div class="flow-island flow-island--publish">
+                <span class="flow-pill flow-pill--count">
+                    {move || {
+                        let count = editor.graph.with(|g| g.nodes.len());
+                        if count <= 1 {
+                            format!("{count} bloc")
+                        } else {
+                            format!("{count} blocs")
+                        }
+                    }}
+                </span>
                 {can_manage.then(|| view! {
                     <button
                         type="button"
@@ -400,6 +399,23 @@ fn FlowSettingsPane(
 }
 
 #[component]
+fn LeftPaletteDock(editor: Editor, can_manage: bool) -> impl IntoView {
+    if !can_manage {
+        return ().into_any();
+    }
+    view! {
+        <aside
+            class="flow-palette-dock"
+            class:is-closed=move || !editor.palette_open.get()
+            aria-label="Catalogue de composants"
+        >
+            <Palette editor=editor />
+        </aside>
+    }
+    .into_any()
+}
+
+#[component]
 fn RightDock(
     editor: Editor,
     meta: RwSignal<FlowRecord>,
@@ -417,17 +433,6 @@ fn RightDock(
         >
             <div class="flow-right-dock__bar">
                 <div class="flow-right-dock__tabs" role="tablist" aria-label="Vues du panneau">
-                    {can_manage.then(|| view! {
-                        <button
-                            type="button"
-                            role="tab"
-                            class="flow-right-dock__tab"
-                            aria-selected=move || editor.palette_open.get().to_string()
-                            on:click=move |_| editor.focus_palette_search()
-                        >
-                            "Composants"
-                        </button>
-                    })}
                     <button
                         type="button"
                         role="tab"
@@ -444,19 +449,19 @@ fn RightDock(
                         type="button"
                         role="tab"
                         class="flow-right-dock__tab"
-                        aria-selected=move || editor.settings_open.get().to_string()
-                        on:click=move |_| editor.open_settings()
+                        aria-selected=move || editor.simulation_open.get().to_string()
+                        on:click=move |_| editor.open_simulation()
                     >
-                        "Réglages"
+                        "Simuler"
                     </button>
                     <button
                         type="button"
                         role="tab"
                         class="flow-right-dock__tab"
-                        aria-selected=move || editor.simulation_open.get().to_string()
-                        on:click=move |_| editor.open_simulation()
+                        aria-selected=move || editor.settings_open.get().to_string()
+                        on:click=move |_| editor.open_settings()
                     >
-                        "Simuler"
+                        "Réglages"
                     </button>
                 </div>
                 <button
@@ -471,10 +476,10 @@ fn RightDock(
             </div>
             <div class="flow-right-dock__body">
                 {move || {
-                    if can_manage && editor.palette_open.get() {
-                        view! { <Palette editor=editor /> }.into_any()
-                    } else if editor.inspector_open.get() && has_selection() {
+                    if editor.inspector_open.get() && has_selection() {
                         view! { <NodeInspector editor=editor can_manage=can_manage /> }.into_any()
+                    } else if editor.simulation_open.get() {
+                        view! { <super::simulation::FlowSimulationPanel editor=editor /> }.into_any()
                     } else if editor.settings_open.get() {
                         view! {
                             <FlowSettingsPane
@@ -485,8 +490,6 @@ fn RightDock(
                             />
                         }
                         .into_any()
-                    } else if editor.simulation_open.get() {
-                        view! { <super::simulation::FlowSimulationPanel editor=editor /> }.into_any()
                     } else {
                         ().into_any()
                     }
@@ -697,11 +700,7 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
         }
         if ctrl && key.eq_ignore_ascii_case("b") && can_manage {
             event.prevent_default();
-            if editor.palette_open.get_untracked() {
-                editor.close_right_panel();
-            } else {
-                editor.focus_palette_search();
-            }
+            editor.toggle_palette();
             return;
         }
         if !ctrl && !in_input && can_manage && key == "/" {
@@ -750,8 +749,7 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
                 editor.branch_target.set(None);
             } else if editor.selected_wire.get_untracked().is_some() {
                 editor.selected_wire.set(None);
-            } else if editor.palette_open.get_untracked()
-                || editor.inspector_open.get_untracked()
+            } else if editor.inspector_open.get_untracked()
                 || editor.settings_open.get_untracked()
                 || editor.simulation_open.get_untracked()
             {
@@ -764,6 +762,8 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
                     .with_untracked(std::collections::HashSet::is_empty)
             {
                 editor.clear_selection();
+            } else if editor.palette_open.get_untracked() {
+                editor.close_palette();
             }
         }
     });
@@ -772,15 +772,6 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
 
     view! {
         <div class="flow-workbench">
-            <FlowCommandBar
-                editor=editor
-                meta=meta
-                diagnostics=diagnostics
-                can_manage=can_manage
-                saving=saving
-                on_save=trigger_save
-            />
-
             {(!can_manage).then(|| view! {
                 <p class="flow-workbench__readonly" role="status">
                     "Lecture seule : modifier un flux demande le droit de gestion des flux."
@@ -793,8 +784,18 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
 
             <div
                 class="flow-workspace-body"
+                class:is-palette-open=move || can_manage && editor.palette_open.get()
                 class:is-panel-open=move || editor.any_right_panel_open()
             >
+                <FlowCommandBar
+                    editor=editor
+                    meta=meta
+                    diagnostics=diagnostics
+                    can_manage=can_manage
+                    saving=saving
+                    on_save=trigger_save
+                />
+                <LeftPaletteDock editor=editor can_manage=can_manage />
                 <GraphCanvas editor=editor can_manage=can_manage />
                 <RightDock
                     editor=editor

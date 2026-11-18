@@ -108,22 +108,36 @@ pub fn Palette(editor: Editor) -> impl IntoView {
 
     view! {
         <div class="flow-dock-pane flow-palette-pane" aria-label="Composants de flux">
-            <div class="flow-palette__subbar">
-                <span class="flow-palette__badge">
-                    {move || format!("{} composants", editor.catalog.with(|c| c.len()))}
-                </span>
-                <button
-                    type="button"
-                    class="header-icon-btn"
-                    class:is-active=move || editor.palette_pinned.get()
-                    aria-pressed=move || editor.palette_pinned.get().to_string()
-                    title="Garder les composants ouverts après un ajout"
-                    aria-label="Garder les composants ouverts après un ajout"
-                    on:click=move |_| editor.palette_pinned.update(|pinned| *pinned = !*pinned)
-                >
-                    <Icon name=IconName::Pin size=HEADER_ICON_SIZE />
-                </button>
-            </div>
+            <header class="flow-palette__header">
+                <div class="flow-palette__title-wrap">
+                    <h2 class="flow-palette__title">"Composants"</h2>
+                    <span class="flow-palette__badge">
+                        {move || editor.catalog.with(|c| c.len())}
+                    </span>
+                </div>
+                <div class="flow-palette__header-actions">
+                    <button
+                        type="button"
+                        class="header-icon-btn"
+                        class:is-active=move || editor.palette_pinned.get()
+                        aria-pressed=move || editor.palette_pinned.get().to_string()
+                        title="Garder les composants ouverts après un ajout"
+                        aria-label="Garder les composants ouverts après un ajout"
+                        on:click=move |_| editor.palette_pinned.update(|pinned| *pinned = !*pinned)
+                    >
+                        <Icon name=IconName::Pin size=HEADER_ICON_SIZE />
+                    </button>
+                    <button
+                        type="button"
+                        class="header-icon-btn"
+                        title="Fermer les composants (Ctrl+B)"
+                        aria-label="Fermer les composants"
+                        on:click=move |_| editor.close_palette()
+                    >
+                        <Icon name=IconName::Close size=HEADER_ICON_SIZE />
+                    </button>
+                </div>
+            </header>
 
             {move || {
                 let target = editor.branch_target.get()?;

@@ -10,7 +10,7 @@ use super::geometry::{
     zoom_around,
 };
 use super::presentation::{
-    NodeDomain, PortPresentation, node_output_ports, node_summary, output_presentation,
+    NodeDomain, PortPresentation, node_chips, node_output_ports, output_presentation,
 };
 use super::quick_add::QuickAddPopover;
 use super::state::{Editor, PendingWire, QuickAddState};
@@ -20,12 +20,16 @@ use flux_shared::flows::{FlowBlockKind, FlowConnection, find_owned};
 use leptos::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-const NODE_ICON_SIZE: u32 = 16;
+const NODE_ICON_SIZE: u32 = 15;
 const ACTION_ICON_SIZE: u32 = 14;
 const TOOLBAR_ICON_SIZE: u32 = 14;
-const WIRE_BADGE_WIDTH: f64 = 58.0;
+const WIRE_BADGE_WIDTH: f64 = 60.0;
 const WIRE_BADGE_HEIGHT: f64 = 20.0;
 const WIRE_BADGE_RX: f64 = 10.0;
+const WIRE_ENDPOINT_RADIUS: f64 = 3.5;
+const WIRE_INSERT_RADIUS: f64 = 11.0;
+const WIRE_BADGE_OFFSET_Y: f64 = 13.0;
+const WIRE_INSERT_OFFSET_Y: f64 = 13.0;
 const ZOOM_PERCENT_SCALE: f64 = 100.0;
 const MINI_NODE_RX: f64 = 8.0;
 const DEFAULT_ZOOM: f64 = 1.0;
@@ -844,48 +848,150 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                     to: edge.to.clone(),
                                     port: edge.port.clone(),
                                 };
-                                let badge = edge
-                                    .port
-                                    .as_deref()
-                                    .filter(|p| !p.is_empty())
-                                    .map(|port| {
-                                        let label = wire_badge_label(port);
-                                        let rx = mid.x - WIRE_BADGE_WIDTH / 2.0;
-                                        let ry = mid.y - WIRE_BADGE_HEIGHT / 2.0;
-                                        view! {
-                                            <g class="flow-wire__badge" data-tone=pres.tone.as_attr()>
-                                                <rect
-                                                    x=rx
-                                                    y=ry
-                                                    width=WIRE_BADGE_WIDTH
-                                                    height=WIRE_BADGE_HEIGHT
-                                                    rx=WIRE_BADGE_RX
-                                                />
-                                                <text x=mid.x y=mid.y text-anchor="middle" dominant-baseline="central">
-                                                    {label}
-                                                </text>
-                                            </g>
-                                        }
+                                let insert_edge = click_edge.clone();
+                                let named_port =
+                                    edge.port.as_deref().filter(|p| !p.is_empty());
+                                let badge_y = if can_manage {
+                                    mid.y - WIRE_BADGE_OFFSET_Y
+                                } else {
+                                    mid.y
+                                };
+                                let insert_y = if named_port.is_some() {
+                                    mid.y + WIRE_INSERT_OFFSET_Y
+                                } else {
+                                    mid.y
+                                };
+                                let insert_point = Point { x: mid.x, y: insert_y };
+                                let open_wire_insert = move || {
+                                    let anchor = board_to_screen(
+                                        editor.viewport.get_untracked(),
+                                        insert_point,
+                                    );
+                                    editor.open_quick_add(QuickAddState {
+                                        anchor,
+                                        board_pos: None,
+                                        branch: Some(BranchTarget {
+                                            source_id: insert_edge.from.clone(),
+                                            port: insert_edge.port.clone(),
+                                            replace_to: Some(insert_edge.to.clone()),
+                                        }),
                                     });
-                                Some(view! {
-                                    <path
-                                        class="flow-wire__hit"
-                                        d=d.clone()
+                                };
+                                let click_insert = open_wire_insert.clone();
+                                let key_insert = open_wire_insert;
+                                let badge = named_port.map(|port| {
+                                    let label = wire_badge_label(port);
+                                    let rx = mid.x - WIRE_BADGE_WIDTH / 2.0;
+                                    let ry = badge_y - WIRE_BADGE_HEIGHT / 2.0;
+                                    view! {
+                                        <g class="flow-wire__badge" data-tone=pres.tone.as_attr()>
+                                            <rect
+                                                x=rx
+                                                y=ry
+                                                width=WIRE_BADGE_WIDTH
+                                                height=WIRE_BADGE_HEIGHT
+                                                rx=WIRE_BADGE_RX
+                                            />
+                                            <text x=mid.x y=badge_y text-anchor="middle" dominant-baseline="central">
+                                                {label}
+                                            </text>
+                                        </g>
+                                    }
+                                });
+                                let insert_btn = can_manage.then(|| view! {
+                                    <g
+                                        class="flow-wire__insert-btn"
+                                        role="button"
+                                        tabindex="0"
+                                        aria-label="Insérer une étape sur cette liaison"
                                         on:mousedown=move |event| event.stop_propagation()
                                         on:click=move |event| {
                                             event.stop_propagation();
-                                            editor.selected_wire.set(Some(click_edge.clone()));
+                                            click_insert();
                                         }
-                                    />
-                                    <path
-                                        class="flow-wire"
+                                        on:keydown=move |event| {
+                                            let key = event.key();
+                                            if key == "Enter" || key == " " {
+                                                event.prevent_default();
+                                                event.stop_propagation();
+                                                key_insert();
+                                            }
+                                        }
+                                    >
+                                        <circle
+                                            class="flow-wire__insert-circle"
+                                            cx=mid.x
+                                            cy=insert_y
+                                            r=WIRE_INSERT_RADIUS
+                                        />
+                                        <text
+                                            class="flow-wire__insert-plus"
+                                            x=mid.x
+                                            y=insert_y
+                                            text-anchor="middle"
+                                            dominant-baseline="central"
+                                        >
+                                            "+"
+                                        </text>
+                                    </g>
+                                });
+                                let tone_attr = pres.tone.as_attr();
+                                Some(view! {
+                                    <g
+                                        class="flow-wire-group"
                                         class:is-highlighted=is_highlighted
-                                        class:is-sim-path=sim_active
-                                        class:is-muted=is_muted
-                                        data-tone=pres.tone.as_attr()
-                                        d=d
-                                    />
-                                    {badge}
+                                        data-tone=tone_attr
+                                    >
+                                        <path
+                                            class="flow-wire__hit"
+                                            d=d.clone()
+                                            on:mousedown=move |event| event.stop_propagation()
+                                            on:click=move |event| {
+                                                event.stop_propagation();
+                                                editor.selected_wire.set(Some(click_edge.clone()));
+                                            }
+                                        />
+                                        {(is_highlighted || sim_active).then(|| view! {
+                                            <path
+                                                class="flow-wire__glow"
+                                                data-tone=tone_attr
+                                                d=d.clone()
+                                            />
+                                        })}
+                                        <path
+                                            class="flow-wire"
+                                            class:is-highlighted=is_highlighted
+                                            class:is-sim-path=sim_active
+                                            class:is-muted=is_muted
+                                            data-tone=tone_attr
+                                            d=d.clone()
+                                        />
+                                        {(is_highlighted || sim_active).then(|| view! {
+                                            <path
+                                                class="flow-wire__flow"
+                                                data-tone=tone_attr
+                                                d=d
+                                            />
+                                        })}
+                                        <circle
+                                            class="flow-wire__endpoint"
+                                            class:is-muted=is_muted
+                                            data-tone=tone_attr
+                                            cx=start.x
+                                            cy=start.y
+                                            r=WIRE_ENDPOINT_RADIUS
+                                        />
+                                        <circle
+                                            class="flow-wire__endpoint"
+                                            class:is-muted=is_muted
+                                            data-tone=tone_attr
+                                            cx=end.x
+                                            cy=end.y
+                                            r=WIRE_ENDPOINT_RADIUS
+                                        />
+                                        {badge}
+                                        {insert_btn}
+                                    </g>
                                 })
                             })
                             .collect_view()
@@ -924,7 +1030,9 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                         graph
                             .nodes
                             .iter()
-                            .map(|node| {
+                            .enumerate()
+                            .map(|(idx, node)| {
+                                let step_num = idx + 1;
                                 let spec = find_owned(&catalog, &node.kind);
                                 let category = spec.map_or("Bloc", |s| s.category.as_str());
                                 let kind_label = spec.map_or_else(
@@ -932,9 +1040,10 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                     |s| s.label.clone(),
                                 );
                                 let domain = NodeDomain::from_spec(spec, category);
+                                let domain_label = domain.label();
                                 let incomplete =
                                     spec.is_some_and(|s| !s.missing_fields(&node.config).is_empty());
-                                let summary = node_summary(node, spec);
+                                let chips = node_chips(node, spec);
                                 let has_input = spec.is_none_or(|s| s.has_input);
                                 let ports = node_output_ports(&graph, node, &catalog);
                                 let port_count = ports.len();
@@ -1110,29 +1219,24 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                             event.stop_propagation();
                                                             connect_to_node(click_target_id.clone());
                                                         }
-                                                    ></button>
+                                                    >
+                                                        <span class="flow-graph__port-dot" aria-hidden="true"></span>
+                                                    </button>
                                                 }
                                             })}
 
-                                            <div class="canvas-node__heading">
+                                            <div class="canvas-node__header">
                                                 <span class="canvas-node__icon" aria-hidden="true">
                                                     <Icon name=domain_icon size=NODE_ICON_SIZE />
                                                 </span>
-                                                <button
-                                                    type="button"
-                                                    class="canvas-node__main"
-                                                >
-                                                    <span class="canvas-node__title-row">
-                                                        <span class="canvas-node__title">{node_name}</span>
-                                                        {incomplete.then(|| view! {
-                                                            <span class="canvas-node__warn" title="Réglage obligatoire manquant">"!"</span>
-                                                        })}
-                                                    </span>
-                                                    <span class="canvas-node__subtitle">{subtitle}</span>
-                                                    {summary.map(|text| view! {
-                                                        <span class="canvas-node__summary">{text}</span>
-                                                    })}
-                                                </button>
+                                                <div class="canvas-node__meta">
+                                                    <span class="canvas-node__domain">{domain_label}</span>
+                                                    <span class="canvas-node__kind">{kind_label}</span>
+                                                </div>
+                                                <span class="canvas-node__step text-mono" title="Numéro d'étape">{format!("#{step_num}")}</span>
+                                                {incomplete.then(|| view! {
+                                                    <span class="canvas-node__warn" title="Réglage obligatoire manquant">"!"</span>
+                                                })}
                                                 {can_manage.then(move || view! {
                                                     <div class="canvas-node__actions">
                                                         <button
@@ -1165,6 +1269,35 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                 })}
                                             </div>
 
+                                            <div class="canvas-node__body">
+                                                <button
+                                                    type="button"
+                                                    class="canvas-node__main"
+                                                >
+                                                    <span class="canvas-node__title-row">
+                                                        <span class="canvas-node__title">{node_name}</span>
+                                                    </span>
+                                                    {if !chips.is_empty() {
+                                                        view! {
+                                                            <div class="canvas-node__chips">
+                                                                {chips.into_iter().map(|chip| view! {
+                                                                    <span class="canvas-node__chip">
+                                                                        {chip.key.map(|k| view! {
+                                                                            <span class="canvas-node__chip-key">{format!("{k}:")}</span>
+                                                                        })}
+                                                                        <span class="canvas-node__chip-val">{chip.value}</span>
+                                                                    </span>
+                                                                }).collect_view()}
+                                                            </div>
+                                                        }.into_any()
+                                                    } else {
+                                                        view! {
+                                                            <span class="canvas-node__subtitle">{subtitle}</span>
+                                                        }.into_any()
+                                                    }}
+                                                </button>
+                                            </div>
+
                                             {(!output_slots.is_empty()).then(move || view! {
                                                 <div
                                                     class="canvas-node__outputs"
@@ -1176,20 +1309,25 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                         let click_from = id.clone();
                                                         let click_port = slot.port.clone();
                                                         let insert_from = id.clone();
-                                                        let insert_port = slot.port;
+                                                        let insert_port = slot.port.clone();
                                                         let existing_to = slot.existing_to;
                                                         let port_idx = slot.port_idx;
                                                         let pres_label = slot.pres.label;
                                                         let pres_symbol = slot.pres.symbol;
                                                         let pres_tone = slot.pres.tone;
                                                         let add_label = pres_label.clone();
+                                                        let is_pill = port_count > 1 || slot.port.is_some();
+                                                        let port_symbol = if is_pill { pres_symbol } else { "↓" };
+                                                        let port_title = format!("Sortie : {} (cliquer ou glisser pour relier)", pres_label);
+                                                        let port_aria = format!("Sortie {}", pres_label);
                                                         view! {
                                                             <div class="canvas-output-slot" data-tone=pres_tone.as_attr()>
                                                                 <button
                                                                     type="button"
                                                                     class="canvas-port is-output"
-                                                                    title=format!("Sortie : {} (cliquer ou glisser pour relier)", pres_label)
-                                                                    aria-label=format!("Sortie {}", pres_label)
+                                                                    class:canvas-port--pill=is_pill
+                                                                    title=port_title
+                                                                    aria-label=port_aria
                                                                     on:mousedown=move |event| {
                                                                         event.stop_propagation();
                                                                         event.prevent_default();
@@ -1238,7 +1376,10 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                                                                         }
                                                                     }
                                                                 >
-                                                                    <span>{pres_symbol}</span>
+                                                                    <span>{port_symbol}</span>
+                                                                    {is_pill.then(|| view! {
+                                                                        <span class="canvas-port__label">{pres_label}</span>
+                                                                    })}
                                                                 </button>
                                                                 {can_manage.then(move || view! {
                                                                     <button
@@ -1319,7 +1460,7 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
                             class="flow-canvas__wires"
                             width="100%"
                             height="100%"
-                            aria-hidden="true"
+                            aria-label="Liaisons du graphe"
                         >
                             <g attr:transform=move || viewport_svg_transform(editor.viewport.get())>
                                 {wires_view}

@@ -1,18 +1,18 @@
 //! Styles du plan interactif nodal, du dock palette, des cartes, des liaisons et de la minimap.
 
 pub const GRAPH_CSS: &str = r#"
-/* --- Tiroir droit unifié et flottant (Composants / Bloc / Réglages) --- */
+/* --- Tiroir droit unifié et flottant (Bloc / Simulation / Réglages) --- */
 .flow-right-dock {
   position: absolute;
-  top: 10px;
-  right: 10px;
-  bottom: 10px;
-  width: 320px;
+  top: 68px;
+  right: 12px;
+  bottom: 12px;
+  width: 340px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   background: var(--bg-glass);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
@@ -105,23 +105,31 @@ pub const GRAPH_CSS: &str = r#"
   padding: 0.45rem 0.75rem 0;
 }
 
-/* --- Dock Palette latéral (conservé pour compatibilité) --- */
+/* --- Dock Palette flottant gauche --- */
 .flow-palette-dock {
-  width: 300px;
-  flex-shrink: 0;
-  background: var(--bg-card);
-  border-right: 1px solid var(--border-color);
+  position: absolute;
+  top: 68px;
+  left: 12px;
+  bottom: 12px;
+  width: 304px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  transition: width 0.2s var(--ease-out);
-  z-index: 14;
+  transition: transform 0.2s var(--ease-out), opacity 0.2s var(--ease-out);
+  z-index: 16;
 }
 
 .flow-palette-dock.is-closed {
-  width: 0;
-  border-right: none;
+  transform: translateX(calc(-100% - 20px));
+  opacity: 0;
+  pointer-events: none;
 }
 
 .flow-palette__header {
@@ -129,8 +137,10 @@ pub const GRAPH_CSS: &str = r#"
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0.75rem 0.85rem;
+  padding: 0.55rem 0.75rem;
   border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  flex-shrink: 0;
 }
 
 .flow-palette__title-wrap {
@@ -485,19 +495,18 @@ pub const GRAPH_CSS: &str = r#"
   position: relative;
   box-sizing: border-box;
   width: 100%;
-  min-height: 92px;
+  min-height: 104px;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-card) 100%);
   border: 1px solid var(--border-color);
-  border-left: 4px solid var(--node-accent, var(--primary));
+  border-top: 3px solid var(--node-accent, var(--primary));
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
-  padding: 0.6rem 0.7rem 0.75rem;
+  padding: 0;
   color: var(--text-main);
   cursor: grab;
-  transition: box-shadow 0.16s var(--ease-out), border-color 0.16s var(--ease-out);
+  transition: box-shadow 0.16s var(--ease-out), border-color 0.16s var(--ease-out), transform 0.16s var(--ease-out);
 }
 
 .canvas-node:hover {
@@ -521,24 +530,70 @@ pub const GRAPH_CSS: &str = r#"
   cursor: grabbing;
 }
 
-.canvas-node__heading {
+.canvas-node__header {
   display: flex;
-  align-items: flex-start;
-  gap: 0.55rem;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.42rem 0.55rem;
+  background: color-mix(in srgb, var(--node-accent, var(--primary)) 10%, var(--bg-elevated));
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: calc(var(--radius-md) - 2px) calc(var(--radius-md) - 2px) 0 0;
 }
 
 .canvas-node__icon {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
   border: 0;
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--node-accent, var(--primary)) 14%, transparent);
+  background: color-mix(in srgb, var(--node-accent, var(--primary)) 16%, transparent);
   color: var(--node-accent, var(--primary));
   padding: 0;
-  margin-top: 0.1rem;
+}
+
+.canvas-node__meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.02rem;
+  line-height: 1.15;
+}
+
+.canvas-node__domain {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--node-accent, var(--primary));
+}
+
+.canvas-node__kind {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.canvas-node__step {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  padding: 0.08rem 0.34rem;
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.canvas-node__body {
+  padding: 0.5rem 0.65rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
 }
 
 .canvas-node__main {
@@ -552,7 +607,7 @@ pub const GRAPH_CSS: &str = r#"
   cursor: inherit;
   display: flex;
   flex-direction: column;
-  gap: 0.12rem;
+  gap: 0.28rem;
 }
 
 .canvas-node__title-row {
@@ -591,14 +646,34 @@ pub const GRAPH_CSS: &str = r#"
   text-overflow: ellipsis;
 }
 
-.canvas-node__summary {
-  margin-top: 0.2rem;
-  padding: 0.15rem 0.4rem;
+.canvas-node__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.canvas-node__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 100%;
+  padding: 0.14rem 0.42rem;
   border-radius: var(--radius-sm);
   background: var(--bg-subtle);
-  color: var(--text-dim);
+  border: 1px solid var(--border-subtle);
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.67rem;
+  line-height: 1.25;
+}
+
+.canvas-node__chip-key {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.canvas-node__chip-val {
+  color: var(--text-main);
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -607,7 +682,7 @@ pub const GRAPH_CSS: &str = r#"
 .canvas-node__actions {
   display: flex;
   align-items: center;
-  gap: 0.15rem;
+  gap: 0.12rem;
   opacity: 0;
   transition: opacity 0.15s ease;
 }
@@ -619,8 +694,8 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .canvas-node__action-btn {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
 }
 
 .canvas-node__action-btn.is-danger:hover {
@@ -641,11 +716,11 @@ pub const GRAPH_CSS: &str = r#"
 
 .canvas-port.is-input {
   position: absolute;
-  top: -7px;
+  top: -8px;
   left: 50%;
   transform: translateX(-50%);
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   background: var(--bg-card);
   border: 2px solid var(--node-accent, var(--primary));
   transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
@@ -687,8 +762,12 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .canvas-port.is-output {
-  width: 22px;
-  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
   background: var(--bg-card);
   border: 1.5px solid var(--port-color);
   color: var(--port-color);
@@ -699,14 +778,24 @@ pub const GRAPH_CSS: &str = r#"
   transition: transform 0.14s ease, background-color 0.14s ease;
 }
 
+.canvas-port.is-output.canvas-port--pill {
+  padding: 0 0.55rem;
+  gap: 0.28rem;
+  font-size: 0.68rem;
+}
+
+.canvas-port__label {
+  white-space: nowrap;
+}
+
 .canvas-port.is-output:hover {
-  transform: scale(1.15);
+  transform: scale(1.08);
   background: var(--bg-subtle);
 }
 
 .canvas-port__add {
   position: absolute;
-  top: 24px;
+  top: 28px;
   width: 20px;
   height: 20px;
   border-radius: var(--radius-pill);
@@ -747,6 +836,22 @@ pub const GRAPH_CSS: &str = r#"
   cursor: pointer;
 }
 
+.flow-wire__glow {
+  fill: none;
+  stroke: color-mix(in srgb, var(--primary) 28%, transparent);
+  stroke-width: 8px;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.flow-wire__glow[data-tone="success"] {
+  stroke: color-mix(in srgb, var(--success) 28%, transparent);
+}
+
+.flow-wire__glow[data-tone="warning"] {
+  stroke: color-mix(in srgb, var(--warning) 28%, transparent);
+}
+
 .flow-wire {
   fill: none;
   stroke: var(--primary);
@@ -769,6 +874,45 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .flow-wire.is-muted {
+  opacity: 0.25;
+}
+
+.flow-wire__flow {
+  fill: none;
+  stroke: var(--primary-contrast);
+  stroke-width: 2px;
+  stroke-linecap: round;
+  stroke-dasharray: 4 10;
+  opacity: 0.78;
+  pointer-events: none;
+  animation: pulseWireFlow 0.9s linear infinite;
+}
+
+@keyframes pulseWireFlow {
+  from {
+    stroke-dashoffset: 14;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.flow-wire__endpoint {
+  fill: var(--primary);
+  stroke: var(--bg-card);
+  stroke-width: 1.5px;
+  pointer-events: none;
+}
+
+.flow-wire__endpoint[data-tone="success"] {
+  fill: var(--success);
+}
+
+.flow-wire__endpoint[data-tone="warning"] {
+  fill: var(--warning);
+}
+
+.flow-wire__endpoint.is-muted {
   opacity: 0.25;
 }
 
@@ -815,6 +959,44 @@ pub const GRAPH_CSS: &str = r#"
   fill: var(--warning);
 }
 
+.flow-wire__insert-btn {
+  pointer-events: all;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.flow-wire-group:hover .flow-wire__insert-btn,
+.flow-wire-group.is-highlighted .flow-wire__insert-btn,
+.flow-wire__insert-btn:focus-visible {
+  opacity: 1;
+}
+
+.flow-wire__insert-circle {
+  fill: var(--bg-card);
+  stroke: var(--border-highlight);
+  stroke-width: 1.5px;
+  transition: fill 0.14s ease, stroke 0.14s ease;
+}
+
+.flow-wire__insert-plus {
+  fill: var(--primary);
+  font-size: 13px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.flow-wire__insert-btn:hover .flow-wire__insert-circle,
+.flow-wire__insert-btn:focus-visible .flow-wire__insert-circle {
+  fill: var(--primary);
+  stroke: var(--primary);
+}
+
+.flow-wire__insert-btn:hover .flow-wire__insert-plus,
+.flow-wire__insert-btn:focus-visible .flow-wire__insert-plus {
+  fill: var(--primary-contrast);
+}
+
 /* --- Barre verticale flottante bas-gauche (Zoom, Fit, Layout, Undo/Redo) --- */
 .flow-canvas-controls {
   position: absolute;
@@ -831,7 +1013,12 @@ pub const GRAPH_CSS: &str = r#"
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   box-shadow: var(--shadow-md);
+  transition: left 0.2s var(--ease-out);
   z-index: 11;
+}
+
+.flow-workspace-body.is-palette-open .flow-canvas-controls {
+  left: 328px;
 }
 
 .flow-control-btn {
@@ -902,7 +1089,7 @@ pub const GRAPH_CSS: &str = r#"
 }
 
 .flow-workspace-body.is-panel-open .flow-minimap-panel {
-  right: 342px;
+  right: 364px;
 }
 
 .flow-minimap__tools {
@@ -1214,12 +1401,18 @@ pub const GRAPH_CSS: &str = r#"
   background: var(--bg-elevated);
 }
 
-/* Sélecteur historique conservé pour les tests de thème. */
+/* Point central du port d'entrée (et sélecteur vérifié par les tests de thème). */
 .flow-graph__port-dot {
-  position: absolute;
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
+  background: var(--node-accent, var(--primary));
+  transition: background-color 0.14s ease;
+}
+
+.canvas-port.is-input:hover .flow-graph__port-dot,
+.canvas-port.is-input.is-valid-target .flow-graph__port-dot {
+  background: var(--primary-contrast);
 }
 
 /* --- Simulation interactive du parcours dans l'éditeur --- */
@@ -1322,17 +1515,23 @@ pub const GRAPH_CSS: &str = r#"
     bottom: 0;
     width: min(340px, 100%);
     border-radius: 0;
+    z-index: 25;
   }
   .flow-workspace-body.is-panel-open .flow-minimap-panel {
     right: 14px;
+  }
+  .flow-workspace-body.is-palette-open .flow-canvas-controls {
+    left: 14px;
   }
   .flow-palette-dock {
     position: absolute;
     left: 0;
     top: 0;
     bottom: 0;
-    width: min(300px, 100%);
+    width: min(304px, 100%);
+    border-radius: 0;
     box-shadow: var(--shadow-lg);
+    z-index: 25;
   }
   .flow-inspector-drawer {
     position: absolute;

@@ -27,16 +27,50 @@ pub const FLOWS_CSS: &str = r#"
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.35rem 0.6rem;
+  padding: 0.3rem 0.55rem;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
+  border-left: 3px solid var(--step-accent, var(--primary));
   border-radius: var(--radius-sm);
-  font-size: 0.78rem;
+  font-size: 0.77rem;
   font-weight: 600;
   color: var(--text-main);
+  max-width: 190px;
+}
+
+.pipeline-step-node__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--step-accent, var(--primary)) 14%, transparent);
+  color: var(--step-accent, var(--primary));
+  flex-shrink: 0;
+}
+
+.pipeline-step-node__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pipeline-step-node__branch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.05rem 0.3rem;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--step-accent, var(--primary)) 16%, transparent);
+  color: var(--step-accent, var(--primary));
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 .pipeline-step-node--more {
+  border-left-width: 1px;
   background: var(--primary-bg);
   border-color: var(--border-highlight);
   color: var(--primary);
@@ -50,6 +84,7 @@ pub const FLOWS_CSS: &str = r#"
 
 /* --- Atelier plein écran (Workbench) --- */
 .flow-workbench {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -67,6 +102,7 @@ pub const FLOWS_CSS: &str = r#"
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-card);
   color: var(--text-dim);
+  z-index: 22;
 }
 
 .flow-workbench__readonly {
@@ -74,35 +110,62 @@ pub const FLOWS_CSS: &str = r#"
   color: var(--warning);
 }
 
-/* --- Barre de commande de l'atelier --- */
+/* --- Barre de commande flottante en îlots --- */
 .flow-command-bar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem 0.85rem;
+  gap: 0.65rem;
   flex-wrap: wrap;
-  min-height: 46px;
-  padding: 0.35rem 0.75rem;
-  background: var(--bg-card);
-  border-bottom: 1px solid var(--border-color);
-  box-shadow: var(--shadow-sm);
+  pointer-events: none;
   z-index: 20;
-  flex-shrink: 0;
 }
 
-.flow-command-bar__lead {
-  display: flex;
+.flow-island {
+  pointer-events: auto;
+  display: inline-flex;
   align-items: center;
+  gap: 0.45rem;
+  min-height: 44px;
+  padding: 0.3rem 0.6rem;
+  background: var(--bg-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  max-width: 100%;
+}
+
+.flow-island--identity {
   gap: 0.55rem;
   min-width: 0;
-  flex: 1 1 18rem;
+}
+
+.flow-island--tools {
+  flex-wrap: wrap;
+}
+
+.flow-island--publish {
+  margin-left: auto;
+}
+
+.flow-island__sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border-subtle);
+  margin: 0 0.1rem;
 }
 
 .flow-command-bar__identity {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.5rem;
   min-width: 0;
   flex-wrap: wrap;
 }
@@ -118,14 +181,13 @@ pub const FLOWS_CSS: &str = r#"
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-main);
-  font-size: 1rem;
+  font-size: 0.96rem;
   font-weight: 700;
   padding: 0.12rem 0.45rem;
-  margin-left: -0.45rem;
   border-radius: var(--radius-sm);
   cursor: pointer;
   text-align: left;
-  max-width: 340px;
+  max-width: 280px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -142,21 +204,21 @@ pub const FLOWS_CSS: &str = r#"
 }
 
 .flow-title-input {
-  font-size: 1rem;
+  font-size: 0.96rem;
   font-weight: 700;
   padding: 0.18rem 0.5rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--primary);
   background: var(--bg-elevated);
   color: var(--text-main);
-  min-width: 220px;
-  max-width: 340px;
+  min-width: 200px;
+  max-width: 280px;
 }
 
 .flow-command-bar__pills {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.38rem;
   flex-wrap: wrap;
 }
 
@@ -293,11 +355,16 @@ pub const FLOWS_CSS: &str = r#"
   box-shadow: var(--shadow-lg);
   max-height: 200px;
   overflow-y: auto;
+  transition: left 0.2s var(--ease-out), right 0.2s var(--ease-out);
   z-index: 18;
 }
 
+.flow-workspace-body.is-palette-open .flow-diagnostics-tray {
+  left: 332px;
+}
+
 .flow-workspace-body.is-panel-open .flow-diagnostics-tray {
-  right: 342px;
+  right: 368px;
 }
 
 .flow-diagnostics-tray.is-closed {
@@ -398,6 +465,16 @@ pub const FLOWS_CSS: &str = r#"
 }
 
 @media (max-width: 960px) {
+  .flow-command-bar {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    gap: 0.4rem;
+  }
+  .flow-island {
+    min-height: 40px;
+    padding: 0.25rem 0.5rem;
+  }
   .flow-settings-drawer {
     position: absolute;
     right: 0;
@@ -407,6 +484,7 @@ pub const FLOWS_CSS: &str = r#"
     box-shadow: var(--shadow-lg);
   }
   .flow-diagnostics-tray,
+  .flow-workspace-body.is-palette-open .flow-diagnostics-tray,
   .flow-workspace-body.is-panel-open .flow-diagnostics-tray {
     left: 10px;
     right: 10px;

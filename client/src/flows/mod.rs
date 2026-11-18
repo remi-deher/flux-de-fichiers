@@ -23,8 +23,8 @@ use crate::ui::filters::{Filters, FlowFilter, flow_filter};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
-    EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, StatusBadge, Tag, TagTone,
-    Toasts,
+    EmptyState, Icon, IconName, MetricTone, ResourceCard, StatItem, StatStrip, StatusBadge, Tag,
+    TagTone, Toasts,
 };
 use crate::{api, format};
 use flux_shared::Permission;
@@ -40,6 +40,8 @@ const LOCAL_PATH: &str = "/api/v1/local";
 const LOCAL_FLOW_TEMPLATES_PATH: &str = "/api/v1/local/flow-templates";
 const LOCAL_ITEMS_PATH: &str = "/api/v1/local/items";
 const PIPELINE_PREVIEW_LIMIT: usize = 4;
+const STEP_ICON_SIZE: u32 = 13;
+const ID_SUFFIX_MODULO: u64 = 100_000;
 
 /// Mode d'affichage de la section Flows & Modèles.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -50,20 +52,71 @@ pub enum FlowsCatalogFilter {
     All,
 }
 
-fn pipeline_preview(graph_json: &str) -> (Vec<String>, usize) {
-    let nodes = FlowGraph::parse(graph_json).nodes;
-    let total = nodes.len();
-    let labels = nodes
-        .into_iter()
+/// Étape résumée dans la prévisualisation d'un pipeline de flux.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PipelineStepPreview {
+    pub label: String,
+    pub kind: String,
+    pub domain: NodeDomain,
+    pub is_branching: bool,
+}
+
+fn infer_domain_from_kind(kind: &str, has_branches: bool) -> NodeDomain {
+    let lower = kind.to_ascii_lowercase();
+    if lower.contains("input") {
+        NodeDomain::Input
+    } else if lower.contains("condition") || has_branches {
+        NodeDomain::Logic
+    } else if lower.contains("inspect") {
+        NodeDomain::Inspect
+    } else if lower.contains("output") {
+        NodeDomain::Output
+    } else if lower.contains("webhook")
+        || lower.contains("sonarr")
+        || lower.contains("radarr")
+        || lower.contains("notification")
+        || lower.contains("integration")
+    {
+        NodeDomain::Integration
+    } else {
+        NodeDomain::Process
+    }
+}
+
+/// Extrait jusqu'à `PIPELINE_PREVIEW_LIMIT` étapes enrichies, le total de blocs et le total de liaisons.
+pub fn pipeline_preview_steps(graph_json: &str) -> (Vec<PipelineStepPreview>, usize, usize) {
+    let graph = FlowGraph::parse(graph_json);
+    let total_blocks = graph.nodes.len();
+    let total_connections = graph.connections.len();
+    let steps = graph
+        .nodes
+        .iter()
         .take(PIPELINE_PREVIEW_LIMIT)
-        .map(|node| node.name)
+        .map(|node| {
+            let outgoing_count = graph.outgoing(&node.id).count();
+            let has_named_port = graph.outgoing(&node.id).any(|edge| edge.port.is_some());
+            let has_branches = outgoing_count > 1 || has_named_port;
+            let kind = node.kind.as_str().to_owned();
+            let is_branching = has_branches || kind.to_ascii_lowercase().contains("condition");
+            let domain = infer_domain_from_kind(&kind, has_branches);
+            PipelineStepPreview {
+                label: node.name.clone(),
+                kind,
+                domain,
+                is_branching,
+            }
+        })
         .collect();
-    (labels, total)
+    (steps, total_blocks, total_connections)
 }
 
 /// Extrait jusqu'à `PIPELINE_PREVIEW_LIMIT` libellés d'étapes pour l'aperçu d'un flux.
 pub fn pipeline_preview_labels(graph_json: &str) -> Vec<String> {
-    pipeline_preview(graph_json).0
+    pipeline_preview_steps(graph_json)
+        .0
+        .into_iter()
+        .map(|step| step.label)
+        .collect()
 }
 
 /// Nombre de bibliothèques liées à un flux donné.
@@ -116,22 +169,32 @@ fn flow_template_id(flow_id: &str) -> String {
 
 #[component]
 fn FlowPipelinePreview(
-    preview: Vec<String>,
+    steps: Vec<PipelineStepPreview>,
     extra_blocks: usize,
     empty_label: &'static str,
     aria_label: &'static str,
 ) -> impl IntoView {
     view! {
         <div class="flow-card__pipeline">
-            {if preview.is_empty() {
+            {if steps.is_empty() {
                 view! { <span class="text-dim text-xs">{empty_label}</span> }.into_any()
             } else {
-                let count = preview.len();
+                let count = steps.len();
                 view! {
                     <div class="flow-pipeline" aria-label=aria_label>
-                        {preview.into_iter().enumerate().map(|(idx, step)| {
+                        {steps.into_iter().enumerate().map(|(idx, step)| {
+                            let step_style = format!("--step-accent: {};", step.domain.accent_var());
+                            let icon_name = step.domain.icon();
                             view! {
-                                <span class="pipeline-step-node">{step}</span>
+                                <span class="pipeline-step-node" style=step_style>
+                                    <span class="pipeline-step-node__icon" aria-hidden="true">
+                                        <Icon name=icon_name size=STEP_ICON_SIZE />
+                                    </span>
+                                    <span class="pipeline-step-node__label">{step.label}</span>
+                                    {step.is_branching.then(|| view! {
+                                        <span class="pipeline-step-node__branch" title="Embranchement conditionnel">"⑂"</span>
+                                    })}
+                                </span>
                                 {(idx + 1 < count).then(|| view! {
                                     <span class="pipeline-connector" aria-hidden="true">"→"</span>
                                 })}
@@ -157,8 +220,8 @@ fn FlowCard(
     on_removed: Callback<()>,
 ) -> impl IntoView {
     let router = use_router();
-    let (preview, total_blocks) = pipeline_preview(&flow.definition);
-    let extra_blocks = total_blocks.saturating_sub(preview.len());
+    let (steps, total_blocks, total_connections) = pipeline_preview_steps(&flow.definition);
+    let extra_blocks = total_blocks.saturating_sub(steps.len());
     let feedback = RwSignal::new(None::<String>);
     let path = format!("{FLOWS_PATH}/{}", encode_segment(&flow.id));
     let remove = Action::new_local(move |_: &()| {
@@ -168,6 +231,29 @@ fn FlowCard(
     Effect::new(move |_| match remove.value().get() {
         Some(Ok(())) => {
             Toasts::notify_success("Flux supprimé.");
+            on_removed.run(());
+        }
+        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
+        None => {}
+    });
+    let dup_name = format!("{} (copie)", flow.name);
+    let dup_req = UpdateFlowRequest {
+        name: dup_name.clone(),
+        description: flow.description.clone(),
+        file_mask: flow.file_mask.clone(),
+        is_default: false,
+        definition: flow.definition.clone(),
+    };
+    let duplicate = Action::new_local(move |_: &()| {
+        let suffix = (js_sys::Date::now() as u64 % ID_SUFFIX_MODULO).to_string();
+        let id = new_flow_id(&dup_name, &suffix);
+        let path = format!("{FLOWS_PATH}/{}", encode_segment(&id));
+        let req = dup_req.clone();
+        async move { api::put::<UpdateFlowRequest, FlowRecord>(&path, &req).await }
+    });
+    Effect::new(move |_| match duplicate.value().get() {
+        Some(Ok(_)) => {
+            Toasts::notify_success("Flux dupliqué.");
             on_removed.run(());
         }
         Some(Err(error)) => Toasts::set_error(feedback, error.message()),
@@ -209,6 +295,10 @@ fn FlowCard(
         .then(|| view! { <StatusBadge label="Défaut" variant="success" /> }.into_any());
     let actions = view! {
         <Link to=Route::FlowEditor(flow.id) class="btn btn-secondary btn-sm">"Ouvrir l'atelier"</Link>
+        {can_manage.then(|| view! {
+            <button type="button" class="btn btn-secondary btn-sm" disabled=move || duplicate.pending().get()
+                on:click=move |_| { duplicate.dispatch(()); }>"Dupliquer"</button>
+        })}
         {can_templates.then(|| view! {
             <button type="button" class="btn btn-secondary btn-sm" disabled=move || save_template.pending().get()
                 on:click=move |_| { save_template.dispatch(()); }>"Modèle"</button>
@@ -233,7 +323,7 @@ fn FlowCard(
             tone=if flow.is_default { MetricTone::Success } else { MetricTone::Neutral }
             badge=badge
             on_click=Some(open_editor)
-            footer_meta=format!("{total_blocks} bloc(s) · {updated}")
+            footer_meta=format!("{total_blocks} bloc(s) · {total_connections} liaison(s) · {updated}")
             footer_actions=Some(actions)
         >
             <div class="cluster">
@@ -246,7 +336,7 @@ fn FlowCard(
                 />
             </div>
             <FlowPipelinePreview
-                preview=preview
+                steps=steps
                 extra_blocks=extra_blocks
                 empty_label="Pipeline vide"
                 aria_label="Aperçu du pipeline"
@@ -267,8 +357,8 @@ fn FlowTemplateCard(
 ) -> impl IntoView {
     let router = use_router();
     let def_str = serde_json::to_string(&template.definition).unwrap_or_else(|_| "{}".into());
-    let (preview, total_blocks) = pipeline_preview(&def_str);
-    let extra_blocks = total_blocks.saturating_sub(preview.len());
+    let (steps, total_blocks, total_connections) = pipeline_preview_steps(&def_str);
+    let extra_blocks = total_blocks.saturating_sub(steps.len());
     let feedback = RwSignal::new(None::<String>);
 
     let name_for_create = template.name.clone();
@@ -276,7 +366,7 @@ fn FlowTemplateCard(
     let mask_for_create = template.file_mask.clone();
     let def_for_create = def_str;
     let create_from_tpl = Action::new_local(move |_: &()| {
-        let suffix = (js_sys::Date::now() as u64 % 100_000).to_string();
+        let suffix = (js_sys::Date::now() as u64 % ID_SUFFIX_MODULO).to_string();
         let id = new_flow_id(&name_for_create, &suffix);
         let path = format!("{FLOWS_PATH}/{}", encode_segment(&id));
         let req = UpdateFlowRequest {
@@ -337,7 +427,7 @@ fn FlowTemplateCard(
             icon=IconName::Layers
             tone=MetricTone::Neutral
             badge=Some(badge)
-            footer_meta=format!("{total_blocks} bloc(s) · {}", template.id)
+            footer_meta=format!("{total_blocks} bloc(s) · {total_connections} liaison(s) · {}", template.id)
             footer_actions=Some(actions)
         >
             <div class="cluster">
@@ -345,7 +435,7 @@ fn FlowTemplateCard(
                 <Tag label=template.file_mask tone=TagTone::Primary />
             </div>
             <FlowPipelinePreview
-                preview=preview
+                steps=steps
                 extra_blocks=extra_blocks
                 empty_label="Modèle vide"
                 aria_label="Aperçu du modèle"
@@ -893,5 +983,59 @@ mod tests {
                 unused: 2,
             }
         );
+    }
+
+    #[test]
+    fn pipeline_preview_steps_identifies_domains_and_branches() {
+        let catalog = test_support::test_catalog();
+        let mut graph = FlowGraph::default();
+        let entry = graph.append(
+            FlowBlockKind::parse("block.core.file-input"),
+            "Entrée",
+            serde_json::json!({}),
+            &catalog,
+        );
+        let cond = graph.append(
+            FlowBlockKind::parse("block.core.condition"),
+            "HEVC ?",
+            serde_json::json!({}),
+            &catalog,
+        );
+        let hook = graph.append(
+            FlowBlockKind::parse("block.core.webhook"),
+            "Webhook",
+            serde_json::json!({}),
+            &catalog,
+        );
+        let out = graph.append(
+            FlowBlockKind::parse("block.core.file-output"),
+            "Sortie",
+            serde_json::json!({}),
+            &catalog,
+        );
+        graph.connections.clear();
+        assert!(graph.connect(&entry, None, &cond, &catalog).is_ok());
+        assert!(
+            graph
+                .connect(&cond, Some("true".into()), &out, &catalog)
+                .is_ok()
+        );
+        assert!(
+            graph
+                .connect(&cond, Some("false".into()), &hook, &catalog)
+                .is_ok()
+        );
+
+        let json = serde_json::to_string(&graph).unwrap_or_default();
+        let (steps, total_blocks, total_connections) = pipeline_preview_steps(&json);
+        assert_eq!(total_blocks, 4);
+        assert_eq!(total_connections, 3);
+        assert_eq!(steps.len(), 4);
+        assert_eq!(steps[0].domain, NodeDomain::Input);
+        assert!(!steps[0].is_branching);
+        assert_eq!(steps[1].domain, NodeDomain::Logic);
+        assert!(steps[1].is_branching);
+        assert_eq!(steps[2].domain, NodeDomain::Integration);
+        assert_eq!(steps[3].domain, NodeDomain::Output);
     }
 }

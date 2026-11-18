@@ -134,6 +134,14 @@ pub struct QuickAddState {
     pub branch: Option<BranchTarget>,
 }
 
+/// Onglet actif dans le dock flottant droit (Inspecteur / Simulation / Réglages).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RightDockTab {
+    Inspector,
+    Simulation,
+    Settings,
+}
+
 #[derive(Clone, Copy)]
 pub struct Editor {
     pub flow_id: RwSignal<Option<String>>,
@@ -297,18 +305,37 @@ impl Editor {
         self.dirty.set(true);
     }
 
-    /// Ouvre l'onglet Composants dans le tiroir droit unifié.
+    /// Ouvre le dock flottant gauche des composants sans modifier le dock droit.
     pub fn open_palette(&self) {
-        self.inspector_open.set(false);
-        self.settings_open.set(false);
-        self.simulation_open.set(false);
         self.palette_open.set(true);
     }
 
-    /// Ouvre l'onglet Composants et demande le focus sur la recherche.
+    /// Ferme le dock flottant gauche des composants.
+    pub fn close_palette(&self) {
+        self.palette_open.set(false);
+    }
+
+    /// Bascule l'ouverture du dock gauche des composants et focalise la recherche à l'ouverture.
+    pub fn toggle_palette(&self) {
+        if self.palette_open.get_untracked() {
+            self.close_palette();
+        } else {
+            self.focus_palette_search();
+        }
+    }
+
+    /// Ouvre le dock composants et demande le focus sur la recherche.
     pub fn focus_palette_search(&self) {
         self.open_palette();
         self.palette_focus_tick.update(|n| *n = n.wrapping_add(1));
+    }
+
+    fn set_right_tab(&self, tab: Option<RightDockTab>) {
+        self.inspector_open
+            .set(tab == Some(RightDockTab::Inspector));
+        self.simulation_open
+            .set(tab == Some(RightDockTab::Simulation));
+        self.settings_open.set(tab == Some(RightDockTab::Settings));
     }
 
     /// Ouvre l'inspecteur du bloc sélectionné dans le tiroir droit unifié.
@@ -316,42 +343,40 @@ impl Editor {
         if self.selected.get_untracked().is_none() {
             return;
         }
-        self.palette_open.set(false);
-        self.settings_open.set(false);
-        self.simulation_open.set(false);
-        self.inspector_open.set(true);
+        self.set_right_tab(Some(RightDockTab::Inspector));
     }
 
     /// Ouvre les réglages du flux dans le tiroir droit unifié.
     pub fn open_settings(&self) {
-        self.palette_open.set(false);
-        self.inspector_open.set(false);
-        self.simulation_open.set(false);
-        self.settings_open.set(true);
+        self.set_right_tab(Some(RightDockTab::Settings));
     }
 
     /// Ouvre le simulateur de flux dans le tiroir droit unifié.
     pub fn open_simulation(&self) {
-        self.palette_open.set(false);
-        self.inspector_open.set(false);
-        self.settings_open.set(false);
-        self.simulation_open.set(true);
+        self.set_right_tab(Some(RightDockTab::Simulation));
     }
 
     /// Ferme le tiroir droit unifié quel que soit l'onglet actif.
     pub fn close_right_panel(&self) {
-        self.palette_open.set(false);
-        self.inspector_open.set(false);
-        self.settings_open.set(false);
-        self.simulation_open.set(false);
+        self.set_right_tab(None);
+    }
+
+    /// Indique de façon réactive l'onglet actuellement visible dans le tiroir droit.
+    pub fn active_right_tab(&self) -> Option<RightDockTab> {
+        if self.inspector_open.get() && self.selected.get().is_some() {
+            Some(RightDockTab::Inspector)
+        } else if self.simulation_open.get() {
+            Some(RightDockTab::Simulation)
+        } else if self.settings_open.get() {
+            Some(RightDockTab::Settings)
+        } else {
+            None
+        }
     }
 
     /// Indique de façon réactive si un onglet du tiroir droit est ouvert.
     pub fn any_right_panel_open(&self) -> bool {
-        self.palette_open.get()
-            || (self.inspector_open.get() && self.selected.get().is_some())
-            || self.settings_open.get()
-            || self.simulation_open.get()
+        self.active_right_tab().is_some()
     }
 
     /// Indique de façon réactive si un bloc donné est sélectionné (simple ou multiple).
@@ -1047,27 +1072,44 @@ mod tests {
         let editor = Editor::for_flow(Some("flow.dock".into()), graph);
 
         assert!(editor.palette_open.get_untracked());
-        assert!(!editor.inspector_open.get_untracked());
-        assert!(!editor.settings_open.get_untracked());
+        assert_eq!(editor.active_right_tab(), None);
 
         editor.open_settings();
+        assert_eq!(editor.active_right_tab(), Some(RightDockTab::Settings));
         assert!(editor.settings_open.get_untracked());
-        assert!(!editor.palette_open.get_untracked());
+        assert!(editor.palette_open.get_untracked());
 
         editor.select_node(Some(input), true);
+        assert_eq!(editor.active_right_tab(), Some(RightDockTab::Inspector));
         assert!(editor.inspector_open.get_untracked());
         assert!(!editor.settings_open.get_untracked());
-        assert!(!editor.palette_open.get_untracked());
+        assert!(editor.palette_open.get_untracked());
+
+        editor.open_simulation();
+        assert_eq!(editor.active_right_tab(), Some(RightDockTab::Simulation));
+        assert!(editor.simulation_open.get_untracked());
+        assert!(!editor.inspector_open.get_untracked());
+        assert!(editor.palette_open.get_untracked());
 
         editor.focus_palette_search();
         assert!(editor.palette_open.get_untracked());
-        assert!(!editor.inspector_open.get_untracked());
+        assert_eq!(editor.active_right_tab(), Some(RightDockTab::Simulation));
         assert_eq!(editor.palette_focus_tick.get_untracked(), 1);
 
         editor.close_right_panel();
-        assert!(!editor.palette_open.get_untracked());
+        assert_eq!(editor.active_right_tab(), None);
         assert!(!editor.inspector_open.get_untracked());
         assert!(!editor.settings_open.get_untracked());
+        assert!(!editor.simulation_open.get_untracked());
+        assert!(editor.palette_open.get_untracked());
+
+        editor.toggle_palette();
+        assert!(!editor.palette_open.get_untracked());
+        editor.toggle_palette();
+        assert!(editor.palette_open.get_untracked());
+        assert_eq!(editor.palette_focus_tick.get_untracked(), 2);
+        editor.close_palette();
+        assert!(!editor.palette_open.get_untracked());
     }
 
     #[test]

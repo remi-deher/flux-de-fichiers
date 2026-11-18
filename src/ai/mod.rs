@@ -1,5 +1,6 @@
 //! Assistant IA intégré au central : orchestration LLM multi-fournisseurs branchée sur les outils MCP (ADR 0015).
 
+pub mod diagnosis;
 pub mod health;
 pub mod history;
 pub mod oauth;
@@ -28,9 +29,10 @@ use flux_shared::{
     Permission,
     ai::{
         AiActionDecision, AiChatRequest, AiChatResponse, AiChatRole, AiClientStatus, AiContext,
-        AiConversation, AiConversationList, AiHealth, AiOauthDeviceCode, AiOauthPollResponse,
-        AiProvider, AiQuotaSettings, AiRunEvent, AiRunStarted, AiSettingsView, AiTestRequest,
-        AiTestResponse, AiToolCallTrace, MAX_CHAT_MESSAGES, UpdateAiSettingsRequest,
+        AiConversation, AiConversationList, AiDiagnosis, AiDiagnosisSettings, AiHealth,
+        AiOauthDeviceCode, AiOauthPollResponse, AiProvider, AiQuotaSettings, AiRunEvent,
+        AiRunStarted, AiSettingsView, AiTestRequest, AiTestResponse, AiToolCallTrace,
+        MAX_CHAT_MESSAGES, UpdateAiSettingsRequest,
     },
     mcp::McpAuditOutcome,
 };
@@ -325,6 +327,33 @@ pub async fn get_health(
     }))
 }
 
+/// Diagnostic proactif des échecs de tâches (`GET /api/v1/ai/diagnosis`).
+pub async fn get_diagnosis(
+    State(state): State<AppState>,
+    AnyAuth(principal): AnyAuth,
+) -> AppResult<Json<AiDiagnosis>> {
+    auth::require(&principal, Permission::ViewJobs)?;
+    Ok(Json(diagnosis::current(&state).await))
+}
+
+/// Active ou coupe le diagnostic proactif (`PUT /api/v1/ai/diagnosis`).
+pub async fn update_diagnosis(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Json(request): Json<AiDiagnosisSettings>,
+) -> AppResult<Json<AiDiagnosis>> {
+    diagnosis::set_enabled(&state.pool, request.enabled).await?;
+    Ok(Json(diagnosis::current(&state).await))
+}
+
+/// Recalcule la synthèse maintenant (`POST /api/v1/ai/diagnosis/refresh`).
+pub async fn refresh_diagnosis(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+) -> AppResult<Json<AiDiagnosis>> {
+    diagnosis::refresh(&state).await.map(Json)
+}
+
 /// Plafonds quotidiens (`GET /api/v1/ai/quotas`).
 pub async fn get_quotas(
     State(state): State<AppState>,
@@ -344,12 +373,17 @@ pub async fn update_quotas(
 
 /// Vérifie que l'assistant est utilisable et compte la question dans les quotas du jour.
 async fn admit(state: &AppState, principal: &Principal) -> AppResult<()> {
+    admit_owner(state, &principal.id).await
+}
+
+/// Comme `admit`, pour un propriétaire de quota qui n'est pas un compte (diagnostic proactif).
+async fn admit_owner(state: &AppState, owner: &str) -> AppResult<()> {
     let ai_cfg = settings::load_effective(&state.pool, &state.config).await;
     if !ai_cfg.enabled || !ai_cfg.as_client_status().available {
         return Err(AppError::Conflict);
     }
     let quotas = usage::load_quotas(&state.pool).await;
-    usage::record_question(&state.pool, &principal.id, quotas).await
+    usage::record_question(&state.pool, owner, quotas).await
 }
 
 /// Un tour de modèle, dont le résultat alimente l'état du fournisseur.
@@ -1774,6 +1808,144 @@ mod tests {
         );
         let again = call("POST", "/api/v1/ai/chat", &admin, question()?).await?;
         assert_eq!(again.status(), StatusCode::OK);
+
+        server_task.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn proactive_diagnosis_is_opt_in_cheap_and_computed_once_per_batch_of_failures()
+    -> anyhow::Result<()> {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_in_mock = Arc::clone(&calls);
+        let mock_llm = axum::Router::new().route(
+            "/v1/chat/completions",
+            post(move |Json(body): Json<Value>| {
+                calls_in_mock.fetch_add(1, Ordering::SeqCst);
+                let writes_offered = body["tools"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|tool| tool["function"]["name"] == "delete_job");
+                async move {
+                    Json(json!({ "choices": [{ "message": {
+                        "role": "assistant",
+                        "content": format!("Cause : disque plein. Écritures proposées : {writes_offered}")
+                    }}]}))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let mock_addr = listener.local_addr()?;
+        let server_task = tokio::spawn(async move {
+            let _ = axum::serve(listener, mock_llm).await;
+        });
+
+        let (app, state, _dir) = test_app().await?;
+        let admin = issue_key_header(&state.pool, "diag-admin", Role::Admin).await?;
+        let worker = issue_key_header(&state.pool, "diag-worker", Role::Worker).await?;
+        let call = |method: &'static str, uri: &'static str, auth: &str, body: Body| {
+            let request = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("authorization", auth)
+                .header("content-type", "application/json")
+                .body(body);
+            let app = app.clone();
+            async move { anyhow::Ok(app.oneshot(request?).await?) }
+        };
+        let read = |res: axum::response::Response| async move {
+            anyhow::Ok(serde_json::from_slice::<AiDiagnosis>(
+                &axum::body::to_bytes(res.into_body(), 65_536).await?,
+            )?)
+        };
+        // Les réglages IA autorisent les écritures : le diagnostic ne doit pourtant jamais en proposer.
+        let settings = Body::from(serde_json::to_vec(&UpdateAiSettingsRequest {
+            enabled: true,
+            provider: AiProvider::OpenAiCompatible,
+            base_url: format!("http://{mock_addr}/v1"),
+            model: "mock-model".into(),
+            api_key: Some("sk-secret-value".into()),
+            allow_write_tools: true,
+            max_tool_rounds: 2,
+        })?);
+        assert_eq!(
+            call("PUT", "/api/v1/ai/settings", &admin, settings)
+                .await?
+                .status(),
+            StatusCode::OK
+        );
+
+        // Désactivé par défaut : ni synthèse, ni recalcul possible, ni appel au fournisseur.
+        let initial =
+            read(call("GET", "/api/v1/ai/diagnosis", &admin, Body::empty()).await?).await?;
+        assert_eq!(initial, AiDiagnosis::default());
+        assert_eq!(
+            call(
+                "POST",
+                "/api/v1/ai/diagnosis/refresh",
+                &admin,
+                Body::empty()
+            )
+            .await?
+            .status(),
+            StatusCode::CONFLICT
+        );
+        diagnosis::tick(&state).await?;
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        // Seul un administrateur règle le diagnostic.
+        let enable = || {
+            Body::from(
+                serde_json::to_vec(&AiDiagnosisSettings { enabled: true }).unwrap_or_default(),
+            )
+        };
+        assert_eq!(
+            call("PUT", "/api/v1/ai/diagnosis", &worker, enable())
+                .await?
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        let enabled = read(call("PUT", "/api/v1/ai/diagnosis", &admin, enable()).await?).await?;
+        assert!(enabled.enabled && enabled.summary.is_none());
+
+        // Sans échec, la synthèse le dit sans interroger le fournisseur.
+        diagnosis::tick(&state).await?;
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let quiet = read(
+            call(
+                "POST",
+                "/api/v1/ai/diagnosis/refresh",
+                &admin,
+                Body::empty(),
+            )
+            .await?,
+        )
+        .await?;
+        assert_eq!(quiet.summary.map(|s| s.failures), Some(0));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        // Un échec récent déclenche UN calcul, en lecture seule ; la boucle ne le refait pas.
+        sqlx::query("INSERT INTO jobs (id, source_name, status, error_code) VALUES ('j1', 'film.mkv', 'failed', 'disk_full')")
+            .execute(&state.pool)
+            .await?;
+        state.ai_diagnosis.clear_for_tests();
+        diagnosis::tick(&state).await?;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let computed =
+            read(call("GET", "/api/v1/ai/diagnosis", &admin, Body::empty()).await?).await?;
+        let summary = computed
+            .summary
+            .ok_or_else(|| anyhow::anyhow!("synthèse absente"))?;
+        assert_eq!(summary.failures, 1);
+        assert!(summary.text.contains("disque plein"));
+        assert!(summary.text.contains("Écritures proposées : false"));
+        diagnosis::tick(&state).await?;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        // Le travail de fond passe par les quotas.
+        let usage_today = usage::requests_today(&state.pool, "system:diagnosis").await?;
+        assert_eq!(usage_today.1, 1);
 
         server_task.abort();
         Ok(())

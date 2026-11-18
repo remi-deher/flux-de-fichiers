@@ -4,12 +4,15 @@ use crate::api;
 use crate::format;
 use crate::ui::{SectionHeader, Tag, TagTone, Toasts};
 use chrono::DateTime;
-use flux_shared::ai::{AiHealth, AiQuotaSettings, MAX_AI_DAILY_QUOTA};
+use flux_shared::ai::{
+    AiDiagnosis, AiDiagnosisSettings, AiHealth, AiQuotaSettings, MAX_AI_DAILY_QUOTA,
+};
 use leptos::ev;
 use leptos::prelude::*;
 
 const AI_HEALTH_PATH: &str = "/api/v1/ai/health";
 const AI_QUOTAS_PATH: &str = "/api/v1/ai/quotas";
+const AI_DIAGNOSIS_PATH: &str = "/api/v1/ai/diagnosis";
 
 /// Date RFC 3339 du central, affichée dans le fuseau du navigateur ; telle quelle si illisible.
 fn when(raw: &str) -> String {
@@ -128,6 +131,7 @@ fn AiStatusBody(state: AiHealth, on_saved: Callback<()>) -> impl IntoView {
                     usage_label(state.your_requests_today, quota.per_user_daily),
                 )}
             </p>
+            <DiagnosisToggle />
             <form class="settings-form" on:submit=submit>
                 <div class="form-group">
                     <label for="ai-quota-user" class="form-label">"Questions par jour et par compte (0 : sans limite)"</label>
@@ -156,6 +160,50 @@ fn AiStatusBody(state: AiHealth, on_saved: Callback<()>) -> impl IntoView {
                     </button>
                 </div>
             </form>
+        </div>
+    }
+}
+
+/// Active ou coupe le diagnostic proactif des échecs de tâches (appels au fournisseur en tâche de fond).
+#[component]
+fn DiagnosisToggle() -> impl IntoView {
+    let enabled = RwSignal::new(false);
+    let feedback = RwSignal::new(None::<String>);
+    let loaded = LocalResource::new(move || async move {
+        if let Ok(state) = api::get::<AiDiagnosis>(AI_DIAGNOSIS_PATH).await {
+            enabled.set(state.enabled);
+        }
+    });
+    let change = move |event: ev::Event| {
+        let next = event_target_checked(&event);
+        enabled.set(next);
+        feedback.set(None);
+        leptos::task::spawn_local(async move {
+            let body = AiDiagnosisSettings { enabled: next };
+            match api::put::<AiDiagnosisSettings, AiDiagnosis>(AI_DIAGNOSIS_PATH, &body).await {
+                Ok(state) => enabled.set(state.enabled),
+                Err(err) => {
+                    enabled.set(!next);
+                    Toasts::set_error(feedback, err.message());
+                }
+            }
+        });
+    };
+    view! {
+        <div class="form-group">
+            <label class="flow-settings__toggle">
+                <input
+                    type="checkbox"
+                    disabled=move || loaded.get().is_none()
+                    prop:checked=move || enabled.get()
+                    on:change=change
+                />
+                <span>"Diagnostic proactif des échecs de tâches (Activité)"</span>
+            </label>
+            <p class="form-help">
+                "Désactivé par défaut. Activé, le central interroge le fournisseur IA au plus une fois par heure, et seulement s'il y a de nouveaux échecs ; ces appels comptent dans les quotas. La synthèse reste en mémoire et n'utilise que des outils en lecture."
+            </p>
+            {move || feedback.get().map(|err| view! { <p class="form-error" role="alert">{err}</p> })}
         </div>
     }
 }

@@ -118,6 +118,7 @@ pub struct AppState {
     pub ai_runs: crate::ai::run::AiRuns,
     pub ai_health: crate::ai::health::AiHealthTracker,
     pub ai_models: crate::ai::health::ModelCache,
+    pub ai_diagnosis: crate::ai::diagnosis::DiagnosisStore,
 }
 
 impl AppState {
@@ -138,6 +139,7 @@ impl AppState {
             ai_runs: crate::ai::run::AiRuns::new(),
             ai_health: crate::ai::health::AiHealthTracker::new(),
             ai_models: crate::ai::health::ModelCache::new(),
+            ai_diagnosis: crate::ai::diagnosis::DiagnosisStore::new(),
         }
     }
 
@@ -410,6 +412,10 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/ai/test", post(crate::ai::test_connection))
         .route("/api/v1/ai/health", get(crate::ai::get_health))
         .route(
+            "/api/v1/ai/diagnosis",
+            get(crate::ai::get_diagnosis).put(crate::ai::update_diagnosis),
+        )
+        .route(
             "/api/v1/ai/quotas",
             get(crate::ai::get_quotas).put(crate::ai::update_quotas),
         )
@@ -486,6 +492,10 @@ fn ai_chat_routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/ai/chat", post(crate::ai::chat))
         .route("/api/v1/ai/runs", post(crate::ai::start_run))
+        .route(
+            "/api/v1/ai/diagnosis/refresh",
+            post(crate::ai::refresh_diagnosis),
+        )
         .route(
             "/api/v1/ai/conversations",
             get(crate::ai::list_conversations).delete(crate::ai::delete_conversations),
@@ -841,6 +851,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     }
     let plugin_sync = tokio::spawn(plugin_sync_loop(state.clone()));
     let lib_scans = tokio::spawn(library_scan_loop(state.clone()));
+    let ai_diagnosis = tokio::spawn(crate::ai::diagnosis::run_loop(state.clone()));
     let app = router(state);
     tracing::info!(%addr, "central started");
     if let Some((cert, key)) = tls {
@@ -867,6 +878,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     }
     plugin_sync.abort();
     lib_scans.abort();
+    ai_diagnosis.abort();
     pool.close().await;
     Ok(())
 }

@@ -362,6 +362,33 @@ pub struct AiHealth {
     pub your_requests_today: u32,
 }
 
+/// Synthèse des échecs récents de tâches, produite par l'assistant (diagnostic proactif).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiDiagnosisSummary {
+    pub text: String,
+    /// RFC 3339, UTC.
+    pub generated_at: String,
+    /// Tâches en échec sur la fenêtre analysée (24 h).
+    pub failures: u32,
+}
+
+/// État du diagnostic proactif (`GET /api/v1/ai/diagnosis`) ; la synthèse est gardée en mémoire.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiDiagnosis {
+    pub enabled: bool,
+    #[serde(default)]
+    pub summary: Option<AiDiagnosisSummary>,
+}
+
+/// Active ou coupe le diagnostic proactif (`PUT /api/v1/ai/diagnosis`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiDiagnosisSettings {
+    pub enabled: bool,
+}
+
 /// Objet de l'interface sur lequel porte la conversation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

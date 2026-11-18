@@ -210,7 +210,7 @@ fn route_context(route: &Route) -> AiContext {
     }
 }
 
-fn render_blocks(text: &str) -> AnyView {
+pub(crate) fn render_blocks(text: &str) -> AnyView {
     let blocks = parse_message_blocks(text);
     if blocks.is_empty() {
         return view! { <p class="text-dim">"(Réponse vide)"</p> }.into_any();

@@ -150,9 +150,16 @@ est devant l'écran) ; le MCP externe garde « pas de file d'approbation » (dé
    conversation, la réponse (`done`) renvoie l'identifiant. `GET /api/v1/ai/conversations`,
    `GET` et `DELETE` sur `/{id}`, `DELETE` sur la collection ; un compte ne voit que les siennes
    (404 sinon). Le client n'envoie au central que les 24 derniers messages.
-6. **Diagnostic proactif.** Réglage **désactivé par défaut** : résumé des échecs récents, calculé en
-   tâche de fond au plus une fois par heure et seulement si de nouveaux échecs existent, affiché
-   dans Activité. Aucun appel au fournisseur sans ce réglage.
+6. **Diagnostic proactif.** Réglage **désactivé par défaut** (`PUT /api/v1/ai/diagnosis`, admin).
+   Activé, une boucle de fond du central (passage toutes les 10 min) résume les tâches en échec
+   des dernières 24 h : appel au fournisseur **au plus une fois par heure et seulement si les
+   échecs ont changé** ; sans échec, le texte est local, sans appel. Le calcul est un tour de
+   conversation **sans run**, donc avec les seuls outils en lecture, sous un compte interne
+   (`system:diagnosis`) dont les appels comptent dans les quotas et l'audit. La synthèse reste
+   **en mémoire** (elle cite des noms de fichiers) et est recalculée après un redémarrage s'il y a
+   encore des échecs. `GET /api/v1/ai/diagnosis` (droit de voir les tâches) l'expose, `POST
+   .../refresh` (admin) la recalcule ; Activité > Tâches l'affiche, Paramètres > Assistant IA
+   l'active.
 7. **Quotas, cache, état.** Une « question » est une conversation lancée (run ou `/ai/chat`) ;
    elle est comptée par jour (UTC) et par compte dans `ai_usage` (migration 0026, purgée après
    14 jours). Deux plafonds réglables par un administrateur, `GET/PUT /api/v1/ai/quotas` : par

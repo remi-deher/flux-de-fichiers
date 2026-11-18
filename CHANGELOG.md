@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.39.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.38.1...v0.39.0) (2026-11-18)
+
+
+### Features
+
+* **libraries:** sélecteur d'arborescence de dossiers/médias et édition en ligne des workers ([de1e9b4](https://github.com/remi-deher/flux-de-fichiers/commit/de1e9b47d01a33aea64763fb6ec26569aed61213))
+* **libraries:** sélecteur d'arborescence de dossiers/médias et édition en ligne des workers ([d15a78c](https://github.com/remi-deher/flux-de-fichiers/commit/d15a78c95fb2789d4cfe1cb6cb048b769f32ab02))
+
 ## [0.38.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.38.0...v0.38.1) (2026-11-18)
 
 

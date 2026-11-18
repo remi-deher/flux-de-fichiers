@@ -8,7 +8,9 @@ pub use flux_shared::jobs::{
 };
 
 pub use flux_shared::libraries::{
-    LIBRARY_NAME_MAX, LIBRARY_PATH_MAX, Library, LibraryAccess, LibraryWorkerPath, LibraryWrite,
+    DirectoryEntry, DirectoryListing, LIBRARY_NAME_MAX, LIBRARY_PATH_MAX, Library, LibraryAccess,
+    LibraryWorkerPath, LibraryWrite, MediaFileEntry, RootShortcut, WorkerBrowseReport,
+    WorkerBrowseTask,
 };
 pub use flux_shared::workers::{SystemConfig, Worker};
 

@@ -348,3 +348,129 @@ async fn upload_and_scan_library_routes() -> anyhow::Result<()> {
     assert_eq!(rescan_json["skippedExisting"], 2);
     Ok(())
 }
+
+#[tokio::test]
+async fn browse_library_filesystem_local_and_remote_worker() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let input_dir = dir.path().join("input");
+    let films_dir = input_dir.join("Films");
+    std::fs::create_dir_all(&films_dir)?;
+    std::fs::write(films_dir.join("film.mkv"), b"mkv")?;
+    std::fs::write(input_dir.join("sample.mp4"), b"mp4")?;
+    std::fs::write(input_dir.join("notes.txt"), b"txt")?;
+
+    let config = Config {
+        bind: "127.0.0.1:3000".parse()?,
+        database_url: "sqlite::memory:".into(),
+        data_dir: dir.path().to_path_buf(),
+        input_dir: input_dir.clone(),
+        config_dir: dir.path().join("config"),
+        tools_cache_dir: dir.path().join("tools-cache"),
+        plugins_dir: None,
+        static_dir: "frontend/dist".into(),
+        max_file_bytes: 1024,
+        local_worker: false,
+        web_origin: None,
+        web_session_ttl_seconds: 28_800,
+        tls: None,
+        smtp: None,
+    };
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&config.database_url)
+        .await?;
+    sqlx::migrate!().run(&pool).await?;
+    common::install_keys(&pool).await?;
+    let app = router(AppState::new(pool, Arc::new(config)));
+
+    // 1. Exploration locale (sans workerId -> input_dir)
+    let local_resp = admin(&app, "GET", "/api/v1/libraries/browse", None).await?;
+    assert_eq!(local_resp.status(), StatusCode::OK);
+    let local_json = json_of(local_resp).await?;
+    assert_eq!(local_json["path"], input_dir.to_string_lossy().as_ref());
+    assert_eq!(local_json["directories"].as_array().map(Vec::len), Some(1));
+    assert_eq!(local_json["directories"][0]["name"], "Films");
+    assert_eq!(local_json["directories"][0]["mediaCount"], 1);
+    assert_eq!(local_json["files"].as_array().map(Vec::len), Some(1));
+    assert_eq!(local_json["files"][0]["name"], "sample.mp4");
+
+    // 2. Refus d'un chemin relatif / traversant
+    let invalid_resp = admin(&app, "GET", "/api/v1/libraries/browse?path=../etc", None).await?;
+    assert_eq!(invalid_resp.status(), StatusCode::BAD_REQUEST);
+
+    // 3. Relais vers un worker distant en ligne
+    let remote_id = register_worker(&app, "nas-browse").await?;
+    let app_worker = app.clone();
+    let worker_id_for_task = remote_id.clone();
+    let worker_task = tokio::spawn(async move {
+        let pending_req = Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/api/v1/worker/filesystem/pending?worker_id={worker_id_for_task}&wait_ms=2000"
+            ))
+            .header("authorization", format!("Bearer {}", common::WORKER_KEY))
+            .body(Body::empty())?;
+        let pending_resp = app_worker.clone().oneshot(pending_req).await?;
+        assert_eq!(pending_resp.status(), StatusCode::OK);
+        let tasks = json_of(pending_resp).await?;
+        let task_arr = tasks
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("expected array"))?;
+        assert_eq!(task_arr.len(), 1);
+        let request_id = task_arr[0]["requestId"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("missing requestId"))?;
+        assert_eq!(task_arr[0]["path"], "/volume1/medias");
+
+        let report_body = serde_json::json!({
+            "requestId": request_id,
+            "workerId": worker_id_for_task,
+            "listing": {
+                "workerId": worker_id_for_task,
+                "path": "/volume1/medias",
+                "parentPath": "/volume1",
+                "writable": true,
+                "roots": [{ "label": "Racine (/)", "path": "/", "writable": false }],
+                "directories": [{
+                    "name": "Séries",
+                    "path": "/volume1/medias/Séries",
+                    "writable": true,
+                    "hasSubdirs": true,
+                    "mediaCount": 12
+                }],
+                "files": [{
+                    "name": "pilot.mkv",
+                    "path": "/volume1/medias/pilot.mkv",
+                    "bytes": 4096,
+                    "extension": "mkv"
+                }]
+            },
+            "error": null
+        });
+        let report_req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/worker/filesystem")
+            .header("authorization", format!("Bearer {}", common::WORKER_KEY))
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&report_body)?))?;
+        let report_resp = app_worker.oneshot(report_req).await?;
+        assert_eq!(report_resp.status(), StatusCode::NO_CONTENT);
+        Ok::<(), anyhow::Error>(())
+    });
+
+    let remote_resp = admin(
+        &app,
+        "GET",
+        &format!("/api/v1/libraries/browse?workerId={remote_id}&path=%2Fvolume1%2Fmedias"),
+        None,
+    )
+    .await?;
+    assert_eq!(remote_resp.status(), StatusCode::OK);
+    let remote_json = json_of(remote_resp).await?;
+    assert_eq!(remote_json["path"], "/volume1/medias");
+    assert_eq!(remote_json["directories"][0]["name"], "Séries");
+    assert_eq!(remote_json["files"][0]["name"], "pilot.mkv");
+
+    worker_task.await??;
+    Ok(())
+}

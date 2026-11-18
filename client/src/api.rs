@@ -66,6 +66,9 @@ impl ApiError {
                 "Action refusée dans l'état actuel (conflit).".into()
             }
             Self::Rejected { status: 403, .. } => "Droit insuffisant pour cette action.".into(),
+            Self::Rejected { status: 429, .. } => {
+                "Trop de demandes ou quota quotidien atteint : réessayez plus tard.".into()
+            }
             Self::Rejected { code, .. } => format!("Refusé par le central ({code})."),
             Self::Network => "Central injoignable ou réponse illisible.".into(),
         }
@@ -224,6 +227,11 @@ mod tests {
             code: "invalid_input".into(),
         };
         assert!(other.message().contains("invalid_input"));
+        let limited = ApiError::Rejected {
+            status: 429,
+            code: "too_many_attempts".into(),
+        };
+        assert!(limited.message().contains("quota"));
     }
 
     #[test]

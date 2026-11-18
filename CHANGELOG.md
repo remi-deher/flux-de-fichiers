@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.37.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.36.0...v0.37.0) (2026-11-18)
+
+
+### Features
+
+* **ui:** render plugin blocks as flow palette cards ([2482363](https://github.com/remi-deher/flux-de-fichiers/commit/24823636d3d4f2604d9adc0b354b78a831facc5a))
+* **ui:** render plugin blocks as flow palette cards ([5676e9d](https://github.com/remi-deher/flux-de-fichiers/commit/5676e9d0920254df1f768ead7d51f755ea381ac7))
+
 ## [0.36.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.35.0...v0.36.0) (2026-11-18)
 
 

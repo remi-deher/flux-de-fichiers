@@ -6,7 +6,16 @@ use serde_json::Value;
 
 const SUMMARY_MAX_CHARS: usize = 42;
 const SUMMARY_MAX_PARTS: usize = 3;
+const CHIP_MAX_CHARS: usize = 28;
+const CHIP_MAX_COUNT: usize = 3;
 const MASKED_SECRET: &str = "••••";
+
+/// Puce structurée de paramètre affichée dans le corps d'une carte du canevas.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NodeChip {
+    pub key: Option<String>,
+    pub value: String,
+}
 
 /// Rôle fonctionnel d'un bloc, dictant son accent visuel et son pictogramme.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +59,18 @@ impl NodeDomain {
             Self::Integration
         } else {
             Self::Process
+        }
+    }
+
+    /// Libellé court du domaine métier affiché dans l'en-tête de carte.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Input => "Entrée",
+            Self::Logic => "Logique",
+            Self::Inspect => "Inspection",
+            Self::Process => "Traitement",
+            Self::Integration => "Intégration",
+            Self::Output => "Sortie",
         }
     }
 
@@ -156,12 +177,86 @@ fn is_hidden_field(name: &str, spec: Option<&OwnedBlockSpec>) -> bool {
         || lower.contains("header")
 }
 
-fn truncate_summary(text: String) -> String {
-    if text.chars().count() <= SUMMARY_MAX_CHARS {
+fn truncate_text(text: String, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
         return text;
     }
-    let prefix: String = text.chars().take(SUMMARY_MAX_CHARS - 1).collect();
+    let prefix: String = text.chars().take(max_chars.saturating_sub(1)).collect();
     format!("{prefix}…")
+}
+
+fn is_condition_config(
+    obj: &serde_json::Map<String, Value>,
+    spec: Option<&OwnedBlockSpec>,
+) -> bool {
+    spec.is_some_and(|s| !s.ports.is_empty())
+        || (obj.contains_key("property")
+            && obj.contains_key("operator")
+            && obj.contains_key("target"))
+}
+
+fn condition_parts<'a>(
+    obj: &'a serde_json::Map<String, Value>,
+    spec: Option<&OwnedBlockSpec>,
+) -> Option<(&'a str, &'a str, &'a str)> {
+    if !is_condition_config(obj, spec) {
+        return None;
+    }
+    let property = obj.get("property").and_then(Value::as_str).map(str::trim)?;
+    let target = obj.get("target").and_then(Value::as_str).map(str::trim)?;
+    if property.is_empty() || target.is_empty() {
+        return None;
+    }
+    let op = match obj.get("operator").and_then(Value::as_str).unwrap_or("eq") {
+        "eq" => "=",
+        "neq" => "!=",
+        "contains" => "~",
+        "gt" => ">",
+        "lt" => "<",
+        other => other,
+    };
+    Some((property, op, target))
+}
+
+fn visible_config_entries<'a>(
+    obj: &'a serde_json::Map<String, Value>,
+    spec: Option<&'a OwnedBlockSpec>,
+    limit: usize,
+) -> Vec<(&'a str, &'a str, &'a Value)> {
+    let mut entries = Vec::new();
+    if let Some(block_spec) = spec {
+        for field in &block_spec.fields {
+            if entries.len() >= limit {
+                break;
+            }
+            if is_hidden_field(&field.name, Some(block_spec)) {
+                continue;
+            }
+            if let Some(value) = obj.get(&field.name) {
+                let label = if field.label.trim().is_empty() {
+                    field.name.as_str()
+                } else {
+                    field.label.as_str()
+                };
+                if scalar_summary_part(&field.name, value).is_some() {
+                    entries.push((field.name.as_str(), label, value));
+                }
+            }
+        }
+    } else {
+        for (key, value) in obj {
+            if entries.len() >= limit {
+                break;
+            }
+            if is_hidden_field(key, None) {
+                continue;
+            }
+            if scalar_summary_part(key, value).is_some() {
+                entries.push((key.as_str(), key.as_str(), value));
+            }
+        }
+    }
+    entries
 }
 
 fn scalar_summary_part(key: &str, value: &Value) -> Option<String> {
@@ -176,60 +271,52 @@ fn scalar_summary_part(key: &str, value: &Value) -> Option<String> {
     }
 }
 
-/// Résumé compact de configuration affiché sur une carte du canevas.
+/// Résumé compact de configuration affiché dans la simulation et l'aperçu texte.
 pub fn node_summary(node: &FlowNode, spec: Option<&OwnedBlockSpec>) -> Option<String> {
     let obj = node.config.as_object()?;
-    let is_condition = spec.is_some_and(|s| !s.ports.is_empty())
-        || (obj.contains_key("property")
-            && obj.contains_key("operator")
-            && obj.contains_key("target"));
-    if is_condition {
-        let property = obj.get("property").and_then(Value::as_str).map(str::trim)?;
-        let target = obj.get("target").and_then(Value::as_str).map(str::trim)?;
-        if !property.is_empty() && !target.is_empty() {
-            let op = match obj.get("operator").and_then(Value::as_str).unwrap_or("eq") {
-                "eq" => "=",
-                "neq" => "!=",
-                "contains" => "~",
-                "gt" => ">",
-                "lt" => "<",
-                other => other,
-            };
-            return Some(truncate_summary(format!("{property} {op} {target}")));
-        }
+    if let Some((property, op, target)) = condition_parts(obj, spec) {
+        return Some(truncate_text(
+            format!("{property} {op} {target}"),
+            SUMMARY_MAX_CHARS,
+        ));
+    }
+    if is_condition_config(obj, spec) {
+        return None;
     }
 
-    let mut parts = Vec::new();
-    if let Some(block_spec) = spec {
-        for field in &block_spec.fields {
-            if parts.len() >= SUMMARY_MAX_PARTS {
-                break;
-            }
-            if is_hidden_field(&field.name, Some(block_spec)) {
-                continue;
-            }
-            if let Some(part) = obj
-                .get(&field.name)
-                .and_then(|value| scalar_summary_part(&field.name, value))
-            {
-                parts.push(part);
-            }
-        }
-    } else {
-        for (key, value) in obj {
-            if parts.len() >= SUMMARY_MAX_PARTS {
-                break;
-            }
-            if is_hidden_field(key, None) {
-                continue;
-            }
-            if let Some(part) = scalar_summary_part(key, value) {
-                parts.push(part);
-            }
-        }
+    let parts: Vec<String> = visible_config_entries(obj, spec, SUMMARY_MAX_PARTS)
+        .into_iter()
+        .filter_map(|(key, _, value)| scalar_summary_part(key, value))
+        .collect();
+
+    (!parts.is_empty()).then(|| truncate_text(parts.join(" · "), SUMMARY_MAX_CHARS))
+}
+
+/// Puces structurées de paramètres affichées dans le corps d'une carte sur le canevas.
+pub fn node_chips(node: &FlowNode, spec: Option<&OwnedBlockSpec>) -> Vec<NodeChip> {
+    let Some(obj) = node.config.as_object() else {
+        return Vec::new();
+    };
+    if let Some((property, op, target)) = condition_parts(obj, spec) {
+        return vec![NodeChip {
+            key: Some(truncate_text(property.to_owned(), CHIP_MAX_CHARS)),
+            value: truncate_text(format!("{op} {target}"), CHIP_MAX_CHARS),
+        }];
     }
 
-    (!parts.is_empty()).then(|| truncate_summary(parts.join(" · ")))
+    visible_config_entries(obj, spec, CHIP_MAX_COUNT)
+        .into_iter()
+        .filter_map(|(key, label, value)| match value {
+            Value::Bool(true) => Some(NodeChip {
+                key: None,
+                value: truncate_text(label.to_owned(), CHIP_MAX_CHARS),
+            }),
+            _ => scalar_summary_part(key, value).map(|val| NodeChip {
+                key: Some(truncate_text(label.to_owned(), CHIP_MAX_CHARS)),
+                value: truncate_text(val, CHIP_MAX_CHARS),
+            }),
+        })
+        .collect()
 }
 
 /// Sévérité d'un diagnostic du graphe.
@@ -439,6 +526,59 @@ mod tests {
             json!({"secret_token": "abc", "masked": "••••", "preset": "fast"}),
         );
         assert_eq!(node_summary(&extra_secret, None), Some("fast".to_owned()));
+    }
+
+    #[test]
+    fn node_chips_extracts_structured_badges_and_masks_secrets() {
+        assert_eq!(NodeDomain::Input.label(), "Entrée");
+        assert_eq!(NodeDomain::Logic.label(), "Logique");
+        assert_eq!(NodeDomain::Inspect.label(), "Inspection");
+        assert_eq!(NodeDomain::Process.label(), "Traitement");
+        assert_eq!(NodeDomain::Integration.label(), "Intégration");
+        assert_eq!(NodeDomain::Output.label(), "Sortie");
+
+        let catalog = test_catalog();
+        let cond = make_node(
+            FlowBlockKind::parse("block.core.condition"),
+            "HEVC ?",
+            json!({"property": "video.codec", "operator": "eq", "target": "hevc"}),
+        );
+        assert_eq!(
+            node_chips(&cond, find_owned(&catalog, &cond.kind)),
+            vec![NodeChip {
+                key: Some("video.codec".to_owned()),
+                value: "= hevc".to_owned(),
+            }]
+        );
+
+        let hook = make_node(
+            FlowBlockKind::parse("block.core.webhook"),
+            "Hook",
+            json!({
+                "url": "https://hook.test",
+                "method": "POST",
+                "custom_headers": {"Authorization": "secret"},
+                "api_secret": "••••",
+                "fail_on_error": true
+            }),
+        );
+        assert_eq!(
+            node_chips(&hook, find_owned(&catalog, &hook.kind)),
+            vec![
+                NodeChip {
+                    key: Some("URL".to_owned()),
+                    value: "https://hook.test".to_owned(),
+                },
+                NodeChip {
+                    key: Some("Méthode".to_owned()),
+                    value: "POST".to_owned(),
+                },
+                NodeChip {
+                    key: None,
+                    value: "Échec bloquant".to_owned(),
+                },
+            ]
+        );
     }
 
     #[test]

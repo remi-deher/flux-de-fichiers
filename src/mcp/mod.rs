@@ -1,7 +1,8 @@
 //! Serveur MCP natif (Streamable HTTP JSON-RPC 2.0 sur `/mcp`, ADR 0015).
 
-mod audit;
-mod protocol;
+pub(crate) mod audit;
+mod prompts;
+pub(crate) mod protocol;
 mod tools_flows;
 mod tools_libraries;
 mod tools_plugins;
@@ -9,10 +10,11 @@ mod tools_system;
 
 use crate::{
     api::{
-        AnyAuth, AppState, ManageApiKeysAuth, OPENAPI_SPEC, ViewFlowsAuth, ViewLibrariesAuth,
-        ViewPluginsAuth, flows, libraries, plugins,
+        AnyAuth, AppState, ManageApiKeysAuth, OPENAPI_SPEC, ViewFlowsAuth, ViewJobsAuth,
+        ViewLibrariesAuth, ViewOverviewAuth, ViewPluginsAuth, ViewWorkersAuth, flows, jobs,
+        libraries, plugins, system,
     },
-    auth::Principal,
+    auth::{self, Principal},
     error::{AppError, AppResult},
     repository,
 };
@@ -34,10 +36,10 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::time::Instant;
 
-fn tool_required_permissions(name: &str) -> &'static [Permission] {
+pub(crate) fn tool_required_permissions(name: &str) -> &'static [Permission] {
     match name {
         "list_blocks" | "list_flows" | "get_flow" | "list_flow_versions" | "get_flow_version"
-        | "validate_flow" => &[Permission::ViewFlows],
+        | "validate_flow" | "simulate_flow" | "diff_flow_versions" => &[Permission::ViewFlows],
         "save_flow" | "delete_flow" | "restore_flow_version" => &[Permission::ManageFlows],
         "list_repositories" | "get_repository" | "list_catalog" | "get_plugin" | "list_tools"
         | "get_tool" | "get_pack" | "list_local_catalog" => &[Permission::ViewPlugins],
@@ -47,6 +49,7 @@ fn tool_required_permissions(name: &str) -> &'static [Permission] {
         | "delete_repository"
         | "get_plugin_settings"
         | "save_plugin_settings"
+        | "test_plugin_connection"
         | "install_tool"
         | "install_pack"
         | "upload_local_resource"
@@ -56,25 +59,34 @@ fn tool_required_permissions(name: &str) -> &'static [Permission] {
         | "create_local_pack"
         | "delete_local_item" => &[Permission::ManagePlugins],
         "list_libraries" | "get_library" | "list_input_files" => &[Permission::ViewLibraries],
-        "create_library" | "update_library" | "delete_library" | "delete_input_file" => {
-            &[Permission::ManageLibraries]
-        }
+        "create_library" | "update_library" | "delete_library" | "delete_input_file"
+        | "browse_filesystem" => &[Permission::ManageLibraries],
         "scan_library" => &[Permission::ManageLibraries, Permission::ManageJobs],
-        "list_jobs" | "get_job" | "get_job_steps" => &[Permission::ViewJobs],
-        "create_job" | "retry_job" | "delete_job" | "delete_job_output" => {
-            &[Permission::ManageJobs]
+        "list_jobs" | "get_job" | "get_job_steps" | "get_job_stats" | "diagnose_job" => {
+            &[Permission::ViewJobs]
         }
+        "create_job"
+        | "retry_job"
+        | "cancel_job"
+        | "update_job_priority"
+        | "batch_jobs"
+        | "delete_job"
+        | "delete_job_output" => &[Permission::ManageJobs],
         "get_system_status" | "update_system_settings" | "run_diagnostics" => {
             &[Permission::ManageSettings]
         }
         "get_instance_status" | "get_system_hardware" => &[Permission::ViewOverview],
-        "list_workers" => &[Permission::ViewWorkers],
-        "delete_worker" => &[Permission::ManageWorkers],
+        "list_workers" | "list_enrollment_requests" => &[Permission::ViewWorkers],
+        "update_worker_settings"
+        | "delete_worker"
+        | "set_enrollment_window"
+        | "approve_enrollment_request"
+        | "reject_enrollment_request" => &[Permission::ManageWorkers],
         _ => &[Permission::ManageSettings],
     }
 }
 
-fn allowed_tools(principal: &Principal) -> Vec<McpTool> {
+pub(crate) fn allowed_tools(principal: &Principal) -> Vec<McpTool> {
     let mut tools = Vec::new();
     tools.extend(tools_flows::tools());
     tools.extend(tools_plugins::tools());
@@ -116,6 +128,30 @@ fn all_resources() -> Vec<McpResource> {
             description: "Catalogue JSON des plugins, packs, flux modèles et scripts.",
             mime_type: "application/json",
         },
+        McpResource {
+            uri: "flux://workers",
+            name: "Workers enregistrés",
+            description: "Liste JSON des workers, concurrence, plages horaires et télémétrie.",
+            mime_type: "application/json",
+        },
+        McpResource {
+            uri: "flux://jobs/recent",
+            name: "Tâches récentes",
+            description: "Les 50 dernières tâches traitées ou en file.",
+            mime_type: "application/json",
+        },
+        McpResource {
+            uri: "flux://jobs/stats",
+            name: "Statistiques et économies disque",
+            description: "Bilan volumétrique global et économies d'espace par bibliothèque.",
+            mime_type: "application/json",
+        },
+        McpResource {
+            uri: "flux://system/hardware",
+            name: "Matériel du central",
+            description: "Capacités CPU, mémoire, GPU et stockage du serveur central.",
+            mime_type: "application/json",
+        },
     ]
 }
 
@@ -131,7 +167,14 @@ struct ResourceReadParams {
     uri: String,
 }
 
-async fn call_tool(
+#[derive(Deserialize)]
+struct PromptGetParams {
+    name: String,
+    #[serde(default)]
+    arguments: Value,
+}
+
+pub(crate) async fn call_tool(
     name: &str,
     args: Value,
     state: &AppState,
@@ -178,6 +221,35 @@ async fn read_resource(
                     .await
                     .map_err(|err| format!("{err:?}"))?;
             let text = serde_json::to_string_pretty(&list).map_err(|err| err.to_string())?;
+            Ok((text, "application/json"))
+        }
+        "flux://workers" => {
+            let Json(list) =
+                jobs::workers(State(state.clone()), ViewWorkersAuth(principal.clone()))
+                    .await
+                    .map_err(|err| format!("{err:?}"))?;
+            let text = serde_json::to_string_pretty(&list).map_err(|err| err.to_string())?;
+            Ok((text, "application/json"))
+        }
+        "flux://jobs/recent" => {
+            auth::require(principal, Permission::ViewJobs).map_err(|err| format!("{err:?}"))?;
+            let list = repository::list_jobs(&state.pool, None, 50)
+                .await
+                .map_err(|err| format!("{err:?}"))?;
+            let text = serde_json::to_string_pretty(&list).map_err(|err| err.to_string())?;
+            Ok((text, "application/json"))
+        }
+        "flux://jobs/stats" => {
+            let Json(stats) = jobs::stats(State(state.clone()), ViewJobsAuth(principal.clone()))
+                .await
+                .map_err(|err| format!("{err:?}"))?;
+            let text = serde_json::to_string_pretty(&stats).map_err(|err| err.to_string())?;
+            Ok((text, "application/json"))
+        }
+        "flux://system/hardware" => {
+            let Json(hw) =
+                system::hardware(State(state.clone()), ViewOverviewAuth(principal.clone())).await;
+            let text = serde_json::to_string_pretty(&hw).map_err(|err| err.to_string())?;
             Ok((text, "application/json"))
         }
         _ => Err(format!("ressource inconnue : {uri}")),
@@ -233,7 +305,8 @@ pub async fn handle_post(
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {
                     "tools": { "listChanged": false },
-                    "resources": { "subscribe": false, "listChanged": false }
+                    "resources": { "subscribe": false, "listChanged": false },
+                    "prompts": { "listChanged": false }
                 },
                 "serverInfo": {
                     "name": SERVER_NAME,
@@ -376,6 +449,27 @@ pub async fn handle_post(
                         }
                     }
                 }
+                Err(err) => JsonRpcResponse::err(
+                    id,
+                    ERR_INVALID_PARAMS,
+                    format!("paramètres invalides : {err}"),
+                ),
+            }
+        }
+        "prompts/list" => JsonRpcResponse::ok(id, json!({ "prompts": prompts::list() })),
+        "prompts/get" => {
+            let params_val = req.params.unwrap_or(Value::Null);
+            match serde_json::from_value::<PromptGetParams>(params_val) {
+                Ok(params) => match prompts::get(&params.name, &params.arguments) {
+                    Ok((description, messages)) => JsonRpcResponse::ok(
+                        id,
+                        json!({
+                            "description": description,
+                            "messages": messages,
+                        }),
+                    ),
+                    Err(msg) => JsonRpcResponse::err(id, ERR_INVALID_PARAMS, msg),
+                },
                 Err(err) => JsonRpcResponse::err(
                     id,
                     ERR_INVALID_PARAMS,
@@ -831,6 +925,224 @@ mod tests {
         )?;
         assert_eq!(limited_json["total"], 1);
         assert_eq!(limited_json["entries"][0]["outcome"], "rate_limited");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mcp_exposes_annotations_prompts_new_resources_simulation_diff_and_diagnostics()
+    -> anyhow::Result<()> {
+        let (app, state, _dir) = test_app().await?;
+        let mcp_key = api_keys::issue(&state.pool, "smart-mcp", Role::Mcp).await?;
+
+        // 1. Capabilities + annotations sur tools/list + prompts/list + prompts/get
+        let (st_init, init_resp) = mcp_call(
+            &app,
+            &mcp_key.raw,
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }),
+        )
+        .await?;
+        assert_eq!(st_init, StatusCode::OK);
+        assert!(init_resp["result"]["capabilities"]["prompts"].is_object());
+
+        let (_, tools_resp) = mcp_call(
+            &app,
+            &mcp_key.raw,
+            json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
+        )
+        .await?;
+        let tools = tools_resp["result"]["tools"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("tools array expected"))?;
+        let sim_tool = tools
+            .iter()
+            .find(|t| t["name"] == "simulate_flow")
+            .ok_or_else(|| anyhow::anyhow!("simulate_flow missing"))?;
+        assert_eq!(sim_tool["annotations"]["readOnlyHint"], true);
+        let del_tool = tools
+            .iter()
+            .find(|t| t["name"] == "delete_flow")
+            .ok_or_else(|| anyhow::anyhow!("delete_flow missing"))?;
+        assert_eq!(del_tool["annotations"]["destructiveHint"], true);
+
+        let (_, prompts_resp) = mcp_call(
+            &app,
+            &mcp_key.raw,
+            json!({ "jsonrpc": "2.0", "id": 3, "method": "prompts/list" }),
+        )
+        .await?;
+        assert_eq!(
+            prompts_resp["result"]["prompts"]
+                .as_array()
+                .map_or(0, Vec::len),
+            3
+        );
+        let (_, prompt_get) = mcp_call(
+            &app,
+            &mcp_key.raw,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "prompts/get",
+                "params": { "name": "design_flow", "arguments": { "goal": "AV1 VAAPI" } }
+            }),
+        )
+        .await?;
+        assert!(
+            prompt_get["result"]["messages"][0]["content"]["text"]
+                .as_str()
+                .unwrap_or("")
+                .contains("simulate_flow")
+        );
+
+        // 2. Sauvegarde de deux versions d'un flux + simulation + diff
+        let v1_def = json!({
+            "nodes": [
+                { "id": "n1", "type": "file-input", "name": "Entrée", "config": {} },
+                { "id": "n2", "type": "file-output", "name": "Sortie", "config": {} }
+            ],
+            "connections": [
+                { "from": "n1", "to": "n2" }
+            ]
+        });
+        let (_, _) = mcp_call(
+            &app,
+            &mcp_key.raw,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "tools/call",
+                "params": {
+                    "name": "save_flow",
+                    "arguments": {
+                        "id": "flow.ai.sim",
+                        "name": "Flux IA",
+                        "isDefault": true,
+                        "definition": v1_def
+                    }
+                }
+            }),
+        )
+        .await?;
+        let v2_def = json!({
+            "nodes": [
+                { "id": "n1", "type": "file-input", "name": "Entrée", "config": {} },
+                { "id": "n2", "type": "file-output", "name": "Sortie", "config": {} },
+                {
+                    "id": "n3",
+                    "type": "webhook",
+                    "name": "Webhook",
+                    "config": { "custom_headers": { "Authorization": "Bearer should-never-leak" } }
+                }
+            ],
+            "connections": [
+                { "from": "n1", "to": "n3" },
+                { "from": "n3", "to": "n2" }
+            ]
+        });
+        let (_, _) = mcp_call(
+            &app,
+            &mcp_key.raw,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 6,
+                "method": "tools/call",
+                "params": {
+                    "name": "save_flow",
+                    "arguments": {
+                        "id": "flow.ai.sim",
+                        "name": "Flux IA",
+                        "isDefault": true,
+                        "definition": v2_def
+                    }
+                }
+            }),
+        )
+        .await?;
+
+        let (_, sim_resp) = mcp_call(
+            &app,
+            &mcp_key.raw,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {
+                    "name": "simulate_flow",
+                    "arguments": { "flowId": "flow.ai.sim", "preset": "structured_tracks" }
+                }
+            }),
+        )
+        .await?;
+        assert_eq!(sim_resp["result"]["isError"], false);
+        let sim_val: Value = serde_json::from_str(
+            sim_resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or("{}"),
+        )?;
+        assert_eq!(sim_val["status"], "complete");
+        assert_eq!(sim_val["steps"].as_array().map_or(0, Vec::len), 3);
+
+        let (_, diff_resp) = mcp_call(
+            &app,
+            &mcp_key.raw,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 8,
+                "method": "tools/call",
+                "params": {
+                    "name": "diff_flow_versions",
+                    "arguments": { "id": "flow.ai.sim" }
+                }
+            }),
+        )
+        .await?;
+        let diff_val: Value = serde_json::from_str(
+            diff_resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or("{}"),
+        )?;
+        assert_eq!(diff_val["fromVersion"], 1);
+        assert_eq!(diff_val["toVersion"], 2);
+        assert_eq!(diff_val["diff"]["addedNodes"][0]["id"], "n3");
+
+        // 3. Création d'une tâche + diagnose_job (vérifie masquage du secret webhook) + get_job_stats + ressource stats
+        let job =
+            repository::insert_job(&state.pool, "movie.mkv", None, &"a".repeat(64), 1_000_000)
+                .await?;
+        let (_, diag_resp) = mcp_call(
+            &app,
+            &mcp_key.raw,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "tools/call",
+                "params": { "name": "diagnose_job", "arguments": { "id": job.id } }
+            }),
+        )
+        .await?;
+        assert_eq!(diag_resp["result"]["isError"], false);
+        let diag_text = diag_resp["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or("");
+        assert!(!diag_text.contains("should-never-leak"));
+
+        let (_, res_stats) = mcp_call(
+            &app,
+            &mcp_key.raw,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "resources/read",
+                "params": { "uri": "flux://jobs/stats" }
+            }),
+        )
+        .await?;
+        let stats_val: Value = serde_json::from_str(
+            res_stats["result"]["contents"][0]["text"]
+                .as_str()
+                .unwrap_or("{}"),
+        )?;
+        assert_eq!(stats_val["totalJobs"], 1);
         Ok(())
     }
 }

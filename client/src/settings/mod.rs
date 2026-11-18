@@ -2,6 +2,7 @@
 
 mod account;
 mod accounts;
+mod ai;
 mod keys;
 mod mcp_audit;
 mod network;
@@ -16,6 +17,7 @@ use crate::shell::instance_role_badge;
 use crate::ui::{MetricTone, StatItem, StatStrip};
 use account::AccountSection;
 use accounts::AccountsSection;
+use ai::AiSettingsSection;
 use flux_shared::session::Me;
 use flux_shared::system::{KeySource, SystemStatus};
 use flux_shared::{InstanceKind, Permission};
@@ -34,6 +36,7 @@ enum Section {
     Account,
     Users,
     Keys,
+    Ai,
     Network,
     System,
 }
@@ -44,6 +47,7 @@ impl Section {
             Self::Account => "Mon compte",
             Self::Users => "Utilisateurs",
             Self::Keys => "Clés d'API",
+            Self::Ai => "Assistant IA",
             Self::Network => "Réseau & Courriel",
             Self::System => "Système",
         }
@@ -61,6 +65,10 @@ fn sections(me: &Me) -> Vec<Section> {
         (
             Section::Keys,
             central && me.allows(Permission::ManageApiKeys),
+        ),
+        (
+            Section::Ai,
+            central && me.allows(Permission::ManageSettings),
         ),
         (
             Section::Network,
@@ -191,6 +199,7 @@ pub fn SettingsPage(me: Me) -> impl IntoView {
                         <McpAuditSection />
                     </div>
                 }.into_any(),
+                Section::Ai => view! { <AiSettingsSection /> }.into_any(),
                 Section::Network => status_signal.map(|status| view! {
                     <div class="settings-bento-grid">
                         <ConfigurationCard status=status on_saved=on_settings_saved />
@@ -229,7 +238,7 @@ mod tests {
             InstanceKind::Central,
             None,
         );
-        assert_eq!(sections(&admin).len(), 5);
+        assert_eq!(sections(&admin).len(), 6);
 
         let worker = Me::new(
             CallerKind::Account,

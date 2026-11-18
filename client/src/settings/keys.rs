@@ -4,6 +4,7 @@ use super::account::role_label;
 use crate::api;
 use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, Icon, IconName, SectionHeader, Toasts};
+use crate::workers::origin;
 use flux_shared::accounts::{ApiKeyRecord, CreateKeyRequest, CreatedKey};
 use flux_shared::{Permission, Role};
 use leptos::prelude::*;
@@ -11,6 +12,25 @@ use leptos::prelude::*;
 const KEYS_PATH: &str = "/api/v1/api-keys";
 /// Rôles possibles d'une clé : `worker` pour les nœuds, `mcp` pour l'automatisation MCP.
 const KEY_ROLES: [Role; 4] = [Role::Admin, Role::Mcp, Role::Worker, Role::Viewer];
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RevealedKey {
+    key: String,
+    is_mcp: bool,
+}
+
+/// Génère un extrait `.mcp.json` prêt à copier pour connecter un client MCP au central.
+pub fn build_mcp_client_snippet(central_origin: &str, key: &str) -> String {
+    let base = central_origin.trim().trim_end_matches('/');
+    let base = if base.is_empty() {
+        "http://localhost:3000"
+    } else {
+        base
+    };
+    format!(
+        "{{\n  \"mcpServers\": {{\n    \"flux-de-fichiers\": {{\n      \"type\": \"http\",\n      \"url\": \"{base}/mcp\",\n      \"headers\": {{\n        \"Authorization\": \"Bearer {key}\"\n      }}\n    }}\n  }}\n}}"
+    )
+}
 
 fn format_scope_summary(scopes: &Option<Vec<Permission>>) -> String {
     match scopes {
@@ -33,7 +53,7 @@ pub fn KeysSection() -> impl IntoView {
         api::get::<Vec<ApiKeyRecord>>(KEYS_PATH)
     });
     let feedback = RwSignal::new(None::<String>);
-    let revealed = RwSignal::new(None::<String>);
+    let revealed = RwSignal::new(None::<RevealedKey>);
     let creating = RwSignal::new(false);
     let (name, role) = (RwSignal::new(String::new()), RwSignal::new(Role::Worker));
     let full_scope = RwSignal::new(true);
@@ -50,7 +70,11 @@ pub fn KeysSection() -> impl IntoView {
     Effect::new(move |_| match create.value().get() {
         Some(Ok(created)) => {
             creating.set(false);
-            revealed.set(Some(created.key));
+            let is_mcp = Role::parse(&created.record.role) == Some(Role::Mcp);
+            revealed.set(Some(RevealedKey {
+                key: created.key,
+                is_mcp,
+            }));
             name.set(String::new());
             full_scope.set(true);
             selected_scopes.set(role.get_untracked().permissions());
@@ -118,12 +142,23 @@ pub fn KeysSection() -> impl IntoView {
                 actions=header_actions
             />
             <div class="registre">
-            {move || revealed.get().map(|key| view! {
-                <div class="settings-alert" role="status">
-                    <p>"Copiez cette clé maintenant : elle ne sera plus affichée."</p>
-                    <pre class="code-block-wrapper"><code>{key}</code></pre>
-                    <button type="button" class="btn btn-secondary btn-sm" on:click=move |_| revealed.set(None)>"C'est noté"</button>
-                </div>
+            {move || revealed.get().map(|item| {
+                let snippet = item
+                    .is_mcp
+                    .then(|| build_mcp_client_snippet(&origin(), &item.key));
+                view! {
+                    <div class="settings-alert" role="status">
+                        <p>"Copiez cette clé maintenant : elle ne sera plus affichée."</p>
+                        <pre class="code-block-wrapper"><code>{item.key}</code></pre>
+                        {snippet.map(|cfg| view! {
+                            <div class="stack-xs">
+                                <p class="form-help">"Configuration prête à copier pour Claude Code / Cursor (`.mcp.json`) :"</p>
+                                <pre class="code-block-wrapper"><code>{cfg}</code></pre>
+                            </div>
+                        })}
+                        <button type="button" class="btn btn-secondary btn-sm" on:click=move |_| revealed.set(None)>"C'est noté"</button>
+                    </div>
+                }
             })}
             <div class="table-wrapper">
                 <table class="data-table" aria-label="Clés d'API">
@@ -254,5 +289,17 @@ pub fn KeysSection() -> impl IntoView {
             <p class="form-help" role="status">{move || feedback.get()}</p>
             </div>
         </section>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mcp_client_snippet_embeds_origin_and_bearer_token() {
+        let json = build_mcp_client_snippet("http://192.168.1.50:18480/", "flx_secret");
+        assert!(json.contains("\"url\": \"http://192.168.1.50:18480/mcp\""));
+        assert!(json.contains("\"Authorization\": \"Bearer flx_secret\""));
     }
 }

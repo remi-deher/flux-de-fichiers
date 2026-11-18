@@ -3,6 +3,7 @@
 //! Il partage avec le central les types de `flux-shared`.
 
 mod access;
+pub mod ai;
 pub mod api;
 mod app;
 pub mod flows;

@@ -275,6 +275,9 @@ pub struct AiChatRequest {
     /// Écran et objet ouverts ; le serveur en déduit quoi lire par ses outils.
     #[serde(default)]
     pub context: Option<AiContext>,
+    /// Conversation de l'historique à poursuivre ; absente pour en commencer une (runs seulement).
+    #[serde(default)]
+    pub conversation_id: Option<String>,
 }
 
 /// Réponse complète de l'assistant après résolution éventuelle des appels d'outils.
@@ -287,6 +290,34 @@ pub struct AiChatResponse {
     #[serde(default)]
     pub tool_calls: Vec<AiToolCallTrace>,
     pub rounds_used: u8,
+    /// Conversation de l'historique où l'échange a été enregistré (runs seulement).
+    #[serde(default)]
+    pub conversation_id: Option<String>,
+}
+
+/// Conversation de l'historique, sans ses messages.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConversationSummary {
+    pub id: String,
+    pub title: String,
+    /// Dernier échange, `AAAA-MM-JJ HH:MM:SS` (UTC).
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConversationList {
+    pub conversations: Vec<AiConversationSummary>,
+}
+
+/// Conversation de l'historique avec ses messages.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConversation {
+    pub id: String,
+    pub title: String,
+    pub messages: Vec<AiChatMessage>,
 }
 
 /// Objet de l'interface sur lequel porte la conversation.

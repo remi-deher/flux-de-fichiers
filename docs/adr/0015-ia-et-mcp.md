@@ -141,9 +141,15 @@ est devant l'écran) ; le MCP externe garde « pas de file d'approbation » (dé
    Seuls les interpréteurs de `ScriptInterpreter` sont acceptés. **Exécuter ou tester** un script
    n'est pas offert à l'assistant : il tourne sur un worker, sans isolation, et un essai à blanc
    demande un travail à part (tâche d'essai sur un worker, entrée d'exemple, sortie bornée).
-5. **Historique.** Conversations par compte (`ai_conversations`, `ai_messages`), texte utilisateur
-   et assistant seulement (aucun résultat d'outil), chiffré au repos par `SecretBox`, conservé
-   30 jours et 50 conversations par compte, supprimable depuis le tiroir.
+5. **Historique.** Conversations par compte (`ai_conversations`, `ai_messages`, migration 0025),
+   texte utilisateur et assistant seulement (aucun résultat d'outil). Titre et messages sont
+   chiffrés au repos par `SecretBox`, le propriétaire servant de donnée associée : une ligne copiée
+   vers un autre compte ne se déchiffre pas, et la rotation de clé locale les re-chiffre. Conservés
+   30 jours après le dernier échange, 50 conversations au plus par compte (purge à chaque
+   enregistrement). Seuls les runs enregistrent : `conversation_id` dans la requête poursuit une
+   conversation, la réponse (`done`) renvoie l'identifiant. `GET /api/v1/ai/conversations`,
+   `GET` et `DELETE` sur `/{id}`, `DELETE` sur la collection ; un compte ne voit que les siennes
+   (404 sinon). Le client n'envoie au central que les 24 derniers messages.
 6. **Diagnostic proactif.** Réglage **désactivé par défaut** : résumé des échecs récents, calculé en
    tâche de fond au plus une fois par heure et seulement si de nouveaux échecs existent, affiché
    dans Activité. Aucun appel au fournisseur sans ce réglage.

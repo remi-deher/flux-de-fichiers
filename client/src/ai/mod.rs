@@ -1,5 +1,6 @@
 //! Assistant IA intégré au poste de pilotage (tiroir global, suggestions contextuelles et historique).
 
+mod history;
 mod run;
 
 use crate::api;
@@ -257,6 +258,10 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
     let steps = RwSignal::new(Vec::<run::LiveStep>::new());
     let run_id = RwSignal::new(None::<String>);
     let confirmation = RwSignal::new(None::<run::PendingAction>);
+    // Conversation de l'historique en cours (créée par le central au premier échange).
+    let conversation_id = RwSignal::new(None::<String>);
+    let history_open = RwSignal::new(false);
+    let history_reload = RwSignal::new(0u64);
 
     // Termine la conversation en cours (réponse, échec ou perte du flux).
     let finish = move |outcome: Result<flux_shared::ai::AiChatResponse, String>| {
@@ -265,13 +270,19 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
         run_id.set(None);
         pending.set(false);
         match outcome {
-            Ok(reply) => messages.update(|list| {
-                list.push(TimelineItem {
-                    role: AiChatRole::Assistant,
-                    content: reply.reply,
-                    tool_calls: reply.tool_calls,
+            Ok(reply) => {
+                if reply.conversation_id.is_some() {
+                    conversation_id.set(reply.conversation_id);
+                    history_reload.update(|n| *n = n.wrapping_add(1));
+                }
+                messages.update(|list| {
+                    list.push(TimelineItem {
+                        role: AiChatRole::Assistant,
+                        content: reply.reply,
+                        tool_calls: reply.tool_calls,
+                    });
                 });
-            }),
+            }
             Err(message) => error_msg.set(Some(message)),
         }
     };
@@ -304,7 +315,8 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
         error_msg.set(None);
         pending.set(true);
         let request = AiChatRequest {
-            messages: wire_messages,
+            messages: history::wire_window(wire_messages),
+            conversation_id: conversation_id.get_untracked(),
             context_hint: hint,
             context: Some(route_context(&router.current())),
         };
@@ -392,18 +404,55 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
         send(text, None);
     };
 
-    let header_actions = view! {
-        <button
-            type="button"
-            class="btn btn-secondary btn-sm"
-            disabled=move || messages.with(Vec::is_empty) && error_msg.get().is_none()
-            on:click=move |_| {
-                messages.set(Vec::new());
-                error_msg.set(None);
+    let new_conversation = move || {
+        messages.set(Vec::new());
+        error_msg.set(None);
+        conversation_id.set(None);
+    };
+    let open_conversation = Callback::new(move |id: String| {
+        leptos::task::spawn_local(async move {
+            match history::load(&id).await {
+                Ok(conversation) => {
+                    messages.set(
+                        conversation
+                            .messages
+                            .into_iter()
+                            .map(|message| TimelineItem {
+                                role: message.role,
+                                content: message.content,
+                                tool_calls: Vec::new(),
+                            })
+                            .collect(),
+                    );
+                    error_msg.set(None);
+                    conversation_id.set(Some(conversation.id));
+                    history_open.set(false);
+                }
+                Err(err) => error_msg.set(Some(err.message())),
             }
-        >
-            "Effacer"
-        </button>
+        });
+    });
+
+    let header_actions = view! {
+        <div class="cluster">
+            <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                aria-pressed=move || history_open.get().to_string()
+                on:click=move |_| history_open.update(|open| *open = !*open)
+            >
+                "Historique"
+            </button>
+            <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                disabled=move || pending.get()
+                    || (messages.with(Vec::is_empty) && error_msg.get().is_none())
+                on:click=move |_| new_conversation()
+            >
+                "Nouvelle"
+            </button>
+        </div>
     }
     .into_any();
 
@@ -469,6 +518,15 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
                         }.into_any()
                     }
                 }}
+
+                <Show when=move || history_open.get()>
+                    <history::AiHistoryPanel
+                        reload=history_reload
+                        current=conversation_id
+                        on_open=open_conversation
+                        on_current_deleted=Callback::new(move |()| new_conversation())
+                    />
+                </Show>
 
                 <div class="ai-chat__prompts" role="group" aria-label="Suggestions contextuelles">
                     {move || {

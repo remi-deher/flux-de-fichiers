@@ -1,5 +1,6 @@
 //! Assistant IA intégré au central : orchestration LLM multi-fournisseurs branchée sur les outils MCP (ADR 0015).
 
+pub mod history;
 pub mod oauth;
 mod preview;
 mod provider;
@@ -7,6 +8,7 @@ pub mod run;
 pub mod settings;
 
 use crate::net_policy::OutboundPolicy;
+use crate::secrets::SecretBox;
 use crate::{
     api::{AdminAuth, AnyAuth, AppState},
     auth::{self, Principal},
@@ -24,9 +26,9 @@ use flux_shared::{
     Permission,
     ai::{
         AiActionDecision, AiChatRequest, AiChatResponse, AiChatRole, AiClientStatus, AiContext,
-        AiOauthDeviceCode, AiOauthPollResponse, AiProvider, AiRunEvent, AiRunStarted,
-        AiSettingsView, AiTestRequest, AiTestResponse, AiToolCallTrace, MAX_CHAT_MESSAGES,
-        UpdateAiSettingsRequest,
+        AiConversation, AiConversationList, AiOauthDeviceCode, AiOauthPollResponse, AiProvider,
+        AiRunEvent, AiRunStarted, AiSettingsView, AiTestRequest, AiTestResponse, AiToolCallTrace,
+        MAX_CHAT_MESSAGES, UpdateAiSettingsRequest,
     },
     mcp::McpAuditOutcome,
 };
@@ -383,6 +385,7 @@ async fn converse(
                     provider: ai_cfg.provider,
                     tool_calls: traces,
                     rounds_used,
+                    conversation_id: None,
                 });
             }
             ModelTurnResponse::ToolCalls {
@@ -443,6 +446,7 @@ async fn converse(
         provider: ai_cfg.provider,
         tool_calls: traces,
         rounds_used,
+        conversation_id: None,
     })
 }
 
@@ -506,6 +510,78 @@ async fn execute_with_confirmation(
     )
 }
 
+/// Enregistre l'échange dans l'historique du compte ; un échec n'empêche pas la réponse.
+async fn save_exchange(
+    state: &AppState,
+    principal: &Principal,
+    conversation_id: Option<&str>,
+    question: &str,
+    reply: &str,
+) -> Option<String> {
+    let saved = async {
+        let secrets = SecretBox::open(&state.config.config_dir)?;
+        history::append_exchange(
+            &state.pool,
+            &secrets,
+            &principal.id,
+            conversation_id,
+            question,
+            reply,
+        )
+        .await
+    }
+    .await;
+    saved
+        .inspect_err(|error| tracing::warn!(%error, "historique de l'assistant non enregistré"))
+        .ok()
+}
+
+/// Historique du compte (`GET /api/v1/ai/conversations`).
+pub async fn list_conversations(
+    State(state): State<AppState>,
+    AnyAuth(principal): AnyAuth,
+) -> AppResult<Json<AiConversationList>> {
+    auth::require(&principal, Permission::ViewOverview)?;
+    let secrets = SecretBox::open(&state.config.config_dir)?;
+    history::list(&state.pool, &secrets, &principal.id)
+        .await
+        .map(Json)
+}
+
+/// Une conversation de l'historique (`GET /api/v1/ai/conversations/{id}`).
+pub async fn get_conversation(
+    State(state): State<AppState>,
+    AnyAuth(principal): AnyAuth,
+    Path(id): Path<String>,
+) -> AppResult<Json<AiConversation>> {
+    auth::require(&principal, Permission::ViewOverview)?;
+    let secrets = SecretBox::open(&state.config.config_dir)?;
+    history::load(&state.pool, &secrets, &principal.id, &id)
+        .await
+        .map(Json)
+}
+
+/// Supprime une conversation (`DELETE /api/v1/ai/conversations/{id}`).
+pub async fn delete_conversation(
+    State(state): State<AppState>,
+    AnyAuth(principal): AnyAuth,
+    Path(id): Path<String>,
+) -> AppResult<StatusCode> {
+    auth::require(&principal, Permission::ViewOverview)?;
+    history::delete(&state.pool, &principal.id, &id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Vide l'historique du compte (`DELETE /api/v1/ai/conversations`).
+pub async fn delete_conversations(
+    State(state): State<AppState>,
+    AnyAuth(principal): AnyAuth,
+) -> AppResult<StatusCode> {
+    auth::require(&principal, Permission::ViewOverview)?;
+    history::delete_all(&state.pool, &principal.id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Lance une conversation en tâche de fond (`POST /api/v1/ai/runs`) ; l'avancement se lit en SSE.
 pub async fn start_run(
     State(state): State<AppState>,
@@ -523,9 +599,25 @@ pub async fn start_run(
         .create(&principal.id)
         .ok_or(AppError::RateLimited)?;
     let task_run = Arc::clone(&run);
+    let question = request
+        .messages
+        .last()
+        .map(|message| message.content.clone())
+        .unwrap_or_default();
+    let conversation_id = request.conversation_id.clone();
     let handle = tokio::spawn(async move {
         let last = match converse(&state, &principal, request, Some(&task_run)).await {
-            Ok(response) => AiRunEvent::Done { response },
+            Ok(mut response) => {
+                response.conversation_id = save_exchange(
+                    &state,
+                    &principal,
+                    conversation_id.as_deref(),
+                    &question,
+                    &response.reply,
+                )
+                .await;
+                AiRunEvent::Done { response }
+            }
             Err(error) => AiRunEvent::Failed {
                 message: failure_message(&error).to_owned(),
             },
@@ -896,6 +988,7 @@ mod tests {
                 }],
                 context_hint: Some("Écran /libraries".into()),
                 context: None,
+                conversation_id: None,
             })?))?;
         let chat_res = app.clone().oneshot(chat_req).await?;
         assert_eq!(chat_res.status(), StatusCode::OK);
@@ -931,6 +1024,7 @@ mod tests {
                 }],
                 context_hint: None,
                 context: None,
+                conversation_id: None,
             })?))?;
         let worker_res = app.oneshot(worker_req).await?;
         assert_eq!(worker_res.status(), StatusCode::FORBIDDEN);
@@ -1007,6 +1101,7 @@ mod tests {
                 content: "Que contient ce flux ?".into(),
             }],
             context_hint: None,
+            conversation_id: None,
             context: Some(AiContext {
                 screen: "/app/flows/f1".into(),
                 object: Some(AiContextObject {
@@ -1175,6 +1270,7 @@ mod tests {
                 }],
                 context_hint: None,
                 context: None,
+                conversation_id: None,
             })?))
         };
 
@@ -1261,6 +1357,176 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn runs_are_saved_in_a_private_history_that_can_be_continued_and_deleted()
+    -> anyhow::Result<()> {
+        let mock_llm = axum::Router::new().route(
+            "/v1/chat/completions",
+            post(|| async {
+                Json(json!({ "choices": [{ "message": {
+                    "role": "assistant", "content": "Voici la réponse."
+                }}]}))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let mock_addr = listener.local_addr()?;
+        let server_task = tokio::spawn(async move {
+            let _ = axum::serve(listener, mock_llm).await;
+        });
+
+        let (app, state, _dir) = test_app().await?;
+        let alice = issue_key_header(&state.pool, "history-alice", Role::Admin).await?;
+        let bob = issue_key_header(&state.pool, "history-bob", Role::Admin).await?;
+        let call = |method: &'static str, uri: String, auth: &str, body: Body| {
+            let request = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("authorization", auth)
+                .header("content-type", "application/json")
+                .body(body);
+            let app = app.clone();
+            async move { anyhow::Ok(app.oneshot(request?).await?) }
+        };
+        let settings = Body::from(serde_json::to_vec(&UpdateAiSettingsRequest {
+            enabled: true,
+            provider: AiProvider::OpenAiCompatible,
+            base_url: format!("http://{mock_addr}/v1"),
+            model: "mock-model".into(),
+            api_key: Some("sk-secret-value".into()),
+            allow_write_tools: false,
+            max_tool_rounds: 2,
+        })?);
+        assert_eq!(
+            call("PUT", "/api/v1/ai/settings".into(), &alice, settings)
+                .await?
+                .status(),
+            StatusCode::OK
+        );
+
+        let ask = |conversation_id: Option<String>, text: &str| -> anyhow::Result<Body> {
+            Ok(Body::from(serde_json::to_vec(&AiChatRequest {
+                messages: vec![AiChatMessage {
+                    role: AiChatRole::User,
+                    content: text.into(),
+                }],
+                context_hint: None,
+                context: None,
+                conversation_id,
+            })?))
+        };
+        let run_to_end = |conversation_id: Option<String>, text: &'static str| {
+            let call = &call;
+            let alice = alice.clone();
+            let body = ask(conversation_id, text);
+            async move {
+                let started = call("POST", "/api/v1/ai/runs".into(), &alice, body?).await?;
+                let started: AiRunStarted = serde_json::from_slice(
+                    &axum::body::to_bytes(started.into_body(), 4096).await?,
+                )?;
+                let stream = call(
+                    "GET",
+                    format!("/api/v1/ai/runs/{}/events", started.run_id),
+                    &alice,
+                    Body::empty(),
+                )
+                .await?;
+                let mut stream = stream.into_body().into_data_stream();
+                let events = read_events(&mut stream, |_| false).await?;
+                match events.last() {
+                    Some(AiRunEvent::Done { response }) => Ok(response.clone()),
+                    other => anyhow::bail!("fin inattendue : {other:?}"),
+                }
+            }
+        };
+
+        let first = run_to_end(None, "Pourquoi la tâche 12 échoue ?").await?;
+        let id = first
+            .conversation_id
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("conversation non enregistrée"))?;
+        let second = run_to_end(Some(id.clone()), "Et la suivante ?").await?;
+        assert_eq!(second.conversation_id.as_deref(), Some(id.as_str()));
+
+        let listed = call(
+            "GET",
+            "/api/v1/ai/conversations".into(),
+            &alice,
+            Body::empty(),
+        )
+        .await?;
+        let listed: AiConversationList =
+            serde_json::from_slice(&axum::body::to_bytes(listed.into_body(), 65_536).await?)?;
+        assert_eq!(listed.conversations.len(), 1);
+        assert_eq!(
+            listed.conversations[0].title,
+            "Pourquoi la tâche 12 échoue ?"
+        );
+
+        let uri = format!("/api/v1/ai/conversations/{id}");
+        let loaded = call("GET", uri.clone(), &alice, Body::empty()).await?;
+        let loaded: AiConversation =
+            serde_json::from_slice(&axum::body::to_bytes(loaded.into_body(), 65_536).await?)?;
+        let texts: Vec<&str> = loaded.messages.iter().map(|m| m.content.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "Pourquoi la tâche 12 échoue ?",
+                "Voici la réponse.",
+                "Et la suivante ?",
+                "Voici la réponse."
+            ]
+        );
+
+        // Un autre compte ne voit rien et ne peut rien supprimer.
+        let bobs = call(
+            "GET",
+            "/api/v1/ai/conversations".into(),
+            &bob,
+            Body::empty(),
+        )
+        .await?;
+        let bobs: AiConversationList =
+            serde_json::from_slice(&axum::body::to_bytes(bobs.into_body(), 65_536).await?)?;
+        assert!(bobs.conversations.is_empty());
+        assert_eq!(
+            call("GET", uri.clone(), &bob, Body::empty())
+                .await?
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            call("DELETE", uri.clone(), &bob, Body::empty())
+                .await?
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+
+        assert_eq!(
+            call("DELETE", uri.clone(), &alice, Body::empty())
+                .await?
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            call("GET", uri, &alice, Body::empty()).await?.status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            call(
+                "DELETE",
+                "/api/v1/ai/conversations".into(),
+                &alice,
+                Body::empty()
+            )
+            .await?
+            .status(),
+            StatusCode::NO_CONTENT
+        );
+
+        server_task.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn chatgpt_oauth_chat_requires_connection_sends_account_and_can_disconnect()
     -> anyhow::Result<()> {
         let mock_llm = axum::Router::new()
@@ -1337,6 +1603,7 @@ mod tests {
                 }],
                 context_hint: None,
                 context: None,
+                conversation_id: None,
             })?))
         };
 

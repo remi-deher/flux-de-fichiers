@@ -77,6 +77,7 @@ pub async fn rotate_values(
     report.plugin_values +=
         crate::runtime_settings::rotate_secrets_in_tx(&mut tx, old, new).await?;
     report.plugin_values += crate::ai::settings::rotate_secrets_in_tx(&mut tx, old, new).await?;
+    report.plugin_values += crate::ai::history::rotate_secrets_in_tx(&mut tx, old, new).await?;
     tx.commit().await?;
     Ok(report)
 }

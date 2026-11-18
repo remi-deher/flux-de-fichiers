@@ -22,6 +22,8 @@ const MAX_PROVIDER_ERROR_CHARS: usize = 240;
 const CHATGPT_ORIGINATOR: &str = "flux_de_fichiers";
 const CHATGPT_ACCOUNT_HEADER: &str = "chatgpt-account-id";
 const SSE_DATA_PREFIX: &str = "data:";
+const CHATGPT_CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+const CHATGPT_MODEL_VISIBLE: &str = "list";
 
 #[derive(Clone, Debug)]
 pub struct ProviderEndpoint {
@@ -141,6 +143,121 @@ fn truncate_error(raw: &str) -> String {
     }
 }
 
+/// Modèles proposés au compte ChatGPT, du plus prioritaire au moins prioritaire.
+fn parse_chatgpt_models(body: &Value) -> Vec<String> {
+    let mut visible: Vec<(i64, String)> = body
+        .get("models")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|model| {
+            model
+                .get("visibility")
+                .and_then(Value::as_str)
+                .is_none_or(|visibility| visibility == CHATGPT_MODEL_VISIBLE)
+        })
+        .filter_map(|model| {
+            let slug = model.get("slug").and_then(Value::as_str)?.trim();
+            let priority = model.get("priority").and_then(Value::as_i64);
+            (!slug.is_empty()).then(|| (priority.unwrap_or(i64::MAX), slug.to_owned()))
+        })
+        .collect();
+    visible.sort();
+    visible.dedup();
+    visible.into_iter().map(|(_, slug)| slug).collect()
+}
+
+/// Liste les modèles que le compte ChatGPT connecté peut utiliser (`GET …/models`).
+pub async fn list_chatgpt_models(
+    endpoint: &ProviderEndpoint,
+    policy: OutboundPolicy,
+) -> Result<Vec<String>, String> {
+    let token = endpoint
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| "Compte ChatGPT non connecté".to_owned())?;
+    let target = format!(
+        "{}?client_version={CHATGPT_CLIENT_VERSION}",
+        join_base(&endpoint.base_url, "/models")
+    );
+    let (url, client) = pinned_client_for(&target, policy, LLM_TEST_TIMEOUT)
+        .await
+        .map_err(|e| format!("URL ChatGPT refusée ({e:?})"))?;
+    let mut req = client
+        .get(url)
+        .bearer_auth(token)
+        .header("originator", CHATGPT_ORIGINATOR);
+    if let Some(account) = endpoint.account_id.as_deref() {
+        req = req.header(CHATGPT_ACCOUNT_HEADER, account);
+    }
+    let resp = req.send().await.map_err(|err| {
+        format!(
+            "Erreur réseau ChatGPT : {}",
+            truncate_error(&err.to_string())
+        )
+    })?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        return Err(format!(
+            "ChatGPT HTTP {} : {}",
+            status.as_u16(),
+            truncate_error(&body.to_string())
+        ));
+    }
+    Ok(parse_chatgpt_models(&body))
+}
+
+async fn test_chatgpt(
+    endpoint: &ProviderEndpoint,
+    policy: OutboundPolicy,
+    started: Instant,
+) -> AiTestResponse {
+    let latency_ms = || u64::try_from(started.elapsed().as_millis()).unwrap_or(0);
+    match list_chatgpt_models(endpoint, policy).await {
+        Ok(models) if models.is_empty() => AiTestResponse {
+            reachable: false,
+            latency_ms: latency_ms(),
+            available_models: models,
+            message: "Compte connecté, mais aucun modèle n'est proposé à ce compte.".into(),
+        },
+        Ok(models) => {
+            let wanted = endpoint.model.trim();
+            let message = if wanted.is_empty() {
+                format!(
+                    "Compte ChatGPT connecté · {} modèle(s) · automatique : « {} ».",
+                    models.len(),
+                    models[0]
+                )
+            } else if models.iter().any(|model| model == wanted) {
+                format!(
+                    "Compte ChatGPT connecté · {} modèle(s) · modèle sélectionné disponible.",
+                    models.len()
+                )
+            } else {
+                format!(
+                    "Compte ChatGPT connecté · {} modèle(s) (modèle « {wanted} » refusé par ce compte : choisissez-en un ou laissez vide).",
+                    models.len()
+                )
+            };
+            AiTestResponse {
+                reachable: true,
+                latency_ms: latency_ms(),
+                available_models: models,
+                message,
+            }
+        }
+        Err(message) => AiTestResponse {
+            reachable: false,
+            latency_ms: latency_ms(),
+            available_models: Vec::new(),
+            message,
+        },
+    }
+}
+
 pub async fn test_connection(
     endpoint: &ProviderEndpoint,
     policy: OutboundPolicy,
@@ -150,15 +267,7 @@ pub async fn test_connection(
         AiProvider::Ollama => join_base(&endpoint.base_url, "/api/tags"),
         AiProvider::OpenAiCompatible => openai_endpoint(&endpoint.base_url, "models"),
         AiProvider::Anthropic => anthropic_endpoint(&endpoint.base_url, "models"),
-        // Le jeton a déjà été validé ou rafraîchi ; ce fournisseur ne liste pas ses modèles.
-        AiProvider::ChatGptOauth => {
-            return AiTestResponse {
-                reachable: true,
-                latency_ms: 0,
-                available_models: Vec::new(),
-                message: "Compte ChatGPT connecté (jeton valide). Le modèle est vérifié à la première question.".into(),
-            };
-        }
+        AiProvider::ChatGptOauth => return test_chatgpt(endpoint, policy, started).await,
     };
     let (url, client) = match pinned_client_for(&target_url, policy, LLM_TEST_TIMEOUT).await {
         Ok(pair) => pair,
@@ -1090,5 +1199,18 @@ mod tests {
         assert!(parse_responses_sse(&failed).is_err_and(|e| e.contains("boom")));
         let cut = sse(&[json!({ "type": "response.output_text.delta", "delta": "x" })]);
         assert!(parse_responses_sse(&cut).is_err());
+    }
+
+    #[test]
+    fn chatgpt_models_keep_visible_ones_ordered_by_priority() {
+        let body = json!({ "models": [
+            { "slug": "cache", "visibility": "hide", "priority": 0 },
+            { "slug": "b", "visibility": "list", "priority": 2 },
+            { "slug": "a", "visibility": "list", "priority": 1 },
+            { "slug": "sans-priorite" },
+            { "slug": "  " },
+        ]});
+        assert_eq!(parse_chatgpt_models(&body), ["a", "b", "sans-priorite"]);
+        assert!(parse_chatgpt_models(&json!({})).is_empty());
     }
 }

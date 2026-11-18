@@ -138,7 +138,8 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
             allow_write_tools: allow_write_tools.get_untracked(),
             max_tool_rounds: rounds,
         };
-        if req.base_url.is_empty() || req.model.is_empty() {
+        if req.base_url.is_empty() || (req.model.is_empty() && !req.provider.has_automatic_model())
+        {
             Toasts::set_error(
                 feedback,
                 "L'URL de l'API et le nom du modèle sont obligatoires.",
@@ -192,7 +193,14 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
                         <input
                             id="ai-model"
                             class="form-input text-mono"
-                            placeholder=move || provider.get().default_model()
+                            placeholder=move || {
+                                let current = provider.get();
+                                if current.has_automatic_model() {
+                                    "Automatique (premier modèle proposé au compte)"
+                                } else {
+                                    current.default_model()
+                                }
+                            }
                             prop:value=move || model.get()
                             on:input=move |ev| model.set(event_target_value(&ev))
                         />

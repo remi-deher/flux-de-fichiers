@@ -74,12 +74,18 @@ impl AiProvider {
             Self::Ollama => "qwen2.5:7b",
             Self::OpenAiCompatible => "gpt-4o-mini",
             Self::Anthropic => "claude-3-5-sonnet-latest",
-            Self::ChatGptOauth => "gpt-5-codex",
+            // Aucun nom fixe : la liste des modèles dépend du compte (voir `has_automatic_model`).
+            Self::ChatGptOauth => "",
         }
     }
 
     pub const fn requires_api_key(self) -> bool {
         matches!(self, Self::OpenAiCompatible | Self::Anthropic)
+    }
+
+    /// Un modèle vide est permis : le central choisit le premier modèle proposé au compte.
+    pub const fn has_automatic_model(self) -> bool {
+        matches!(self, Self::ChatGptOauth)
     }
 
     /// Le fournisseur s'authentifie par une connexion OAuth plutôt que par une clé d'API.
@@ -269,7 +275,10 @@ mod tests {
             assert_eq!(AiProvider::parse(provider.as_str()), Some(provider));
             assert!(!provider.label().is_empty());
             assert!(provider.default_base_url().starts_with("http"));
-            assert!(!provider.default_model().is_empty());
+            assert_eq!(
+                provider.default_model().is_empty(),
+                provider.has_automatic_model()
+            );
         }
         assert_eq!(
             AiProvider::parse("openai"),

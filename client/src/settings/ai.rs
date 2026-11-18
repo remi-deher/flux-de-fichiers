@@ -1,5 +1,6 @@
 //! Réglages de l'assistant IA intégré (Ollama, OpenAI/compatible, Anthropic Claude).
 
+use super::ai_oauth::AiOauthPanel;
 use crate::api;
 use crate::ui::{SectionHeader, Tag, TagTone, Toasts};
 use flux_shared::ai::{
@@ -28,7 +29,7 @@ pub fn AiSettingsSection() -> impl IntoView {
         <section class="settings-section section-panel">
             <SectionHeader
                 title="Assistant IA intégré"
-                subtitle="Configurez un modèle local (Ollama) ou une API externe (OpenAI, Anthropic) ; la clé est chiffrée au repos et jamais exposée au navigateur."
+                subtitle="Configurez un modèle local (Ollama) ou une API externe (OpenAI, Anthropic) ou votre abonnement ChatGPT par connexion OAuth ; clés et jetons sont chiffrés au repos et jamais exposés au navigateur."
             />
             {move || match resource.get() {
                 None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),
@@ -57,6 +58,8 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
     let feedback = RwSignal::new(None::<String>);
     let test_result = RwSignal::new(None::<Result<AiTestResponse, String>>);
     let api_key_set = initial.api_key_set;
+    let oauth_account = RwSignal::new(initial.oauth_account.clone());
+    let uses_oauth = move || provider.get().uses_oauth();
 
     let save = Action::new_local(move |req: &UpdateAiSettingsRequest| {
         let req = req.clone();
@@ -195,6 +198,7 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
                         />
                     </div>
 
+                    <Show when=move || !uses_oauth()>
                     <div class="form-group">
                         <label for="ai-api-key" class="form-label">
                             <span>"Clé d'API "</span>
@@ -219,9 +223,13 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
                             on:input=move |ev| api_key.set(event_target_value(&ev))
                         />
                     </div>
+                    </Show>
+                    <Show when=uses_oauth>
+                        <AiOauthPanel account=oauth_account />
+                    </Show>
                 </div>
 
-                {api_key_set.then(|| view! {
+                <Show when=move || api_key_set && !uses_oauth()>
                     <label class="flow-settings__toggle">
                         <input
                             type="checkbox"
@@ -230,7 +238,7 @@ fn AiSettingsForm(initial: AiSettingsView, on_saved: Callback<()>) -> impl IntoV
                         />
                         <span>"Effacer la clé d'API enregistrée"</span>
                     </label>
-                })}
+                </Show>
             </fieldset>
 
             <fieldset class="settings-fieldset">

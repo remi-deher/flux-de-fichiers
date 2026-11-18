@@ -1,4 +1,4 @@
-//! Client HTTP sortant vers Ollama, OpenAI/compatible et Anthropic Claude.
+//! Client HTTP sortant vers Ollama, OpenAI/compatible, Anthropic Claude et ChatGPT (OAuth).
 //!
 //! Mutualise l'épinglage DNS anti-SSRF (`net_policy`) et normalise les échanges multi-tours
 //! avec appels d'outils (`function calling`).
@@ -19,13 +19,19 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 const ANTHROPIC_MAX_TOKENS: u32 = 2048;
 const MAX_DETECTED_MODELS: usize = 40;
 const MAX_PROVIDER_ERROR_CHARS: usize = 240;
+const CHATGPT_ORIGINATOR: &str = "flux_de_fichiers";
+const CHATGPT_ACCOUNT_HEADER: &str = "chatgpt-account-id";
+const SSE_DATA_PREFIX: &str = "data:";
 
 #[derive(Clone, Debug)]
 pub struct ProviderEndpoint {
     pub provider: AiProvider,
     pub base_url: String,
     pub model: String,
+    /// Clé d'API, ou jeton d'accès OAuth pour les fournisseurs à connexion OAuth.
     pub api_key: Option<String>,
+    /// Identifiant de compte exigé par ChatGPT (connexion OAuth uniquement).
+    pub account_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -78,7 +84,7 @@ fn map_net_error(error: NetPolicyError) -> AppError {
     }
 }
 
-async fn pinned_client_for(
+pub(super) async fn pinned_client_for(
     raw_url: &str,
     policy: OutboundPolicy,
     timeout: Duration,
@@ -144,6 +150,15 @@ pub async fn test_connection(
         AiProvider::Ollama => join_base(&endpoint.base_url, "/api/tags"),
         AiProvider::OpenAiCompatible => openai_endpoint(&endpoint.base_url, "models"),
         AiProvider::Anthropic => anthropic_endpoint(&endpoint.base_url, "models"),
+        // Le jeton a déjà été validé ou rafraîchi ; ce fournisseur ne liste pas ses modèles.
+        AiProvider::ChatGptOauth => {
+            return AiTestResponse {
+                reachable: true,
+                latency_ms: 0,
+                available_models: Vec::new(),
+                message: "Compte ChatGPT connecté (jeton valide). Le modèle est vérifié à la première question.".into(),
+            };
+        }
     };
     let (url, client) = match pinned_client_for(&target_url, policy, LLM_TEST_TIMEOUT).await {
         Ok(pair) => pair,
@@ -159,7 +174,7 @@ pub async fn test_connection(
 
     let mut req = client.get(url);
     req = match endpoint.provider {
-        AiProvider::Ollama | AiProvider::OpenAiCompatible => {
+        AiProvider::Ollama | AiProvider::OpenAiCompatible | AiProvider::ChatGptOauth => {
             apply_bearer_if_present(req, endpoint.api_key.as_deref())
         }
         AiProvider::Anthropic => {
@@ -231,7 +246,7 @@ pub async fn test_connection(
 fn extract_models(provider: AiProvider, body: &Value) -> Vec<String> {
     let items = match provider {
         AiProvider::Ollama => body.get("models").and_then(Value::as_array),
-        AiProvider::OpenAiCompatible | AiProvider::Anthropic => {
+        AiProvider::OpenAiCompatible | AiProvider::Anthropic | AiProvider::ChatGptOauth => {
             body.get("data").and_then(Value::as_array)
         }
     };
@@ -309,6 +324,9 @@ pub async fn complete_turn(
         }
         AiProvider::Anthropic => {
             complete_anthropic(endpoint, system_prompt, entries, tools, policy).await
+        }
+        AiProvider::ChatGptOauth => {
+            complete_chatgpt(endpoint, system_prompt, entries, tools, policy).await
         }
     }
 }
@@ -711,6 +729,201 @@ async fn complete_anthropic(
     }
 }
 
+fn responses_message(role: &str, content_type: &str, text: &str) -> Value {
+    json!({
+        "type": "message",
+        "role": role,
+        "content": [{ "type": content_type, "text": text }],
+    })
+}
+
+/// Convertit l'historique au format `input` de l'API Responses.
+fn build_responses_input(entries: &[ConversationEntry]) -> Vec<Value> {
+    let mut items = Vec::new();
+    for entry in entries {
+        match entry {
+            ConversationEntry::UserText(text) => {
+                items.push(responses_message("user", "input_text", text));
+            }
+            ConversationEntry::AssistantText(text) => {
+                items.push(responses_message("assistant", "output_text", text));
+            }
+            ConversationEntry::AssistantToolCalls { content, calls } => {
+                if let Some(text) = content.as_deref().filter(|t| !t.trim().is_empty()) {
+                    items.push(responses_message("assistant", "output_text", text));
+                }
+                items.extend(calls.iter().map(|call| {
+                    json!({
+                        "type": "function_call",
+                        "call_id": call.id,
+                        "name": call.name,
+                        "arguments": call.arguments.to_string(),
+                    })
+                }));
+            }
+            ConversationEntry::ToolResult {
+                call_id, content, ..
+            } => {
+                items.push(json!({
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": content,
+                }));
+            }
+        }
+    }
+    items
+}
+
+fn responses_tool_definitions(tools: &[McpTool]) -> Vec<Value> {
+    tools
+        .iter()
+        .map(|tool| {
+            json!({
+                "type": "function",
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.input_schema,
+            })
+        })
+        .collect()
+}
+
+/// Lit le flux SSE complet d'une réponse de l'API Responses.
+fn parse_responses_sse(body: &str) -> Result<ModelTurnResponse, String> {
+    let mut message_text: Vec<String> = Vec::new();
+    let mut delta_text = String::new();
+    let mut calls = Vec::new();
+    let mut completed = false;
+    for line in body.lines() {
+        let Some(data) = line.trim().strip_prefix(SSE_DATA_PREFIX) else {
+            continue;
+        };
+        let Ok(event) = serde_json::from_str::<Value>(data.trim()) else {
+            continue;
+        };
+        match event.get("type").and_then(Value::as_str) {
+            Some("response.output_text.delta") => {
+                if let Some(delta) = event.get("delta").and_then(Value::as_str) {
+                    delta_text.push_str(delta);
+                }
+            }
+            Some("response.output_item.done") => {
+                let item = event.get("item").unwrap_or(&Value::Null);
+                match item.get("type").and_then(Value::as_str) {
+                    Some("message") => message_text.extend(
+                        item.get("content")
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|part| part.get("text").and_then(Value::as_str))
+                            .map(ToOwned::to_owned),
+                    ),
+                    Some("function_call") => {
+                        if let Some(name) = item.get("name").and_then(Value::as_str) {
+                            let id = item.get("call_id").and_then(Value::as_str).map_or_else(
+                                || format!("chatgpt_call_{}", calls.len()),
+                                str::to_owned,
+                            );
+                            calls.push(ToolCallRequest {
+                                id,
+                                name: name.to_owned(),
+                                arguments: parse_tool_arguments(item.get("arguments")),
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Some("response.completed") => completed = true,
+            Some("response.failed" | "response.incomplete" | "error") => {
+                return Err(format!(
+                    "ChatGPT a interrompu la réponse : {}",
+                    truncate_error(&event.to_string())
+                ));
+            }
+            _ => {}
+        }
+    }
+    if !completed {
+        return Err("Flux ChatGPT fermé avant la fin de la réponse".to_owned());
+    }
+    let text = if message_text.is_empty() {
+        delta_text
+    } else {
+        message_text.join("\n")
+    };
+    if calls.is_empty() {
+        Ok(ModelTurnResponse::FinalText(text))
+    } else {
+        Ok(ModelTurnResponse::ToolCalls {
+            assistant_content: (!text.trim().is_empty()).then_some(text),
+            calls,
+        })
+    }
+}
+
+async fn complete_chatgpt(
+    endpoint: &ProviderEndpoint,
+    system_prompt: &str,
+    entries: &[ConversationEntry],
+    tools: &[McpTool],
+    policy: OutboundPolicy,
+) -> Result<ModelTurnResponse, String> {
+    let token = endpoint
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| "Compte ChatGPT non connecté".to_owned())?;
+    let target = join_base(&endpoint.base_url, "/responses");
+    let (url, client) = pinned_client_for(&target, policy, LLM_REQUEST_TIMEOUT)
+        .await
+        .map_err(|e| format!("URL ChatGPT refusée ({e:?})"))?;
+    let mut payload = json!({
+        "model": endpoint.model,
+        "instructions": system_prompt,
+        "input": build_responses_input(entries),
+        "store": false,
+        "stream": true,
+    });
+    if !tools.is_empty() {
+        payload["tools"] = Value::Array(responses_tool_definitions(tools));
+        payload["tool_choice"] = json!("auto");
+        payload["parallel_tool_calls"] = json!(false);
+    }
+    let mut req = client
+        .post(url)
+        .bearer_auth(token)
+        .header("originator", CHATGPT_ORIGINATOR)
+        .header("accept", "text/event-stream")
+        .json(&payload);
+    if let Some(account) = endpoint.account_id.as_deref() {
+        req = req.header(CHATGPT_ACCOUNT_HEADER, account);
+    }
+    let resp = req.send().await.map_err(|err| {
+        format!(
+            "Erreur réseau ChatGPT : {}",
+            truncate_error(&err.to_string())
+        )
+    })?;
+    let status = resp.status();
+    let body = resp.text().await.map_err(|err| {
+        format!(
+            "Réponse ChatGPT illisible : {}",
+            truncate_error(&err.to_string())
+        )
+    })?;
+    if !status.is_success() {
+        return Err(format!(
+            "ChatGPT HTTP {} : {}",
+            status.as_u16(),
+            truncate_error(&body)
+        ));
+    }
+    parse_responses_sse(&body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -772,5 +985,110 @@ mod tests {
                 .map(Vec::len),
             Some(2)
         );
+    }
+
+    fn sse(events: &[Value]) -> String {
+        events
+            .iter()
+            .map(|event| format!("event: x\ndata: {event}\n\n"))
+            .collect()
+    }
+
+    #[test]
+    fn responses_input_maps_messages_tool_calls_and_results() {
+        let entries = vec![
+            ConversationEntry::UserText("Bonjour".into()),
+            ConversationEntry::AssistantToolCalls {
+                content: Some("Je regarde".into()),
+                calls: vec![ToolCallRequest {
+                    id: "c1".into(),
+                    name: "list_jobs".into(),
+                    arguments: json!({ "limit": 2 }),
+                }],
+            },
+            ConversationEntry::ToolResult {
+                call_id: "c1".into(),
+                tool_name: "list_jobs".into(),
+                content: "[]".into(),
+                is_error: false,
+            },
+        ];
+        let items = build_responses_input(&entries);
+        let kinds: Vec<_> = items
+            .iter()
+            .filter_map(|item| item.get("type").and_then(Value::as_str))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                "message",
+                "message",
+                "function_call",
+                "function_call_output"
+            ]
+        );
+        assert_eq!(items[0]["content"][0]["type"], "input_text");
+        assert_eq!(items[1]["content"][0]["type"], "output_text");
+        assert_eq!(items[2]["arguments"], "{\"limit\":2}");
+        assert_eq!(items[3]["call_id"], "c1");
+    }
+
+    #[test]
+    fn responses_sse_yields_final_text() -> Result<(), String> {
+        let body = sse(&[
+            json!({ "type": "response.output_text.delta", "delta": "Bon" }),
+            json!({
+                "type": "response.output_item.done",
+                "item": { "type": "message", "content": [{ "type": "output_text", "text": "Bonjour" }] }
+            }),
+            json!({ "type": "response.completed", "response": {} }),
+        ]);
+        match parse_responses_sse(&body)? {
+            ModelTurnResponse::FinalText(text) => assert_eq!(text, "Bonjour"),
+            ModelTurnResponse::ToolCalls { .. } => panic!("texte attendu"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn responses_sse_falls_back_to_deltas_and_extracts_function_calls() -> Result<(), String> {
+        let deltas = sse(&[
+            json!({ "type": "response.output_text.delta", "delta": "Salut" }),
+            json!({ "type": "response.completed" }),
+        ]);
+        assert!(matches!(
+            parse_responses_sse(&deltas)?,
+            ModelTurnResponse::FinalText(text) if text == "Salut"
+        ));
+
+        let calls = sse(&[
+            json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "call_id": "call_9",
+                    "name": "list_libraries",
+                    "arguments": "{\"x\":1}"
+                }
+            }),
+            json!({ "type": "response.completed" }),
+        ]);
+        match parse_responses_sse(&calls)? {
+            ModelTurnResponse::ToolCalls { calls, .. } => {
+                assert_eq!(calls.len(), 1);
+                assert_eq!(calls[0].id, "call_9");
+                assert_eq!(calls[0].arguments["x"], 1);
+            }
+            ModelTurnResponse::FinalText(_) => panic!("appel d'outil attendu"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn responses_sse_reports_failures_and_truncated_streams() {
+        let failed = sse(&[json!({ "type": "response.failed", "response": { "error": "boom" } })]);
+        assert!(parse_responses_sse(&failed).is_err_and(|e| e.contains("boom")));
+        let cut = sse(&[json!({ "type": "response.output_text.delta", "delta": "x" })]);
+        assert!(parse_responses_sse(&cut).is_err());
     }
 }

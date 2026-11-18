@@ -7,6 +7,7 @@ use serde_json::Value;
 const SUMMARY_MAX_CHARS: usize = 42;
 const SUMMARY_MAX_PARTS: usize = 3;
 const CHIP_MAX_CHARS: usize = 28;
+const CHIP_KEY_MAX_CHARS: usize = 16;
 const CHIP_MAX_COUNT: usize = 3;
 const MASKED_SECRET: &str = "••••";
 
@@ -94,6 +95,18 @@ impl NodeDomain {
             Self::Process => IconName::Package,
             Self::Integration => IconName::Plugins,
             Self::Output => IconName::Check,
+        }
+    }
+
+    /// Indice discret affiché lorsqu'aucune puce de configuration n'est présente.
+    pub const fn default_hint(self) -> &'static str {
+        match self {
+            Self::Input => "Point d'entrée du flux",
+            Self::Logic => "Branche conditionnelle",
+            Self::Inspect => "Analyse des pistes",
+            Self::Process => "Paramètres par défaut",
+            Self::Integration => "Appel externe",
+            Self::Output => "Cible de sortie",
         }
     }
 }
@@ -195,6 +208,17 @@ fn is_condition_config(
             && obj.contains_key("target"))
 }
 
+fn condition_op_symbol(raw: Option<&str>) -> &str {
+    match raw.unwrap_or("eq") {
+        "eq" => "=",
+        "neq" => "!=",
+        "contains" => "~",
+        "gt" => ">",
+        "lt" => "<",
+        other => other,
+    }
+}
+
 fn condition_parts<'a>(
     obj: &'a serde_json::Map<String, Value>,
     spec: Option<&OwnedBlockSpec>,
@@ -207,14 +231,7 @@ fn condition_parts<'a>(
     if property.is_empty() || target.is_empty() {
         return None;
     }
-    let op = match obj.get("operator").and_then(Value::as_str).unwrap_or("eq") {
-        "eq" => "=",
-        "neq" => "!=",
-        "contains" => "~",
-        "gt" => ">",
-        "lt" => "<",
-        other => other,
-    };
+    let op = condition_op_symbol(obj.get("operator").and_then(Value::as_str));
     Some((property, op, target))
 }
 
@@ -299,9 +316,24 @@ pub fn node_chips(node: &FlowNode, spec: Option<&OwnedBlockSpec>) -> Vec<NodeChi
     };
     if let Some((property, op, target)) = condition_parts(obj, spec) {
         return vec![NodeChip {
-            key: Some(truncate_text(property.to_owned(), CHIP_MAX_CHARS)),
+            key: Some(truncate_text(property.to_owned(), CHIP_KEY_MAX_CHARS)),
             value: truncate_text(format!("{op} {target}"), CHIP_MAX_CHARS),
         }];
+    }
+    if is_condition_config(obj, spec) {
+        let op = condition_op_symbol(obj.get("operator").and_then(Value::as_str));
+        return obj
+            .get("property")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|prop| !prop.is_empty())
+            .map(|prop| {
+                vec![NodeChip {
+                    key: Some(truncate_text(prop.to_owned(), CHIP_KEY_MAX_CHARS)),
+                    value: truncate_text(format!("{op} ?"), CHIP_MAX_CHARS),
+                }]
+            })
+            .unwrap_or_default();
     }
 
     visible_config_entries(obj, spec, CHIP_MAX_COUNT)
@@ -312,7 +344,7 @@ pub fn node_chips(node: &FlowNode, spec: Option<&OwnedBlockSpec>) -> Vec<NodeChi
                 value: truncate_text(label.to_owned(), CHIP_MAX_CHARS),
             }),
             _ => scalar_summary_part(key, value).map(|val| NodeChip {
-                key: Some(truncate_text(label.to_owned(), CHIP_MAX_CHARS)),
+                key: Some(truncate_text(label.to_owned(), CHIP_KEY_MAX_CHARS)),
                 value: truncate_text(val, CHIP_MAX_CHARS),
             }),
         })
@@ -536,8 +568,31 @@ mod tests {
         assert_eq!(NodeDomain::Process.label(), "Traitement");
         assert_eq!(NodeDomain::Integration.label(), "Intégration");
         assert_eq!(NodeDomain::Output.label(), "Sortie");
+        assert_eq!(NodeDomain::Input.default_hint(), "Point d'entrée du flux");
 
         let catalog = test_catalog();
+        let cond_empty_target = make_node(
+            FlowBlockKind::parse("block.core.condition"),
+            "Condition",
+            json!({"property": "any", "operator": "eq", "target": ""}),
+        );
+        assert_eq!(
+            node_chips(
+                &cond_empty_target,
+                find_owned(&catalog, &cond_empty_target.kind)
+            ),
+            vec![NodeChip {
+                key: Some("any".to_owned()),
+                value: "= ?".to_owned(),
+            }]
+        );
+        let cond_blank = make_node(
+            FlowBlockKind::parse("block.core.condition"),
+            "Condition vide",
+            json!({}),
+        );
+        assert!(node_chips(&cond_blank, find_owned(&catalog, &cond_blank.kind)).is_empty());
+
         let cond = make_node(
             FlowBlockKind::parse("block.core.condition"),
             "HEVC ?",

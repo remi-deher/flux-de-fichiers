@@ -39,6 +39,7 @@ pub enum IconName {
     Maximize,
     Magnet,
     Sparkles,
+    More,
 }
 
 impl IconName {
@@ -77,6 +78,9 @@ impl IconName {
             }
             Self::ChevronLeft => r#"<path d="m15 18-6-6 6-6"/>"#,
             Self::ChevronRight => r#"<path d="m9 18 6-6-6-6"/>"#,
+            Self::More => {
+                r#"<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>"#
+            }
             Self::Menu => {
                 r#"<line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/>"#
             }

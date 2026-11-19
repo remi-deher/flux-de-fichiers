@@ -335,3 +335,47 @@ pub async fn system_config(
         version: crate::version::app_version().to_owned(),
     }))
 }
+
+pub async fn placement(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    _auth: ViewJobsAuth,
+) -> AppResult<Json<forgearr_shared::libraries::JobPlacement>> {
+    use forgearr_shared::{flows::FlowGraph, libraries::JobPlacement};
+    let job = repository::get_job(&s.pool, id).await?;
+    if job.status != JobStatus::Queued {
+        return Ok(Json(JobPlacement::default()));
+    }
+    let flow = match (job.flow_id.as_deref(), job.flow_version) {
+        (Some(id), Some(version)) => {
+            Some(repository::get_flow_version(&s.pool, id, version).await?)
+        }
+        _ => None,
+    };
+    let hardware_requested = flow
+        .as_ref()
+        .and_then(|flow| serde_json::from_str::<FlowGraph>(&flow.definition).ok())
+        .is_some_and(|graph| {
+            graph.nodes.iter().any(|node| {
+                matches!(
+                    node.config
+                        .get("encoder")
+                        .and_then(serde_json::Value::as_str),
+                    Some("nvidia" | "intel_qsv" | "vaapi" | "amd_amf")
+                )
+            })
+        });
+    let roots = crate::plugins::catalog_roots(&s.pool, &s.config).await;
+    let registry = s.catalog_cache.operations(&roots).await;
+    let catalog_tools_unavailable = registry
+        .required_tool_refs_for_flow(flow.as_ref())
+        .into_iter()
+        .filter(|tool| !crate::plugins::is_tool_installable(&roots, &tool.id))
+        .map(|tool| tool.id)
+        .collect();
+    let workers = repository::library_history::placement(&s.pool, &job, hardware_requested).await?;
+    Ok(Json(JobPlacement {
+        workers,
+        catalog_tools_unavailable,
+    }))
+}

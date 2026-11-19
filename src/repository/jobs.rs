@@ -680,6 +680,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
             let local_source_root = job_source(pool, j.id).await?.and_then(|source| {
                 (source.source_worker_id == Some(worker)).then_some(source.source_root)
             });
+            let resume_node_id = super::relays::resume_node(pool, j.id).await?;
             Ok(Some(Claim {
                 job_id: j.id,
                 lease_token: j.lease_token.ok_or(AppError::Internal)?,
@@ -699,6 +700,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                 allow_private_integrations: None,
                 media_root: None,
                 local_source_root,
+                resume_node_id,
             }))
         }
     }

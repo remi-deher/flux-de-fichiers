@@ -19,6 +19,7 @@ pub mod local;
 pub mod logs;
 pub mod mcp;
 pub mod plugins;
+pub mod relay;
 pub mod search;
 pub mod session;
 pub mod system;

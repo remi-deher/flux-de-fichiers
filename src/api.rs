@@ -484,6 +484,7 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/jobs/{id}/heartbeat", post(jobs::heartbeat))
         .route("/api/v1/jobs/{id}/progress", post(jobs::progress))
         .route("/api/v1/jobs/{id}/failure", post(jobs::failure))
+        .route("/api/v1/jobs/{id}/relay", post(jobs::relay))
         .layer(axum::extract::DefaultBodyLimit::max(JSON_BODY_LIMIT))
         .layer(tower_http::timeout::TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,

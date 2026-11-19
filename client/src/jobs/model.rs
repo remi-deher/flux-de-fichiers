@@ -106,6 +106,7 @@ pub fn error_label(code: JobErrorCode) -> &'static str {
         JobErrorCode::ProbeUnavailable => "Sonde requise absente sur le worker",
         JobErrorCode::LeaseExpired => "Serveur déconnecté en cours de traitement",
         JobErrorCode::MissingSourceFingerprint => "Empreinte de la source manquante",
+        JobErrorCode::NoCapableWorker => "Aucun worker capable pour le relais",
     }
 }
 
@@ -126,7 +127,7 @@ pub fn progress_of(event: &JobEvent) -> Option<(uuid::Uuid, u32)> {
 }
 
 /// Noms d'événements du flux `/api/v1/jobs/events`, un par type.
-pub const EVENT_NAMES: [JobEventType; 8] = [
+pub const EVENT_NAMES: [JobEventType; 9] = [
     JobEventType::JobCreated,
     JobEventType::JobClaimed,
     JobEventType::JobHeartbeat,
@@ -135,6 +136,7 @@ pub const EVENT_NAMES: [JobEventType; 8] = [
     JobEventType::JobFailed,
     JobEventType::JobCanceled,
     JobEventType::JobRetried,
+    JobEventType::JobRelayed,
 ];
 
 /// Tâches lues par page : le maximum que le central sert.
@@ -243,6 +245,7 @@ mod tests {
             JobErrorCode::ProbeUnavailable,
             JobErrorCode::LeaseExpired,
             JobErrorCode::MissingSourceFingerprint,
+            JobErrorCode::NoCapableWorker,
         ] {
             assert!(!error_label(code).is_empty());
         }

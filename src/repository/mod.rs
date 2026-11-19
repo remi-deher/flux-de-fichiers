@@ -7,6 +7,7 @@ pub(crate) mod library_history;
 mod mcp_audit;
 mod password_reset;
 mod plugins;
+mod relays;
 
 pub use enrollment::{
     create_enrollment_request, decide_enrollment_request, enrollment_window_status,
@@ -51,3 +52,4 @@ pub use plugins::{
     list_all_plugin_settings, list_plugin_repositories, set_plugin_settings,
     toggle_plugin_repository, touch_plugin_repository_sync, verify_or_pin_release,
 };
+pub use relays::{RelayOutcome, relay_job};

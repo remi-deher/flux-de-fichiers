@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum VideoCodec {
     H264,
+    /// Accepte aussi `h265`, valeur du bloc d'encodage.
+    #[serde(alias = "h265")]
     Hevc,
     Av1,
 }
@@ -88,6 +90,27 @@ impl WorkerCapabilities {
     }
 }
 
+/// Capacité demandée par un bloc : un codec, avec ou sans accélérateur imposé.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityRequirement {
+    pub codec: VideoCodec,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceleration: Option<EncodeAcceleration>,
+}
+
+impl WorkerCapabilities {
+    /// Indique si les encodeurs matériels déclarés satisfont l'exigence.
+    pub fn satisfies(&self, requirement: &CapabilityRequirement) -> bool {
+        self.hardware_encoders.iter().any(|encoder| {
+            encoder.codec == requirement.codec
+                && requirement
+                    .acceleration
+                    .is_none_or(|acceleration| acceleration == encoder.acceleration)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +126,16 @@ mod tests {
             r#"{"codec":"hevc","acceleration":"nvenc"}"#
         );
         assert_eq!(encoder.label(), "H.265 · NVENC");
+        Ok(())
+    }
+
+    #[test]
+    fn hevc_accepts_the_encode_block_spelling() -> Result<(), serde_json::Error> {
+        assert_eq!(
+            serde_json::from_str::<VideoCodec>(r#""h265""#)?,
+            VideoCodec::Hevc
+        );
+        assert_eq!(serde_json::to_string(&VideoCodec::Hevc)?, r#""hevc""#);
         Ok(())
     }
 
@@ -133,5 +166,31 @@ mod tests {
         assert_eq!(capabilities.gpu_models, ["A", "B"]);
         assert!(capabilities.can_encode_in_hardware(VideoCodec::Hevc));
         assert!(!capabilities.can_encode_in_hardware(VideoCodec::Av1));
+    }
+
+    #[test]
+    fn requirement_matches_codec_and_optional_acceleration() {
+        let capabilities = WorkerCapabilities {
+            gpu_models: Vec::new(),
+            hardware_encoders: vec![HardwareEncoder {
+                codec: VideoCodec::Hevc,
+                acceleration: EncodeAcceleration::Vaapi,
+            }],
+        };
+        let any = CapabilityRequirement {
+            codec: VideoCodec::Hevc,
+            acceleration: None,
+        };
+        let nvenc = CapabilityRequirement {
+            acceleration: Some(EncodeAcceleration::Nvenc),
+            ..any
+        };
+        let av1 = CapabilityRequirement {
+            codec: VideoCodec::Av1,
+            ..any
+        };
+        assert!(capabilities.satisfies(&any));
+        assert!(!capabilities.satisfies(&nvenc));
+        assert!(!capabilities.satisfies(&av1));
     }
 }

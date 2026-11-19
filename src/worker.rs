@@ -268,6 +268,10 @@ impl WorkerLoop {
         )
         .await?;
         self.report_steps(claim, worker, &outcome.steps).await;
+        if let Some(request) = outcome.relay {
+            self.relay_job(claim, worker, request).await?;
+            return Ok(());
+        }
 
         let (_, output_size) =
             storage::fingerprint(&outcome.working_file, self.config.max_bytes).await?;
@@ -284,6 +288,34 @@ impl WorkerLoop {
             .error_for_status()?;
         Ok(())
     }
+    /// Confie la tâche au central, qui la place dans la file du worker cible (ADR 0018).
+    async fn relay_job(
+        &self,
+        claim: &Claim,
+        worker: Uuid,
+        request: forgearr_shared::relay::RelayRequest,
+    ) -> anyhow::Result<()> {
+        let response = self
+            .request(
+                reqwest::Method::POST,
+                &format!("/api/v1/jobs/{}/relay", claim.job_id),
+            )
+            .timeout(Duration::from_secs(10))
+            .json(&forgearr_shared::relay::RelayReport {
+                worker_id: worker,
+                lease_token: claim.lease_token,
+                lease_epoch: claim.lease_epoch,
+                request,
+            })
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<forgearr_shared::relay::RelayResponse>()
+            .await?;
+        tracing::info!(job_id = %claim.job_id, relayed = response.relayed, "relais rapporté au central");
+        Ok(())
+    }
+
     async fn download_source(
         &self,
         claim: &Claim,

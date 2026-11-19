@@ -1,6 +1,6 @@
 use crate::{
     api::{self, AppState},
-    domain::{JobErrorCode, LeaseRequest},
+    domain::{JobErrorCode, JobEventType, JobStatus, LeaseRequest},
     job_runner::{self, JobRunError},
     repository, storage,
 };
@@ -197,6 +197,11 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
             tracing::warn!(job_id = %claim.job_id, error = %error, "failed to persist job steps");
         }
 
+        if let Some(request) = execution.relay.as_ref() {
+            relay_locally(state, claim.job_id, &lease, request).await?;
+            return anyhow::Ok(());
+        }
+
         crate::api::transfers::publish_staged(
             state,
             claim.job_id,
@@ -236,6 +241,27 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
         tracing::warn!(job_id=%claim.job_id, error_code=%code, "local processing failed");
     }
     cleanup(&work_dir).await;
+}
+
+/// Relaie la tâche du worker intégré vers la file d'un autre worker (ADR 0018).
+async fn relay_locally(
+    state: &AppState,
+    job: Uuid,
+    lease: &LeaseRequest,
+    request: &forgearr_shared::relay::RelayRequest,
+) -> anyhow::Result<()> {
+    match repository::relay_job(&state.pool, job, lease, request).await? {
+        repository::RelayOutcome::Relayed { .. } => {
+            state.notify_job_event(JobEventType::JobRelayed, job, JobStatus::Queued, None);
+        }
+        repository::RelayOutcome::Failed => state.notify_job_event(
+            JobEventType::JobFailed,
+            job,
+            JobStatus::Failed,
+            Some(JobErrorCode::NoCapableWorker),
+        ),
+    }
+    Ok(())
 }
 
 async fn heartbeat_loop(

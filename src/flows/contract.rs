@@ -131,6 +131,10 @@ pub enum PrimitiveKind {
     Entry,
     Terminal,
     Condition,
+    /// Aiguille selon les capacités du worker courant (ADR 0018).
+    Capability,
+    /// Relaie la tâche vers la file d'un autre worker (ADR 0018).
+    Relay,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

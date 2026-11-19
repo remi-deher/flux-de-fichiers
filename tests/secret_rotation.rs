@@ -9,7 +9,7 @@ use serde_json::json;
 use sqlx::sqlite::SqlitePoolOptions;
 use std::path::Path;
 
-const PLUGIN: &str = "plugin.sonarr";
+const PLUGIN: &str = "sonarr";
 const FLOW: &str = "flow.hook";
 const NODE: &str = "n1";
 const HEADER: &str = "Authorization";

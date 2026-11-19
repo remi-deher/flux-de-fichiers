@@ -538,7 +538,7 @@ mod tests {
 
         let op_json = json!({
             "kind": "http",
-            "settingsPluginId": "plugin.sonarr",
+            "settingsPluginId": "sonarr",
             "requiredSettings": ["url", "apiKey"],
             "errorCode": "integration_failed",
             "failOnErrorParam": "fail_on_error",
@@ -588,7 +588,7 @@ mod tests {
         });
         let rt: HttpRuntime = serde_json::from_value(op_json)?;
         let configs = HashMap::from([(
-            "plugin.sonarr".to_owned(),
+            "sonarr".to_owned(),
             json!({
                 "url": format!("http://{addr}/"),
                 "apiKey": "secret",

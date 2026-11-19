@@ -1,8 +1,8 @@
 //! Lecture et installation déclarative des packs de plugins (`packs/*/installation.json`).
 
 use super::{
-    CatalogItemType, SyncPolicy, catalog_with_roots, ensure_tool_installed,
-    ensure_tool_installed_verified,
+    CatalogItemType, RequiredTool, SyncPolicy, catalog_with_roots,
+    dependencies::install_tool_with_optional_pool,
 };
 use crate::{
     error::{AppError, AppResult},
@@ -87,6 +87,7 @@ pub fn build_pack_detail(roots: &[PathBuf], pack_id: &str) -> AppResult<PackDeta
             .unwrap_or(entry.tags),
         compatibility: manifest.and_then(|m| m.compatibility).unwrap_or_default(),
         installation,
+        updated_at: entry.updated_at,
     })
 }
 
@@ -132,29 +133,12 @@ async fn install_pack_with_optional_pool(
     for component in &plan.components {
         match component.kind {
             CatalogItemType::App => {
-                let outcome = match pool {
-                    Some(pool) => {
-                        ensure_tool_installed_verified(
-                            pool,
-                            roots,
-                            cache,
-                            &component.id,
-                            &component.version,
-                            policy,
-                        )
-                        .await
-                    }
-                    None => {
-                        ensure_tool_installed(
-                            roots,
-                            cache,
-                            &component.id,
-                            &component.version,
-                            policy,
-                        )
-                        .await
-                    }
+                let tool = RequiredTool {
+                    id: component.id.clone(),
+                    version: component.version.clone(),
                 };
+                let outcome =
+                    install_tool_with_optional_pool(pool, roots, cache, &tool, policy).await;
                 match outcome {
                     Ok(_) => installed_tools.push(component.id.clone()),
                     Err(error) => failed_tools.push((component.id.clone(), error.to_string())),
@@ -202,9 +186,9 @@ mod tests {
         if !sibling.join("packs/media/installation.json").is_file() {
             return Ok(());
         }
-        let plan = read_pack_installation(&[sibling], "pack.media")?;
-        assert_eq!(plan.pack_id, "pack.media");
-        assert!(plan.components.iter().any(|c| c.id == "app.mkvtoolnix"));
+        let plan = read_pack_installation(&[sibling], "media")?;
+        assert_eq!(plan.pack_id, "media");
+        assert!(plan.components.iter().any(|c| c.id == "mkvtoolnix"));
         Ok(())
     }
 
@@ -217,7 +201,7 @@ mod tests {
             root.join("index.json"),
             r#"{"schemaVersion":"1.0.0","entries":[
                 {"id":"pack.demo","type":"pack","version":"1.0.0","name":"Demo","manifestPath":"packs/demo/manifest.json"},
-                {"id":"plugin.video","type":"plugin","version":"1.0.0","name":"Vid","manifestPath":"plugins/v.json"}
+                {"id":"video","type":"plugin","version":"1.0.0","name":"Vid","manifestPath":"plugins/v.json"}
             ]}"#,
         )?;
         std::fs::write(
@@ -227,9 +211,9 @@ mod tests {
         std::fs::write(
             root.join("packs/demo/installation.json"),
             r#"{"schemaVersion":"1.0.0","packId":"pack.demo","packVersion":"1.0.0","kind":"declarative-bundle","components":[
-                {"id":"plugin.video","version":"1.0.0","kind":"plugin"},
+                {"id":"video","version":"1.0.0","kind":"plugin"},
                 {"id":"plugin.absent","version":"1.0.0","kind":"plugin"},
-                {"id":"app.mkvtoolnix","version":"1.0.0","kind":"app"}
+                {"id":"mkvtoolnix","version":"1.0.0","kind":"app"}
             ]}"#,
         )?;
 
@@ -241,10 +225,10 @@ mod tests {
             "pack.demo",
         )
         .await?;
-        assert_eq!(result.verified_components, vec!["plugin.video"]);
+        assert_eq!(result.verified_components, vec!["video"]);
         assert_eq!(result.missing_components, vec!["plugin.absent"]);
         assert_eq!(result.failed_tools.len(), 1);
-        assert_eq!(result.failed_tools[0].0, "app.mkvtoolnix");
+        assert_eq!(result.failed_tools[0].0, "mkvtoolnix");
         Ok(())
     }
 }

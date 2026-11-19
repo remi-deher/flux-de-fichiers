@@ -72,6 +72,13 @@ pub struct ToolDistribution {
     pub tool_version: String,
     #[serde(default, alias = "release_status")]
     pub release_status: Option<String>,
+    /// Date de publication de la Release immuable des artefacts.
+    #[serde(
+        default,
+        deserialize_with = "flux_shared::plugins::vocab::deserialize_optional_date",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub released_at: Option<chrono::NaiveDate>,
     #[serde(default = "default_distribution_mode", alias = "distribution_mode")]
     pub distribution_mode: String,
     pub artifacts: Vec<ToolArtifact>,
@@ -567,13 +574,13 @@ mod tests {
             }),
         };
 
-        assert!(!manager.is_ready("app.mkvtoolnix", "88.0.0", "x86_64"));
+        assert!(!manager.is_ready("mkvtoolnix", "88.0.0", "x86_64"));
 
         let installed_path =
-            manager.extract_and_install("app.mkvtoolnix", "88.0.0", &artifact, &archive_bytes)?;
+            manager.extract_and_install("mkvtoolnix", "88.0.0", &artifact, &archive_bytes)?;
 
         assert!(installed_path.is_file());
-        assert!(manager.is_ready("app.mkvtoolnix", "88.0.0", "x86_64"));
+        assert!(manager.is_ready("mkvtoolnix", "88.0.0", "x86_64"));
 
         // Vérification des permissions 0755
         let metadata = fs::metadata(&installed_path)?;
@@ -581,7 +588,7 @@ mod tests {
 
         // Vérification cache chaud
         let cached_path = manager.verify_cached_binary(
-            "app.mkvtoolnix",
+            "mkvtoolnix",
             "88.0.0",
             "x86_64",
             "mkvmerge",
@@ -705,7 +712,7 @@ mod tests {
         };
         let allowlist = vec!["bin/mkvmerge".into(), "bin/mkvpropedit".into()];
         let installed = manager.extract_and_install_with_allowlist(
-            "app.mkvtoolnix",
+            "mkvtoolnix",
             "1.0.0",
             &artifact,
             &archive_bytes,
@@ -713,20 +720,15 @@ mod tests {
         )?;
         assert!(installed.is_file());
         let propedit = manager
-            .tool_dir("app.mkvtoolnix", "1.0.0", "x86_64")
+            .tool_dir("mkvtoolnix", "1.0.0", "x86_64")
             .join("bin/mkvpropedit");
         assert!(propedit.is_file());
         assert_eq!(
             fs::metadata(&propedit)?.permissions().mode() & 0o777,
             EXECUTABLE_UNIX_MODE
         );
-        let verified = manager.verify_cached_binary(
-            "app.mkvtoolnix",
-            "1.0.0",
-            "x86_64",
-            "bin/mkvmerge",
-            None,
-        )?;
+        let verified =
+            manager.verify_cached_binary("mkvtoolnix", "1.0.0", "x86_64", "bin/mkvmerge", None)?;
         assert_eq!(verified, installed);
         Ok(())
     }
@@ -793,9 +795,9 @@ mod tests {
             binaries,
             permissions: None,
         };
-        let result = manager.extract_and_install("app.ffmpeg", "1.0.0", &artifact, &archive_bytes);
+        let result = manager.extract_and_install("ffmpeg", "1.0.0", &artifact, &archive_bytes);
         assert!(matches!(result, Err(AppError::ChecksumMismatch { .. })));
-        assert!(!manager.is_ready("app.ffmpeg", "1.0.0", "x86_64"));
+        assert!(!manager.is_ready("ffmpeg", "1.0.0", "x86_64"));
         Ok(())
     }
 
@@ -804,15 +806,15 @@ mod tests {
     {
         let tmp = tempdir()?;
         let manager = ToolCacheManager::new(tmp.path());
-        std::fs::create_dir_all(manager.tool_dir("app.ffmpeg", "7.0.0", "x86_64"))?;
-        std::fs::create_dir_all(manager.tool_dir("app.ffmpeg", "7.1.0", "x86_64"))?;
+        std::fs::create_dir_all(manager.tool_dir("ffmpeg", "7.0.0", "x86_64"))?;
+        std::fs::create_dir_all(manager.tool_dir("ffmpeg", "7.1.0", "x86_64"))?;
         std::fs::create_dir_all(manager.tool_dir("app.old", "1.0.0", "x86_64"))?;
         std::fs::create_dir_all(tmp.path().join(".tmp-active"))?;
 
-        let pruned = manager.prune_unused(&[("app.ffmpeg".into(), "7.1.0".into())])?;
+        let pruned = manager.prune_unused(&[("ffmpeg".into(), "7.1.0".into())])?;
         assert_eq!(pruned, 2);
-        assert!(manager.tool_dir("app.ffmpeg", "7.1.0", "x86_64").is_dir());
-        assert!(!manager.tool_dir("app.ffmpeg", "7.0.0", "x86_64").exists());
+        assert!(manager.tool_dir("ffmpeg", "7.1.0", "x86_64").is_dir());
+        assert!(!manager.tool_dir("ffmpeg", "7.0.0", "x86_64").exists());
         assert!(!tmp.path().join("app.old").exists());
         assert!(tmp.path().join(".tmp-active").is_dir());
         Ok(())

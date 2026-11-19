@@ -287,13 +287,13 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let input = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
         );
         let end = graph.append(
-            FlowBlockKind::parse("block.core.file-output"),
+            FlowBlockKind::parse("essentiel.file-output"),
             "Fin",
             json!({}),
             &catalog,

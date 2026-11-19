@@ -10,6 +10,7 @@ use std::{
 
 mod blocks;
 mod cache;
+mod dependencies;
 mod install;
 mod local;
 mod packs;
@@ -21,6 +22,10 @@ mod sync;
 
 pub use blocks::{flow_block_catalog, plugin_default_config};
 pub use cache::CatalogCache;
+pub use dependencies::{
+    DependencyInstallResult, DependencyPlan, RequiredTool, install_with_dependencies,
+    resolve_dependencies,
+};
 pub use install::{
     ensure_tool_installed, ensure_tool_installed_verified, ensure_tools_for_requirements,
     install_from_distribution, is_installing, parse_distribution, read_distribution,
@@ -382,6 +387,7 @@ pub fn build_plugin_detail(
                 .settings_schema
                 .is_some_and(|schema| !schema.fields.is_empty()),
             blocks,
+            updated_at: entry.updated_at,
         },
         None => PluginDetailView {
             id: entry.id.clone(),
@@ -397,6 +403,7 @@ pub fn build_plugin_detail(
             compatibility: PluginCompatibility::default(),
             has_settings: false,
             blocks,
+            updated_at: entry.updated_at,
         },
     }
 }
@@ -468,6 +475,7 @@ pub fn build_tool_detail(
         compatibility: manifest.and_then(|m| m.compatibility).unwrap_or_default(),
         tool_version: distribution.as_ref().map(|d| d.tool_version.clone()),
         release_status: distribution.as_ref().and_then(|d| d.release_status.clone()),
+        released_at: distribution.as_ref().and_then(|d| d.released_at),
         distribution_mode: distribution.map(|d| d.distribution_mode),
         artifacts,
         used_by_plugins,
@@ -558,7 +566,7 @@ pub fn summarize_tool(
 ) -> ToolStatusSummary {
     let arch = host_arch();
     // La télémétrie est interne au binaire ; tout autre outil vient du cache local.
-    let is_system_ready = entry.id == "app.internal.telemetry";
+    let is_system_ready = entry.id == "telemetrie";
     let status = if is_system_ready || cache_mgr.is_ready(&entry.id, &entry.version, arch) {
         ToolStatus::Ready
     } else if is_installing(&entry.id) {
@@ -579,6 +587,7 @@ pub fn summarize_tool(
             .unwrap_or_else(|| "autonomous-binary".into()),
         description,
         installable,
+        updated_at: entry.updated_at,
     }
 }
 
@@ -645,6 +654,7 @@ mod tests {
             tags: Vec::new(),
             owner: None,
             sha256: None,
+            updated_at: None,
         };
         let mut hidden = entry.clone();
         hidden.category = Some(PluginCategory::Other);
@@ -752,7 +762,7 @@ mod tests {
             }
         }
 
-        for plugin_id in ["plugin.sonarr", "plugin.radarr"] {
+        for plugin_id in ["sonarr", "radarr"] {
             let entry = catalog
                 .entries
                 .iter()
@@ -847,7 +857,7 @@ mod tests {
             dir.path().join("plugins/sonarr/manifest.json"),
             r#"{
                 "schemaVersion": "1.1.0",
-                "id": "plugin.sonarr",
+                "id": "sonarr",
                 "type": "plugin",
                 "version": "1.2.0",
                 "name": "Sonarr Integration",
@@ -861,7 +871,7 @@ mod tests {
             }"#,
         )?;
         let entry = CatalogEntry {
-            id: "plugin.sonarr".into(),
+            id: "sonarr".into(),
             entry_type: CatalogItemType::Plugin,
             version: "1.2.0".into(),
             name: "Sonarr Integration".into(),
@@ -873,6 +883,7 @@ mod tests {
             tags: vec!["arr".into()],
             owner: None,
             sha256: None,
+            updated_at: None,
         };
         let block = |kind: &str, owner: Option<&str>| flux_shared::flows::OwnedBlockSpec {
             kind: kind.into(),
@@ -894,17 +905,17 @@ mod tests {
             dir.path(),
             &entry,
             &[
-                block("block.sonarr.rescan", Some("plugin.sonarr")),
-                block("block.radarr.rescan", Some("plugin.radarr")),
+                block("sonarr.rescan", Some("sonarr")),
+                block("radarr.rescan", Some("radarr")),
             ],
         );
-        assert_eq!(detail.id, "plugin.sonarr");
+        assert_eq!(detail.id, "sonarr");
         assert!(detail.has_settings);
         assert_eq!(detail.author.as_deref(), Some("flux-de-fichiers"));
         assert_eq!(detail.compatibility.platforms, vec!["linux/amd64"]);
         assert_eq!(detail.dependencies.len(), 1);
         assert_eq!(detail.blocks.len(), 1);
-        assert_eq!(detail.blocks[0].kind, "block.sonarr.rescan");
+        assert_eq!(detail.blocks[0].kind, "sonarr.rescan");
         Ok(())
     }
 
@@ -913,8 +924,8 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let arch = host_arch();
         for (folder, id, status) in [
-            ("released-tool", "app.released-tool", "released"),
-            ("pending-tool", "app.pending-tool", "contract-only"),
+            ("released-tool", "released-tool", "released"),
+            ("pending-tool", "pending-tool", "contract-only"),
         ] {
             let tool_dir = dir.path().join("apps").join(folder);
             std::fs::create_dir_all(&tool_dir)?;
@@ -939,9 +950,9 @@ mod tests {
             )?;
         }
         let roots = [dir.path().to_path_buf()];
-        assert!(is_tool_installable(&roots, "app.released-tool"));
-        assert!(!is_tool_installable(&roots, "app.pending-tool"));
-        assert!(!is_tool_installable(&roots, "app.unknown"));
+        assert!(is_tool_installable(&roots, "released-tool"));
+        assert!(!is_tool_installable(&roots, "pending-tool"));
+        assert!(!is_tool_installable(&roots, "unknown"));
         Ok(())
     }
 }

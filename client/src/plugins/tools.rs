@@ -1,17 +1,17 @@
 //! Onglet Outils de la page Plugins : état d'installation et déploiement des binaires.
 
 use super::tool_detail::{ToolDetail, ToolDrawerTab};
-use super::{SelectedItem, TOOLS_PATH, bump, tool_status_label};
+use super::{
+    SelectedItem, TOOLS_PATH, bump, install_with_dependencies_action, tool_status_label,
+    updated_label,
+};
 use crate::api;
-use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
 use crate::ui::{
     Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
-    Toasts,
 };
 use flux_shared::plugins::{ToolStatus, ToolStatusSummary};
 use leptos::prelude::*;
-use serde_json::Value;
 
 /// Filtre 1-clic des outils via leur `StatStrip`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -98,23 +98,13 @@ pub fn ToolsSection(
             .unwrap_or_default()
     });
     let feedback = RwSignal::new(None::<String>);
-    let install = Action::new_local(move |id: &String| {
-        let id = id.clone();
-        installing_id.set(Some(id.clone()));
-        let path = format!("{TOOLS_PATH}/{}/install", encode_segment(&id));
-        async move { api::post::<(), Value>(&path, None).await }
+    let install = install_with_dependencies_action(TOOLS_PATH, feedback, move || {
+        bump(reload_tools);
     });
-    Effect::new(move |_| match install.value().get() {
-        Some(Ok(_)) => {
+    Effect::new(move |_| {
+        if !install.pending().get() {
             installing_id.set(None);
-            Toasts::set_success(feedback, "Outil installé.");
-            bump(reload_tools);
         }
-        Some(Err(error)) => {
-            installing_id.set(None);
-            Toasts::set_error(feedback, error.message());
-        }
-        None => {}
     });
 
     let stats = Signal::derive(move || {
@@ -264,7 +254,10 @@ pub fn ToolsSection(
                                         let id_label = id.clone();
                                         view! {
                                             <button type="button" class="btn btn-secondary btn-sm" disabled=move || install.pending().get()
-                                                on:click=move |_| { install.dispatch(id.clone()); }>
+                                                on:click=move |_| {
+                                                    installing_id.set(Some(id.clone()));
+                                                    install.dispatch(id.clone());
+                                                }>
                                                 {move || if install.pending().get() && installing_id.get().as_deref() == Some(id_label.as_str()) {
                                                     "Installation…"
                                                 } else {
@@ -291,7 +284,7 @@ pub fn ToolsSection(
                                                     .is_some_and(|item| item.id == active_id)
                                         }))
                                         on_click=Some(open_detail)
-                                        footer_meta=id
+                                        footer_meta=updated_label(tool.updated_at)
                                         footer_actions=Some(actions)
                                     >
                                         <div class="cluster">
@@ -335,6 +328,7 @@ mod tests {
             current_choice: false,
             status,
             installable: true,
+            updated_at: None,
         }
     }
 

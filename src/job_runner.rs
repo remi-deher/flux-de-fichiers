@@ -230,17 +230,17 @@ mod tests {
         let mut claim = sample_claim(
             None,
             vec![ToolRequirement {
-                tool_id: "app.ffmpeg".into(),
+                tool_id: "ffmpeg".into(),
                 version: "2.0.0".into(),
             }],
         );
-        claim.probe_tool_id = Some("app.mediainfo".into());
+        claim.probe_tool_id = Some("mediainfo".into());
         claim.probe_version = Some("1.2.3".into());
         let wanted = collect_wanted_tools(&claim);
         assert_eq!(wanted.len(), 2);
-        assert_eq!(wanted[0].tool_id, "app.ffmpeg");
+        assert_eq!(wanted[0].tool_id, "ffmpeg");
         assert_eq!(wanted[0].version, "2.0.0");
-        assert_eq!(wanted[1].tool_id, "app.mediainfo");
+        assert_eq!(wanted[1].tool_id, "mediainfo");
         assert_eq!(wanted[1].version, "1.2.3");
     }
 

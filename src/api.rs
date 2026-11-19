@@ -272,6 +272,10 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/plugins", get(plugins::catalog))
         .route("/api/v1/plugins/{id}", get(plugins::plugin_detail))
         .route(
+            "/api/v1/plugins/{id}/install",
+            post(plugins::install_plugin),
+        )
+        .route(
             "/api/v1/plugins/repositories",
             get(plugins::list_repositories).post(plugins::add_repository),
         )

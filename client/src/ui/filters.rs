@@ -330,6 +330,7 @@ mod tests {
             tags: Vec::new(),
             owner: None,
             sha256: None,
+            updated_at: None,
         }
     }
 

@@ -31,6 +31,38 @@ pub struct CreateRepositoryRequest {
     pub index_url: String,
 }
 
+/// État opérationnel synthétique d'une pièce du catalogue calculé par le central.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CatalogReadiness {
+    /// Outils requis prêts et réglages obligatoires configurés (ou non requis).
+    Ready,
+    /// Au moins un outil requis par cette pièce n'est pas encore installé.
+    NeedsTools,
+    /// Outils prêts, mais des réglages globaux restent à configurer.
+    NeedsConfig,
+    /// Élément déclaratif sans prérequis d'installation ni réglages (flux, script, ressource).
+    #[default]
+    Available,
+}
+
+/// Synthèse d'état calculée côté central pour enrichir les cartes du catalogue (absente d'`index.json`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogRuntimeSummary {
+    pub readiness: CatalogReadiness,
+    #[serde(default)]
+    pub has_settings: bool,
+    #[serde(default)]
+    pub configured: bool,
+    #[serde(default)]
+    pub missing_tools_count: usize,
+    #[serde(default)]
+    pub blocks_count: usize,
+    #[serde(default)]
+    pub components_count: usize,
+}
+
 /// Fiche d'index dans `index.json` à la racine du dépôt.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -71,6 +103,9 @@ pub struct CatalogEntry {
         skip_serializing_if = "Option::is_none"
     )]
     pub updated_at: Option<NaiveDate>,
+    /// État opérationnel calculé par le central (jamais écrit dans `index.json`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<CatalogRuntimeSummary>,
 }
 
 /// État d'un outil dans le cache local.
@@ -215,6 +250,9 @@ pub struct PluginDependency {
     pub kind: Option<String>,
     #[serde(default)]
     pub optional: bool,
+    /// État réel de l'outil dans le cache local du central (renseigné par `GET /api/v1/plugins/{id}`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<ToolStatus>,
 }
 
 /// Compatibilité déclarée par le manifeste d'un plugin.
@@ -351,4 +389,48 @@ pub struct RepositoryDetailView {
     pub skipped_count: usize,
     #[serde(default)]
     pub entries: Vec<CatalogEntry>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_entry_keeps_index_json_backward_compatible() -> Result<(), serde_json::Error> {
+        let raw = r#"{"id":"sonarr","type":"plugin","version":"1.0.0","name":"Sonarr","manifestPath":"sonarr/manifest.json"}"#;
+        let entry: CatalogEntry = serde_json::from_str(raw)?;
+        assert!(entry.runtime.is_none());
+
+        let serialized = serde_json::to_string(&entry)?;
+        assert!(!serialized.contains("runtime"));
+        Ok(())
+    }
+
+    #[test]
+    fn catalog_runtime_summary_and_dependency_status_round_trip() -> Result<(), serde_json::Error> {
+        let summary = CatalogRuntimeSummary {
+            readiness: CatalogReadiness::NeedsTools,
+            has_settings: true,
+            configured: false,
+            missing_tools_count: 2,
+            blocks_count: 3,
+            components_count: 0,
+        };
+        let json = serde_json::to_string(&summary)?;
+        assert!(json.contains("\"readiness\":\"needs_tools\""));
+        let decoded: CatalogRuntimeSummary = serde_json::from_str(&json)?;
+        assert_eq!(decoded, summary);
+
+        let dep_raw = r#"{"id":"ffmpeg","optional":false}"#;
+        let dep: PluginDependency = serde_json::from_str(dep_raw)?;
+        assert_eq!(dep.status, None);
+
+        let dep_ready = PluginDependency {
+            status: Some(ToolStatus::Ready),
+            ..dep
+        };
+        let dep_json = serde_json::to_string(&dep_ready)?;
+        assert!(dep_json.contains("\"status\":\"ready\""));
+        Ok(())
+    }
 }

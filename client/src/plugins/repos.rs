@@ -1,11 +1,15 @@
-//! Onglet Dépôts de la page Plugins : sources officielles/tierces, synchronisation et ajout.
+//! Onglet Dépôts de la page Plugins : cartes de sources officielles/tierces, synchronisation et ajout.
 
+use super::metadata::{StoreCard, StoreTone};
 use super::repo_detail::{RepoDetail, RepoDrawerTab};
 use super::{REPOSITORIES_PATH, SelectedItem, bump};
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
-use crate::ui::{Drawer, MetricTone, StatItem, StatStrip, Toasts};
+use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
+use crate::ui::{
+    Drawer, EmptyState, IconName, MetricTone, StatItem, StatStrip, Tag, TagTone, Toasts,
+};
 use forgearr_shared::plugins::{CreateRepositoryRequest, PluginRepository};
 use leptos::prelude::*;
 use serde_json::Value;
@@ -81,6 +85,15 @@ pub fn filter_repos(
         .collect()
 }
 
+pub fn format_sync_label(last_synced_at: Option<&str>) -> String {
+    match last_synced_at {
+        Some(raw) if !raw.trim().is_empty() => {
+            format!("Synchro : {}", raw.split('T').next().unwrap_or(raw))
+        }
+        _ => "Jamais synchronisé".to_owned(),
+    }
+}
+
 #[component]
 pub fn ReposSection(
     repositories: LocalResource<Result<Vec<PluginRepository>, api::ApiError>>,
@@ -88,6 +101,10 @@ pub fn ReposSection(
     reload_catalog: RwSignal<u32>,
     adding: RwSignal<bool>,
 ) -> impl IntoView {
+    provide_topbar_action(ActionSpec {
+        label: "Ajouter un dépôt",
+        on_click: Callback::new(move |()| adding.set(true)),
+    });
     let active_filter = RwSignal::new(RepoFilter::All);
     let selected_repo = RwSignal::new(None::<SelectedItem>);
     let detail_open = RwSignal::new(false);
@@ -103,10 +120,30 @@ pub fn ReposSection(
     let act = Action::new_local(move |(id, action): &(String, RepoAction)| {
         run_repo_action(id.clone(), *action)
     });
+    let sync_all = Action::new_local(move |ids: &Vec<String>| {
+        let ids = ids.clone();
+        async move {
+            for id in ids {
+                run_repo_action(id, RepoAction::Sync).await?;
+            }
+            Ok::<(), api::ApiError>(())
+        }
+    });
     Effect::new(move |_| match act.value().get() {
         Some(Ok(())) => {
             feedback.set(None);
             Toasts::notify_success("Opération sur le dépôt effectuée.");
+            bump(reload_repos);
+            bump(reload_catalog);
+            bump(reload_detail);
+        }
+        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
+        None => {}
+    });
+    Effect::new(move |_| match sync_all.value().get() {
+        Some(Ok(())) => {
+            feedback.set(None);
+            Toasts::notify_success("Tous les dépôts actifs ont été synchronisés.");
             bump(reload_repos);
             bump(reload_catalog);
             bump(reload_detail);
@@ -120,7 +157,7 @@ pub fn ReposSection(
         }
         act.dispatch((id, action));
     });
-    let action_pending = Signal::derive(move || act.pending().get());
+    let action_pending = Signal::derive(move || act.pending().get() || sync_all.pending().get());
     let (name, url) = (RwSignal::new(String::new()), RwSignal::new(String::new()));
     let add = Action::new_local(move |request: &CreateRepositoryRequest| {
         let request = request.clone();
@@ -175,123 +212,183 @@ pub fn ReposSection(
     });
 
     view! {
-        <StatStrip aria_label="Synthèse des dépôts" items=stats />
-        <section class="section-panel">
-            <div class="registre">
-                <div class="table-wrapper">
-                    <table class="data-table" aria-label="Dépôts de plugins">
-                        <thead><tr>
-                            <th scope="col">"Dépôt"</th><th scope="col">"Index"</th><th scope="col">"État"</th>
-                            <th scope="col">"Dernière synchronisation"</th><th scope="col" class="cell-end">"Actions"</th>
-                        </tr></thead>
-                        <tbody>
-                            {move || {
-                                let text = query();
-                                let filter = active_filter.get();
-                                match repositories.get() {
-                                    None => view! {
-                                        <tr><td colspan="5" class="empty-state-text">"Chargement des dépôts…"</td></tr>
-                                    }.into_any(),
-                                    Some(Err(error)) => view! {
-                                        <tr><td colspan="5" class="text-danger">{error.message()}</td></tr>
-                                    }.into_any(),
-                                    Some(Ok(list)) => {
-                                        let shown = filter_repos(list, filter, &text);
-                                        if shown.is_empty() {
-                                            return view! {
-                                                <tr><td colspan="5" class="empty-state-text">"Aucun dépôt correspondant."</td></tr>
-                                            }.into_any();
-                                        }
-                                        shown.into_iter().map(|repo| {
-                                            let (inspect_id, inspect_name, toggle_id, sync_id, delete_id) = (
-                                                repo.id.clone(),
-                                                repo.name.clone(),
-                                                repo.id.clone(),
-                                                repo.id.clone(),
-                                                repo.id.clone(),
-                                            );
-                                            view! {
-                                                <tr>
-                                                    <td class="text-strong">
-                                                        {repo.name.clone()}
-                                                        {repo.is_official.then(|| view! {
-                                                            " "<span class="repo-badge official">"Officiel"</span>
-                                                        })}
-                                                    </td>
-                                                    <td class="text-mono truncate">{repo.index_url.clone()}</td>
-                                                    <td><span class=if repo.enabled { "status-pill success" } else { "status-pill info" }>
-                                                        {if repo.enabled { "Actif" } else { "Désactivé" }}</span></td>
-                                                    <td class="text-dim">{repo.last_synced_at.clone().unwrap_or_else(|| "Jamais".into())}</td>
-                                                    <td class="cell-end inline-actions">
-                                                        <button type="button" class="btn btn-secondary btn-sm"
-                                                            on:click=move |_| {
-                                                                selected_repo.set(Some(SelectedItem {
-                                                                    id: inspect_id.clone(),
-                                                                    name: inspect_name.clone(),
-                                                                }));
-                                                                detail_tab.set(0);
-                                                                detail_open.set(true);
-                                                            }>"Inspecter"</button>
-                                                        <button type="button" class="btn btn-secondary btn-sm" disabled=move || act.pending().get()
-                                                            on:click=move |_| { act.dispatch((sync_id.clone(), RepoAction::Sync)); }>"Synchroniser"</button>
-                                                        <button type="button" class="btn btn-secondary btn-sm" disabled=move || act.pending().get()
-                                                            on:click=move |_| { act.dispatch((toggle_id.clone(), RepoAction::Toggle)); }>
-                                                            {if repo.enabled { "Désactiver" } else { "Activer" }}</button>
-                                                        {(!repo.is_official).then(|| view! {
-                                                            <button type="button" class="btn btn-sm btn-danger-quiet" disabled=move || act.pending().get()
-                                                                on:click=move |_| { act.dispatch((delete_id.clone(), RepoAction::Delete)); }>"Retirer"</button>
-                                                        })}
-                                                    </td>
-                                                </tr>
-                                            }
-                                        }).collect_view().into_any()
-                                    }
-                                }
-                            }}
-                        </tbody>
-                    </table>
+        <div class="store-toolbar">
+            <StatStrip aria_label="Synthèse des dépôts" items=stats />
+            <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                disabled=action_pending
+                on:click=move |_| {
+                    let active_ids: Vec<String> = repositories
+                        .get_untracked()
+                        .and_then(Result::ok)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|repo| repo.enabled)
+                        .map(|repo| repo.id)
+                        .collect();
+                    if !active_ids.is_empty() {
+                        sync_all.dispatch(active_ids);
+                    }
+                }
+            >
+                {move || if sync_all.pending().get() { "Synchronisation…" } else { "Tout synchroniser" }}
+            </button>
+        </div>
+        <Drawer
+            open=detail_open
+            eyebrow="Dépôt"
+            title=detail_title
+            tabs=RepoDrawerTab::TABS.to_vec()
+            tab=detail_tab
+        >
+            {move || selected_repo.get().map(|item| {
+                view! {
+                    <RepoDetail
+                        repo_id=item.id
+                        tab=detail_tab
+                        reload_key=reload_detail
+                        on_action=on_repo_action
+                        action_pending=action_pending
+                    />
+                }
+            })}
+        </Drawer>
+        <Drawer open=adding eyebrow="Extensions" title="Ajouter un dépôt".to_owned()>
+            <form class="inspection-panel" on:submit=move |event| {
+                event.prevent_default();
+                add.dispatch(CreateRepositoryRequest {
+                    id: None,
+                    name: name.get_untracked(),
+                    index_url: url.get_untracked(),
+                });
+            }>
+                <div class="form-group">
+                    <label for="repo-name" class="form-label">"Nom du dépôt"</label>
+                    <input id="repo-name" class="form-input" required=true prop:value=move || name.get()
+                        on:input=move |event| name.set(event_target_value(&event)) />
                 </div>
-                <Drawer
-                    open=detail_open
-                    eyebrow="Dépôt"
-                    title=detail_title
-                    tabs=RepoDrawerTab::TABS.to_vec()
-                    tab=detail_tab
-                >
-                    {move || selected_repo.get().map(|item| {
-                        view! {
-                            <RepoDetail
-                                repo_id=item.id
-                                tab=detail_tab
-                                reload_key=reload_detail
-                                on_action=on_repo_action
-                                action_pending=action_pending
-                            />
+                <div class="form-group">
+                    <label for="repo-url" class="form-label">"URL de l'index"</label>
+                    <input id="repo-url" class="form-input" type="url" required=true placeholder="https://…/index.json"
+                        prop:value=move || url.get() on:input=move |event| url.set(event_target_value(&event)) />
+                </div>
+                <div class="inspection-drawer__actions">
+                    <button type="submit" class="btn btn-primary" disabled=move || add.pending().get()>"Ajouter le dépôt"</button>
+                </div>
+            </form>
+        </Drawer>
+        <section class="page-section">
+            {move || {
+                let text = query();
+                let filter = active_filter.get();
+                match repositories.get() {
+                    None => view! {
+                        <div class="empty-state-panel">
+                            <p class="text-dim">"Chargement des dépôts…"</p>
+                        </div>
+                    }.into_any(),
+                    Some(Err(error)) => view! {
+                        <div class="empty-state-panel">
+                            <p class="form-error">{error.message()}</p>
+                        </div>
+                    }.into_any(),
+                    Some(Ok(list)) => {
+                        let shown = filter_repos(list, filter, &text);
+                        if shown.is_empty() {
+                            return view! {
+                                <div class="empty-state-panel">
+                                    <EmptyState
+                                        title="Aucun dépôt correspondant"
+                                        message="Ajoutez un dépôt ou ajustez le filtre actif."
+                                        icon_name=IconName::Layers
+                                    />
+                                </div>
+                            }.into_any();
                         }
-                    })}
-                </Drawer>
-                <Drawer open=adding eyebrow="Extensions" title="Ajouter un dépôt".to_owned()>
-                    <form class="inspection-panel" on:submit=move |event| {
-                        event.prevent_default();
-                        add.dispatch(CreateRepositoryRequest { id: None, name: name.get_untracked(), index_url: url.get_untracked() });
-                    }>
-                        <div class="form-group">
-                            <label for="repo-name" class="form-label">"Nom du dépôt"</label>
-                            <input id="repo-name" class="form-input" required=true prop:value=move || name.get()
-                                on:input=move |event| name.set(event_target_value(&event)) />
-                        </div>
-                        <div class="form-group">
-                            <label for="repo-url" class="form-label">"URL de l'index"</label>
-                            <input id="repo-url" class="form-input" type="url" required=true placeholder="https://…/index.json"
-                                prop:value=move || url.get() on:input=move |event| url.set(event_target_value(&event)) />
-                        </div>
-                        <div class="inspection-drawer__actions">
-                            <button type="submit" class="btn btn-primary" disabled=move || add.pending().get()>"Ajouter le dépôt"</button>
-                        </div>
-                    </form>
-                </Drawer>
-                <p class="form-help" role="status">{move || feedback.get()}</p>
-            </div>
+                        view! {
+                            <div class="repo-list">
+                                {shown.into_iter().map(|repo| {
+                                    let (inspect_id, inspect_name, active_id, sync_id, toggle_id) = (
+                                        repo.id.clone(),
+                                        repo.name.clone(),
+                                        repo.id.clone(),
+                                        repo.id.clone(),
+                                        repo.id.clone(),
+                                    );
+                                    let tone = if repo.enabled { StoreTone::Success } else { StoreTone::Neutral };
+                                    let status_badge = view! {
+                                        <Tag
+                                            label=if repo.enabled { "Actif" } else { "Désactivé" }
+                                            tone=if repo.enabled { TagTone::Success } else { TagTone::Neutral }
+                                        />
+                                    }.into_any();
+                                    let context_tags = view! {
+                                        <Tag
+                                            label=if repo.is_official { "Officiel" } else { "Tiers" }
+                                            tone=if repo.is_official { TagTone::Primary } else { TagTone::Neutral }
+                                        />
+                                    }.into_any();
+                                    let sync_footer = format_sync_label(repo.last_synced_at.as_deref());
+                                    let enabled = repo.enabled;
+                                    let actions = view! {
+                                        <button
+                                            type="button"
+                                            class="btn btn-primary btn-sm"
+                                            disabled=action_pending
+                                            on:click=move |_| {
+                                                act.dispatch((sync_id.clone(), RepoAction::Sync));
+                                            }
+                                        >
+                                            "Synchroniser"
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn btn-secondary btn-sm"
+                                            disabled=action_pending
+                                            on:click=move |_| {
+                                                act.dispatch((toggle_id.clone(), RepoAction::Toggle));
+                                            }
+                                        >
+                                            {if enabled { "Désactiver" } else { "Activer" }}
+                                        </button>
+                                    }.into_any();
+                                    let open_detail = Callback::new(move |()| {
+                                        selected_repo.set(Some(SelectedItem {
+                                            id: inspect_id.clone(),
+                                            name: inspect_name.clone(),
+                                        }));
+                                        detail_tab.set(0);
+                                        detail_open.set(true);
+                                    });
+                                    view! {
+                                        <StoreCard
+                                            title=repo.name
+                                            description=repo.index_url
+                                            icon=IconName::Layers
+                                            tone=tone
+                                            status_badge=Some(status_badge)
+                                            context_tags=Some(context_tags)
+                                            footer_left=sync_footer
+                                            footer_actions=Some(actions)
+                                            active=Some(Signal::derive(move || {
+                                                detail_open.get()
+                                                    && selected_repo
+                                                        .get()
+                                                        .is_some_and(|item| item.id == active_id)
+                                            }))
+                                            on_open=open_detail
+                                        />
+                                    }
+                                }).collect_view()}
+                            </div>
+                        }.into_any()
+                    }
+                }
+            }}
+            {move || feedback.get().map(|msg| view! {
+                <p class="form-help" role="status">{msg}</p>
+            })}
         </section>
     }
 }
@@ -326,5 +423,14 @@ mod tests {
         assert_eq!(filter_repos(items.clone(), RepoFilter::All, "").len(), 2);
         assert_eq!(filter_repos(items.clone(), RepoFilter::Active, "").len(), 1);
         assert_eq!(filter_repos(items, RepoFilter::Inactive, "commu").len(), 1);
+    }
+
+    #[test]
+    fn format_sync_label_handles_missing_and_iso_dates() {
+        assert_eq!(format_sync_label(None), "Jamais synchronisé");
+        assert_eq!(
+            format_sync_label(Some("2026-11-19T12:00:00Z")),
+            "Synchro : 2026-11-19"
+        );
     }
 }

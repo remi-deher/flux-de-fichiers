@@ -60,6 +60,7 @@ mod tests {
             owner: None,
             sha256: None,
             updated_at: None,
+            runtime: None,
         }
     }
 

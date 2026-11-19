@@ -818,3 +818,58 @@ async fn plugin_connection_test_and_worker_active_tools_work() -> anyhow::Result
     server.abort();
     Ok(())
 }
+
+#[tokio::test]
+async fn catalog_runtime_readiness_and_dependency_status_reflect_state() -> anyhow::Result<()> {
+    let h = harness().await?;
+
+    // Avant configuration, `plugin.demo` requiert `apiKey` -> `needs_config`.
+    let (status, catalog) = call(&h.app, "GET", "/api/v1/plugins", None).await?;
+    assert_eq!(status, StatusCode::OK);
+    let entries = catalog
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("catalog array missing"))?;
+    let demo = entries
+        .iter()
+        .find(|e| e["id"] == PLUGIN_ID)
+        .ok_or_else(|| anyhow::anyhow!("plugin.demo missing"))?;
+    assert_eq!(demo["runtime"]["readiness"], "needs_config");
+    assert_eq!(demo["runtime"]["hasSettings"], true);
+    assert_eq!(demo["runtime"]["configured"], false);
+    assert_eq!(demo["runtime"]["blocksCount"], 1);
+
+    let pack = entries
+        .iter()
+        .find(|e| e["id"] == "pack.suite")
+        .ok_or_else(|| anyhow::anyhow!("pack.suite missing"))?;
+    assert_eq!(pack["runtime"]["componentsCount"], 1);
+
+    // La fiche détaillée renseigne le statut réel de la dépendance `ffmpeg`.
+    let (status, detail) = call(&h.app, "GET", "/api/v1/plugins/plugin.demo", None).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["dependencies"][0]["id"], "ffmpeg");
+    assert_eq!(detail["dependencies"][0]["status"], "not_installed");
+
+    // Après enregistrement du champ obligatoire `apiKey`, `readiness` passe à `ready`.
+    let (status, _) = call(
+        &h.app,
+        "PUT",
+        "/api/v1/plugins/plugin.demo/settings",
+        Some(serde_json::json!({ "apiKey": SECRET_VALUE })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, catalog_after) = call(&h.app, "GET", "/api/v1/plugins", None).await?;
+    assert_eq!(status, StatusCode::OK);
+    let demo_after = catalog_after
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("catalog array missing"))?
+        .iter()
+        .find(|e| e["id"] == PLUGIN_ID)
+        .ok_or_else(|| anyhow::anyhow!("plugin.demo missing"))?;
+    assert_eq!(demo_after["runtime"]["readiness"], "ready");
+    assert_eq!(demo_after["runtime"]["configured"], true);
+
+    Ok(())
+}

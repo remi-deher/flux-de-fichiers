@@ -19,6 +19,8 @@ pub struct JobExecutionResult {
     pub warning: bool,
     pub output_spec: OutputSpec,
     pub steps: Vec<JobStepEntry>,
+    /// Demande de relais à transmettre au central ; aucun résultat n'est alors à publier.
+    pub relay: Option<forgearr_shared::relay::RelayRequest>,
 }
 
 /// Erreur typée remontée au coordinateur avec la trace d'étapes associée.
@@ -158,6 +160,7 @@ pub async fn execute_claim_processing(
         .map(|req| (req.tool_id.clone(), req.version.clone()))
         .collect();
 
+    let worker_capabilities = crate::hardware_probe::detected_capabilities();
     let engine = FlowEngine {
         registry,
         cache_mgr,
@@ -168,6 +171,8 @@ pub async fn execute_claim_processing(
         media_root: claim.media_root.as_deref(),
         logical_source_name: Some(&claim.source_name),
         allow_private_integrations: claim.allow_private_integrations,
+        worker_capabilities: Some(&worker_capabilities),
+        resume_node_id: claim.resume_node_id.as_deref(),
     };
 
     let outcome = match claim.frozen_flow.as_ref() {
@@ -189,6 +194,7 @@ pub async fn execute_claim_processing(
             warning: res.warning,
             output_spec: res.output_spec,
             steps: res.steps,
+            relay: res.relay,
         })
         .map_err(|error| JobRunError {
             code: error.code,
@@ -224,6 +230,7 @@ mod tests {
             allow_private_integrations: None,
             media_root: None,
             local_source_root: None,
+            resume_node_id: None,
         }
     }
 

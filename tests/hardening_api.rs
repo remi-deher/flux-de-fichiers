@@ -429,6 +429,7 @@ async fn worker_version_remote_addr_and_telemetry_are_persisted() -> anyhow::Res
         ram_used_bytes: 4 * 1024 * 1024 * 1024,
         gpu_detected: true,
         gpu_devices: vec!["nvidia RTX 4060".into()],
+        capabilities: Default::default(),
         storage_total_bytes: 500 * 1024 * 1024 * 1024,
         storage_available_bytes: 300 * 1024 * 1024 * 1024,
     };
@@ -598,5 +599,182 @@ async fn system_settings_can_be_updated_and_smtp_password_stays_hidden() -> anyh
     )
     .await?;
     assert_eq!(st, StatusCode::BAD_REQUEST);
+    Ok(())
+}
+
+/// Enregistre un worker de test avec ses encodeurs matériels et renvoie son identifiant.
+async fn register_worker_with_encoders(
+    h: &Harness,
+    name: &str,
+    codecs: &[forgearr_shared::capabilities::VideoCodec],
+) -> anyhow::Result<Uuid> {
+    use forgearr_shared::capabilities::{EncodeAcceleration, HardwareEncoder};
+    let mut telemetry = TelemetrySnapshot {
+        timestamp: chrono::Utc::now(),
+        logical_cores: 4,
+        cpu_usage_percent: 1.0,
+        load_average: [0.0; 3],
+        ram_total_bytes: 1,
+        ram_available_bytes: 1,
+        ram_used_bytes: 0,
+        gpu_detected: false,
+        gpu_devices: Vec::new(),
+        capabilities: Default::default(),
+        storage_total_bytes: 1,
+        storage_available_bytes: 1,
+    };
+    telemetry.capabilities.hardware_encoders = codecs
+        .iter()
+        .map(|codec| HardwareEncoder {
+            codec: *codec,
+            acceleration: EncodeAcceleration::Nvenc,
+        })
+        .collect();
+    let (st, worker) = json_call(
+        &h.app,
+        "POST",
+        "/api/v1/workers",
+        Some(common::WORKER_KEY),
+        Some(serde_json::json!({"name": name, "version": "test", "telemetry": telemetry})),
+    )
+    .await?;
+    assert_eq!(st, StatusCode::OK);
+    Ok(Uuid::parse_str(worker["id"].as_str().unwrap_or_default())?)
+}
+
+async fn claim_for(h: &Harness, worker: Uuid) -> anyhow::Result<Option<Claim>> {
+    let (st, json) = json_call(
+        &h.app,
+        "POST",
+        "/api/v1/claims",
+        Some(common::WORKER_KEY),
+        Some(serde_json::json!({"worker_id": worker})),
+    )
+    .await?;
+    assert_eq!(st, StatusCode::OK);
+    Ok(serde_json::from_value(json)?)
+}
+
+fn capable_target(codec: &str) -> serde_json::Value {
+    serde_json::json!({"mode": "capable", "requirement": {"codec": codec}})
+}
+
+async fn relay_call(
+    h: &Harness,
+    claim: &Claim,
+    worker: Uuid,
+    target: serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    let (st, response) = json_call(
+        &h.app,
+        "POST",
+        &format!("/api/v1/jobs/{}/relay", claim.job_id),
+        Some(common::WORKER_KEY),
+        Some(serde_json::json!({
+            "worker_id": worker,
+            "lease_token": claim.lease_token,
+            "lease_epoch": claim.lease_epoch,
+            "request": {"target": target, "resumeNodeId": "outB"}
+        })),
+    )
+    .await?;
+    assert_eq!(st, StatusCode::OK);
+    Ok(response)
+}
+
+#[tokio::test]
+async fn a_capable_relay_is_offered_to_every_capable_worker() -> anyhow::Result<()> {
+    use forgearr_shared::capabilities::VideoCodec;
+    let h = harness().await?;
+    let origin = register_worker_with_encoders(&h, "sans-gpu", &[]).await?;
+    let first = register_worker_with_encoders(&h, "gpu-un", &[VideoCodec::Hevc]).await?;
+    let second = register_worker_with_encoders(&h, "gpu-deux", &[VideoCodec::Hevc]).await?;
+    let job = repository::insert_job(&h.pool, "film.mkv", None, &"aa".repeat(32), 512).await?;
+
+    let claim = claim_for(&h, origin)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("le worker d'origine doit obtenir la tâche"))?;
+    assert!(claim.resume_node_id.is_none());
+    let response = relay_call(&h, &claim, origin, capable_target("hevc")).await?;
+    assert_eq!(response["relayed"], true);
+    assert!(
+        response["target_worker_id"].is_null(),
+        "aucun worker n'est épinglé"
+    );
+
+    // En file, non ciblée : l'origine (incapable) ne la reprend pas, un worker capable oui.
+    let queued = repository::get_job(&h.pool, job.id).await?;
+    assert_eq!(queued.status, forgearr::domain::JobStatus::Queued);
+    assert_eq!(queued.target_worker_id, None);
+    assert_eq!(queued.attempts, 0, "la tentative du relais est rendue");
+    assert!(claim_for(&h, origin).await?.is_none());
+    let resumed = claim_for(&h, second)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("un worker capable doit obtenir la tâche"))?;
+    assert_eq!(resumed.job_id, job.id);
+    assert_eq!(resumed.resume_node_id.as_deref(), Some("outB"));
+    assert!(claim_for(&h, first).await?.is_none(), "déjà prise");
+
+    let (st, infos) = json_call(
+        &h.app,
+        "GET",
+        &format!("/api/v1/jobs/relays?ids={}", job.id),
+        Some(common::ADMIN_KEY),
+        None,
+    )
+    .await?;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(infos[0]["job_id"], job.id.to_string());
+    assert_eq!(infos[0]["from_worker_id"], origin.to_string());
+    assert_eq!(infos[0]["requirement"]["codec"], "hevc");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_precise_relay_waits_in_the_designated_worker_queue() -> anyhow::Result<()> {
+    let h = harness().await?;
+    let origin = register_worker_with_encoders(&h, "origine", &[]).await?;
+    let precise = register_worker_with_encoders(&h, "designe", &[]).await?;
+    let other = register_worker_with_encoders(&h, "autre", &[]).await?;
+    let job = repository::insert_job(&h.pool, "film.mkv", None, &"dd".repeat(32), 512).await?;
+    let claim = claim_for(&h, origin)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("tâche attendue"))?;
+    let response = relay_call(
+        &h,
+        &claim,
+        origin,
+        serde_json::json!({"mode": "worker", "worker_id": precise}),
+    )
+    .await?;
+    assert_eq!(response["target_worker_id"], precise.to_string());
+    assert_eq!(
+        repository::get_job(&h.pool, job.id).await?.target_worker_id,
+        Some(precise)
+    );
+    assert!(
+        claim_for(&h, other).await?.is_none(),
+        "file propre au worker désigné"
+    );
+    assert!(claim_for(&h, precise).await?.is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_relay_without_capable_worker_fails_the_job_visibly() -> anyhow::Result<()> {
+    let h = harness().await?;
+    let origin = register_worker_with_encoders(&h, "seul", &[]).await?;
+    let job = repository::insert_job(&h.pool, "film.mkv", None, &"bb".repeat(32), 512).await?;
+    let claim = claim_for(&h, origin)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("tâche attendue"))?;
+    let response = relay_call(&h, &claim, origin, capable_target("av1")).await?;
+    assert_eq!(response["relayed"], false);
+    let failed = repository::get_job(&h.pool, job.id).await?;
+    assert_eq!(failed.status, forgearr::domain::JobStatus::Failed);
+    assert_eq!(
+        failed.error_code,
+        Some(forgearr::domain::JobErrorCode::NoCapableWorker)
+    );
     Ok(())
 }

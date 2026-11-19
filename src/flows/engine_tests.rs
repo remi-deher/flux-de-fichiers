@@ -23,7 +23,7 @@ fn install_fake_tool(
     Ok(())
 }
 
-fn install_fake_probe(cache: &ToolCacheManager) -> std::io::Result<()> {
+pub(super) fn install_fake_probe(cache: &ToolCacheManager) -> std::io::Result<()> {
     install_fake_tool(
         cache,
         "mkvtoolnix",
@@ -33,7 +33,7 @@ fn install_fake_probe(cache: &ToolCacheManager) -> std::io::Result<()> {
     )
 }
 
-fn base_registry() -> OperationRegistry {
+pub(super) fn base_registry() -> OperationRegistry {
     let mut reg = OperationRegistry::new();
     for op in [
         json!({
@@ -185,7 +185,7 @@ fn base_registry() -> OperationRegistry {
     reg
 }
 
-fn flow_record(definition: serde_json::Value) -> FlowRecord {
+pub(super) fn flow_record(definition: serde_json::Value) -> FlowRecord {
     FlowRecord {
         id: "flow".into(),
         name: "test".into(),
@@ -201,7 +201,7 @@ fn flow_record(definition: serde_json::Value) -> FlowRecord {
 
 type ProgressLog = Arc<Mutex<Vec<(u32, String)>>>;
 
-fn recording_progress() -> (FlowProgressCallback, ProgressLog) {
+pub(super) fn recording_progress() -> (FlowProgressCallback, ProgressLog) {
     let log: ProgressLog = Arc::default();
     let sink = log.clone();
     let callback: FlowProgressCallback = Arc::new(move |percent, line| {
@@ -244,6 +244,8 @@ async fn remux_mp4_contract_runs_mp4box_and_reports_progress()
         media_root: None,
         logical_source_name: None,
         allow_private_integrations: None,
+        worker_capabilities: None,
+        resume_node_id: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -306,6 +308,8 @@ exit 2
         media_root: None,
         logical_source_name: None,
         allow_private_integrations: None,
+        worker_capabilities: None,
+        resume_node_id: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -394,6 +398,8 @@ exit 9
         media_root: None,
         logical_source_name: None,
         allow_private_integrations: None,
+        worker_capabilities: None,
+        resume_node_id: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -433,6 +439,8 @@ async fn mkvpropedit_skips_when_unchanged_and_fails_cleanly_on_error()
         media_root: None,
         logical_source_name: None,
         allow_private_integrations: None,
+        worker_capabilities: None,
+        resume_node_id: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, dir.path(), progress)
     .await
@@ -613,6 +621,8 @@ async fn local_script_executes_end_to_end_across_registry_routing_and_claim_payl
         media_root: None,
         logical_source_name: None,
         allow_private_integrations: None,
+        worker_capabilities: None,
+        resume_node_id: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -691,6 +701,8 @@ async fn local_script_stop_pipeline_halts_execution_before_output()
         media_root: None,
         logical_source_name: None,
         allow_private_integrations: None,
+        worker_capabilities: None,
+        resume_node_id: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -802,6 +814,8 @@ async fn unified_script_block_supports_inline_library_ref_and_strict_next_port()
         media_root: None,
         logical_source_name: None,
         allow_private_integrations: None,
+        worker_capabilities: None,
+        resume_node_id: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -926,6 +940,8 @@ async fn non_media_input_is_accepted_then_the_extracted_file_is_probed()
                 media_root: None,
                 logical_source_name: None,
                 allow_private_integrations: None,
+                worker_capabilities: None,
+                resume_node_id: None,
             }
             .execute_flow(Uuid::new_v4(), flow, source, work, progress)
             .await
@@ -983,6 +999,8 @@ async fn arr_notification_is_deferred_until_publication() -> anyhow::Result<()> 
         media_root: None,
         logical_source_name: Some("series/episode.mkv"),
         allow_private_integrations: Some(false),
+        worker_capabilities: None,
+        resume_node_id: None,
     };
     let outcome = engine
         .execute_flow(

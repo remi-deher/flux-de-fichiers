@@ -329,6 +329,64 @@ pub async fn failure(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+pub struct RelayInfoQuery {
+    ids: String,
+}
+
+/// Marques « relayée » des tâches listées, pour l'interface (200 identifiants au plus).
+pub async fn relay_infos(
+    State(s): State<AppState>,
+    Query(query): Query<RelayInfoQuery>,
+    _auth: ViewJobsAuth,
+) -> AppResult<Json<Vec<forgearr_shared::relay::JobRelayInfo>>> {
+    let ids = query
+        .ids
+        .split(',')
+        .take(200)
+        .map(|id| id.parse::<Uuid>().map_err(|_| AppError::Invalid))
+        .collect::<AppResult<Vec<_>>>()?;
+    Ok(Json(repository::list_relays(&s.pool, &ids).await?))
+}
+
+/// Relaie la tâche d'un worker vers la file d'un autre worker (ADR 0018).
+pub async fn relay(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(report): Json<forgearr_shared::relay::RelayReport>,
+) -> AppResult<Json<forgearr_shared::relay::RelayResponse>> {
+    crate::auth::authorize_worker(&s.pool, &h).await?;
+    let lease = LeaseRequest {
+        worker_id: report.worker_id,
+        lease_token: report.lease_token,
+        lease_epoch: report.lease_epoch,
+        telemetry: None,
+    };
+    let response = match repository::relay_job(&s.pool, id, &lease, &report.request).await? {
+        repository::RelayOutcome::Relayed { target_worker_id } => {
+            s.notify_job_event(JobEventType::JobRelayed, id, JobStatus::Queued, None);
+            forgearr_shared::relay::RelayResponse {
+                relayed: true,
+                target_worker_id,
+            }
+        }
+        repository::RelayOutcome::Failed => {
+            s.notify_job_event(
+                JobEventType::JobFailed,
+                id,
+                JobStatus::Failed,
+                Some(JobErrorCode::NoCapableWorker),
+            );
+            forgearr_shared::relay::RelayResponse {
+                relayed: false,
+                target_worker_id: None,
+            }
+        }
+    };
+    Ok(Json(response))
+}
+
 pub async fn system_config(
     State(s): State<AppState>,
     _auth: ViewOverviewAuth,

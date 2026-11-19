@@ -241,15 +241,31 @@ fn WorkerTelemetrySection(telemetry: forgearr_shared::workers::WorkerTelemetry) 
                     <crate::ui::ProgressBar percent=disk_pct.round() as u32 tone=disk_tone />
                 </div>
             </div>
-            {(!gpus.is_empty()).then(|| view! {
-                <div class="cluster cluster-wrap">
-                    {gpus.into_iter().map(|gpu| view! {
-                        <Tag label=gpu tone=TagTone::Mono />
-                    }).collect_view()}
-                </div>
-            })}
+            <TagRow labels=gpus tone=TagTone::Mono />
+            <TagRow labels=encoder_labels(&telemetry.capabilities) tone=TagTone::Success />
         </div>
     }
+}
+
+/// Libellés des encodeurs matériels déclarés par un worker (ex. « H.265 · NVENC »).
+fn encoder_labels(capabilities: &forgearr_shared::capabilities::WorkerCapabilities) -> Vec<String> {
+    capabilities
+        .hardware_encoders
+        .iter()
+        .map(|encoder| encoder.label())
+        .collect()
+}
+
+/// Rangée d'étiquettes ; rien n'est affiché quand la liste est vide.
+#[component]
+fn TagRow(labels: Vec<String>, tone: TagTone) -> impl IntoView {
+    (!labels.is_empty()).then(|| {
+        view! {
+            <div class="cluster cluster-wrap">
+                {labels.into_iter().map(|label| view! { <Tag label tone /> }).collect_view()}
+            </div>
+        }
+    })
 }
 
 #[component]
@@ -1079,6 +1095,7 @@ mod tests {
             storage_total_bytes: 1_000_000_000,
             storage_available_bytes: 250_000_000,
             gpu_devices: vec!["Intel QuickSync".into()],
+            capabilities: Default::default(),
         };
         assert_eq!(storage_used_bytes(&telemetry), 750_000_000);
         let summary = telemetry_summary(&telemetry);
@@ -1086,5 +1103,21 @@ mod tests {
         assert!(summary.contains("CPU 42 %"));
         assert!(summary.contains("RAM 25 %"));
         assert!(summary.contains("1 GPU"));
+    }
+
+    #[test]
+    fn encoder_labels_lists_hardware_encoders() {
+        use forgearr_shared::capabilities::{
+            EncodeAcceleration, HardwareEncoder, VideoCodec, WorkerCapabilities,
+        };
+        let capabilities = WorkerCapabilities {
+            gpu_models: Vec::new(),
+            hardware_encoders: vec![HardwareEncoder {
+                codec: VideoCodec::Hevc,
+                acceleration: EncodeAcceleration::Nvenc,
+            }],
+        };
+        assert_eq!(encoder_labels(&capabilities), ["H.265 · NVENC"]);
+        assert!(encoder_labels(&WorkerCapabilities::default()).is_empty());
     }
 }

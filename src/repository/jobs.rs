@@ -625,6 +625,12 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
     let next_id: Option<Uuid> = sqlx::query_scalar(
         "SELECT id FROM jobs WHERE status=?1 AND attempts < ?2
          AND (target_worker_id IS NULL OR target_worker_id=?3)
+         AND (NOT EXISTS (SELECT 1 FROM job_relays r WHERE r.job_id=jobs.id AND r.requirement_json IS NOT NULL)
+              OR EXISTS (SELECT 1 FROM job_relays r, workers w, json_each(w.telemetry_json, '$.capabilities.hardwareEncoders') e
+                         WHERE r.job_id=jobs.id AND w.id=?3 AND r.requirement_json IS NOT NULL
+                           AND json_extract(e.value, '$.codec')=json_extract(r.requirement_json, '$.codec')
+                           AND (json_extract(r.requirement_json, '$.acceleration') IS NULL
+                                OR json_extract(e.value, '$.acceleration')=json_extract(r.requirement_json, '$.acceleration'))))
          AND ((source_key IS NULL AND (source_worker_id IS NULL OR source_worker_id=?3)) OR EXISTS (
              SELECT 1 FROM verified_job_source_mounts m WHERE m.job_id=jobs.id
                  AND (m.worker_id=?3 OR m.worker_id=zeroblob(16))
@@ -680,6 +686,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
             let local_source_root = job_source(pool, j.id).await?.and_then(|source| {
                 (source.source_worker_id == Some(worker)).then_some(source.source_root)
             });
+            let resume_node_id = super::relays::resume_node(pool, j.id).await?;
             Ok(Some(Claim {
                 job_id: j.id,
                 lease_token: j.lease_token.ok_or(AppError::Internal)?,
@@ -699,6 +706,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                 allow_private_integrations: None,
                 media_root: None,
                 local_source_root,
+                resume_node_id,
             }))
         }
     }

@@ -51,7 +51,7 @@ FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d
 ARG APP_VERSION=0.1.0
 ARG VCS_REF=local
 LABEL org.opencontainers.image.title="Forgearr" org.opencontainers.image.version=$APP_VERSION org.opencontainers.image.revision=$VCS_REF
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl pciutils vainfo intel-media-va-driver i965-va-driver && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 app \
     && mkdir -p /config /data/input /data/output /data/staging /work /logs /usr/share/forgearr/frontend \
     && chown -R app:app /config /data /work /logs /usr/share/forgearr/frontend

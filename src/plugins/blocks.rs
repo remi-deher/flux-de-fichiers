@@ -191,6 +191,7 @@ fn parse_ui_field(raw: &Value) -> Option<OwnedFieldSpec> {
     let kind = match field_type {
         "boolean" => OwnedFieldKind::Bool,
         "headers" => OwnedFieldKind::Headers,
+        "worker" => OwnedFieldKind::Worker,
         "select" => {
             let options = raw
                 .get("options")
@@ -400,5 +401,10 @@ mod tests {
             panic!("un champ headers doit être lu");
         };
         assert_eq!(field.kind, OwnedFieldKind::Headers);
+        let worker = serde_json::json!({"name": "workerId", "label": "Worker", "type": "worker"});
+        let Some(field) = parse_ui_field(&worker) else {
+            panic!("un champ worker doit être lu");
+        };
+        assert_eq!(field.kind, OwnedFieldKind::Worker);
     }
 }

@@ -237,6 +237,7 @@ mod tests {
             allow_private_integrations: None,
             media_root: None,
             local_source_root: None,
+            resume_node_id: None,
         };
 
         let worker_key = "fdf_01020304_0123456789abcdef0123456789abcdef0123456789abcdef";

@@ -8,14 +8,18 @@ mod custom_args;
 pub mod header_secrets;
 pub mod http_runner;
 pub mod lease_secrets;
+pub mod placement;
 pub(crate) mod publication;
 pub mod script_runner;
 
 #[cfg(test)]
 mod engine_tests;
+#[cfg(test)]
+mod placement_flow_tests;
 
 use crate::{media::OutputSpec, tools_cache::ToolCacheManager};
 use chrono::Utc;
+use forgearr_shared::{capabilities::WorkerCapabilities, relay::RelayRequest};
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -87,6 +91,8 @@ pub struct FlowExecutionOutcome {
     pub warning: bool,
     pub output_spec: OutputSpec,
     pub steps: Vec<crate::domain::JobStepEntry>,
+    /// Présent quand le bloc « Relayer la tâche » a arrêté l'exécution locale (ADR 0018).
+    pub relay: Option<RelayRequest>,
 }
 
 /// Échec complet d'exécution avec le journal exact des étapes exécutées.
@@ -108,6 +114,10 @@ pub struct FlowEngine<'a> {
     pub media_root: Option<&'a Path>,
     pub logical_source_name: Option<&'a str>,
     pub allow_private_integrations: Option<bool>,
+    /// Capacités matérielles du worker qui exécute (bloc « Capacité du worker »).
+    pub worker_capabilities: Option<&'a WorkerCapabilities>,
+    /// Nœud où reprendre un flux relayé, au lieu du bloc d'entrée.
+    pub resume_node_id: Option<&'a str>,
 }
 
 impl<'a> FlowEngine<'a> {
@@ -186,6 +196,7 @@ impl<'a> FlowEngine<'a> {
                 message: outcome.message,
                 output_excerpt: outcome.excerpt,
             }],
+            relay: None,
         })
     }
 
@@ -265,7 +276,18 @@ impl<'a> FlowEngine<'a> {
             });
         };
 
-        let mut current_node_id = input_node.id;
+        let mut current_node_id = match self.resume_node_id {
+            Some(resume) if graph.nodes.iter().any(|node| node.id == resume) => resume.to_owned(),
+            Some(resume) => {
+                return Err(FlowExecutionError {
+                    code: forgearr_shared::jobs::JobErrorCode::OperationFailed,
+                    message: format!("nœud de reprise introuvable dans le flux : {resume}"),
+                    steps,
+                });
+            }
+            None => input_node.id,
+        };
+        let mut relay: Option<RelayRequest> = None;
         let mut remaining_steps = MAX_FLOW_STEPS;
         let mut step_index: i32 = 0;
 
@@ -310,6 +332,65 @@ impl<'a> FlowEngine<'a> {
                             serde_json::from_value(node.config.clone()).unwrap_or_default();
                         let matched = evaluate_condition(&cond_cfg, &ctx.media_info);
                         next_port = Some(if matched { "true" } else { "false" }.to_owned());
+                    }
+                    PrimitiveKind::Capability => {
+                        match placement::evaluate_capability(&node.config, self.worker_capabilities)
+                        {
+                            Ok(port) => next_port = Some(port.to_owned()),
+                            Err(message) => {
+                                steps.push(failed_step(
+                                    step_index,
+                                    &node,
+                                    Some(op.id.clone()),
+                                    message.clone(),
+                                    None,
+                                ));
+                                return Err(FlowExecutionError {
+                                    code: forgearr_shared::jobs::JobErrorCode::OperationFailed,
+                                    message,
+                                    steps,
+                                });
+                            }
+                        }
+                    }
+                    PrimitiveKind::Relay => {
+                        let decided = if current_working_file != source_file || !is_in_place {
+                            Err(
+                                "le relais n'est possible qu'avant tout traitement du fichier"
+                                    .to_owned(),
+                            )
+                        } else {
+                            next_connection(&graph.connections, &node.id, None)
+                                .ok_or_else(|| {
+                                    "le bloc « Relayer la tâche » n'a aucune sortie « Reprise »"
+                                        .to_owned()
+                                })
+                                .and_then(|resume| {
+                                    placement::build_relay_request(&node.config, &resume.to)
+                                })
+                        };
+                        match decided {
+                            Ok(request) => {
+                                relay = Some(request);
+                                stop_pipeline = true;
+                                step_message =
+                                    Some("tâche relayée vers un autre worker".to_owned());
+                            }
+                            Err(message) => {
+                                steps.push(failed_step(
+                                    step_index,
+                                    &node,
+                                    Some(op.id.clone()),
+                                    message.clone(),
+                                    None,
+                                ));
+                                return Err(FlowExecutionError {
+                                    code: forgearr_shared::jobs::JobErrorCode::OperationFailed,
+                                    message,
+                                    steps,
+                                });
+                            }
+                        }
                     }
                 },
                 OperationRuntime::Binary(bin_rt) => {
@@ -566,6 +647,7 @@ impl<'a> FlowEngine<'a> {
             warning: final_warning,
             output_spec: resolved_spec,
             steps,
+            relay,
         })
     }
 }

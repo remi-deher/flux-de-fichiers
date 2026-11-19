@@ -53,7 +53,7 @@ pub enum ContractError {
     InvalidContract(String),
 }
 
-/// Référence déclarative vers un outil externe (`app.*`) requis par une opération binaire.
+/// Référence déclarative vers un outil du catalogue requis par une opération.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolRef {
@@ -100,6 +100,9 @@ pub use flux_shared::local::ScriptInterpreter;
 pub struct ScriptRuntime {
     #[serde(default)]
     pub tool: Option<ToolRef>,
+    /// Outils du cache placés en tête du `PATH` de la commande (ex. `ffmpeg` appelé par l'outil).
+    #[serde(default)]
+    pub path_tools: Vec<ToolRef>,
     #[serde(default)]
     pub executable: Option<String>,
     #[serde(default)]
@@ -116,6 +119,10 @@ pub struct ScriptRuntime {
     pub timeout_seconds: u64,
     #[serde(default)]
     pub defaults: Map<String, Value>,
+    /// Le script accepte une entrée non média (ex. archive à extraire) : un flux qui le contient
+    /// tolère l'échec de la sonde initiale.
+    #[serde(default)]
+    pub accepts_non_media: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -284,6 +291,9 @@ pub struct BinaryRuntime {
     pub default_fallback: bool,
     #[serde(default)]
     pub tool: Option<ToolRef>,
+    /// Outils du cache placés en tête du `PATH` de la commande (ex. `ffmpeg` appelé par l'outil).
+    #[serde(default)]
+    pub path_tools: Vec<ToolRef>,
     pub executable: String,
     #[serde(default)]
     pub env_override: Option<String>,
@@ -712,15 +722,17 @@ impl OperationRegistry {
         let mut seen = HashSet::new();
         let mut tools = Vec::new();
         let mut push_op_tool = |op: &OperationContract| {
-            let tool = match &op.runtime {
-                OperationRuntime::Binary(bin) => bin.tool.as_ref(),
-                OperationRuntime::Script(script) => script.tool.as_ref(),
-                OperationRuntime::Primitive(_) | OperationRuntime::Http(_) => None,
+            let (tool, path_tools) = match &op.runtime {
+                OperationRuntime::Binary(bin) => (bin.tool.as_ref(), bin.path_tools.as_slice()),
+                OperationRuntime::Script(script) => {
+                    (script.tool.as_ref(), script.path_tools.as_slice())
+                }
+                OperationRuntime::Primitive(_) | OperationRuntime::Http(_) => (None, &[][..]),
             };
-            if let Some(tool) = tool
-                && seen.insert(tool.id.clone())
-            {
-                tools.push(tool.clone());
+            for tool in tool.into_iter().chain(path_tools) {
+                if seen.insert(tool.id.clone()) {
+                    tools.push(tool.clone());
+                }
             }
         };
 
@@ -742,6 +754,15 @@ impl OperationRegistry {
             }
         }
         tools
+    }
+
+    /// Le graphe contient-il une opération qui accepte une entrée non média ?
+    pub fn graph_accepts_non_media(&self, graph: &FlowGraph) -> bool {
+        graph.nodes.iter().any(|node| {
+            self.resolve_node_operation(node).is_some_and(|op| {
+                matches!(&op.runtime, OperationRuntime::Script(script) if script.accepts_non_media)
+            })
+        })
     }
 
     pub fn required_settings_plugins_for_flow(&self, flow: Option<&FlowRecord>) -> Vec<String> {

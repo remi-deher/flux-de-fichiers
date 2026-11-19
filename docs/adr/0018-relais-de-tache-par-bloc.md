@@ -45,24 +45,36 @@ requiert pas.
    Réserve : `nvidia-smi` est généralement injecté par l'hôte (NVIDIA Container Toolkit) et non
    installé dans l'image ; son absence signifie « pas de GPU NVIDIA exposé », pas une erreur.
    Une sonde qui échoue ou est absente ne fait déclarer aucune capacité correspondante.
-3. **Bloc natif « Relayer la tâche »** (runtime `primitive`, car il agit sur le bail et la file,
-   ce qu'un plugin ne peut pas faire). Paramètres : cible = worker précis, étiquette ou capacité
-   requise ; mode strict optionnel.
-4. **Effet du relais :**
-   - le worker enregistre le point de reprise : nœud suivant, fichier de travail courant,
-     métadonnées du média, flux figé (`flow_id`, `flow_version`) ;
-   - il libère volontairement son bail (époque incrémentée) ; le job repasse `queued` avec une
-     contrainte de cible ;
-   - `claim` n'attribue le job qu'à un worker qui satisfait la cible ;
-   - le repreneur reprend au nœud suivant, avec la version figée du flux.
+3. **Deux blocs natifs** (runtime `primitive`, car ils agissent sur le worker courant, le bail et
+   la file, ce qu'un plugin ne peut pas faire), déclarés dans le plugin `essentiel` :
+   - **« Capacité du worker »** : compare les capacités du worker qui exécute à un codec (et un
+     accélérateur facultatif) ; sorties `capable` et `incapable`. Aiguillage pur, qui permet aussi
+     une bascule vers l'encodage CPU sans relais.
+   - **« Relayer la tâche »** : une seule sortie, « Reprise », branchée sur le nœud qui continue
+     le flux. Cible = **worker capable** (codec et accélérateur requis) ou **worker précis**.
+     Le worker courant est toujours exclu.
+4. **Effet du relais (file propre du worker cible) :**
+   - le bloc arrête l'exécution locale et le worker appelle `POST /api/v1/jobs/{id}/relay`
+     (bail requis) ; il n'enregistre aucun fichier de travail (voir cadrage) ;
+   - le central choisit **immédiatement** le worker cible : le worker précis demandé, ou, parmi les
+     workers enrôlés qui satisfont l'exigence et accèdent à la source, le moins chargé (de
+     préférence en ligne) ;
+   - le job repasse `queued` avec `target_worker_id` = cible : il attend dans **la file de ce
+     worker**, que `claim` filtre déjà, sans toucher aux autres. Il est marqué **« relayé »**
+     (worker d'origine, nombre de relais, nœud de reprise), sans nouveau statut de job ;
+   - le bail du worker d'origine est libéré (époque incrémentée) : ce worker n'est pas bloqué et
+     prend la tâche suivante ; la tentative en cours est rendue (`attempts` non consommé) ;
+   - le repreneur reprend au nœud de la sortie « Reprise », avec la version figée du flux.
 5. **Exception encadrée à l'ADR 0012.** La règle « pas de remise en file » vise la **perte
    involontaire** du bail ; elle reste inchangée. Le relais est **volontaire, journalisé
    (événement dédié), émis par un bloc explicite, avant tout effet non rejouable** et borné par un
    nombre maximal de relais par tâche (constante nommée). Un bail expiré après un relais reste un
    échec `lease_expired`.
-6. **Pas de cible compatible = échec visible.** Si aucun worker enrôlé ne satisfait la cible, la
-   tâche échoue avec un code dédié (`no_capable_worker`) ; en mode non strict, elle peut attendre
-   un délai borné avant d'échouer. Jamais d'attente infinie silencieuse.
+6. **Pas de cible éligible = échec visible.** Si aucun worker enrôlé ne satisfait la cible, la
+   tâche échoue avec un code dédié (`no_capable_worker`). Si la cible est éligible mais hors ligne,
+   la tâche l'attend dans sa file, visiblement marquée « relayée vers X, en attente » ; elle n'est
+   pas réattribuée automatiquement (un administrateur peut la recibler). Aucune attente infinie
+   silencieuse : l'état est affiché.
 7. **Accès au fichier par le repreneur** (avant tout traitement : seule la source est concernée) :
    - montage partagé commun : `verified_job_source_mounts`, sans transfert ;
    - sinon : le repreneur récupère la source et le fichier de travail via le central
@@ -85,8 +97,8 @@ requiert pas.
 
 - Étape 1 (capacités) : aucune migration. Les capacités voyagent dans la télémétrie déjà persistée
   (`workers.telemetry_json`, champ `capabilities`), relevées une fois par `hardware_probe`.
-- Migration à venir (`0031_*`, étapes suivantes) : contrainte de cible et compteur de relais du
-  job, trace du point de reprise. Les migrations existantes ne changent pas.
+- Migration à venir (`0031_*`) : sur `jobs`, worker d'origine du relais, nombre de relais et nœud
+  de reprise. La cible réutilise `target_worker_id` : `claim` ne change pas de filtre. Les migrations existantes ne changent pas.
 - Les capacités décrivent le matériel seulement : l'encodage logiciel (x265, SVT-AV1) dépend de
   l'outil FFmpeg des plugins et sera traité avec le bloc de relais.
 - `Dockerfile` : ajout des sondes légères (construction des images sur GitHub CI uniquement).

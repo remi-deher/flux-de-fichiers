@@ -9,6 +9,7 @@ use forgearr_shared::system::{KeySource, SystemStatus, UpdateCheckStatus, Volume
 use leptos::prelude::*;
 
 const SYSTEM_UPDATES_PATH: &str = "/api/v1/system/updates";
+const SYSTEM_UPDATES_FORCE_PATH: &str = "/api/v1/system/updates?force=true";
 
 /// Version compilée dans l'interface WASM chargée dans le navigateur (témoin de cohérence : la
 /// version de la release affichée vient du serveur, voir `forgearr::version`).
@@ -210,13 +211,29 @@ pub fn SystemSection(
     on_changed: Callback<()>,
 ) -> impl IntoView {
     let check_updates = Action::new_local(move |()| async move {
-        api::get::<UpdateCheckStatus>(SYSTEM_UPDATES_PATH).await
+        api::get::<UpdateCheckStatus>(SYSTEM_UPDATES_FORCE_PATH).await
     });
     let updates_enabled = Signal::derive(move || {
         status
             .get()
             .and_then(Result::ok)
             .is_some_and(|s| s.check_updates_enabled)
+    });
+    let initial_updates = LocalResource::new(move || {
+        let enabled = updates_enabled.get();
+        async move {
+            if enabled {
+                Some(api::get::<UpdateCheckStatus>(SYSTEM_UPDATES_PATH).await)
+            } else {
+                None
+            }
+        }
+    });
+    let latest_check = Signal::derive(move || {
+        check_updates
+            .value()
+            .get()
+            .or_else(|| initial_updates.get().flatten())
     });
     let footer = view! {
         <div class="stack">
@@ -229,15 +246,26 @@ pub fn SystemSection(
                         on:click=move |_| { check_updates.dispatch(()); }>
                         {move || if check_updates.pending().get() { "Vérification…" } else { "Vérifier les mises à jour" }}
                     </button>
-                    {move || match check_updates.value().get() {
+                    {move || match latest_check.get() {
                         Some(Ok(res)) if res.error.is_some() => view! {
                             <span class="form-help">{res.error.unwrap_or_default()}</span>
                         }.into_any(),
-                        Some(Ok(res)) if res.update_available => view! {
-                            <span class="text-strong">
-                                {format!("Nouvelle version disponible : v{}", res.latest_version.unwrap_or_default())}
-                            </span>
-                        }.into_any(),
+                        Some(Ok(res)) if res.update_available => {
+                            let version = res.latest_version.unwrap_or_default();
+                            let release_url = res.release_url;
+                            view! {
+                                <span class="cluster cluster-xs">
+                                    <span class="status-pill warning">
+                                        {format!("Nouvelle version disponible : v{version}")}
+                                    </span>
+                                    {release_url.map(|url| view! {
+                                        <a href=url target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm">
+                                            "Voir la release"
+                                        </a>
+                                    })}
+                                </span>
+                            }.into_any()
+                        }
                         Some(Ok(res)) => view! {
                             <span class="form-help">
                                 {format!("À jour (v{}).", res.latest_version.unwrap_or(res.current_version))}

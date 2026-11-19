@@ -9,7 +9,10 @@ use crate::{
     secrets::{self, SecretBox},
     telemetry::{TelemetryProbe, TelemetrySnapshot},
 };
-use axum::{Json, extract::State};
+use axum::{
+    Json,
+    extract::{Query, State},
+};
 pub use forgearr_shared::system::{
     HardwareStatus, KeySource, NetworkStatus, StorageStatus, SystemStatus, UpdateCheckStatus,
     UpdateSystemSettingsRequest, VolumeSpace,
@@ -23,8 +26,9 @@ use std::{
 
 const GITHUB_RELEASES_API: &str =
     "https://api.github.com/repos/remi-deher/flux-de-fichiers/releases/latest";
-const UPDATE_CHECK_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
+const UPDATE_CHECK_CACHE_TTL: Duration = Duration::from_secs(15 * 60);
 const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
+const UPDATE_CHECK_MAX_REDIRECTS: usize = 3;
 
 struct CachedUpdateCheck {
     fetched_at: Instant,
@@ -213,8 +217,18 @@ struct GithubLatestRelease {
     html_url: Option<String>,
 }
 
+#[derive(Default, serde::Deserialize)]
+pub struct UpdatesQuery {
+    #[serde(default)]
+    pub force: bool,
+}
+
 /// Vérifie la dernière version publiée sur GitHub si l'administrateur a activé l'option.
-pub async fn updates(State(state): State<AppState>, _auth: AdminAuth) -> Json<UpdateCheckStatus> {
+pub async fn updates(
+    State(state): State<AppState>,
+    Query(query): Query<UpdatesQuery>,
+    _auth: AdminAuth,
+) -> Json<UpdateCheckStatus> {
     let current = crate::version::app_version().to_owned();
     let effective = runtime_settings::load_effective(&state.pool, &state.config).await;
     if !effective.check_updates_enabled {
@@ -228,9 +242,10 @@ pub async fn updates(State(state): State<AppState>, _auth: AdminAuth) -> Json<Up
             error: None,
         });
     }
-    {
+    if !query.force {
         let cache = UPDATE_CACHE.lock().await;
         if let Some(cached) = cache.as_ref()
+            && cached.status.current_version == current
             && cached.fetched_at.elapsed() < UPDATE_CHECK_CACHE_TTL
         {
             return Json(cached.status.clone());
@@ -238,7 +253,9 @@ pub async fn updates(State(state): State<AppState>, _auth: AdminAuth) -> Json<Up
     }
     let client = reqwest::Client::builder()
         .timeout(UPDATE_CHECK_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none())
+        .redirect(reqwest::redirect::Policy::limited(
+            UPDATE_CHECK_MAX_REDIRECTS,
+        ))
         .build();
     let result = match client {
         Ok(client) => {

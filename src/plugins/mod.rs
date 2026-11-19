@@ -12,6 +12,7 @@ mod blocks;
 mod cache;
 mod dependencies;
 mod install;
+mod legacy_ids;
 mod local;
 mod packs;
 mod probe;
@@ -30,6 +31,7 @@ pub use install::{
     ensure_tool_installed, ensure_tool_installed_verified, ensure_tools_for_requirements,
     install_from_distribution, is_installing, parse_distribution, read_distribution,
 };
+pub use legacy_ids::{legacy_plugin_id, migrate_legacy_plugin_secrets};
 pub use local::{
     build_local_snapshot, delete_local_item, local_resource_file, save_local_block_template,
     save_local_flow_template, save_local_pack, save_local_script, upload_local_resource,
@@ -56,7 +58,8 @@ pub use flux_shared::plugins::{
     ToolStatusSummary,
 };
 pub use secret_settings::{
-    decrypt_all, mask, migrate_plaintext, plugin_secret_aad, rotate_settings, seal, secret_names,
+    decrypt_all, mask, migrate_plaintext, plugin_secret_aad, reseal_legacy_settings,
+    rotate_settings, seal, secret_names,
 };
 pub use settings::{
     ResolvedSettingsField, SettingsField, SettingsFieldType, SettingsSchema, resolve_setting_value,

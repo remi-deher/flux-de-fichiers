@@ -399,6 +399,7 @@ async fn jobs_freeze_library_flow_record_steps_and_clear_output_explicitly() -> 
             name: "Séries".into(),
             flow_id: Some("flow.lib".into()),
             workers: vec![forgearr::domain::LibraryWorkerPath {
+                source_key: None,
                 worker_id: worker.id,
                 local_path: "/srv/series".into(),
                 access: forgearr::domain::LibraryAccess::ReadWrite,
@@ -638,5 +639,93 @@ async fn priority_cancellation_batch_concurrency_schedule_and_stats() -> anyhow:
     .await?;
     assert_eq!(batch_del.updated, 2);
     assert_eq!(batch_del.skipped, 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn verified_mount_aliases_share_a_task_and_keep_independent_volumes_distinct()
+-> anyhow::Result<()> {
+    use forgearr::domain::{LibraryAccess, LibraryWorkerPath, LibraryWrite};
+    let pool = pool().await?;
+    let first = repository::register(&pool, "first-mount").await?;
+    let second = repository::register(&pool, "second-mount").await?;
+    let library = repository::insert_library(
+        &pool,
+        LibraryWrite {
+            name: "Films".into(),
+            workers: [
+                (first.id, "/media/films", Some("nas-films")),
+                (second.id, "/usb/films", Some("nas-films")),
+                (second.id, "/usb/independent", None),
+            ]
+            .into_iter()
+            .map(|(worker_id, path, key)| LibraryWorkerPath {
+                worker_id,
+                local_path: path.into(),
+                source_key: key.map(str::to_owned),
+                access: LibraryAccess::Read,
+            })
+            .collect(),
+            ..Default::default()
+        },
+    )
+    .await?;
+    let enqueue = |worker, path: &str, key: Option<&str>| {
+        let source = repository::JobSource {
+            source_key: key.map(str::to_owned),
+            source_root: path.into(),
+            source_worker_id: Some(worker),
+            source_mtime_ns: None,
+            source_writable: false,
+        };
+        let pool = pool.clone();
+        async move {
+            repository::enqueue_library_source(
+                &pool,
+                library.id,
+                &source,
+                "same.mkv",
+                &"a".repeat(64),
+                10,
+                None,
+                None,
+                false,
+            )
+            .await
+        }
+    };
+    let original = enqueue(first.id, "/media/films", Some("nas-films"))
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("expected new task"))?;
+    assert!(repository::claim(&pool, second.id).await?.is_none());
+    assert!(
+        enqueue(second.id, "/usb/films", Some("nas-films"))
+            .await?
+            .is_none()
+    );
+    let claim = repository::claim(&pool, second.id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("expected alias claim"))?;
+    assert_eq!(claim.job_id, original.id);
+    assert_eq!(claim.local_source_root.as_deref(), Some("/usb/films"));
+    assert!(
+        enqueue(second.id, "/usb/independent", None)
+            .await?
+            .is_some()
+    );
+    sqlx::query("UPDATE jobs SET status='succeeded', output_bytes=13 WHERE id=?")
+        .bind(original.id)
+        .execute(&pool)
+        .await?;
+    let stats = repository::job_storage_stats(&pool).await?;
+    let volume = stats
+        .by_volume
+        .iter()
+        .find(|volume| volume.key == "source:nas-films")
+        .ok_or_else(|| anyhow::anyhow!("expected volume summary"))?;
+    assert_eq!(
+        (volume.saved_bytes, volume.grown_bytes, volume.grown_count),
+        (-3, 3, 1)
+    );
     Ok(())
 }

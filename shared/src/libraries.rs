@@ -1,4 +1,4 @@
-//! Contrat des bibliothèques : un nom, un flux, un chemin par worker (ADR 0014).
+//! Contrats des bibliothèques, dossiers par hôte, scans et historique.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 pub const LIBRARY_NAME_MAX: usize = 80;
 pub const LIBRARY_PATH_MAX: usize = 512;
+pub const LIBRARY_HISTORY_PAGE_SIZE: usize = 50;
 pub const MAX_SCAN_INTERVAL_MINUTES: i32 = 7 * 24 * 60;
 
 /// Stratégie de publication du fichier produit pour une bibliothèque.
@@ -60,7 +61,7 @@ pub struct LibraryAutomation {
     pub output_policy: LibraryOutputPolicy,
 }
 
-/// Accès d'un worker au dossier de la bibliothèque.
+/// Accès de l’hôte au dossier de la bibliothèque.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::Type), sqlx(rename_all = "snake_case"))]
 #[serde(rename_all = "snake_case")]
@@ -69,9 +70,11 @@ pub enum LibraryAccess {
     ReadWrite,
 }
 
-/// Chemin local d'une bibliothèque sur un worker.
+/// Dossier sur un hôte. Un UUID nul identifie la centrale.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LibraryWorkerPath {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_key: Option<String>,
     pub worker_id: Uuid,
     pub local_path: String,
     pub access: LibraryAccess,
@@ -170,6 +173,8 @@ pub struct WorkerBrowseTask {
     pub request_id: Uuid,
     pub worker_id: Uuid,
     pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan: Option<FolderScanOptions>,
 }
 
 /// Réponse d'exploration renvoyée au central par un worker distant.
@@ -179,6 +184,8 @@ pub struct WorkerBrowseReport {
     pub request_id: Uuid,
     pub worker_id: Uuid,
     pub listing: Option<DirectoryListing>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan: Option<FolderScanReport>,
     pub error: Option<String>,
 }
 
@@ -225,17 +232,33 @@ pub fn wildcard_matches_ci(pattern: &str, text: &str) -> bool {
 
 /// Vérifie si un fichier `(nom, taille)` satisfait les règles d'inclusion/exclusion d'une bibliothèque.
 pub fn library_accepts_file(library: &Library, file_name: &str, bytes: u64) -> bool {
-    if bytes < library.min_file_bytes {
+    matches_library_filters(
+        &library.include_extensions,
+        &library.exclude_patterns,
+        library.min_file_bytes,
+        file_name,
+        bytes,
+    )
+}
+
+pub fn matches_library_filters(
+    include_extensions: &[String],
+    exclude_patterns: &[String],
+    min_file_bytes: u64,
+    file_name: &str,
+    bytes: u64,
+) -> bool {
+    if bytes < min_file_bytes {
         return false;
     }
-    if !library.include_extensions.is_empty() {
+    if !include_extensions.is_empty() {
         let ext = file_name
             .rsplit('.')
             .next()
             .filter(|_| file_name.contains('.'))
             .map(|s| s.trim().trim_start_matches('.').to_ascii_lowercase())
             .unwrap_or_default();
-        let allowed = library.include_extensions.iter().any(|candidate| {
+        let allowed = include_extensions.iter().any(|candidate| {
             candidate
                 .trim()
                 .trim_start_matches('.')
@@ -245,8 +268,7 @@ pub fn library_accepts_file(library: &Library, file_name: &str, bytes: u64) -> b
             return false;
         }
     }
-    !library
-        .exclude_patterns
+    !exclude_patterns
         .iter()
         .any(|pat| wildcard_matches_ci(pat, file_name))
 }
@@ -332,4 +354,92 @@ mod tests {
         assert!(!library_accepts_file(&lib, "Movie-Trailer.mp4", 5_000));
         assert!(!library_accepts_file(&lib, "Tiny.mkv", 999));
     }
+}
+
+/// Options de scan relayées à l'hôte qui monte un dossier.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderScanOptions {
+    pub library: LibraryAutomation,
+    pub max_bytes: u64,
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub known_files: std::collections::HashMap<String, (u64, i64)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderScanFile {
+    pub name: String,
+    pub bytes: u64,
+    pub sha256: String,
+    #[serde(default)]
+    pub mtime_ns: Option<i64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanIgnoreReason {
+    FileSize,
+    LibraryFilter,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IgnoredScanFile {
+    pub path: String,
+    pub reason: ScanIgnoreReason,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderScanReport {
+    pub files: Vec<FolderScanFile>,
+    pub waiting_for_stability: usize,
+    #[serde(default)]
+    pub skipped_known: usize,
+    #[serde(default)]
+    pub pending_files: Vec<String>,
+    #[serde(default)]
+    pub ignored_files: Vec<IgnoredScanFile>,
+    pub scanned: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryFileHistory {
+    pub source_root: Option<String>,
+    pub source_worker_id: Option<Uuid>,
+    pub jobs: Vec<crate::jobs::Job>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReprocessLibraryFile {
+    pub flow_version: Option<i64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlacementStatus {
+    Ready,
+    Offline,
+    OutsideSchedule,
+    AtCapacity,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerPlacement {
+    pub worker_id: Uuid,
+    pub name: String,
+    pub status: PlacementStatus,
+    pub gpu_not_reported: bool,
+    #[serde(default)]
+    pub source_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobPlacement {
+    pub workers: Vec<WorkerPlacement>,
+    pub catalog_tools_unavailable: Vec<String>,
 }

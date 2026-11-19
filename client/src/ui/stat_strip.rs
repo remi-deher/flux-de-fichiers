@@ -12,6 +12,7 @@ pub struct StatItem {
     pub detail: Option<String>,
     pub active: bool,
     pub on_click: Option<Callback<()>>,
+    pub href: Option<String>,
 }
 
 impl StatItem {
@@ -23,11 +24,17 @@ impl StatItem {
             detail: None,
             active: false,
             on_click: None,
+            href: None,
         }
     }
 
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
+        self
+    }
+
+    pub fn with_link(mut self, href: impl Into<String>) -> Self {
+        self.href = Some(href.into());
         self
     }
 
@@ -65,7 +72,9 @@ pub fn StatStrip(
                     .map(|item| {
                         let tone = item.tone.as_attr();
                         let inner = stat_pill_inner(item.label, item.detail, item.value);
-                        if let Some(cb) = item.on_click {
+                        if let Some(href) = item.href {
+                            view! { <a href=href class="stat-pill is-interactive" data-tone=tone>{inner}</a> }.into_any()
+                        } else if let Some(cb) = item.on_click {
                             view! {
                                 <button
                                     type="button"

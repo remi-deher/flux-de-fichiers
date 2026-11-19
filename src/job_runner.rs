@@ -166,6 +166,7 @@ pub async fn execute_claim_processing(
         plugin_configs: &claim.plugin_configs,
         tool_versions: &tool_versions,
         media_root: claim.media_root.as_deref(),
+        logical_source_name: Some(&claim.source_name),
         allow_private_integrations: claim.allow_private_integrations,
     };
 
@@ -222,6 +223,7 @@ mod tests {
             sealed_secrets: None,
             allow_private_integrations: None,
             media_root: None,
+            local_source_root: None,
         }
     }
 

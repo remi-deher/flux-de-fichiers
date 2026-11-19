@@ -65,6 +65,28 @@ pour bâtir le lien. Sans eux, seule la ligne de commande `reset-password` reste
 Plugins : `PLUGINS_DIR` (dossier de catalogue local de développement, prioritaire) et
 `PLUGIN_ALLOW_PRIVATE_HOSTS=1` pour autoriser un dépôt sur un réseau privé.
 
+## Bibliothèques sur plusieurs hôtes
+
+Dans **Bibliothèques**, ajoutez un ou plusieurs dossiers à la même bibliothèque. Pour chaque dossier,
+sélectionnez **Centrale** ou le worker qui voit le montage, puis indiquez le chemin **dans son conteneur**.
+Une bibliothèque sans dossier déclaré continue de passer par l’entrée de la centrale. Les dossiers
+configurés sont scannés récursivement avec un délai de stabilité d’une minute et la limite `MAX_FILE_BYTES`.
+Un dossier indisponible est signalé dans le bilan du scan.
+
+Indiquez le même **identifiant de source partagée** pour les montages d’un même dossier sur des
+hôtes différents. Forgearr enregistre un seul traitement par source logique, chemin relatif et
+empreinte. Un autre worker ne peut prendre le bail que si son montage a déjà signalé cette empreinte.
+Laissez l’identifiant vide pour les volumes indépendants.
+
+Un worker lit les sources de ses propres montages et renvoie le résultat à la centrale.
+Le remplacement sur place s’applique aux dossiers de la centrale déclarés en écriture.
+L’onglet **Fichiers** de chaque bibliothèque regroupe les tâches par chemin source et donne accès à
+leurs journaux et au retraitement par version. La fiche d’une tâche en file explique son attribution.
+
+Les modèles **Radarr · Préparer les médias** et **Sonarr · Préparer les médias** du catalogue utilisent
+un traitement FFmpeg unique pour la vidéo, l’audio et les sous-titres. La notification d’intégration
+est exécutée après la publication du résultat lorsque la connexion correspondante est configurée.
+
 ## Plugins, outils et secrets
 
 Le catalogue ne vient que des dépôts de plugins (aucun catalogue embarqué). Le dépôt

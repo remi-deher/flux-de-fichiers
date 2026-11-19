@@ -12,6 +12,7 @@ pub mod filesystem_browser;
 pub mod flows;
 pub mod instance;
 pub mod job_runner;
+mod library_scan;
 pub mod local_worker;
 pub mod logs;
 pub mod mail;

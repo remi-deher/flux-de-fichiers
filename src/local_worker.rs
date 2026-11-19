@@ -141,14 +141,17 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
         tracing::warn!(job_id=%claim.job_id, error=%error, "local work directory creation failed");
         return;
     }
-    let source = match storage::input_path(&state.config.input_dir, &claim.source_name).await {
-        Ok(path) => path,
-        Err(_) => {
-            report_failure(state, claim.job_id, &lease, JobErrorCode::SourceIntegrity).await;
-            cleanup(&work_dir).await;
-            return;
-        }
-    };
+    let source =
+        match crate::library_scan::central_job_source(&state.pool, &state.config.input_dir, &job)
+            .await
+        {
+            Ok(Some(path)) => path,
+            _ => {
+                report_failure(state, claim.job_id, &lease, JobErrorCode::SourceIntegrity).await;
+                cleanup(&work_dir).await;
+                return;
+            }
+        };
     let source_snapshot = work_dir.join(forgearr_shared::jobs::source_working_filename(
         &claim.source_name,
     ));
@@ -199,7 +202,7 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
             claim.job_id,
             &lease,
             &job,
-            &source_snapshot,
+            Some(&source_snapshot),
             &execution.working_file,
             execution.warning,
             &execution.output_spec,
@@ -250,7 +253,7 @@ async fn heartbeat_loop(
     }
 }
 
-async fn copy_verified_source(
+pub(crate) async fn copy_verified_source(
     source: &std::path::Path,
     snapshot: &std::path::Path,
     max_bytes: u64,
@@ -263,7 +266,11 @@ async fn copy_verified_source(
         .create_new(true)
         .open(snapshot)
         .await?;
-    let copied = tokio::io::copy(&mut source_file.take(max_bytes + 1), &mut snapshot_file).await?;
+    let copied = tokio::io::copy(
+        &mut source_file.take(max_bytes.saturating_add(1)),
+        &mut snapshot_file,
+    )
+    .await?;
     anyhow::ensure!(copied <= max_bytes, "source_integrity");
     snapshot_file.flush().await?;
     snapshot_file.sync_all().await?;

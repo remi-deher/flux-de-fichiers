@@ -1,15 +1,12 @@
 //! Chiffres et alertes de la vue d'ensemble, calculés sans DOM.
 
 use chrono::{DateTime, Utc};
-use forgearr_shared::jobs::{Job, JobStatus};
+use forgearr_shared::jobs::Job;
 use forgearr_shared::libraries::Library;
 use forgearr_shared::workers::Worker;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Summary {
-    pub queued: usize,
-    pub running: usize,
-    pub failed: usize,
     pub retryable: usize,
     pub workers_online: usize,
     pub workers_total: usize,
@@ -24,11 +21,7 @@ impl Summary {
         libraries: &[Library],
         now: DateTime<Utc>,
     ) -> Self {
-        let count = |status| jobs.iter().filter(|job| job.status == status).count();
         Self {
-            queued: count(JobStatus::Queued),
-            running: count(JobStatus::Running),
-            failed: count(JobStatus::Failed),
             retryable: jobs.iter().filter(|job| job.is_retryable()).count(),
             workers_online: workers
                 .iter()

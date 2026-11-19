@@ -217,7 +217,7 @@ async fn libraries_round_trip_flow_and_worker_paths() -> anyhow::Result<()> {
         })),
     )
     .await?;
-    assert_eq!(twice.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(twice.status(), StatusCode::OK);
 
     save_flow(&app, "flow.other", "Autre flux").await?;
     let reattached = admin(
@@ -555,5 +555,140 @@ async fn library_automation_rules_filter_scan_and_persist() -> anyhow::Result<()
     // Une fois scannée, elle n'est plus immédiatement due.
     let due_after = forgearr::repository::due_scheduled_libraries(&pool).await?;
     assert!(due_after.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn scans_grouped_central_and_worker_folders_and_keeps_distinct_history() -> anyhow::Result<()>
+{
+    use serde_json::json;
+    use std::time::{Duration, SystemTime};
+    let app = test_app().await?;
+    let worker = register_worker(&app, "nas-montage").await?;
+    let central_a = tempfile::tempdir()?;
+    let central_b = tempfile::tempdir()?;
+    for (directory, content) in [(&central_a, b"one"), (&central_b, b"two")] {
+        let file = directory.path().join("episode.mkv");
+        std::fs::write(&file, content)?;
+        std::fs::File::open(&file)?.set_modified(SystemTime::now() - Duration::from_secs(120))?;
+    }
+    std::fs::write(central_a.path().join("incoming.mkv"), b"too recent")?;
+    save_flow(&app, "flow.history", "Traitement").await?;
+    let created = admin(
+        &app,
+        "POST",
+        "/api/v1/libraries",
+        Some(json!({
+            "name": "Archives",
+            "flow_id": "flow.history",
+            "workers": [
+                {"worker_id": uuid::Uuid::nil(), "local_path": central_a.path(), "access": "read"},
+                {"worker_id": uuid::Uuid::nil(), "local_path": central_b.path(), "access": "read"},
+                {"worker_id": worker, "local_path": "/worker/tv", "access": "read"}
+            ]
+        })),
+    )
+    .await?;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let library = json_of(created).await?;
+    let id = library["id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("library id"))?;
+    let scan_uri = format!("/api/v1/libraries/{id}/scan");
+    let answer_worker = async {
+        let key = "Bearer fdf_b0000001_fedcba9876543210fedcba9876543210fedcba9876543210";
+        let request = Request::builder()
+            .uri(format!(
+                "/api/v1/worker/filesystem/pending?worker_id={worker}&wait_ms=3000"
+            ))
+            .header("authorization", key)
+            .body(Body::empty())?;
+        let tasks = json_of(app.clone().oneshot(request).await?).await?;
+        let task = &tasks[0];
+        assert_eq!(task["path"], "/worker/tv");
+        assert!(task["scan"].is_object());
+        let request = Request::builder().method("POST").uri("/api/v1/worker/filesystem")
+            .header("authorization", key).header("content-type","application/json")
+            .body(Body::from(json!({
+                "requestId":task["requestId"], "workerId":worker,
+                "scan":{"files":[{"name":"saison/episode.mkv","bytes":3,"sha256":"a".repeat(64)}],
+                    "scanned":1,"waitingForStability":0}
+            }).to_string()))?;
+        assert_eq!(
+            app.clone().oneshot(request).await?.status(),
+            StatusCode::NO_CONTENT
+        );
+        Ok::<_, anyhow::Error>(())
+    };
+    let (scan, worker_report) = tokio::join!(admin(&app, "POST", &scan_uri, None), answer_worker);
+    worker_report?;
+    let scan = json_of(scan?).await?;
+    assert_eq!(scan["createdJobs"], 3);
+    assert_eq!(scan["waitingForStability"], 1);
+    assert!(
+        scan["pendingFiles"][0]
+            .as_str()
+            .is_some_and(|path| path.ends_with("/incoming.mkv"))
+    );
+    let other_worker = register_worker(&app, "nas-autre").await?;
+    let second_scan = json_of(
+        admin(
+            &app,
+            "POST",
+            &scan_uri,
+            Some(json!({
+                "dryRun": true, "targetWorkerId": other_worker
+            })),
+        )
+        .await?,
+    )
+    .await?;
+    assert_eq!(second_scan["createdJobs"], 0);
+    assert_eq!(second_scan["skippedExisting"], 2);
+
+    let history =
+        json_of(admin(&app, "GET", &format!("/api/v1/libraries/{id}/files"), None).await?).await?;
+    let files = history
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("file history"))?;
+    assert_eq!(files.len(), 3);
+    let remote = files
+        .iter()
+        .find(|file| file["sourceWorkerId"] == worker)
+        .ok_or_else(|| anyhow::anyhow!("worker file"))?;
+    assert_eq!(remote["jobs"][0]["target_worker_id"], worker);
+    let job = remote["jobs"][0]["id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("job id"))?;
+    let placement =
+        json_of(admin(&app, "GET", &format!("/api/v1/jobs/{job}/placement"), None).await?).await?;
+    assert_eq!(placement["workers"][0]["workerId"], worker);
+    assert_eq!(placement["workers"][0]["status"], "ready");
+    let filtered = admin(
+        &app,
+        "GET",
+        &format!("/api/v1/jobs?state=active&library={id}"),
+        None,
+    )
+    .await?;
+    assert_eq!(filtered.status(), StatusCode::OK);
+    assert_eq!(json_of(filtered).await?.as_array().map(Vec::len), Some(3));
+    let failures = admin(&app, "GET", "/api/v1/jobs?state=failed", None).await?;
+    assert_eq!(failures.status(), StatusCode::OK);
+    assert_eq!(json_of(failures).await?, serde_json::json!([]));
+    let canceled = admin(&app, "POST", &format!("/api/v1/jobs/{job}/cancel"), None).await?;
+    assert_eq!(canceled.status(), StatusCode::OK);
+    save_flow(&app, "flow.history", "Nouvelle version").await?;
+    let replay = admin(
+        &app,
+        "POST",
+        &format!("/api/v1/libraries/{id}/files/{job}/reprocess"),
+        Some(json!({"flowVersion":1})),
+    )
+    .await?;
+    assert_eq!(replay.status(), StatusCode::CREATED);
+    let replay = json_of(replay).await?;
+    assert_eq!(replay["flow_version"], 1);
+    assert_eq!(replay["target_worker_id"], worker);
     Ok(())
 }

@@ -2,10 +2,12 @@
 //! dans un tiroir, relance manuelle (ADR 0012, 0014).
 
 mod detail;
+pub(crate) use detail::JobDetail;
 mod diagnosis;
 mod live;
 mod logs;
 pub mod model;
+mod query;
 pub mod table;
 
 pub use live::LiveJobs;
@@ -15,7 +17,6 @@ use crate::ui::filters::{Filters, JobStateFilter, job_state, period};
 use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, MetricTone, StatItem, StatStrip, Toasts};
 use chrono::Utc;
-use detail::JobDetail;
 use diagnosis::AiDiagnosisCard;
 use forgearr_shared::flows::FlowRecord;
 use forgearr_shared::jobs::{Job, JobBatchAction, JobBatchRequest, JobBatchResult};
@@ -105,11 +106,59 @@ fn JobsTasks(me: Me) -> impl IntoView {
         || RwSignal::new(HashMap::<Uuid, u32>::new()),
         |live| live.progress,
     );
-    let selected = RwSignal::new(None::<Uuid>);
+    let initial = query::JobsQuery::current();
+    let selected = RwSignal::new(initial.job);
     let checked_ids = RwSignal::new(HashSet::<Uuid>::new());
-    let detail_open = RwSignal::new(false);
-    let job_tab = RwSignal::new(0_usize);
-    let selected_library = RwSignal::new(None::<Uuid>);
+    let detail_open = RwSignal::new(initial.job.is_some());
+    let job_tab = RwSignal::new(usize::from(initial.step.is_some()));
+    let initial_step = initial.step;
+    let initial_job = initial.job;
+    let selected_library = RwSignal::new(initial.library);
+    let volume = RwSignal::new(initial.volume);
+    let initial_state = RwSignal::new(initial.state);
+    let selected_error = RwSignal::new(initial.error);
+    let params = move || {
+        query::JobsQuery {
+            state: initial_state
+                .get()
+                .or_else(|| query::JobsQuery::state_name(job_state()).map(str::to_owned)),
+            library: selected_library.get(),
+            volume: volume.get(),
+            error: selected_error.get(),
+            ..Default::default()
+        }
+        .list_params()
+    };
+    let replay_version = RwSignal::new(String::new());
+    let replay = Action::new_local(move |request: &forgearr_shared::jobs::FailureReplay| {
+        let request = request.clone();
+        async move { api::post::<_, JobBatchResult>("/api/v1/jobs/failures", Some(&request)).await }
+    });
+    Effect::new(move |_| {
+        if let Some(result) = replay.value().get() {
+            match result {
+                Ok(result) => {
+                    Toasts::notify_success(format!(
+                        "{} remise(s) en file · {} ignorée(s)",
+                        result.updated, result.skipped
+                    ));
+                    checked_ids.set(HashSet::new());
+                    reload.update(|n| *n = n.wrapping_add(1));
+                }
+                Err(error) => Toasts::notify_error(error.message()),
+            }
+        }
+    });
+    let deep_job = LocalResource::new(move || {
+        let id = selected.get();
+        reload.track();
+        async move {
+            match id {
+                Some(id) if central => api::get::<Job>(&format!("{JOBS_PATH}/{id}")).await.ok(),
+                _ => None,
+            }
+        }
+    });
     let batch_action = Action::new_local(move |req: &JobBatchRequest| {
         let req = req.clone();
         async move { api::post::<JobBatchRequest, JobBatchResult>(JOBS_BATCH_PATH, Some(&req)).await }
@@ -128,7 +177,10 @@ fn JobsTasks(me: Me) -> impl IntoView {
     });
     let first_page = LocalResource::new(move || {
         reload.track();
-        let path = format!("{JOBS_PATH}?limit={JOBS_PAGE_SIZE}");
+        let path = format!(
+            "{JOBS_PATH}?limit={JOBS_PAGE_SIZE}{}",
+            if central { params() } else { String::new() }
+        );
         async move { api::get::<Vec<Job>>(&path).await }
     });
     let workers_res = LocalResource::new(move || async move {
@@ -195,8 +247,38 @@ fn JobsTasks(me: Me) -> impl IntoView {
     // Pages plus anciennes, ajoutées à la demande (curseur : dernière tâche chargée).
     let older = RwSignal::new(Vec::<Job>::new());
     let exhausted = RwSignal::new(false);
+    Effect::new(move |_| {
+        let query = params();
+        older.set(Vec::new());
+        exhausted.set(false);
+        checked_ids.set(HashSet::new());
+        let location = window().location();
+        let search = location.search().unwrap_or_default();
+        let deep = search
+            .trim_start_matches('?')
+            .split('&')
+            .filter(|item| item.starts_with("job=") || item.starts_with("step="))
+            .map(|item| format!("&{item}"))
+            .collect::<String>();
+        let query = format!("{query}{deep}");
+        let path = format!(
+            "{}{}",
+            location.pathname().unwrap_or_default(),
+            if query.is_empty() {
+                String::new()
+            } else {
+                format!("?{}", query.trim_start_matches('&'))
+            }
+        );
+        if let Ok(history) = window().history() {
+            let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&path));
+        }
+    });
     let load_older = Action::new_local(move |before: &Uuid| {
-        let path = format!("{JOBS_PATH}?limit={JOBS_PAGE_SIZE}&before={before}");
+        let path = format!(
+            "{JOBS_PATH}?limit={JOBS_PAGE_SIZE}&before={before}{}",
+            params()
+        );
         async move {
             if let Ok(page) = api::get::<Vec<Job>>(&path).await {
                 exhausted.set(!may_have_more(page.len()));
@@ -223,7 +305,13 @@ fn JobsTasks(me: Me) -> impl IntoView {
     });
     let all_jobs = Signal::derive(move || jobs.get().and_then(Result::ok).unwrap_or_default());
     let visible = Signal::derive(move || {
-        let state = job_state();
+        let state = match initial_state.get().as_deref() {
+            Some("active") => JobStateFilter::Active,
+            Some("failed") => JobStateFilter::Failed,
+            Some("completed" | "succeeded") => JobStateFilter::Completed,
+            _ => job_state(),
+        };
+        let succeeded_only = initial_state.get().as_deref() == Some("succeeded");
         let text = query();
         let period = period();
         let lib_filter = selected_library.get();
@@ -234,6 +322,8 @@ fn JobsTasks(me: Me) -> impl IntoView {
                     list.into_iter()
                         .filter(|job| {
                             state.accepts(job)
+                                && (!succeeded_only
+                                    || job.status == forgearr_shared::jobs::JobStatus::Succeeded)
                                 && period.accepts(job.created_at, now)
                                 && lib_filter.is_none_or(|id| job.library_id == Some(id))
                                 && matches(&[&job.source_name, &job.id.to_string()], &text)
@@ -245,7 +335,11 @@ fn JobsTasks(me: Me) -> impl IntoView {
     });
     let selected_job = Signal::derive(move || {
         let id = selected.get()?;
-        all_jobs.get().into_iter().find(|job| job.id == id)
+        all_jobs
+            .get()
+            .into_iter()
+            .find(|job| job.id == id)
+            .or_else(|| deep_job.get().flatten().filter(|job| job.id == id))
     });
     let open = Callback::new(move |id: Uuid| {
         job_tab.set(0);
@@ -261,9 +355,17 @@ fn JobsTasks(me: Me) -> impl IntoView {
     let stats = Signal::derive(move || {
         let list = all_jobs.get();
         let (running, queued, completed, failed) = summarize_jobs(&list);
-        let active_filter = job_state();
+        let active_filter = match initial_state.get().as_deref() {
+            Some("active") => JobStateFilter::Active,
+            Some("failed") => JobStateFilter::Failed,
+            Some("completed" | "succeeded") => JobStateFilter::Completed,
+            _ => job_state(),
+        };
         let set_state = move |next: JobStateFilter| {
             Callback::new(move |()| {
+                initial_state.set(None);
+                volume.set(None);
+                selected_error.set(None);
                 if let Some(filters) = filters {
                     filters.job_state.set(next);
                 }
@@ -306,6 +408,35 @@ fn JobsTasks(me: Me) -> impl IntoView {
     view! {
         <div class="tab-panel" role="tabpanel">
             <StatStrip aria_label="Synthèse de l'activité" items=stats />
+            {move || central.then(|| view! {
+                <div class="cluster">
+                    {volume.get().map(|label| view! { <span>{format!("Volume · {}", if label.is_empty() { "Entrée par défaut".into() } else { label })}</span> })}
+                    {selected_error.get().map(|code| view! { <span>{model::error_label(code)}</span> })}
+                    {(volume.get().is_some() || selected_error.get().is_some()).then(|| view! {
+                        <button type="button" class="btn btn-secondary btn-sm" on:click=move |_| { volume.set(None); selected_error.set(None); }>"Effacer le filtre de volume ou d’échec"</button>
+                    })}
+                    {(can_manage && !checked_ids.get().is_empty()).then(|| view! {
+                        <label for="replay-flow-version">"Version pour retraiter les échecs"</label>
+                        <input id="replay-flow-version" class="form-input" inputmode="numeric" placeholder="Version d’origine si vide"
+                            prop:value=move || replay_version.get()
+                            on:input=move |event| replay_version.set(event_target_value(&event)) />
+                        <button type="button" class="btn btn-secondary" disabled=move || replay.pending().get()
+                            on:click=move |_| {
+                                let raw = replay_version.get_untracked();
+                                let version = raw.trim().parse::<i64>().ok().filter(|number| *number > 0);
+                                if !raw.trim().is_empty() && version.is_none() {
+                                    Toasts::notify_error("Saisissez une version entière positive.");
+                                    return;
+                                }
+                                let ids: Vec<_> = checked_ids.get_untracked().into_iter().collect();
+                                if window().confirm_with_message(&format!("Retraiter les échecs parmi les {} tâches sélectionnées ?", ids.len())).unwrap_or(false) {
+                                    replay.dispatch(forgearr_shared::jobs::FailureReplay { ids, version });
+                                }
+                            }>"Retraiter les échecs sélectionnés"</button>
+                    })}
+                </div>
+            })}
+
             {move || {
                 let options = libraries_options.get();
                 let selected_count = checked_ids.with(HashSet::len);
@@ -403,6 +534,7 @@ fn JobsTasks(me: Me) -> impl IntoView {
             >
                 {move || selected_job.get().map(|job| view! {
                     <JobDetail
+                        focused_step=if Some(job.id) == initial_job { initial_step } else { None }
                         job=job
                         tab=job_tab
                         libraries=libraries_map

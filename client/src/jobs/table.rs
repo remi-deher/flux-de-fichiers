@@ -72,6 +72,28 @@ pub fn JobsTable(
     } else {
         HEADERS[1..].to_vec()
     };
+    let failures = LocalResource::new(move || {
+        let ids = jobs
+            .get()
+            .and_then(Result::ok)
+            .unwrap_or_default()
+            .iter()
+            .filter(|job| job.status == JobStatus::Failed)
+            .take(200)
+            .map(|job| job.id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        async move {
+            if ids.is_empty() {
+                return Vec::new();
+            }
+            crate::api::get::<Vec<forgearr_shared::jobs::JobFailureDetail>>(&format!(
+                "/api/v1/jobs/failures?ids={ids}"
+            ))
+            .await
+            .unwrap_or_default()
+        }
+    });
     let span = headers.len();
     view! {
         <Registre aria_label="Tâches" headers=headers>
@@ -83,9 +105,11 @@ pub fn JobsTable(
                     let workers_map = workers.get();
                     let flows_map = flows.get();
                     let libs_map = libraries.get();
+                    let failures = failures.get().unwrap_or_default();
                     list.into_iter().map(|job| {
                         let id = job.id;
                         let status = job.status;
+                        let failure = failures.iter().find(|entry| entry.job_id == id).cloned();
                         let priority = job.priority;
                         let flow_label = resolve_flow_label(job.flow_id.as_deref(), &flows_map);
                         let worker_label = resolve_worker_label(job.worker_id, &workers_map);
@@ -147,7 +171,13 @@ pub fn JobsTable(
                                             <Tag label="Avertissement" tone=TagTone::Warning />
                                         })}
                                         {job.error_code.map(|code| view! {
-                                            <Tag label=error_label(code) tone=TagTone::Danger />
+                                            <a class="btn btn-secondary btn-sm" href=format!("/jobs?state=failed&error={}", code.as_str())
+                                                on:click=move |event| event.stop_propagation()>{error_label(code)}</a>
+                                        })}
+                                        {failure.map(|entry| view! {
+                                            <a href=format!("/jobs?job={id}&step={}", entry.step_index)
+                                                on:click=move |event| event.stop_propagation()>{format!("Étape {} · {}", entry.step_index + 1, entry.block_kind)}</a>
+                                            {entry.message.map(|message| view! { <span class="text-xs text-dim">{message}</span> })}
                                         })}
                                     </div>
                                 </td>

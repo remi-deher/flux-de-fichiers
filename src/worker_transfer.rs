@@ -92,25 +92,37 @@ pub fn transfer_router(state: TransferState) -> Router {
         .with_state(state)
 }
 
+/// Plage d'octets invalide ou non prise en charge (réponse 416).
+#[derive(Debug, PartialEq, Eq)]
+pub struct UnsatisfiableRange;
+
 /// Plage d'octets demandée, bornes incluses ; `None` pour le fichier entier.
-/// `Err` pour une plage invalide ou non prise en charge (416).
-pub fn parse_range(header: Option<&str>, total: u64) -> Result<Option<(u64, u64)>, ()> {
+pub fn parse_range(
+    header: Option<&str>,
+    total: u64,
+) -> Result<Option<(u64, u64)>, UnsatisfiableRange> {
     let Some(raw) = header else {
         return Ok(None);
     };
-    let spec = raw.trim().strip_prefix("bytes=").ok_or(())?;
+    let spec = raw
+        .trim()
+        .strip_prefix("bytes=")
+        .ok_or(UnsatisfiableRange)?;
     if spec.contains(',') {
-        return Err(());
+        return Err(UnsatisfiableRange);
     }
-    let (start, end) = spec.split_once('-').ok_or(())?;
-    let start: u64 = start.trim().parse().map_err(|_| ())?;
-    let last = total.checked_sub(1).ok_or(())?;
+    let (start, end) = spec.split_once('-').ok_or(UnsatisfiableRange)?;
+    let start: u64 = start.trim().parse().map_err(|_| UnsatisfiableRange)?;
+    let last = total.checked_sub(1).ok_or(UnsatisfiableRange)?;
     let end = match end.trim() {
         "" => last,
-        value => value.parse::<u64>().map_err(|_| ())?.min(last),
+        value => value
+            .parse::<u64>()
+            .map_err(|_| UnsatisfiableRange)?
+            .min(last),
     };
     if start > end || start > last {
-        return Err(());
+        return Err(UnsatisfiableRange);
     }
     Ok(Some((start, end)))
 }
@@ -150,7 +162,7 @@ async fn serve_source(State(state): State<TransferState>, headers: HeaderMap) ->
     let (status, start, end) = match parse_range(range, total) {
         Ok(Some((start, end))) => (StatusCode::PARTIAL_CONTENT, start, end),
         Ok(None) => (StatusCode::OK, 0, total.saturating_sub(1)),
-        Err(()) => {
+        Err(UnsatisfiableRange) => {
             return (
                 StatusCode::RANGE_NOT_SATISFIABLE,
                 [(header::CONTENT_RANGE, format!("bytes */{total}"))],
@@ -255,11 +267,17 @@ mod tests {
         assert_eq!(parse_range(Some("bytes=10-"), 100), Ok(Some((10, 99))));
         assert_eq!(parse_range(Some("bytes=10-19"), 100), Ok(Some((10, 19))));
         assert_eq!(parse_range(Some("bytes=90-500"), 100), Ok(Some((90, 99))));
-        assert_eq!(parse_range(Some("bytes=100-"), 100), Err(()));
-        assert_eq!(parse_range(Some("bytes=0-1,5-6"), 100), Err(()));
-        assert_eq!(parse_range(Some("bytes=-5"), 100), Err(()));
-        assert_eq!(parse_range(Some("items=0-1"), 100), Err(()));
-        assert_eq!(parse_range(Some("bytes=0-"), 0), Err(()));
+        assert_eq!(
+            parse_range(Some("bytes=100-"), 100),
+            Err(UnsatisfiableRange)
+        );
+        assert_eq!(
+            parse_range(Some("bytes=0-1,5-6"), 100),
+            Err(UnsatisfiableRange)
+        );
+        assert_eq!(parse_range(Some("bytes=-5"), 100), Err(UnsatisfiableRange));
+        assert_eq!(parse_range(Some("items=0-1"), 100), Err(UnsatisfiableRange));
+        assert_eq!(parse_range(Some("bytes=0-"), 0), Err(UnsatisfiableRange));
     }
 
     fn state_for(dir: &Path, name: &str, bytes: i64) -> TransferState {

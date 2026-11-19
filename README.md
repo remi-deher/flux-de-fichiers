@@ -30,6 +30,7 @@ via un reverse proxy externe). Au premier démarrage, le central crée dans `/co
 |---------|------|
 | `flux.db` | base SQLite (tâches, flux, bibliothèques, réglages) |
 | `secret_key` | clé de chiffrement des secrets, générée à l'installation (0600) |
+| `secret_keys.retired` | anciennes clés gardées pour déchiffrer seulement, si présent (0600) |
 | `plugins/<dépôt>/` | copie locale de chaque dépôt de plugins synchronisé |
 
 **Première ouverture** : la page d'installation demande le nom du central, puis un

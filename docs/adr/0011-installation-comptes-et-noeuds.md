@@ -114,6 +114,15 @@ centrale dans le bandeau.
   (réglages de plugins, en-têtes de webhook) en une seule transaction : une valeur illisible annule tout.
   Le fichier de clé n'est remplacé qu'après le commit. Refusée si `SECRET_KEY_FILE` est défini (la clé
   appartient alors à l'orchestrateur). À lancer centrale arrêtée de préférence.
+- Trousseau de clés : fait (étape 1 de la rotation autonome, `src/secrets.rs` et
+  `src/secrets/retired_keys.rs`). Une clé active chiffre ; les clés retirées, une par ligne dans
+  `/config/secret_keys.retired` (0600), ne servent plus qu'à déchiffrer les valeurs qui portent encore
+  leur identifiant. Le déchiffrement choisit la clé d'après l'identifiant inscrit dans la valeur. Aucune
+  migration : `secret_key` (ou `SECRET_KEY_FILE`) reste la clé active. Les clés retirées s'appliquent aussi
+  avec `SECRET_KEY_FILE`. Une rotation rechiffre aussi les valeurs des clés retirées. Restent : rotation
+  en ligne lancée depuis la page Système (tâche de fond, retrait automatique de l'ancienne clé quand plus
+  aucune valeur ne l'utilise, sauvegarde sans clé en clair), puis kit de récupération protégé par phrase
+  de passe.
 - Rôle lecteur et gestion des comptes : fait. Le rôle `viewer` porte tous les droits « voir » (vue d'ensemble,
   tâches, nœuds, bibliothèques, flux, plugins) et aucun droit d'administration. Les routes de lecture
   exigent leur droit « voir » (`ViewJobsAuth`, `ViewFlowsAuth`…, déclarés par `permission_auth!` dans

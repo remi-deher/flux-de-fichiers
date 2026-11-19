@@ -101,6 +101,9 @@ pub struct Claim {
     /// Nœud du flux où reprendre une tâche relayée par un autre worker (ADR 0018).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_node_id: Option<String>,
+    /// Billet pour lire la source chez le worker qui la détient (ADR 0019).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_ticket: Option<forgearr_shared::transfer::SourceTicket>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -110,6 +113,9 @@ pub struct Register {
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<crate::telemetry::TelemetrySnapshot>,
+    /// Adresse du serveur de transfert de ce worker, si elle est annoncée (ADR 0019).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transfer_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -282,6 +288,7 @@ mod tests {
             media_root: None,
             local_source_root: None,
             resume_node_id: None,
+            source_ticket: None,
         };
         let encoded = serde_json::to_value(&with_flow)?;
         assert_eq!(encoded["frozen_flow"]["id"], "flow.x");

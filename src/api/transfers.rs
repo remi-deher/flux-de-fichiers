@@ -71,10 +71,23 @@ pub async fn source(
 ) -> AppResult<Response> {
     crate::auth::authorize_worker(&s.pool, &h).await?;
     let job = repository::active(&s.pool, id, &lease(&h)?).await?;
-    let source = crate::library_scan::central_job_source(&s.pool, &s.config.input_dir, &job)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    stream_file(&source, None, "application/octet-stream").await
+    match crate::library_scan::central_job_source(&s.pool, &s.config.input_dir, &job).await? {
+        Some(source) => stream_file(&source, None, "application/octet-stream").await,
+        // Source détenue par un autre worker : repli en flux par le central (ADR 0019).
+        None => super::source_relay::relay_source_from_worker(&s, &job).await,
+    }
+}
+
+/// Le worker source valide un billet présenté par un worker traitant (ADR 0019).
+pub async fn redeem(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    axum::Json(request): axum::Json<forgearr_shared::transfer::RedeemRequest>,
+) -> AppResult<axum::Json<forgearr_shared::transfer::TransferGrant>> {
+    crate::auth::authorize_worker(&s.pool, &h).await?;
+    Ok(axum::Json(
+        repository::redeem_ticket(&s.pool, &request.token, request.worker_id).await?,
+    ))
 }
 
 fn extension_for_name(name: &str) -> &str {

@@ -12,6 +12,7 @@ pub(crate) mod plugins;
 pub(crate) mod recovery_kit;
 pub(crate) mod session;
 mod setup;
+pub(crate) mod source_relay;
 pub(crate) mod system;
 pub(crate) mod transfers;
 mod worker_view;
@@ -115,6 +116,7 @@ pub struct AppState {
     pub catalog_cache: crate::plugins::CatalogCache,
     pub event_history: EventHistory,
     pub browse_broker: crate::filesystem_browser::RemoteBrowseBroker,
+    pub source_relay: crate::source_relay::SourceRelayBroker,
     pub pending_worker_setup: Arc<tokio::sync::Mutex<Option<installation::PendingWorkerSetup>>>,
     pub ai_runs: crate::ai::run::AiRuns,
     pub ai_health: crate::ai::health::AiHealthTracker,
@@ -136,6 +138,7 @@ impl AppState {
             catalog_cache: crate::plugins::CatalogCache::new(),
             event_history: EventHistory::new(),
             browse_broker: crate::filesystem_browser::RemoteBrowseBroker::new(),
+            source_relay: crate::source_relay::SourceRelayBroker::new(),
             pending_worker_setup: Arc::new(tokio::sync::Mutex::new(None)),
             ai_runs: crate::ai::run::AiRuns::new(),
             ai_health: crate::ai::health::AiHealthTracker::new(),
@@ -503,6 +506,15 @@ fn transfer_routes() -> Router<AppState> {
             get(transfers::output).delete(transfers::delete_output),
         )
         .route("/api/v1/jobs/{id}/source", get(transfers::source))
+        .route("/api/v1/worker/transfers/redeem", post(transfers::redeem))
+        .route(
+            "/api/v1/worker/source-relay/pending",
+            get(source_relay::pending),
+        )
+        .route(
+            "/api/v1/worker/source-relay/{request_id}",
+            put(source_relay::send),
+        )
         .route("/api/v1/jobs/{id}/result", put(transfers::result))
         .route(
             "/api/v1/files/{name}",
@@ -678,16 +690,21 @@ async fn register(
         return Err(crate::error::AppError::Invalid);
     }
     let remote_addr = client_remote_addr(&h, connect_info);
-    Ok(axum::Json(
-        repository::register_with_metadata(
-            &s.pool,
-            &r.name,
-            r.version.as_deref(),
-            remote_addr.as_deref(),
-            r.telemetry.as_ref(),
-        )
-        .await?,
-    ))
+    let worker = repository::register_with_metadata(
+        &s.pool,
+        &r.name,
+        r.version.as_deref(),
+        remote_addr.as_deref(),
+        r.telemetry.as_ref(),
+    )
+    .await?;
+    // Une adresse absente ou invalide efface l'annonce : seul le repli par le central reste possible.
+    let transfer_url = r
+        .transfer_url
+        .as_deref()
+        .and_then(repository::valid_transfer_url);
+    repository::set_transfer_url(&s.pool, worker.id, transfer_url.as_deref()).await?;
+    Ok(axum::Json(worker))
 }
 /// Enrichit un bail (`Claim`) avec les contrats d'opérations, outils requis et réglages nécessaires.
 pub(crate) async fn populate_claim_contracts(
@@ -781,6 +798,7 @@ async fn claim(
     }
     if let Some(ref mut claim) = claim_res {
         populate_claim_contracts(&s.pool, &s.config, &s.catalog_cache, r.worker_id, claim).await?;
+        repository::attach_source_ticket(&s.pool, r.worker_id, claim).await?;
         if let Some(worker_key) = crate::auth::bearer_token(&h) {
             crate::flows::seal_claim_secrets_for_worker(claim, worker_key)?;
         }

@@ -51,10 +51,10 @@ mod tests {
 
     #[test]
     fn format_day_uses_french_month_abbreviations() {
-        let date = NaiveDate::from_ymd_opt(2026, 11, 19).expect("date valide");
-        assert_eq!(format_day(date), "19 nov. 2026");
-        let first = NaiveDate::from_ymd_opt(2027, 1, 1).expect("date valide");
-        assert_eq!(format_day(first), "1 janv. 2027");
+        let date = NaiveDate::from_ymd_opt(2026, 11, 19);
+        assert_eq!(date.map(format_day).as_deref(), Some("19 nov. 2026"));
+        let first = NaiveDate::from_ymd_opt(2027, 1, 1);
+        assert_eq!(first.map(format_day).as_deref(), Some("1 janv. 2027"));
     }
 
     #[test]

@@ -13,6 +13,7 @@ mod network;
 mod network_diagnostics;
 mod recovery_kit;
 pub mod system;
+mod timezone;
 
 pub use account::{logout, role_label};
 pub use system::duration_label;
@@ -33,6 +34,7 @@ use network::ConfigurationCard;
 use network_diagnostics::DiagnosticsCard;
 use recovery_kit::{KitState, kit_state};
 use system::{SystemSection, is_version_coherent};
+use timezone::TimezoneControl;
 
 const STATUS_PATH: &str = "/api/v1/system/status";
 
@@ -218,7 +220,10 @@ pub fn SettingsPage(me: Me) -> impl IntoView {
                     </div>
                 }).into_any(),
                 Section::System => status_signal.map(|status| view! {
-                    <SystemSection status=status on_changed=on_settings_saved />
+                    <div class="stack-md">
+                        <TimezoneControl status=status on_changed=on_settings_saved />
+                        <SystemSection status=status on_changed=on_settings_saved />
+                    </div>
                 }).into_any(),
             }}
         </div>

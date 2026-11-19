@@ -180,6 +180,7 @@ fn system_rows(status: &SystemStatus) -> Vec<DetailRow> {
         DetailRow::mono("Version du central", status.version.clone()),
         DetailRow::mono("Version de l'interface", interface_version(status)),
         DetailRow::text("Cohérence", coherence_label(status.build(), CLIENT_VERSION)),
+        DetailRow::mono("Fuseau horaire", status.timezone.clone()),
         DetailRow::mono("Clé de chiffrement", status.key_id.clone()),
         DetailRow::text("Origine de la clé", key_source_label(status.key_source)),
         DetailRow::text(

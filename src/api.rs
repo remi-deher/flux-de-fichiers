@@ -414,6 +414,10 @@ fn json_routes() -> Router<AppState> {
         )
         .route("/api/v1/system/status", get(system::status))
         .route("/api/v1/system/settings", put(system::update_settings))
+        .route(
+            "/api/v1/system/timezone",
+            get(system::timezone).put(system::update_timezone),
+        )
         .route("/api/v1/system/secret-key/rotate", post(system::rotate_key))
         .route(
             "/api/v1/system/secret-key/recovery-kit",

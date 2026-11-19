@@ -1,8 +1,8 @@
 # 0021 — Modes d'accès des workers aux bibliothèques
 
 Statut : proposé (19 nov. 2026). Orientation validée par l'utilisateur : une bibliothèque porte un flux et
-des workers qui ont ou non un accès direct aux fichiers mais qui peuvent traiter les tâches. Deux choix
-détaillés ci-dessous (points 4 et 8) sont des **valeurs par défaut à confirmer**. Précise les
+des workers qui ont ou non un accès direct aux fichiers mais qui peuvent traiter les tâches. Les deux
+choix détaillés ci-dessous (points 4 et 8) sont **confirmés par l'utilisateur**. Précise les
 [ADR 0018](0018-relais-de-tache-par-bloc.md), [0019](0019-partage-des-sources-entre-workers.md) et
 [0020](0020-blocs-de-transfert-dans-le-flux.md).
 
@@ -36,7 +36,7 @@ Défaut constaté : pour faire fonctionner le relais, `claim` a été ouvert à 
    l'enregistrement refuse le doublon.
 3. **Le worker intégré au central est un nœud comme les autres.** Il est « direct » quand la bibliothèque
    a un dossier de la centrale (UUID nul), et peut être « par transfert » sinon. Aucun cas particulier.
-4. **Attribution (`claim`) — par défaut à confirmer.** Une tâche de bibliothèque est attribuable à un
+4. **Attribution (`claim`).** Une tâche de bibliothèque est attribuable à un
    worker s'il a un montage vérifié (comportement actuel) **ou** s'il est « par transfert » dans cette
    bibliothèque, y compris pour les tâches neuves, pas seulement les relais. Cela permet de dédier un
    worker de calcul à une bibliothèque hébergée ailleurs. L'ouverture « tout relais » de l'ADR 0018 est
@@ -52,7 +52,7 @@ Défaut constaté : pour faire fonctionner le relais, `claim` a été ouvert à 
    l'un ne bloque rien.
 7. **Scan.** Seuls les workers à accès direct (et la centrale) scannent une bibliothèque ; les workers par
    transfert ne scannent jamais. Le scan reste une découverte de fichiers (ADR 0020).
-8. **Politique de sortie — par défaut à confirmer.** `OutputDir` (défaut) fonctionne avec les workers par
+8. **Politique de sortie.** `OutputDir` (défaut) fonctionne avec les workers par
    transfert : le résultat va au dossier de sortie du central. Les politiques `ReplaceWithBackup` et
    `ReplaceInPlace` exigent d'écrire chez le worker qui détient la source, ce que personne ne sait faire à
    distance. Tant que le retour du résultat n'est pas implémenté (chantier à part), l'enregistrement d'une

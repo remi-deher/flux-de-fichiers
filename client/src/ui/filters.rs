@@ -323,6 +323,7 @@ mod tests {
             version: "1.0.0".into(),
             name: "Nom".into(),
             manifest_path: "manifest.json".into(),
+            description: None,
             capability: None,
             current_choice: None,
             distribution: None,

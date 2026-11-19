@@ -41,6 +41,9 @@ pub struct CatalogEntry {
     pub version: String,
     pub name: String,
     pub manifest_path: String,
+    /// Ce que fait la pièce, repris de son manifeste par le central si l'index ne le donne pas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default)]
     pub capability: Option<CatalogCapability>,
     #[serde(default)]

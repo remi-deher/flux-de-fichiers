@@ -13,7 +13,10 @@ use crate::{
     repository,
     secrets::{SecretBox, is_encrypted},
 };
-use forgearr_shared::system::{OutboundPolicyStatus, SmtpStatus, UpdateSystemSettingsRequest};
+use forgearr_shared::{
+    system::{OutboundPolicyStatus, SmtpStatus, UpdateSystemSettingsRequest},
+    timezone::{DEFAULT_TIMEZONE, canonical_timezone},
+};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::env;
@@ -51,6 +54,8 @@ struct PersistedRuntimeSettings {
     block_private_integration_hosts: Option<bool>,
     #[serde(default)]
     check_updates_enabled: Option<bool>,
+    #[serde(default)]
+    timezone: Option<String>,
 }
 
 /// Vue effective résolue (base SQLite si présente, sinon configuration de démarrage).
@@ -60,6 +65,7 @@ pub struct EffectiveRuntimeSettings {
     pub smtp_status: SmtpStatus,
     pub outbound: OutboundPolicyStatus,
     pub check_updates_enabled: bool,
+    pub timezone: String,
 }
 
 impl EffectiveRuntimeSettings {
@@ -131,6 +137,23 @@ fn default_outbound_from_env() -> OutboundPolicyStatus {
     }
 }
 
+fn default_timezone_from_env() -> String {
+    env::var("TZ")
+        .ok()
+        .and_then(|raw| canonical_timezone(&raw))
+        .unwrap_or_else(|| DEFAULT_TIMEZONE.to_owned())
+}
+
+/// Charge uniquement le fuseau horaire effectif (base SQLite, sinon `TZ`, sinon `UTC`).
+pub async fn load_timezone(pool: &SqlitePool) -> String {
+    let persisted = read_persisted(pool).await;
+    persisted
+        .timezone
+        .as_deref()
+        .and_then(canonical_timezone)
+        .unwrap_or_else(default_timezone_from_env)
+}
+
 /// Charge les réglages effectifs (surcharges SQLite appliquées par-dessus `base`).
 pub async fn load_effective(pool: &SqlitePool, base: &Config) -> EffectiveRuntimeSettings {
     let persisted = read_persisted(pool).await;
@@ -173,12 +196,18 @@ fn resolve_effective(
             .block_private_integration_hosts
             .unwrap_or(env_outbound.block_private_integration_hosts),
     };
+    let timezone = persisted
+        .timezone
+        .as_deref()
+        .and_then(canonical_timezone)
+        .unwrap_or_else(default_timezone_from_env);
     let smtp_status = default_smtp_status(&effective);
     EffectiveRuntimeSettings {
         config: effective,
         smtp_status,
         outbound,
         check_updates_enabled: persisted.check_updates_enabled.unwrap_or(false),
+        timezone,
     }
 }
 
@@ -243,6 +272,11 @@ pub async fn update(
         None
     };
 
+    let timezone = match clean_opt(request.timezone) {
+        Some(raw) => Some(canonical_timezone(&raw).ok_or(AppError::Invalid)?),
+        None => previous.timezone,
+    };
+
     let next = PersistedRuntimeSettings {
         web_origin_set: true,
         web_origin,
@@ -252,10 +286,25 @@ pub async fn update(
         allow_private_plugin_hosts: Some(request.allow_private_plugin_hosts),
         block_private_integration_hosts: Some(request.block_private_integration_hosts),
         check_updates_enabled: Some(request.check_updates_enabled),
+        timezone,
     };
     let encoded = serde_json::to_string(&next).map_err(|_| AppError::Internal)?;
     repository::set_setting(pool, RUNTIME_SETTINGS_KEY, &encoded).await?;
     Ok(resolve_effective(base, &next))
+}
+
+/// Valide et enregistre uniquement le fuseau horaire IANA du central.
+pub async fn update_timezone(
+    pool: &SqlitePool,
+    base: &Config,
+    raw_timezone: &str,
+) -> AppResult<EffectiveRuntimeSettings> {
+    let canonical = canonical_timezone(raw_timezone).ok_or(AppError::Invalid)?;
+    let mut persisted = read_persisted(pool).await;
+    persisted.timezone = Some(canonical);
+    let encoded = serde_json::to_string(&persisted).map_err(|_| AppError::Internal)?;
+    repository::set_setting(pool, RUNTIME_SETTINGS_KEY, &encoded).await?;
+    Ok(resolve_effective(base, &persisted))
 }
 
 /// Re-chiffre l'éventuel mot de passe SMTP persisté dans `instance_settings` lors d'une rotation de clé.
@@ -349,6 +398,7 @@ mod tests {
                 allow_private_plugin_hosts: true,
                 block_private_integration_hosts: true,
                 check_updates_enabled: true,
+                timezone: Some("Europe/Paris".into()),
             },
         )
         .await?;
@@ -386,6 +436,7 @@ mod tests {
                 allow_private_plugin_hosts: false,
                 block_private_integration_hosts: false,
                 check_updates_enabled: false,
+                timezone: None,
             },
         )
         .await?;
@@ -449,6 +500,28 @@ mod tests {
             .await,
             Err(AppError::Invalid)
         ));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn updates_and_validates_timezone_in_sqlite() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let base = base_config(dir.path());
+        let pool = test_pool().await?;
+
+        let updated = update_timezone(&pool, &base, "Europe/Paris").await?;
+        assert_eq!(updated.timezone, "Europe/Paris");
+        assert_eq!(load_timezone(&pool).await, "Europe/Paris");
+
+        let gmt = update_timezone(&pool, &base, "GMT").await?;
+        assert_eq!(gmt.timezone, "Etc/GMT");
+        assert_eq!(load_timezone(&pool).await, "Etc/GMT");
+
+        assert!(matches!(
+            update_timezone(&pool, &base, "Invalid/Zone").await,
+            Err(AppError::Invalid)
+        ));
+        assert_eq!(load_timezone(&pool).await, "Etc/GMT");
         Ok(())
     }
 }

@@ -147,7 +147,6 @@ pub async fn placement(
     job: &Job,
     hardware_requested: bool,
 ) -> AppResult<Vec<WorkerPlacement>> {
-    use chrono::{Datelike, Timelike};
     let source = job_source(pool, job.id).await?;
     let source_worker = source.as_ref().and_then(|source| source.source_worker_id);
     let mounts: std::collections::HashMap<Uuid, String> = sqlx::query_as::<_, (Uuid, String)>(
@@ -162,7 +161,9 @@ pub async fn placement(
         .as_ref()
         .is_some_and(|source| source.source_key.is_some());
     let central_path = mounts.get(&Uuid::nil());
-    let now = chrono::Local::now();
+    let timezone = crate::runtime_settings::load_timezone(pool).await;
+    let now_utc = chrono::Utc::now();
+    let (weekday, hour) = forgearr_shared::timezone::local_weekday_and_hour(now_utc, &timezone);
     let mut candidates = Vec::new();
     for worker in super::list_workers(pool).await? {
         let has_source = if shared {
@@ -173,11 +174,13 @@ pub async fn placement(
         if !has_source || job.target_worker_id.is_some_and(|id| id != worker.id) {
             continue;
         }
-        let status = if !worker.is_online(now.to_utc()) {
+        let status = if !worker.is_online(now_utc) {
             PlacementStatus::Offline
-        } else if worker.schedule.as_ref().is_some_and(|schedule| {
-            !schedule.allows_at(now.weekday().number_from_monday() as u8, now.hour() as u8)
-        }) {
+        } else if worker
+            .schedule
+            .as_ref()
+            .is_some_and(|schedule| !schedule.allows_at(weekday, hour))
+        {
             PlacementStatus::OutsideSchedule
         } else {
             let count: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE worker_id=? AND status='running' AND leased_until>datetime('now')")

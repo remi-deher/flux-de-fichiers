@@ -7,7 +7,6 @@ use leptos::ev;
 use leptos::prelude::*;
 
 const LOGS_PATH: &str = "/api/v1/logs";
-const TIMESTAMP_CHARS: usize = 19;
 
 /// Encode une valeur de paramètre d'URL (seuls les caractères non réservés restent tels quels).
 fn encode_component(raw: &str) -> String {
@@ -42,12 +41,9 @@ fn level_pill_class(level: LogLevel) -> &'static str {
     }
 }
 
-/// `2026-11-18T17:10:06.123Z` devient `2026-11-18 17:10:06` (heure UTC du central).
+/// Formate l'horodatage RFC 3339 dans le fuseau horaire actif de l'application.
 fn short_timestamp(raw: &str) -> String {
-    raw.chars()
-        .take(TIMESTAMP_CHARS)
-        .map(|c| if c == 'T' { ' ' } else { c })
-        .collect()
+    crate::format::timestamp_rfc3339(raw)
 }
 
 #[component]
@@ -122,7 +118,7 @@ pub fn LogsPanel() -> impl IntoView {
         <section class="section-panel">
             <SectionHeader
                 title="Journal du central"
-                subtitle="Événements récents de l'application (erreurs, alertes, appels sortants). Heure UTC, plus récent en premier."
+                subtitle="Événements récents de l'application (erreurs, alertes, appels sortants), plus récent en premier, dans le fuseau horaire configuré."
                 actions=actions
             />
             <div class="registre">
@@ -188,7 +184,7 @@ mod tests {
     fn timestamps_and_pills_are_compact() {
         assert_eq!(
             short_timestamp("2026-11-18T17:10:06.123456Z"),
-            "2026-11-18 17:10:06"
+            "18/11/2026 17:10:06 UTC"
         );
         assert_eq!(level_pill_class(LogLevel::Error), "status-pill danger");
         assert_eq!(level_pill_class(LogLevel::Trace), "status-pill");

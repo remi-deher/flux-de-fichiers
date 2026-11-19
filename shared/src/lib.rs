@@ -21,6 +21,7 @@ pub mod plugins;
 pub mod search;
 pub mod session;
 pub mod system;
+pub mod timezone;
 pub mod workers;
 
 use serde::{Deserialize, Serialize};

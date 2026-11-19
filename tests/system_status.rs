@@ -445,3 +445,51 @@ async fn test_admin_exports_a_recovery_kit_and_restores_it() -> anyhow::Result<(
     assert_eq!(restored["retiredKeyIds"], serde_json::json!([]));
     Ok(())
 }
+
+#[tokio::test]
+async fn timezone_can_be_read_and_updated_by_admin() -> anyhow::Result<()> {
+    let (app, _dir) = app().await?;
+    let (status, headers, _) = call(
+        &app,
+        "POST",
+        "/api/v1/setup/central",
+        None,
+        Some(serde_json::json!({"name": "Central", "username": "admin-tz", "password": PASSWORD})),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    let admin = cookies_of(&headers);
+
+    let (status, _, initial) =
+        call(&app, "GET", "/api/v1/system/timezone", Some(&admin), None).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert!(initial["timezone"].as_str().is_some());
+    assert!(initial["utcOffset"].as_str().is_some());
+
+    let (status, _, _) = call(
+        &app,
+        "PUT",
+        "/api/v1/system/timezone",
+        Some(&admin),
+        Some(serde_json::json!({"timezone": "Invalid/Timezone"})),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, _, updated) = call(
+        &app,
+        "PUT",
+        "/api/v1/system/timezone",
+        Some(&admin),
+        Some(serde_json::json!({"timezone": "Europe/Paris"})),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(updated["timezone"], "Europe/Paris");
+
+    let (status, _, after) =
+        call(&app, "GET", "/api/v1/system/timezone", Some(&admin), None).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(after["timezone"], "Europe/Paris");
+    Ok(())
+}

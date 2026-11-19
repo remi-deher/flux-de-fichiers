@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.55.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.54.0...v0.55.0) (2026-11-19)
+
+
+### Features
+
+* **plugins:** refonte UX/UI App Store, tiroirs croisés et état opérationnel ([1fea154](https://github.com/remi-deher/flux-de-fichiers/commit/1fea15493e3fa805b00c08726fcec96371a9c90a))
+* **plugins:** refonte UX/UI App Store, tiroirs croisés et état opérationnel ([2dbf64a](https://github.com/remi-deher/flux-de-fichiers/commit/2dbf64ae89a93f9d40656723e43cc03dd5cd65f8))
+
+
+### Bug Fixes
+
+* **client:** corriger les 4 avertissements clippy WASM ([655a8f6](https://github.com/remi-deher/flux-de-fichiers/commit/655a8f66977d243823ac2c14a5ce232ad2e92023))
+* **tests:** remplacer expect() par ? pour clippy::expect-used ([c654f1e](https://github.com/remi-deher/flux-de-fichiers/commit/c654f1e0674af9cd8fd61835a9cf09f599e0cae5))
+
 ## [0.54.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.53.0...v0.54.0) (2026-11-19)
 
 

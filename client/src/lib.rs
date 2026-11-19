@@ -18,6 +18,7 @@ mod settings;
 mod shell;
 mod sleep;
 pub mod theme;
+pub mod timezone;
 mod ui;
 pub mod workers;
 

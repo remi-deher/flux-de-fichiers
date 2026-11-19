@@ -14,6 +14,7 @@ pub use forgearr_shared::system::{
     HardwareStatus, KeySource, NetworkStatus, StorageStatus, SystemStatus, UpdateCheckStatus,
     UpdateSystemSettingsRequest, VolumeSpace,
 };
+use forgearr_shared::timezone::{ClockInfo, UpdateTimezoneRequest, describe_instant};
 use std::{
     path::{Path, PathBuf},
     sync::LazyLock,
@@ -144,6 +145,7 @@ fn build_system_status(effective: &EffectiveRuntimeSettings, secrets: &SecretBox
         smtp: effective.smtp_status.clone(),
         outbound: effective.outbound,
         check_updates_enabled: effective.check_updates_enabled,
+        timezone: effective.timezone.clone(),
     }
 }
 
@@ -184,6 +186,24 @@ pub async fn update_settings(
 ) -> AppResult<Json<SystemStatus>> {
     let secrets = SecretBox::open(&state.config.config_dir)?;
     let effective = runtime_settings::update(&state.pool, &state.config, request).await?;
+    Ok(Json(build_system_status(&effective, &secrets)))
+}
+
+/// Retourne le fuseau horaire actif et l'horloge du central (`GET /api/v1/system/timezone`).
+pub async fn timezone(State(state): State<AppState>, _auth: ViewOverviewAuth) -> Json<ClockInfo> {
+    let tz = runtime_settings::load_timezone(&state.pool).await;
+    Json(describe_instant(chrono::Utc::now(), &tz))
+}
+
+/// Met à jour le fuseau horaire IANA du central (`PUT /api/v1/system/timezone`).
+pub async fn update_timezone(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Json(request): Json<UpdateTimezoneRequest>,
+) -> AppResult<Json<SystemStatus>> {
+    let secrets = SecretBox::open(&state.config.config_dir)?;
+    let effective =
+        runtime_settings::update_timezone(&state.pool, &state.config, &request.timezone).await?;
     Ok(Json(build_system_status(&effective, &secrets)))
 }
 

@@ -156,8 +156,15 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                         };
                         view! {
                             <section class="section-panel">
-                                <SectionHeader title="Économies de stockage" subtitle=format!("{saved_label} ({pct_detail})") />
-                                <a href="/jobs?state=succeeded">"Voir les traitements réussis"</a>
+                                <SectionHeader
+                                    title="Économies de stockage"
+                                    subtitle=format!("{saved_label} ({pct_detail})")
+                                    actions=view! {
+                                        <a href="/jobs?state=succeeded" class="btn btn-secondary btn-sm">
+                                            "Voir les traitements réussis"
+                                        </a>
+                                    }.into_any()
+                                />
 
                                 {if storage_stats.by_library.is_empty() {
                                     view! { <EmptyState title="Aucune statistique" message="Les gains d'espace disque apparaîtront après les premières tâches réussies." icon_name=IconName::Libraries /> }.into_any()

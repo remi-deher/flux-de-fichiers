@@ -214,26 +214,28 @@ pub fn ReposSection(
     view! {
         <div class="store-toolbar">
             <StatStrip aria_label="Synthèse des dépôts" items=stats />
-            <button
-                type="button"
-                class="btn btn-secondary btn-sm"
-                disabled=action_pending
-                on:click=move |_| {
-                    let active_ids: Vec<String> = repositories
-                        .get_untracked()
-                        .and_then(Result::ok)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .filter(|repo| repo.enabled)
-                        .map(|repo| repo.id)
-                        .collect();
-                    if !active_ids.is_empty() {
-                        sync_all.dispatch(active_ids);
+            <div class="store-toolbar__actions">
+                <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    disabled=action_pending
+                    on:click=move |_| {
+                        let active_ids: Vec<String> = repositories
+                            .get_untracked()
+                            .and_then(Result::ok)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter(|repo| repo.enabled)
+                            .map(|repo| repo.id)
+                            .collect();
+                        if !active_ids.is_empty() {
+                            sync_all.dispatch(active_ids);
+                        }
                     }
-                }
-            >
-                {move || if sync_all.pending().get() { "Synchronisation…" } else { "Tout synchroniser" }}
-            </button>
+                >
+                    {move || if sync_all.pending().get() { "Synchronisation…" } else { "Tout synchroniser" }}
+                </button>
+            </div>
         </div>
         <Drawer
             open=detail_open

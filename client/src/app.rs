@@ -7,8 +7,8 @@ use crate::route::{Route, Router, use_router};
 use crate::settings::SettingsPage;
 use crate::shell::{Shell, allowed};
 use crate::{flows, jobs::JobsPage, libraries, workers};
-use flux_shared::session::Me;
-use flux_shared::{InstanceKind, Permission};
+use forgearr_shared::session::Me;
+use forgearr_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
 
 #[component]

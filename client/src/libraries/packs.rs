@@ -9,9 +9,9 @@ use crate::ui::{
     Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
     Toasts,
 };
-use flux_shared::local::{CreateLocalPackRequest, LocalLibrarySnapshot};
-use flux_shared::plugins::vocab::CatalogItemType;
-use flux_shared::plugins::{CatalogEntry, PackComponent};
+use forgearr_shared::local::{CreateLocalPackRequest, LocalLibrarySnapshot};
+use forgearr_shared::plugins::vocab::CatalogItemType;
+use forgearr_shared::plugins::{CatalogEntry, PackComponent};
 use leptos::prelude::*;
 use std::collections::HashSet;
 

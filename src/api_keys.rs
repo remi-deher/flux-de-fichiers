@@ -5,7 +5,7 @@ use crate::{
     repository::{self, ApiKeyRecord},
 };
 use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
-use flux_shared::{Permission, Role};
+use forgearr_shared::{Permission, Role};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use subtle::ConstantTimeEq;

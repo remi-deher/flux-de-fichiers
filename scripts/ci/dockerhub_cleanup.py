@@ -12,7 +12,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 HUB_URL = "https://hub.docker.com"
-IMAGE_NAME = "flux-de-fichiers"
+IMAGE_NAME = "forgearr"
 PR_TAG = re.compile(r"pr-[0-9a-f]{12}")
 TEST_TAG = re.compile(r"test-[0-9a-f]{12}")
 HTTP_TIMEOUT_SECONDS = 30

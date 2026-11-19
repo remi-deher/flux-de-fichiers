@@ -79,7 +79,7 @@ impl SessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::Role;
+    use forgearr_shared::Role;
 
     fn account(id: &str) -> VerifiedAccount {
         VerifiedAccount {

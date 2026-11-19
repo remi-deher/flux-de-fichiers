@@ -3,7 +3,7 @@
 use super::forms::{Field, GateCard};
 use super::{Gate, access_error, clear_address_fragment};
 use crate::api;
-use flux_shared::accounts::{ForgotPasswordRequest, ResetPasswordRequest};
+use forgearr_shared::accounts::{ForgotPasswordRequest, ResetPasswordRequest};
 use leptos::prelude::*;
 
 const FORGOT_PATH: &str = "/api/v1/auth/forgot-password";

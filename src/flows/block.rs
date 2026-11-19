@@ -3,7 +3,7 @@
 use crate::flows::contract::{
     OperationContract, OperationRegistry, OperationRuntime, PrimitiveKind,
 };
-use flux_shared::flows::FlowNode;
+use forgearr_shared::flows::FlowNode;
 
 /// Indique si un nœud correspond à une primitive d'entrée (`runtime.primitive == "entry"`).
 pub fn is_entry_node(registry: &OperationRegistry, node: &FlowNode) -> bool {

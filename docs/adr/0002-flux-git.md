@@ -85,5 +85,5 @@ PR de release sur `main` (version de `Cargo.toml`, `Cargo.lock`,
 
 Secrets du dépôt GitHub : `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` (jeton
 Docker Hub en lecture/écriture), `RELEASE_TOKEN` (jeton GitHub, droits
-`contents` et `pull-requests` en écriture). « Allow auto-merge » doit être activé. Le dépôt Docker Hub `flux-de-fichiers` est
+`contents` et `pull-requests` en écriture). « Allow auto-merge » doit être activé. Le dépôt Docker Hub `forgearr` est
 créé au premier push.

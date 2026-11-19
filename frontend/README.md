@@ -15,10 +15,10 @@ Le central sert `dist/index.html` pour toute route d'interface et `dist/pkg/` po
 L'image le fait (`Dockerfile`) ; à la main :
 
 ```sh
-cargo run -p flux-frontend
-cargo build --release -p flux-client --target wasm32-unknown-unknown
-wasm-bindgen --target web --no-typescript --out-dir frontend/dist/pkg \
-  target/wasm32-unknown-unknown/release/flux_client.wasm
+cargo run -p forgearr-frontend
+cargo build --release -p forgearr-client --target wasm32-unknown-unknown
+wasm-bindgen --target web --no-typescript --out-name flux_client --out-dir frontend/dist/pkg \
+  target/wasm32-unknown-unknown/release/forgearr_client.wasm
 ```
 
 `wasm-bindgen-cli` doit avoir la version exacte du crate `wasm-bindgen` verrouillé

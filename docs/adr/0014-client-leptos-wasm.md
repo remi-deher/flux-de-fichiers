@@ -12,15 +12,15 @@ l'éditeur de flux a longtemps détruit les flux à l'enregistrement sans que ri
 
 ## Décision
 
-1. **Nouveau client Leptos en WASM** (crate `client/`, `flux-client`, Leptos `csr`), compilé
+1. **Nouveau client Leptos en WASM** (crate `client/`, `forgearr-client`, Leptos `csr`), compilé
    pour `wasm32-unknown-unknown` puis lié par `wasm-bindgen --target web`.
 2. **Servi sous `/app/`**, à côté de l'interface historique (`/`). Les routes sous `/app`
-   retombent sur `app/index.html` ; la page est générée par `flux-frontend` avec les mêmes styles
+   retombent sur `app/index.html` ; la page est générée par `forgearr-frontend` avec les mêmes styles
    de thème.
 3. **Migration écran par écran.** Un écran porté vit dans le client ; l'interface historique y
    renvoie. Quand tous les écrans sont portés, `/` sert le client et le JavaScript historique
    est supprimé. Aucun pont entre le JavaScript historique et le WASM.
-4. **Contrat partagé** : les réponses lues par le client sont des types de `flux-shared`
+4. **Contrat partagé** : les réponses lues par le client sont des types de `forgearr-shared`
    (`jobs`, `session`, `format`, `flows`, `libraries`, `workers`, `plugins`, `accounts`,
    `system`, `app`), utilisés aussi par le central ; les dérivations SQLx y sont derrière la
    fonctionnalité `sqlx`, que seul le central active.
@@ -28,8 +28,8 @@ l'éditeur de flux a longtemps détruit les flux à l'enregistrement sans que ri
    cookie (`/api/v1/auth/session` donne le jeton CSRF).
 6. **Construction** : la cible WASM est déclarée dans `rust-toolchain.toml` ; l'image installe
    `wasm-bindgen-cli` à la version exacte du crate verrouillé (`WASM_BINDGEN_VERSION`). La CI
-   vérifie le client en natif et pour `wasm32-unknown-unknown`, et teste `flux-shared`,
-   `flux-client` et `flux-frontend`.
+   vérifie le client en natif et pour `wasm32-unknown-unknown`, et teste `forgearr-shared`,
+   `forgearr-client` et `forgearr-frontend`.
 
 ## Écrans portés
 
@@ -38,7 +38,7 @@ l'éditeur de flux a longtemps détruit les flux à l'enregistrement sans que ri
 - **Flux** : liste (version, composition), création, suppression, et éditeur :
   - graphe disposé en couches (plus long chemin depuis l'entrée), liaisons SVG par sortie ;
   - palette et formulaires générés depuis le **catalogue des blocs exécutables**
-    (`flux_shared::flows::block_catalog`) : un champ décrit est un champ que le moteur lit ;
+    (`forgearr_shared::flows::block_catalog`) : un champ décrit est un champ que le moteur lit ;
     une valeur enregistrée hors liste reste sélectionnable ;
   - sorties reliées une à une, avec refus des boucles, des sorties déjà prises et des entrées
     impossibles (`FlowGraph::connect`) ; retrait d'un bloc avec raccord d'un maillon simple ;
@@ -60,8 +60,8 @@ l'éditeur de flux a longtemps détruit les flux à l'enregistrement sans que ri
 
 ## Bascule (14 nov. 2026)
 
-Le client est servi à la racine (`/`, chemins de `flux_shared::app`) ; les anciens liens `/app/…`
-restent valides. Le crate `flux-frontend` ne génère plus que la page et le thème : le script
+Le client est servi à la racine (`/`, chemins de `forgearr_shared::app`) ; les anciens liens `/app/…`
+restent valides. Le crate `forgearr-frontend` ne génère plus que la page et le thème : le script
 historique et ses vues générées sont supprimés. Sur un worker, le client n'offre que la vue
 d'ensemble, les tâches (lecture), les plugins (lecture) et les paramètres (compte, thème).
 

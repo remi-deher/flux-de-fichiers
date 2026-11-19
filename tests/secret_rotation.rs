@@ -1,6 +1,6 @@
 //! Rotation de la clé de chiffrement : tout est rechiffré ou rien ne change (ADR 0011).
 
-use flux_de_fichiers::{
+use forgearr::{
     error::AppError,
     plugins::plugin_secret_aad,
     secret_rotation::{

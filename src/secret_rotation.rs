@@ -139,7 +139,7 @@ pub async fn reseal_and_retire(
     Ok(report)
 }
 
-/// Rotation complète d'un coup, central arrêté (`flux-de-fichiers rotate-secret`).
+/// Rotation complète d'un coup, central arrêté (`forgearr rotate-secret`).
 pub async fn rotate_local_key(pool: &SqlitePool, config_dir: &Path) -> AppResult<RotationOutcome> {
     let switch = switch_active_key(config_dir, None)?;
     let report = reseal_and_retire(pool, config_dir, None).await?;

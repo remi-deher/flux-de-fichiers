@@ -12,11 +12,11 @@ use crate::ui::{
 };
 use crate::{api, format};
 use chrono::{DateTime, Utc};
-use flux_shared::Permission;
-use flux_shared::jobs::{Job, JobStatus};
-use flux_shared::libraries::Library;
-use flux_shared::session::Me;
-use flux_shared::workers::{
+use forgearr_shared::Permission;
+use forgearr_shared::jobs::{Job, JobStatus};
+use forgearr_shared::libraries::Library;
+use forgearr_shared::session::Me;
+use forgearr_shared::workers::{
     EnrollmentWindowStatus, Liveness, UpdateWorkerSettingsRequest, WORKER_MAX_CONCURRENCY,
     WORKER_MIN_CONCURRENCY, Worker, WorkerEnrollmentList, WorkerEnrollmentSummary, WorkerSchedule,
 };
@@ -39,16 +39,16 @@ struct EnrollmentWindowBody {
 /// Service `compose` d'un worker distant par approbation (aucune clé ni secret à copier).
 pub fn enroll_approval_compose() -> &'static str {
     "services:
-  flux-worker:
-    image: mrcryllix/flux-de-fichiers:latest
+  forgearr-worker:
+    image: mrcryllix/forgearr:latest
     restart: unless-stopped
     ports:
       - \"3001:3000\"
     volumes:
-      - flux-worker:/config
+      - forgearr-worker:/config
       - /chemin/data:/data
 volumes:
-  flux-worker:
+  forgearr-worker:
 "
 }
 
@@ -62,18 +62,18 @@ pub fn remaining_label(expires_at: DateTime<Utc>, now: DateTime<Utc>) -> String 
 pub fn enroll_compose(origin: &str) -> String {
     format!(
         "services:
-  flux-worker:
-    image: mrcryllix/flux-de-fichiers:latest
+  forgearr-worker:
+    image: mrcryllix/forgearr:latest
     command: worker
     restart: unless-stopped
     environment:
       CENTRAL_URL: {origin}
       WORKER_KEY_FILE: /config/worker_key
     volumes:
-      - flux-worker:/config
+      - forgearr-worker:/config
       - /chemin/data:/data
 volumes:
-  flux-worker:
+  forgearr-worker:
 "
     )
 }
@@ -171,13 +171,13 @@ pub fn filter_workers(
         .collect()
 }
 
-fn storage_used_bytes(telemetry: &flux_shared::workers::WorkerTelemetry) -> u64 {
+fn storage_used_bytes(telemetry: &forgearr_shared::workers::WorkerTelemetry) -> u64 {
     telemetry
         .storage_total_bytes
         .saturating_sub(telemetry.storage_available_bytes)
 }
 
-fn telemetry_summary(telemetry: &flux_shared::workers::WorkerTelemetry) -> String {
+fn telemetry_summary(telemetry: &forgearr_shared::workers::WorkerTelemetry) -> String {
     let ram_pct =
         crate::overview::hardware::percent(telemetry.ram_used_bytes, telemetry.ram_total_bytes);
     let mut base = format!(
@@ -191,7 +191,7 @@ fn telemetry_summary(telemetry: &flux_shared::workers::WorkerTelemetry) -> Strin
 }
 
 #[component]
-fn WorkerTelemetrySection(telemetry: flux_shared::workers::WorkerTelemetry) -> impl IntoView {
+fn WorkerTelemetrySection(telemetry: forgearr_shared::workers::WorkerTelemetry) -> impl IntoView {
     use crate::settings::system::{DetailGrid, DetailRow};
     let cpu_pct = telemetry.cpu_usage_percent.clamp(0.0, 100.0);
     let ram_pct =
@@ -938,7 +938,7 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
 mod tests {
     use super::*;
     use crate::ui::filters::Presence;
-    use flux_shared::workers::{
+    use forgearr_shared::workers::{
         INTEGRATED_WORKER_NAME, WORKER_ONLINE_SECONDS, WORKER_SILENT_ALERT_SECONDS,
     };
 
@@ -1070,7 +1070,7 @@ mod tests {
 
     #[test]
     fn telemetry_summary_formats_cpu_ram_and_gpu_count() {
-        let telemetry = flux_shared::workers::WorkerTelemetry {
+        let telemetry = forgearr_shared::workers::WorkerTelemetry {
             timestamp: Utc::now(),
             logical_cores: 8,
             cpu_usage_percent: 42.4,

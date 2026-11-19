@@ -151,18 +151,8 @@ pub const BASE_CSS: &str = r#"
 }
 
 .brand-mark {
-  width: 38px;
-  height: 38px;
-  border-radius: var(--radius-md);
-  background: var(--primary-fill);
-  color: var(--primary-contrast);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  font-size: var(--font-size-xs);
-  letter-spacing: 0.5px;
-  box-shadow: var(--shadow-sm);
+  width: var(--space-4);
+  height: var(--space-4);
   flex-shrink: 0;
 }
 

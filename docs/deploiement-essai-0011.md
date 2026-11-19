@@ -27,7 +27,7 @@ de Rashin du 13 nov. Écarts constatés à l'exécution :
 | Élément | Centrale (`.50`, `truenas`, TrueNAS 25.10.6) | Worker (`.51`, `ARTEMIS`, TrueNAS 25.10.7) |
 | --- | --- | --- |
 | Application | `flux-essai`, RUNNING | `flux-essai-worker`, RUNNING |
-| Image actuelle | `mrcryllix/flux-de-fichiers:latest` (0.15.0, 12 nov.) | `mrcryllix/flux-de-fichiers:0.12.0` |
+| Image actuelle | `mrcryllix/forgearr:latest` (0.15.0, 12 nov.) | `mrcryllix/forgearr:0.12.0` |
 | Accès | HTTP `:18480` → conteneur `:3000` | aucun port publié |
 | Données | `/mnt/DATA/flux-de-fichiers-test/essai25/` (`arr-config` = `/config`, `data`, `logs`, `input`, `frontend`) | `/mnt/SSD/flux-de-fichiers-test/essai25/` (`worker-work`, `worker-logs`, `worker-secrets/worker_key`) |
 | Variables | `BIND`, `CONFIG_DIR`, `DATA_DIR`, `INPUT_DIR`, `LOCAL_WORKER`, `LOG_DIR`, `STATIC_DIR` | `COORDINATOR_URL=http://192.168.1.50:18480`, `WORKER_NAME=artemis-essai`, `WORKER_KEY_FILE=/run/secrets/worker_key`, `MAX_FILE_BYTES` |
@@ -35,7 +35,7 @@ de Rashin du 13 nov. Écarts constatés à l'exécution :
 Autres constats :
 
 - L'interface est servie depuis le volume `frontend` (monté en lecture seule sur
-  `/usr/share/flux-de-fichiers/frontend`) : il faut y recopier le `index.html` de la nouvelle image.
+  `/usr/share/forgearr/frontend`) : il faut y recopier le `index.html` de la nouvelle image.
 - Sur `.51`, un ancien `flux-essai` (centrale) est `STOPPED` : on n'y touche pas.
 - Des sauvegardes `arr-config.bak-<version>` existent déjà : on suit la même convention.
 - Le conteneur du worker est en lecture seule et n'a pas de volume `/config` : il fonctionne (le dossier
@@ -47,7 +47,7 @@ Autres constats :
 
 ## Image à déployer
 
-`mrcryllix/flux-de-fichiers:test-89e594c7451b` : pointe de `test`, CI verte (PR #92, #93 et #94), phases 2
+`mrcryllix/forgearr:test-89e594c7451b` : pointe de `test`, CI verte (PR #92, #93 et #94), phases 2
 à 5 incluses. L'étiquette `latest` est encore la 0.15.0 et **n'a pas** ces phases : la promotion
 `test → main` n'est pas faite. Étiquette immuable recommandée pour l'essai.
 
@@ -57,7 +57,7 @@ Les commandes se lancent en SSH (`truenas_admin@<hôte>`). Forme `midclt` valid�
 
 ### A. Préparer (sans effet sur l'application)
 
-1. Sur `.50`, tirer l'image : `sudo docker pull mrcryllix/flux-de-fichiers:test-89e594c7451b`.
+1. Sur `.50`, tirer l'image : `sudo docker pull mrcryllix/forgearr:test-89e594c7451b`.
 2. Sur `.51`, la tirer aussi.
 3. Sauvegarder la configuration de la centrale (copie, rien n'est supprimé) :
    `sudo cp -a /mnt/DATA/flux-de-fichiers-test/essai25/arr-config /mnt/DATA/flux-de-fichiers-test/essai25/arr-config.bak-0.15.0-avant-0011`.
@@ -85,7 +85,7 @@ sudo mkdir arr-config && sudo chown 10001:10001 arr-config && sudo chmod 700 arr
 ### D. Mettre à jour l'image de la centrale
 
 Interface TrueNAS : Applications → `flux-essai` → Modifier → image
-`mrcryllix/flux-de-fichiers:test-89e594c7451b` → Enregistrer. Forme en ligne de commande, vérifiée le
+`mrcryllix/forgearr:test-89e594c7451b` → Enregistrer. Forme en ligne de commande, vérifiée le
 13 nov. 2026 (TrueNAS 25.10.6) : lire `app.config`, enregistrer la configuration, ne changer que
 `services.coordinator.image`, puis `midclt call -j app.update '"flux-essai"' '{"custom_compose_config": …}'`.
 L'application reste arrêtée après la mise à jour.
@@ -98,9 +98,9 @@ Garder l'ancienne version à côté (`index.html.avant-<étiquette>`, `pkg.avant
 ```bash
 D=/mnt/DATA/flux-de-fichiers-test/essai25/frontend
 sudo cp -a $D/index.html $D/index.html.avant-<étiquette> && sudo cp -a $D/pkg $D/pkg.avant-<étiquette>
-c=$(sudo docker create mrcryllix/flux-de-fichiers:<étiquette>)
-sudo docker cp "$c":/usr/share/flux-de-fichiers/frontend/index.html $D/index.html
-sudo docker cp "$c":/usr/share/flux-de-fichiers/frontend/pkg $D/pkg.new
+c=$(sudo docker create mrcryllix/forgearr:<étiquette>)
+sudo docker cp "$c":/usr/share/forgearr/frontend/index.html $D/index.html
+sudo docker cp "$c":/usr/share/forgearr/frontend/pkg $D/pkg.new
 sudo docker rm "$c"
 sudo rm -rf $D/pkg && sudo mv $D/pkg.new $D/pkg && sudo chown -R 10001:10001 $D/index.html $D/pkg
 ```
@@ -148,7 +148,7 @@ modifiante demande l'accord de l'utilisateur.
 
 1. **Vérifier la release** : PR de release-please fusionnée, image `X.Y.Z` présente sur Docker Hub, même
    digest que l'image `test-<sha>` validée.
-2. **Tirer l'image** sur `.50` et `.51` : `sudo docker pull mrcryllix/flux-de-fichiers:X.Y.Z`.
+2. **Tirer l'image** sur `.50` et `.51` : `sudo docker pull mrcryllix/forgearr:X.Y.Z`.
 3. **Enregistrer les configurations** (lecture seule, avant l'arrêt) :
    `sudo midclt call app.config '"flux-essai"' | sudo tee <dossier>/compose-flux-essai.avant-X.Y.Z.json`
    (`flux-essai-worker` sur `.51`, fichier `compose-flux-essai-worker.avant-X.Y.Z.json`, droits `600`).
@@ -173,7 +173,7 @@ de l'étape 5 est donc le seul moyen de revenir à la base précédente.
 
 1. Arrêter les deux applications (étape B).
 2. Centrale : `sudo rm -r arr-config && sudo mv arr-config.avant-0011 arr-config`, remettre l'image
-   `mrcryllix/flux-de-fichiers:latest` (ou la précédente) et recopier son `index.html` (étape E avec
+   `mrcryllix/forgearr:latest` (ou la précédente) et recopier son `index.html` (étape E avec
    l'ancienne image).
 3. Worker : restaurer `worker-secrets.bak-0.12.0`, remettre l'image `0.12.0`.
 4. Redémarrer (centrale d'abord).

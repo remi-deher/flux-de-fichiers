@@ -2,9 +2,9 @@
 
 use crate::route::Route;
 use chrono::{DateTime, Duration, Utc};
-use flux_shared::jobs::{Job, JobStatus};
-use flux_shared::plugins::CatalogEntry;
-use flux_shared::plugins::vocab::CatalogSection;
+use forgearr_shared::jobs::{Job, JobStatus};
+use forgearr_shared::plugins::CatalogEntry;
+use forgearr_shared::plugins::vocab::CatalogSection;
 use leptos::prelude::*;
 
 /// Critère proposé dans la feuille, avec ses choix.
@@ -289,7 +289,7 @@ pub fn FilterSheet(route: Signal<Route>) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::plugins::vocab::CatalogItemType;
+    use forgearr_shared::plugins::vocab::CatalogItemType;
 
     fn job_with_status(status: JobStatus) -> Result<Job, serde_json::Error> {
         let mut job: Job = serde_json::from_value(serde_json::json!({

@@ -6,8 +6,8 @@ use crate::{
     password, password_reset, repository, web_session,
 };
 use axum::{Json, extract::State, http::HeaderMap, response::Response};
-pub use flux_shared::system::{SetupRequest, SetupStatus};
-use flux_shared::{InstanceKind, Role};
+pub use forgearr_shared::system::{SetupRequest, SetupStatus};
+use forgearr_shared::{InstanceKind, Role};
 
 const INSTANCE_NAME_MAX_LEN: usize = 80;
 

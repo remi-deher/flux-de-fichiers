@@ -1,7 +1,7 @@
 //! État du fournisseur IA (dernier succès, dernière erreur) et cache de la liste des modèles.
 
 use chrono::{SecondsFormat, Utc};
-use flux_shared::ai::AiHealthError;
+use forgearr_shared::ai::AiHealthError;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, MutexGuard, PoisonError},

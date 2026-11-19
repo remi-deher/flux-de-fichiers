@@ -10,7 +10,7 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Key, KeyInit, Nonce,
     aead::{Aead, AeadCore, OsRng, Payload, rand_core::RngCore},
 };
-use flux_shared::system::{
+use forgearr_shared::system::{
     RECOVERY_KIT_FORMAT, RECOVERY_PASSPHRASE_MIN_LEN, RecoveryKdf, RecoveryKdfAlgorithm,
     RecoveryKit,
 };

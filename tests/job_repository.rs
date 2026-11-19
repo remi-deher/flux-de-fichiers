@@ -1,6 +1,6 @@
 //! Couverture directe des fonctions du dépôt jobs et flux.
 
-use flux_de_fichiers::{
+use forgearr::{
     domain::{JobErrorCode, JobStatus, LeaseRequest, MAX_ATTEMPTS, UpdateFlowRequest},
     error::AppError,
     repository,
@@ -395,13 +395,13 @@ async fn jobs_freeze_library_flow_record_steps_and_clear_output_explicitly() -> 
     let worker = repository::register(&pool, "w-lib").await?;
     let library = repository::insert_library(
         &pool,
-        flux_de_fichiers::domain::LibraryWrite {
+        forgearr::domain::LibraryWrite {
             name: "Séries".into(),
             flow_id: Some("flow.lib".into()),
-            workers: vec![flux_de_fichiers::domain::LibraryWorkerPath {
+            workers: vec![forgearr::domain::LibraryWorkerPath {
                 worker_id: worker.id,
                 local_path: "/srv/series".into(),
-                access: flux_de_fichiers::domain::LibraryAccess::ReadWrite,
+                access: forgearr::domain::LibraryAccess::ReadWrite,
             }],
             ..Default::default()
         },
@@ -453,12 +453,12 @@ async fn jobs_freeze_library_flow_record_steps_and_clear_output_explicitly() -> 
     repository::save_job_steps(
         &pool,
         job.id,
-        &[flux_de_fichiers::domain::JobStepEntry {
+        &[forgearr::domain::JobStepEntry {
             step_index: 0,
             node_id: "node-1".into(),
             block_kind: "encode".into(),
             operation_id: Some("ffmpeg.encode".into()),
-            status: flux_de_fichiers::domain::JobStepStatus::Succeeded,
+            status: forgearr::domain::JobStepStatus::Succeeded,
             message: Some("OK".into()),
             output_excerpt: Some("frame=10".into()),
         }],
@@ -601,7 +601,7 @@ async fn priority_cancellation_batch_concurrency_schedule_and_stats() -> anyhow:
         &pool,
         worker.id,
         2,
-        Some(&flux_de_fichiers::domain::WorkerSchedule {
+        Some(&forgearr::domain::WorkerSchedule {
             enabled: true,
             start_hour: blocked_start,
             end_hour: blocked_end,
@@ -624,7 +624,7 @@ async fn priority_cancellation_batch_concurrency_schedule_and_stats() -> anyhow:
     let (batch_cancel, events) = repository::batch_jobs(
         &pool,
         &[low.id, high.id],
-        flux_de_fichiers::domain::JobBatchAction::Cancel,
+        forgearr::domain::JobBatchAction::Cancel,
     )
     .await?;
     assert_eq!(batch_cancel.updated, 1);
@@ -633,7 +633,7 @@ async fn priority_cancellation_batch_concurrency_schedule_and_stats() -> anyhow:
     let (batch_del, _) = repository::batch_jobs(
         &pool,
         &[third.id, low.id],
-        flux_de_fichiers::domain::JobBatchAction::Delete,
+        forgearr::domain::JobBatchAction::Delete,
     )
     .await?;
     assert_eq!(batch_del.updated, 2);

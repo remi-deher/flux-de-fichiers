@@ -24,7 +24,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use flux_shared::{
+use forgearr_shared::{
     Permission, Role,
     mcp::{McpAuditListResponse, McpAuditOutcome},
 };
@@ -525,7 +525,7 @@ mod tests {
         body::Body,
         http::{Request, header},
     };
-    use flux_shared::Role;
+    use forgearr_shared::Role;
     use tower::ServiceExt;
 
     async fn test_app() -> anyhow::Result<(axum::Router, AppState, tempfile::TempDir)> {

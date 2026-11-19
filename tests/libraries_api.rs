@@ -4,7 +4,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use flux_de_fichiers::{
+use forgearr::{
     api::{AppState, router},
     config::Config,
 };
@@ -536,7 +536,7 @@ async fn library_automation_rules_filter_scan_and_persist() -> anyhow::Result<()
     assert_eq!(created["output_policy"], "replace_with_backup");
 
     // Avant le scan, la bibliothèque planifiée est due.
-    let due_before = flux_de_fichiers::repository::due_scheduled_libraries(&pool).await?;
+    let due_before = forgearr::repository::due_scheduled_libraries(&pool).await?;
     assert_eq!(due_before.len(), 1);
 
     let scan_resp = admin(
@@ -553,7 +553,7 @@ async fn library_automation_rules_filter_scan_and_persist() -> anyhow::Result<()
     assert_eq!(scan_json["createdFiles"], serde_json::json!(["movie.mkv"]));
 
     // Une fois scannée, elle n'est plus immédiatement due.
-    let due_after = flux_de_fichiers::repository::due_scheduled_libraries(&pool).await?;
+    let due_after = forgearr::repository::due_scheduled_libraries(&pool).await?;
     assert!(due_after.is_empty());
     Ok(())
 }

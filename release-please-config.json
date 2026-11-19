@@ -5,7 +5,7 @@
   "bump-minor-pre-major": true,
   "packages": {
     ".": {
-      "package-name": "flux-de-fichiers",
+      "package-name": "forgearr",
       "changelog-path": "CHANGELOG.md"
     }
   }

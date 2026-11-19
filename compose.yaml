@@ -1,5 +1,5 @@
 x-app: &app
-  image: flux-de-fichiers:${IMAGE_TAG:-local}
+  image: forgearr:${IMAGE_TAG:-local}
   restart: unless-stopped
   read_only: true
   tmpfs:
@@ -22,7 +22,7 @@ services:
       DATA_DIR: /data
       INPUT_DIR: /input
       LOG_DIR: /logs
-      STATIC_DIR: /usr/share/flux-de-fichiers/frontend
+      STATIC_DIR: /usr/share/forgearr/frontend
       # The scenario lab controls worker availability explicitly.
       LOCAL_WORKER: "false"
     volumes:
@@ -64,7 +64,7 @@ services:
     build:
       context: .
       dockerfile: deploy/fixtures.Dockerfile
-    image: flux-fixtures:local
+    image: forgearr-fixtures:local
     volumes:
       - ./var/input:/fixtures
     entrypoint: [ffmpeg]

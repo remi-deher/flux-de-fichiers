@@ -4,7 +4,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use flux_de_fichiers::{
+use forgearr::{
     api::{AppState, router},
     config::Config,
     flows::{self, ConditionConfig},
@@ -234,9 +234,7 @@ async fn test_flows_crud_and_default_protection() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn webhook_block_honors_fail_on_error() -> anyhow::Result<()> {
-    use flux_de_fichiers::flows::{
-        self, contract::HttpRuntime, http_runner::execute_http_operation,
-    };
+    use forgearr::flows::{self, contract::HttpRuntime, http_runner::execute_http_operation};
     use std::collections::HashMap;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -451,7 +449,7 @@ async fn test_resaving_a_masked_flow_keeps_the_stored_header() -> anyhow::Result
     save_webhook_flow(&app, "").await?;
     assert_eq!(stored_definition(&pool).await?, first);
 
-    let secrets = flux_de_fichiers::secrets::SecretBox::open(dir.path())?;
+    let secrets = forgearr::secrets::SecretBox::open(dir.path())?;
     let stored: serde_json::Value = serde_json::from_str(&first)?;
     let encrypted = stored["nodes"][1]["config"]["custom_headers"]["Authorization"]
         .as_str()

@@ -17,7 +17,7 @@ use crate::{
     tool_run::mask_log_secrets,
 };
 use axum::extract::{Json, Path, Query, State};
-use flux_shared::Permission;
+use forgearr_shared::Permission;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;

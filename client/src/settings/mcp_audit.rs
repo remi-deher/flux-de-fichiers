@@ -4,7 +4,7 @@ use crate::api;
 use crate::format;
 use crate::ui::search::{matches, query};
 use crate::ui::{Icon, IconName, SectionHeader};
-use flux_shared::mcp::{McpAuditListResponse, McpAuditOutcome};
+use forgearr_shared::mcp::{McpAuditListResponse, McpAuditOutcome};
 use leptos::prelude::*;
 
 const MCP_AUDIT_PATH: &str = "/api/v1/mcp/audit";

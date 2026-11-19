@@ -1,7 +1,7 @@
 use super::*;
 use crate::flows::OperationRegistry;
 use crate::plugins::{CatalogItemType, load_catalog, vocab::PluginCategory};
-use flux_shared::{
+use forgearr_shared::{
     base64,
     local::{
         CreateBlockTemplateRequest, CreateFlowTemplateRequest, CreateLocalPackRequest,

@@ -23,9 +23,9 @@ use axum::{
     response::Response,
     routing::{get, post, put},
 };
-use flux_shared::accounts::ChangePasswordRequest;
-use flux_shared::system::SetupStatus;
-use flux_shared::{InstanceKind, Permission};
+use forgearr_shared::accounts::ChangePasswordRequest;
+use forgearr_shared::system::SetupStatus;
+use forgearr_shared::{InstanceKind, Permission};
 use serde::Serialize;
 use std::{
     path::PathBuf,

@@ -2,7 +2,7 @@
 
 use crate::ui::{SectionHeader, StatusBadge};
 use crate::{api, workers::origin};
-use flux_shared::diagnostics::{
+use forgearr_shared::diagnostics::{
     CheckStatus, DiagnosticCheck, DiagnosticsReport, DiagnosticsRequest,
 };
 use leptos::prelude::*;

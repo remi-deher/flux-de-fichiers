@@ -8,7 +8,7 @@ use crate::flows::{
     },
     header_secrets::decrypt_headers,
 };
-use flux_shared::jobs::JobErrorCode;
+use forgearr_shared::jobs::JobErrorCode;
 use reqwest::{Client, Method};
 use serde_json::{Map, Value};
 use std::{collections::HashMap, path::Path, time::Duration};

@@ -109,18 +109,6 @@ pub const AUTH_CSS: &str = r#"
   margin-bottom: var(--space-3);
 }
 
-.auth-gate__logo {
-  display: inline-grid;
-  place-items: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: var(--radius-md);
-  background-color: var(--primary-fill);
-  color: var(--primary-contrast);
-  font-size: var(--font-size-xs);
-  font-weight: 800;
-}
-
 .auth-gate__name {
   font-weight: 700;
   color: var(--text-main);

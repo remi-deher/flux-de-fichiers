@@ -6,7 +6,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use flux_de_fichiers::{
+use forgearr::{
     api::{AppState, router},
     config::Config,
 };
@@ -65,7 +65,25 @@ async fn test_smoke_frontend_served() -> anyhow::Result<()> {
     assert_eq!(resp.status(), StatusCode::OK);
     let bytes = to_bytes(resp.into_body(), 1024 * 1024).await?;
     let body = String::from_utf8_lossy(&bytes);
-    assert!(body.contains("Flux de Fichiers"));
+    assert!(body.contains("Forgearr"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_smoke_forgearr_mark_served_as_svg() -> anyhow::Result<()> {
+    let app = test_app().await?;
+    let req = Request::builder()
+        .uri(forgearr_shared::brand::MARK_PATH)
+        .body(Body::empty())?;
+
+    let resp = app.oneshot(req).await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        resp.headers()[axum::http::header::CONTENT_TYPE],
+        "image/svg+xml"
+    );
+    let bytes = to_bytes(resp.into_body(), 4096).await?;
+    assert!(bytes.starts_with(b"<svg"));
     Ok(())
 }
 

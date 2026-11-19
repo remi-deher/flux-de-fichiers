@@ -4,14 +4,14 @@ use super::key_rotation::KeyRotationControl;
 use super::recovery_kit::{RecoveryKitControl, kit_state, kit_state_label};
 use crate::api;
 use crate::ui::{ProgressBar, SectionHeader};
-use flux_shared::format::format_bytes;
-use flux_shared::system::{KeySource, SystemStatus, UpdateCheckStatus, VolumeSpace};
+use forgearr_shared::format::format_bytes;
+use forgearr_shared::system::{KeySource, SystemStatus, UpdateCheckStatus, VolumeSpace};
 use leptos::prelude::*;
 
 const SYSTEM_UPDATES_PATH: &str = "/api/v1/system/updates";
 
 /// Version compilée dans l'interface WASM chargée dans le navigateur (témoin de cohérence : la
-/// version de la release affichée vient du serveur, voir `flux_de_fichiers::version`).
+/// version de la release affichée vient du serveur, voir `forgearr::version`).
 const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const SECONDS_PER_MINUTE: i64 = 60;
 const SECONDS_PER_HOUR: i64 = 60 * SECONDS_PER_MINUTE;
@@ -254,7 +254,7 @@ pub fn SystemSection(
                 <div class="settings-help-details__body">
                     <p class="form-help">
                         "Clé de chiffrement : le bouton « Renouveler la clé de chiffrement » suffit. En secours, central arrêté : "
-                        <code>"flux-de-fichiers rotate-secret"</code>
+                        <code>"forgearr rotate-secret"</code>
                         "."
                     </p>
                     <p class="form-help">

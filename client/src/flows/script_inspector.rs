@@ -5,8 +5,8 @@ use super::state::Editor;
 use crate::api;
 use crate::libraries::starter_script_code;
 use crate::ui::Toasts;
-use flux_shared::flows::FlowNode;
-use flux_shared::local::{
+use forgearr_shared::flows::FlowNode;
+use forgearr_shared::local::{
     LocalLibrarySnapshot, LocalScriptSummary, ScriptInterpreter, UpsertLocalScriptRequest,
 };
 use leptos::prelude::*;
@@ -380,7 +380,7 @@ pub fn ScriptBlockInspector(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::flows::FlowBlockKind;
+    use forgearr_shared::flows::FlowBlockKind;
 
     #[test]
     fn script_block_inspector_defaults_follow_node_config() {

@@ -8,7 +8,7 @@ use super::state::Editor;
 use crate::route::encode_segment;
 use crate::ui::{Registre, RegistreMessage};
 use crate::{api, format};
-use flux_shared::flows::{FlowGraph, FlowRecord, FlowVersionSummary};
+use forgearr_shared::flows::{FlowGraph, FlowRecord, FlowVersionSummary};
 use leptos::prelude::*;
 
 const FLOWS_PATH: &str = "/api/v1/flows";

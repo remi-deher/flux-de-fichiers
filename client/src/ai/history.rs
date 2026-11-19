@@ -2,7 +2,7 @@
 
 use crate::api;
 use crate::ui::Toasts;
-use flux_shared::ai::{
+use forgearr_shared::ai::{
     AiChatMessage, AiChatRole, AiConversation, AiConversationList, MAX_CHAT_MESSAGES,
 };
 use leptos::prelude::*;

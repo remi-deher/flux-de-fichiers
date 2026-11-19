@@ -2,7 +2,7 @@
 
 use super::system::{DetailGrid, DetailRow, duration_label};
 use crate::ui::SectionHeader;
-use flux_shared::system::{NetworkStatus, SystemStatus};
+use forgearr_shared::system::{NetworkStatus, SystemStatus};
 use leptos::prelude::*;
 
 fn tls_label(direct: bool) -> &'static str {
@@ -52,19 +52,19 @@ const SETTINGS_PATH: &str = "/api/v1/system/settings";
 const MIN_SESSION_TTL_SECONDS: i64 = 60;
 const MAX_SESSION_TTL_SECONDS: i64 = 2_592_000;
 
-fn tls_mode_value(tls: flux_shared::system::SmtpTls) -> &'static str {
+fn tls_mode_value(tls: forgearr_shared::system::SmtpTls) -> &'static str {
     match tls {
-        flux_shared::system::SmtpTls::None => "none",
-        flux_shared::system::SmtpTls::StartTls => "starttls",
-        flux_shared::system::SmtpTls::Tls => "tls",
+        forgearr_shared::system::SmtpTls::None => "none",
+        forgearr_shared::system::SmtpTls::StartTls => "starttls",
+        forgearr_shared::system::SmtpTls::Tls => "tls",
     }
 }
 
-fn parse_tls_mode(value: &str) -> flux_shared::system::SmtpTls {
+fn parse_tls_mode(value: &str) -> forgearr_shared::system::SmtpTls {
     match value {
-        "starttls" => flux_shared::system::SmtpTls::StartTls,
-        "tls" => flux_shared::system::SmtpTls::Tls,
-        _ => flux_shared::system::SmtpTls::None,
+        "starttls" => forgearr_shared::system::SmtpTls::StartTls,
+        "tls" => forgearr_shared::system::SmtpTls::Tls,
+        _ => forgearr_shared::system::SmtpTls::None,
     }
 }
 
@@ -92,7 +92,7 @@ struct SettingsFormInput<'a> {
 
 fn build_settings_request(
     input: &SettingsFormInput<'_>,
-) -> Result<flux_shared::system::UpdateSystemSettingsRequest, String> {
+) -> Result<forgearr_shared::system::UpdateSystemSettingsRequest, String> {
     let ttl: i64 = input
         .session_ttl
         .trim()
@@ -122,7 +122,7 @@ fn build_settings_request(
     } else {
         Some(input.smtp_password.to_owned())
     };
-    Ok(flux_shared::system::UpdateSystemSettingsRequest {
+    Ok(forgearr_shared::system::UpdateSystemSettingsRequest {
         web_origin: trimmed_optional(input.web_origin),
         session_ttl_seconds: ttl,
         smtp_enabled: input.smtp_enabled,
@@ -158,7 +158,7 @@ fn SettingsRuntimeForm(initial: SystemStatus, on_saved: Callback<()>) -> impl In
     let feedback = RwSignal::new(None::<String>);
 
     let save = Action::new_local(
-        move |req: &flux_shared::system::UpdateSystemSettingsRequest| {
+        move |req: &forgearr_shared::system::UpdateSystemSettingsRequest| {
             let body = req.clone();
             async move { crate::api::put::<_, SystemStatus>(SETTINGS_PATH, &body).await }
         },
@@ -206,7 +206,7 @@ fn SettingsRuntimeForm(initial: SystemStatus, on_saved: Callback<()>) -> impl In
             <div class="settings-form-grid">
                 <div class="form-group">
                     <label for="cfg-web-origin" class="form-label">"Origine web publique (WEB_ORIGIN)"</label>
-                    <input id="cfg-web-origin" class="form-input text-mono" placeholder="https://flux.exemple"
+                    <input id="cfg-web-origin" class="form-input text-mono" placeholder="https://forgearr.example"
                         prop:value=move || web_origin.get()
                         on:input=move |ev| web_origin.set(event_target_value(&ev)) />
                 </div>
@@ -251,7 +251,7 @@ fn SettingsRuntimeForm(initial: SystemStatus, on_saved: Callback<()>) -> impl In
                     </div>
                     <div class="form-group">
                         <label for="cfg-smtp-from" class="form-label">"Adresse d'expédition"</label>
-                        <input id="cfg-smtp-from" class="form-input" placeholder="Flux <noreply@flux.exemple>"
+                        <input id="cfg-smtp-from" class="form-input" placeholder="Forgearr <noreply@forgearr.example>"
                             prop:value=move || smtp_from.get()
                             on:input=move |ev| smtp_from.set(event_target_value(&ev)) />
                     </div>
@@ -412,7 +412,7 @@ mod tests {
         assert_eq!(kept.web_origin.as_deref(), Some("https://flux.ex"));
         assert_eq!(kept.session_ttl_seconds, 7200);
         assert_eq!(kept.smtp_port, Some(587));
-        assert_eq!(kept.smtp_tls, flux_shared::system::SmtpTls::StartTls);
+        assert_eq!(kept.smtp_tls, forgearr_shared::system::SmtpTls::StartTls);
         assert_eq!(kept.smtp_password, None);
         assert!(kept.allow_private_plugin_hosts);
         assert!(!kept.block_private_integration_hosts);
@@ -426,7 +426,7 @@ mod tests {
             ..Default::default()
         })?;
         assert_eq!(cleared.smtp_password, Some(String::new()));
-        assert_eq!(cleared.smtp_tls, flux_shared::system::SmtpTls::Tls);
+        assert_eq!(cleared.smtp_tls, forgearr_shared::system::SmtpTls::Tls);
         assert!(cleared.block_private_integration_hosts);
         Ok(())
     }

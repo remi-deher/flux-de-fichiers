@@ -13,7 +13,7 @@ use crate::{
     tool_run::{CommandSpec, ToolRunError, run_command},
     tools_cache::{ToolCacheManager, host_arch},
 };
-use flux_shared::jobs::JobErrorCode;
+use forgearr_shared::jobs::JobErrorCode;
 use serde_json::Value;
 use std::{
     collections::HashMap,

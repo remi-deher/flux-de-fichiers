@@ -44,10 +44,10 @@ ce qui **reste à faire**. À mettre à jour (ou supprimer) quand l'état change
 
 | Crate | Rôle |
 |---|---|
-| `.` (`flux-de-fichiers`) | Central et worker : API Axum, SQLite, moteur de flux, transferts |
-| `shared/` (`flux-shared`) | **Contrat** lu par le central et le client : tâches, flux (graphe, catalogue des blocs exécutables), bibliothèques, workers, plugins, comptes, session, système, chemins |
-| `client/` (`flux-client`) | Interface Leptos `csr` en WASM, un dossier par écran |
-| `frontend/` (`flux-frontend`) | Page `dist/index.html` et thème CSS typé ; rien d'autre |
+| `.` (`forgearr`) | Central et worker : API Axum, SQLite, moteur de flux, transferts |
+| `shared/` (`forgearr-shared`) | **Contrat** lu par le central et le client : tâches, flux (graphe, catalogue des blocs exécutables), bibliothèques, workers, plugins, comptes, session, système, chemins |
+| `client/` (`forgearr-client`) | Interface Leptos `csr` en WASM, un dossier par écran |
+| `frontend/` (`forgearr-frontend`) | Page `dist/index.html` et thème CSS typé ; rien d'autre |
 
 Écrans du client : accès et installation, vue d'ensemble, tâches, flux (éditeur), bibliothèques,
 workers, plugins, paramètres. Sur un worker : vue d'ensemble, tâches et plugins (lecture),
@@ -116,7 +116,7 @@ paramètres.
 - Secrets webhook / Arr déchiffrés voyagent dans le bail (à durcir si besoin).
 - Baux sans numéro d'époque (*fencing*) : un ancien worker peut encore répondre tard.
 - Requêtes SQL non vérifiées à la compilation (`query!` non adopté, voir l'audit).
-- `frontend/dist/index.html` est versionné : le régénérer (`cargo run -p flux-frontend`) après
+- `frontend/dist/index.html` est versionné : le régénérer (`cargo run -p forgearr-frontend`) après
   toute modification du thème ou de la page.
 
 ## Reste à faire (liste complète au 14 nov.)
@@ -197,7 +197,7 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 
 ## Production (NAS)
 
-**Déployé le 14 nov. 2026** : `mrcryllix/flux-de-fichiers:test-0c6de4f0a632` (PR #109 : gabarit
+**Déployé le 14 nov. 2026** : `mrcryllix/forgearr:test-0c6de4f0a632` (PR #109 : gabarit
 d'origine, #105, #106, #108) sur les deux hôtes. Vérifié : santé, WASM au bon contenu et sans
 cache, worker enregistré, porte d'accès affichée. Non vérifié : écrans connectés. Sauvegardes et
 retour arrière : journal de Rashin du 14 nov. (`*.avant-0c6de4f*`).

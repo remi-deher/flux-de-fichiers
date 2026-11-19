@@ -12,7 +12,9 @@ use crate::{
     repository,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use flux_shared::ai::{AiOauthAccount, AiOauthDeviceCode, AiOauthPollResponse, AiOauthPollStatus};
+use forgearr_shared::ai::{
+    AiOauthAccount, AiOauthDeviceCode, AiOauthPollResponse, AiOauthPollStatus,
+};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

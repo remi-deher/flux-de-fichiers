@@ -75,7 +75,7 @@ pub struct ToolDistribution {
     /// Date de publication de la Release immuable des artefacts.
     #[serde(
         default,
-        deserialize_with = "flux_shared::plugins::vocab::deserialize_optional_date",
+        deserialize_with = "forgearr_shared::plugins::vocab::deserialize_optional_date",
         skip_serializing_if = "Option::is_none"
     )]
     pub released_at: Option<chrono::NaiveDate>,

@@ -10,7 +10,7 @@ use crate::ui::search::{matches, query};
 use crate::ui::{
     Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
 };
-use flux_shared::plugins::{ToolStatus, ToolStatusSummary};
+use forgearr_shared::plugins::{ToolStatus, ToolStatusSummary};
 use leptos::prelude::*;
 
 /// Filtre 1-clic des outils via leur `StatStrip`.
@@ -314,7 +314,7 @@ pub fn ToolsSection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::plugins::vocab::CatalogCapability;
+    use forgearr_shared::plugins::vocab::CatalogCapability;
 
     fn tool(id: &str, status: ToolStatus) -> ToolStatusSummary {
         ToolStatusSummary {

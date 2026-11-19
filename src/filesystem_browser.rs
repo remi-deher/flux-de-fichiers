@@ -7,7 +7,7 @@ use crate::{
     },
     error::{AppError, AppResult},
 };
-use flux_shared::libraries::is_media_extension;
+use forgearr_shared::libraries::is_media_extension;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},

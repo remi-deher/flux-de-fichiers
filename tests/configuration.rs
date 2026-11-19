@@ -1,4 +1,4 @@
-use flux_de_fichiers::config::central_url;
+use forgearr::config::central_url;
 
 #[test]
 fn remote_central_requires_no_embedded_credentials() {
@@ -25,7 +25,7 @@ fn remote_central_requires_no_embedded_credentials() {
 
 #[test]
 fn admin_and_worker_roles_are_distinct() {
-    use flux_shared::{Permission, Role};
+    use forgearr_shared::{Permission, Role};
     assert!(Role::Admin.allows(Permission::ManageApiKeys));
     assert!(!Role::Admin.allows(Permission::WorkerProtocol));
     assert!(Role::Worker.allows(Permission::WorkerProtocol));

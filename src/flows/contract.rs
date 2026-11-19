@@ -9,7 +9,7 @@ use crate::{
     tool_run::{ProgressParser, ProgressStream},
     tools_cache::{ToolCacheManager, host_arch},
 };
-use flux_shared::{
+use forgearr_shared::{
     flows::{FlowGraph, FlowNode, FlowRecord},
     jobs::JobErrorCode,
 };
@@ -92,7 +92,7 @@ pub enum OperationRuntime {
     Script(ScriptRuntime),
 }
 
-pub use flux_shared::local::ScriptInterpreter;
+pub use forgearr_shared::local::ScriptInterpreter;
 
 /// Contrat d'exécution d'un script ou exécutable agnostique via `stdin`/`stdout` JSON (`kind: "script"`).
 #[derive(Clone, Debug, Deserialize, Serialize)]

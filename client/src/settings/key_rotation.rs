@@ -2,7 +2,7 @@
 
 use crate::api::{self, ApiError};
 use crate::sleep::sleep;
-use flux_shared::system::{KeySource, SystemStatus};
+use forgearr_shared::system::{KeySource, SystemStatus};
 use leptos::prelude::*;
 
 const ROTATE_PATH: &str = "/api/v1/system/secret-key/rotate";

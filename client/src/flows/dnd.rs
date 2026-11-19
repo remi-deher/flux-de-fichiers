@@ -1,7 +1,7 @@
 //! Glisser-déposer et opérations de câblage sur le graphe, validées par `FlowGraph`.
 
 use super::presentation::node_output_ports;
-use flux_shared::flows::{
+use forgearr_shared::flows::{
     FlowBlockKind, FlowConnection, FlowGraph, FlowNode, GraphError, OwnedBlockSpec, find_owned,
 };
 use serde_json::{Map, Value};
@@ -225,11 +225,13 @@ pub fn connect_checked(
             GraphError::InvalidPort
         });
     }
-    graph.connections.push(flux_shared::flows::FlowConnection {
-        from: from.to_owned(),
-        to: to.to_owned(),
-        port,
-    });
+    graph
+        .connections
+        .push(forgearr_shared::flows::FlowConnection {
+            from: from.to_owned(),
+            to: to.to_owned(),
+            port,
+        });
     Ok(())
 }
 
@@ -277,22 +279,26 @@ pub fn insert_on_branch(
     });
 
     graph.disconnect(&target.source_id, &target.port);
-    graph.connections.push(flux_shared::flows::FlowConnection {
-        from: target.source_id.clone(),
-        to: new_id.clone(),
-        port: target.port.clone(),
-    });
+    graph
+        .connections
+        .push(forgearr_shared::flows::FlowConnection {
+            from: target.source_id.clone(),
+            to: new_id.clone(),
+            port: target.port.clone(),
+        });
 
     if let Some(next_id) = previous_next
         && !spec.terminal
         && graph.node(&next_id).is_some()
     {
         let bridge_port = spec.ports.first().map(|(port, _)| port.clone());
-        graph.connections.push(flux_shared::flows::FlowConnection {
-            from: new_id.clone(),
-            to: next_id,
-            port: bridge_port,
-        });
+        graph
+            .connections
+            .push(forgearr_shared::flows::FlowConnection {
+                from: new_id.clone(),
+                to: next_id,
+                port: bridge_port,
+            });
     }
 
     Ok(new_id)

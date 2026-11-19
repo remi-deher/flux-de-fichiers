@@ -58,7 +58,7 @@ mod tests {
     fn test_all_styles_contains_tokens_and_base() {
         let styles = get_all_styles();
         assert!(styles.contains(":root {"));
-        assert!(styles.contains("--bg-app: #090b10;"));
+        assert!(styles.contains("--bg-app: #151416;"));
         assert!(styles.contains(".application-shell {"));
         assert!(styles.contains(".status-pill {"));
         assert!(styles.contains(".widget-grid {"));

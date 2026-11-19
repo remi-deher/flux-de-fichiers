@@ -7,7 +7,7 @@ use crate::{
     repository,
     secrets::{SecretBox, is_encrypted},
 };
-use flux_shared::ai::{
+use forgearr_shared::ai::{
     AiClientStatus, AiProvider, AiSettingsView, DEFAULT_MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS,
     MIN_TOOL_ROUNDS, UpdateAiSettingsRequest,
 };

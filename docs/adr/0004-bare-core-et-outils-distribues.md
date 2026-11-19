@@ -20,7 +20,7 @@ L'utilisateur a acté le choix de l'**Option B : Moteur Bare Core et distributio
 
 ### 1. Moteur « Bare Core »
 
-L'application `flux-de-fichiers` (coordinateur central et agents workers) est un **moteur nu (Bare Core)** :
+L'application `forgearr` (coordinateur central et agents workers) est un **moteur nu (Bare Core)** :
 - Aucun outil tiers de traitement média (`mkvtoolnix`, `ffmpeg`, etc.) n'est embarqué en dur dans l'image Docker applicative de production.
 - Le runtime applicatif se concentre strictement sur ses responsabilités fondamentales : API REST/TLS, persistance et baux PostgreSQL, orchestration distribuée, gestion des transferts de flux, contrôle d'intégrité cryptographique et interface de pilotage Leptos.
 - Le seul outil interne intégré au binaire est la **sonde système de télémétrie matérielle** (`app.internal.telemetry`).
@@ -67,7 +67,7 @@ Pour les flux de traitement nécessitant une suite d'opérations (par exemple in
 ## Conséquences
 
 ### Positives
-- **Légèreté et portabilité des conteneurs** : l'image applicative `flux-de-fichiers` est drastiquement réduite, débarrassée des paquets médias lourds.
+- **Légèreté et portabilité des conteneurs** : l'image applicative `forgearr` est drastiquement réduite, débarrassée des paquets médias lourds.
 - **Mise à jour sans interruption applicative** : un nouvel outil ou une nouvelle version d'outil est déployé par ajout dans le catalogue, sans redémarrer ni reconstruire les conteneurs du central ou des workers.
 - **Sécurité renforcée** : chaque artefact exécutable est authentifié cryptographiquement par SHA-256 et s'exécute sous un profil de privilèges minimal.
 - **Planification intelligente** : le coordinateur tire parti des métriques de la sonde pour orienter les charges vers les nœuds les plus aptes (disponibilité mémoire, présence d'accélérateurs).

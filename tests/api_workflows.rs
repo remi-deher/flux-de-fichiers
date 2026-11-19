@@ -6,7 +6,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use flux_de_fichiers::{
+use forgearr::{
     api::{AppState, router},
     config::Config,
     domain::{Claim, Failure, Job, JobErrorCode, JobStatus, LeaseRequest, Worker},
@@ -291,7 +291,7 @@ async fn test_storage_list_inputs_behavior() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn json_routes_reject_oversized_bodies_and_transfers_do_not() -> anyhow::Result<()> {
-    use flux_de_fichiers::api::{
+    use forgearr::api::{
         JSON_API_TIMEOUT, JSON_BODY_LIMIT, TRANSFER_TIMEOUT, is_long_running_route,
     };
 
@@ -433,8 +433,8 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
     // Vérifie le tampon SSE Last-Event-ID avant même de requêter en HTTP.
     let first_seq = state
         .event_history
-        .publish(flux_de_fichiers::domain::JobEvent {
-            event_type: flux_de_fichiers::domain::JobEventType::JobCreated,
+        .publish(forgearr::domain::JobEvent {
+            event_type: forgearr::domain::JobEventType::JobCreated,
             job_id: uuid::Uuid::new_v4(),
             status: JobStatus::Queued,
             timestamp: chrono::Utc::now(),
@@ -445,8 +445,8 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
         .await;
     let second_seq = state
         .event_history
-        .publish(flux_de_fichiers::domain::JobEvent {
-            event_type: flux_de_fichiers::domain::JobEventType::JobProgress,
+        .publish(forgearr::domain::JobEvent {
+            event_type: forgearr::domain::JobEventType::JobProgress,
             job_id: uuid::Uuid::new_v4(),
             status: JobStatus::Running,
             timestamp: chrono::Utc::now(),
@@ -621,7 +621,7 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
         )
         .await?;
     assert_eq!(resp.status(), StatusCode::OK);
-    let steps: Vec<flux_de_fichiers::domain::JobStepLog> =
+    let steps: Vec<forgearr::domain::JobStepLog> =
         serde_json::from_slice(&to_bytes(resp.into_body(), 1024 * 64).await?)?;
     assert_eq!(steps.len(), 1);
     assert_eq!(steps[0].node_id, "n1");
@@ -629,7 +629,7 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
     // 5. Suppression explicite de sortie terminée
     let output_file = output_dir.join("done.mkv");
     std::fs::write(&output_file, b"out")?;
-    flux_de_fichiers::repository::publish_succeeded(
+    forgearr::repository::publish_succeeded(
         &pool,
         job.id,
         &LeaseRequest {
@@ -638,7 +638,7 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
             lease_epoch: claim.lease_epoch,
             telemetry: None,
         },
-        flux_de_fichiers::repository::PublishedOutput {
+        forgearr::repository::PublishedOutput {
             name: "done.mkv",
             sha256: &"11".repeat(32),
             bytes: 3,

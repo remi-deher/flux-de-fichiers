@@ -826,11 +826,13 @@ async fn catalog_runtime_readiness_and_dependency_status_reflect_state() -> anyh
     // Avant configuration, `plugin.demo` requiert `apiKey` -> `needs_config`.
     let (status, catalog) = call(&h.app, "GET", "/api/v1/plugins", None).await?;
     assert_eq!(status, StatusCode::OK);
-    let entries = catalog.as_array().expect("catalog array");
+    let entries = catalog
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("catalog array missing"))?;
     let demo = entries
         .iter()
         .find(|e| e["id"] == PLUGIN_ID)
-        .expect("plugin.demo present");
+        .ok_or_else(|| anyhow::anyhow!("plugin.demo missing"))?;
     assert_eq!(demo["runtime"]["readiness"], "needs_config");
     assert_eq!(demo["runtime"]["hasSettings"], true);
     assert_eq!(demo["runtime"]["configured"], false);
@@ -839,7 +841,7 @@ async fn catalog_runtime_readiness_and_dependency_status_reflect_state() -> anyh
     let pack = entries
         .iter()
         .find(|e| e["id"] == "pack.suite")
-        .expect("pack.suite present");
+        .ok_or_else(|| anyhow::anyhow!("pack.suite missing"))?;
     assert_eq!(pack["runtime"]["componentsCount"], 1);
 
     // La fiche détaillée renseigne le statut réel de la dépendance `ffmpeg`.
@@ -862,10 +864,10 @@ async fn catalog_runtime_readiness_and_dependency_status_reflect_state() -> anyh
     assert_eq!(status, StatusCode::OK);
     let demo_after = catalog_after
         .as_array()
-        .expect("catalog array")
+        .ok_or_else(|| anyhow::anyhow!("catalog array missing"))?
         .iter()
         .find(|e| e["id"] == PLUGIN_ID)
-        .expect("plugin.demo present");
+        .ok_or_else(|| anyhow::anyhow!("plugin.demo missing"))?;
     assert_eq!(demo_after["runtime"]["readiness"], "ready");
     assert_eq!(demo_after["runtime"]["configured"], true);
 

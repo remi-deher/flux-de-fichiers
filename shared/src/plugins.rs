@@ -396,17 +396,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_entry_keeps_index_json_backward_compatible() {
+    fn catalog_entry_keeps_index_json_backward_compatible() -> Result<(), serde_json::Error> {
         let raw = r#"{"id":"sonarr","type":"plugin","version":"1.0.0","name":"Sonarr","manifestPath":"sonarr/manifest.json"}"#;
-        let entry: CatalogEntry = serde_json::from_str(raw).expect("deserialize");
+        let entry: CatalogEntry = serde_json::from_str(raw)?;
         assert!(entry.runtime.is_none());
 
-        let serialized = serde_json::to_string(&entry).expect("serialize");
+        let serialized = serde_json::to_string(&entry)?;
         assert!(!serialized.contains("runtime"));
+        Ok(())
     }
 
     #[test]
-    fn catalog_runtime_summary_and_dependency_status_round_trip() {
+    fn catalog_runtime_summary_and_dependency_status_round_trip() -> Result<(), serde_json::Error> {
         let summary = CatalogRuntimeSummary {
             readiness: CatalogReadiness::NeedsTools,
             has_settings: true,
@@ -415,20 +416,21 @@ mod tests {
             blocks_count: 3,
             components_count: 0,
         };
-        let json = serde_json::to_string(&summary).expect("serialize");
+        let json = serde_json::to_string(&summary)?;
         assert!(json.contains("\"readiness\":\"needs_tools\""));
-        let decoded: CatalogRuntimeSummary = serde_json::from_str(&json).expect("deserialize");
+        let decoded: CatalogRuntimeSummary = serde_json::from_str(&json)?;
         assert_eq!(decoded, summary);
 
         let dep_raw = r#"{"id":"ffmpeg","optional":false}"#;
-        let dep: PluginDependency = serde_json::from_str(dep_raw).expect("dep");
+        let dep: PluginDependency = serde_json::from_str(dep_raw)?;
         assert_eq!(dep.status, None);
 
         let dep_ready = PluginDependency {
             status: Some(ToolStatus::Ready),
             ..dep
         };
-        let dep_json = serde_json::to_string(&dep_ready).expect("dep serialize");
+        let dep_json = serde_json::to_string(&dep_ready)?;
         assert!(dep_json.contains("\"status\":\"ready\""));
+        Ok(())
     }
 }

@@ -471,19 +471,19 @@ mod tests {
     fn chain(catalog: &[OwnedBlockSpec]) -> (FlowGraph, String, String) {
         let mut graph = FlowGraph::default();
         let input = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             catalog,
         );
         let remux = graph.append(
-            FlowBlockKind::parse("block.video.remux-mkv"),
+            FlowBlockKind::parse("video.remux-mkv"),
             "Remux",
             json!({}),
             catalog,
         );
         graph.append(
-            FlowBlockKind::parse("block.core.file-output"),
+            FlowBlockKind::parse("essentiel.file-output"),
             "Fin",
             json!({}),
             catalog,
@@ -503,7 +503,7 @@ mod tests {
     fn a_palette_block_is_inserted_into_the_simple_link() {
         let catalog = test_catalog();
         let (graph, input, remux) = chain(&catalog);
-        let dropped = drop_outcome(&graph, &palette("block.core.webhook"), &input, &catalog);
+        let dropped = drop_outcome(&graph, &palette("essentiel.webhook"), &input, &catalog);
         let Ok(dropped) = dropped else {
             panic!("dépôt refusé");
         };
@@ -524,12 +524,12 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let input = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
         );
-        let dropped = drop_outcome(&graph, &palette("block.video.remux-mkv"), &input, &catalog);
+        let dropped = drop_outcome(&graph, &palette("video.remux-mkv"), &input, &catalog);
         assert_eq!(dropped.map(|d| d.graph.connections.len()), Ok(1));
     }
 
@@ -537,7 +537,7 @@ mod tests {
     fn a_block_without_input_is_refused_and_leaves_the_graph_alone() {
         let catalog = test_catalog();
         let (graph, input, _) = chain(&catalog);
-        let refused = drop_outcome(&graph, &palette("block.core.file-input"), &input, &catalog);
+        let refused = drop_outcome(&graph, &palette("essentiel.file-input"), &input, &catalog);
         assert!(refused.is_err());
     }
 
@@ -547,7 +547,7 @@ mod tests {
         let (graph, _, _) = chain(&catalog);
         let end = graph.nodes[2].id.clone();
         assert_eq!(
-            drop_outcome(&graph, &palette("block.core.webhook"), &end, &catalog),
+            drop_outcome(&graph, &palette("essentiel.webhook"), &end, &catalog),
             Err(NO_FREE_OUTPUT)
         );
     }
@@ -557,7 +557,7 @@ mod tests {
         let catalog = test_catalog();
         let (mut graph, input, remux) = chain(&catalog);
         let hook = graph.append(
-            FlowBlockKind::parse("block.core.webhook"),
+            FlowBlockKind::parse("essentiel.webhook"),
             "Hook",
             json!({}),
             &catalog,
@@ -599,25 +599,25 @@ mod tests {
         assert!(drop_outcome(&graph, &DragPayload::Card(input.clone()), &input, &catalog).is_err());
         let mut branching = FlowGraph::default();
         branching.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
         );
         let cond = branching.append(
-            FlowBlockKind::parse("block.core.condition"),
+            FlowBlockKind::parse("essentiel.condition"),
             "Si",
             json!({}),
             &catalog,
         );
         let yes = branching.append(
-            FlowBlockKind::parse("block.video.remux-mkv"),
+            FlowBlockKind::parse("video.remux-mkv"),
             "Oui",
             json!({}),
             &catalog,
         );
         let no = branching.append(
-            FlowBlockKind::parse("block.video.remux-mkv"),
+            FlowBlockKind::parse("video.remux-mkv"),
             "Non",
             json!({}),
             &catalog,
@@ -728,13 +728,13 @@ mod tests {
         let initial_len = graph.nodes.len();
         let mut tpl = FlowGraph::default();
         let n1 = tpl.append(
-            FlowBlockKind::parse("block.video.remux-mkv"),
+            FlowBlockKind::parse("video.remux-mkv"),
             "R",
             Value::Null,
             &catalog,
         );
         let n2 = tpl.append(
-            FlowBlockKind::parse("block.core.file-output"),
+            FlowBlockKind::parse("essentiel.file-output"),
             "Out",
             Value::Null,
             &catalog,

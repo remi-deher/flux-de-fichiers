@@ -51,6 +51,7 @@ pub(crate) fn tool_required_permissions(name: &str) -> &'static [Permission] {
         | "save_plugin_settings"
         | "test_plugin_connection"
         | "install_tool"
+        | "install_plugin"
         | "install_pack"
         | "upload_local_resource"
         | "upsert_local_script"
@@ -821,7 +822,7 @@ mod tests {
                 "params": {
                     "name": "save_plugin_settings",
                     "arguments": {
-                        "id": "plugin.radarr",
+                        "id": "radarr",
                         "settings": { "apiKey": "radarr-top-secret-key" }
                     }
                 }
@@ -873,7 +874,7 @@ mod tests {
         assert_eq!(audit_json["total"], 3);
         let text_dump = audit_json.to_string();
         assert!(!text_dump.contains("radarr-top-secret-key"));
-        assert!(text_dump.contains("plugin.radarr"));
+        assert!(text_dump.contains("radarr"));
 
         let filtered = app
             .clone()

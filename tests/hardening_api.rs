@@ -40,16 +40,16 @@ fn write_plugin_catalog(root: &Path) -> anyhow::Result<()> {
             "schemaVersion": "1.0.0",
             "entries": [
                 {
-                    "id": "plugin.core",
+                    "id": "essentiel",
                     "type": "plugin",
                     "version": "1.0.0",
                     "name": "Noyau",
                     "manifestPath": "plugins/core/manifest.json"
                 },
                 {
-                    "id": "block.core.webhook",
+                    "id": "essentiel.webhook",
                     "type": "block",
-                    "owner": "plugin.core",
+                    "owner": "essentiel",
                     "version": "1.0.0",
                     "name": "Webhook",
                     "manifestPath": "plugins/core/blocks/webhook.json"
@@ -62,7 +62,7 @@ fn write_plugin_catalog(root: &Path) -> anyhow::Result<()> {
         root.join("plugins/core/manifest.json"),
         serde_json::json!({
             "schemaVersion": "1.1.0",
-            "id": "plugin.core",
+            "id": "essentiel",
             "type": "plugin",
             "version": "1.0.0",
             "name": "Noyau",
@@ -83,7 +83,7 @@ fn write_plugin_catalog(root: &Path) -> anyhow::Result<()> {
         root.join("plugins/core/blocks/webhook.json"),
         serde_json::json!({
             "schemaVersion": "1.1.0",
-            "id": "block.core.webhook",
+            "id": "essentiel.webhook",
             "aliases": ["webhook"],
             "version": "1.0.0",
             "name": "Webhook",
@@ -101,13 +101,13 @@ fn write_plugin_catalog(root: &Path) -> anyhow::Result<()> {
             "id": "operation.core.webhook",
             "version": "1.0.0",
             "name": "Webhook",
-            "providerId": "plugin.core",
+            "providerId": "essentiel",
             "providerKind": "plugin",
             "capability": "notification",
             "status": "validated",
             "runtime": {
                 "kind": "http",
-                "settingsPluginId": "plugin.core",
+                "settingsPluginId": "essentiel",
                 "requiredSettings": ["endpoint", "token"],
                 "steps": [{
                     "url": "{$settings.endpoint}",
@@ -256,7 +256,7 @@ async fn lease_epoch_fences_all_worker_job_routes() -> anyhow::Result<()> {
                 "steps": [{
                     "step_index": 0,
                     "node_id": "n1",
-                    "block_kind": "block.core.file-input",
+                    "block_kind": "essentiel.file-input",
                     "status": "succeeded"
                 }],
             })),
@@ -311,7 +311,7 @@ async fn claim_seals_plugin_and_webhook_secrets_for_the_worker_only() -> anyhow:
     let (st, _) = json_call(
         &h.app,
         "PUT",
-        "/api/v1/plugins/plugin.core/settings",
+        "/api/v1/plugins/essentiel/settings",
         Some(common::ADMIN_KEY),
         Some(serde_json::json!({
             "endpoint": "https://hooks.example/run",
@@ -325,7 +325,7 @@ async fn claim_seals_plugin_and_webhook_secrets_for_the_worker_only() -> anyhow:
         "format": 1,
         "nodes": [{
             "id": "hook-1",
-            "type": "block.core.webhook",
+            "type": "essentiel.webhook",
             "name": "Webhook",
             "config": {
                 "url": "https://hooks.example/event",
@@ -403,7 +403,7 @@ async fn claim_seals_plugin_and_webhook_secrets_for_the_worker_only() -> anyhow:
     unseal_claim_secrets_for_worker(&mut claim, common::WORKER_KEY)?;
     assert!(claim.sealed_secrets.is_none());
     assert_eq!(
-        claim.plugin_configs["plugin.core"]["token"],
+        claim.plugin_configs["essentiel"]["token"],
         "PLUGIN-TOP-SECRET"
     );
     let def_clear = claim

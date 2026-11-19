@@ -112,6 +112,36 @@ pub fn migrate_plaintext(
     Ok(changed.then_some(Value::Object(object)))
 }
 
+/// Réécrit les champs chiffrés d'un enregistrement de réglages avec `rewrite`, qui renvoie la
+/// nouvelle valeur ou `None` pour laisser le champ intact. Renvoie les réglages réécrits et le
+/// nombre de valeurs changées, ou `None` si rien n'a changé.
+fn rewrite_encrypted_fields(
+    stored: &str,
+    mut rewrite: impl FnMut(&str, &str) -> AppResult<Option<String>>,
+) -> AppResult<Option<(String, usize)>> {
+    let Ok(mut value) = serde_json::from_str::<Value>(stored) else {
+        return Ok(None);
+    };
+    let Some(object) = value.as_object_mut() else {
+        return Ok(None);
+    };
+    let mut rewritten = 0;
+    for (name, field) in object.iter_mut() {
+        let Some(text) = field.as_str().filter(|text| is_encrypted(text)) else {
+            continue;
+        };
+        if let Some(next) = rewrite(name, text)? {
+            *field = Value::String(next);
+            rewritten += 1;
+        }
+    }
+    if rewritten == 0 {
+        return Ok(None);
+    }
+    let serialized = serde_json::to_string(&value).map_err(|_| AppError::Invalid)?;
+    Ok(Some((serialized, rewritten)))
+}
+
 /// Re-chiffre avec la nouvelle clé les secrets d'un enregistrement de réglages ; `None` s'il n'y en a pas.
 /// Renvoie les réglages réécrits et le nombre de valeurs changées.
 pub fn rotate_settings(
@@ -120,27 +150,32 @@ pub fn rotate_settings(
     plugin_id: &str,
     stored: &str,
 ) -> AppResult<Option<(String, usize)>> {
-    let Ok(mut value) = serde_json::from_str::<Value>(stored) else {
-        return Ok(None);
-    };
-    let Some(object) = value.as_object_mut() else {
-        return Ok(None);
-    };
-    let mut rotated = 0;
-    for (name, field) in object.iter_mut() {
-        let Some(text) = field.as_str().filter(|text| is_encrypted(text)) else {
-            continue;
-        };
+    rewrite_encrypted_fields(stored, |name, text| {
         let aad = plugin_secret_aad(plugin_id, name);
         let plaintext = old.decrypt(text, &aad)?;
-        *field = Value::String(new.encrypt(&plaintext, &aad)?);
-        rotated += 1;
-    }
-    if rotated == 0 {
-        return Ok(None);
-    }
-    let rewritten = serde_json::to_string(&value).map_err(|_| AppError::Invalid)?;
-    Ok(Some((rewritten, rotated)))
+        Ok(Some(new.encrypt(&plaintext, &aad)?))
+    })
+}
+
+/// Rescelle sous l'identifiant actuel `plugin_id` les secrets encore liés à son ancien
+/// identifiant `legacy_id`. Une valeur déjà à jour, ou qui ne se déchiffre sous aucun des deux,
+/// est laissée telle quelle : l'opération est idempotente et ne perd rien.
+pub fn reseal_legacy_settings(
+    secrets: &SecretBox,
+    plugin_id: &str,
+    legacy_id: &str,
+    stored: &str,
+) -> AppResult<Option<(String, usize)>> {
+    rewrite_encrypted_fields(stored, |name, text| {
+        let current = plugin_secret_aad(plugin_id, name);
+        if secrets.decrypt(text, &current).is_ok() {
+            return Ok(None);
+        }
+        match secrets.decrypt(text, &plugin_secret_aad(legacy_id, name)) {
+            Ok(plaintext) => Ok(Some(secrets.encrypt(&plaintext, &current)?)),
+            Err(_) => Ok(None),
+        }
+    })
 }
 
 /// Réglages sans les secrets, et noms des secrets qui ont une valeur enregistrée.
@@ -177,6 +212,42 @@ pub fn decrypt_all(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn reseal_legacy_settings_moves_secrets_to_the_new_identifier_once() -> AppResult<()> {
+        let dir = tempfile::tempdir()?;
+        let secrets = SecretBox::open(dir.path())?;
+        let other_dir = tempfile::tempdir()?;
+        let other = SecretBox::open(other_dir.path())?;
+        let legacy = secrets.encrypt("cle-api", &plugin_secret_aad("plugin.sonarr", "apiKey"))?;
+        let current = secrets.encrypt("jeton", &plugin_secret_aad("sonarr", "token"))?;
+        let foreign = other.encrypt("autre", &plugin_secret_aad("plugin.sonarr", "secret"))?;
+        let stored = json!({
+            "url": "http://sonarr:8989",
+            "apiKey": legacy,
+            "token": current,
+            "secret": foreign,
+        })
+        .to_string();
+
+        let (resealed, count) =
+            reseal_legacy_settings(&secrets, "sonarr", "plugin.sonarr", &stored)?
+                .ok_or(AppError::Invalid)?;
+        assert_eq!(count, 1);
+        let value: Value = serde_json::from_str(&resealed).map_err(|_| AppError::Invalid)?;
+        let plain = decrypt_all(
+            &secrets,
+            "sonarr",
+            &json!({ "apiKey": value["apiKey"], "token": value["token"] }),
+        )?;
+        assert_eq!(plain["apiKey"], "cle-api");
+        assert_eq!(plain["token"], "jeton");
+        assert_eq!(value["url"], "http://sonarr:8989");
+        assert_eq!(value["secret"], json!(foreign));
+
+        assert!(reseal_legacy_settings(&secrets, "sonarr", "plugin.sonarr", &resealed)?.is_none());
+        Ok(())
+    }
 
     const PLUGIN: &str = "plugin.demo";
 

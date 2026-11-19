@@ -197,7 +197,7 @@ mod tests {
             dir.path().join("index.json"),
             r#"{"schemaVersion":"1.0.0","entries":[
                 {"id":"plugin.a","type":"plugin","version":"1.0.0","name":"A","manifestPath":"a.json"},
-                {"id":"app.mkvtoolnix","type":"app","version":"2.1.0","name":"MKV","manifestPath":"mkv.json"}
+                {"id":"mkvtoolnix","type":"app","version":"2.1.0","name":"MKV","manifestPath":"mkv.json"}
             ]}"#,
         )?;
         // Sans invalidation, le cache garde la vue précédente.
@@ -206,7 +206,7 @@ mod tests {
         cache.invalidate().await;
         assert_eq!(cache.exposed_catalog(&roots).await.len(), 2);
         assert_eq!(
-            cache.resolve_tool_version(&roots, "app.mkvtoolnix").await,
+            cache.resolve_tool_version(&roots, "mkvtoolnix").await,
             "2.1.0"
         );
         Ok(())

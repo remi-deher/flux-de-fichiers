@@ -76,30 +76,40 @@ pub async fn install_tool(
     State(s): State<AppState>,
     Path(id): Path<String>,
     _auth: ManagePluginsAuth,
-) -> AppResult<Json<Value>> {
+) -> AppResult<Json<plugins::DependencyInstallResult>> {
+    install_catalog_item(&s, &id, plugins::CatalogItemType::App).await
+}
+
+/// Installe les outils requis par un plugin (dépendances transitives comprises).
+pub async fn install_plugin(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    _auth: ManagePluginsAuth,
+) -> AppResult<Json<plugins::DependencyInstallResult>> {
+    install_catalog_item(&s, &id, plugins::CatalogItemType::Plugin).await
+}
+
+/// Installe une pièce du catalogue du type attendu et ses outils requis.
+async fn install_catalog_item(
+    s: &AppState,
+    id: &str,
+    expected: plugins::CatalogItemType,
+) -> AppResult<Json<plugins::DependencyInstallResult>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    let entry = plugins::list_catalog(&roots)
-        .into_iter()
-        .find(|entry| entry.id == id)
-        .ok_or(AppError::NotFound)?;
+    if !plugins::list_catalog(&roots)
+        .iter()
+        .any(|entry| entry.id == id && entry.entry_type == expected)
+    {
+        return Err(AppError::NotFound);
+    }
     let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
     let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
         .await
         .sync_policy();
-    plugins::ensure_tool_installed_verified(
-        &s.pool,
-        &roots,
-        &cache_mgr,
-        &entry.id,
-        &entry.version,
-        &sync_policy,
-    )
-    .await?;
-    Ok(Json(serde_json::json!({
-        "id": entry.id,
-        "version": entry.version,
-        "status": "ready",
-    })))
+    let result =
+        plugins::install_with_dependencies(Some(&s.pool), &roots, &cache_mgr, &sync_policy, id)
+            .await?;
+    Ok(Json(result))
 }
 
 fn parse_saved(raw: Option<&str>) -> Value {
@@ -243,9 +253,9 @@ pub async fn test_connection(
     };
 
     let (probe_path, auth_header) = match id.as_str() {
-        "plugin.sonarr" | "plugin.radarr" => ("/api/v3/system/status", Some("X-Api-Key")),
-        "plugin.jellyfin" | "plugin.emby" => ("/System/Info", Some("X-Emby-Token")),
-        "plugin.plex" => ("/identity", Some("X-Plex-Token")),
+        "sonarr" | "radarr" => ("/api/v3/system/status", Some("X-Api-Key")),
+        "jellyfin" | "emby" => ("/System/Info", Some("X-Emby-Token")),
+        "plex" => ("/identity", Some("X-Plex-Token")),
         _ => ("", None),
     };
     let target_url = if probe_path.is_empty() {

@@ -320,10 +320,10 @@ mod tests {
         let catalog = flow_block_catalog(std::slice::from_ref(&root));
         let encode = catalog
             .iter()
-            .find(|spec| spec.kind == "block.video.encode")
+            .find(|spec| spec.kind == "video.encode")
             .ok_or_else(|| anyhow::anyhow!("bloc d'encodage vidéo absent"))?;
         assert!(encode.from_plugin);
-        assert_eq!(encode.owner.as_deref(), Some("plugin.video"));
+        assert_eq!(encode.owner.as_deref(), Some("video"));
         assert!(
             encode
                 .fields
@@ -332,14 +332,14 @@ mod tests {
                     && matches!(field.kind, OwnedFieldKind::Select(_)))
         );
         for expected in [
-            "block.core.file-input",
-            "block.core.condition",
-            "block.metadata.mkvpropedit",
-            "block.audio.encode",
-            "block.sonarr.rescan",
-            "block.radarr.rename",
-            "block.core.webhook",
-            "block.core.file-output",
+            "essentiel.file-input",
+            "essentiel.condition",
+            "video.mkvpropedit",
+            "audio.encode",
+            "sonarr.rescan",
+            "radarr.rename",
+            "essentiel.webhook",
+            "essentiel.file-output",
         ] {
             assert!(
                 catalog
@@ -350,17 +350,17 @@ mod tests {
         }
         let input = catalog
             .iter()
-            .find(|spec| spec.kind == "block.core.file-input")
+            .find(|spec| spec.kind == "essentiel.file-input")
             .ok_or_else(|| anyhow::anyhow!("file-input absent"))?;
         assert!(!input.has_input);
         let condition = catalog
             .iter()
-            .find(|spec| spec.kind == "block.core.condition")
+            .find(|spec| spec.kind == "essentiel.condition")
             .ok_or_else(|| anyhow::anyhow!("condition absente"))?;
         assert_eq!(condition.ports.len(), 2);
         let output = catalog
             .iter()
-            .find(|spec| spec.kind == "block.core.file-output")
+            .find(|spec| spec.kind == "essentiel.file-output")
             .ok_or_else(|| anyhow::anyhow!("file-output absent"))?;
         assert!(output.terminal);
         assert!(

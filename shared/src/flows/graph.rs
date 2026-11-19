@@ -268,18 +268,18 @@ mod tests {
 
     fn test_catalog() -> Vec<OwnedBlockSpec> {
         vec![
-            spec("block.core.file-input", false, &[], false),
-            spec("block.core.condition", true, &["true", "false"], false),
-            spec("block.video.remux-mkv", true, &[], false),
-            spec("block.core.webhook", true, &[], false),
-            spec("block.core.file-output", true, &[], true),
+            spec("essentiel.file-input", false, &[], false),
+            spec("essentiel.condition", true, &["true", "false"], false),
+            spec("video.remux-mkv", true, &[], false),
+            spec("essentiel.webhook", true, &[], false),
+            spec("essentiel.file-output", true, &[], true),
         ]
     }
 
     fn chain(catalog: &[OwnedBlockSpec]) -> FlowGraph {
         let mut graph = FlowGraph::default();
-        graph.append("block.core.file-input".into(), "Entrée", json!({}), catalog);
-        graph.append("block.core.condition".into(), "HEVC ?", json!({}), catalog);
+        graph.append("essentiel.file-input".into(), "Entrée", json!({}), catalog);
+        graph.append("essentiel.condition".into(), "HEVC ?", json!({}), catalog);
         graph
     }
 
@@ -296,7 +296,7 @@ mod tests {
             }]
         );
         // La condition n'a que des sorties nommées : le bloc suivant n'est pas relié d'office.
-        let after = graph.append("block.video.remux-mkv".into(), "Remux", json!({}), &catalog);
+        let after = graph.append("video.remux-mkv".into(), "Remux", json!({}), &catalog);
         assert_eq!(graph.incoming(&after).count(), 0);
         assert_eq!(after, "node-3");
     }
@@ -305,8 +305,8 @@ mod tests {
     fn connect_checks_ports_duplicates_and_cycles() {
         let catalog = test_catalog();
         let mut graph = chain(&catalog);
-        let yes = graph.append("block.video.remux-mkv".into(), "Oui", json!({}), &catalog);
-        let no = graph.append("block.core.file-output".into(), "Fin", json!({}), &catalog);
+        let yes = graph.append("video.remux-mkv".into(), "Oui", json!({}), &catalog);
+        let no = graph.append("essentiel.file-output".into(), "Fin", json!({}), &catalog);
         assert_eq!(
             graph.connect("node-2", Some("true".into()), &yes, &catalog),
             Ok(())
@@ -336,12 +336,12 @@ mod tests {
             Err(GraphError::InvalidPort)
         );
         let mut looped = chain(&catalog);
-        let a = looped.append("block.video.remux-mkv".into(), "A", json!({}), &catalog);
+        let a = looped.append("video.remux-mkv".into(), "A", json!({}), &catalog);
         assert_eq!(
             looped.connect("node-2", Some("false".into()), &a, &catalog),
             Ok(())
         );
-        let b = looped.append("block.video.remux-mkv".into(), "B", json!({}), &catalog);
+        let b = looped.append("video.remux-mkv".into(), "B", json!({}), &catalog);
         assert_eq!(
             looped.connect(&b, None, "node-2", &catalog),
             Err(GraphError::Cycle)
@@ -357,12 +357,12 @@ mod tests {
     fn remove_bridges_a_simple_link_and_keeps_the_port() {
         let catalog = test_catalog();
         let mut graph = chain(&catalog);
-        let middle = graph.append("block.video.remux-mkv".into(), "Remux", json!({}), &catalog);
+        let middle = graph.append("video.remux-mkv".into(), "Remux", json!({}), &catalog);
         assert_eq!(
             graph.connect("node-2", Some("false".into()), &middle, &catalog),
             Ok(())
         );
-        let end = graph.append("block.core.file-output".into(), "Fin", json!({}), &catalog);
+        let end = graph.append("essentiel.file-output".into(), "Fin", json!({}), &catalog);
         graph.remove(&middle);
         assert_eq!(
             graph
@@ -387,9 +387,9 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = chain(&catalog);
         for (kind, name) in [
-            ("block.video.remux-mkv", "Oui"),
-            ("block.core.webhook", "Non"),
-            ("block.core.file-output", "Fin"),
+            ("video.remux-mkv", "Oui"),
+            ("essentiel.webhook", "Non"),
+            ("essentiel.file-output", "Fin"),
         ] {
             graph.append(kind.into(), name, json!({}), &catalog);
         }
@@ -434,7 +434,7 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let id = graph.append(
-            FlowBlockKind::parse("block.scripts.run"),
+            FlowBlockKind::parse("scripts.run"),
             "Script",
             serde_json::json!({"mode": "inline", "routing": "single"}),
             &catalog,

@@ -106,7 +106,13 @@ pub fn tools() -> Vec<McpTool> {
         ),
         McpTool::write(
             "install_tool",
-            "Télécharge, vérifie (SHA-256) et installe une application distribuée dans le cache.",
+            "Télécharge, vérifie (SHA-256) et installe une application distribuée et ses dépendances.",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+            true,
+        ),
+        McpTool::write(
+            "install_plugin",
+            "Installe les applications requises par un plugin (dépendances transitives comprises).",
             obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
             true,
         ),
@@ -388,6 +394,19 @@ pub async fn call(
                 Err(msg) => return Some(McpToolResult::error(msg)),
             };
             plugins::install_tool(
+                State(state.clone()),
+                Path(id),
+                ManagePluginsAuth(principal.clone()),
+            )
+            .await
+            .map(|Json(v)| McpToolResult::json(&v))
+        }
+        "install_plugin" => {
+            let id = match req_str(&args, "id") {
+                Ok(id) => id.to_owned(),
+                Err(msg) => return Some(McpToolResult::error(msg)),
+            };
+            plugins::install_plugin(
                 State(state.clone()),
                 Path(id),
                 ManagePluginsAuth(principal.clone()),

@@ -1,6 +1,7 @@
 //! Vocabulaire fermé du catalogue. Le dépôt de plugins tranche pour `type` et
 //! `capability` ; la catégorie appartient à Flux.
 
+use chrono::NaiveDate;
 use serde::Deserializer;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -264,6 +265,19 @@ where
         None => Ok(None),
     }
 }
+
+/// Date de catalogue (`AAAA-MM-JJ`) : une valeur absente ou mal formée devient `None`
+/// plutôt que de rejeter toute la fiche d'un dépôt tiers.
+pub fn deserialize_optional_date<'de, D>(deserializer: D) -> Result<Option<NaiveDate>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?
+        .and_then(|raw| NaiveDate::parse_from_str(&raw, CATALOG_DATE_FORMAT).ok()))
+}
+
+/// Format des dates de catalogue (`updatedAt`, `releasedAt`).
+pub const CATALOG_DATE_FORMAT: &str = "%Y-%m-%d";
 
 /// Catégorie et tags lus sur un document de catalogue, sans exiger un manifeste complet.
 #[derive(Clone, Debug, PartialEq, Eq)]

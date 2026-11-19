@@ -1,6 +1,6 @@
 //! Installation d'un outil distribué dans le cache local, d'après son contrat de distribution.
 
-use super::{SyncPolicy, is_mutable_branch_url, sync::fetch_archive};
+use super::{CatalogItemType, SyncPolicy, is_mutable_branch_url, sync::fetch_archive};
 use crate::{
     error::{AppError, AppResult},
     tools_cache::{ToolArtifact, ToolCacheManager, ToolDistribution, host_arch},
@@ -60,13 +60,8 @@ pub fn artifact_for_host(distribution: &ToolDistribution) -> Option<&ToolArtifac
 
 /// Contrat de distribution d'un outil, lu dans le premier dossier de catalogue qui le porte.
 pub fn read_distribution(roots: &[PathBuf], tool_id: &str) -> AppResult<serde_json::Value> {
-    let candidates = distribution_lookup_names(tool_id);
-    if candidates.is_empty() {
-        return Err(AppError::NotFound);
-    }
     for root in roots {
-        for name in &candidates {
-            let path = distribution_path(root, name);
+        for path in distribution_candidates(root, tool_id) {
             if path.is_file() {
                 let content = std::fs::read_to_string(&path)?;
                 return serde_json::from_str(&content)
@@ -77,15 +72,24 @@ pub fn read_distribution(roots: &[PathBuf], tool_id: &str) -> AppResult<serde_js
     Err(AppError::NotFound)
 }
 
-/// Noms de dossier possibles pour un outil (`app.ffmpeg` → `ffmpeg`).
-fn distribution_lookup_names(tool_id: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    for stripped in [tool_id.trim_start_matches("app."), tool_id] {
-        if super::is_valid_repository_id(stripped) && !names.iter().any(|name| name == stripped) {
-            names.push(stripped.to_owned());
-        }
+/// Emplacements possibles du contrat : à côté du manifeste indexé (dossier libre, dépôts
+/// tiers compris), puis `apps/<identifiant>` pour un dossier sans index.
+fn distribution_candidates(root: &Path, tool_id: &str) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(catalog) = super::load_catalog(root)
+        && let Some(entry) = catalog
+            .entries
+            .iter()
+            .find(|entry| entry.entry_type == CatalogItemType::App && entry.id == tool_id)
+        && ToolCacheManager::is_safe_relative_path(Path::new(&entry.manifest_path))
+        && let Some(folder) = Path::new(&entry.manifest_path).parent()
+    {
+        candidates.push(root.join(folder).join(DISTRIBUTION_FILE_NAME));
     }
-    names
+    if super::is_valid_repository_id(tool_id) {
+        candidates.push(distribution_path(root, tool_id));
+    }
+    candidates
 }
 
 /// Télécharge, vérifie (SHA-256) et installe l'artefact de cet hôte. Sans effet si l'outil est déjà prêt.
@@ -300,7 +304,7 @@ mod tests {
     fn distribution(address: std::net::SocketAddr, archive_sha256: String) -> ToolDistribution {
         ToolDistribution {
             schema_version: Some("1.0.0".into()),
-            tool_id: "app.demo".into(),
+            tool_id: "demo".into(),
             tool_version: "1.0.0".into(),
             release_status: None,
             distribution_mode: "autonomous-binary".into(),
@@ -315,6 +319,7 @@ mod tests {
                 binaries: std::collections::HashMap::new(),
                 permissions: None,
             }],
+            released_at: None,
         }
     }
 
@@ -332,7 +337,7 @@ mod tests {
 
         let binary = install_from_distribution(&cache, &contract, &policy).await?;
         assert!(binary.is_file());
-        assert!(cache.is_ready("app.demo", "1.0.0", host_arch()));
+        assert!(cache.is_ready("demo", "1.0.0", host_arch()));
 
         let again = install_from_distribution(&cache, &contract, &policy).await?;
         assert_eq!(binary, again);
@@ -353,7 +358,7 @@ mod tests {
 
         let result = install_from_distribution(&cache, &contract, &policy).await;
         assert!(matches!(result, Err(AppError::ChecksumMismatch { .. })));
-        assert!(!cache.is_ready("app.demo", "1.0.0", host_arch()));
+        assert!(!cache.is_ready("demo", "1.0.0", host_arch()));
         Ok(())
     }
 
@@ -381,6 +386,28 @@ mod tests {
     }
 
     #[test]
+    fn read_distribution_follows_the_indexed_manifest_folder() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join("apps/handbrake"))?;
+        std::fs::write(
+            root.join("index.json"),
+            r#"{"schemaVersion":"1.0.0","entries":[{"id":"com.alice.handbrake","type":"app",
+                "version":"1.0.0","name":"HandBrake","manifestPath":"apps/handbrake/manifest.json"}]}"#,
+        )?;
+        std::fs::write(
+            root.join("apps/handbrake").join(DISTRIBUTION_FILE_NAME),
+            r#"{"toolId":"com.alice.handbrake","toolVersion":"1.0.0","artifacts":[]}"#,
+        )?;
+        let roots = vec![root];
+        assert_eq!(
+            read_distribution(&roots, "com.alice.handbrake")?["toolId"],
+            "com.alice.handbrake"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_read_distribution_refuses_unsafe_names_and_reads_synced_contracts() -> anyhow::Result<()>
     {
         let dir = tempfile::tempdir()?;
@@ -388,48 +415,48 @@ mod tests {
         std::fs::create_dir_all(root.join("apps/demo"))?;
         std::fs::write(
             distribution_path(&root, "demo"),
-            r#"{"toolId":"app.demo","toolVersion":"1.0.0","artifacts":[]}"#,
+            r#"{"toolId":"demo","toolVersion":"1.0.0","artifacts":[]}"#,
         )?;
         let roots = vec![root];
-        assert_eq!(read_distribution(&roots, "app.demo")?["toolId"], "app.demo");
+        assert_eq!(read_distribution(&roots, "demo")?["toolId"], "demo");
         assert!(matches!(
-            read_distribution(&roots, "app.absent"),
+            read_distribution(&roots, "absent"),
             Err(AppError::NotFound)
         ));
         assert!(matches!(
-            read_distribution(&roots, "app../../x"),
+            read_distribution(&roots, "../../x"),
             Err(AppError::NotFound)
         ));
 
         let sibling = Path::new(env!("CARGO_MANIFEST_DIR")).join("../flux-de-fichiers-plugins");
         if sibling.join("apps/ffmpeg/distribution.v1.json").is_file() {
-            let ffmpeg = read_distribution(std::slice::from_ref(&sibling), "app.ffmpeg")?;
-            assert_eq!(ffmpeg["toolId"], "app.ffmpeg");
+            let ffmpeg = read_distribution(std::slice::from_ref(&sibling), "ffmpeg")?;
+            assert_eq!(ffmpeg["toolId"], "ffmpeg");
         }
         Ok(())
     }
 
     #[test]
     fn test_parse_distribution_reads_the_repository_format() -> AppResult<()> {
-        let raw = r#"{"schemaVersion":"1.0.0","toolId":"app.mediainfo","toolVersion":"1.0.0",
+        let raw = r#"{"schemaVersion":"1.0.0","toolId":"mediainfo","toolVersion":"1.0.0",
             "distributionMode":"autonomous-binary","artifacts":[{"arch":"x86_64","os":"linux",
             "archiveUrl":"https://example.org/a.tar.gz","archiveFormat":"tar.gz",
             "archiveSha256":"abc","binaryRelativePath":"bin/mediainfo"}]}"#;
         let parsed = parse_distribution(raw)?;
-        assert_eq!(parsed.tool_id, "app.mediainfo");
+        assert_eq!(parsed.tool_id, "mediainfo");
         assert_eq!(parsed.artifacts[0].binary_relative_path, "bin/mediainfo");
         Ok(())
     }
 
     #[test]
     fn test_installing_guard_marks_the_tool_until_it_is_dropped() {
-        assert!(!is_installing("app.garde"));
+        assert!(!is_installing("garde"));
         {
-            let _first = InstallingGuard::start("app.garde");
-            let _again = InstallingGuard::start("app.garde");
-            assert!(is_installing("app.garde"));
+            let _first = InstallingGuard::start("garde");
+            let _again = InstallingGuard::start("garde");
+            assert!(is_installing("garde"));
         }
-        assert!(!is_installing("app.garde"));
+        assert!(!is_installing("garde"));
     }
 
     #[tokio::test]
@@ -443,11 +470,11 @@ mod tests {
             ..SyncPolicy::default()
         };
         let mut contract = distribution(address, hex(&archive));
-        contract.tool_id = "app.suivi".into();
+        contract.tool_id = "suivi".into();
 
         let watcher = tokio::spawn(async {
             for _ in 0..200 {
-                if is_installing("app.suivi") {
+                if is_installing("suivi") {
                     return true;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(1)).await;
@@ -456,7 +483,7 @@ mod tests {
         });
         install_from_distribution(&cache, &contract, &policy).await?;
         assert!(watcher.await?);
-        assert!(!is_installing("app.suivi"));
+        assert!(!is_installing("suivi"));
         Ok(())
     }
 
@@ -477,11 +504,11 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let cache = ToolCacheManager::new(dir.path());
         let wanted = [crate::domain::ToolRequirement {
-            tool_id: "app.example".into(),
+            tool_id: "example".into(),
             version: "1.0.0".into(),
         }];
         ensure_tools_for_requirements(&[], &cache, &wanted, &SyncPolicy::default()).await;
-        assert!(!cache.is_ready("app.example", "1.0.0", host_arch()));
+        assert!(!cache.is_ready("example", "1.0.0", host_arch()));
         Ok(())
     }
 
@@ -502,7 +529,7 @@ mod tests {
             distribution_path(&root, "demo"),
             serde_json::json!({
                 "schemaVersion": "1.0.0",
-                "toolId": "app.demo",
+                "toolId": "demo",
                 "toolVersion": "1.0.0",
                 "releaseStatus": "released",
                 "distributionMode": "autonomous-binary",
@@ -527,7 +554,7 @@ mod tests {
             &pool,
             std::slice::from_ref(&root),
             &cache,
-            "app.demo",
+            "demo",
             "1.0.0",
             &policy,
         )
@@ -538,7 +565,7 @@ mod tests {
             distribution_path(&root, "demo"),
             serde_json::json!({
                 "schemaVersion": "1.0.0",
-                "toolId": "app.demo",
+                "toolId": "demo",
                 "toolVersion": "1.0.0",
                 "releaseStatus": "released",
                 "distributionMode": "autonomous-binary",
@@ -557,7 +584,7 @@ mod tests {
             &pool,
             std::slice::from_ref(&root),
             &cache,
-            "app.demo",
+            "demo",
             "1.0.0",
             &policy,
         )

@@ -58,24 +58,15 @@ mod tests {
             tags: Vec::new(),
             owner: None,
             sha256: None,
+            updated_at: None,
         }
     }
 
     #[test]
     fn required_probe_is_the_current_probe_tool() -> Result<(), &'static str> {
         let entries = vec![
-            tool(
-                "app.mkvtoolnix",
-                "1.0.0",
-                CatalogCapability::new("remux"),
-                true,
-            ),
-            tool(
-                "app.mediainfo",
-                "1.0.0",
-                CatalogCapability::new("probe"),
-                true,
-            ),
+            tool("mkvtoolnix", "1.0.0", CatalogCapability::new("remux"), true),
+            tool("mediainfo", "1.0.0", CatalogCapability::new("probe"), true),
             tool(
                 "app.other-probe",
                 "2.0.0",
@@ -84,7 +75,7 @@ mod tests {
             ),
         ];
         let probe = required_probe(&entries).ok_or("sonde absente")?;
-        assert_eq!(probe.tool_id, "app.mediainfo");
+        assert_eq!(probe.tool_id, "mediainfo");
         assert_eq!(probe.version, "1.0.0");
         Ok(())
     }
@@ -92,7 +83,7 @@ mod tests {
     #[test]
     fn required_probe_is_absent_without_a_current_choice() {
         let entries = vec![tool(
-            "app.mediainfo",
+            "mediainfo",
             "1.0.0",
             CatalogCapability::new("probe"),
             false,
@@ -105,7 +96,7 @@ mod tests {
         let root = tempfile::tempdir()?;
         let cache = ToolCacheManager::new(root.path());
         let contract = ProbeContract {
-            tool_id: "app.mediainfo".into(),
+            tool_id: "mediainfo".into(),
             version: "1.0.0".into(),
         };
         assert!(!probe_is_ready(&cache, &contract));

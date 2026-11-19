@@ -266,10 +266,10 @@ mod tests {
     #[test]
     fn quick_add_suggests_contextual_blocks_and_filters_inputless_on_branch() {
         let catalog = test_catalog();
-        let entry = find_owned(&catalog, &FlowBlockKind::parse("block.core.file-input"));
+        let entry = find_owned(&catalog, &FlowBlockKind::parse("essentiel.file-input"));
         let res = quick_add_candidates(&catalog, "", true, entry);
         assert!(!res.suggested.is_empty());
-        assert_eq!(res.suggested[0].kind, "block.core.condition");
+        assert_eq!(res.suggested[0].kind, "essentiel.condition");
         assert!(res.ordered().iter().all(|s| s.has_input));
 
         let filtered = quick_add_candidates(&catalog, "sonarr", true, None);

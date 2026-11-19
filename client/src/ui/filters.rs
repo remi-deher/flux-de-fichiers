@@ -1,6 +1,7 @@
 //! Critères de filtrage des écrans : pilotage en 1 clic par `StatStrip` + feuille de période sur Activité.
 
 use crate::route::Route;
+use crate::ui::icon::{Icon, IconName};
 use chrono::{DateTime, Duration, Utc};
 use forgearr_shared::jobs::{Job, JobStatus};
 use forgearr_shared::plugins::CatalogEntry;
@@ -275,7 +276,9 @@ pub fn FilterSheet(route: Signal<Route>) -> impl IntoView {
         {move || has_filters(&route.get()).then(|| {
             view! {
                 <details class="popover">
-                    <summary class="btn btn-secondary btn-sm">"Période"</summary>
+                    <summary class="topbar-search-filter" aria-label="Période" title="Période">
+                        <Icon name=IconName::Sliders size=15 />
+                    </summary>
                     <div class="popover__panel">
                         <ChoiceSelect label="Créée" value=filters.period />
                         <button type="button" class="btn btn-secondary btn-sm" on:click=move |_| filters.period.set(Period::Any)>"Réinitialiser"</button>

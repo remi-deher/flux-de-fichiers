@@ -1,6 +1,5 @@
-//! Actions contextuelles d'un écran, affichées à droite de la barre du haut.
+//! Actions contextuelles d'un écran, réparties par le header commun (principale, menu, retour).
 
-use super::icon::{Icon, IconName};
 use leptos::prelude::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -34,7 +33,7 @@ impl TopbarAction {
         slot
     }
 
-    fn specs(&self) -> Vec<ActionSpec> {
+    pub fn specs(&self) -> Vec<ActionSpec> {
         self.current
             .get()
             .map_or_else(Vec::new, |entry| entry.specs)
@@ -68,32 +67,6 @@ pub fn provide_topbar_actions(specs: Vec<ActionSpec>) {
     };
     let id = slot.set_many(specs);
     on_cleanup(move || slot.clear_id(id));
-}
-
-/// Boutons d'actions contextuelles affichés à droite de la barre du haut.
-#[component]
-pub fn TopbarActionSlot() -> impl IntoView {
-    let slot = use_context::<TopbarAction>().unwrap_or_else(TopbarAction::install);
-    move || {
-        slot.specs()
-            .into_iter()
-            .enumerate()
-            .map(|(index, spec)| {
-                let is_back = spec.label.starts_with("Retour");
-                let class = if is_back || index > 0 {
-                    "btn btn-secondary btn-sm"
-                } else {
-                    "btn btn-primary btn-sm"
-                };
-                view! {
-                    <button type="button" class=class on:click=move |_| spec.on_click.run(())>
-                        {(!is_back).then(|| view! { <Icon name=IconName::Plus size=14 /> })}
-                        <span>{spec.label}</span>
-                    </button>
-                }
-            })
-            .collect_view()
-    }
 }
 
 #[cfg(test)]

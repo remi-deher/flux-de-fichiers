@@ -33,7 +33,6 @@ input[type="radio"] {{
   .form-input,
   .form-select,
   .topbar-search,
-  .sidebar-cmd-btn,
   .theme-segmented__btn,
   .sidebar-collapse-btn,
   .inspection-drawer__tab {{
@@ -58,8 +57,7 @@ input[type="radio"] {{
 
 /* Sans survol (écran tactile seul) : pas de raccourcis clavier affichés. */
 @media (hover: none) {{
-  .kbd-shortcut,
-  .sidebar-cmd-btn__kbd {{
+  .kbd-shortcut {{
     display: none;
   }}
 }}

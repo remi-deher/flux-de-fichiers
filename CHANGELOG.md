@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.58.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.57.1...v0.58.0) (2026-11-19)
+
+
+### Features
+
+* **ui:** nouvelle sidebar et header commun à zones fixes ([7ab09f0](https://github.com/remi-deher/flux-de-fichiers/commit/7ab09f0d72dd0ef40c74d07a3ff26cf3fbd4a614))
+* **ui:** nouvelle sidebar et header commun à zones fixes ([4d5f1ef](https://github.com/remi-deher/flux-de-fichiers/commit/4d5f1ef0622d6f092867a0403915701d0707c452))
+
 ## [0.57.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.57.0...v0.57.1) (2026-11-19)
 
 

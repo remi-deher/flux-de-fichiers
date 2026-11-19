@@ -56,6 +56,7 @@ fn field_kind_label(kind: &OwnedFieldKind) -> &'static str {
         OwnedFieldKind::Bool => "Booléen",
         OwnedFieldKind::Select(_) => "Sélection",
         OwnedFieldKind::Headers => "En-têtes",
+        OwnedFieldKind::Worker => "Worker",
     }
 }
 

@@ -13,6 +13,8 @@ pub enum OwnedFieldKind {
     /// Liste de choix : `(valeur, libellé)`.
     Select(Vec<(String, String)>),
     Headers,
+    /// Choix d'un worker du central ; la valeur enregistrée est son identifiant.
+    Worker,
 }
 
 /// Réglage d'un bloc, version détenue.
@@ -73,7 +75,7 @@ impl OwnedBlockSpec {
                     OwnedFieldKind::Select(options) => {
                         json!(options.first().map_or("", |(value, _)| value.as_str()))
                     }
-                    OwnedFieldKind::Text => json!(""),
+                    OwnedFieldKind::Text | OwnedFieldKind::Worker => json!(""),
                 });
             config.insert(field.name.clone(), value);
         }

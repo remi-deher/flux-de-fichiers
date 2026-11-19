@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use forgearr_shared::workers::WorkerTelemetry;
+use forgearr_shared::{capabilities::WorkerCapabilities, workers::WorkerTelemetry};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -21,6 +21,9 @@ pub struct TelemetrySnapshot {
     pub ram_used_bytes: u64,
     pub gpu_detected: bool,
     pub gpu_devices: Vec<String>,
+    /// Capacités matérielles relevées une fois par les sondes (ADR 0018).
+    #[serde(default)]
+    pub capabilities: WorkerCapabilities,
     pub storage_total_bytes: u64,
     pub storage_available_bytes: u64,
 }
@@ -37,6 +40,7 @@ impl TelemetrySnapshot {
             storage_total_bytes: self.storage_total_bytes,
             storage_available_bytes: self.storage_available_bytes,
             gpu_devices: self.gpu_devices.clone(),
+            capabilities: self.capabilities.clone(),
         }
     }
 }
@@ -95,6 +99,7 @@ impl TelemetryProbe {
             ram_used_bytes,
             gpu_detected,
             gpu_devices,
+            capabilities: crate::hardware_probe::detected_capabilities(),
             storage_total_bytes,
             storage_available_bytes,
         }

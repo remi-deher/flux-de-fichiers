@@ -255,6 +255,7 @@ fn json_routes() -> Router<AppState> {
             "/api/v1/jobs/failures",
             get(jobs::failure_details).post(jobs::replay_failures),
         )
+        .route("/api/v1/jobs/relays", get(jobs::relay_infos))
         .route(
             "/api/v1/worker/filesystem/pending",
             get(libraries::worker_pending_browse),
@@ -484,6 +485,7 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/jobs/{id}/heartbeat", post(jobs::heartbeat))
         .route("/api/v1/jobs/{id}/progress", post(jobs::progress))
         .route("/api/v1/jobs/{id}/failure", post(jobs::failure))
+        .route("/api/v1/jobs/{id}/relay", post(jobs::relay))
         .layer(axum::extract::DefaultBodyLimit::max(JSON_BODY_LIMIT))
         .layer(tower_http::timeout::TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,

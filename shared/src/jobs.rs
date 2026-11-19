@@ -83,6 +83,7 @@ pub enum JobEventType {
     JobFailed,
     JobCanceled,
     JobRetried,
+    JobRelayed,
 }
 
 impl JobEventType {
@@ -96,6 +97,7 @@ impl JobEventType {
             Self::JobFailed => "job_failed",
             Self::JobCanceled => "job_canceled",
             Self::JobRetried => "job_retried",
+            Self::JobRelayed => "job_relayed",
         }
     }
 }
@@ -123,6 +125,7 @@ pub enum JobErrorCode {
     ProbeUnavailable,
     LeaseExpired,
     MissingSourceFingerprint,
+    NoCapableWorker,
 }
 
 impl JobErrorCode {
@@ -136,6 +139,7 @@ impl JobErrorCode {
             Self::ProbeUnavailable => "probe_unavailable",
             Self::LeaseExpired => "lease_expired",
             Self::MissingSourceFingerprint => "missing_source_fingerprint",
+            Self::NoCapableWorker => "no_capable_worker",
         }
     }
 
@@ -183,6 +187,7 @@ impl FromStr for JobErrorCode {
             "probe_unavailable" => Ok(Self::ProbeUnavailable),
             "lease_expired" => Ok(Self::LeaseExpired),
             "missing_source_fingerprint" => Ok(Self::MissingSourceFingerprint),
+            "no_capable_worker" => Ok(Self::NoCapableWorker),
             _ => Err(()),
         }
     }

@@ -1,9 +1,12 @@
 //! Registre des tâches filtrées, avec la progression reçue en direct.
 
-use super::model::{error_label, priority_label, resolve_library_label, status_label, status_tone};
+use super::model::{
+    error_label, priority_label, relay_label, resolve_library_label, status_label, status_tone,
+};
 use crate::format;
 use crate::ui::{ProgressBar, Registre, RegistreMessage, StatusBadge, Tag, TagTone, on_activate};
 use forgearr_shared::jobs::{Job, JobStatus};
+use forgearr_shared::relay::JobRelayInfo;
 use leptos::prelude::*;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -34,6 +37,37 @@ fn resolve_worker_label(
             .cloned()
             .unwrap_or_else(|| id.to_string().chars().take(8).collect()),
     )
+}
+
+/// Détails serveur des tâches visibles (200 au plus) retenues par `keep`, lus à `endpoint?ids=`.
+fn job_details<T>(
+    jobs: Signal<Option<Result<Vec<Job>, String>>>,
+    endpoint: &'static str,
+    keep: fn(&Job) -> bool,
+) -> LocalResource<Vec<T>>
+where
+    T: serde::de::DeserializeOwned + 'static,
+{
+    LocalResource::new(move || {
+        let ids = jobs
+            .get()
+            .and_then(Result::ok)
+            .unwrap_or_default()
+            .iter()
+            .filter(|job| keep(job))
+            .take(200)
+            .map(|job| job.id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        async move {
+            if ids.is_empty() {
+                return Vec::new();
+            }
+            crate::api::get::<Vec<T>>(&format!("{endpoint}?ids={ids}"))
+                .await
+                .unwrap_or_default()
+        }
+    })
 }
 
 /// Cellule de progression partagée entre l'écran Activité et les tâches récentes de la Vue d'ensemble.
@@ -72,28 +106,12 @@ pub fn JobsTable(
     } else {
         HEADERS[1..].to_vec()
     };
-    let failures = LocalResource::new(move || {
-        let ids = jobs
-            .get()
-            .and_then(Result::ok)
-            .unwrap_or_default()
-            .iter()
-            .filter(|job| job.status == JobStatus::Failed)
-            .take(200)
-            .map(|job| job.id.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-        async move {
-            if ids.is_empty() {
-                return Vec::new();
-            }
-            crate::api::get::<Vec<forgearr_shared::jobs::JobFailureDetail>>(&format!(
-                "/api/v1/jobs/failures?ids={ids}"
-            ))
-            .await
-            .unwrap_or_default()
-        }
-    });
+    let failures = job_details::<forgearr_shared::jobs::JobFailureDetail>(
+        jobs,
+        "/api/v1/jobs/failures",
+        |job| job.status == JobStatus::Failed,
+    );
+    let relays = job_details::<JobRelayInfo>(jobs, "/api/v1/jobs/relays", |_| true);
     let span = headers.len();
     view! {
         <Registre aria_label="Tâches" headers=headers>
@@ -106,10 +124,15 @@ pub fn JobsTable(
                     let flows_map = flows.get();
                     let libs_map = libraries.get();
                     let failures = failures.get().unwrap_or_default();
+                    let relays = relays.get().unwrap_or_default();
                     list.into_iter().map(|job| {
                         let id = job.id;
                         let status = job.status;
                         let failure = failures.iter().find(|entry| entry.job_id == id).cloned();
+                        let relay = relays
+                            .iter()
+                            .find(|entry| entry.job_id == id)
+                            .map(|entry| relay_label(entry, status, &workers_map));
                         let priority = job.priority;
                         let flow_label = resolve_flow_label(job.flow_id.as_deref(), &flows_map);
                         let worker_label = resolve_worker_label(job.worker_id, &workers_map);
@@ -143,6 +166,9 @@ pub fn JobsTable(
                                         <span class="text-strong">{job.source_name.clone()}</span>
                                         {library_label.map(|name| view! {
                                             <Tag label=name tone=TagTone::Primary />
+                                        })}
+                                        {relay.map(|label| view! {
+                                            <Tag label=label tone=TagTone::Warning />
                                         })}
                                         {(priority != 0).then(|| view! {
                                             <Tag

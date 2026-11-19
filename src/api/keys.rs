@@ -11,8 +11,8 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use flux_shared::Role;
-use flux_shared::accounts::{CreateKeyRequest, CreatedKey};
+use forgearr_shared::Role;
+use forgearr_shared::accounts::{CreateKeyRequest, CreatedKey};
 
 pub async fn list(
     State(state): State<AppState>,

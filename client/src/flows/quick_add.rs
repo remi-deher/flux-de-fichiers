@@ -5,7 +5,7 @@ use super::presentation::NodeDomain;
 use super::state::Editor;
 use crate::ui::search::matches;
 use crate::ui::{Icon, IconName, Toasts};
-use flux_shared::flows::{OwnedBlockSpec, find_owned};
+use forgearr_shared::flows::{OwnedBlockSpec, find_owned};
 use leptos::prelude::*;
 
 const POPOVER_WIDTH: f64 = 280.0;
@@ -261,7 +261,7 @@ pub fn QuickAddPopover(editor: Editor, board_ref: NodeRef<leptos::html::Div>) ->
 mod tests {
     use super::super::test_support::test_catalog;
     use super::*;
-    use flux_shared::flows::FlowBlockKind;
+    use forgearr_shared::flows::FlowBlockKind;
 
     #[test]
     fn quick_add_suggests_contextual_blocks_and_filters_inputless_on_branch() {

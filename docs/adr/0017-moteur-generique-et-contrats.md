@@ -10,7 +10,7 @@ moteur garde en dur ce qu'il devrait lire dans le dépôt de plugins :
 - les outils (`app.mkvtoolnix`, `tool.ffmpeg`, `tool.mp4box`), leurs versions et leurs binaires
   (`mkvmerge`, `MP4Box`, `ffmpeg`), installés systématiquement par `ensure_job_tools` ;
 - l'argv de chaque outil, construit en Rust (`mp4box.rs`, `encode.rs`, `media.rs`) ;
-- les types de blocs, un enum fermé `FlowBlockKind` (`flux-shared`) exécuté par un `match` ;
+- les types de blocs, un enum fermé `FlowBlockKind` (`forgearr-shared`) exécuté par un `match` ;
 - Sonarr, Radarr et les webhooks (`flows/arr.rs`, `webhook.rs`) ; la sonde `mkvmerge -J`.
 
 Le dépôt `flux-de-fichiers-plugins` définit déjà les contrats nécessaires : distribution d'un

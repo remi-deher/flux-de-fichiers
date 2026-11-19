@@ -5,7 +5,7 @@ use super::{REPOSITORIES_PATH, section_badge_label};
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::{Tag, TagTone};
-use flux_shared::plugins::RepositoryDetailView;
+use forgearr_shared::plugins::RepositoryDetailView;
 use leptos::prelude::*;
 
 /// Onglets du tiroir d'un dépôt de plugins.

@@ -8,7 +8,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use flux_de_fichiers::{
+use forgearr::{
     api::{AppState, router},
     config::Config,
     domain::Claim,
@@ -16,7 +16,7 @@ use flux_de_fichiers::{
     repository,
     telemetry::TelemetrySnapshot,
 };
-use flux_shared::system::{SmtpTls, UpdateSystemSettingsRequest};
+use forgearr_shared::system::{SmtpTls, UpdateSystemSettingsRequest};
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 use std::{path::Path, sync::Arc};
 use tower::ServiceExt;

@@ -21,7 +21,7 @@ use super::quick_add::QuickAddPopover;
 use super::state::{Editor, PendingWire, QuickAddState};
 use crate::route::{Link, Route};
 use crate::ui::{Icon, IconName, Toasts, on_activate};
-use flux_shared::flows::{FlowBlockKind, FlowConnection, find_owned};
+use forgearr_shared::flows::{FlowBlockKind, FlowConnection, find_owned};
 use leptos::prelude::*;
 use std::collections::{HashMap, HashSet};
 

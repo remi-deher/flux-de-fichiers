@@ -4,7 +4,7 @@ Statut : accepté (complète l'ADR 0011, qui prévoyait seulement la réinitiali
 
 ## Contexte
 
-La réinitialisation passait uniquement par `flux-de-fichiers reset-password` dans le conteneur.
+La réinitialisation passait uniquement par `forgearr reset-password` dans le conteneur.
 Les comptes n'avaient pas d'adresse e-mail. Un écran « mot de passe oublié » exige donc une adresse
 par compte et un moyen d'envoyer un message.
 

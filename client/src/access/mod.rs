@@ -4,8 +4,8 @@ pub(crate) mod forms;
 mod recovery;
 
 use crate::api::{self, ApiError};
-use flux_shared::session::{Me, SessionInfo};
-use flux_shared::system::SetupStatus;
+use forgearr_shared::session::{Me, SessionInfo};
+use forgearr_shared::system::SetupStatus;
 use forms::{CentralSetupForm, GateCard, LoginForm, RoleChoice, WorkerSetupForm};
 use leptos::prelude::*;
 use recovery::{ForgotPasswordForm, ResetPasswordForm};

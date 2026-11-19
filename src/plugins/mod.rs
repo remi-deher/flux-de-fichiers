@@ -53,8 +53,10 @@ pub use sync::{
     sync_repository, sync_repository_verified, validate_index_url,
 };
 
-pub use flux_shared::plugins::vocab::{self, CatalogCapability, CatalogItemType, PluginCategory};
-pub use flux_shared::plugins::{
+pub use forgearr_shared::plugins::vocab::{
+    self, CatalogCapability, CatalogItemType, PluginCategory,
+};
+pub use forgearr_shared::plugins::{
     CatalogEntry, CreateRepositoryRequest, PackDetailView, PluginCompatibility,
     PluginConnectionTestResult, PluginDependency, PluginDetailView, PluginRepository,
     PluginSettingsView, RepositoryDetailView, ToolArtifactSummary, ToolDetailView, ToolStatus,
@@ -364,7 +366,7 @@ pub fn plugin_exists(roots: &[PathBuf], plugin_id: &str) -> bool {
 pub fn build_plugin_detail(
     root: &Path,
     entry: &CatalogEntry,
-    all_blocks: &[flux_shared::flows::OwnedBlockSpec],
+    all_blocks: &[forgearr_shared::flows::OwnedBlockSpec],
 ) -> PluginDetailView {
     let manifest = load_manifest(root, &entry.manifest_path).ok();
     let blocks = all_blocks
@@ -868,7 +870,7 @@ mod tests {
                 "version": "1.2.0",
                 "name": "Sonarr Integration",
                 "description": "Synchronisation Sonarr",
-                "author": "flux-de-fichiers",
+                "author": "forgearr",
                 "license": "GPL-2.0-or-later",
                 "capability": "integration",
                 "dependencies": [{"id": "app.curl", "versionRange": "^8.0", "kind": "app", "optional": true}],
@@ -891,7 +893,7 @@ mod tests {
             sha256: None,
             updated_at: None,
         };
-        let block = |kind: &str, owner: Option<&str>| flux_shared::flows::OwnedBlockSpec {
+        let block = |kind: &str, owner: Option<&str>| forgearr_shared::flows::OwnedBlockSpec {
             kind: kind.into(),
             aliases: Vec::new(),
             label: kind.into(),
@@ -917,7 +919,7 @@ mod tests {
         );
         assert_eq!(detail.id, "sonarr");
         assert!(detail.has_settings);
-        assert_eq!(detail.author.as_deref(), Some("flux-de-fichiers"));
+        assert_eq!(detail.author.as_deref(), Some("forgearr"));
         assert_eq!(detail.compatibility.platforms, vec!["linux/amd64"]);
         assert_eq!(detail.dependencies.len(), 1);
         assert_eq!(detail.blocks.len(), 1);

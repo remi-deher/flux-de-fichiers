@@ -5,8 +5,8 @@ use crate::{
     error::{AppError, AppResult},
 };
 use chrono::{DateTime, Duration, Utc};
-use flux_shared::Role;
-use flux_shared::workers::{
+use forgearr_shared::Role;
+use forgearr_shared::workers::{
     EnrollmentRequestStatus, EnrollmentWindowStatus, WorkerEnrollmentCreated, WorkerEnrollmentList,
     WorkerEnrollmentPollResponse, WorkerEnrollmentSummary,
 };

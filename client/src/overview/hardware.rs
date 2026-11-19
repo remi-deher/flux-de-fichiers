@@ -1,7 +1,7 @@
 //! Utilitaires de formatage matériel (CPU, RAM, disque, GPU) partagés par les vues workers.
 
 use crate::ui::MetricTone;
-use flux_shared::format::format_bytes;
+use forgearr_shared::format::format_bytes;
 
 const FULL_PERCENT: f32 = 100.0;
 const WARNING_PERCENT: f32 = 80.0;

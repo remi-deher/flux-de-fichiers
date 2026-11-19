@@ -29,7 +29,7 @@ pub use contract::{
     OperationRegistry, OperationRuntime, PrimitiveKind, ScriptInterpreter, ScriptRuntime, ToolRef,
 };
 pub use custom_args::{CustomArgsError, parse_custom_args, safe_custom_args};
-pub use flux_shared::flows::{FlowBlockKind, FlowConnection, FlowGraph, FlowNode, FlowRecord};
+pub use forgearr_shared::flows::{FlowBlockKind, FlowConnection, FlowGraph, FlowNode, FlowRecord};
 pub use header_secrets::{
     decrypt_definition_headers, extract_and_mask_definition_headers, has_webhook_headers,
     inject_definition_headers, mask_definition, migrate_flow_secrets, rotate_definition,
@@ -91,7 +91,7 @@ pub struct FlowExecutionOutcome {
 /// Échec complet d'exécution avec le journal exact des étapes exécutées.
 #[derive(Debug)]
 pub struct FlowExecutionError {
-    pub code: flux_shared::jobs::JobErrorCode,
+    pub code: forgearr_shared::jobs::JobErrorCode,
     pub message: String,
     pub steps: Vec<crate::domain::JobStepEntry>,
 }
@@ -120,14 +120,14 @@ impl<'a> FlowEngine<'a> {
             .registry
             .default_fallback_operation()
             .ok_or_else(|| FlowExecutionError {
-                code: flux_shared::jobs::JobErrorCode::OperationFailed,
+                code: forgearr_shared::jobs::JobErrorCode::OperationFailed,
                 message: "aucune opération par défaut (defaultFallback) dans le catalogue"
                     .to_owned(),
                 steps: Vec::new(),
             })?;
         let OperationRuntime::Binary(bin_rt) = &op.runtime else {
             return Err(FlowExecutionError {
-                code: flux_shared::jobs::JobErrorCode::OperationFailed,
+                code: forgearr_shared::jobs::JobErrorCode::OperationFailed,
                 message: format!("contrat par défaut « {} » non binaire", op.id),
                 steps: Vec::new(),
             });
@@ -198,7 +198,7 @@ impl<'a> FlowEngine<'a> {
     ) -> Result<FlowExecutionOutcome, FlowExecutionError> {
         let graph: FlowGraph =
             serde_json::from_str(&flow.definition).map_err(|err| FlowExecutionError {
-                code: flux_shared::jobs::JobErrorCode::OperationFailed,
+                code: forgearr_shared::jobs::JobErrorCode::OperationFailed,
                 message: format!("définition de flux invalide : {err}"),
                 steps: Vec::new(),
             })?;
@@ -253,7 +253,7 @@ impl<'a> FlowEngine<'a> {
             .or_else(|| graph.nodes.first().cloned())
         else {
             return Err(FlowExecutionError {
-                code: flux_shared::jobs::JobErrorCode::OperationFailed,
+                code: forgearr_shared::jobs::JobErrorCode::OperationFailed,
                 message: "le flux ne contient aucun bloc d'entrée".to_owned(),
                 steps,
             });
@@ -279,7 +279,7 @@ impl<'a> FlowEngine<'a> {
                 let message = format!("aucun contrat d'opération pour le bloc « {} »", node.kind);
                 steps.push(failed_step(step_index, &node, None, message.clone(), None));
                 return Err(FlowExecutionError {
-                    code: flux_shared::jobs::JobErrorCode::OperationFailed,
+                    code: forgearr_shared::jobs::JobErrorCode::OperationFailed,
                     message,
                     steps,
                 });

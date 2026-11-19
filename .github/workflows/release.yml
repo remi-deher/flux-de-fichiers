@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 env:
-  IMAGE_NAME: flux-de-fichiers
+  IMAGE_NAME: forgearr
 
 jobs:
   release-please:
@@ -72,7 +72,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Promouvoir test-<sha> sans recompiler
         env:
-          REPO: ${{ secrets.DOCKERHUB_USERNAME }}/flux-de-fichiers
+          REPO: ${{ secrets.DOCKERHUB_USERNAME }}/forgearr
           SOURCE_TAG: test-${{ steps.tested.outputs.short }}
           VERSION: ${{ needs.release-please.outputs.version }}
           MAJOR_MINOR: ${{ needs.release-please.outputs.major }}.${{ needs.release-please.outputs.minor }}

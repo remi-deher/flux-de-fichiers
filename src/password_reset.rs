@@ -107,7 +107,10 @@ pub fn reset_link(origin: &str, token: &str) -> String {
 fn reset_mail(to: &str, link: &str) -> OutgoingMail {
     OutgoingMail {
         to: to.to_owned(),
-        subject: "Réinitialisation de votre mot de passe Flux de Fichiers".into(),
+        subject: format!(
+            "Réinitialisation de votre mot de passe {}",
+            forgearr_shared::brand::NAME
+        ),
         body: format!(
             "Une réinitialisation du mot de passe a été demandée pour ce compte.\n\n\
              Choisissez un nouveau mot de passe : {link}\n\n\

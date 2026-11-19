@@ -8,8 +8,8 @@ use crate::api;
 use crate::route::{Link, Route};
 use crate::ui::search::{matches, query as global_query};
 use crate::ui::{Icon, IconName, Toasts};
-use flux_shared::flows::{FlowGraph, OwnedBlockSpec};
-use flux_shared::local::LocalLibrarySnapshot;
+use forgearr_shared::flows::{FlowGraph, OwnedBlockSpec};
+use forgearr_shared::local::LocalLibrarySnapshot;
 use leptos::prelude::*;
 
 const HEADER_ICON_SIZE: u32 = 15;

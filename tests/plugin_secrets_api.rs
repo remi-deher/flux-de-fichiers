@@ -4,7 +4,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use flux_de_fichiers::{
+use forgearr::{
     api::{AppState, router},
     config::Config,
     secrets::SecretBox,
@@ -43,7 +43,7 @@ fn write_catalog(root: &Path) -> anyhow::Result<()> {
     std::fs::write(
         root.join("plugins/demo.json"),
         r#"{"schemaVersion":"1.1.0","id":"plugin.demo","type":"plugin","version":"1.0.0","name":"Démo",
-            "description":"Plugin de démonstration","author":"flux-de-fichiers","license":"GPL-2.0-or-later",
+            "description":"Plugin de démonstration","author":"forgearr","license":"GPL-2.0-or-later",
             "dependencies":[{"id":"ffmpeg","versionRange":"^7.0.0","kind":"app","optional":true}],
             "compatibility":{"appMin":"1.0.0","platforms":["linux/amd64"]},
             "settingsSchema":{"fields":[
@@ -60,7 +60,7 @@ fn write_catalog(root: &Path) -> anyhow::Result<()> {
     )?;
     std::fs::write(
         root.join("packs/suite/manifest.json"),
-        r#"{"schemaVersion":"1.1.0","id":"pack.suite","type":"pack","version":"1.0.0","name":"Suite Démo","description":"Pack de test","author":"flux-de-fichiers","license":"GPL-2.0-or-later"}"#,
+        r#"{"schemaVersion":"1.1.0","id":"pack.suite","type":"pack","version":"1.0.0","name":"Suite Démo","description":"Pack de test","author":"forgearr","license":"GPL-2.0-or-later"}"#,
     )?;
     std::fs::write(
         root.join("packs/suite/installation.json"),
@@ -223,7 +223,7 @@ async fn test_empty_secret_keeps_the_stored_value_and_a_new_one_replaces_it() ->
     assert_eq!(
         secrets.decrypt(
             value["apiKey"].as_str().unwrap_or_default(),
-            &flux_de_fichiers::plugins::plugin_secret_aad(PLUGIN_ID, "apiKey"),
+            &forgearr::plugins::plugin_secret_aad(PLUGIN_ID, "apiKey"),
         )?,
         SECRET_VALUE
     );
@@ -239,7 +239,7 @@ async fn test_empty_secret_keeps_the_stored_value_and_a_new_one_replaces_it() ->
     assert_eq!(
         secrets.decrypt(
             value["apiKey"].as_str().unwrap_or_default(),
-            &flux_de_fichiers::plugins::plugin_secret_aad(PLUGIN_ID, "apiKey"),
+            &forgearr::plugins::plugin_secret_aad(PLUGIN_ID, "apiKey"),
         )?,
         "AUTRE"
     );
@@ -313,7 +313,7 @@ async fn test_plugin_detail_exposes_owned_blocks_and_metadata() -> anyhow::Resul
     assert_eq!(status, StatusCode::OK);
     assert_eq!(detail["id"], PLUGIN_ID);
     assert_eq!(detail["hasSettings"], true);
-    assert_eq!(detail["author"], "flux-de-fichiers");
+    assert_eq!(detail["author"], "forgearr");
     assert_eq!(detail["compatibility"]["appMin"], "1.0.0");
     let blocks = detail["blocks"]
         .as_array()
@@ -377,7 +377,7 @@ async fn test_local_library_crud_without_github() -> anyhow::Result<()> {
             "name": "Sous-titres FR",
             "entryType": "resource.subtitle",
             "filename": "fr.srt",
-            "contentBase64": flux_shared::base64::encode(b"1\n00:00:00,000 --> 00:00:01,000\nOK\n")
+            "contentBase64": forgearr_shared::base64::encode(b"1\n00:00:00,000 --> 00:00:01,000\nOK\n")
         })),
     )
     .await?;
@@ -693,7 +693,7 @@ async fn test_local_library_limits_conflicts_and_role_permissions() -> anyhow::R
             "name": "Grosse Police",
             "entryType": "resource.font",
             "filename": "font.ttf",
-            "contentBase64": flux_shared::base64::encode(&raw_asset)
+            "contentBase64": forgearr_shared::base64::encode(&raw_asset)
         })),
     )
     .await?;

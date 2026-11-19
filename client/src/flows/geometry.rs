@@ -1,6 +1,6 @@
 //! Géométrie du graphe affiché : placement libre 2D, centrage topologique, ports et courbes SVG.
 
-use flux_shared::flows::{FlowGraph, FlowNode, layout};
+use forgearr_shared::flows::{FlowGraph, FlowNode, layout};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
@@ -456,7 +456,7 @@ pub fn drag_moved_beyond_threshold(
 mod tests {
     use super::super::test_support::test_catalog;
     use super::*;
-    use flux_shared::flows::FlowBlockKind;
+    use forgearr_shared::flows::FlowBlockKind;
     use serde_json::json;
 
     #[test]

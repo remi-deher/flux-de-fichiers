@@ -11,7 +11,7 @@ use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
 };
-pub use flux_shared::accounts::{ForgotPasswordRequest, ResetPasswordRequest};
+pub use forgearr_shared::accounts::{ForgotPasswordRequest, ResetPasswordRequest};
 
 /// Demande un lien. La réponse est `202` que l'adresse corresponde à un compte ou non, et l'envoi se
 /// fait en arrière-plan pour que le délai ne le révèle pas non plus.

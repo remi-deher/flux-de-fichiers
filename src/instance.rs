@@ -52,7 +52,7 @@ fn parse_role(argument: Option<&str>) -> anyhow::Result<Option<Role>> {
         Some("central") => Ok(Some(Role::Central)),
         None => Ok(None),
         _ => anyhow::bail!(
-            "Usage: flux-de-fichiers [central|worker|reset-password <identifiant>|rotate-secret|--version]"
+            "Usage: forgearr [central|worker|reset-password <identifiant>|rotate-secret|--version]"
         ),
     }
 }
@@ -73,8 +73,8 @@ fn initial_role(argument: Option<&str>) -> anyhow::Result<Role> {
 
 /// Réinitialise le mot de passe d'un compte de ce central et l'affiche une seule fois.
 async fn reset_password(username: Option<&str>) -> anyhow::Result<()> {
-    let username = username
-        .ok_or_else(|| anyhow::anyhow!("Usage: flux-de-fichiers reset-password <identifiant>"))?;
+    let username =
+        username.ok_or_else(|| anyhow::anyhow!("Usage: forgearr reset-password <identifiant>"))?;
     let pool = api::connect_database(&Config::load()?).await?;
     let new_password = account_admin::reset_password(&pool, username)
         .await

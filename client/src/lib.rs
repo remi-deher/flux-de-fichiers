@@ -1,6 +1,6 @@
 //! Client web Leptos compilé en WASM (ADR 0014) : toute l'interface, servie à la racine.
 //!
-//! Il partage avec le central les types de `flux-shared`.
+//! Il partage avec le central les types de `forgearr-shared`.
 
 mod access;
 pub mod ai;

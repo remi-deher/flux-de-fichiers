@@ -1,10 +1,11 @@
 [package]
-name = "flux-frontend"
+name = "forgearr-frontend"
 version = "0.50.0"
 edition = "2024"
 rust-version = "1.99"
 
 [dependencies]
+forgearr-shared = { path = "../shared" }
 stylist = { version = "0.15.1", features = ["parser", "macros"] }
 
 [lints.clippy]

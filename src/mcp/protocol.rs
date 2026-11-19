@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub const PROTOCOL_VERSION: &str = "2025-03-26";
-pub const SERVER_NAME: &str = "flux-de-fichiers";
+pub const SERVER_NAME: &str = "forgearr";
 
 #[derive(Debug, Deserialize)]
 pub struct JsonRpcRequest {

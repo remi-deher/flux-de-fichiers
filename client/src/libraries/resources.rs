@@ -10,12 +10,12 @@ use crate::ui::{
     Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
     Toasts,
 };
-use flux_shared::base64;
-use flux_shared::flows::FlowRecord;
-use flux_shared::local::{
+use forgearr_shared::base64;
+use forgearr_shared::flows::FlowRecord;
+use forgearr_shared::local::{
     LocalBlockTemplate, LocalLibrarySnapshot, LocalResourceSummary, UploadLocalResourceRequest,
 };
-use flux_shared::plugins::vocab::CatalogItemType;
+use forgearr_shared::plugins::vocab::CatalogItemType;
 use leptos::prelude::*;
 use serde_json::Value;
 use wasm_bindgen::JsCast;

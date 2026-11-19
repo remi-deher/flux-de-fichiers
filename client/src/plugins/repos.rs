@@ -6,7 +6,7 @@ use crate::api;
 use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, MetricTone, StatItem, StatStrip, Toasts};
-use flux_shared::plugins::{CreateRepositoryRequest, PluginRepository};
+use forgearr_shared::plugins::{CreateRepositoryRequest, PluginRepository};
 use leptos::prelude::*;
 use serde_json::Value;
 

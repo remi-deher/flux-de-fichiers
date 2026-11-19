@@ -3,7 +3,7 @@
 //! Un « run » garde en mémoire (jamais en base) l'historique de ses évènements : un client qui se
 //! reconnecte reprend là où il s'était arrêté (`Last-Event-ID`). Chaque run appartient à un compte.
 
-use flux_shared::ai::AiRunEvent;
+use forgearr_shared::ai::AiRunEvent;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, MutexGuard, PoisonError},
@@ -169,7 +169,7 @@ impl AiRuns {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::ai::AiRunEvent;
+    use forgearr_shared::ai::AiRunEvent;
 
     fn started(name: &str) -> AiRunEvent {
         AiRunEvent::ToolStarted {

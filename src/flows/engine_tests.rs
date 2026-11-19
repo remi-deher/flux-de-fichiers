@@ -499,7 +499,7 @@ async fn local_script_executes_end_to_end_across_registry_routing_and_claim_payl
 -> Result<(), Box<dyn std::error::Error>> {
     use crate::domain::JobStepStatus;
     use crate::plugins::save_local_script;
-    use flux_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
+    use forgearr_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
 
     let dir = tempfile::tempdir()?;
     let local_dir = dir.path().join("local");
@@ -633,7 +633,7 @@ async fn local_script_executes_end_to_end_across_registry_routing_and_claim_payl
 async fn local_script_stop_pipeline_halts_execution_before_output()
 -> Result<(), Box<dyn std::error::Error>> {
     use crate::plugins::save_local_script;
-    use flux_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
+    use forgearr_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
 
     let dir = tempfile::tempdir()?;
     let local_dir = dir.path().join("local");
@@ -700,7 +700,7 @@ async fn local_script_stop_pipeline_halts_execution_before_output()
 async fn unified_script_block_supports_inline_library_ref_and_strict_next_port()
 -> Result<(), Box<dyn std::error::Error>> {
     use crate::plugins::save_local_script;
-    use flux_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
+    use forgearr_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
 
     let dir = tempfile::tempdir()?;
     let local_dir = dir.path().join("local");

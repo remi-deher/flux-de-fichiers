@@ -1,16 +1,16 @@
 //! Simulation à sec d'un flux dans l'éditeur sans lancer de tâche réelle.
 //!
 //! Évalue localement les nœuds `condition` avec le même évaluateur JSON générique
-//! que le moteur (`flux_shared::flows::evaluate_condition`) et trace le parcours sur le graphe.
+//! que le moteur (`forgearr_shared::flows::evaluate_condition`) et trace le parcours sur le graphe.
 
 use super::presentation::{node_summary, output_presentation};
 use super::state::Editor;
 use crate::ui::{Icon, IconName, Tag, TagTone};
-use flux_shared::flow_analysis::simulate_flow_with;
-pub use flux_shared::flow_analysis::{
+use forgearr_shared::flow_analysis::simulate_flow_with;
+pub use forgearr_shared::flow_analysis::{
     SimulationInput, SimulationPreset, SimulationReport, SimulationStatus,
 };
-use flux_shared::flows::{FlowGraph, OwnedBlockSpec};
+use forgearr_shared::flows::{FlowGraph, OwnedBlockSpec};
 use leptos::prelude::*;
 
 const JSON_EDITOR_ROWS: u32 = 6;
@@ -204,7 +204,7 @@ pub fn FlowSimulationPanel(editor: Editor) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::flows::{FlowBlockKind, FlowConnection};
+    use forgearr_shared::flows::{FlowBlockKind, FlowConnection};
     use serde_json::json;
 
     fn test_catalog() -> Vec<OwnedBlockSpec> {

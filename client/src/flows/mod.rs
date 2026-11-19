@@ -29,13 +29,13 @@ use crate::ui::{
     StatusBadge, Tag, TagTone, Toasts, on_activate,
 };
 use crate::{api, format};
-use flux_shared::Permission;
-use flux_shared::flows::{
+use forgearr_shared::Permission;
+use forgearr_shared::flows::{
     FlowGraph, FlowRecord, FlowVersionSummary, UpdateFlowRequest, new_flow_id,
 };
-use flux_shared::libraries::Library;
-use flux_shared::local::{CreateFlowTemplateRequest, LocalFlowTemplate, LocalLibrarySnapshot};
-use flux_shared::session::Me;
+use forgearr_shared::libraries::Library;
+use forgearr_shared::local::{CreateFlowTemplateRequest, LocalFlowTemplate, LocalLibrarySnapshot};
+use forgearr_shared::session::Me;
 use leptos::prelude::*;
 
 const FLOWS_PATH: &str = "/api/v1/flows";
@@ -1161,7 +1161,7 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
 
 #[cfg(test)]
 pub(super) mod test_support {
-    use flux_shared::flows::{OwnedBlockSpec, OwnedFieldKind, OwnedFieldSpec};
+    use forgearr_shared::flows::{OwnedBlockSpec, OwnedFieldKind, OwnedFieldSpec};
     use serde_json::json;
 
     struct BlockBuilder(OwnedBlockSpec);
@@ -1371,7 +1371,7 @@ pub(super) mod test_support {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use flux_shared::flows::FlowBlockKind;
+    use forgearr_shared::flows::FlowBlockKind;
 
     #[test]
     fn pipeline_preview_labels_limits_steps_and_handles_invalid_json() {
@@ -1418,7 +1418,7 @@ mod tests {
             include_extensions: Vec::new(),
             exclude_patterns: Vec::new(),
             min_file_bytes: 0,
-            output_policy: flux_shared::libraries::LibraryOutputPolicy::OutputDir,
+            output_policy: forgearr_shared::libraries::LibraryOutputPolicy::OutputDir,
             created_at: now,
             updated_at: now,
         };

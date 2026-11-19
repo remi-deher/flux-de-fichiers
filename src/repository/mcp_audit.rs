@@ -2,7 +2,7 @@
 
 use crate::error::AppResult;
 use chrono::{DateTime, Utc};
-use flux_shared::mcp::{McpAuditEntry, McpAuditListResponse, McpAuditOutcome};
+use forgearr_shared::mcp::{McpAuditEntry, McpAuditListResponse, McpAuditOutcome};
 use sqlx::SqlitePool;
 
 /// Nombre maximal d'entrées conservées dans `mcp_audit_log`.

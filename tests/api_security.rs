@@ -4,7 +4,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use flux_de_fichiers::{
+use forgearr::{
     api::{AppState, router},
     config::Config,
 };
@@ -200,7 +200,7 @@ async fn the_old_key_less_web_session_endpoint_no_longer_exists() -> anyhow::Res
 #[tokio::test]
 async fn authorization_header_takes_priority_over_web_session_cookie() -> anyhow::Result<()> {
     use axum::http::{HeaderMap, Method};
-    use flux_de_fichiers::auth::authenticate;
+    use forgearr::auth::authenticate;
     let (_, pool) = migrated_app(None).await?;
     let config = Config {
         bind: "127.0.0.1:3000".parse()?,
@@ -224,13 +224,13 @@ async fn authorization_header_takes_priority_over_web_session_cookie() -> anyhow
         format!("Bearer {}", common::ADMIN_KEY).parse()?,
     );
     let principal = authenticate(&pool, &config, &headers, &Method::GET).await?;
-    assert_eq!(principal.role, flux_shared::Role::Admin);
+    assert_eq!(principal.role, forgearr_shared::Role::Admin);
 
     headers.insert("authorization", "Bearer invalid".parse()?);
     headers.insert("cookie", "flux_session=valid-session-cookie".parse()?);
     assert!(matches!(
         authenticate(&pool, &config, &headers, &Method::GET).await,
-        Err(flux_de_fichiers::error::AppError::Unauthorized)
+        Err(forgearr::error::AppError::Unauthorized)
     ));
     Ok(())
 }
@@ -238,7 +238,7 @@ async fn authorization_header_takes_priority_over_web_session_cookie() -> anyhow
 #[test]
 fn csrf_requires_matching_cookie_header_and_server_verifier() -> anyhow::Result<()> {
     use chrono::Utc;
-    use flux_de_fichiers::web_session::{self, ValidatedSession};
+    use forgearr::web_session::{self, ValidatedSession};
     use sha2::{Digest, Sha256};
     let token = "csrf-token-for-test";
     let csrf_hash = format!("{:x}", Sha256::digest(token.as_bytes()));
@@ -261,7 +261,7 @@ fn csrf_requires_matching_cookie_header_and_server_verifier() -> anyhow::Result<
 #[test]
 fn web_cookies_have_scoped_flags_and_secure_on_https() -> anyhow::Result<()> {
     use chrono::Utc;
-    use flux_de_fichiers::{
+    use forgearr::{
         config::Config,
         web_session::{self, WebSession},
     };

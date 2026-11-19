@@ -4,7 +4,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use flux_de_fichiers::{
+use forgearr::{
     api::{AppState, router},
     config::Config,
     worker_settings,
@@ -346,7 +346,7 @@ async fn test_approval_enrollment_window_approval_rejection_and_one_time_key() -
     let dir = tempfile::tempdir()?;
     let (central, admin) = installed_central_with_session(dir.path()).await?;
 
-    let (secret, secret_hash) = flux_de_fichiers::enrollment::generate_secret_and_hash();
+    let (secret, secret_hash) = forgearr::enrollment::generate_secret_and_hash();
 
     // Fenêtre fermée par défaut : toute demande est refusée sans créer d'état.
     let (status, _) = post(
@@ -455,7 +455,7 @@ async fn test_approval_enrollment_window_approval_rejection_and_one_time_key() -
     assert_eq!(me["name"], "nas-approve");
 
     // Cas du refus par l'administrateur.
-    let (rej_secret, rej_hash) = flux_de_fichiers::enrollment::generate_secret_and_hash();
+    let (rej_secret, rej_hash) = forgearr::enrollment::generate_secret_and_hash();
     let req2 = Request::builder()
         .method("POST")
         .uri("/api/v1/workers/requests")

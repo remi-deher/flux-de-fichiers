@@ -18,13 +18,13 @@ use crate::ui::{
     Toasts,
 };
 use chrono::NaiveDate;
-use flux_shared::format::format_day;
-use flux_shared::plugins::vocab::{CatalogItemType, CatalogSection};
-use flux_shared::plugins::{
+use forgearr_shared::format::format_day;
+use forgearr_shared::plugins::vocab::{CatalogItemType, CatalogSection};
+use forgearr_shared::plugins::{
     CatalogEntry, DependencyInstallResult, PluginRepository, ToolStatus, ToolStatusSummary,
 };
-use flux_shared::session::Me;
-use flux_shared::{InstanceKind, Permission};
+use forgearr_shared::session::Me;
+use forgearr_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
 pub(crate) use pack_detail::{PackDetail, PackDrawerTab};
 use plugin_detail::{PluginDetail, PluginDrawerTab};
@@ -628,7 +628,7 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::plugins::vocab::CatalogCapability;
+    use forgearr_shared::plugins::vocab::CatalogCapability;
 
     #[test]
     fn visible_tabs_hide_repositories_without_manage_permission() {

@@ -4,8 +4,8 @@ use crate::{
     error::{AppError, AppResult},
     worker_view::AccountCopy,
 };
-pub use flux_shared::accounts::{Account, ApiKeyRecord};
-use flux_shared::{Permission, Role};
+pub use forgearr_shared::accounts::{Account, ApiKeyRecord};
+use forgearr_shared::{Permission, Role};
 use sqlx::SqlitePool;
 use uuid::Uuid;
 

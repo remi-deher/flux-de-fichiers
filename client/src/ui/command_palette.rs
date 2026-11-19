@@ -8,8 +8,8 @@ use crate::ai::AiAssistantState;
 use crate::route::{Route, use_router};
 use crate::shell::{allowed, groups};
 use crate::theme::{Theme, set_theme};
-use flux_shared::InstanceKind;
-use flux_shared::session::Me;
+use forgearr_shared::InstanceKind;
+use forgearr_shared::session::Me;
 use leptos::prelude::*;
 
 const HEADER_ICON_SIZE: u32 = 16;
@@ -289,8 +289,8 @@ pub fn CommandPalette(me: Me) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::session::CallerKind;
-    use flux_shared::{InstanceKind, Role};
+    use forgearr_shared::session::CallerKind;
+    use forgearr_shared::{InstanceKind, Role};
 
     fn me(role: Role, instance_kind: InstanceKind) -> Me {
         Me::new(

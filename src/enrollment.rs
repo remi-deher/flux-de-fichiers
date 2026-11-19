@@ -6,7 +6,7 @@ use crate::{
     error::{AppError, AppResult},
 };
 use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
-use flux_shared::workers::{
+use forgearr_shared::workers::{
     WorkerEnrollmentCreated, WorkerEnrollmentPollResponse, WorkerEnrollmentRequestInput,
 };
 use reqwest::StatusCode;

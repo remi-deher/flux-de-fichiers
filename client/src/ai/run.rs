@@ -1,7 +1,9 @@
 //! Conversation de l'assistant en tâche de fond : lancement, suivi SSE des évènements et étapes affichées.
 
 use crate::api::{self, ApiError};
-use flux_shared::ai::{AiActionDecision, AiChatRequest, AiRunEvent, AiRunStarted, AiToolCallTrace};
+use forgearr_shared::ai::{
+    AiActionDecision, AiChatRequest, AiRunEvent, AiRunStarted, AiToolCallTrace,
+};
 use wasm_bindgen::{JsCast, closure::Closure};
 use web_sys::{EventSource, MessageEvent};
 

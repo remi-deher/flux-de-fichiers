@@ -4,7 +4,7 @@
 frontières préparées dans le socle et les capacités encore à concevoir. Elle ne
 fige ni le format de manifeste, ni le mécanisme de distribution des plugins.
 
-## Dépôt applicatif `flux-de-fichiers`
+## Dépôt applicatif `forgearr`
 
 Ce dépôt conserve le binaire Rust unique et les migrations SQL. Il porte les
 services d'exécution :
@@ -65,7 +65,7 @@ la vérification des dépendances à la synchronisation n'est pas encore branch�
 ## Frontières et responsabilités futures
 
 ```text
-flux-de-fichiers (application)
+forgearr (application)
   API + PostgreSQL + baux + fichiers + sécurité
   exécution MKVToolNix locale ou par workers distants
   futur lecteur de catalogue/manifeste ─────────┐

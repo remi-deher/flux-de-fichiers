@@ -12,7 +12,7 @@ use crate::{
     repository,
 };
 use chrono::{SecondsFormat, Utc};
-use flux_shared::{
+use forgearr_shared::{
     Role,
     ai::{
         AiChatMessage, AiChatRequest, AiChatRole, AiDiagnosis, AiDiagnosisSettings,

@@ -786,12 +786,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "flux-client"
+name = "forgearr-client"
 version = "0.50.0"
 dependencies = [
  "chrono",
  "console_error_panic_hook",
- "flux-shared",
+ "forgearr-shared",
  "gloo-net",
  "js-sys",
  "leptos",
@@ -804,7 +804,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "flux-de-fichiers"
+name = "forgearr"
 version = "0.50.0"
 dependencies = [
  "anyhow",
@@ -815,7 +815,7 @@ dependencies = [
  "chacha20poly1305",
  "chrono",
  "flate2",
- "flux-shared",
+ "forgearr-shared",
  "futures-util",
  "lettre",
  "libc",
@@ -839,14 +839,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "flux-frontend"
+name = "forgearr-frontend"
 version = "0.50.0"
 dependencies = [
+ "forgearr-shared",
  "stylist",
 ]
 
 [[package]]
-name = "flux-shared"
+name = "forgearr-shared"
 version = "0.50.0"
 dependencies = [
  "chrono",

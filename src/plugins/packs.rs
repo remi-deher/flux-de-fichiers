@@ -8,7 +8,7 @@ use crate::{
     error::{AppError, AppResult},
     tools_cache::ToolCacheManager,
 };
-pub use flux_shared::plugins::{PackDetailView, PackInstallResult, PackInstallation};
+pub use forgearr_shared::plugins::{PackDetailView, PackInstallResult, PackInstallation};
 use serde_json::Value;
 use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};

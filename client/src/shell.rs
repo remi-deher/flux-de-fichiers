@@ -9,13 +9,14 @@ use crate::ui::filters::{FilterSheet, Filters};
 use crate::ui::search::Search;
 use crate::ui::topbar_action::{TopbarAction, TopbarActionSlot};
 use crate::ui::{
-    CommandPalette, CommandPaletteState, Icon, IconName, TagTone, ToastViewport, Toasts,
+    BrandMark, CommandPalette, CommandPaletteState, Icon, IconName, TagTone, ToastViewport, Toasts,
 };
 use chrono::{DateTime, Utc};
-use flux_shared::jobs::{Job, JobStatus};
-use flux_shared::session::Me;
-use flux_shared::workers::Worker;
-use flux_shared::{InstanceKind, Permission};
+use forgearr_shared::brand::NAME as APP_NAME;
+use forgearr_shared::jobs::{Job, JobStatus};
+use forgearr_shared::session::Me;
+use forgearr_shared::workers::Worker;
+use forgearr_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
 
 /// Écran de la navigation : route, libellé, pictogramme, droit, hébergé sur un worker, recherche.
@@ -152,9 +153,6 @@ pub fn allowed(me: &Me, route: &Route) -> bool {
         })
 }
 
-/// Nom de l'application, suffixe du titre de chaque onglet.
-const APP_NAME: &str = "Flux de Fichiers";
-
 /// Titre de l'écran : `h1` de la page et début du titre de l'onglet (WCAG 2.4.2, 2.4.6).
 pub fn screen_title(route: &Route) -> &'static str {
     match route {
@@ -168,7 +166,7 @@ pub fn screen_title(route: &Route) -> &'static str {
     }
 }
 
-/// Titre du document pour un écran : « Écran — Flux de Fichiers ».
+/// Titre du document pour un écran : « Écran — Forgearr ».
 pub fn document_title(route: &Route) -> String {
     format!("{} — {APP_NAME}", screen_title(route))
 }
@@ -293,12 +291,10 @@ fn Sidebar(me: Me, jobs: Signal<Vec<Job>>, workers: Signal<Vec<Worker>>) -> impl
         <aside class="application-sidebar" class:is-collapsed=move || collapsed.get()
             class:is-open=move || drawer.is_some_and(|open| open.get()) aria-label="Navigation principale">
             <div class="sidebar-header">
-                <a href="/" class="brand" title="Flux de Fichiers">
-                    <span class="brand-mark" aria-hidden="true">
-                        <Icon name=IconName::Flows size=18 />
-                    </span>
+                <a href="/" class="brand" title=APP_NAME aria-label=APP_NAME>
+                    <BrandMark />
                     <div class="brand-info">
-                        <span class="brand-name">"Flux de Fichiers"</span>
+                        <span class="brand-name">{APP_NAME}</span>
                         <div class="brand-meta">
                             <span class="brand-node-badge">{node_badge}</span>
                             <span class="brand-version">{format!("v{app_version}")}</span>
@@ -569,8 +565,8 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::Role;
-    use flux_shared::session::CallerKind;
+    use forgearr_shared::Role;
+    use forgearr_shared::session::CallerKind;
 
     fn me(role: Role, instance_kind: InstanceKind) -> Me {
         Me::new(
@@ -621,7 +617,7 @@ mod tests {
         }
         assert_eq!(
             document_title(&Route::Overview),
-            "Vue d'ensemble — Flux de Fichiers"
+            "Vue d'ensemble — Forgearr"
         );
     }
 

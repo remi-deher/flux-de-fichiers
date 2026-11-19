@@ -11,7 +11,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use flux_shared::flows::OwnedBlockSpec;
+use forgearr_shared::flows::OwnedBlockSpec;
 
 /// Catalogue des blocs pour la palette : issu exclusivement des dépôts de plugins synchronisés.
 pub async fn list_blocks(
@@ -142,7 +142,7 @@ pub struct FlowValidationReport {
     pub warnings: Vec<String>,
 }
 
-fn has_cycle(graph: &flux_shared::flows::FlowGraph) -> bool {
+fn has_cycle(graph: &forgearr_shared::flows::FlowGraph) -> bool {
     use std::collections::{HashMap, VecDeque};
     let mut indegree: HashMap<&str, usize> =
         graph.nodes.iter().map(|n| (n.id.as_str(), 0)).collect();
@@ -186,7 +186,7 @@ pub async fn validate_flow(
         serde_json::Value::String(s) => s,
         other => other.to_string(),
     };
-    let graph: flux_shared::flows::FlowGraph =
+    let graph: forgearr_shared::flows::FlowGraph =
         serde_json::from_str(&raw).map_err(|_| AppError::Invalid)?;
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     let blocks = s.catalog_cache.blocks(&roots).await;
@@ -203,7 +203,7 @@ pub async fn validate_flow(
         } else if !seen_ids.insert(node.id.as_str()) {
             errors.push(format!("Identifiant de nœud dupliqué : {}", node.id));
         }
-        if let Some(spec) = flux_shared::flows::find_owned(&blocks, &node.kind) {
+        if let Some(spec) = forgearr_shared::flows::find_owned(&blocks, &node.kind) {
             for field in &spec.fields {
                 if field.required && field.default.is_none() {
                     let missing = node.config.get(&field.name).is_none_or(|v| {

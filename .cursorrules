@@ -1,6 +1,6 @@
-# Flux de Fichiers - Cursor Rules
+# Forgearr - Cursor Rules
 
-Tu travailles sur le projet **Flux de Fichiers**. Source de vérité : `AGENTS.md`, puis `docs/developpement.md` (où est le code, quoi vérifier) et `docs/reprise.md` (état du chantier). Ce fichier en est un résumé.
+Tu travailles sur le projet **Forgearr**. Source de vérité : `AGENTS.md`, puis `docs/developpement.md` (où est le code, quoi vérifier) et `docs/reprise.md` (état du chantier). Ce fichier en est un résumé.
 
 ---
 
@@ -8,7 +8,7 @@ Tu travailles sur le projet **Flux de Fichiers**. Source de vérité : `AGENTS.m
 
 - **Stack** : Rust, Axum/Tokio, SQLx/SQLite local (`/config/flux.db`), Docker (conteneur unique), MKVToolNix. Ne pas la changer sans demande de l'utilisateur (ADR 0001, 0005).
 - **Interface** : client Leptos compilé en WASM (`client/`, ADR 0014), servi à la racine par Axum. Il n'y a plus de page statique ni de JavaScript écrit à la main.
-- **Contrat** : la crate `shared/` (`flux-shared`) est lue par le central et le client (tâches, flux, bibliothèques, workers, plugins, comptes). Toute évolution d'API passe par elle.
+- **Contrat** : la crate `shared/` (`forgearr-shared`) est lue par le central et le client (tâches, flux, bibliothèques, workers, plugins, comptes). Toute évolution d'API passe par elle.
 - **`frontend/`** : uniquement la page `dist/index.html` et le thème CSS typé (`frontend/src/theme/`), hébergés dans des modules Rust. Aucun fichier externe `.js`, `.css` ou `.scss`.
 - **Vocabulaire** : central / worker / installation ; « nœud » désigne seulement un bloc d'un graphe de flux (ADR 0013).
 - **Zéro Boilerplate & Factorisation Continue** : ne jamais dupliquer de code, de balisage ou de styles. Remplacer les chaînes magiques par des `enum` typés avec Serde. Pas de constante numérique sans nom.
@@ -34,7 +34,7 @@ Tu travailles sur le projet **Flux de Fichiers**. Source de vérité : `AGENTS.m
 - La cible `wasm32-unknown-unknown` n'est pas installée en local : le client se vérifie en natif ici, en WASM en CI.
 - **Régénérer la page** après toute modification du thème ou de la page (`feature.yml` refuse une page périmée) :
   ```bash
-  cargo run -p flux-frontend
+  cargo run -p forgearr-frontend
   # Régénère frontend/dist/index.html
   ```
 

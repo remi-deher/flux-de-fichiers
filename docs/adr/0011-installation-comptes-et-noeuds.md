@@ -60,7 +60,7 @@ des comptes avec mot de passe pour les humains, des clés d'API pour les machine
 ## État d'avancement (13 nov. 2026)
 
 **Phase 1 faite** (centrale : assistant, comptes Argon2id, sessions + CSRF, clés d'API, secret v2
-automatique, crate `flux-shared`, interface de connexion, Réglages → compte et clés d'API).
+automatique, crate `forgearr-shared`, interface de connexion, Réglages → compte et clés d'API).
 Vérifiée en local, non déployée.
 
 **Phase 2 faite** (CI verte sur la PR #92 le 13 nov. 2026 : fmt, clippy, tests Rust, build Docker et scénarios ; interface non vérifiée dans un navigateur) :
@@ -106,7 +106,7 @@ centrale dans le bandeau.
   mis à jour le 13 nov. 2026 sur `test-89e594c7451b` ; le worker s'enregistre et réclame des tâches. Restent :
   connexion à l'interface du worker (`http://192.168.1.51:18481`), compte lecteur, tâche de remux de bout en bout,
   et la promotion `test → main`.
-- Mot de passe oublié : fait en ligne de commande, `flux-de-fichiers reset-password <identifiant>` dans le
+- Mot de passe oublié : fait en ligne de commande, `forgearr reset-password <identifiant>` dans le
   conteneur (mot de passe généré, affiché une fois, sessions du compte fermées ; `src/account_admin.rs`).
 - Rotation de la clé de chiffrement : faite, central en marche, par le bouton « Renouveler la clé de
   chiffrement » de la page Système (`POST /api/v1/system/secret-key/rotate`, administrateur ;
@@ -119,7 +119,7 @@ centrale dans le bandeau.
   Aucune étape ne détruit une clé encore utile : plus de sauvegarde de clés en clair dans
   `/config/backups`. Une seule rotation à la fois par trousseau (409 sinon). Une rotation interrompue (arrêt pendant le
   délai) s'achève au démarrage suivant. Refusée si `SECRET_KEY_FILE` est défini (la clé appartient alors à
-  l'orchestrateur). En secours, central arrêté : `flux-de-fichiers rotate-secret` fait les trois étapes
+  l'orchestrateur). En secours, central arrêté : `forgearr rotate-secret` fait les trois étapes
   d'un coup. `SystemStatus.retiredKeyIds` signale une rotation en cours.
 - Trousseau de clés (`src/secrets.rs`, `src/secrets/retired_keys.rs`) : une clé active chiffre ; les clés
   retirées, une par ligne dans `/config/secret_keys.retired` (0600), ne servent plus qu'à déchiffrer les

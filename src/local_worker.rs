@@ -13,7 +13,7 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 
 pub async fn run(state: AppState) {
     let worker_name = std::env::var("LOCAL_WORKER_NAME")
-        .unwrap_or_else(|_| flux_shared::workers::INTEGRATED_WORKER_NAME.into());
+        .unwrap_or_else(|_| forgearr_shared::workers::INTEGRATED_WORKER_NAME.into());
     let probe = crate::telemetry::TelemetryProbe::with_storage_path(&state.config.data_dir);
     let initial_snapshot = probe.sample();
     let worker = match repository::register_with_metadata(
@@ -149,7 +149,7 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
             return;
         }
     };
-    let source_snapshot = work_dir.join(flux_shared::jobs::source_working_filename(
+    let source_snapshot = work_dir.join(forgearr_shared::jobs::source_working_filename(
         &claim.source_name,
     ));
     let mut heartbeat = tokio::spawn(heartbeat_loop(

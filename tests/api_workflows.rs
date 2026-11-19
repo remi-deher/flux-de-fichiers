@@ -384,8 +384,8 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
         repos_dir.join("index.json"),
         r#"{"schemaVersion":"1.0.0","entries":[
             {"id":"pack.demo","type":"pack","version":"1.0.0","name":"Demo","manifestPath":"packs/demo/manifest.json"},
-            {"id":"plugin.video","type":"plugin","version":"1.0.0","name":"Video","manifestPath":"plugins/video/manifest.json"},
-            {"id":"app.mkvtoolnix","type":"app","version":"1.0.0","name":"MKVToolNix","manifestPath":"apps/mkvtoolnix/manifest.json"}
+            {"id":"video","type":"plugin","version":"1.0.0","name":"Video","manifestPath":"plugins/video/manifest.json"},
+            {"id":"mkvtoolnix","type":"app","version":"1.0.0","name":"MKVToolNix","manifestPath":"apps/mkvtoolnix/manifest.json"}
         ]}"#,
     )?;
     std::fs::write(
@@ -398,11 +398,11 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
     )?;
     std::fs::write(
         repos_dir.join("plugins/video/manifest.json"),
-        r#"{"schemaVersion":"1.1.0","id":"plugin.video","type":"plugin","version":"1.0.0","name":"Video","files":[{"path":"operations/probe.json","role":"operation","mediaType":"application/json"}]}"#,
+        r#"{"schemaVersion":"1.1.0","id":"video","type":"plugin","version":"1.0.0","name":"Video","files":[{"path":"operations/probe.json","role":"operation","mediaType":"application/json"}]}"#,
     )?;
     std::fs::write(
         repos_dir.join("plugins/video/operations/probe.json"),
-        r#"{"schemaVersion":"1.1.0","id":"operation.mkvtoolnix.probe","version":"1.0.0","name":"Probe","providerId":"plugin.video","providerKind":"plugin","capability":"probe","status":"validated","runtime":{"kind":"binary","tool":{"id":"app.mkvtoolnix","version":"1.0.0"},"executable":"mkvmerge","executionMode":"probe-primary","probeFormat":"json","probeRequirePaths":["container.recognized","tracks"],"argv":[{"param":"source","as":"filePath"}]}}"#,
+        r#"{"schemaVersion":"1.1.0","id":"operation.mkvtoolnix.probe","version":"1.0.0","name":"Probe","providerId":"video","providerKind":"plugin","capability":"probe","status":"validated","runtime":{"kind":"binary","tool":{"id":"mkvtoolnix","version":"1.0.0"},"executable":"mkvmerge","executionMode":"probe-primary","probeFormat":"json","probeRequirePaths":["container.recognized","tracks"],"argv":[{"param":"source","as":"filePath"}]}}"#,
     )?;
 
     let config = Config {
@@ -580,7 +580,7 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
     let claim: Claim =
         serde_json::from_slice::<Option<Claim>>(&to_bytes(resp.into_body(), 1024 * 64).await?)?
             .ok_or_else(|| anyhow::anyhow!("claim attendu"))?;
-    assert_eq!(claim.required_tools[0].tool_id, "app.mkvtoolnix");
+    assert_eq!(claim.required_tools[0].tool_id, "mkvtoolnix");
 
     // 4. Report des étapes & lecture côté admin
     let resp = app

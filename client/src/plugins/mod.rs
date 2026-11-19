@@ -9,14 +9,20 @@ mod tool_detail;
 mod tools;
 
 use crate::api;
+use crate::route::encode_segment;
 use crate::ui::filters::{Filters, PluginKindFilter, plugin_kind};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
     Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
+    Toasts,
 };
+use chrono::NaiveDate;
+use flux_shared::format::format_day;
 use flux_shared::plugins::vocab::{CatalogItemType, CatalogSection};
-use flux_shared::plugins::{CatalogEntry, PluginRepository, ToolStatus, ToolStatusSummary};
+use flux_shared::plugins::{
+    CatalogEntry, DependencyInstallResult, PluginRepository, ToolStatus, ToolStatusSummary,
+};
 use flux_shared::session::Me;
 use flux_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
@@ -122,6 +128,68 @@ fn section_icon(entry_type: CatalogItemType) -> IconName {
     }
 }
 
+/// Ligne « terme / date » d'une fiche ; rien si la date est inconnue.
+pub(super) fn date_row(term: &'static str, date: Option<NaiveDate>) -> impl IntoView {
+    date.map(|day| {
+        view! {
+            <div class="detail-term">{term}</div>
+            <div class="detail-val">{format_day(day)}</div>
+        }
+    })
+}
+
+/// Synthèse du bilan d'installation d'un outil ou d'un plugin et de ses dépendances.
+pub(super) fn dependency_install_summary(result: &DependencyInstallResult) -> (bool, String) {
+    let ok = result.failed_tools.is_empty() && result.missing_dependencies.is_empty();
+    let msg = if ok {
+        format!(
+            "{} outil(s) installé(s) ou déjà prêt(s).",
+            result.installed_tools.len()
+        )
+    } else {
+        format!(
+            "{} outil(s) prêt(s), {} en échec, {} dépendance(s) introuvable(s).",
+            result.installed_tools.len(),
+            result.failed_tools.len(),
+            result.missing_dependencies.len()
+        )
+    };
+    (ok, msg)
+}
+
+/// Action d'installation d'une pièce (`{base}/{id}/install`) et de ses outils requis ;
+/// le bilan est affiché dans `feedback` puis `on_done` est appelé.
+pub(super) fn install_with_dependencies_action(
+    base: &'static str,
+    feedback: RwSignal<Option<String>>,
+    on_done: impl Fn() + 'static,
+) -> Action<String, Result<DependencyInstallResult, api::ApiError>> {
+    let action = Action::new_local(move |id: &String| {
+        let path = format!("{base}/{}/install", encode_segment(id));
+        async move { api::post::<(), DependencyInstallResult>(&path, None).await }
+    });
+    Effect::new(move |_| match action.value().get() {
+        Some(Ok(result)) => {
+            let (ok, msg) = dependency_install_summary(&result);
+            if ok {
+                Toasts::set_success(feedback, msg);
+            } else {
+                Toasts::set_error(feedback, msg);
+            }
+            on_done();
+        }
+        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
+        None => {}
+    });
+    action
+}
+
+/// Mention de dernière mise à jour d'une pièce du catalogue ; vide si le dépôt ne la fournit pas.
+pub(super) fn updated_label(date: Option<NaiveDate>) -> String {
+    date.map(|day| format!("Mis à jour le {}", format_day(day)))
+        .unwrap_or_default()
+}
+
 pub(super) fn section_badge_label(entry_type: CatalogItemType) -> &'static str {
     if let Some(sub) = entry_type.subtitle() {
         return sub;
@@ -188,8 +256,6 @@ enum CatalogDrawer {
 #[component]
 fn CatalogSectionView(
     catalog: LocalResource<Result<Vec<CatalogEntry>, api::ApiError>>,
-    repositories: Option<LocalResource<Result<Vec<PluginRepository>, api::ApiError>>>,
-    active_tab: RwSignal<PluginsTab>,
     reload_tools: RwSignal<u32>,
     can_configure: bool,
 ) -> impl IntoView {
@@ -224,7 +290,7 @@ fn CatalogSectionView(
                 }
             })
         };
-        let mut items = vec![
+        vec![
             StatItem::new("Tous", counts.total.to_string(), MetricTone::Neutral).with_filter(
                 active_kind == PluginKindFilter::Any,
                 set_kind(PluginKindFilter::Any),
@@ -263,20 +329,7 @@ fn CatalogSectionView(
                 active_kind == PluginKindFilter::Resources,
                 set_kind(PluginKindFilter::Resources),
             ),
-        ];
-        if let Some(repos) = repositories {
-            let repo_count = repos
-                .get()
-                .and_then(Result::ok)
-                .map_or(0, |list| list.len());
-            items.push(
-                StatItem::new("Dépôts", repo_count.to_string(), MetricTone::Neutral).with_filter(
-                    false,
-                    Callback::new(move |()| active_tab.set(PluginsTab::Repositories)),
-                ),
-            );
-        }
-        items
+        ]
     });
 
     view! {
@@ -354,6 +407,7 @@ fn CatalogSectionView(
                                 {shown.into_iter().map(|entry| {
                                     let id = entry.id.clone();
                                     let active_id = id.clone();
+                                    let updated = updated_label(entry.updated_at);
                                     let target = match entry.entry_type {
                                         CatalogItemType::Plugin => Some((
                                             CatalogDrawer::Plugin(SelectedItem {
@@ -446,7 +500,7 @@ fn CatalogSectionView(
                                                             .is_some_and(|item| item.id == active_id))
                                             }))
                                             on_click=open_drawer
-                                            footer_meta=id
+                                            footer_meta=updated
                                             footer_actions=actions
                                         >
                                             {if has_meta {
@@ -544,8 +598,6 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
                 PluginsTab::Catalog => view! {
                     <CatalogSectionView
                         catalog=catalog
-                        repositories=repositories
-                        active_tab=active_tab
                         reload_tools=reload_tools
                         can_configure=can_manage
                     />
@@ -619,12 +671,45 @@ mod tests {
             tags: Vec::new(),
             owner: None,
             sha256: None,
+            updated_at: None,
         }
     }
 
     #[test]
+    fn updated_label_formats_known_dates_only() {
+        let date = NaiveDate::from_ymd_opt(2026, 11, 19);
+        assert_eq!(updated_label(date), "Mis à jour le 19 nov. 2026");
+        assert_eq!(updated_label(None), "");
+    }
+
+    #[test]
+    fn dependency_install_summary_reports_failures_and_missing() {
+        let mut result = DependencyInstallResult {
+            item_id: "video".into(),
+            installed_tools: vec!["ffmpeg".into(), "mkvtoolnix".into()],
+            failed_tools: Vec::new(),
+            missing_dependencies: Vec::new(),
+        };
+        assert_eq!(
+            dependency_install_summary(&result),
+            (true, "2 outil(s) installé(s) ou déjà prêt(s).".to_owned())
+        );
+        result
+            .failed_tools
+            .push(("mp4box".into(), "contrat absent".into()));
+        result.missing_dependencies.push("absent".into());
+        assert_eq!(
+            dependency_install_summary(&result),
+            (
+                false,
+                "2 outil(s) prêt(s), 1 en échec, 1 dépendance(s) introuvable(s).".to_owned()
+            )
+        );
+    }
+
+    #[test]
     fn summarize_and_filter_catalog_exclude_apps_and_blocks() {
-        let mut plugin = entry("plugin.sonarr", CatalogItemType::Plugin);
+        let mut plugin = entry("sonarr", CatalogItemType::Plugin);
         plugin.capability = Some(CatalogCapability::new("integration"));
         plugin.tags = vec!["arr".into(), "tv".into()];
         let flow = entry("flow.remux", CatalogItemType::Flow);
@@ -632,7 +717,7 @@ mod tests {
         let pack = entry("pack.base", CatalogItemType::Pack);
         let preset = entry("preset.fast", CatalogItemType::Preset);
         let subtitle = entry("res.sub", CatalogItemType::ResourceSubtitle);
-        let app = entry("app.ffmpeg", CatalogItemType::App);
+        let app = entry("ffmpeg", CatalogItemType::App);
         let block = entry("block.remux", CatalogItemType::Block);
 
         let all = vec![plugin, flow, script, pack, preset, subtitle, app, block];

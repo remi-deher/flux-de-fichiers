@@ -90,13 +90,13 @@ mod tests {
     #[test]
     fn secrets_are_masked_at_any_depth_and_other_fields_stay_readable() {
         let args = json!({
-            "id": "plugin.radarr",
+            "id": "radarr",
             "settings": { "apiKey": "super-secret-value", "url": "http://radarr" },
             "custom_headers": { "X-Auth": "abc" },
             "targets": [{ "webhookUrl": "https://hooks/secret", "name": "n" }]
         });
         let preview = action_preview(&args);
-        assert!(preview.contains("plugin.radarr") && preview.contains("http://radarr"));
+        assert!(preview.contains("radarr") && preview.contains("http://radarr"));
         assert!(preview.contains("\"name\": \"n\""));
         for leaked in ["super-secret-value", "abc", "hooks/secret"] {
             assert!(!preview.contains(leaked), "{leaked} ne doit pas apparaître");

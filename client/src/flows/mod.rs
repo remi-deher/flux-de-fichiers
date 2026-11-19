@@ -1226,17 +1226,17 @@ pub(super) mod test_support {
     pub(super) fn test_catalog() -> Vec<OwnedBlockSpec> {
         vec![
             BlockBuilder::new(
-                "block.core.file-input",
+                "essentiel.file-input",
                 "file-input",
                 "Fichier source",
                 "Entrée",
                 "input",
             )
             .no_input()
-            .suggest(&["block.core.condition", "block.video.remux-mkv"])
+            .suggest(&["essentiel.condition", "video.remux-mkv"])
             .build(),
             BlockBuilder::new(
-                "block.core.condition",
+                "essentiel.condition",
                 "condition",
                 "Condition",
                 "Logique",
@@ -1251,10 +1251,10 @@ pub(super) mod test_support {
                 help: String::new(),
                 default: None,
             }])
-            .suggest(&["block.video.encode", "block.video.remux-mkv"])
+            .suggest(&["video.encode", "video.remux-mkv"])
             .build(),
             BlockBuilder::new(
-                "block.media.inspect",
+                "video.inspect",
                 "media-inspect",
                 "Inspection média",
                 "Média",
@@ -1262,7 +1262,7 @@ pub(super) mod test_support {
             )
             .build(),
             BlockBuilder::new(
-                "block.metadata.mkvpropedit",
+                "video.mkvpropedit",
                 "mkvpropedit",
                 "Édition des en-têtes",
                 "MKVToolNix",
@@ -1270,25 +1270,25 @@ pub(super) mod test_support {
             )
             .build(),
             BlockBuilder::new(
-                "block.video.remux-mkv",
+                "video.remux-mkv",
                 "remux-mkv",
                 "Remuxage Matroska",
                 "MKVToolNix",
                 "mkv",
             )
-            .suggest(&["block.core.file-output"])
+            .suggest(&["essentiel.file-output"])
             .build(),
             BlockBuilder::new(
-                "block.video.encode",
+                "video.encode",
                 "video-encode",
                 "Encodage vidéo",
                 "Média",
                 "video",
             )
-            .suggest(&["block.video.remux-mkv"])
+            .suggest(&["video.remux-mkv"])
             .build(),
             BlockBuilder::new(
-                "block.audio.encode",
+                "audio.encode",
                 "audio-encode",
                 "Encodage audio",
                 "Média",
@@ -1296,7 +1296,7 @@ pub(super) mod test_support {
             )
             .build(),
             BlockBuilder::new(
-                "block.sonarr.rescan",
+                "sonarr.rescan",
                 "sonarr-rescan",
                 "Sonarr : réanalyser",
                 "Intégrations",
@@ -1304,7 +1304,7 @@ pub(super) mod test_support {
             )
             .build(),
             BlockBuilder::new(
-                "block.sonarr.rename",
+                "sonarr.rename",
                 "sonarr-rename",
                 "Sonarr : renommer",
                 "Intégrations",
@@ -1312,7 +1312,7 @@ pub(super) mod test_support {
             )
             .build(),
             BlockBuilder::new(
-                "block.core.webhook",
+                "essentiel.webhook",
                 "webhook",
                 "Webhook",
                 "Notification",
@@ -1352,10 +1352,10 @@ pub(super) mod test_support {
                     default: Some(json!(false)),
                 },
             ])
-            .suggest(&["block.core.file-output"])
+            .suggest(&["essentiel.file-output"])
             .build(),
             BlockBuilder::new(
-                "block.core.file-output",
+                "essentiel.file-output",
                 "file-output",
                 "Fin du flux",
                 "Sortie",
@@ -1379,7 +1379,7 @@ mod tests {
         let mut graph = FlowGraph::default();
         for idx in 1..=5 {
             graph.append(
-                FlowBlockKind::parse("block.core.file-input"),
+                FlowBlockKind::parse("essentiel.file-input"),
                 &format!("Étape {idx}"),
                 serde_json::json!({}),
                 &catalog,
@@ -1450,25 +1450,25 @@ mod tests {
         let catalog = test_support::test_catalog();
         let mut graph = FlowGraph::default();
         let entry = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             serde_json::json!({}),
             &catalog,
         );
         let cond = graph.append(
-            FlowBlockKind::parse("block.core.condition"),
+            FlowBlockKind::parse("essentiel.condition"),
             "HEVC ?",
             serde_json::json!({}),
             &catalog,
         );
         let hook = graph.append(
-            FlowBlockKind::parse("block.core.webhook"),
+            FlowBlockKind::parse("essentiel.webhook"),
             "Webhook",
             serde_json::json!({}),
             &catalog,
         );
         let out = graph.append(
-            FlowBlockKind::parse("block.core.file-output"),
+            FlowBlockKind::parse("essentiel.file-output"),
             "Sortie",
             serde_json::json!({}),
             &catalog,

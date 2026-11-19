@@ -962,13 +962,13 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
         );
         graph.append(
-            FlowBlockKind::parse("block.core.webhook"),
+            FlowBlockKind::parse("essentiel.webhook"),
             "Hook",
             json!({"url": ""}),
             &catalog,
@@ -990,7 +990,7 @@ mod tests {
         let catalog = test_catalog();
         let mut g1 = FlowGraph::default();
         g1.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
@@ -1005,7 +1005,7 @@ mod tests {
 
         let mut g2 = g1.clone();
         g2.append(
-            FlowBlockKind::parse("block.video.remux-mkv"),
+            FlowBlockKind::parse("video.remux-mkv"),
             "Remux",
             json!({}),
             &catalog,
@@ -1015,7 +1015,7 @@ mod tests {
 
         let mut g3 = g2.clone();
         g3.append(
-            FlowBlockKind::parse("block.core.file-output"),
+            FlowBlockKind::parse("essentiel.file-output"),
             "Fin",
             json!({}),
             &catalog,
@@ -1030,7 +1030,7 @@ mod tests {
 
         let mut alt = g2;
         alt.append(
-            FlowBlockKind::parse("block.core.webhook"),
+            FlowBlockKind::parse("essentiel.webhook"),
             "Hook",
             json!({}),
             &catalog,
@@ -1045,7 +1045,7 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let input = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
@@ -1104,7 +1104,7 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let input = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
@@ -1157,14 +1157,14 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let input = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
         );
         let editor = Editor::for_flow(Some("flow.qa".into()), graph);
         editor.catalog.set(catalog.clone());
-        let Some(encode) = catalog.into_iter().find(|s| s.kind == "block.video.encode") else {
+        let Some(encode) = catalog.into_iter().find(|s| s.kind == "video.encode") else {
             panic!("encode absent du catalogue de test");
         };
 
@@ -1203,19 +1203,19 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let input = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
         );
         let remux = graph.append(
-            FlowBlockKind::parse("block.video.remux-mkv"),
+            FlowBlockKind::parse("video.remux-mkv"),
             "Remux",
             json!({}),
             &catalog,
         );
         let output = graph.append(
-            FlowBlockKind::parse("block.core.file-output"),
+            FlowBlockKind::parse("essentiel.file-output"),
             "Sortie",
             json!({}),
             &catalog,
@@ -1252,7 +1252,7 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let id = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
@@ -1273,7 +1273,7 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let input = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,

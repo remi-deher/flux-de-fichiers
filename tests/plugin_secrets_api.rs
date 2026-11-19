@@ -36,7 +36,7 @@ fn write_catalog(root: &Path) -> anyhow::Result<()> {
         r#"{"schemaVersion":"1.0.0","entries":[
             {"id":"plugin.demo","type":"plugin","version":"1.0.0","name":"Démo","manifestPath":"plugins/demo.json"},
             {"id":"block.demo.run","type":"block","owner":"plugin.demo","version":"1.0.0","name":"Démo : exécuter","manifestPath":"plugins/blocks/run.json"},
-            {"id":"app.ffmpeg","type":"app","version":"7.1.0","name":"FFmpeg","manifestPath":"apps/ffmpeg/manifest.json"},
+            {"id":"ffmpeg","type":"app","version":"7.1.0","name":"FFmpeg","manifestPath":"apps/ffmpeg/manifest.json"},
             {"id":"pack.suite","type":"pack","version":"1.0.0","name":"Suite Démo","manifestPath":"packs/suite/manifest.json"}
         ]}"#,
     )?;
@@ -44,7 +44,7 @@ fn write_catalog(root: &Path) -> anyhow::Result<()> {
         root.join("plugins/demo.json"),
         r#"{"schemaVersion":"1.1.0","id":"plugin.demo","type":"plugin","version":"1.0.0","name":"Démo",
             "description":"Plugin de démonstration","author":"flux-de-fichiers","license":"GPL-2.0-or-later",
-            "dependencies":[{"id":"app.ffmpeg","versionRange":"^7.0.0","kind":"app","optional":true}],
+            "dependencies":[{"id":"ffmpeg","versionRange":"^7.0.0","kind":"app","optional":true}],
             "compatibility":{"appMin":"1.0.0","platforms":["linux/amd64"]},
             "settingsSchema":{"fields":[
                 {"name":"url","label":"URL","type":"url","default":"http://defaut"},
@@ -56,7 +56,7 @@ fn write_catalog(root: &Path) -> anyhow::Result<()> {
     )?;
     std::fs::write(
         root.join("apps/ffmpeg/manifest.json"),
-        r#"{"schemaVersion":"1.1.0","id":"app.ffmpeg","type":"app","version":"7.1.0","name":"FFmpeg","description":"Transcodeur","author":"FFmpeg","license":"GPL-2.0-or-later","tool":{"capability":"encode","interface":"cli"}}"#,
+        r#"{"schemaVersion":"1.1.0","id":"ffmpeg","type":"app","version":"7.1.0","name":"FFmpeg","description":"Transcodeur","author":"FFmpeg","license":"GPL-2.0-or-later","tool":{"capability":"encode","interface":"cli"}}"#,
     )?;
     std::fs::write(
         root.join("packs/suite/manifest.json"),
@@ -325,10 +325,24 @@ async fn test_plugin_detail_exposes_owned_blocks_and_metadata() -> anyhow::Resul
     let (status, _) = call(&h.app, "GET", "/api/v1/plugins/plugin.inconnu", None).await?;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    let (status, tool) = call(&h.app, "GET", "/api/v1/tools/app.ffmpeg", None).await?;
+    let (status, tool) = call(&h.app, "GET", "/api/v1/tools/ffmpeg", None).await?;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(tool["summary"]["id"], "app.ffmpeg");
+    assert_eq!(tool["summary"]["id"], "ffmpeg");
     assert_eq!(tool["usedByPlugins"], serde_json::json!(["plugin.demo"]));
+
+    // Installer un plugin installe ses outils requis ; sans contrat de distribution,
+    // l'échec de la dépendance est rapporté sans faire échouer la requête.
+    let (status, installed) =
+        call(&h.app, "POST", "/api/v1/plugins/plugin.demo/install", None).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(installed["itemId"], PLUGIN_ID);
+    assert_eq!(installed["installedTools"], serde_json::json!([]));
+    assert_eq!(installed["failedTools"][0][0], "ffmpeg");
+    assert_eq!(installed["missingDependencies"], serde_json::json!([]));
+    let (status, _) = call(&h.app, "POST", "/api/v1/plugins/ffmpeg/install", None).await?;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = call(&h.app, "POST", "/api/v1/tools/ffmpeg/install", None).await?;
+    assert_ne!(status, StatusCode::OK);
 
     let (status, pack) = call(&h.app, "GET", "/api/v1/packs/pack.suite", None).await?;
     assert_eq!(status, StatusCode::OK);
@@ -751,7 +765,7 @@ async fn plugin_connection_test_and_worker_active_tools_work() -> anyhow::Result
     )
     .await?;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(tools_json[0]["tool_id"], "app.ffmpeg");
+    assert_eq!(tools_json[0]["tool_id"], "ffmpeg");
     assert_eq!(tools_json[0]["version"], "7.1.0");
 
     // Démarrer un petit serveur HTTP local pour vérifier le test de connexion d'un plugin API.

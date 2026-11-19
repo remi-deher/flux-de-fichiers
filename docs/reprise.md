@@ -161,6 +161,7 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 ### 3. Moteur et plugins
 
 - [x] Exécuter `block.video.remux-mp4` (MP4Box) (#114).
+- [x] Identifiants du catalogue sans préfixe de type (`ffmpeg`, `essentiel`, `video.encode`… ; seules les opérations gardent `operation.*`), date `updatedAt` par pièce et `releasedAt` par outil affichées dans Catalogue/Outils, retrait de la pastille « Dépôts » du Catalogue, installation des outils requis par un plugin (`POST /api/v1/plugins/{id}/install`, dépendances transitives, aussi appliquée à `POST /api/v1/tools/{id}/install`). Les réglages et secrets enregistrés sous les anciens identifiants sont repris automatiquement (migration `0027` + rescellement au démarrage, `plugins::legacy_ids`), de même que les types de blocs des flux en base, de leurs versions figées et des modèles locaux.
 - [x] Artefacts `ffmpeg` / `ffprobe` / `MP4Box` / `mkvtoolnix` / `mediainfo` intégrés dans `.github/workflows/build-tools.yml` (côté `flux-de-fichiers-plugins`).
 - [x] Repli automatique GPU → CPU quand l'encodeur matériel échoue (#133).
 - [x] Moteur 100 % déclaratif par contrats ([ADR 0017](adr/0017-moteur-generique-et-contrats.md)) : `OperationRegistry`, exécuteurs génériques `binary_runner` / `http_runner` et `script_runner` (`kind: "script"`, routage `nextPort`, `workingFile`, fusion `mediaInfo`, `Skip`, `stopPipeline`), installation déclarative de packs. Côté `flux-de-fichiers-plugins` : schémas, `build_index.py`, `check_catalogue.py` et `scaffold.py script` alignés sur `type: "script"`.

@@ -131,7 +131,7 @@ mod tests {
 
     fn sample_webhook() -> OwnedBlockSpec {
         OwnedBlockSpec {
-            kind: "block.core.webhook".into(),
+            kind: "essentiel.webhook".into(),
             aliases: vec!["webhook".into()],
             label: "Webhook".into(),
             category: "Notification".into(),
@@ -180,13 +180,13 @@ mod tests {
     fn find_owned_resolves_canonical_and_alias() {
         let catalog = vec![sample_webhook()];
         assert_eq!(
-            find_owned(&catalog, &FlowBlockKind::parse("block.core.webhook"))
+            find_owned(&catalog, &FlowBlockKind::parse("essentiel.webhook"))
                 .map(|s| s.kind.as_str()),
-            Some("block.core.webhook")
+            Some("essentiel.webhook")
         );
         assert_eq!(
             find_owned(&catalog, &FlowBlockKind::parse("webhook")).map(|s| s.kind.as_str()),
-            Some("block.core.webhook")
+            Some("essentiel.webhook")
         );
         assert!(find_owned(&catalog, &FlowBlockKind::parse("macro.unknown")).is_none());
     }

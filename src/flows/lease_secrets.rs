@@ -142,18 +142,18 @@ mod tests {
             "id": "operation.sonarr.rescan",
             "version": "1.0.0",
             "name": "Sonarr Rescan",
-            "providerId": "plugin.sonarr",
+            "providerId": "sonarr",
             "providerKind": "plugin",
             "capability": "integration",
             "status": "validated",
             "runtime": {
                 "kind": "http",
-                "settingsPluginId": "plugin.sonarr",
+                "settingsPluginId": "sonarr",
                 "requiredSettings": ["url", "apiKey"],
                 "steps": [{ "url": "{$setting.url}/api", "method": "POST" }]
             }
         }));
-        reg.register_block_mapping("block.sonarr.rescan", "operation.sonarr.rescan");
+        reg.register_block_mapping("sonarr.rescan", "operation.sonarr.rescan");
         reg
     }
 
@@ -161,10 +161,9 @@ mod tests {
     fn decrypts_encrypted_plugin_settings_and_keeps_plaintext() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         let secrets = SecretBox::open(dir.path())?;
-        let sealed =
-            secrets.encrypt("api_secret", &plugin_secret_aad("plugin.sonarr", "apiKey"))?;
+        let sealed = secrets.encrypt("api_secret", &plugin_secret_aad("sonarr", "apiKey"))?;
         let raw = json!({ "url": "http://sonarr:8989", "apiKey": sealed });
-        let decrypted = decrypt_plugin_settings_value(&secrets, "plugin.sonarr", raw)
+        let decrypted = decrypt_plugin_settings_value(&secrets, "sonarr", raw)
             .ok_or_else(|| anyhow::anyhow!("decryption failed"))?;
         assert_eq!(decrypted["url"], "http://sonarr:8989");
         assert_eq!(decrypted["apiKey"], "api_secret");
@@ -178,7 +177,7 @@ mod tests {
             file_mask: "*".into(),
             is_default: false,
             definition: json!({
-                "nodes": [{ "id": "n1", "type": "block.sonarr.rescan", "name": "s" }],
+                "nodes": [{ "id": "n1", "type": "sonarr.rescan", "name": "s" }],
                 "connections": []
             })
             .to_string(),
@@ -187,7 +186,7 @@ mod tests {
         };
         assert_eq!(
             reg.required_settings_plugins_for_flow(Some(&flow)),
-            vec!["plugin.sonarr".to_owned()]
+            vec!["sonarr".to_owned()]
         );
         Ok(())
     }
@@ -214,7 +213,7 @@ mod tests {
                 definition: json!({
                     "nodes": [{
                         "id": "n1",
-                        "type": "block.core.webhook",
+                        "type": "essentiel.webhook",
                         "name": "Webhook",
                         "config": {
                             "url": "https://hook.example/notify",
@@ -231,7 +230,7 @@ mod tests {
             operations: HashMap::new(),
             block_operations: HashMap::new(),
             plugin_configs: HashMap::from([(
-                "plugin.sonarr".to_owned(),
+                "sonarr".to_owned(),
                 json!({ "url": "http://sonarr:8989", "apiKey": "sonarr-secret" }),
             )]),
             sealed_secrets: None,
@@ -262,10 +261,7 @@ mod tests {
         // Worker détenteur + bon epoch -> secrets restaurés.
         unseal_claim_secrets_for_worker(&mut claim, worker_key)?;
         assert!(claim.sealed_secrets.is_none());
-        assert_eq!(
-            claim.plugin_configs["plugin.sonarr"]["apiKey"],
-            "sonarr-secret"
-        );
+        assert_eq!(claim.plugin_configs["sonarr"]["apiKey"], "sonarr-secret");
         let clear_def = &claim
             .frozen_flow
             .as_ref()

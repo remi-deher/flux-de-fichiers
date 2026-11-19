@@ -26,7 +26,7 @@ fn install_fake_tool(
 fn install_fake_probe(cache: &ToolCacheManager) -> std::io::Result<()> {
     install_fake_tool(
         cache,
-        "app.mkvtoolnix",
+        "mkvtoolnix",
         "1.0.0",
         "mkvmerge",
         &format!("echo '{INSPECT_JSON}'"),
@@ -41,7 +41,7 @@ fn base_registry() -> OperationRegistry {
             "id": "operation.core.file-input",
             "version": "1.0.0",
             "name": "Entrée",
-            "providerId": "plugin.core",
+            "providerId": "essentiel",
             "providerKind": "plugin",
             "capability": "control",
             "status": "validated",
@@ -52,7 +52,7 @@ fn base_registry() -> OperationRegistry {
             "id": "operation.core.file-output",
             "version": "1.0.0",
             "name": "Sortie",
-            "providerId": "plugin.core",
+            "providerId": "essentiel",
             "providerKind": "plugin",
             "capability": "control",
             "status": "validated",
@@ -63,13 +63,13 @@ fn base_registry() -> OperationRegistry {
             "id": "operation.mkvtoolnix.probe",
             "version": "1.0.0",
             "name": "Probe",
-            "providerId": "plugin.video",
+            "providerId": "video",
             "providerKind": "plugin",
             "capability": "probe",
             "status": "validated",
             "runtime": {
                 "kind": "binary",
-                "tool": { "id": "app.mkvtoolnix", "version": "1.0.0" },
+                "tool": { "id": "mkvtoolnix", "version": "1.0.0" },
                 "executable": "mkvmerge",
                 "executionMode": "probe-primary",
                 "probeFormat": "json",
@@ -83,13 +83,13 @@ fn base_registry() -> OperationRegistry {
             "id": "operation.mp4box.remux",
             "version": "1.0.0",
             "name": "MP4Box",
-            "providerId": "plugin.video",
+            "providerId": "video",
             "providerKind": "plugin",
             "capability": "remux",
             "status": "validated",
             "runtime": {
                 "kind": "binary",
-                "tool": { "id": "app.mp4box", "version": "1.0.0" },
+                "tool": { "id": "mp4box", "version": "1.0.0" },
                 "executable": "MP4Box",
                 "executionMode": "staged-output",
                 "outputExtension": "mp4",
@@ -114,13 +114,13 @@ fn base_registry() -> OperationRegistry {
             "id": "operation.ffmpeg.video.encode",
             "version": "1.0.0",
             "name": "FFmpeg",
-            "providerId": "plugin.video",
+            "providerId": "video",
             "providerKind": "plugin",
             "capability": "encode",
             "status": "validated",
             "runtime": {
                 "kind": "binary",
-                "tool": { "id": "app.ffmpeg", "version": "1.0.0" },
+                "tool": { "id": "ffmpeg", "version": "1.0.0" },
                 "executable": "ffmpeg",
                 "executionMode": "staged-output",
                 "outputExtension": "mkv",
@@ -143,13 +143,13 @@ fn base_registry() -> OperationRegistry {
             "id": "operation.mkvtoolnix.mkvpropedit",
             "version": "1.0.0",
             "name": "mkvpropedit",
-            "providerId": "plugin.video",
+            "providerId": "video",
             "providerKind": "plugin",
             "capability": "remux",
             "status": "validated",
             "runtime": {
                 "kind": "binary",
-                "tool": { "id": "app.mkvtoolnix", "version": "1.0.0" },
+                "tool": { "id": "mkvtoolnix", "version": "1.0.0" },
                 "executable": "mkvpropedit",
                 "executionMode": "in-place",
                 "outputProfile": "mkv_metadata_edit",
@@ -170,11 +170,11 @@ fn base_registry() -> OperationRegistry {
     }
     for (block, op) in [
         ("file-input", "operation.core.file-input"),
-        ("block.core.file-input", "operation.core.file-input"),
+        ("essentiel.file-input", "operation.core.file-input"),
         ("file-output", "operation.core.file-output"),
-        ("block.core.file-output", "operation.core.file-output"),
-        ("block.video.remux-mp4", "operation.mp4box.remux"),
-        ("block.video.encode", "operation.ffmpeg.video.encode"),
+        ("essentiel.file-output", "operation.core.file-output"),
+        ("video.remux-mp4", "operation.mp4box.remux"),
+        ("video.encode", "operation.ffmpeg.video.encode"),
         (
             "block.video.mkvpropedit",
             "operation.mkvtoolnix.mkvpropedit",
@@ -218,7 +218,7 @@ async fn remux_mp4_contract_runs_mp4box_and_reports_progress()
     let dir = tempfile::tempdir()?;
     let cache = ToolCacheManager::new(dir.path().join("cache"));
     install_fake_probe(&cache)?;
-    install_fake_tool(&cache, "app.mp4box", "1.0.0", "MP4Box", FAKE_WRITER)?;
+    install_fake_tool(&cache, "mp4box", "1.0.0", "MP4Box", FAKE_WRITER)?;
     let source = dir.path().join("in.mkv");
     std::fs::write(&source, "x")?;
     let work = dir.path().join("work");
@@ -227,7 +227,7 @@ async fn remux_mp4_contract_runs_mp4box_and_reports_progress()
     let flow = flow_record(json!({
         "nodes": [
             {"id": "n1", "type": "file-input", "name": "in"},
-            {"id": "n2", "type": "block.video.remux-mp4", "name": "mp4"},
+            {"id": "n2", "type": "video.remux-mp4", "name": "mp4"},
             {"id": "n3", "type": "file-output", "name": "out"}
         ],
         "connections": [{"from": "n1", "to": "n2"}, {"from": "n2", "to": "n3"}]
@@ -268,7 +268,7 @@ async fn encode_contract_applies_gpu_to_cpu_retry_fallback()
     install_fake_probe(&cache)?;
     install_fake_tool(
         &cache,
-        "app.ffmpeg",
+        "ffmpeg",
         "1.0.0",
         "ffmpeg",
         r#"
@@ -288,7 +288,7 @@ exit 2
     let flow = flow_record(json!({
         "nodes": [
             {"id": "n1", "type": "file-input", "name": "in"},
-            {"id": "n2", "type": "block.video.encode", "name": "enc", "config": {"codec": "h265", "encoder": "nvidia"}},
+            {"id": "n2", "type": "video.encode", "name": "enc", "config": {"codec": "h265", "encoder": "nvidia"}},
             {"id": "n3", "type": "file-output", "name": "out"}
         ],
         "connections": [{"from": "n1", "to": "n2"}, {"from": "n2", "to": "n3"}]
@@ -449,7 +449,7 @@ fn register_core_and_probe(reg: &mut OperationRegistry) -> Result<(), Box<dyn st
             "id": "operation.core.file-input",
             "version": "1.0.0",
             "name": "Entrée",
-            "providerId": "plugin.core",
+            "providerId": "essentiel",
             "providerKind": "plugin",
             "capability": "control",
             "status": "validated",
@@ -460,7 +460,7 @@ fn register_core_and_probe(reg: &mut OperationRegistry) -> Result<(), Box<dyn st
             "id": "operation.core.file-output",
             "version": "1.0.0",
             "name": "Sortie",
-            "providerId": "plugin.core",
+            "providerId": "essentiel",
             "providerKind": "plugin",
             "capability": "control",
             "status": "validated",
@@ -471,13 +471,13 @@ fn register_core_and_probe(reg: &mut OperationRegistry) -> Result<(), Box<dyn st
             "id": "operation.mkvtoolnix.probe",
             "version": "1.0.0",
             "name": "Probe",
-            "providerId": "plugin.video",
+            "providerId": "video",
             "providerKind": "plugin",
             "capability": "probe",
             "status": "validated",
             "runtime": {
                 "kind": "binary",
-                "tool": { "id": "app.mkvtoolnix", "version": "1.0.0" },
+                "tool": { "id": "mkvtoolnix", "version": "1.0.0" },
                 "executable": "mkvmerge",
                 "executionMode": "probe-primary",
                 "probeFormat": "json",
@@ -729,18 +729,18 @@ async fn unified_script_block_supports_inline_library_ref_and_strict_next_port()
         "id": "operation.scripts.run",
         "version": "1.0.0",
         "name": "Script",
-        "providerId": "plugin.scripts",
+        "providerId": "scripts",
         "providerKind": "plugin",
         "capability": "script",
         "status": "validated",
         "runtime": {
             "kind": "script",
-            "tool": { "id": "app.script-runners", "version": "1.0.0" },
+            "tool": { "id": "interpreteurs", "version": "1.0.0" },
             "interpreter": "sh",
             "timeoutSeconds": 300
         }
     }))?;
-    reg.register_block_mapping("block.scripts.run", "operation.scripts.run");
+    reg.register_block_mapping("scripts.run", "operation.scripts.run");
 
     // 1. Mode inline -> passe au bloc suivant en mode library (scriptId) qui renvoie nextPort: "false".
     // Seule la branche "true" est câblée : next_connection ne doit PAS retomber sur "true".
@@ -749,7 +749,7 @@ async fn unified_script_block_supports_inline_library_ref_and_strict_next_port()
             {"id": "n1", "type": "file-input", "name": "in"},
             {
                 "id": "n2",
-                "type": "block.scripts.run",
+                "type": "scripts.run",
                 "name": "Inline",
                 "config": {
                     "mode": "inline",
@@ -759,7 +759,7 @@ async fn unified_script_block_supports_inline_library_ref_and_strict_next_port()
             },
             {
                 "id": "n3",
-                "type": "block.scripts.run",
+                "type": "scripts.run",
                 "name": "Library Ref",
                 "config": {
                     "mode": "library",

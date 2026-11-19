@@ -1,7 +1,10 @@
 //! Exécuteur agnostique de scripts/exécutables via protocole `stdin`/`stdout` JSON (`kind: "script"`).
 
 use crate::{
-    flows::contract::{OperationContract, ScriptInterpreter, ScriptRuntime, merge_params},
+    flows::{
+        binary_runner::tool_search_path,
+        contract::{OperationContract, ScriptInterpreter, ScriptRuntime, merge_params},
+    },
     tool_run::{
         MAX_STDOUT_CAPTURE_BYTES, ProgressParser, TailBuffer, for_each_segment, mask_log_secrets,
         read_bounded_bytes,
@@ -47,6 +50,8 @@ pub struct ScriptInput<'a> {
     pub node_id: &'a str,
     pub operation_id: &'a str,
     pub working_file: String,
+    /// Fichier d'origine de la tâche (référence pour une comparaison, ex. VMAF).
+    pub source_file: String,
     pub work_dir: String,
     pub media_info: &'a Value,
     pub config: Value,
@@ -210,6 +215,7 @@ pub async fn execute_script_operation(
     node_config: &Value,
     work_dir: &Path,
     working_file: &Path,
+    source_file: &Path,
     media_info: &Value,
     step_index: i32,
     on_progress: ScriptProgressCallback,
@@ -272,6 +278,7 @@ pub async fn execute_script_operation(
         node_id,
         operation_id: &op.id,
         working_file: working_file.to_string_lossy().into_owned(),
+        source_file: source_file.to_string_lossy().into_owned(),
         work_dir: work_dir.to_string_lossy().into_owned(),
         media_info,
         config: merged_config,
@@ -282,7 +289,14 @@ pub async fn execute_script_operation(
         excerpt: None,
     })?;
 
-    let safe_path = std::env::var("PATH").unwrap_or_else(|_| DEFAULT_SAFE_PATH.to_owned());
+    let safe_path = std::env::var_os("PATH").unwrap_or_else(|| DEFAULT_SAFE_PATH.into());
+    let safe_path = tool_search_path(
+        cache_mgr,
+        tool_versions,
+        &rt.path_tools,
+        Some(safe_path.clone()),
+    )
+    .unwrap_or(safe_path);
     let mut child = Command::new(&program)
         .args(&args)
         .current_dir(work_dir)
@@ -456,6 +470,7 @@ mod tests {
     fn test_op(code: &str, timeout_seconds: u64) -> (OperationContract, ScriptRuntime) {
         let rt = ScriptRuntime {
             tool: None,
+            path_tools: Vec::new(),
             executable: None,
             interpreter: Some(ScriptInterpreter::Sh),
             entrypoint: Some("test.sh".into()),
@@ -464,6 +479,7 @@ mod tests {
             error_code: None,
             timeout_seconds,
             defaults: serde_json::Map::new(),
+            accepts_non_media: false,
         };
         let op = OperationContract {
             schema_version: "1.1.0".into(),
@@ -477,6 +493,54 @@ mod tests {
             runtime: OperationRuntime::Script(rt.clone()),
         };
         (op, rt)
+    }
+
+    #[tokio::test]
+    async fn script_sees_path_tools_first_and_receives_the_source_file() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir()?;
+        let cache = ToolCacheManager::new(dir.path().join("cache"));
+        let tool_bin = cache
+            .tool_dir("outil-test", "1.0.0", crate::tools_cache::host_arch())
+            .join("bin");
+        std::fs::create_dir_all(&tool_bin)?;
+        let tool = tool_bin.join("outil-test");
+        std::fs::write(&tool, "#!/bin/sh\nprintf outil-du-cache\n")?;
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755))?;
+        let working = dir.path().join("encode.mkv");
+        let original = dir.path().join("original.mkv");
+        std::fs::write(&working, b"enc")?;
+        std::fs::write(&original, b"orig")?;
+        let script = "cat > entree.json\nsrc=$(grep -c '\"sourceFile\":\"[^\"]*original.mkv\"' entree.json)\nprintf '{\"status\":\"ok\",\"message\":\"%s %s\"}' \"$(outil-test)\" \"$src\"";
+        let (op, mut rt) = test_op(script, 10);
+        rt.path_tools = vec![crate::flows::contract::ToolRef {
+            id: "outil-test".into(),
+            version: "1.0.0".into(),
+        }];
+
+        let outcome = execute_script_operation(
+            &op,
+            &rt,
+            &cache,
+            &HashMap::new(),
+            "flow-1",
+            "node-1",
+            &Value::Null,
+            dir.path(),
+            &working,
+            &original,
+            &Value::Null,
+            1,
+            Arc::new(|_, _| {}),
+        )
+        .await?;
+        match outcome {
+            ScriptStepOutcome::Succeeded { message, .. } => {
+                assert_eq!(message.as_deref(), Some("outil-du-cache 1"));
+            }
+            ScriptStepOutcome::Skipped { .. } => anyhow::bail!("étape ignorée inattendue"),
+        }
+        Ok(())
     }
 
     #[tokio::test]
@@ -509,6 +573,7 @@ mod tests {
             "node-1",
             &serde_json::json!({"threshold": 42}),
             dir.path(),
+            &source,
             &source,
             &serde_json::json!({"format": {"duration": "10"}}),
             1,
@@ -571,6 +636,7 @@ mod tests {
             &Value::Null,
             work_dir.path(),
             &source,
+            &source,
             &Value::Null,
             1,
             Arc::new(|_, _| {}),
@@ -605,6 +671,7 @@ printf '{"status":"ok","message":"isolated"}'
             "node-1",
             &Value::Null,
             dir.path(),
+            &source,
             &source,
             &Value::Null,
             1,

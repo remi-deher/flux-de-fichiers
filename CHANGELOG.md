@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.52.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.51.0...v0.52.0) (2026-11-19)
+
+
+### Features
+
+* adopter le nom Forgearr ([fabe3bc](https://github.com/remi-deher/flux-de-fichiers/commit/fabe3bcd80719ee0c8846258a771ba3223541ad0))
+* adopter le nom Forgearr ([37e353d](https://github.com/remi-deher/flux-de-fichiers/commit/37e353dd1488f30e86cf2676946fecacc3ea4198))
+
 ## [0.51.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.50.0...v0.51.0) (2026-11-19)
 
 

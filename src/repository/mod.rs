@@ -52,4 +52,4 @@ pub use plugins::{
     list_all_plugin_settings, list_plugin_repositories, set_plugin_settings,
     toggle_plugin_repository, touch_plugin_repository_sync, verify_or_pin_release,
 };
-pub use relays::{RelayOutcome, relay_job};
+pub use relays::{RelayOutcome, list_relays, relay_job};

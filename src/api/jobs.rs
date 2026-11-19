@@ -329,6 +329,26 @@ pub async fn failure(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+pub struct RelayInfoQuery {
+    ids: String,
+}
+
+/// Marques « relayée » des tâches listées, pour l'interface (200 identifiants au plus).
+pub async fn relay_infos(
+    State(s): State<AppState>,
+    Query(query): Query<RelayInfoQuery>,
+    _auth: ViewJobsAuth,
+) -> AppResult<Json<Vec<forgearr_shared::relay::JobRelayInfo>>> {
+    let ids = query
+        .ids
+        .split(',')
+        .take(200)
+        .map(|id| id.parse::<Uuid>().map_err(|_| AppError::Invalid))
+        .collect::<AppResult<Vec<_>>>()?;
+    Ok(Json(repository::list_relays(&s.pool, &ids).await?))
+}
+
 /// Relaie la tâche d'un worker vers la file d'un autre worker (ADR 0018).
 pub async fn relay(
     State(s): State<AppState>,
@@ -348,7 +368,7 @@ pub async fn relay(
             s.notify_job_event(JobEventType::JobRelayed, id, JobStatus::Queued, None);
             forgearr_shared::relay::RelayResponse {
                 relayed: true,
-                target_worker_id: Some(target_worker_id),
+                target_worker_id,
             }
         }
         repository::RelayOutcome::Failed => {

@@ -110,6 +110,30 @@ pub fn error_label(code: JobErrorCode) -> &'static str {
     }
 }
 
+/// Libellé de la marque « relayée » d'une tâche : où elle attend, ou d'où elle vient.
+pub fn relay_label(
+    info: &forgearr_shared::relay::JobRelayInfo,
+    status: forgearr_shared::jobs::JobStatus,
+    workers: &std::collections::HashMap<uuid::Uuid, String>,
+) -> String {
+    let name = |id: &uuid::Uuid| {
+        workers
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| id.to_string().chars().take(8).collect())
+    };
+    if status != forgearr_shared::jobs::JobStatus::Queued {
+        return format!("Relayée depuis {}", name(&info.from_worker_id));
+    }
+    match (&info.target_worker_id, &info.requirement) {
+        (Some(target), _) => format!("Relayée vers {}", name(target)),
+        (None, Some(requirement)) => {
+            format!("Relayée · attend un worker {}", requirement.codec.label())
+        }
+        (None, None) => "Relayée".to_owned(),
+    }
+}
+
 /// Un événement du flux SSE impose-t-il de relire la liste ?
 pub fn needs_reload(event: JobEventType) -> bool {
     !matches!(
@@ -232,6 +256,42 @@ mod tests {
         };
         assert_eq!(progress_of(&done), None);
         Ok(())
+    }
+
+    #[test]
+    fn relay_label_tells_where_the_job_waits_or_came_from() {
+        use forgearr_shared::capabilities::{CapabilityRequirement, VideoCodec};
+        use forgearr_shared::relay::JobRelayInfo;
+        let origin = uuid::Uuid::from_u128(1);
+        let target = uuid::Uuid::from_u128(2);
+        let workers = std::collections::HashMap::from([(origin, "sans-gpu".to_owned())]);
+        let open = JobRelayInfo {
+            job_id: uuid::Uuid::from_u128(9),
+            from_worker_id: origin,
+            relay_count: 1,
+            target_worker_id: None,
+            requirement: Some(CapabilityRequirement {
+                codec: VideoCodec::Hevc,
+                acceleration: None,
+            }),
+        };
+        assert_eq!(
+            relay_label(&open, JobStatus::Queued, &workers),
+            "Relayée · attend un worker H.265"
+        );
+        assert_eq!(
+            relay_label(&open, JobStatus::Running, &workers),
+            "Relayée depuis sans-gpu"
+        );
+        let pinned = JobRelayInfo {
+            target_worker_id: Some(target),
+            requirement: None,
+            ..open
+        };
+        assert_eq!(
+            relay_label(&pinned, JobStatus::Queued, &workers),
+            "Relayée vers 00000000"
+        );
     }
 
     #[test]

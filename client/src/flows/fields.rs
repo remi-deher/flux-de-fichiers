@@ -117,6 +117,36 @@ fn HeadersField(editor: Editor, node_id: String, field: OwnedFieldSpec) -> impl 
     }
 }
 
+/// Liste déroulante d'un réglage de bloc ; une valeur enregistrée hors liste reste sélectionnable.
+#[component]
+fn OptionSelect(
+    editor: Editor,
+    node_id: String,
+    field_name: String,
+    input_id: String,
+    label: String,
+    options: Signal<Vec<(String, String)>>,
+) -> impl IntoView {
+    let id = StoredValue::new(node_id);
+    let name = StoredValue::new(field_name);
+    view! {
+        <label for=input_id.clone() class="form-label">{label}</label>
+        <select id=input_id class="form-select"
+            prop:value=move || current(editor, &id.read_value(), &name.get_value()).as_str().unwrap_or_default().to_owned()
+            on:change=move |event| set_field(editor, &id.read_value(), &name.get_value(), Value::String(event_target_value(&event)))>
+            {move || {
+                let stored = current(editor, &id.read_value(), &name.get_value())
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                select_options(&options.get(), &stored).into_iter().map(|(value, label)| view! {
+                    <option value=value>{label}</option>
+                }).collect_view()
+            }}
+        </select>
+    }
+}
+
 #[component]
 pub fn FieldControl(editor: Editor, node_id: String, field: OwnedFieldSpec) -> impl IntoView {
     let input_id = format!("field-{}-{}", node_id, field.name);
@@ -140,23 +170,30 @@ pub fn FieldControl(editor: Editor, node_id: String, field: OwnedFieldSpec) -> i
                 <span>{label.clone()}</span>
             </label>
         }.into_any(),
-        OwnedFieldKind::Select(options) => {
-            let options = StoredValue::new(options);
+        OwnedFieldKind::Select(options) => view! {
+            <OptionSelect editor=editor node_id=id.get_value() field_name=field_name.get_value()
+                input_id=input_id.clone() label=label.clone() options=Signal::stored(options) />
+        }.into_any(),
+        OwnedFieldKind::Worker => {
+            let workers = LocalResource::new(|| async {
+                crate::api::get::<Vec<forgearr_shared::workers::Worker>>("/api/v1/workers")
+                    .await
+                    .unwrap_or_default()
+            });
+            let options = Signal::derive(move || {
+                let mut list = vec![(String::new(), "Aucun worker".to_owned())];
+                list.extend(
+                    workers
+                        .get()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|worker| (worker.id.to_string(), worker.name)),
+                );
+                list
+            });
             view! {
-                <label for=input_id.clone() class="form-label">{label.clone()}</label>
-                <select id=input_id.clone() class="form-select"
-                    prop:value=move || current(editor, &id.read_value(), &field_name.get_value()).as_str().unwrap_or_default().to_owned()
-                    on:change=move |event| set_field(editor, &id.read_value(), &field_name.get_value(), Value::String(event_target_value(&event)))>
-                    {move || {
-                        let stored = current(editor, &id.read_value(), &field_name.get_value())
-                            .as_str()
-                            .unwrap_or_default()
-                            .to_owned();
-                        select_options(&options.get_value(), &stored).into_iter().map(|(value, label)| view! {
-                            <option value=value>{label}</option>
-                        }).collect_view()
-                    }}
-                </select>
+                <OptionSelect editor=editor node_id=id.get_value() field_name=field_name.get_value()
+                    input_id=input_id.clone() label=label.clone() options=options />
             }.into_any()
         }
         OwnedFieldKind::Text => view! {

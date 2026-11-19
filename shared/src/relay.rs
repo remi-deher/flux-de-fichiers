@@ -34,6 +34,21 @@ pub struct RelayReport {
     pub request: RelayRequest,
 }
 
+/// Marque « relayée » d'une tâche, pour l'interface.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobRelayInfo {
+    pub job_id: Uuid,
+    /// Worker qui a relayé la tâche.
+    pub from_worker_id: Uuid,
+    pub relay_count: i64,
+    /// Worker désigné ; absent quand la tâche est offerte à tous les workers capables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_worker_id: Option<Uuid>,
+    /// Exigence de capacité de la cible « capable ».
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requirement: Option<CapabilityRequirement>,
+}
+
 /// Réponse du central à une demande de relais.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RelayResponse {

@@ -13,6 +13,7 @@ pub const COMPONENTS_CSS: &str = r#"
   font-weight: 600;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
+  text-decoration: none;
   cursor: pointer;
   transition: all 0.15s ease-in-out;
   text-decoration: none;

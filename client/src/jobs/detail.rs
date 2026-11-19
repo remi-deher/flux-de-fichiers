@@ -6,6 +6,7 @@ use super::model::{
     status_label, status_tone, step_status_label, step_status_tone,
 };
 use crate::ai::AiAssistantState;
+use crate::plugins::{FlowMiniPreview, preview_from_job_steps};
 use crate::ui::{Icon, IconName, StatusBadge, Tag, TagTone, Toasts};
 use crate::{api, format};
 use forgearr_shared::format::format_bytes;
@@ -285,8 +286,13 @@ pub fn JobDetail(
                             Some(Ok(list)) if list.is_empty() => {
                                 view! { <p class="text-dim text-sm">"Aucune étape enregistrée pour cette tâche."</p> }.into_any()
                             }
-                            Some(Ok(list)) => view! {
-                                <div class="table-wrapper no-margin-top">
+                            Some(Ok(list)) => {
+                                let step_preview = preview_from_job_steps(&list);
+                                view! {
+                                    {step_preview.map(|preview| view! {
+                                        <FlowMiniPreview preview=preview />
+                                    })}
+                                    <div class="table-wrapper no-margin-top">
                                     <table class="data-table">
                                         <thead>
                                             <tr>
@@ -316,8 +322,9 @@ pub fn JobDetail(
                                         </tbody>
                                     </table>
                                 </div>
+                                }
+                                .into_any()
                             }
-                            .into_any(),
                         }}
                     </div>
                 }.into_any(),

@@ -4,11 +4,27 @@ pub const PLUGINS_CSS: &str = r#"
 /* --- Barre de filtres et contrôles de la vue Catalogue --- */
 .store-toolbar {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: 0.75rem;
   margin-bottom: 1.25rem;
+}
+
+.store-toolbar > .stat-strip {
+  width: 100%;
+  margin-bottom: 0;
+}
+
+.store-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.page-subnav__tab {
+  gap: 0.45rem;
 }
 
 .store-segmented {
@@ -46,6 +62,11 @@ pub const PLUGINS_CSS: &str = r#"
 /* --- En-têtes de section du Store --- */
 .store-section {
   margin-bottom: 1.75rem;
+}
+
+.store-section + .store-section {
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .store-section__head {
@@ -388,6 +409,172 @@ pub const PLUGINS_CSS: &str = r#"
   align-items: center;
   gap: 0.4rem;
   flex-shrink: 0;
+}
+
+/* --- Mini aperçu de flux sur les cartes du Catalogue --- */
+.flow-mini {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.flow-mini__node {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 10rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--component-accent, var(--primary));
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.flow-mini__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.flow-mini__arrow {
+  font-size: var(--font-size-xs);
+  color: var(--text-dim);
+}
+
+.flow-mini__more {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 0.15rem 0.35rem;
+}
+
+/* --- Diagramme visuel d'un flux dans le tiroir d'inspection --- */
+.flow-diagram {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.flow-diagram__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.flow-diagram__canvas {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+  padding: 0.9rem;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+}
+
+.flow-diagram__connector {
+  display: flex;
+  justify-content: center;
+  line-height: 1;
+}
+
+.flow-diagram__arrow {
+  font-size: var(--font-size-sm);
+  color: var(--text-dim);
+}
+
+.flow-diagram__layer {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.6rem;
+}
+
+.flow-diagram__layer.is-branch {
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+}
+
+.flow-diagram__node {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--component-accent, var(--primary));
+}
+
+.flow-diagram__ports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.flow-diagram__port {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: var(--primary);
+  background: var(--primary-bg);
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--radius-pill);
+}
+
+.flow-diagram__node-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.flow-diagram__node-icon {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-subtle);
+  color: var(--component-accent, var(--primary));
+  flex-shrink: 0;
+}
+
+.flow-diagram__node-titles {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.flow-diagram__node-title {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.flow-diagram__node-kind {
+  font-size: var(--font-size-xs);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+.flow-diagram__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
 }
 
 @media (max-width: 640px) {

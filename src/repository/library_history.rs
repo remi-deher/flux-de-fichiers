@@ -9,26 +9,40 @@ use uuid::Uuid;
 
 const MAX_FILE_ATTEMPTS_SHOWN: i64 = 25;
 
+#[derive(sqlx::FromRow)]
+struct FileLocation {
+    source_root: Option<String>,
+    source_worker_id: Option<Uuid>,
+    source_name: String,
+    source_key: Option<String>,
+}
+
 pub async fn files(
     pool: &SqlitePool,
     library_id: Uuid,
     offset: i64,
 ) -> AppResult<Vec<LibraryFileHistory>> {
     super::get_library(pool, library_id).await?;
-    let rows: Vec<(Option<String>, Option<Uuid>, String, Option<String>)> = sqlx::query_as(
+    let rows = sqlx::query_as::<_, FileLocation>(
         "SELECT source_root, source_worker_id, source_name, source_key FROM jobs WHERE library_id=?
          GROUP BY source_key, CASE WHEN source_key IS NULL THEN source_root END, CASE WHEN source_key IS NULL THEN source_worker_id END, source_name
          ORDER BY max(created_at) DESC, source_root, source_worker_id, source_name LIMIT ? OFFSET ?",
     ).bind(library_id).bind(forgearr_shared::libraries::LIBRARY_HISTORY_PAGE_SIZE as i64).bind(offset.max(0)).fetch_all(pool).await?;
     let mut files = Vec::with_capacity(rows.len());
-    for (root, worker, name, key) in rows {
+    for FileLocation {
+        source_root,
+        source_worker_id,
+        source_name,
+        source_key,
+    } in rows
+    {
         let jobs = sqlx::query_as::<_, Job>(
             "SELECT * FROM jobs WHERE library_id=?1 AND source_name=?4 AND (source_key=?6 OR (?6 IS NULL AND source_key IS NULL AND source_root IS ?2 AND source_worker_id IS ?3))
              ORDER BY created_at DESC, id DESC LIMIT ?5",
-        ).bind(library_id).bind(&root).bind(worker).bind(name).bind(MAX_FILE_ATTEMPTS_SHOWN).bind(key).fetch_all(pool).await?;
+        ).bind(library_id).bind(&source_root).bind(source_worker_id).bind(source_name).bind(MAX_FILE_ATTEMPTS_SHOWN).bind(source_key).fetch_all(pool).await?;
         files.push(LibraryFileHistory {
-            source_root: root,
-            source_worker_id: worker,
+            source_root,
+            source_worker_id,
             jobs,
         });
     }

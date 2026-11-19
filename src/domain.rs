@@ -95,6 +95,9 @@ pub struct Claim {
     /// Dossier source tel que vu par le central (pour les traductions de chemins d'intégration).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media_root: Option<std::path::PathBuf>,
+    /// Racine locale à ce worker, fournie seulement pour les tâches épinglées à son montage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_source_root: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -273,6 +276,7 @@ mod tests {
             sealed_secrets: None,
             allow_private_integrations: None,
             media_root: None,
+            local_source_root: None,
         };
         let encoded = serde_json::to_value(&with_flow)?;
         assert_eq!(encoded["frozen_flow"]["id"], "flow.x");

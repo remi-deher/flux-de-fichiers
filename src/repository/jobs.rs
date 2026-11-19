@@ -223,7 +223,8 @@ pub async fn list_workers(pool: &SqlitePool) -> AppResult<Vec<Worker>> {
 
 pub async fn delete_worker(pool: &SqlitePool, id: Uuid) -> AppResult<()> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    sqlx::query!("DELETE FROM library_workers WHERE worker_id=?1", id)
+    sqlx::query("DELETE FROM library_folders WHERE worker_id=?1")
+        .bind(id)
         .execute(&mut *tx)
         .await?;
     let affected = sqlx::query!("DELETE FROM workers WHERE id=?1", id)
@@ -291,6 +292,112 @@ pub async fn insert_job_with_priority(
     explicit_flow_id: Option<&str>,
     priority: i32,
 ) -> AppResult<Job> {
+    let mut conn = pool.acquire().await?;
+    create_job(
+        &mut conn,
+        source_name,
+        target_worker_id,
+        source_sha256,
+        source_bytes,
+        library_id,
+        explicit_flow_id,
+        priority,
+        None,
+    )
+    .await
+}
+
+/// Racine de la source, indépendamment du dossier de travail éphémère.
+#[derive(sqlx::FromRow)]
+pub struct JobSource {
+    pub source_root: String,
+    pub source_worker_id: Option<Uuid>,
+    pub source_writable: bool,
+    pub source_mtime_ns: Option<i64>,
+}
+
+pub async fn job_source(pool: &SqlitePool, id: Uuid) -> AppResult<Option<JobSource>> {
+    Ok(sqlx::query_as(
+        "SELECT source_root, source_worker_id, source_writable, source_mtime_ns FROM jobs WHERE id=? AND source_root IS NOT NULL",
+    ).bind(id).fetch_optional(pool).await?)
+}
+
+pub async fn known_library_file_signatures(
+    pool: &SqlitePool,
+    library: Uuid,
+    source: &JobSource,
+) -> AppResult<std::collections::HashMap<String, (u64, i64)>> {
+    let rows: Vec<(String, i64, i64)> = sqlx::query_as(
+        "SELECT source_name, source_bytes, source_mtime_ns FROM jobs
+         WHERE library_id=? AND source_root=? AND source_worker_id IS ?
+           AND source_mtime_ns IS NOT NULL AND source_bytes IS NOT NULL
+         ORDER BY created_at ASC, id ASC",
+    )
+    .bind(library)
+    .bind(&source.source_root)
+    .bind(source.source_worker_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(name, bytes, modified)| {
+            u64::try_from(bytes)
+                .ok()
+                .map(|size| (name, (size, modified)))
+        })
+        .collect())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn enqueue_library_source(
+    pool: &SqlitePool,
+    library_id: Uuid,
+    source: &JobSource,
+    name: &str,
+    hash: &str,
+    bytes: i64,
+    worker: Option<Uuid>,
+    flow_id: Option<&str>,
+    dry_run: bool,
+) -> AppResult<Option<Job>> {
+    let mut conn = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM jobs WHERE library_id=? AND source_root=? AND source_worker_id IS ? AND source_name=? AND (source_sha256=?5 OR (status='succeeded' AND source_writable=1 AND output_sha256=?5)))",
+    ).bind(library_id).bind(&source.source_root).bind(source.source_worker_id)
+        .bind(name).bind(hash).fetch_one(&mut *conn).await?;
+    if exists {
+        return Ok(None);
+    }
+    let job = create_job(
+        &mut conn,
+        name,
+        worker,
+        hash,
+        bytes,
+        Some(library_id),
+        flow_id,
+        0,
+        Some(source),
+    )
+    .await?;
+    if !dry_run {
+        conn.commit().await?;
+    }
+    Ok(Some(job))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn create_job(
+    conn: &mut sqlx::SqliteConnection,
+    source_name: &str,
+    target_worker_id: Option<Uuid>,
+    source_sha256: &str,
+    source_bytes: i64,
+    library_id: Option<Uuid>,
+    explicit_flow_id: Option<&str>,
+    priority: i32,
+    source: Option<&JobSource>,
+) -> AppResult<Job> {
     let clamped_priority = priority.clamp(JOB_PRIORITY_MIN, JOB_PRIORITY_MAX);
     let mut chosen_flow_id: Option<String> = explicit_flow_id
         .map(str::trim)
@@ -299,7 +406,7 @@ pub async fn insert_job_with_priority(
 
     if let Some(lib_id) = library_id {
         let row = sqlx::query!("SELECT flow_id FROM libraries WHERE id=?1", lib_id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *conn)
             .await?;
         let Some(row) = row else {
             return Err(AppError::Invalid);
@@ -314,14 +421,14 @@ pub async fn insert_job_with_priority(
             r#"SELECT id AS "id!: String", version FROM flows WHERE id=?1"#,
             flow_id
         )
-        .fetch_optional(pool)
+        .fetch_optional(&mut *conn)
         .await?;
         let Some(found) = found else {
             return Err(AppError::Invalid);
         };
         Some((found.id, found.version))
     } else {
-        default_flow_with(pool)
+        default_flow_with(&mut *conn)
             .await?
             .map(|flow| (flow.id, flow.version))
     };
@@ -345,8 +452,20 @@ pub async fn insert_job_with_priority(
         flow_version,
         clamped_priority,
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *conn)
     .await?;
+    if let Some(source) = source {
+        sqlx::query(
+            "UPDATE jobs SET source_root=?, source_worker_id=?, source_writable=?, source_mtime_ns=? WHERE id=?",
+        )
+        .bind(&source.source_root)
+        .bind(source.source_worker_id)
+        .bind(source.source_writable)
+        .bind(source.source_mtime_ns)
+        .bind(job.id)
+        .execute(conn)
+        .await?;
+    }
     Ok(job)
 }
 
@@ -465,12 +584,15 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
     }
 
     let queued_status = JobStatus::Queued;
-    let next_id: Option<Uuid> = sqlx::query_scalar!(
-        r#"SELECT id AS "id!: Uuid" FROM jobs WHERE status=?1 AND attempts < ?2 AND (target_worker_id IS NULL OR target_worker_id=?3) ORDER BY priority DESC, created_at ASC, id ASC LIMIT 1"#,
-        queued_status,
-        MAX_ATTEMPTS,
-        worker,
+    let next_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM jobs WHERE status=?1 AND attempts < ?2
+         AND (target_worker_id IS NULL OR target_worker_id=?3)
+         AND (source_worker_id IS NULL OR source_worker_id=?3)
+         ORDER BY priority DESC, created_at ASC, id ASC LIMIT 1",
     )
+    .bind(queued_status)
+    .bind(MAX_ATTEMPTS)
+    .bind(worker)
     .fetch_optional(&mut *tx)
     .await?;
     let job: Option<Job> = if let Some(id) = next_id {
@@ -499,6 +621,9 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                 }
                 _ => None,
             };
+            let local_source_root = job_source(pool, j.id).await?.and_then(|source| {
+                (source.source_worker_id == Some(worker)).then_some(source.source_root)
+            });
             Ok(Some(Claim {
                 job_id: j.id,
                 lease_token: j.lease_token.ok_or(AppError::Internal)?,
@@ -517,6 +642,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                 sealed_secrets: None,
                 allow_private_integrations: None,
                 media_root: None,
+                local_source_root,
             }))
         }
     }

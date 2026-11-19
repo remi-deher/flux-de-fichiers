@@ -8,6 +8,7 @@ use crate::{
     error::{AppError, AppResult},
 };
 use forgearr_shared::libraries::is_media_extension;
+use forgearr_shared::libraries::{FolderScanOptions, FolderScanReport};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -258,8 +259,8 @@ pub fn error_code_for_report(err: &AppError) -> &'static str {
 struct PendingRequest {
     task: WorkerBrowseTask,
     dispatched: bool,
-    created_at: tokio::time::Instant,
-    reply: oneshot::Sender<Result<DirectoryListing, String>>,
+    expires_at: tokio::time::Instant,
+    reply: oneshot::Sender<WorkerBrowseReport>,
 }
 
 #[derive(Default)]
@@ -281,7 +282,7 @@ impl RemoteBrowseBroker {
 
     fn purge_expired(state: &mut HashMap<Uuid, PendingRequest>) {
         let now = tokio::time::Instant::now();
-        state.retain(|_, req| now.saturating_duration_since(req.created_at) < BROWSE_REQUEST_TTL);
+        state.retain(|_, req| now < req.expires_at);
     }
 
     /// Met une demande d'exploration en file pour `worker_id` et attend la réponse jusqu'à `timeout`.
@@ -291,6 +292,32 @@ impl RemoteBrowseBroker {
         path: Option<String>,
         timeout: Duration,
     ) -> AppResult<DirectoryListing> {
+        self.request_on_worker(worker_id, path, None, timeout)
+            .await?
+            .listing
+            .ok_or(AppError::CentralUnavailable)
+    }
+
+    pub async fn scan(
+        &self,
+        worker_id: Uuid,
+        path: String,
+        options: FolderScanOptions,
+        timeout: Duration,
+    ) -> AppResult<FolderScanReport> {
+        self.request_on_worker(worker_id, Some(path), Some(options), timeout)
+            .await?
+            .scan
+            .ok_or(AppError::CentralUnavailable)
+    }
+
+    async fn request_on_worker(
+        &self,
+        worker_id: Uuid,
+        path: Option<String>,
+        scan: Option<FolderScanOptions>,
+        timeout: Duration,
+    ) -> AppResult<WorkerBrowseReport> {
         let (tx, rx) = oneshot::channel();
         let request_id = Uuid::new_v4();
         {
@@ -303,9 +330,10 @@ impl RemoteBrowseBroker {
                         request_id,
                         worker_id,
                         path,
+                        scan,
                     },
                     dispatched: false,
-                    created_at: tokio::time::Instant::now(),
+                    expires_at: tokio::time::Instant::now() + timeout.max(BROWSE_REQUEST_TTL),
                     reply: tx,
                 },
             );
@@ -320,10 +348,10 @@ impl RemoteBrowseBroker {
                 Err(AppError::CentralUnavailable)
             }
             Ok(Err(_)) => Err(AppError::CentralUnavailable),
-            Ok(Ok(Ok(listing))) => Ok(listing),
-            Ok(Ok(Err(code))) => match code.as_str() {
-                "not_found" => Err(AppError::NotFound),
-                "invalid_input" => Err(AppError::Invalid),
+            Ok(Ok(report)) => match report.error.as_deref() {
+                None => Ok(report),
+                Some("not_found") => Err(AppError::NotFound),
+                Some("invalid_input") => Err(AppError::Invalid),
                 _ => Err(AppError::CentralUnavailable),
             },
         }
@@ -379,11 +407,7 @@ impl RemoteBrowseBroker {
         let Some(entry) = entry else {
             return false;
         };
-        let outcome = match report.listing {
-            Some(listing) => Ok(listing),
-            None => Err(report.error.unwrap_or_else(|| "unavailable".to_owned())),
-        };
-        let _ = entry.reply.send(outcome);
+        let _ = entry.reply.send(report);
         true
     }
 }
@@ -485,6 +509,7 @@ mod tests {
                         directories: Vec::new(),
                         files: Vec::new(),
                     }),
+                    scan: None,
                     error: None,
                 })
                 .await;
@@ -522,6 +547,7 @@ mod tests {
                         request_id: task.request_id,
                         worker_id: worker_b,
                         listing: None,
+                        scan: None,
                         error: Some("not_found".into()),
                     })
                     .await
@@ -532,6 +558,7 @@ mod tests {
                         request_id: task.request_id,
                         worker_id: worker_a,
                         listing: None,
+                        scan: None,
                         error: Some("not_found".into()),
                     })
                     .await

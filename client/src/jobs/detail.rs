@@ -192,6 +192,7 @@ pub fn JobDetail(
                         })}
                         <span class="text-mono text-xs text-dim">{format!("#{short_id}")}</span>
                     </div>
+                    {(job_status == JobStatus::Queued).then(|| view! { <QueuePlacement job_id=job_id /> })}
                     {diagnostic.map(|reason| view! {
                         <div class="diagnostic-box" role="alert">
                             <Icon name=IconName::Alert size=16 />
@@ -384,6 +385,42 @@ pub fn JobDetail(
                     </button>
                 })}
             </div>
+        </div>
+    }
+}
+
+#[component]
+fn QueuePlacement(job_id: Uuid) -> impl IntoView {
+    use forgearr_shared::libraries::{JobPlacement, PlacementStatus};
+    let placement = LocalResource::new(move || async move {
+        api::get::<JobPlacement>(&format!("/api/v1/jobs/{job_id}/placement")).await
+    });
+    view! {
+        <div class="inspection-panel__section">
+            <p class="inspection-panel__title">"Attribution du traitement"</p>
+            {move || match placement.get() {
+                None => view! { <p>"Chargement des workers…"</p> }.into_any(),
+                Some(Err(error)) => view! { <p role="status">{error.message()}</p> }.into_any(),
+                Some(Ok(report)) => view! {
+                    {report.workers.is_empty().then(|| view! { <p>"Aucun worker admissible pour cette source."</p> })}
+                    <ul>
+                        {report.workers.into_iter().map(|worker| {
+                            let reason = match worker.status {
+                                PlacementStatus::Ready => "Disponible",
+                                PlacementStatus::Offline => "Hors ligne",
+                                PlacementStatus::OutsideSchedule => "Hors créneau",
+                                PlacementStatus::AtCapacity => "Capacité atteinte",
+                            };
+                            view! { <li>{worker.name} " · " {reason}
+                                {worker.gpu_not_reported.then_some(" · Aucun GPU signalé pour l’encodeur demandé")}
+                            </li> }
+                        }).collect_view()}
+                    </ul>
+                    {(!report.catalog_tools_unavailable.is_empty()).then(|| view! {
+                        <p>{format!("Outils sans distribution disponible dans le catalogue pour cette architecture · {}", report.catalog_tools_unavailable.join(", "))}</p>
+                    })}
+                }.into_any(),
+            }}
         </div>
     }
 }

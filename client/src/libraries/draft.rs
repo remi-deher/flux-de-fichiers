@@ -35,45 +35,27 @@ impl LibraryDraft {
         }
     }
 
-    /// Ajoute le chemin d'un worker ; refuse un worker déjà présent ou un chemin non absolu.
-    #[cfg(test)]
-    pub fn add_worker(
-        &mut self,
-        worker_id: Uuid,
-        path: &str,
-        access: LibraryAccess,
-    ) -> Result<(), &'static str> {
-        if self
-            .workers
-            .iter()
-            .any(|entry| entry.worker_id == worker_id)
-        {
-            return Err("Ce worker a déjà un chemin pour cette bibliothèque.");
-        }
-        self.set_or_add_worker(worker_id, path, access)
+    pub fn remove_folder(&mut self, worker_id: Uuid, path: &str) {
+        self.workers
+            .retain(|entry| entry.worker_id != worker_id || entry.local_path != path);
     }
 
-    pub fn remove_worker(&mut self, worker_id: Uuid) {
-        self.workers.retain(|entry| entry.worker_id != worker_id);
-    }
-
-    /// Ajoute un worker ou met à jour son chemin et son droit s'il est déjà associé.
+    /// Ajoute un dossier ou met à jour le droit du même couple hôte/chemin.
     pub fn set_or_add_worker(
         &mut self,
         worker_id: Uuid,
         path: &str,
         access: LibraryAccess,
     ) -> Result<(), &'static str> {
-        let path = path.trim();
+        let path = path.trim().trim_end_matches('/');
         if !path.starts_with('/') {
             return Err("Le chemin doit être absolu (commencer par /).");
         }
         if let Some(existing) = self
             .workers
             .iter_mut()
-            .find(|entry| entry.worker_id == worker_id)
+            .find(|entry| entry.worker_id == worker_id && entry.local_path == path)
         {
-            existing.local_path = path.to_owned();
             existing.access = access;
         } else {
             self.workers.push(LibraryWorkerPath {
@@ -83,17 +65,6 @@ impl LibraryDraft {
             });
         }
         Ok(())
-    }
-
-    /// Met à jour le droit d'accès d'un worker déjà rattaché.
-    pub fn update_worker_access(&mut self, worker_id: Uuid, access: LibraryAccess) {
-        if let Some(existing) = self
-            .workers
-            .iter_mut()
-            .find(|entry| entry.worker_id == worker_id)
-        {
-            existing.access = access;
-        }
     }
 
     /// Pré-remplit le nom s'il est encore vide à partir du dossier choisi.
@@ -116,7 +87,7 @@ impl LibraryDraft {
             return Ok(());
         }
         let Some(worker_id) = worker_id else {
-            return Err("Choisissez un worker.");
+            return Err("Choisissez un hôte.");
         };
         self.set_or_add_worker(worker_id, path, access)
     }
@@ -197,26 +168,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn adding_a_worker_checks_the_path_and_duplicates() {
+    fn folders_on_one_host_can_be_configured_independently() {
         let mut draft = LibraryDraft::default();
-        let worker = Uuid::nil();
+        let host = Uuid::nil();
         assert!(
             draft
-                .add_worker(worker, "media", LibraryAccess::Read)
+                .set_or_add_worker(host, "media", LibraryAccess::Read)
                 .is_err()
         );
-        assert_eq!(
-            draft.add_worker(worker, " /mnt/films ", LibraryAccess::Read),
-            Ok(())
+        assert!(
+            draft
+                .set_or_add_worker(host, " /mnt/films/ ", LibraryAccess::Read)
+                .is_ok()
         );
+        assert!(
+            draft
+                .set_or_add_worker(host, "/mnt/series", LibraryAccess::ReadWrite)
+                .is_ok()
+        );
+        assert!(
+            draft
+                .set_or_add_worker(host, "/mnt/films", LibraryAccess::ReadWrite)
+                .is_ok()
+        );
+        assert_eq!(draft.workers.len(), 2);
+        draft.remove_folder(host, "/mnt/series");
         assert_eq!(draft.workers[0].local_path, "/mnt/films");
-        assert!(
-            draft
-                .add_worker(worker, "/autre", LibraryAccess::ReadWrite)
-                .is_err()
-        );
-        draft.remove_worker(worker);
-        assert!(draft.workers.is_empty());
+        assert_eq!(draft.workers[0].access, LibraryAccess::ReadWrite);
     }
 
     #[test]
@@ -312,15 +290,19 @@ mod tests {
         assert_eq!(draft.workers[0].local_path, "/mnt/medias/Films 4K");
         assert_eq!(draft.workers[0].access, LibraryAccess::ReadWrite);
 
-        draft.update_worker_access(worker_id, LibraryAccess::Read);
+        assert!(
+            draft
+                .set_or_add_worker(worker_id, "/mnt/medias/Films 4K", LibraryAccess::Read)
+                .is_ok()
+        );
         assert_eq!(draft.workers[0].access, LibraryAccess::Read);
 
         assert_eq!(
             draft.set_or_add_worker(worker_id, "/data/Films", LibraryAccess::ReadWrite),
             Ok(())
         );
-        assert_eq!(draft.workers.len(), 1);
-        assert_eq!(draft.workers[0].local_path, "/data/Films");
-        assert_eq!(draft.workers[0].access, LibraryAccess::ReadWrite);
+        assert_eq!(draft.workers.len(), 2);
+        assert_eq!(draft.workers[1].local_path, "/data/Films");
+        assert_eq!(draft.workers[1].access, LibraryAccess::ReadWrite);
     }
 }

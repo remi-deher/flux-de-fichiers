@@ -8,6 +8,7 @@ mod custom_args;
 pub mod header_secrets;
 pub mod http_runner;
 pub mod lease_secrets;
+pub(crate) mod publication;
 pub mod script_runner;
 
 #[cfg(test)]
@@ -105,6 +106,7 @@ pub struct FlowEngine<'a> {
     pub plugin_configs: &'a HashMap<String, Value>,
     pub tool_versions: &'a HashMap<String, String>,
     pub media_root: Option<&'a Path>,
+    pub logical_source_name: Option<&'a str>,
     pub allow_private_integrations: Option<bool>,
 }
 
@@ -236,10 +238,14 @@ impl<'a> FlowEngine<'a> {
         let mut steps: Vec<crate::domain::JobStepEntry> = Vec::new();
         let mut ctx = FlowContext::new(
             job_id,
-            source_file
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "source".into()),
+            self.logical_source_name
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    source_file
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "source".into())
+                }),
             current_working_file.clone(),
             media_info,
         );
@@ -358,6 +364,12 @@ impl<'a> FlowEngine<'a> {
                             });
                         }
                     }
+                }
+                OperationRuntime::Http(_)
+                    if op.capability == "integration" && publication::after_publication(&node) =>
+                {
+                    step_status = crate::domain::JobStepStatus::Skipped;
+                    step_message = Some(publication::DEFERRED_MESSAGE.to_owned());
                 }
                 OperationRuntime::Http(http_rt) => {
                     let outbound_policy = crate::net_policy::OutboundPolicy {

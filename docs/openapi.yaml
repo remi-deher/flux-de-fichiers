@@ -176,7 +176,7 @@ paths:
   /api/v1/libraries/{id}/scan:
     post:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Scanner le dossier d'entrée et créer les tâches manquantes pour la bibliothèque
+      summary: Scanner les dossiers de la bibliothèque sur leurs hôtes et créer les tâches manquantes
       parameters:
         - in: path
           name: id
@@ -195,6 +195,43 @@ paths:
       responses:
         '200':
           description: Bilan du scan (fichiers analysés, tâches créées, doublons ignorés)
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/libraries/{id}/files:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Voir les traitements regroupés par fichier et emplacement
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {in: query, name: offset, schema: {type: integer, minimum: 0}}
+      responses:
+        '200': {description: Page de fichiers et tâches associées}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/libraries/{id}/files/{job}/reprocess:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Retraiter la source d’une tâche terminée avec une version du flux
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {in: path, name: job, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                flowVersion: {type: [integer, 'null'], minimum: 1}
+      responses:
+        '201': {description: Nouveau traitement mis en file}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/placement:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Expliquer le placement d’une tâche en file
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Workers admissibles et état des prérequis}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/libraries:
     get:
@@ -1614,7 +1651,7 @@ components:
       type: object
       required: [worker_id, local_path, access]
       properties:
-        worker_id: {type: string, format: uuid}
+        worker_id: {type: string, format: uuid, description: "UUID nul pour un dossier de la centrale."}
         local_path: {type: string, minLength: 1, maxLength: 512}
         access: {type: string, enum: [read, read_write]}
     LibraryWrite:
@@ -1666,6 +1703,7 @@ components:
         source_name: {type: string}
         source_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
         source_bytes: {type: integer, minimum: 1}
+        local_source_root: {type: string, description: "Dossier local au worker pour une source sur son montage."}
     Job:
       type: object
       required: [id, source_name, status, attempts, warning, created_at, updated_at]

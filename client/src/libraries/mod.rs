@@ -3,6 +3,7 @@
 mod block_templates;
 mod draft;
 mod form;
+mod history;
 mod packs;
 mod resources;
 mod scripts;
@@ -128,6 +129,10 @@ fn MediaLibrariesSection(
     reload: RwSignal<u32>,
 ) -> impl IntoView {
     let can_manage = me.allows(Permission::ManageLibraries);
+    let can_view_jobs = me.allows(Permission::ViewJobs);
+    let can_manage_jobs = me.allows(Permission::ManageJobs);
+    let files_drawer = RwSignal::new(false);
+    let selected_library = RwSignal::new(None::<Library>);
     let filters = use_context::<Filters>();
     let editing = RwSignal::new(None::<LibraryDraft>);
     let drawer = RwSignal::new(false);
@@ -286,15 +291,23 @@ fn MediaLibrariesSection(
                                     drawer.set(true);
                                 })
                             });
-                            let actions = can_manage.then(|| {
-                                let draft = draft.clone();
-                                view! {
-                                    <button type="button" class="btn btn-secondary btn-sm"
-                                        on:click=move |_| { editing.set(Some(draft.clone())); drawer.set(true); }>
-                                        "Configurer"
-                                    </button>
-                                }.into_any()
-                            });
+                            let actions = {
+                                let selected = library.clone();
+                                Some(view! {
+                                    {can_view_jobs.then(|| view! {
+                                        <button type="button" class="btn btn-secondary btn-sm"
+                                            on:click=move |event: leptos::ev::MouseEvent| { event.stop_propagation(); selected_library.set(Some(selected.clone())); files_drawer.set(true); }>
+                                            "Fichiers"
+                                        </button>
+                                    })}
+                                    {can_manage.then(|| view! {
+                                        <button type="button" class="btn btn-secondary btn-sm"
+                                            on:click=move |event: leptos::ev::MouseEvent| { event.stop_propagation(); editing.set(Some(draft.clone())); drawer.set(true); }>
+                                            "Configurer"
+                                        </button>
+                                    })}
+                                }.into_any())
+                            };
                             let badge = view! {
                                 <StatusBadge
                                     label=if ready { "Prête" } else { "À configurer" }
@@ -309,7 +322,7 @@ fn MediaLibrariesSection(
                                     badge=Some(badge)
                                     active=Some(Signal::derive(move || editing.get().and_then(|d| d.id) == Some(id)))
                                     on_click=open_edit
-                                    footer_meta=format!("{worker_count} worker(s) · {updated}")
+                                    footer_meta=format!("{worker_count} dossier(s) · {updated}")
                                     footer_actions=actions
                                 >
                                     <div class="cluster">
@@ -332,7 +345,7 @@ fn MediaLibrariesSection(
                                                     <Tag label=format!("{path} ({access})") tone=TagTone::Mono />
                                                 }).collect_view()}
                                                 {(extra_workers > 0).then(|| view! {
-                                                    <Tag label=format!("+{extra_workers} worker(s)") tone=TagTone::Neutral />
+                                                    <Tag label=format!("+{extra_workers} dossier(s)") tone=TagTone::Neutral />
                                                 })}
                                             }.into_any()
                                         }}
@@ -367,6 +380,13 @@ fn MediaLibrariesSection(
         <StatStrip aria_label="Synthèse des bibliothèques" items=stats />
         {grid}
         <Drawer open=drawer eyebrow="Bibliothèque" title=title>{form}</Drawer>
+        <Drawer open=files_drawer eyebrow="Fichiers" title=Signal::derive(move || selected_library.get().map(|library| library.name).unwrap_or_default())>
+            {move || files_drawer.get().then(|| selected_library.get()).flatten().map(|library| view! {
+                <history::LibraryHistory library=library can_scan=can_manage can_manage_jobs=can_manage_jobs
+                    workers=workers.get().and_then(Result::ok).unwrap_or_default() />
+            })}
+        </Drawer>
+
     }
 }
 

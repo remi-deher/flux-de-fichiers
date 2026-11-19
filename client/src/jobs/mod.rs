@@ -2,6 +2,7 @@
 //! dans un tiroir, relance manuelle (ADR 0012, 0014).
 
 mod detail;
+pub(crate) use detail::JobDetail;
 mod diagnosis;
 mod live;
 mod logs;
@@ -15,7 +16,6 @@ use crate::ui::filters::{Filters, JobStateFilter, job_state, period};
 use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, MetricTone, StatItem, StatStrip, Toasts};
 use chrono::Utc;
-use detail::JobDetail;
 use diagnosis::AiDiagnosisCard;
 use forgearr_shared::flows::FlowRecord;
 use forgearr_shared::jobs::{Job, JobBatchAction, JobBatchRequest, JobBatchResult};

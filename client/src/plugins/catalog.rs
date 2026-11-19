@@ -192,7 +192,7 @@ fn FeaturedPackCard(
             class:is-open=move || active_id.get().as_deref() == Some(check_id.as_str())
             tabindex="0"
             on:click=move |_| open_click()
-            on:keydown=on_activate(move || open_key())
+            on:keydown=on_activate(open_key)
         >
             <div class="featured-pack__top">
                 <span class="featured-pack__icon" aria-hidden="true">

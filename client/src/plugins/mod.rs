@@ -15,11 +15,9 @@ use crate::api;
 use crate::route::encode_segment;
 use crate::ui::{Drawer, IconName, Toasts};
 use catalog::{CatalogSectionView, summarize_catalog};
-use chrono::NaiveDate;
-use forgearr_shared::format::format_day;
 use forgearr_shared::plugins::vocab::{CatalogItemType, CatalogSection};
 use forgearr_shared::plugins::{
-    CatalogEntry, DependencyInstallResult, PluginRepository, ToolStatus, ToolStatusSummary,
+    CatalogEntry, DependencyInstallResult, PluginRepository, ToolStatusSummary,
 };
 use forgearr_shared::session::Me;
 use forgearr_shared::{InstanceKind, Permission};
@@ -34,14 +32,6 @@ use tools::ToolsSection;
 const REPOSITORIES_PATH: &str = "/api/v1/plugins/repositories";
 const CATALOG_PATH: &str = "/api/v1/plugins";
 const TOOLS_PATH: &str = "/api/v1/tools";
-
-pub fn tool_status_label(status: ToolStatus) -> (&'static str, &'static str) {
-    match status {
-        ToolStatus::Ready => ("Installé", "status-pill success"),
-        ToolStatus::Installing => ("Installation…", "status-pill warning"),
-        ToolStatus::NotInstalled => ("Non installé", "status-pill info"),
-    }
-}
 
 pub(super) fn bump(signal: RwSignal<u32>) {
     signal.update(|count| *count = count.wrapping_add(1));
@@ -102,12 +92,6 @@ pub(super) fn install_with_dependencies_action(
         None => {}
     });
     action
-}
-
-/// Mention de dernière mise à jour d'une pièce du catalogue ; vide si le dépôt ne la fournit pas.
-pub(super) fn updated_label(date: Option<NaiveDate>) -> String {
-    date.map(|day| format!("Mis à jour le {}", format_day(day)))
-        .unwrap_or_default()
 }
 
 pub(super) fn section_badge_label(entry_type: CatalogItemType) -> &'static str {
@@ -195,7 +179,7 @@ enum InspectionTarget {
     Plugin(SelectedItem),
     Pack(SelectedItem),
     Tool(SelectedItem),
-    Item(CatalogEntry),
+    Item(Box<CatalogEntry>),
 }
 
 impl InspectionTarget {
@@ -261,7 +245,7 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
     });
     let open_item = Callback::new(move |entry: CatalogEntry| {
         close_all_drawers();
-        target.set(Some(InspectionTarget::Item(entry)));
+        target.set(Some(InspectionTarget::Item(Box::new(entry))));
         item_open.set(true);
     });
 
@@ -402,7 +386,7 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
             <Drawer open=item_open eyebrow="Catalogue" title=drawer_title>
                 {move || match target.get() {
                     Some(InspectionTarget::Item(entry)) => view! {
-                        <CatalogItemDetail entry=entry />
+                        <CatalogItemDetail entry=*entry />
                     }.into_any(),
                     _ => ().into_any(),
                 }}
@@ -466,17 +450,6 @@ mod tests {
         assert_eq!(PluginsTab::Catalog.label(), "Catalogue");
     }
 
-    #[test]
-    fn every_tool_state_has_a_label() {
-        for status in [
-            ToolStatus::Ready,
-            ToolStatus::Installing,
-            ToolStatus::NotInstalled,
-        ] {
-            assert!(!tool_status_label(status).0.is_empty());
-        }
-    }
-
     fn entry(id: &str, entry_type: CatalogItemType) -> CatalogEntry {
         CatalogEntry {
             id: id.to_owned(),
@@ -513,13 +486,6 @@ mod tests {
             card_description(&entry("polices", CatalogItemType::ResourceFont)),
             "Polices"
         );
-    }
-
-    #[test]
-    fn updated_label_formats_known_dates_only() {
-        let date = NaiveDate::from_ymd_opt(2026, 11, 19);
-        assert_eq!(updated_label(date), "Mis à jour le 19 nov. 2026");
-        assert_eq!(updated_label(None), "");
     }
 
     #[test]

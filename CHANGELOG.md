@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.54.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.53.0...v0.54.0) (2026-11-19)
+
+
+### Features
+
+* **plugins:** descriptions réelles des pièces et espacement du sous-menu ([d7f3386](https://github.com/remi-deher/flux-de-fichiers/commit/d7f33863f545e05c479b3385a55a7f94dc1b9182))
+* **plugins:** descriptions réelles des pièces et espacement du sous-menu ([4d2a148](https://github.com/remi-deher/flux-de-fichiers/commit/4d2a14848017d31946bd0a4863f653b6d753d771))
+
 ## [0.53.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.52.0...v0.53.0) (2026-11-19)
 
 

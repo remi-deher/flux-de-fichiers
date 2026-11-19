@@ -1,29 +1,29 @@
-//! Fiche d'inspection à onglets d'un pack : composants, installation et informations.
+//! Fiche d'inspection à onglets d'un pack : vue d'ensemble + installation unifiée et informations.
 
-use super::{date_row, section_badge_label};
+use super::metadata::{CommonInfoRows, MetaRow, StatusBanner, StoreTone};
+use super::{SelectedItem, section_badge_label};
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::{Icon, IconName, Tag, TagTone, Toasts};
+use forgearr_shared::plugins::vocab::CatalogItemType;
 use forgearr_shared::plugins::{PackDetailView, PackInstallResult};
 use leptos::prelude::*;
 
 const INSTALL_ICON_SIZE: u32 = 15;
 
-/// Onglets du tiroir d'un pack.
+/// Onglets du tiroir d'un pack (composants et installation réunis dans Aperçu).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PackDrawerTab {
-    Components,
-    Install,
+    Overview,
     Info,
 }
 
 impl PackDrawerTab {
-    pub const TABS: &'static [&'static str] = &["Composants", "Installation", "Informations"];
+    pub const TABS: &'static [&'static str] = &["Aperçu & Installation", "Informations"];
 
     pub const fn from_index(index: usize) -> Self {
         match index {
-            0 => Self::Components,
-            1 => Self::Install,
+            0 => Self::Overview,
             _ => Self::Info,
         }
     }
@@ -49,77 +49,47 @@ pub fn pack_install_summary(result: &PackInstallResult) -> (bool, String) {
 }
 
 #[component]
-fn ComponentsTab(detail: PackDetailView) -> impl IntoView {
-    let spec = detail.installation;
-    view! {
-        {spec.entrypoint.map(|entry| view! {
-            <div class="detail-grid">
-                <div class="detail-term">"Point d'entrée"</div>
-                <div class="detail-val">
-                    <Tag label=section_badge_label(entry.kind) tone=TagTone::Primary />
-                    " "
-                    <span class="text-mono text-strong">{entry.id}</span>
-                    " "
-                    <Tag label=entry.version tone=TagTone::Mono />
-                </div>
-            </div>
-        })}
-        <div class="pack-components">
-            <h3 class="form-label">"Composants déclarés"</h3>
-            {if spec.components.is_empty() {
-                view! { <p class="text-dim text-sm">"Aucun composant déclaré."</p> }.into_any()
-            } else {
-                view! {
-                    <ul class="step-list">
-                        {spec.components.into_iter().map(|comp| view! {
-                            <li class="step-item">
-                                <div class="step-item__head">
-                                    <Tag label=section_badge_label(comp.kind) tone=TagTone::Primary />
-                                    <span class="text-mono text-strong">{comp.id}</span>
-                                    <Tag label=comp.version tone=TagTone::Mono />
-                                </div>
-                            </li>
-                        }).collect_view()}
-                    </ul>
-                }.into_any()
-            }}
-        </div>
-    }
-}
-
-#[component]
-fn InstallTab(
+fn OverviewTab(
     detail: PackDetailView,
     can_install: bool,
     install: Action<(), Result<PackInstallResult, api::ApiError>>,
     last_result: RwSignal<Option<PackInstallResult>>,
     feedback: RwSignal<Option<String>>,
+    on_open_plugin: Option<Callback<SelectedItem>>,
+    on_open_tool: Option<Callback<SelectedItem>>,
 ) -> impl IntoView {
     let spec = detail.installation;
+    let components_count = spec.components.len();
     let runtime_label = match spec.runtime_implemented {
-        Some(true) => "Prêt",
+        Some(true) => "Prêt à installer",
         Some(false) => "Non implémenté",
-        None => "Déclaratif",
+        None => "Pack déclaratif",
     };
+
+    let install_btn = can_install.then(|| {
+        view! {
+            <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                disabled=move || install.pending().get()
+                on:click=move |_| { install.dispatch(()); }
+            >
+                <Icon name=IconName::Download size=INSTALL_ICON_SIZE />
+                <span>{move || if install.pending().get() { "Installation…" } else { "Installer le pack" }}</span>
+            </button>
+        }
+        .into_any()
+    });
+
     view! {
-        <div class="detail-grid">
-            <div class="detail-term">"Exécution"</div>
-            <div class="detail-val">{runtime_label}</div>
-            <div class="detail-term">"Composants"</div>
-            <div class="detail-val">{spec.components.len().to_string()}</div>
-        </div>
-        {can_install.then(|| view! {
-            <div class="inspection-drawer__actions">
-                <button
-                    type="button"
-                    class="btn btn-primary"
-                    disabled=move || install.pending().get()
-                    on:click=move |_| { install.dispatch(()); }
-                >
-                    <Icon name=IconName::Download size=INSTALL_ICON_SIZE />
-                    <span>{move || if install.pending().get() { "Installation…" } else { "Installer le pack" }}</span>
-                </button>
-            </div>
+        <StatusBanner
+            title=runtime_label
+            text=Some(format!("{components_count} composant(s) inclus dans ce pack."))
+            tone=StoreTone::Primary
+            action=install_btn
+        />
+        {detail.description.map(|desc| view! {
+            <p class="text-sm">{desc}</p>
         })}
         {move || last_result.get().map(|res| view! {
             <div class="pack-components">
@@ -146,61 +116,101 @@ fn InstallTab(
                 })}
             </div>
         })}
-        <p class="form-help" role="status">{move || feedback.get()}</p>
+        {move || feedback.get().map(|msg| view! {
+            <p class="form-help" role="status">{msg}</p>
+        })}
+        {spec.entrypoint.map(|entry| view! {
+            <div class="detail-grid">
+                <MetaRow term="Point d'entrée">
+                    <div class="cluster">
+                        <Tag label=section_badge_label(entry.kind) tone=TagTone::Primary />
+                        <span class="text-mono text-strong">{entry.id}</span>
+                        <Tag label=entry.version tone=TagTone::Mono />
+                    </div>
+                </MetaRow>
+            </div>
+        })}
+        <div class="pack-components">
+            <h3 class="form-label">"Composants inclus"</h3>
+            {if spec.components.is_empty() {
+                view! { <p class="text-dim text-sm">"Aucun composant déclaré."</p> }.into_any()
+            } else {
+                view! {
+                    <ul class="step-list">
+                        {spec.components.into_iter().map(|comp| {
+                            let target_cb = match comp.kind {
+                                CatalogItemType::Plugin => on_open_plugin,
+                                CatalogItemType::App => on_open_tool,
+                                _ => None,
+                            };
+                            let icon = match comp.kind {
+                                CatalogItemType::App => IconName::Package,
+                                _ => IconName::Plugins,
+                            };
+                            if let Some(cb) = target_cb {
+                                let open_id = comp.id.clone();
+                                let open_name = comp.id.clone();
+                                view! {
+                                    <li>
+                                        <button
+                                            type="button"
+                                            class="dep-link"
+                                            on:click=move |_| cb.run(SelectedItem {
+                                                id: open_id.clone(),
+                                                name: open_name.clone(),
+                                            })
+                                        >
+                                            <span class="dep-link__main">
+                                                <Icon name=icon size=15 />
+                                                <span class="text-mono text-strong">{comp.id}</span>
+                                            </span>
+                                            <span class="dep-link__meta">
+                                                <Tag label=section_badge_label(comp.kind) tone=TagTone::Primary />
+                                                <Tag label=comp.version tone=TagTone::Mono />
+                                            </span>
+                                        </button>
+                                    </li>
+                                }
+                                .into_any()
+                            } else {
+                                view! {
+                                    <li class="step-item">
+                                        <div class="step-item__head">
+                                            <Tag label=section_badge_label(comp.kind) tone=TagTone::Primary />
+                                            <span class="text-mono text-strong">{comp.id}</span>
+                                            <Tag label=comp.version tone=TagTone::Mono />
+                                        </div>
+                                    </li>
+                                }
+                                .into_any()
+                            }
+                        }).collect_view()}
+                    </ul>
+                }.into_any()
+            }}
+        </div>
     }
 }
 
 #[component]
 fn InfoTab(detail: PackDetailView) -> impl IntoView {
     view! {
-        {detail.description.map(|desc| view! {
-            <p class="text-sm">{desc}</p>
-        })}
         <div class="detail-grid">
-            <div class="detail-term">"Identifiant"</div>
-            <div class="detail-val text-mono">{detail.id}</div>
-            <div class="detail-term">"Nom"</div>
-            <div class="detail-val">{detail.name}</div>
-            <div class="detail-term">"Version"</div>
-            <div class="detail-val text-mono">{detail.version}</div>
-            {date_row("Mise à jour", detail.updated_at)}
-            <div class="detail-term">"Format"</div>
-            <div class="detail-val text-mono">{detail.installation.kind}</div>
+            <CommonInfoRows
+                id=detail.id
+                version=detail.version
+                updated_at=detail.updated_at
+                author=detail.author
+                license=detail.license
+                app_min=detail.compatibility.app_min
+                platforms=detail.compatibility.platforms
+                tags=detail.tags
+            />
+            <MetaRow term="Format" mono=true>{detail.installation.kind}</MetaRow>
             {detail.category.filter(|cat| cat.shows_badge()).map(|cat| view! {
-                <div class="detail-term">"Catégorie"</div>
-                <div class="detail-val"><Tag label=cat.as_str() tone=TagTone::Neutral /></div>
-            })}
-            {detail.author.map(|author| view! {
-                <div class="detail-term">"Auteur"</div>
-                <div class="detail-val">{author}</div>
-            })}
-            {detail.license.map(|license| view! {
-                <div class="detail-term">"Licence"</div>
-                <div class="detail-val text-mono">{license}</div>
-            })}
-            {detail.compatibility.app_min.map(|min| view! {
-                <div class="detail-term">"App minimale"</div>
-                <div class="detail-val text-mono">{min}</div>
-            })}
-            {(!detail.compatibility.platforms.is_empty()).then(|| view! {
-                <div class="detail-term">"Plateformes"</div>
-                <div class="detail-val">
-                    <div class="cluster">
-                        {detail.compatibility.platforms.into_iter().map(|plat| view! {
-                            <Tag label=plat tone=TagTone::Mono />
-                        }).collect_view()}
-                    </div>
-                </div>
-            })}
-            {(!detail.tags.is_empty()).then(|| view! {
-                <div class="detail-term">"Étiquettes"</div>
-                <div class="detail-val">
-                    <div class="cluster">
-                        {detail.tags.into_iter().map(|tag| view! {
-                            <Tag label=tag tone=TagTone::Neutral />
-                        }).collect_view()}
-                    </div>
-                </div>
+                <MetaRow term="Catégorie">
+                    <Tag label=cat.as_str() tone=TagTone::Neutral />
+                </MetaRow>
             })}
         </div>
     }
@@ -212,6 +222,8 @@ pub fn PackDetail(
     tab: RwSignal<usize>,
     can_install: bool,
     on_installed: Callback<()>,
+    #[prop(optional)] on_open_plugin: Option<Callback<SelectedItem>>,
+    #[prop(optional)] on_open_tool: Option<Callback<SelectedItem>>,
 ) -> impl IntoView {
     let encoded = encode_segment(&pack_id);
     let spec_path = format!("/api/v1/packs/{encoded}");
@@ -252,14 +264,15 @@ pub fn PackDetail(
                     None => view! { <p class="text-dim">"Chargement du pack…"</p> }.into_any(),
                     Some(Err(error)) => view! { <p class="text-danger">{error.message()}</p> }.into_any(),
                     Some(Ok(data)) => match active_tab {
-                        PackDrawerTab::Components => view! { <ComponentsTab detail=data /> }.into_any(),
-                        PackDrawerTab::Install => view! {
-                            <InstallTab
+                        PackDrawerTab::Overview => view! {
+                            <OverviewTab
                                 detail=data
                                 can_install=can_install
                                 install=install
                                 last_result=last_result
                                 feedback=feedback
+                                on_open_plugin=on_open_plugin
+                                on_open_tool=on_open_tool
                             />
                         }
                         .into_any(),
@@ -279,11 +292,10 @@ mod tests {
     fn pack_drawer_tabs_map_all_indices() {
         assert_eq!(
             PackDrawerTab::TABS,
-            &["Composants", "Installation", "Informations"]
+            &["Aperçu & Installation", "Informations"]
         );
-        assert_eq!(PackDrawerTab::from_index(0), PackDrawerTab::Components);
-        assert_eq!(PackDrawerTab::from_index(1), PackDrawerTab::Install);
-        assert_eq!(PackDrawerTab::from_index(2), PackDrawerTab::Info);
+        assert_eq!(PackDrawerTab::from_index(0), PackDrawerTab::Overview);
+        assert_eq!(PackDrawerTab::from_index(1), PackDrawerTab::Info);
         assert_eq!(PackDrawerTab::from_index(10), PackDrawerTab::Info);
     }
 

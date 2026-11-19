@@ -19,10 +19,18 @@ pub async fn catalog(
     _auth: ViewPluginsAuth,
 ) -> AppResult<Json<Vec<CatalogEntry>>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    Ok(Json(s.catalog_cache.exposed_catalog(&roots).await))
+    let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
+    let saved_settings = crate::repository::list_all_plugin_settings(&s.pool)
+        .await
+        .unwrap_or_default();
+    Ok(Json(
+        s.catalog_cache
+            .exposed_catalog_enriched(&roots, &cache_mgr, &saved_settings)
+            .await,
+    ))
 }
 
-/// Fiche détaillée d'un plugin du catalogue (métadonnées, dépendances, compatibilité et blocs exposés).
+/// Fiche détaillée d'un plugin du catalogue (métadonnées, dépendances avec état réel, compatibilité et blocs exposés).
 pub async fn plugin_detail(
     State(s): State<AppState>,
     Path(id): Path<String>,
@@ -32,11 +40,20 @@ pub async fn plugin_detail(
         return Err(AppError::NotFound);
     }
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    let detail = s
+    let mut detail = s
         .catalog_cache
         .plugin_detail(&roots, &id)
         .await
         .ok_or(AppError::NotFound)?;
+    let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
+    let tool_statuses: std::collections::HashMap<String, plugins::ToolStatus> = s
+        .catalog_cache
+        .tools_status(&roots, &cache_mgr)
+        .await
+        .into_iter()
+        .map(|tool| (tool.id, tool.status))
+        .collect();
+    plugins::attach_dependency_statuses(&mut detail, &tool_statuses);
     Ok(Json(detail))
 }
 

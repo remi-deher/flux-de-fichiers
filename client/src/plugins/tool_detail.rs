@@ -1,6 +1,7 @@
-//! Tiroir d'inspection à onglets d'un outil distribué : distribution, utilisation et informations.
+//! Tiroir d'inspection à onglets d'un outil distribué : distribution, utilisation (liens croisés) et informations.
 
-use super::{TOOLS_PATH, bump, date_row, install_with_dependencies_action, tool_status_label};
+use super::metadata::{CommonInfoRows, MetaRow, StatusBanner, meta_date_row, tool_status_tag};
+use super::{SelectedItem, TOOLS_PATH, bump, install_with_dependencies_action};
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::{Icon, IconName, Tag, TagTone};
@@ -40,14 +41,15 @@ pub fn short_sha(sha: &str) -> String {
 }
 
 #[component]
-fn DistributionTab(
+fn ToolActionBanner(
     detail: ToolDetailView,
     can_install: bool,
     reload_tools: RwSignal<u32>,
+    reload_catalog: RwSignal<u32>,
     reload_detail: RwSignal<u32>,
 ) -> impl IntoView {
     let tool_id = detail.summary.id.clone();
-    let (status_label, status_class) = tool_status_label(detail.summary.status);
+    let (status_label, _, banner_tone) = tool_status_tag(detail.summary.status);
     let installable = can_install
         && detail.summary.installable
         && detail.summary.status == ToolStatus::NotInstalled
@@ -55,27 +57,66 @@ fn DistributionTab(
     let feedback = RwSignal::new(None::<String>);
     let install = install_with_dependencies_action(TOOLS_PATH, feedback, move || {
         bump(reload_tools);
+        bump(reload_catalog);
         bump(reload_detail);
     });
 
+    let subtitle = match detail.summary.status {
+        ToolStatus::Ready => format!(
+            "Disponible sur {} ({}).",
+            detail.summary.arch, detail.summary.distribution
+        ),
+        ToolStatus::Installing => "Téléchargement et extraction en cours…".to_owned(),
+        ToolStatus::NotInstalled if installable => {
+            "Prêt à être téléchargé dans le cache local.".to_owned()
+        }
+        ToolStatus::NotInstalled => {
+            "Aucun paquet téléchargeable pour cette architecture pour le moment.".to_owned()
+        }
+    };
+
+    let action = installable.then(|| {
+        view! {
+            <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                disabled=move || install.pending().get()
+                on:click=move |_| { install.dispatch(tool_id.clone()); }
+            >
+                <Icon name=IconName::Download size=INSTALL_ICON_SIZE />
+                <span>{move || if install.pending().get() { "Installation…" } else { "Installer" }}</span>
+            </button>
+        }
+        .into_any()
+    });
+
+    view! {
+        <StatusBanner
+            title=status_label
+            text=Some(subtitle)
+            tone=banner_tone
+            action=action
+        />
+        {move || feedback.get().map(|msg| view! {
+            <p class="form-help" role="status">{msg}</p>
+        })}
+    }
+}
+
+#[component]
+fn DistributionTab(detail: ToolDetailView) -> impl IntoView {
     view! {
         <div class="detail-grid">
-            <div class="detail-term">"Statut"</div>
-            <div class="detail-val"><span class=status_class>{status_label}</span></div>
-            <div class="detail-term">"Distribution"</div>
-            <div class="detail-val">{detail.summary.distribution}</div>
+            <MetaRow term="Distribution">{detail.summary.distribution}</MetaRow>
             {detail.tool_version.map(|ver| view! {
-                <div class="detail-term">"Version binaire"</div>
-                <div class="detail-val text-mono">{ver}</div>
+                <MetaRow term="Version binaire" mono=true>{ver}</MetaRow>
             })}
             {detail.release_status.map(|status| view! {
-                <div class="detail-term">"Disponibilité"</div>
-                <div class="detail-val text-mono">{status}</div>
+                <MetaRow term="Disponibilité" mono=true>{status}</MetaRow>
             })}
-            {date_row("Publication", detail.released_at)}
+            {meta_date_row("Publication", detail.released_at)}
             {detail.distribution_mode.map(|mode| view! {
-                <div class="detail-term">"Installation"</div>
-                <div class="detail-val text-mono">{mode}</div>
+                <MetaRow term="Installation" mono=true>{mode}</MetaRow>
             })}
         </div>
         <div class="pack-components">
@@ -104,41 +145,24 @@ fn DistributionTab(
                 }.into_any()
             }}
         </div>
-        {installable.then(|| view! {
-            <div class="inspection-drawer__actions">
-                <button
-                    type="button"
-                    class="btn btn-primary"
-                    disabled=move || install.pending().get()
-                    on:click=move |_| { install.dispatch(tool_id.clone()); }
-                >
-                    <Icon name=IconName::Download size=INSTALL_ICON_SIZE />
-                    <span>{move || if install.pending().get() { "Installation…" } else { "Installer l'outil" }}</span>
-                </button>
-            </div>
-        })}
-        {(!installable && detail.summary.status == ToolStatus::NotInstalled).then(|| view! {
-            <p class="text-dim text-sm">"Bientôt disponible : aucun paquet téléchargeable pour cet appareil."</p>
-        })}
-        <p class="form-help" role="status">{move || feedback.get()}</p>
     }
 }
 
 #[component]
-fn UsageTab(detail: ToolDetailView) -> impl IntoView {
+fn UsageTab(detail: ToolDetailView, on_open_plugin: Callback<SelectedItem>) -> impl IntoView {
     view! {
         <div class="detail-grid">
-            <div class="detail-term">"Capacité"</div>
-            <div class="detail-val"><Tag label=detail.summary.capability.as_str().to_owned() tone=TagTone::Primary /></div>
-            <div class="detail-term">"Choix actif"</div>
-            <div class="detail-val">{if detail.summary.current_choice { "Oui" } else { "Non" }}</div>
+            <MetaRow term="Capacité">
+                <Tag label=detail.summary.capability.as_str().to_owned() tone=TagTone::Primary />
+            </MetaRow>
+            <MetaRow term="Choix actif">
+                {if detail.summary.current_choice { "Oui" } else { "Non" }}
+            </MetaRow>
             {detail.interface.map(|iface| view! {
-                <div class="detail-term">"Interface"</div>
-                <div class="detail-val text-mono">{iface}</div>
+                <MetaRow term="Interface" mono=true>{iface}</MetaRow>
             })}
             {detail.invocation.map(|inv| view! {
-                <div class="detail-term">"Invocation"</div>
-                <div class="detail-val text-mono">{inv}</div>
+                <MetaRow term="Invocation" mono=true>{inv}</MetaRow>
             })}
         </div>
         <div class="pack-components">
@@ -148,13 +172,29 @@ fn UsageTab(detail: ToolDetailView) -> impl IntoView {
             } else {
                 view! {
                     <ul class="step-list">
-                        {detail.used_by_plugins.into_iter().map(|plugin_id| view! {
-                            <li class="step-item">
-                                <div class="step-item__head">
-                                    <Tag label="Plugin" tone=TagTone::Success />
-                                    <span class="text-mono text-strong">{plugin_id}</span>
-                                </div>
-                            </li>
+                        {detail.used_by_plugins.into_iter().map(|plugin_id| {
+                            let target_id = plugin_id.clone();
+                            let target_name = plugin_id.clone();
+                            view! {
+                                <li>
+                                    <button
+                                        type="button"
+                                        class="dep-link"
+                                        on:click=move |_| on_open_plugin.run(SelectedItem {
+                                            id: target_id.clone(),
+                                            name: target_name.clone(),
+                                        })
+                                    >
+                                        <span class="dep-link__main">
+                                            <Icon name=IconName::Plugins size=15 />
+                                            <span class="text-mono text-strong">{plugin_id}</span>
+                                        </span>
+                                        <span class="dep-link__meta">
+                                            <Tag label="Ouvrir le plugin" tone=TagTone::Primary />
+                                        </span>
+                                    </button>
+                                </li>
+                            }
                         }).collect_view()}
                     </ul>
                 }.into_any()
@@ -170,45 +210,17 @@ fn InfoTab(detail: ToolDetailView) -> impl IntoView {
             <p class="text-sm">{detail.summary.description}</p>
         })}
         <div class="detail-grid">
-            <div class="detail-term">"Identifiant"</div>
-            <div class="detail-val text-mono">{detail.summary.id}</div>
-            <div class="detail-term">"Version catalogue"</div>
-            <div class="detail-val text-mono">{detail.summary.version}</div>
-            {date_row("Mise à jour", detail.summary.updated_at)}
-            <div class="detail-term">"Architecture hôte"</div>
-            <div class="detail-val text-mono">{detail.summary.arch}</div>
-            {detail.author.map(|author| view! {
-                <div class="detail-term">"Auteur"</div>
-                <div class="detail-val">{author}</div>
-            })}
-            {detail.license.map(|license| view! {
-                <div class="detail-term">"Licence"</div>
-                <div class="detail-val text-mono">{license}</div>
-            })}
-            {detail.compatibility.app_min.map(|min| view! {
-                <div class="detail-term">"App minimale"</div>
-                <div class="detail-val text-mono">{min}</div>
-            })}
-            {(!detail.compatibility.platforms.is_empty()).then(|| view! {
-                <div class="detail-term">"Plateformes"</div>
-                <div class="detail-val">
-                    <div class="cluster">
-                        {detail.compatibility.platforms.into_iter().map(|plat| view! {
-                            <Tag label=plat tone=TagTone::Mono />
-                        }).collect_view()}
-                    </div>
-                </div>
-            })}
-            {(!detail.tags.is_empty()).then(|| view! {
-                <div class="detail-term">"Étiquettes"</div>
-                <div class="detail-val">
-                    <div class="cluster">
-                        {detail.tags.into_iter().map(|tag| view! {
-                            <Tag label=tag tone=TagTone::Neutral />
-                        }).collect_view()}
-                    </div>
-                </div>
-            })}
+            <CommonInfoRows
+                id=detail.summary.id
+                version=detail.summary.version
+                updated_at=detail.summary.updated_at
+                author=detail.author
+                license=detail.license
+                app_min=detail.compatibility.app_min
+                platforms=detail.compatibility.platforms
+                tags=detail.tags
+            />
+            <MetaRow term="Architecture hôte" mono=true>{detail.summary.arch}</MetaRow>
         </div>
     }
 }
@@ -219,6 +231,8 @@ pub fn ToolDetail(
     tab: RwSignal<usize>,
     can_install: bool,
     reload_tools: RwSignal<u32>,
+    reload_catalog: RwSignal<u32>,
+    on_open_plugin: Callback<SelectedItem>,
 ) -> impl IntoView {
     let reload_detail = RwSignal::new(0_u32);
     let path = format!("{TOOLS_PATH}/{}", encode_segment(&tool_id));
@@ -235,19 +249,29 @@ pub fn ToolDetail(
                 match detail.get() {
                     None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),
                     Some(Err(error)) => view! { <p class="text-danger">{error.message()}</p> }.into_any(),
-                    Some(Ok(data)) => match active_tab {
-                        ToolDrawerTab::Distribution => view! {
-                            <DistributionTab
-                                detail=data
+                    Some(Ok(data)) => {
+                        let banner_data = data.clone();
+                        view! {
+                            <ToolActionBanner
+                                detail=banner_data
                                 can_install=can_install
                                 reload_tools=reload_tools
+                                reload_catalog=reload_catalog
                                 reload_detail=reload_detail
                             />
+                            {match active_tab {
+                                ToolDrawerTab::Distribution => view! {
+                                    <DistributionTab detail=data />
+                                }
+                                .into_any(),
+                                ToolDrawerTab::Usage => view! {
+                                    <UsageTab detail=data on_open_plugin=on_open_plugin />
+                                }.into_any(),
+                                ToolDrawerTab::Info => view! { <InfoTab detail=data /> }.into_any(),
+                            }}
                         }
-                        .into_any(),
-                        ToolDrawerTab::Usage => view! { <UsageTab detail=data /> }.into_any(),
-                        ToolDrawerTab::Info => view! { <InfoTab detail=data /> }.into_any(),
-                    },
+                        .into_any()
+                    }
                 }
             }}
         </div>

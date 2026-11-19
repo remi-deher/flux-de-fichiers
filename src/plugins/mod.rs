@@ -16,6 +16,7 @@ mod legacy_ids;
 mod local;
 mod packs;
 mod probe;
+mod readiness;
 mod secret_settings;
 mod settings;
 mod sources;
@@ -44,6 +45,7 @@ pub use packs::{
     read_pack_installation,
 };
 pub use probe::{ProbeContract, file_job_may_start, probe_is_ready, required_probe};
+pub use readiness::{attach_dependency_statuses, compute_entry_runtime, is_plugin_configured};
 pub use sources::{
     catalog_roots, is_valid_repository_id, local_catalog_dir, repository_dir,
     sync_enabled_repositories,
@@ -57,10 +59,10 @@ pub use forgearr_shared::plugins::vocab::{
     self, CatalogCapability, CatalogItemType, PluginCategory,
 };
 pub use forgearr_shared::plugins::{
-    CatalogEntry, CreateRepositoryRequest, PackDetailView, PluginCompatibility,
-    PluginConnectionTestResult, PluginDependency, PluginDetailView, PluginRepository,
-    PluginSettingsView, RepositoryDetailView, ToolArtifactSummary, ToolDetailView, ToolStatus,
-    ToolStatusSummary,
+    CatalogEntry, CatalogReadiness, CatalogRuntimeSummary, CreateRepositoryRequest, PackDetailView,
+    PluginCompatibility, PluginConnectionTestResult, PluginDependency, PluginDetailView,
+    PluginRepository, PluginSettingsView, RepositoryDetailView, ToolArtifactSummary,
+    ToolDetailView, ToolStatus, ToolStatusSummary,
 };
 pub use secret_settings::{
     decrypt_all, mask, migrate_plaintext, plugin_secret_aad, reseal_legacy_settings,
@@ -712,6 +714,7 @@ mod tests {
             owner: None,
             sha256: None,
             updated_at: None,
+            runtime: None,
         };
         let mut hidden = entry.clone();
         hidden.category = Some(PluginCategory::Other);
@@ -942,6 +945,7 @@ mod tests {
             owner: None,
             sha256: None,
             updated_at: None,
+            runtime: None,
         };
         let block = |kind: &str, owner: Option<&str>| forgearr_shared::flows::OwnedBlockSpec {
             kind: kind.into(),

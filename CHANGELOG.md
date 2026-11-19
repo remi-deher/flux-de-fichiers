@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.49.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.48.0...v0.49.0) (2026-11-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* **plugins:** les identifiants changent (catalogue 2.0.0 requis) ; les secrets de plugins chiffrés avec l'ancien identifiant ne sont plus lisibles (installation neuve, ADR 0012).
+
+### Features
+
+* **flows:** reprise des anciens types de blocs dans les flux enregistrés ([c554350](https://github.com/remi-deher/flux-de-fichiers/commit/c554350a39c9b98170611c97f089f05c620a3a43))
+* **plugins:** identifiants sans préfixe, dates et installation des dépendances ([dadc865](https://github.com/remi-deher/flux-de-fichiers/commit/dadc865f954d1c2bd3f5b923dab67d1fd885a72f))
+* **plugins:** reprise automatique des réglages et secrets des plugins renommés ([3178b56](https://github.com/remi-deher/flux-de-fichiers/commit/3178b56cbc49b39fc047a07ae75010dd508c4a68))
+
 ## [0.48.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.47.0...v0.48.0) (2026-11-18)
 
 

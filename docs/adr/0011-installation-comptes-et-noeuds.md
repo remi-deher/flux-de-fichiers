@@ -117,10 +117,26 @@ centrale dans le bandeau.
      transaction ; une valeur illisible annule tout et garde les clés retirées ;
   3. retrait : après validation, plus aucune valeur n'utilise de clé retirée, qui est oubliée.
   Aucune étape ne détruit une clé encore utile : plus de sauvegarde de clés en clair dans
-  `/config/backups`. Une seule rotation à la fois (409 sinon). Une rotation interrompue (arrêt pendant le
+  `/config/backups`. Une seule rotation à la fois par trousseau (409 sinon). Une rotation interrompue (arrêt pendant le
   délai) s'achève au démarrage suivant. Refusée si `SECRET_KEY_FILE` est défini (la clé appartient alors à
   l'orchestrateur). En secours, central arrêté : `flux-de-fichiers rotate-secret` fait les trois étapes
   d'un coup. `SystemStatus.retiredKeyIds` signale une rotation en cours.
+- Trousseau de clés (`src/secrets.rs`, `src/secrets/retired_keys.rs`) : une clé active chiffre ; les clés
+  retirées, une par ligne dans `/config/secret_keys.retired` (0600), ne servent plus qu'à déchiffrer les
+  valeurs qui portent encore leur identifiant. Le déchiffrement choisit la clé d'après l'identifiant inscrit
+  dans la valeur. Aucune migration : `secret_key` (ou `SECRET_KEY_FILE`) reste la clé active ; les clés
+  retirées s'appliquent aussi avec `SECRET_KEY_FILE`.
+- Kit de récupération : fait (`src/secrets/recovery_kit.rs`, `src/api/recovery_kit.rs`,
+  `client/src/settings/recovery_kit.rs`). Page Système, « Kit de récupération de la clé » : l'administrateur
+  choisit une phrase de passe (12 caractères au moins, jamais enregistrée) et télécharge un fichier JSON
+  (`POST /api/v1/system/secret-key/recovery-kit`). Il contient le trousseau (clé active puis clés retirées)
+  chiffré par ChaCha20-Poly1305 sous une clé dérivée par Argon2id (sel aléatoire, paramètres inscrits dans
+  le kit, bornés à l'import). `/config/recovery_kit.exported` retient la clé couverte par le dernier kit :
+  la page affiche « À jour », « Jamais créé » ou « À refaire » (après un renouvellement), et la tuile
+  Chiffrement passe en alerte. Restauration, après remise en place d'une base sur une nouvelle installation :
+  « Restaurer depuis un kit » (`POST /api/v1/system/secret-key/restore`) reprend les clés du kit comme clés
+  retirées puis rechiffre tout sous la clé active, en partageant le verrou de la rotation (409 pendant une
+  rotation sur le même trousseau). Phrase de passe fausse ou kit altéré : 400, rien ne change.
 - Rôle lecteur et gestion des comptes : fait. Le rôle `viewer` porte tous les droits « voir » (vue d'ensemble,
   tâches, nœuds, bibliothèques, flux, plugins) et aucun droit d'administration. Les routes de lecture
   exigent leur droit « voir » (`ViewJobsAuth`, `ViewFlowsAuth`…, déclarés par `permission_auth!` dans

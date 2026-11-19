@@ -13,7 +13,7 @@ pub fn retired_keys_path(config_dir: &Path) -> std::path::PathBuf {
     config_dir.join(RETIRED_KEYS_FILE_NAME)
 }
 
-fn read_lines(config_dir: &Path) -> AppResult<Vec<String>> {
+pub(super) fn read_lines(config_dir: &Path) -> AppResult<Vec<String>> {
     match fs::read_to_string(retired_keys_path(config_dir)) {
         Ok(text) => Ok(text
             .lines()

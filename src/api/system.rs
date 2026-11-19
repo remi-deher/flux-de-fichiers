@@ -130,6 +130,9 @@ fn build_system_status(effective: &EffectiveRuntimeSettings, secrets: &SecretBox
             .into_iter()
             .map(str::to_owned)
             .collect(),
+        recovery_kit_key_id: secrets::recovery_kit::exported_key_id(&effective.config.config_dir)
+            .ok()
+            .flatten(),
         key_source: if secrets::external_key_file().is_some() {
             KeySource::External
         } else {
@@ -144,7 +147,7 @@ fn build_system_status(effective: &EffectiveRuntimeSettings, secrets: &SecretBox
     }
 }
 
-async fn current_status(state: &AppState) -> AppResult<Json<SystemStatus>> {
+pub(super) async fn current_status(state: &AppState) -> AppResult<Json<SystemStatus>> {
     let secrets = SecretBox::open(&state.config.config_dir)?;
     let effective = runtime_settings::load_effective(&state.pool, &state.config).await;
     Ok(Json(build_system_status(&effective, &secrets)))

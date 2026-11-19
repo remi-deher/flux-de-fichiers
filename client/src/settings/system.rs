@@ -1,6 +1,7 @@
 //! Système : versions et mise à jour, clé de chiffrement, base de données, limites et espace disque ; socle du tableau de bord Paramètres.
 
 use super::key_rotation::KeyRotationControl;
+use super::recovery_kit::{RecoveryKitControl, kit_state, kit_state_label};
 use crate::api;
 use crate::ui::{ProgressBar, SectionHeader};
 use flux_shared::format::format_bytes;
@@ -182,6 +183,13 @@ fn system_rows(status: &SystemStatus) -> Vec<DetailRow> {
         DetailRow::mono("Clé de chiffrement", status.key_id.clone()),
         DetailRow::text("Origine de la clé", key_source_label(status.key_source)),
         DetailRow::text(
+            "Kit de récupération",
+            kit_state_label(kit_state(
+                &status.key_id,
+                status.recovery_kit_key_id.as_deref(),
+            )),
+        ),
+        DetailRow::text(
             "Base de données",
             status
                 .database_bytes
@@ -212,6 +220,7 @@ pub fn SystemSection(
     let footer = view! {
         <div class="stack">
             <KeyRotationControl status=status on_changed=on_changed />
+            <RecoveryKitControl on_changed=on_changed />
             {move || updates_enabled.get().then(|| view! {
                 <div class="cluster cluster-wrap">
                     <button type="button" class="btn btn-secondary btn-sm"

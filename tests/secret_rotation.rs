@@ -4,10 +4,10 @@ use flux_de_fichiers::{
     error::AppError,
     plugins::plugin_secret_aad,
     secret_rotation::{
-        KeySwitch, RotationReport, reseal_and_retire, rotate_local_key, rotate_values,
-        start_online_rotation, switch_active_key,
+        KeySwitch, RotationReport, reseal_and_retire, restore_keys, rotate_local_key,
+        rotate_values, start_online_rotation, switch_active_key,
     },
-    secrets::{SecretBox, retired_keys_path},
+    secrets::{SecretBox, recovery_kit, retired_keys_path},
 };
 use serde_json::json;
 use sqlx::sqlite::SqlitePoolOptions;
@@ -262,6 +262,34 @@ async fn test_online_rotation_reseals_and_retires_in_the_background() -> anyhow:
     }
     let ring = SecretBox::open(dir.path())?;
     assert_eq!(ring.key_id(), new_key_id);
+    assert!(ring.retired_key_ids().is_empty());
+    assert_readable(&pool, &ring).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_a_restored_database_reads_its_secrets_again_with_the_kit() -> anyhow::Result<()> {
+    const PASSPHRASE: &str = "phrase de passe du kit";
+    let original = tempfile::tempdir()?;
+    let old = SecretBox::open(original.path())?;
+    let pool = seeded_pool(&old).await?;
+    let kit = recovery_kit::export(original.path(), None, PASSPHRASE)?;
+
+    // Nouveau conteneur : la base est remise en place, mais /config a une clé neuve.
+    let fresh = tempfile::tempdir()?;
+    let current = SecretBox::open(fresh.path())?;
+    assert!(stored_api_key(&pool).await.map(|value| {
+        current
+            .decrypt(&value, &plugin_secret_aad(PLUGIN, "apiKey"))
+            .is_err()
+    })?);
+
+    let keys = recovery_kit::open(&kit, PASSPHRASE)?;
+    let report = restore_keys(&pool, fresh.path(), None, &keys).await?;
+    assert_eq!(report.plugin_values, 1);
+    assert_eq!(report.flow_values, 1);
+    let ring = SecretBox::open(fresh.path())?;
+    assert_eq!(ring.key_id(), current.key_id());
     assert!(ring.retired_key_ids().is_empty());
     assert_readable(&pool, &ring).await?;
     Ok(())

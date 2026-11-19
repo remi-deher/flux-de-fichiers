@@ -3,6 +3,7 @@
 //! Trousseau : une clé active chiffre ; les clés retirées (`retired_keys`) ne servent plus qu'à
 //! déchiffrer les valeurs qui portent encore leur identifiant.
 
+pub mod recovery_kit;
 mod retired_keys;
 pub use retired_keys::{clear_retired_keys, retire_key, retired_keys_path};
 

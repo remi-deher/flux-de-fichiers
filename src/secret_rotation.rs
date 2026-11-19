@@ -15,8 +15,9 @@ use crate::{
 };
 use sqlx::SqlitePool;
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{LazyLock, Mutex},
     time::Duration,
 };
 
@@ -24,8 +25,10 @@ use std::{
 /// terminer leur écriture, avant le rechiffrement et le retrait.
 pub const RETIRED_KEY_GRACE: Duration = Duration::from_secs(30);
 
-/// Une seule rotation à la fois : une seconde bascule pendant le délai de grâce est refusée.
-static ROTATION_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+/// Une seule rotation à la fois par trousseau (dossier de configuration) : une seconde bascule ou une
+/// restauration pendant le délai de grâce est refusée.
+static ROTATIONS_IN_PROGRESS: LazyLock<Mutex<HashSet<PathBuf>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
 
 /// Valeurs rechiffrées, par origine.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -119,7 +122,7 @@ pub fn switch_active_key(
 }
 
 /// Étapes 2 et 3 : rechiffre tout sous la clé active, puis oublie les clés retirées. Sans clé retirée,
-/// rien n'est fait. Sert aussi au démarrage, pour achever une rotation interrompue.
+/// rien n'est rechiffré. Sert aussi au démarrage, pour achever une rotation interrompue.
 pub async fn reseal_and_retire(
     pool: &SqlitePool,
     config_dir: &Path,
@@ -127,6 +130,8 @@ pub async fn reseal_and_retire(
 ) -> AppResult<RotationReport> {
     let ring = SecretBox::open_with(config_dir, external_key_file)?;
     if ring.retired_key_ids().is_empty() {
+        // Le fichier peut encore lister la clé active (kit restauré sur sa propre clé) : rien n'en dépend.
+        secrets::clear_retired_keys(config_dir)?;
         return Ok(RotationReport::default());
     }
     let report = rotate_values(pool, &ring, &ring).await?;
@@ -141,13 +146,46 @@ pub async fn rotate_local_key(pool: &SqlitePool, config_dir: &Path) -> AppResult
     Ok(RotationOutcome { switch, report })
 }
 
-/// Libère le verrou de rotation quand la tâche se termine, même en cas d'échec.
-struct RotationGuard;
+/// Verrou de rotation d'un trousseau, libéré quand la tâche se termine, même en cas d'échec.
+struct RotationGuard {
+    config_dir: PathBuf,
+}
+
+impl RotationGuard {
+    fn acquire(config_dir: &Path) -> AppResult<Self> {
+        let mut running = ROTATIONS_IN_PROGRESS
+            .lock()
+            .map_err(|_| AppError::Internal)?;
+        if !running.insert(config_dir.to_path_buf()) {
+            return Err(AppError::Conflict);
+        }
+        Ok(Self {
+            config_dir: config_dir.to_path_buf(),
+        })
+    }
+}
 
 impl Drop for RotationGuard {
     fn drop(&mut self) {
-        ROTATION_IN_PROGRESS.store(false, Ordering::Release);
+        if let Ok(mut running) = ROTATIONS_IN_PROGRESS.lock() {
+            running.remove(&self.config_dir);
+        }
     }
+}
+
+/// Restauration depuis un kit : ses clés rejoignent le trousseau des clés retirées, puis tout est
+/// rechiffré sous la clé active. Si une valeur reste illisible, les clés du kit sont gardées.
+pub async fn restore_keys(
+    pool: &SqlitePool,
+    config_dir: &Path,
+    external_key_file: Option<&Path>,
+    keys_hex: &[String],
+) -> AppResult<RotationReport> {
+    let _guard = RotationGuard::acquire(config_dir)?;
+    for key_hex in keys_hex {
+        secrets::retire_key(config_dir, key_hex)?;
+    }
+    reseal_and_retire(pool, config_dir, external_key_file).await
 }
 
 /// Rotation central en marche : bascule tout de suite, puis rechiffre et retire en tâche de fond
@@ -158,10 +196,7 @@ pub fn start_online_rotation(
     external_key_file: Option<PathBuf>,
     grace: Duration,
 ) -> AppResult<KeySwitch> {
-    if ROTATION_IN_PROGRESS.swap(true, Ordering::AcqRel) {
-        return Err(AppError::Conflict);
-    }
-    let guard = RotationGuard;
+    let guard = RotationGuard::acquire(&config_dir)?;
     let switch = switch_active_key(&config_dir, external_key_file.as_deref())?;
     tokio::spawn(async move {
         let _guard = guard;

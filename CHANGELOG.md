@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.59.0...v0.60.0) (2026-11-19)
+
+
+### Features
+
+* **workers:** partage des sources entre workers, HTTP direct et repli par le central ([8222a21](https://github.com/remi-deher/flux-de-fichiers/commit/8222a21fe1f41c7c636c50ce6418304aa1c14948))
+
 ## [0.59.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.58.0...v0.59.0) (2026-11-19)
 
 

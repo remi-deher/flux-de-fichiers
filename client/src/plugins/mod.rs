@@ -1,6 +1,7 @@
 //! Plugins : catalogue App Store, outils distribués, dépôts synchronisés et tiroirs croisés (ADR 0010, 0014).
 
 mod catalog;
+mod flow_preview;
 mod item_detail;
 mod metadata;
 mod pack_detail;
@@ -15,6 +16,9 @@ use crate::api;
 use crate::route::encode_segment;
 use crate::ui::{Drawer, IconName, Toasts};
 use catalog::{CatalogSectionView, summarize_catalog};
+pub(crate) use flow_preview::{
+    FlowMiniPreview, preview_from_definition_json, preview_from_job_steps,
+};
 use forgearr_shared::plugins::vocab::{CatalogItemType, CatalogSection};
 use forgearr_shared::plugins::{
     CatalogEntry, DependencyInstallResult, PluginRepository, ToolStatusSummary,
@@ -282,6 +286,8 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
         bump(reload_tools);
         bump(reload_catalog);
     });
+    let catalog_entries =
+        Signal::derive(move || catalog.get().and_then(Result::ok).unwrap_or_default());
 
     let tab_count = move |tab: PluginsTab| -> Option<usize> {
         match tab {
@@ -357,6 +363,7 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
                             on_installed=on_pack_installed
                             on_open_plugin=open_plugin
                             on_open_tool=open_tool
+                            catalog_entries=catalog_entries
                         />
                     }.into_any(),
                     _ => ().into_any(),

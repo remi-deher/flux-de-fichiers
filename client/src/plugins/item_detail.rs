@@ -1,5 +1,6 @@
 //! Tiroir d'aperçu pour les éléments déclaratifs du catalogue (Flux, Scripts, Préréglages, Ressources).
 
+use super::flow_preview::FlowDiagram;
 use super::metadata::{CommonInfoRows, MetaRow, StatusBanner, StoreTone};
 use super::{card_description, section_badge_label};
 use crate::route::{Route, use_router};
@@ -52,6 +53,11 @@ pub fn CatalogItemDetail(entry: CatalogEntry) -> impl IntoView {
         .into_any()
     });
 
+    let flow_preview = entry
+        .runtime
+        .as_ref()
+        .and_then(|runtime| runtime.flow_preview.clone());
+
     view! {
         <div class="inspection-panel">
             <StatusBanner
@@ -61,6 +67,9 @@ pub fn CatalogItemDetail(entry: CatalogEntry) -> impl IntoView {
                 action=flow_action
             />
             <p class="text-sm">{description}</p>
+            {flow_preview.map(|preview| view! {
+                <FlowDiagram preview=preview />
+            })}
             <div class="detail-grid">
                 <CommonInfoRows
                     id=entry.id

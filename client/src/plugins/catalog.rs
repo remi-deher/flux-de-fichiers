@@ -221,6 +221,150 @@ fn FeaturedPackCard(
     }
 }
 
+/// Découpage du catalogue en groupes thématiques distincts lorsque la vue « Tous » est active.
+#[derive(Default)]
+pub struct CatalogSections {
+    pub packs: Vec<CatalogEntry>,
+    pub plugins: Vec<CatalogEntry>,
+    pub flows_and_scripts: Vec<CatalogEntry>,
+    pub resources: Vec<CatalogEntry>,
+}
+
+pub fn partition_catalog_sections(entries: Vec<CatalogEntry>) -> CatalogSections {
+    let mut sections = CatalogSections::default();
+    for entry in entries {
+        match entry.entry_type.section() {
+            Some(CatalogSection::Packs) => sections.packs.push(entry),
+            Some(CatalogSection::Plugins) => sections.plugins.push(entry),
+            Some(CatalogSection::Flows | CatalogSection::Scripts) => {
+                sections.flows_and_scripts.push(entry);
+            }
+            Some(CatalogSection::Other) => sections.resources.push(entry),
+            Some(CatalogSection::Applications) | None => {}
+        }
+    }
+    sections
+}
+
+#[component]
+fn CatalogGridSection(
+    #[prop(optional)] title: Option<&'static str>,
+    #[prop(optional)] subtitle: Option<&'static str>,
+    entries: Vec<CatalogEntry>,
+    can_configure: bool,
+    active_item_id: Signal<Option<String>>,
+    on_open_plugin: Callback<SelectedItem>,
+    on_open_pack: Callback<SelectedItem>,
+    on_open_item: Callback<CatalogEntry>,
+) -> impl IntoView {
+    if entries.is_empty() {
+        return ().into_any();
+    }
+    let count = entries.len();
+    let header_subtitle = subtitle
+        .map(|s| format!("{s} · {count}"))
+        .unwrap_or_else(|| format!("{count} élément(s)"));
+    view! {
+        <div class="store-section">
+            {title.map(|heading| view! {
+                <div class="store-section__head">
+                    <h2 class="store-section__title">{heading}</h2>
+                    <p class="store-section__subtitle">{header_subtitle.clone()}</p>
+                </div>
+            })}
+            <div class="store-grid">
+                {entries.into_iter().map(|entry| {
+                    let active_id = entry.id.clone();
+                    let desc = card_description(&entry);
+                    let badge_label = section_badge_label(entry.entry_type);
+                    let runtime = entry.runtime.clone().unwrap_or_default();
+                    let (status_label, status_tone, card_tone) = readiness_badge(
+                        runtime.readiness,
+                        runtime.missing_tools_count,
+                    );
+                    let cta_label = primary_action_label(&entry, can_configure);
+                    let is_primary_cta = matches!(
+                        runtime.readiness,
+                        CatalogReadiness::NeedsTools | CatalogReadiness::NeedsConfig
+                    ) && can_configure;
+                    let cta_class = if is_primary_cta {
+                        "btn btn-primary btn-sm"
+                    } else {
+                        "btn btn-secondary btn-sm"
+                    };
+
+                    let status_badge = view! {
+                        <Tag label=status_label tone=status_tone />
+                    }.into_any();
+
+                    let primary_context_tag = entry
+                        .capability
+                        .as_ref()
+                        .map(|cap| cap.as_str().to_owned())
+                        .unwrap_or_else(|| badge_label.to_owned());
+                    let blocks_hint = (runtime.blocks_count > 0)
+                        .then(|| format!("{} bloc(s)", runtime.blocks_count));
+                    let context_tags = view! {
+                        <Tag label=primary_context_tag tone=TagTone::Primary />
+                        {blocks_hint.map(|hint| view! {
+                            <Tag label=hint tone=TagTone::Neutral />
+                        })}
+                    }
+                    .into_any();
+
+                    let entry_for_open = entry.clone();
+                    let open_entry = Callback::new(move |()| match entry_for_open.entry_type {
+                        CatalogItemType::Plugin => on_open_plugin.run(SelectedItem {
+                            id: entry_for_open.id.clone(),
+                            name: entry_for_open.name.clone(),
+                        }),
+                        CatalogItemType::Pack => on_open_pack.run(SelectedItem {
+                            id: entry_for_open.id.clone(),
+                            name: entry_for_open.name.clone(),
+                        }),
+                        _ => on_open_item.run(entry_for_open.clone()),
+                    });
+                    let open_for_btn = open_entry;
+                    let actions = view! {
+                        <button
+                            type="button"
+                            class=cta_class
+                            on:click=move |_| open_for_btn.run(())
+                        >
+                            {cta_label}
+                        </button>
+                    }.into_any();
+
+                    let icon = section_icon(entry.entry_type);
+                    let tone = if entry.entry_type == CatalogItemType::Flow {
+                        StoreTone::Warning
+                    } else {
+                        card_tone
+                    };
+
+                    view! {
+                        <StoreCard
+                            title=entry.name
+                            description=desc
+                            icon=icon
+                            tone=tone
+                            status_badge=Some(status_badge)
+                            context_tags=Some(context_tags)
+                            footer_left=format!("v{}", entry.version)
+                            footer_actions=Some(actions)
+                            active=Some(Signal::derive(move || {
+                                active_item_id.get().as_deref() == Some(active_id.as_str())
+                            }))
+                            on_open=open_entry
+                        />
+                    }
+                }).collect_view()}
+            </div>
+        </div>
+    }
+    .into_any()
+}
+
 #[component]
 pub fn CatalogSectionView(
     catalog: LocalResource<Result<Vec<CatalogEntry>, api::ApiError>>,
@@ -289,21 +433,23 @@ pub fn CatalogSectionView(
     view! {
         <div class="store-toolbar">
             <StatStrip aria_label="Synthèse du catalogue" items=stats />
-            <div class="store-segmented" role="group" aria-label="Filtrer par état">
-                {ReadinessFilter::ALL.into_iter().map(|opt| {
-                    let is_active = move || readiness_filter.get() == opt;
-                    view! {
-                        <button
-                            type="button"
-                            class="store-segmented__btn"
-                            class:is-active=is_active
-                            aria-pressed=move || is_active().to_string()
-                            on:click=move |_| readiness_filter.set(opt)
-                        >
-                            {opt.label()}
-                        </button>
-                    }
-                }).collect_view()}
+            <div class="store-toolbar__actions">
+                <div class="store-segmented" role="group" aria-label="Filtrer par état">
+                    {ReadinessFilter::ALL.into_iter().map(|opt| {
+                        let is_active = move || readiness_filter.get() == opt;
+                        view! {
+                            <button
+                                type="button"
+                                class="store-segmented__btn"
+                                class:is-active=is_active
+                                aria-pressed=move || is_active().to_string()
+                                on:click=move |_| readiness_filter.set(opt)
+                            >
+                                {opt.label()}
+                            </button>
+                        }
+                    }).collect_view()}
+                </div>
             </div>
         </div>
         <section class="page-section">
@@ -350,136 +496,90 @@ pub fn CatalogSectionView(
                             .into_any();
                         }
 
-                        let show_featured = text.trim().is_empty()
-                            && kind == PluginKindFilter::Any
-                            && readiness == ReadinessFilter::All;
-                        let (featured_packs, grid_entries): (Vec<CatalogEntry>, Vec<CatalogEntry>) =
-                            if show_featured {
-                                shown
-                                    .into_iter()
-                                    .partition(|e| e.entry_type == CatalogItemType::Pack)
+                        if kind == PluginKindFilter::Any {
+                            let sections = partition_catalog_sections(shown);
+                            let show_featured_packs = text.trim().is_empty()
+                                && readiness == ReadinessFilter::All
+                                && !sections.packs.is_empty();
+                            let fallback_packs = if show_featured_packs {
+                                Vec::new()
                             } else {
-                                (Vec::new(), shown)
+                                sections.packs.clone()
                             };
-
-                        view! {
-                            {(!featured_packs.is_empty()).then(|| view! {
-                                <div class="store-section">
-                                    <div class="store-section__head">
-                                        <h2 class="store-section__title">"Packs recommandés"</h2>
-                                        <p class="store-section__subtitle">"Ensembles prêts à l'emploi installables en un clic"</p>
-                                    </div>
-                                    <div class="featured-packs">
-                                        {featured_packs.into_iter().map(|pack| view! {
-                                            <FeaturedPackCard
-                                                entry=pack
-                                                can_configure=can_configure
-                                                active_id=active_item_id
-                                                on_open_pack=on_open_pack
-                                            />
-                                        }).collect_view()}
-                                    </div>
-                                </div>
-                            })}
-                            {(!grid_entries.is_empty()).then(|| view! {
-                                <div class="store-section">
-                                    {show_featured.then(|| view! {
+                            view! {
+                                {show_featured_packs.then(|| view! {
+                                    <div class="store-section">
                                         <div class="store-section__head">
-                                            <h2 class="store-section__title">"Extensions & ressources"</h2>
-                                            <p class="store-section__subtitle">{format!("{} élément(s)", grid_entries.len())}</p>
+                                            <h2 class="store-section__title">"Packs recommandés"</h2>
+                                            <p class="store-section__subtitle">"Ensembles prêts à l'emploi installables en un clic"</p>
                                         </div>
-                                    })}
-                                    <div class="store-grid">
-                                        {grid_entries.into_iter().map(|entry| {
-                                            let active_id = entry.id.clone();
-                                            let subtitle = card_description(&entry);
-                                            let badge_label = section_badge_label(entry.entry_type);
-                                            let runtime = entry.runtime.clone().unwrap_or_default();
-                                            let (status_label, status_tone, card_tone) = readiness_badge(
-                                                runtime.readiness,
-                                                runtime.missing_tools_count,
-                                            );
-                                            let cta_label = primary_action_label(&entry, can_configure);
-                                            let is_primary_cta = matches!(
-                                                runtime.readiness,
-                                                CatalogReadiness::NeedsTools | CatalogReadiness::NeedsConfig
-                                            ) && can_configure;
-                                            let cta_class = if is_primary_cta {
-                                                "btn btn-primary btn-sm"
-                                            } else {
-                                                "btn btn-secondary btn-sm"
-                                            };
-
-                                            let status_badge = view! {
-                                                <Tag label=status_label tone=status_tone />
-                                            }.into_any();
-
-                                            let primary_context_tag = entry
-                                                .capability
-                                                .as_ref()
-                                                .map(|cap| cap.as_str().to_owned())
-                                                .unwrap_or_else(|| badge_label.to_owned());
-                                            let blocks_hint = (runtime.blocks_count > 0)
-                                                .then(|| format!("{} bloc(s)", runtime.blocks_count));
-                                            let context_tags = view! {
-                                                <Tag label=primary_context_tag tone=TagTone::Primary />
-                                                {blocks_hint.map(|hint| view! {
-                                                    <Tag label=hint tone=TagTone::Neutral />
-                                                })}
-                                            }.into_any();
-
-                                            let entry_for_open = entry.clone();
-                                            let open_entry = Callback::new(move |()| match entry_for_open.entry_type {
-                                                CatalogItemType::Plugin => on_open_plugin.run(SelectedItem {
-                                                    id: entry_for_open.id.clone(),
-                                                    name: entry_for_open.name.clone(),
-                                                }),
-                                                CatalogItemType::Pack => on_open_pack.run(SelectedItem {
-                                                    id: entry_for_open.id.clone(),
-                                                    name: entry_for_open.name.clone(),
-                                                }),
-                                                _ => on_open_item.run(entry_for_open.clone()),
-                                            });
-                                            let open_for_btn = open_entry;
-                                            let actions = view! {
-                                                <button
-                                                    type="button"
-                                                    class=cta_class
-                                                    on:click=move |_| open_for_btn.run(())
-                                                >
-                                                    {cta_label}
-                                                </button>
-                                            }.into_any();
-
-                                            let icon = section_icon(entry.entry_type);
-                                            let tone = if entry.entry_type == CatalogItemType::Flow {
-                                                StoreTone::Warning
-                                            } else {
-                                                card_tone
-                                            };
-
-                                            view! {
-                                                <StoreCard
-                                                    title=entry.name
-                                                    description=subtitle
-                                                    icon=icon
-                                                    tone=tone
-                                                    status_badge=Some(status_badge)
-                                                    context_tags=Some(context_tags)
-                                                    footer_left=format!("v{}", entry.version)
-                                                    footer_actions=Some(actions)
-                                                    active=Some(Signal::derive(move || {
-                                                        active_item_id.get().as_deref() == Some(active_id.as_str())
-                                                    }))
-                                                    on_open=open_entry
+                                        <div class="featured-packs">
+                                            {sections.packs.into_iter().map(|pack| view! {
+                                                <FeaturedPackCard
+                                                    entry=pack
+                                                    can_configure=can_configure
+                                                    active_id=active_item_id
+                                                    on_open_pack=on_open_pack
                                                 />
-                                            }
-                                        }).collect_view()}
+                                            }).collect_view()}
+                                        </div>
                                     </div>
-                                </div>
-                            })}
+                                })}
+                                <CatalogGridSection
+                                    title="Packs"
+                                    subtitle="Ensembles prêts à l'emploi"
+                                    entries=fallback_packs
+                                    can_configure=can_configure
+                                    active_item_id=active_item_id
+                                    on_open_plugin=on_open_plugin
+                                    on_open_pack=on_open_pack
+                                    on_open_item=on_open_item
+                                />
+                                <CatalogGridSection
+                                    title="Plugins"
+                                    subtitle="Extensions ajoutant des blocs et intégrations à vos flux"
+                                    entries=sections.plugins
+                                    can_configure=can_configure
+                                    active_item_id=active_item_id
+                                    on_open_plugin=on_open_plugin
+                                    on_open_pack=on_open_pack
+                                    on_open_item=on_open_item
+                                />
+                                <CatalogGridSection
+                                    title="Flux & scripts"
+                                    subtitle="Modèles de flux prêts à l'emploi et scripts exécutables"
+                                    entries=sections.flows_and_scripts
+                                    can_configure=can_configure
+                                    active_item_id=active_item_id
+                                    on_open_plugin=on_open_plugin
+                                    on_open_pack=on_open_pack
+                                    on_open_item=on_open_item
+                                />
+                                <CatalogGridSection
+                                    title="Ressources"
+                                    subtitle="Préréglages, polices, images et fichiers partagés"
+                                    entries=sections.resources
+                                    can_configure=can_configure
+                                    active_item_id=active_item_id
+                                    on_open_plugin=on_open_plugin
+                                    on_open_pack=on_open_pack
+                                    on_open_item=on_open_item
+                                />
+                            }
+                            .into_any()
+                        } else {
+                            view! {
+                                <CatalogGridSection
+                                    entries=shown
+                                    can_configure=can_configure
+                                    active_item_id=active_item_id
+                                    on_open_plugin=on_open_plugin
+                                    on_open_pack=on_open_pack
+                                    on_open_item=on_open_item
+                                />
+                            }
+                            .into_any()
                         }
-                        .into_any()
                     }
                 }
             }}
@@ -592,5 +692,22 @@ mod tests {
             filter_catalog(all, PluginKindFilter::Flows, ReadinessFilter::All, "").len(),
             1
         );
+    }
+
+    #[test]
+    fn partition_catalog_sections_separates_plugins_flows_and_resources() {
+        let sections = partition_catalog_sections(vec![
+            entry("pack.media", CatalogItemType::Pack),
+            entry("sonarr", CatalogItemType::Plugin),
+            entry("flow.remux", CatalogItemType::Flow),
+            entry("script.clean", CatalogItemType::Script),
+            entry("res.font", CatalogItemType::ResourceFont),
+            entry("ffmpeg", CatalogItemType::App),
+            entry("block.remux", CatalogItemType::Block),
+        ]);
+        assert_eq!(sections.packs.len(), 1);
+        assert_eq!(sections.plugins.len(), 1);
+        assert_eq!(sections.flows_and_scripts.len(), 2);
+        assert_eq!(sections.resources.len(), 1);
     }
 }

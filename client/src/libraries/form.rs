@@ -2,6 +2,7 @@
 
 use super::draft::{LibraryDraft, access_label};
 use crate::api;
+use crate::plugins::{FlowMiniPreview, preview_from_definition_json};
 use crate::ui::FolderTreePicker;
 use forgearr_shared::flows::FlowRecord;
 use forgearr_shared::libraries::{Library, LibraryAccess, LibraryOutputPolicy, LibraryWrite};
@@ -158,6 +159,7 @@ pub fn LibraryForm(
         }
     };
     let existing_id = draft.get_untracked().id;
+    let flows_for_preview = StoredValue::new(flows.clone());
 
     view! {
         <form class="inspection-panel" on:submit=on_submit>
@@ -182,6 +184,15 @@ pub fn LibraryForm(
                             <option value=flow.id.clone()>{format!("{} (v{})", flow.name, flow.version)}</option>
                         }).collect_view()}
                     </select>
+                    {move || {
+                        let selected = draft.get().flow_id?;
+                        let preview = flows_for_preview.with_value(|list| {
+                            list.iter()
+                                .find(|f| f.id == selected)
+                                .and_then(|f| preview_from_definition_json(&f.definition))
+                        })?;
+                        Some(view! { <FlowMiniPreview preview=preview /> })
+                    }}
                 </div>
                 <div class="form-group">
                     <label for="library-scan-interval" class="form-label">"Scan automatique"</label>

@@ -46,6 +46,41 @@ pub enum CatalogReadiness {
     Available,
 }
 
+/// Nœud d'un modèle de flux du catalogue pour prévisualisation dans l'interface.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogFlowNode {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub summary: Vec<String>,
+}
+
+/// Connexion entre deux nœuds d'un modèle de flux du catalogue.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogFlowEdge {
+    pub from: String,
+    pub to: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<String>,
+}
+
+/// Aperçu structuré du graphe d'un flux du catalogue (blocs et connexions).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogFlowPreview {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_mask: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nodes: Vec<CatalogFlowNode>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connections: Vec<CatalogFlowEdge>,
+}
+
 /// Synthèse d'état calculée côté central pour enrichir les cartes du catalogue (absente d'`index.json`).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,6 +96,8 @@ pub struct CatalogRuntimeSummary {
     pub blocks_count: usize,
     #[serde(default)]
     pub components_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_preview: Option<CatalogFlowPreview>,
 }
 
 /// Fiche d'index dans `index.json` à la racine du dépôt.
@@ -415,6 +452,7 @@ mod tests {
             missing_tools_count: 2,
             blocks_count: 3,
             components_count: 0,
+            flow_preview: None,
         };
         let json = serde_json::to_string(&summary)?;
         assert!(json.contains("\"readiness\":\"needs_tools\""));

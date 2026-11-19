@@ -21,13 +21,14 @@ mod versions;
 pub use editor::FlowEditor;
 pub(crate) use presentation::NodeDomain;
 
+use crate::plugins::{FlowMiniPreview, preview_from_definition_json};
 use crate::route::{Link, Route, encode_segment, use_router};
 use crate::ui::filters::{Filters, FlowFilter, flow_filter};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
-    Drawer, Icon, IconName, MetricTone, Registre, RegistreMessage, StatItem, StatStrip,
-    StatusBadge, Tag, TagTone, Toasts, on_activate,
+    Drawer, IconName, MetricTone, Registre, RegistreMessage, StatItem, StatStrip, StatusBadge, Tag,
+    TagTone, Toasts, on_activate,
 };
 use crate::{api, format};
 use forgearr_shared::Permission;
@@ -45,7 +46,6 @@ const LOCAL_PATH: &str = "/api/v1/local";
 const LOCAL_FLOW_TEMPLATES_PATH: &str = "/api/v1/local/flow-templates";
 const LOCAL_ITEMS_PATH: &str = "/api/v1/local/items";
 const PIPELINE_PREVIEW_LIMIT: usize = 4;
-const STEP_ICON_SIZE: u32 = 13;
 const ID_SUFFIX_MODULO: u64 = 100_000;
 
 /// Mode d'affichage de la section Flows & Modèles.
@@ -181,50 +181,6 @@ fn flow_template_id(flow_id: &str) -> String {
     format!("flow.template.{safe}")
 }
 
-#[component]
-fn FlowPipelinePreview(
-    steps: Vec<PipelineStepPreview>,
-    extra_blocks: usize,
-    empty_label: &'static str,
-    aria_label: &'static str,
-) -> impl IntoView {
-    view! {
-        <div class="flow-card__pipeline">
-            {if steps.is_empty() {
-                view! { <span class="text-dim text-xs">{empty_label}</span> }.into_any()
-            } else {
-                let count = steps.len();
-                view! {
-                    <div class="flow-pipeline" aria-label=aria_label>
-                        {steps.into_iter().enumerate().map(|(idx, step)| {
-                            let step_style = format!("--step-accent: {};", step.domain.accent_var());
-                            let icon_name = step.domain.icon();
-                            view! {
-                                <span class="pipeline-step-node" style=step_style>
-                                    <span class="pipeline-step-node__icon" aria-hidden="true">
-                                        <Icon name=icon_name size=STEP_ICON_SIZE />
-                                    </span>
-                                    <span class="pipeline-step-node__label">{step.label}</span>
-                                    {step.is_branching.then(|| view! {
-                                        <span class="pipeline-step-node__branch" title="Embranchement conditionnel">"⑂"</span>
-                                    })}
-                                </span>
-                                {(idx + 1 < count).then(|| view! {
-                                    <span class="pipeline-connector" aria-hidden="true">"→"</span>
-                                })}
-                            }
-                        }).collect_view()}
-                        {(extra_blocks > 0).then(|| view! {
-                            <span class="pipeline-connector" aria-hidden="true">"→"</span>
-                            <span class="pipeline-step-node pipeline-step-node--more">{format!("+{extra_blocks}")}</span>
-                        })}
-                    </div>
-                }.into_any()
-            }}
-        </div>
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum SelectedFlowEntry {
     Flow(String),
@@ -242,18 +198,15 @@ fn flow_libs_label(bound_libraries: usize) -> String {
 #[component]
 fn FlowPipelineSection(definition: String, empty_label: &'static str) -> impl IntoView {
     let graph = FlowGraph::parse(&definition);
-    let (steps, total_blocks, _) = pipeline_preview_steps(&definition);
-    let extra_blocks = total_blocks.saturating_sub(steps.len());
+    let mini_preview = preview_from_definition_json(&definition);
 
     view! {
         <div class="inspection-panel__section">
             <p class="inspection-panel__title">"Aperçu du pipeline"</p>
-            <FlowPipelinePreview
-                steps=steps
-                extra_blocks=extra_blocks
-                empty_label=empty_label
-                aria_label="Aperçu du pipeline"
-            />
+            {match mini_preview {
+                Some(preview) => view! { <FlowMiniPreview preview=preview /> }.into_any(),
+                None => view! { <p class="text-dim text-sm">{empty_label}</p> }.into_any(),
+            }}
             {(!graph.nodes.is_empty()).then(|| {
                 let rows = graph
                     .nodes

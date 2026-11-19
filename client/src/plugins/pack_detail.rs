@@ -1,12 +1,13 @@
 //! Fiche d'inspection à onglets d'un pack : vue d'ensemble + installation unifiée et informations.
 
+use super::flow_preview::FlowMiniPreview;
 use super::metadata::{CommonInfoRows, MetaRow, StatusBanner, StoreTone};
 use super::{SelectedItem, section_badge_label};
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::{Icon, IconName, Tag, TagTone, Toasts};
 use forgearr_shared::plugins::vocab::CatalogItemType;
-use forgearr_shared::plugins::{PackDetailView, PackInstallResult};
+use forgearr_shared::plugins::{CatalogEntry, PackDetailView, PackInstallResult};
 use leptos::prelude::*;
 
 const INSTALL_ICON_SIZE: u32 = 15;
@@ -57,6 +58,7 @@ fn OverviewTab(
     feedback: RwSignal<Option<String>>,
     on_open_plugin: Option<Callback<SelectedItem>>,
     on_open_tool: Option<Callback<SelectedItem>>,
+    catalog_entries: Option<Signal<Vec<CatalogEntry>>>,
 ) -> impl IntoView {
     let spec = detail.installation;
     let components_count = spec.components.len();
@@ -119,16 +121,30 @@ fn OverviewTab(
         {move || feedback.get().map(|msg| view! {
             <p class="form-help" role="status">{msg}</p>
         })}
-        {spec.entrypoint.map(|entry| view! {
-            <div class="detail-grid">
-                <MetaRow term="Point d'entrée">
-                    <div class="cluster">
-                        <Tag label=section_badge_label(entry.kind) tone=TagTone::Primary />
-                        <span class="text-mono text-strong">{entry.id}</span>
-                        <Tag label=entry.version tone=TagTone::Mono />
-                    </div>
-                </MetaRow>
-            </div>
+        {spec.entrypoint.map(|entry| {
+            let entry_id = entry.id.clone();
+            let entry_preview = catalog_entries.and_then(|entries| {
+                entries
+                    .get_untracked()
+                    .into_iter()
+                    .find(|item| item.id == entry_id)
+                    .and_then(|item| item.runtime)
+                    .and_then(|rt| rt.flow_preview)
+            });
+            view! {
+                <div class="detail-grid">
+                    <MetaRow term="Point d'entrée">
+                        <div class="cluster">
+                            <Tag label=section_badge_label(entry.kind) tone=TagTone::Primary />
+                            <span class="text-mono text-strong">{entry.id}</span>
+                            <Tag label=entry.version tone=TagTone::Mono />
+                        </div>
+                    </MetaRow>
+                </div>
+                {entry_preview.map(|preview| view! {
+                    <FlowMiniPreview preview=preview />
+                })}
+            }
         })}
         <div class="pack-components">
             <h3 class="form-label">"Composants inclus"</h3>
@@ -224,6 +240,7 @@ pub fn PackDetail(
     on_installed: Callback<()>,
     #[prop(optional)] on_open_plugin: Option<Callback<SelectedItem>>,
     #[prop(optional)] on_open_tool: Option<Callback<SelectedItem>>,
+    #[prop(optional)] catalog_entries: Option<Signal<Vec<CatalogEntry>>>,
 ) -> impl IntoView {
     let encoded = encode_segment(&pack_id);
     let spec_path = format!("/api/v1/packs/{encoded}");
@@ -273,6 +290,7 @@ pub fn PackDetail(
                                 feedback=feedback
                                 on_open_plugin=on_open_plugin
                                 on_open_tool=on_open_tool
+                                catalog_entries=catalog_entries
                             />
                         }
                         .into_any(),

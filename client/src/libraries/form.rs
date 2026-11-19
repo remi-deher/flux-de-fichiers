@@ -1,6 +1,7 @@
 //! Formulaire d'une bibliothèque : nom, flux et chemins par worker avec sélecteur d'arborescence.
 
 use super::draft::{LibraryDraft, access_label};
+use super::transfer_workers::TransferWorkersSection;
 use crate::api;
 use crate::plugins::{FlowMiniPreview, preview_from_definition_json};
 use crate::ui::FolderTreePicker;
@@ -160,6 +161,7 @@ pub fn LibraryForm(
     };
     let existing_id = draft.get_untracked().id;
     let flows_for_preview = StoredValue::new(flows.clone());
+    let transfer_candidates = workers.clone();
 
     view! {
         <form class="inspection-panel" on:submit=on_submit>
@@ -324,6 +326,8 @@ pub fn LibraryForm(
                 }}
                 </ul>
             </div>
+
+            <TransferWorkersSection draft=draft workers=transfer_candidates />
 
             <div class="library-worker-editor">
                 <p class="inspection-panel__title">"Ajouter un dossier"</p>

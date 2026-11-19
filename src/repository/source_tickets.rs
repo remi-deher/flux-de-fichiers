@@ -4,7 +4,10 @@ use crate::{
     domain::{Claim, JobStatus},
     error::{AppError, AppResult},
 };
-use forgearr_shared::transfer::{SOURCE_TICKET_TTL_SECONDS, SourceTicket, TransferGrant};
+use forgearr_shared::{
+    transfer::{SOURCE_TICKET_TTL_SECONDS, SourceTicket, TransferGrant},
+    workers::WORKER_ONLINE_SECONDS,
+};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -48,9 +51,69 @@ pub async fn set_transfer_url(
     Ok(())
 }
 
-/// Remet au worker traitant un billet pour lire la source chez son détenteur.
+/// Worker à accès direct qui détient la source d'une tâche (ADR 0021).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceHolder {
+    pub worker_id: Uuid,
+    /// Racine du dossier de la source telle que montée sur ce worker.
+    pub root: String,
+    pub transfer_url: Option<String>,
+}
+
+/// Détenteurs en ligne de la source, hors `exclude`, ceux qui annoncent une adresse de transfert
+/// d'abord. Tout worker à accès direct qui partage la `source_key` convient, pas seulement celui
+/// qui a scanné ; à défaut, le worker propriétaire enregistré sur la tâche.
+pub async fn source_holders(
+    pool: &SqlitePool,
+    job_id: Uuid,
+    exclude: Uuid,
+) -> AppResult<Vec<SourceHolder>> {
+    let rows: Vec<(Uuid, String, Option<String>)> = sqlx::query_as(
+        "SELECT m.worker_id, m.local_path, w.transfer_url \
+         FROM verified_job_source_mounts m JOIN workers w ON w.id = m.worker_id \
+         WHERE m.job_id=?1 AND m.worker_id != ?2 \
+           AND w.last_seen > datetime('now', '-' || ?3 || ' seconds') \
+         ORDER BY (w.transfer_url IS NULL), w.last_seen DESC",
+    )
+    .bind(job_id)
+    .bind(exclude)
+    .bind(WORKER_ONLINE_SECONDS)
+    .fetch_all(pool)
+    .await?;
+    let mut holders: Vec<SourceHolder> = rows
+        .into_iter()
+        .map(|(worker_id, root, transfer_url)| SourceHolder {
+            worker_id,
+            root,
+            transfer_url,
+        })
+        .collect();
+    if holders.is_empty()
+        && let Some(source) = super::job_source(pool, job_id).await?
+        && let Some(owner) = source.source_worker_id.filter(|owner| *owner != exclude)
+    {
+        let row: Option<(Option<String>, bool)> = sqlx::query_as(
+            "SELECT transfer_url, last_seen > datetime('now', '-' || ?2 || ' seconds') \
+             FROM workers WHERE id=?1",
+        )
+        .bind(owner)
+        .bind(WORKER_ONLINE_SECONDS)
+        .fetch_optional(pool)
+        .await?;
+        if let Some((transfer_url, true)) = row {
+            holders.push(SourceHolder {
+                worker_id: owner,
+                root: source.source_root,
+                transfer_url,
+            });
+        }
+    }
+    Ok(holders)
+}
+
+/// Remet au worker traitant un billet pour lire la source chez un détenteur en ligne.
 ///
-/// Sans effet si la source est déjà lisible (montage, central) ou si le détenteur n'annonce pas
+/// Sans effet si la source est déjà lisible (montage, central) ou si aucun détenteur n'annonce
 /// d'adresse : le worker traitant utilisera alors le repli par le central.
 pub async fn attach_source_ticket(
     pool: &SqlitePool,
@@ -63,15 +126,20 @@ pub async fn attach_source_ticket(
     let Some(source) = super::job_source(pool, claim.job_id).await? else {
         return Ok(());
     };
-    let Some(owner) = source.source_worker_id.filter(|owner| *owner != worker) else {
+    // Source du central (aucun worker propriétaire) ou déjà montée par ce worker : rien à transférer.
+    if source.source_worker_id.is_none_or(|owner| owner == worker) {
         return Ok(());
-    };
-    let url: Option<String> = sqlx::query_scalar("SELECT transfer_url FROM workers WHERE id=?1")
-        .bind(owner)
-        .fetch_optional(pool)
+    }
+    let holder = source_holders(pool, claim.job_id, worker)
         .await?
-        .flatten();
-    let Some(url) = url else {
+        .into_iter()
+        .find(|holder| holder.transfer_url.is_some());
+    let Some(SourceHolder {
+        worker_id: holder,
+        transfer_url: Some(url),
+        ..
+    }) = holder
+    else {
         return Ok(());
     };
     let token = new_token();
@@ -85,7 +153,7 @@ pub async fn attach_source_ticket(
     )
     .bind(token_hash(&token))
     .bind(claim.job_id)
-    .bind(owner)
+    .bind(holder)
     .bind(worker)
     .bind(claim.lease_epoch)
     .bind(SOURCE_TICKET_TTL_SECONDS)
@@ -117,11 +185,26 @@ pub async fn redeem_ticket(
     if job.status != JobStatus::Running || job.lease_epoch != lease_epoch {
         return Err(AppError::Conflict);
     }
-    let source = super::job_source(pool, job_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
+    // Racine chez ce détenteur : son montage vérifié, sinon la racine enregistrée sur la tâche.
+    let mount: Option<String> = sqlx::query_scalar(
+        "SELECT local_path FROM verified_job_source_mounts WHERE job_id=?1 AND worker_id=?2",
+    )
+    .bind(job_id)
+    .bind(source_worker)
+    .fetch_optional(pool)
+    .await?;
+    let root = match mount {
+        Some(root) => root,
+        None => {
+            let source = super::job_source(pool, job_id)
+                .await?
+                .filter(|source| source.source_worker_id == Some(source_worker))
+                .ok_or(AppError::NotFound)?;
+            source.source_root
+        }
+    };
     Ok(TransferGrant {
-        root: source.source_root,
+        root,
         source_name: job.source_name,
         sha256: job.source_sha256.ok_or(AppError::Internal)?,
         bytes: job.source_bytes.ok_or(AppError::Internal)?,

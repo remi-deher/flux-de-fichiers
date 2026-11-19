@@ -24,6 +24,7 @@ pub mod search;
 pub mod session;
 pub mod system;
 pub mod timezone;
+pub mod transfer;
 pub mod workers;
 
 use serde::{Deserialize, Serialize};

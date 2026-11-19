@@ -1,0 +1,456 @@
+//! Transfert direct d'une source entre workers (ADR 0019) : serveur de lecture du worker source
+//! et téléchargement vérifié côté worker traitant.
+
+use crate::{error::AppError, library_scan, storage};
+use axum::{
+    Router,
+    body::Body,
+    extract::State,
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    response::{IntoResponse, Response},
+    routing::get,
+};
+use forgearr_shared::transfer::{
+    RedeemRequest, SourceTicket, TRANSFER_TICKET_HEADER, TransferGrant,
+};
+use futures_util::StreamExt;
+use std::{future::Future, path::Path, pin::Pin, sync::Arc, time::Duration};
+use tokio::{
+    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
+    sync::Semaphore,
+};
+use tokio_util::io::ReaderStream;
+use uuid::Uuid;
+
+/// Chemin de lecture de la source sur le serveur de transfert.
+pub const TRANSFER_SOURCE_PATH: &str = "/transfer/source";
+/// Transferts simultanés servis par un worker source.
+const MAX_CONCURRENT_TRANSFERS: usize = 4;
+/// Délai de connexion à la voie directe avant de basculer sur le repli par le central.
+const DIRECT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const REDEEM_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Valide un billet auprès du central ; `Err` porte le statut HTTP à renvoyer.
+pub type RedeemFuture = Pin<Box<dyn Future<Output = Result<TransferGrant, StatusCode>> + Send>>;
+pub type Redeemer = Arc<dyn Fn(String) -> RedeemFuture + Send + Sync>;
+
+#[derive(Clone)]
+pub struct TransferState {
+    redeemer: Redeemer,
+    permits: Arc<Semaphore>,
+}
+
+impl TransferState {
+    pub fn new(redeemer: Redeemer) -> Self {
+        Self {
+            redeemer,
+            permits: Arc::new(Semaphore::new(MAX_CONCURRENT_TRANSFERS)),
+        }
+    }
+}
+
+/// Redeemer de production : interroge le central avec la clé du worker.
+pub fn central_redeemer(
+    client: reqwest::Client,
+    central: reqwest::Url,
+    worker_key: String,
+    worker_id: Uuid,
+) -> Redeemer {
+    Arc::new(move |token| {
+        let client = client.clone();
+        let url = format!(
+            "{}/api/v1/worker/transfers/redeem",
+            central.as_str().trim_end_matches('/')
+        );
+        let key = worker_key.clone();
+        Box::pin(async move {
+            let response = client
+                .post(url)
+                .bearer_auth(key)
+                .timeout(REDEEM_TIMEOUT)
+                .json(&RedeemRequest { token, worker_id })
+                .send()
+                .await
+                .map_err(|_| StatusCode::BAD_GATEWAY)?;
+            match response.status() {
+                status if status.is_success() => response
+                    .json::<TransferGrant>()
+                    .await
+                    .map_err(|_| StatusCode::BAD_GATEWAY),
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(StatusCode::FORBIDDEN),
+                StatusCode::CONFLICT => Err(StatusCode::CONFLICT),
+                _ => Err(StatusCode::BAD_GATEWAY),
+            }
+        })
+    })
+}
+
+/// Routeur du serveur de transfert : une seule route, en lecture seule.
+pub fn transfer_router(state: TransferState) -> Router {
+    Router::new()
+        .route(TRANSFER_SOURCE_PATH, get(serve_source))
+        .with_state(state)
+}
+
+/// Plage d'octets invalide ou non prise en charge (réponse 416).
+#[derive(Debug, PartialEq, Eq)]
+pub struct UnsatisfiableRange;
+
+/// Plage d'octets demandée, bornes incluses ; `None` pour le fichier entier.
+pub fn parse_range(
+    header: Option<&str>,
+    total: u64,
+) -> Result<Option<(u64, u64)>, UnsatisfiableRange> {
+    let Some(raw) = header else {
+        return Ok(None);
+    };
+    let spec = raw
+        .trim()
+        .strip_prefix("bytes=")
+        .ok_or(UnsatisfiableRange)?;
+    if spec.contains(',') {
+        return Err(UnsatisfiableRange);
+    }
+    let (start, end) = spec.split_once('-').ok_or(UnsatisfiableRange)?;
+    let start: u64 = start.trim().parse().map_err(|_| UnsatisfiableRange)?;
+    let last = total.checked_sub(1).ok_or(UnsatisfiableRange)?;
+    let end = match end.trim() {
+        "" => last,
+        value => value
+            .parse::<u64>()
+            .map_err(|_| UnsatisfiableRange)?
+            .min(last),
+    };
+    if start > end || start > last {
+        return Err(UnsatisfiableRange);
+    }
+    Ok(Some((start, end)))
+}
+
+async fn serve_source(State(state): State<TransferState>, headers: HeaderMap) -> Response {
+    let Ok(_permit) = state.permits.clone().try_acquire_owned() else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    let Some(token) = headers
+        .get(TRANSFER_TICKET_HEADER)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let grant = match (state.redeemer)(token.to_owned()).await {
+        Ok(grant) => grant,
+        Err(status) => return status.into_response(),
+    };
+    let path = match library_scan::source_path(Path::new(&grant.root), &grant.source_name).await {
+        Ok(path) => path,
+        Err(AppError::Invalid) => return StatusCode::FORBIDDEN.into_response(),
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let Ok(mut file) = tokio::fs::File::open(&path).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Ok(metadata) = file.metadata().await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let total = metadata.len();
+    if i64::try_from(total).ok() != Some(grant.bytes) {
+        return StatusCode::CONFLICT.into_response();
+    }
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok());
+    let (status, start, end) = match parse_range(range, total) {
+        Ok(Some((start, end))) => (StatusCode::PARTIAL_CONTENT, start, end),
+        Ok(None) => (StatusCode::OK, 0, total.saturating_sub(1)),
+        Err(UnsatisfiableRange) => {
+            return (
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                [(header::CONTENT_RANGE, format!("bytes */{total}"))],
+            )
+                .into_response();
+        }
+    };
+    if start > 0 && file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    let length = if total == 0 { 0 } else { end - start + 1 };
+    let mut response = Response::new(Body::from_stream(ReaderStream::new(file.take(length))));
+    *response.status_mut() = status;
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_LENGTH, HeaderValue::from(length));
+    headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    if status == StatusCode::PARTIAL_CONTENT
+        && let Ok(value) = HeaderValue::from_str(&format!("bytes {start}-{end}/{total}"))
+    {
+        headers.insert(header::CONTENT_RANGE, value);
+    }
+    response
+}
+
+/// Écrit la réponse dans `dest` (création exclusive) puis vérifie taille et SHA-256.
+///
+/// Partagé par la voie directe et la voie du central : une source altérée ou trop grosse est
+/// toujours rejetée (`source_integrity`).
+pub async fn save_verified(
+    response: reqwest::Response,
+    dest: &Path,
+    max_bytes: u64,
+    expected_sha256: &str,
+    expected_bytes: i64,
+) -> anyhow::Result<()> {
+    let mut chunks = response.bytes_stream();
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dest)
+        .await?;
+    let mut total: u64 = 0;
+    while let Some(chunk) = chunks.next().await {
+        let chunk = chunk?;
+        total += chunk.len() as u64;
+        anyhow::ensure!(total <= max_bytes, "source_integrity");
+        file.write_all(&chunk).await?;
+    }
+    file.flush().await?;
+    drop(file);
+    let (hash, bytes) = storage::fingerprint(dest, max_bytes).await?;
+    anyhow::ensure!(
+        hash == expected_sha256 && bytes as i64 == expected_bytes,
+        "source_integrity"
+    );
+    Ok(())
+}
+
+/// Lit la source directement chez le worker qui la détient (voie directe, ADR 0019).
+pub async fn download_direct(
+    client: &reqwest::Client,
+    ticket: &SourceTicket,
+    dest: &Path,
+    max_bytes: u64,
+    expected_sha256: &str,
+    expected_bytes: i64,
+) -> anyhow::Result<()> {
+    let response = client
+        .get(format!("{}{TRANSFER_SOURCE_PATH}", ticket.url))
+        .header(TRANSFER_TICKET_HEADER, &ticket.token)
+        .timeout(Duration::from_secs(60 * 60 * 6))
+        .send()
+        .await?
+        .error_for_status()?;
+    save_verified(response, dest, max_bytes, expected_sha256, expected_bytes).await
+}
+
+/// Client dédié à la voie directe : connexion courte pour basculer vite sur le repli.
+pub fn direct_client() -> reqwest::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .connect_timeout(DIRECT_CONNECT_TIMEOUT)
+        .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    #[test]
+    fn range_parsing_accepts_simple_ranges_and_rejects_the_rest() {
+        assert_eq!(parse_range(None, 100), Ok(None));
+        assert_eq!(parse_range(Some("bytes=10-"), 100), Ok(Some((10, 99))));
+        assert_eq!(parse_range(Some("bytes=10-19"), 100), Ok(Some((10, 19))));
+        assert_eq!(parse_range(Some("bytes=90-500"), 100), Ok(Some((90, 99))));
+        assert_eq!(
+            parse_range(Some("bytes=100-"), 100),
+            Err(UnsatisfiableRange)
+        );
+        assert_eq!(
+            parse_range(Some("bytes=0-1,5-6"), 100),
+            Err(UnsatisfiableRange)
+        );
+        assert_eq!(parse_range(Some("bytes=-5"), 100), Err(UnsatisfiableRange));
+        assert_eq!(parse_range(Some("items=0-1"), 100), Err(UnsatisfiableRange));
+        assert_eq!(parse_range(Some("bytes=0-"), 0), Err(UnsatisfiableRange));
+    }
+
+    fn state_for(dir: &Path, name: &str, bytes: i64) -> TransferState {
+        let root = dir.to_string_lossy().into_owned();
+        let name = name.to_owned();
+        TransferState::new(Arc::new(move |token| {
+            let (root, name) = (root.clone(), name.clone());
+            Box::pin(async move {
+                if token == "bon-billet" {
+                    Ok(TransferGrant {
+                        root,
+                        source_name: name,
+                        sha256: String::new(),
+                        bytes,
+                    })
+                } else {
+                    Err(StatusCode::FORBIDDEN)
+                }
+            })
+        }))
+    }
+
+    async fn get_source(
+        state: TransferState,
+        ticket: Option<&str>,
+        range: Option<&str>,
+    ) -> anyhow::Result<(StatusCode, Vec<u8>)> {
+        let mut request = Request::builder().uri(TRANSFER_SOURCE_PATH);
+        if let Some(ticket) = ticket {
+            request = request.header(TRANSFER_TICKET_HEADER, ticket);
+        }
+        if let Some(range) = range {
+            request = request.header(header::RANGE, range);
+        }
+        let response = transfer_router(state)
+            .oneshot(request.body(Body::empty())?)
+            .await?;
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20).await?;
+        Ok((status, body.to_vec()))
+    }
+
+    #[tokio::test]
+    async fn serves_the_granted_file_whole_or_by_range() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::write(dir.path().join("film.mkv"), b"0123456789")?;
+        let state = state_for(dir.path(), "film.mkv", 10);
+        let (status, body) = get_source(state.clone(), Some("bon-billet"), None).await?;
+        assert_eq!(
+            (status, body.as_slice()),
+            (StatusCode::OK, &b"0123456789"[..])
+        );
+        let (status, body) =
+            get_source(state.clone(), Some("bon-billet"), Some("bytes=4-")).await?;
+        assert_eq!(
+            (status, body.as_slice()),
+            (StatusCode::PARTIAL_CONTENT, &b"456789"[..])
+        );
+        let (status, _) = get_source(state, Some("bon-billet"), Some("bytes=50-")).await?;
+        assert_eq!(status, StatusCode::RANGE_NOT_SATISFIABLE);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn refuses_missing_or_wrong_tickets_and_changed_files() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::write(dir.path().join("film.mkv"), b"0123456789")?;
+        let state = state_for(dir.path(), "film.mkv", 10);
+        let (status, _) = get_source(state.clone(), None, None).await?;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = get_source(state, Some("mauvais"), None).await?;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let changed = state_for(dir.path(), "film.mkv", 999);
+        let (status, _) = get_source(changed, Some("bon-billet"), None).await?;
+        assert_eq!(status, StatusCode::CONFLICT);
+        Ok(())
+    }
+
+    /// Démarre le serveur de transfert sur un port libre et rend son adresse.
+    async fn spawn_server(state: TransferState) -> anyhow::Result<String> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, transfer_router(state)).await;
+        });
+        Ok(format!("http://{address}"))
+    }
+
+    fn sha256_hex(data: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(data)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn direct_download_verifies_size_and_sha256() -> anyhow::Result<()> {
+        let source_dir = tempfile::tempdir()?;
+        let work_dir = tempfile::tempdir()?;
+        std::fs::write(source_dir.path().join("film.mkv"), b"0123456789")?;
+        let url = spawn_server(state_for(source_dir.path(), "film.mkv", 10)).await?;
+        let ticket = SourceTicket {
+            url,
+            token: "bon-billet".into(),
+        };
+        let client = direct_client()?;
+        let good = work_dir.path().join("ok.mkv");
+        download_direct(
+            &client,
+            &ticket,
+            &good,
+            1 << 20,
+            &sha256_hex(b"0123456789"),
+            10,
+        )
+        .await?;
+        assert_eq!(std::fs::read(&good)?, b"0123456789");
+
+        let corrupted = work_dir.path().join("bad.mkv");
+        let error = download_direct(
+            &client,
+            &ticket,
+            &corrupted,
+            1 << 20,
+            &sha256_hex(b"autre"),
+            10,
+        )
+        .await
+        .err()
+        .map(|error| error.to_string());
+        assert_eq!(error.as_deref(), Some("source_integrity"));
+
+        let too_big = work_dir.path().join("big.mkv");
+        assert!(
+            download_direct(
+                &client,
+                &ticket,
+                &too_big,
+                4,
+                &sha256_hex(b"0123456789"),
+                10
+            )
+            .await
+            .is_err(),
+            "une source plus grosse que la limite est rejetée"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn direct_download_fails_fast_when_the_source_worker_is_unreachable() -> anyhow::Result<()>
+    {
+        let work_dir = tempfile::tempdir()?;
+        let ticket = SourceTicket {
+            url: "http://127.0.0.1:1".into(),
+            token: "bon-billet".into(),
+        };
+        let dest = work_dir.path().join("x.mkv");
+        assert!(
+            download_direct(&direct_client()?, &ticket, &dest, 1 << 20, "", 0)
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn never_leaves_the_granted_root() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let state = state_for(dir.path(), "../secret", 1);
+        let (status, _) = get_source(state, Some("bon-billet"), None).await?;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        Ok(())
+    }
+}

@@ -8,6 +8,7 @@ mod mcp_audit;
 mod password_reset;
 mod plugins;
 mod relays;
+mod source_tickets;
 
 pub use enrollment::{
     create_enrollment_request, decide_enrollment_request, enrollment_window_status,
@@ -53,3 +54,6 @@ pub use plugins::{
     toggle_plugin_repository, touch_plugin_repository_sync, verify_or_pin_release,
 };
 pub use relays::{RelayOutcome, list_relays, relay_job};
+pub use source_tickets::{
+    attach_source_ticket, redeem_ticket, set_transfer_url, valid_transfer_url,
+};

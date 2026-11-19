@@ -7,6 +7,7 @@ use crate::{
 use forgearr_shared::{
     capabilities::CapabilityRequirement,
     relay::{JobRelayInfo, MAX_RELAYS_PER_JOB, RelayRequest, RelayTarget},
+    workers::WORKER_ONLINE_SECONDS,
 };
 use sqlx::SqlitePool;
 use std::collections::HashSet;
@@ -65,10 +66,13 @@ async fn worker_can_read_source(pool: &SqlitePool, job: Uuid, worker: Uuid) -> A
         "SELECT (source_key IS NULL AND (source_worker_id IS NULL OR source_worker_id=?2)) \
              OR EXISTS (SELECT 1 FROM verified_job_source_mounts m WHERE m.job_id=jobs.id \
                         AND (m.worker_id=?2 OR m.worker_id=zeroblob(16))) \
+             OR EXISTS (SELECT 1 FROM workers o WHERE o.id=jobs.source_worker_id \
+                        AND o.last_seen > datetime('now', '-' || ?3 || ' seconds')) \
          FROM jobs WHERE id=?1",
     )
     .bind(job)
     .bind(worker)
+    .bind(WORKER_ONLINE_SECONDS)
     .fetch_optional(pool)
     .await?;
     Ok(accessible.unwrap_or(false))

@@ -631,7 +631,9 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                            AND json_extract(e.value, '$.codec')=json_extract(r.requirement_json, '$.codec')
                            AND (json_extract(r.requirement_json, '$.acceleration') IS NULL
                                 OR json_extract(e.value, '$.acceleration')=json_extract(r.requirement_json, '$.acceleration'))))
-         AND ((source_key IS NULL AND (source_worker_id IS NULL OR source_worker_id=?3)) OR EXISTS (
+         AND ((source_key IS NULL AND (source_worker_id IS NULL OR source_worker_id=?3))
+              OR EXISTS (SELECT 1 FROM job_relays WHERE job_relays.job_id=jobs.id)
+              OR EXISTS (
              SELECT 1 FROM verified_job_source_mounts m WHERE m.job_id=jobs.id
                  AND (m.worker_id=?3 OR m.worker_id=zeroblob(16))
          ))
@@ -707,6 +709,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                 media_root: None,
                 local_source_root,
                 resume_node_id,
+                source_ticket: None,
             }))
         }
     }

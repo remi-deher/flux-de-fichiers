@@ -1,5 +1,7 @@
 //! Écran Workers : présence, connectivité, worker intégré, retrait et enrôlement (ADR 0014).
 
+mod library_modes;
+
 use crate::route::{Link, Route};
 use crate::settings::duration_label;
 use crate::sleep::sleep;
@@ -21,6 +23,7 @@ use forgearr_shared::workers::{
     WORKER_MIN_CONCURRENCY, Worker, WorkerEnrollmentList, WorkerEnrollmentSummary, WorkerSchedule,
 };
 use leptos::prelude::*;
+use library_modes::{WorkerLibrariesSection, worker_libraries};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -269,7 +272,13 @@ fn TagRow(labels: Vec<String>, tone: TagTone) -> impl IntoView {
 }
 
 #[component]
-fn WorkerDetail(worker: Worker, can_manage: bool, on_removed: Callback<()>) -> impl IntoView {
+fn WorkerDetail(
+    worker: Worker,
+    can_manage: bool,
+    /// Bibliothèques lisibles par l'utilisateur ; `None` sans droit de lecture.
+    libraries: Option<Vec<Library>>,
+    on_removed: Callback<()>,
+) -> impl IntoView {
     let now = Utc::now();
     let liveness = worker.liveness(now);
     let (badge_label, badge_variant) = liveness_badge(liveness);
@@ -289,6 +298,8 @@ fn WorkerDetail(worker: Worker, can_manage: bool, on_removed: Callback<()>) -> i
         }
     });
     let telemetry = worker.telemetry.clone();
+    let worker_libs =
+        libraries.map(|list| worker_libraries(&list, worker.id, worker.is_integrated()));
     let remove = Action::new_local(move |_: &()| async move {
         api::delete(&format!("{WORKERS_PATH}/{id}")).await
     });
@@ -400,6 +411,7 @@ fn WorkerDetail(worker: Worker, can_manage: bool, on_removed: Callback<()>) -> i
                     </div>
                 </form>
             })}
+            {worker_libs.map(|libraries| view! { <WorkerLibrariesSection libraries=libraries /> })}
             {match telemetry {
                 Some(t) => view! { <WorkerTelemetrySection telemetry=t /> }.into_any(),
                 None => view! {
@@ -704,10 +716,8 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                             } else {
                                 "Nœud distant"
                             };
-                            let mounted_libs = libs
-                                .iter()
-                                .filter(|lib| lib.workers.iter().any(|entry| entry.worker_id == id))
-                                .count();
+                            let mounted_libs =
+                                worker_libraries(&libs, id, worker.is_integrated()).len();
                             let active_jobs = active_jobs_for(id, &jobs_list);
                             let libs_label = match mounted_libs {
                                 0 => "0 bibliothèque".to_owned(),
@@ -909,7 +919,11 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
             {enrollment_panel}
             {grid}
             <Drawer open=detail_open eyebrow="Worker" title=title>
-                {move || selected_worker.get().map(|worker| view! { <WorkerDetail worker=worker can_manage=can_manage on_removed=on_removed /> })}
+                {move || selected_worker.get().map(|worker| view! {
+                    <WorkerDetail worker=worker can_manage=can_manage
+                        libraries=can_libraries.then(|| libraries.get().unwrap_or_default())
+                        on_removed=on_removed />
+                })}
             </Drawer>
             <Drawer open=enroll_open eyebrow="Infrastructure" title="Ajouter un worker">
                 <div class="inspection-panel">

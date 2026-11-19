@@ -5,10 +5,10 @@ use super::{AdminAuth, AppState};
 use crate::{error::AppResult, repository};
 use axum::{Json, extract::State, http::HeaderMap};
 use chrono::{DateTime, Utc};
-use flux_shared::diagnostics::{
+use forgearr_shared::diagnostics::{
     CheckId, CheckStatus, DiagnosticCheck, DiagnosticsReport, DiagnosticsRequest,
 };
-use flux_shared::workers::{Liveness, Worker};
+use forgearr_shared::workers::{Liveness, Worker};
 
 const FORWARDED_PROTO: &str = "x-forwarded-proto";
 const FORWARDED_HOST: &str = "x-forwarded-host";
@@ -338,7 +338,7 @@ mod tests {
     use super::*;
     use axum::http::HeaderValue;
     use chrono::Duration;
-    use flux_shared::workers::{INTEGRATED_WORKER_NAME, WORKER_SILENT_ALERT_SECONDS};
+    use forgearr_shared::workers::{INTEGRATED_WORKER_NAME, WORKER_SILENT_ALERT_SECONDS};
     use uuid::Uuid;
 
     const ORIGIN: &str = "https://flux.example";

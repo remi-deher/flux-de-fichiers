@@ -5,8 +5,8 @@ use super::account::role_label;
 use crate::api;
 use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, Icon, IconName, SectionHeader, Toasts};
-use flux_shared::Role;
-use flux_shared::accounts::{Account, CreateAccountRequest, UpdateAccountRequest};
+use forgearr_shared::Role;
+use forgearr_shared::accounts::{Account, CreateAccountRequest, UpdateAccountRequest};
 use leptos::prelude::*;
 
 const ACCOUNTS_PATH: &str = "/api/v1/accounts";

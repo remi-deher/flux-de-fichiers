@@ -1,5 +1,6 @@
 //! Composants de l'interface, sur le gabarit et les classes du thème (`frontend/src/theme`).
 
+mod brand_mark;
 pub mod command_palette;
 pub mod drawer;
 pub mod empty_state;
@@ -18,6 +19,7 @@ pub mod status_badge;
 pub mod toast;
 pub mod topbar_action;
 
+pub use brand_mark::BrandMark;
 pub use command_palette::{CommandPalette, CommandPaletteState};
 pub use drawer::Drawer;
 pub use empty_state::EmptyState;

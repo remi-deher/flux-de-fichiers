@@ -7,7 +7,7 @@ use crate::{
     repository, web_session,
 };
 use axum::http::{HeaderMap, Method, header};
-use flux_shared::{Permission, Role};
+use forgearr_shared::{Permission, Role};
 use sqlx::SqlitePool;
 use std::{
     collections::HashMap,

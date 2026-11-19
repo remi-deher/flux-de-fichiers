@@ -81,13 +81,7 @@ mod tests {
 
     #[test]
     fn base64_roundtrips_arbitrary_bytes_and_rejects_corrupt_input() {
-        for sample in [
-            b"".as_slice(),
-            b"f",
-            b"fo",
-            b"foo",
-            b"Flux de Fichiers \x00\xff",
-        ] {
+        for sample in [b"".as_slice(), b"f", b"fo", b"foo", b"Forgearr \x00\xff"] {
             let encoded = encode(sample);
             assert_eq!(decode(&encoded), Ok(sample.to_vec()));
         }

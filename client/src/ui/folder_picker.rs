@@ -3,8 +3,8 @@
 use super::icon::{Icon, IconName};
 use crate::api::{self, ApiError};
 use crate::route::encode_segment;
-use flux_shared::format::format_bytes;
-use flux_shared::libraries::{DirectoryEntry, DirectoryListing, MediaFileEntry, RootShortcut};
+use forgearr_shared::format::format_bytes;
+use forgearr_shared::libraries::{DirectoryEntry, DirectoryListing, MediaFileEntry, RootShortcut};
 use leptos::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;

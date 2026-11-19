@@ -9,7 +9,7 @@ use axum::{
     extract::{FromRef, FromRequestParts},
     http::request::Parts,
 };
-use flux_shared::Permission;
+use forgearr_shared::Permission;
 
 /// Appelant authentifié, quel que soit son rôle (compte connecté ou clé d'API).
 #[derive(Debug, Clone)]

@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use flux_shared::plugins::{ResolvedSettingsField, SettingsFieldType};
+pub use forgearr_shared::plugins::{ResolvedSettingsField, SettingsFieldType};
 use serde_json::{Map, Value};
 
 /// Un champ de `settingsSchema.fields`.

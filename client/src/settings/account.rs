@@ -3,19 +3,19 @@
 use crate::api;
 use crate::shell::instance_role_badge;
 use crate::ui::{Drawer, SectionHeader, Toasts};
-use flux_shared::accounts::ChangePasswordRequest;
-use flux_shared::session::Me;
+use forgearr_shared::accounts::ChangePasswordRequest;
+use forgearr_shared::session::Me;
 use leptos::prelude::*;
 
 const PASSWORD_PATH: &str = "/api/v1/account/password";
 const LOGOUT_PATH: &str = "/api/v1/auth/logout";
 
-pub fn role_label(role: flux_shared::Role) -> &'static str {
+pub fn role_label(role: forgearr_shared::Role) -> &'static str {
     match role {
-        flux_shared::Role::Admin => "Administrateur",
-        flux_shared::Role::Mcp => "MCP",
-        flux_shared::Role::Worker => "Worker",
-        flux_shared::Role::Viewer => "Lecteur",
+        forgearr_shared::Role::Admin => "Administrateur",
+        forgearr_shared::Role::Mcp => "MCP",
+        forgearr_shared::Role::Worker => "Worker",
+        forgearr_shared::Role::Viewer => "Lecteur",
     }
 }
 
@@ -50,7 +50,7 @@ pub fn AccountSection(me: Me) -> impl IntoView {
         Some(Err(error)) => feedback.set(Some(error.message())),
         None => {}
     });
-    let can_change = me.kind == flux_shared::session::CallerKind::Account;
+    let can_change = me.kind == forgearr_shared::session::CallerKind::Account;
     view! {
         <section class="section-panel settings-section">
             <SectionHeader

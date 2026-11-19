@@ -5,7 +5,7 @@ use crate::api;
 use crate::format;
 use crate::ui::{SectionHeader, Toasts};
 use chrono::DateTime;
-use flux_shared::ai::{AiDiagnosis, AiDiagnosisSummary};
+use forgearr_shared::ai::{AiDiagnosis, AiDiagnosisSummary};
 use leptos::prelude::*;
 
 const DIAGNOSIS_PATH: &str = "/api/v1/ai/diagnosis";

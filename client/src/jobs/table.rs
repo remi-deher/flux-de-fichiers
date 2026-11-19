@@ -3,7 +3,7 @@
 use super::model::{error_label, priority_label, resolve_library_label, status_label, status_tone};
 use crate::format;
 use crate::ui::{ProgressBar, Registre, RegistreMessage, StatusBadge, Tag, TagTone, on_activate};
-use flux_shared::jobs::{Job, JobStatus};
+use forgearr_shared::jobs::{Job, JobStatus};
 use leptos::prelude::*;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;

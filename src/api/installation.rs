@@ -13,15 +13,15 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
-pub use flux_shared::system::{
+pub use forgearr_shared::system::{
     SetupWorkerApprovalRequest, SetupWorkerRequest, SetupWorkerRequestStatus,
     WorkerSetupRequestState,
 };
-use flux_shared::workers::{
+use forgearr_shared::workers::{
     EnrollmentRequestStatus, EnrollmentWindowStatus, WorkerEnrollmentCreated, WorkerEnrollmentList,
     WorkerEnrollmentRequestInput, WorkerEnrollmentSummary,
 };
-use flux_shared::{InstanceKind, Role};
+use forgearr_shared::{InstanceKind, Role};
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::Duration};
 use tokio::task::JoinHandle;

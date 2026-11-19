@@ -26,7 +26,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::sse::{Event, KeepAlive, Sse},
 };
-use flux_shared::{
+use forgearr_shared::{
     Permission,
     ai::{
         AiActionDecision, AiChatRequest, AiChatResponse, AiChatRole, AiClientStatus, AiContext,
@@ -80,11 +80,12 @@ fn build_system_prompt(
         "Mode lecture seule : aucune création, modification ou suppression n'est exécutée."
     };
     let mut prompt = format!(
-        "Tu es l'assistant intégré de Flux de Fichiers (orchestrateur de traitement média). \
+        "Tu es l'assistant intégré de {} (orchestrateur de traitement média). \
          Réponds en français, de façon claire, concise et factuelle à partir des données obtenues par tes outils.\n\
          Utilisateur actif : {} (rôle : {}).\n\
          Périmètre : {}\n\
          Consignes : privilégie `diagnose_job` pour analyser une tâche en échec, `simulate_flow` et `validate_flow` pour vérifier un flux avant sauvegarde, et `get_job_stats` / `list_workers` / `audit` pour l'état global. Ne réclame et n'invente jamais de secret.",
+        forgearr_shared::brand::NAME,
         principal.name,
         principal.role.as_str(),
         mode
@@ -977,7 +978,7 @@ mod tests {
         http::{Request, StatusCode},
         routing::post,
     };
-    use flux_shared::{
+    use forgearr_shared::{
         Role,
         ai::{AiActionDecision, AiChatMessage, AiContextKind, AiContextObject, AiProvider},
     };

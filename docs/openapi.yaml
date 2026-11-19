@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: Flux de Fichiers — API de remuxage
+  title: Forgearr — API de traitement média
   version: 0.1.0
   description: >-
     Central unique, workers MKVToolNix et frontend Leptos.

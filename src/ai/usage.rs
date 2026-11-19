@@ -4,12 +4,12 @@ use crate::{
     error::{AppError, AppResult},
     repository,
 };
-use flux_shared::ai::AiQuotaSettings;
+use forgearr_shared::ai::AiQuotaSettings;
 use sqlx::SqlitePool;
 
 const QUOTAS_KEY: &str = "ai.quotas";
 /// Plafond accepté pour un réglage : au-delà, autant laisser la limite ouverte (`0`).
-pub const MAX_DAILY_QUOTA: u32 = flux_shared::ai::MAX_AI_DAILY_QUOTA;
+pub const MAX_DAILY_QUOTA: u32 = forgearr_shared::ai::MAX_AI_DAILY_QUOTA;
 const USAGE_RETENTION_DAYS: u32 = 14;
 
 /// Plafonds enregistrés ; sans réglage, aucune limite.

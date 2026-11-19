@@ -10,7 +10,7 @@ use crate::{
     repository,
     secrets::{SecretBox, is_encrypted},
 };
-use flux_shared::flows::FlowRecord;
+use forgearr_shared::flows::FlowRecord;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::SqlitePool;

@@ -1,7 +1,7 @@
 //! Présentation métier de l'éditeur : domaines visuels, ports sémantiques, résumés et diagnostics.
 
 use crate::ui::IconName;
-use flux_shared::flows::{FlowGraph, FlowNode, OwnedBlockSpec, OwnedFieldKind, find_owned};
+use forgearr_shared::flows::{FlowGraph, FlowNode, OwnedBlockSpec, OwnedFieldKind, find_owned};
 use serde_json::Value;
 
 const SUMMARY_MAX_CHARS: usize = 42;
@@ -446,7 +446,7 @@ pub fn diagnose_graph(graph: &FlowGraph, catalog: &[OwnedBlockSpec]) -> Vec<Flow
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::flows::{FlowBlockKind, FlowNode};
+    use forgearr_shared::flows::{FlowBlockKind, FlowNode};
     use serde_json::{Map, json};
 
     use super::super::test_support::test_catalog;

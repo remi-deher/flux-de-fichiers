@@ -8,7 +8,7 @@ use crate::{
     error::{AppError, AppResult},
     secrets::SecretBox,
 };
-use flux_shared::ai::{
+use forgearr_shared::ai::{
     AiChatMessage, AiChatRole, AiConversation, AiConversationList, AiConversationSummary,
 };
 use sqlx::{Sqlite, SqlitePool, Transaction};

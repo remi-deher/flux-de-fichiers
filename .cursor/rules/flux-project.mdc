@@ -1,10 +1,10 @@
 ---
-description: Règles de développement, vérifications, déploiement TrueNAS et flux Git de Flux de Fichiers
+description: Règles de développement, vérifications, déploiement TrueNAS et flux Git de Forgearr
 globs: **/*
 alwaysApply: true
 ---
 
-# Flux de Fichiers - Cursor Rules
+# Forgearr - Cursor Rules
 
 Source de vérité : `AGENTS.md`, `docs/developpement.md`, `docs/reprise.md`. Résumé ci-dessous.
 
@@ -12,7 +12,7 @@ Source de vérité : `AGENTS.md`, `docs/developpement.md`, `docs/reprise.md`. R�
 - Annonce en DEUX lignes maximum l'action exacte prévue avant d'écrire ou de modifier du code.
 
 ## 2. Stack & Principes
-- Rust, Axum/Tokio, SQLx/SQLite, Docker. Interface : client Leptos WASM (`client/`, ADR 0014), contrat partagé dans `shared/` (`flux-shared`). `frontend/` ne contient que la page `dist/index.html` et le thème CSS typé.
+- Rust, Axum/Tokio, SQLx/SQLite, Docker. Interface : client Leptos WASM (`client/`, ADR 0014), contrat partagé dans `shared/` (`forgearr-shared`). `frontend/` ne contient que la page `dist/index.html` et le thème CSS typé.
 - Aucun fichier JS/CSS externe. Vocabulaire : central / worker ; « nœud » = bloc d'un graphe.
 - Zéro Boilerplate & Factorisation continue : pas de code ni de balisage dupliqué, design tokens obligatoires (`var(--primary)`, `var(--bg-card)`...), enums typés Serde, pas de constante numérique sans nom.
 - Tester toutes les fonctions et routes avec des tests Rust natifs légers.
@@ -20,7 +20,7 @@ Source de vérité : `AGENTS.md`, `docs/developpement.md`, `docs/reprise.md`. R�
 ## 3. Commandes Locales (Machine hôte légère)
 - Jamais de build Docker ni de `cargo clippy` en local (la CI s'en charge : `feature.yml`).
 - En local : `cargo fmt` et `cargo test -p <paquet>` (ciblé, assez rapide).
-- Régénérer `frontend/dist/index.html` après un changement du thème ou de la page : `cargo run -p flux-frontend`
+- Régénérer `frontend/dist/index.html` après un changement du thème ou de la page : `cargo run -p forgearr-frontend`
 
 ## 4. Déploiement Test TrueNAS
 - Procédure et retour arrière : `docs/deploiement-essai-0011.md`. Accès NAS depuis DELL-LAPTOP uniquement.

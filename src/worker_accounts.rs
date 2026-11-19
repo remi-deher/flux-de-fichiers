@@ -77,7 +77,7 @@ impl AccountStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::Role;
+    use forgearr_shared::Role;
 
     const PASSWORD: &str = "un-bon-mot-de-passe";
 

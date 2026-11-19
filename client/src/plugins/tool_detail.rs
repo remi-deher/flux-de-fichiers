@@ -4,7 +4,7 @@ use super::{TOOLS_PATH, bump, date_row, install_with_dependencies_action, tool_s
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::{Icon, IconName, Tag, TagTone};
-use flux_shared::plugins::{ToolDetailView, ToolStatus};
+use forgearr_shared::plugins::{ToolDetailView, ToolStatus};
 use leptos::prelude::*;
 
 const INSTALL_ICON_SIZE: u32 = 15;

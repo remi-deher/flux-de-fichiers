@@ -23,9 +23,9 @@ use crate::ui::{MetricTone, StatItem, StatStrip};
 use account::AccountSection;
 use accounts::AccountsSection;
 use ai::AiSettingsSection;
-use flux_shared::session::Me;
-use flux_shared::system::{KeySource, SystemStatus};
-use flux_shared::{InstanceKind, Permission};
+use forgearr_shared::session::Me;
+use forgearr_shared::system::{KeySource, SystemStatus};
+use forgearr_shared::{InstanceKind, Permission};
 use keys::KeysSection;
 use leptos::prelude::*;
 use mcp_audit::McpAuditSection;
@@ -228,8 +228,8 @@ pub fn SettingsPage(me: Me) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::Role;
-    use flux_shared::session::CallerKind;
+    use forgearr_shared::Role;
+    use forgearr_shared::session::CallerKind;
 
     #[test]
     fn a_viewer_only_sees_its_account_and_an_admin_sees_everything() {

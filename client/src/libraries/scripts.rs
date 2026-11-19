@@ -8,10 +8,10 @@ use crate::ui::{
     Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
     Toasts,
 };
-use flux_shared::local::{
+use forgearr_shared::local::{
     LocalLibrarySnapshot, LocalScriptSummary, ScriptInterpreter, UpsertLocalScriptRequest,
 };
-use flux_shared::plugins::vocab::PluginCategory;
+use forgearr_shared::plugins::vocab::PluginCategory;
 use leptos::prelude::*;
 
 const CATEGORIES: &[(Option<PluginCategory>, &str)] = &[

@@ -8,7 +8,7 @@ use crate::{
     secrets::{self, recovery_kit},
 };
 use axum::{Json, extract::State};
-use flux_shared::system::{
+use forgearr_shared::system::{
     ExportRecoveryKitRequest, RecoveryKit, RestoreRecoveryKitRequest, SystemStatus,
 };
 

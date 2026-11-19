@@ -29,10 +29,10 @@ jobs:
       - run: cargo test --locked
       - name: Contrat partagé, client WASM et page (ADR 0014)
         run: |
-          cargo clippy -p flux-shared -p flux-client -p flux-frontend --all-targets --locked -- -D warnings
-          cargo clippy -p flux-client --target wasm32-unknown-unknown --locked -- -D warnings
-          cargo test -p flux-shared -p flux-client -p flux-frontend --locked
+          cargo clippy -p forgearr-shared -p forgearr-client -p forgearr-frontend --all-targets --locked -- -D warnings
+          cargo clippy -p forgearr-client --target wasm32-unknown-unknown --locked -- -D warnings
+          cargo test -p forgearr-shared -p forgearr-client -p forgearr-frontend --locked
       - name: La page générée est à jour
         run: |
-          cargo run -p flux-frontend --locked
+          cargo run -p forgearr-frontend --locked
           git diff --exit-code frontend/dist/index.html

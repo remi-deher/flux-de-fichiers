@@ -1,4 +1,6 @@
-# Flux de Fichiers
+# Forgearr
+
+**Le moteur de traitement média pour les stacks *arr.**
 
 Chaîne de traitement de fichiers média (encodage par plugins), dans un conteneur unique « à la
 *arr ». Un central Rust (Axum/Tokio) stocke son état dans SQLite (`/config/flux.db`),
@@ -14,14 +16,19 @@ Pour contribuer : [guide de développement ciblé](docs/developpement.md)
 ## Démarrage
 
 L'image est construite et testée par la CI GitHub (`dev → test → main`) puis publiée sur
-Docker Hub : `mrcryllix/flux-de-fichiers`. Les tags `test-<sha>` sont les images validées,
+Docker Hub : `mrcryllix/forgearr`. Les tags `test-<sha>` sont les images validées,
 `X.Y.Z`, `X.Y` et `latest` sont promus à chaque release, sans recompilation.
 
 ```sh
-docker run -d --name flux -p 3000:3000 \
-  -v flux-config:/config -v flux-data:/data -v /chemin/des/mkv:/input:ro \
-  mrcryllix/flux-de-fichiers:latest central
+docker run -d --name forgearr -p 3000:3000 \
+  -v forgearr-config:/config -v forgearr-data:/data -v /chemin/des/mkv:/input:ro \
+  mrcryllix/forgearr:latest central
 ```
+
+Pour reprendre une installation Flux de Fichiers, remplacez la référence d'image après publication
+de la première version Forgearr et remontez les volumes existants sur les mêmes chemins. Si vous
+utilisez Compose, conservez aussi le nom de projet qui identifie ces volumes. SQLite reste dans
+`/config/flux.db`.
 
 L'interface est servie sur http://localhost:3000 (un seul port HTTP ; TLS optionnel
 via un reverse proxy externe). Au premier démarrage, le central crée dans `/config` :
@@ -61,7 +68,7 @@ Plugins : `PLUGINS_DIR` (dossier de catalogue local de développement, prioritai
 ## Plugins, outils et secrets
 
 Le catalogue ne vient que des dépôts de plugins (aucun catalogue embarqué). Le dépôt
-officiel, `flux-de-fichiers-plugins`, est synchronisé au démarrage, toutes les 6 h et à la
+officiel [Forgearr Plugins](https://github.com/remi-deher/flux-de-fichiers-plugins) est synchronisé au démarrage, toutes les 6 h et à la
 demande dans `/config/plugins/<id>`. Chaque worker installe lui-même ses outils depuis leur
 contrat de distribution (téléchargement https, SHA-256 vérifié avant exécution) ; une sonde
 installée est exigée avant toute tâche sur fichier. Les clés d'API et les en-têtes des

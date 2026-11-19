@@ -1,7 +1,7 @@
 //! Contrôles de réglage générés depuis la fiche du bloc (`OwnedFieldSpec`).
 
 use super::state::Editor;
-use flux_shared::flows::{OwnedFieldKind, OwnedFieldSpec};
+use forgearr_shared::flows::{OwnedFieldKind, OwnedFieldSpec};
 use leptos::prelude::*;
 use serde_json::{Map, Value};
 

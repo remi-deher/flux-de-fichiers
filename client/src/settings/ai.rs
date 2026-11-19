@@ -5,7 +5,7 @@ use super::ai_oauth::AiOauthPanel;
 use super::ai_status::AiStatusPanel;
 use crate::api;
 use crate::ui::{SectionHeader, Tag, TagTone, Toasts};
-use flux_shared::ai::{
+use forgearr_shared::ai::{
     AiModelOption, AiProvider, AiSettingsView, AiTestRequest, AiTestResponse,
     DEFAULT_MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS, MIN_TOOL_ROUNDS, UpdateAiSettingsRequest,
 };

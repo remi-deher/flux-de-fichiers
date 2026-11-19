@@ -9,7 +9,7 @@ use crate::{
     },
     tools_cache::ToolCacheManager,
 };
-use flux_shared::local::{
+use forgearr_shared::local::{
     LocalBlockTemplate, LocalFlowTemplate, LocalLibrarySnapshot, LocalResourceSummary,
     LocalScriptSummary, ScriptInterpreter,
 };

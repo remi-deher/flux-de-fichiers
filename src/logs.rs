@@ -11,7 +11,7 @@ use axum::{
     Json,
     extract::{Query, State},
 };
-use flux_shared::logs::{
+use forgearr_shared::logs::{
     DEFAULT_LOGS_LIMIT, LogEntry, LogField, LogLevel, LogsQuery, LogsResponse, MAX_LOGS_LIMIT,
 };
 use serde_json::Value;
@@ -203,7 +203,7 @@ mod tests {
         body::Body,
         http::{Request, StatusCode},
     };
-    use flux_shared::Role;
+    use forgearr_shared::Role;
     use serde_json::json;
     use sqlx::sqlite::SqlitePoolOptions;
     use std::sync::Arc;
@@ -228,7 +228,7 @@ mod tests {
     fn parse_line_extracts_level_module_message_and_fields() {
         let raw = line(
             "WARN",
-            "flux_de_fichiers::ai",
+            "forgearr::ai",
             "échec d'appel LLM",
             &json!("chatgpt"),
         );
@@ -257,7 +257,7 @@ mod tests {
             dir.path(),
             "flux.jsonl.2026-11-17",
             &[
-                line("INFO", "flux_de_fichiers::a", "ancien", &json!("x")),
+                line("INFO", "forgearr::a", "ancien", &json!("x")),
                 "ligne corrompue".into(),
             ],
         )?;
@@ -265,8 +265,8 @@ mod tests {
             dir.path(),
             "flux.jsonl.2026-11-18",
             &[
-                line("INFO", "flux_de_fichiers::a", "premier", &json!("x")),
-                line("ERROR", "flux_de_fichiers::ai", "Échec", &json!("ChatGPT")),
+                line("INFO", "forgearr::a", "premier", &json!("x")),
+                line("ERROR", "forgearr::ai", "Échec", &json!("ChatGPT")),
             ],
         )?;
         std::fs::write(dir.path().join("autre.txt"), "ignoré")?;
@@ -303,7 +303,7 @@ mod tests {
     fn limit_truncates_and_missing_directory_is_empty() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         let lines: Vec<String> = (0..5)
-            .map(|n| line("INFO", "flux_de_fichiers::a", &format!("m{n}"), &json!("x")))
+            .map(|n| line("INFO", "forgearr::a", &format!("m{n}"), &json!("x")))
             .collect();
         write_log(dir.path(), "flux.jsonl.2026-11-18", &lines)?;
         let limited = read_entries(
@@ -326,14 +326,7 @@ mod tests {
     fn tail_window_drops_the_partial_first_line() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         let lines: Vec<String> = (0..50)
-            .map(|n| {
-                line(
-                    "INFO",
-                    "flux_de_fichiers::a",
-                    &format!("ligne-{n:02}"),
-                    &json!("x"),
-                )
-            })
+            .map(|n| line("INFO", "forgearr::a", &format!("ligne-{n:02}"), &json!("x")))
             .collect();
         write_log(dir.path(), "flux.jsonl.2026-11-18", &lines)?;
         let window = read_entries_bounded(dir.path(), &LogsQuery::default(), 600);

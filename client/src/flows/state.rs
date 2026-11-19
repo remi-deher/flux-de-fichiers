@@ -10,7 +10,7 @@ use super::geometry::{
 };
 #[cfg(not(test))]
 use crate::prefs;
-use flux_shared::flows::{FlowConnection, FlowGraph, GraphError, OwnedBlockSpec, find_owned};
+use forgearr_shared::flows::{FlowConnection, FlowGraph, GraphError, OwnedBlockSpec, find_owned};
 use leptos::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -945,7 +945,7 @@ pub fn incomplete_blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::flows::FlowBlockKind;
+    use forgearr_shared::flows::FlowBlockKind;
     use serde_json::json;
 
     use super::super::test_support::test_catalog;

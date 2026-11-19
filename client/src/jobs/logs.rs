@@ -2,7 +2,7 @@
 
 use crate::api;
 use crate::ui::{Icon, IconName, SectionHeader};
-use flux_shared::logs::{DEFAULT_LOGS_LIMIT, LogEntry, LogLevel, LogsResponse};
+use forgearr_shared::logs::{DEFAULT_LOGS_LIMIT, LogEntry, LogLevel, LogsResponse};
 use leptos::ev;
 use leptos::prelude::*;
 

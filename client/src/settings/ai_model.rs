@@ -1,6 +1,6 @@
 //! Choix du modèle de l'assistant IA : liste des modèles proposés par le fournisseur.
 
-use flux_shared::ai::{AiModelOption, AiProvider};
+use forgearr_shared::ai::{AiModelOption, AiProvider};
 use leptos::prelude::*;
 
 const AUTOMATIC_LABEL: &str = "Automatique (premier modèle proposé au compte)";

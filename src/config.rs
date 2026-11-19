@@ -1,4 +1,4 @@
-pub use flux_shared::system::SmtpTls;
+pub use forgearr_shared::system::SmtpTls;
 use std::{
     env,
     net::SocketAddr,
@@ -206,7 +206,7 @@ impl Config {
         let static_dir: PathBuf = env::var("STATIC_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
-                let default_path = PathBuf::from("/usr/share/flux-de-fichiers/frontend");
+                let default_path = PathBuf::from("/usr/share/forgearr/frontend");
                 if default_path.is_dir() {
                     default_path
                 } else if PathBuf::from("frontend/dist").is_dir() {

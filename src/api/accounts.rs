@@ -14,8 +14,8 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use flux_shared::Role;
-use flux_shared::accounts::{CreateAccountRequest, UpdateAccountRequest};
+use forgearr_shared::Role;
+use forgearr_shared::accounts::{CreateAccountRequest, UpdateAccountRequest};
 
 /// Rôle d'un compte humain : un rôle inconnu ou réservé aux machines est refusé.
 fn account_role(raw: &str) -> AppResult<Role> {

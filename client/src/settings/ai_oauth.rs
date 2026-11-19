@@ -3,7 +3,9 @@
 use crate::api;
 use crate::sleep::sleep;
 use crate::ui::{Tag, TagTone, Toasts};
-use flux_shared::ai::{AiOauthAccount, AiOauthDeviceCode, AiOauthPollResponse, AiOauthPollStatus};
+use forgearr_shared::ai::{
+    AiOauthAccount, AiOauthDeviceCode, AiOauthPollResponse, AiOauthPollStatus,
+};
 use leptos::prelude::*;
 
 const AI_OAUTH_START_PATH: &str = "/api/v1/ai/oauth/start";

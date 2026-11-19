@@ -4,7 +4,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{HeaderMap, Request, StatusCode},
 };
-use flux_de_fichiers::{
+use forgearr::{
     api::{AppState, router},
     config::Config,
 };
@@ -125,11 +125,8 @@ async fn test_admin_reads_the_system_status() -> anyhow::Result<()> {
 
     let (status, _, body) = call(&app, "GET", "/api/v1/system/status", Some(&admin), None).await?;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["version"], flux_de_fichiers::version::app_version());
-    assert_eq!(
-        body["buildVersion"],
-        flux_de_fichiers::version::BUILD_VERSION
-    );
+    assert_eq!(body["version"], forgearr::version::app_version());
+    assert_eq!(body["buildVersion"], forgearr::version::BUILD_VERSION);
     assert_eq!(body["keySource"], "local");
     let key_id = body["keyId"].as_str().unwrap_or_default();
     assert_eq!(key_id.len(), KEY_ID_HEX_LEN);

@@ -11,11 +11,11 @@ use crate::ui::filters::{Filters, JobStateFilter};
 use crate::ui::{EmptyState, Icon, IconName, MetricTone, SectionHeader, StatItem, StatStrip};
 use crate::{api, format};
 use chrono::Utc;
-use flux_shared::format::format_bytes;
-use flux_shared::jobs::{Job, JobStorageStats};
-use flux_shared::libraries::Library;
-use flux_shared::session::Me;
-use flux_shared::workers::{Worker, WorkerOverview};
+use forgearr_shared::format::format_bytes;
+use forgearr_shared::jobs::{Job, JobStorageStats};
+use forgearr_shared::libraries::Library;
+use forgearr_shared::session::Me;
+use forgearr_shared::workers::{Worker, WorkerOverview};
 use jobs_widget::JobsWidget;
 use leptos::prelude::*;
 use summary::{Summary, alerts, ratio_percent};
@@ -226,7 +226,7 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
 
 #[component]
 pub fn WorkerOverviewPage(me: Me) -> impl IntoView {
-    let can_jobs = me.allows(flux_shared::Permission::ViewJobs);
+    let can_jobs = me.allows(forgearr_shared::Permission::ViewJobs);
     let router = use_router();
     let filters = use_context::<Filters>();
     let overview = LocalResource::new(|| api::get::<WorkerOverview>(WORKER_OVERVIEW_PATH));

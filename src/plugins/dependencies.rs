@@ -8,7 +8,7 @@ use crate::{
     error::{AppError, AppResult},
     tools_cache::ToolCacheManager,
 };
-pub use flux_shared::plugins::DependencyInstallResult;
+pub use forgearr_shared::plugins::DependencyInstallResult;
 use sqlx::SqlitePool;
 use std::{
     collections::{HashMap, HashSet},

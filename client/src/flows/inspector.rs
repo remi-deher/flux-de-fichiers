@@ -6,7 +6,7 @@ use super::presentation::{NodeDomain, node_output_ports, output_presentation};
 use super::script_inspector::{ScriptBlockInspector, UNIFIED_SCRIPT_KIND};
 use super::state::Editor;
 use crate::ui::{Icon, IconName};
-use flux_shared::flows::{FlowGraph, OwnedBlockSpec, find_owned};
+use forgearr_shared::flows::{FlowGraph, OwnedBlockSpec, find_owned};
 use leptos::prelude::*;
 
 const ACTION_ICON_SIZE: u32 = 14;
@@ -279,7 +279,7 @@ pub fn NodeInspector(editor: Editor, can_manage: bool) -> impl IntoView {
 mod tests {
     use super::super::test_support::test_catalog;
     use super::*;
-    use flux_shared::flows::FlowBlockKind;
+    use forgearr_shared::flows::FlowBlockKind;
     use serde_json::json;
 
     #[test]

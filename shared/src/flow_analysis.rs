@@ -78,7 +78,7 @@ impl Default for SimulationInput {
 }
 
 impl SimulationInput {
-    /// Construit un arbre JSON de sonde utilisable par `flux_shared::flows::evaluate_condition`.
+    /// Construit un arbre JSON de sonde utilisable par `forgearr_shared::flows::evaluate_condition`.
     pub fn to_probe_value(&self) -> Result<Value, String> {
         let mut parsed: Value = serde_json::from_str(&self.probe_json)
             .map_err(|err| format!("JSON de sonde invalide : {err}"))?;

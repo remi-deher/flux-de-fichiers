@@ -1,6 +1,6 @@
 //! Règles d'affichage des tâches, sans DOM : libellés et mise à jour en direct.
 
-use flux_shared::jobs::{Job, JobErrorCode, JobEvent, JobEventType, JobStatus, JobStepStatus};
+use forgearr_shared::jobs::{Job, JobErrorCode, JobEvent, JobEventType, JobStatus, JobStepStatus};
 use std::collections::HashMap;
 use uuid::Uuid;
 

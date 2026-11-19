@@ -2,8 +2,8 @@
 
 #![allow(dead_code)]
 
-use flux_de_fichiers::api_keys::install_known_key;
-use flux_shared::Role;
+use forgearr::api_keys::install_known_key;
+use forgearr_shared::Role;
 use sqlx::SqlitePool;
 
 pub const ADMIN_KEY: &str = "fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef";

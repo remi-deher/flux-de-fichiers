@@ -13,10 +13,10 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use flux_shared::InstanceKind;
-pub use flux_shared::accounts::{ChangePasswordRequest, LoginRequest};
+use forgearr_shared::InstanceKind;
+pub use forgearr_shared::accounts::{ChangePasswordRequest, LoginRequest};
 
-pub use flux_shared::session::{CallerKind, Me as MeResponse, SessionInfo as SessionResponse};
+pub use forgearr_shared::session::{CallerKind, Me as MeResponse, SessionInfo as SessionResponse};
 
 /// Vérifie un identifiant et un mot de passe en limitant les essais ; `Unauthorized` sans distinguer
 /// compte inconnu, compte désactivé ou mauvais mot de passe.

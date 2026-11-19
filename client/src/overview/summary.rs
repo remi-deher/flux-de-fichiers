@@ -1,9 +1,9 @@
 //! Chiffres et alertes de la vue d'ensemble, calculés sans DOM.
 
 use chrono::{DateTime, Utc};
-use flux_shared::jobs::{Job, JobStatus};
-use flux_shared::libraries::Library;
-use flux_shared::workers::Worker;
+use forgearr_shared::jobs::{Job, JobStatus};
+use forgearr_shared::libraries::Library;
+use forgearr_shared::workers::Worker;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Summary {
@@ -89,7 +89,7 @@ pub fn ratio_percent(part: usize, total: usize) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::workers::INTEGRATED_WORKER_NAME;
+    use forgearr_shared::workers::INTEGRATED_WORKER_NAME;
     use uuid::Uuid;
 
     fn worker(name: &str, seconds_ago: i64, now: DateTime<Utc>) -> Worker {
@@ -123,7 +123,7 @@ mod tests {
             include_extensions: Vec::new(),
             exclude_patterns: Vec::new(),
             min_file_bytes: 0,
-            output_policy: flux_shared::libraries::LibraryOutputPolicy::OutputDir,
+            output_policy: forgearr_shared::libraries::LibraryOutputPolicy::OutputDir,
             created_at: now,
             updated_at: now,
         };

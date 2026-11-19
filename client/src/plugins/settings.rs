@@ -2,7 +2,7 @@
 
 use crate::api;
 use crate::route::encode_segment;
-use flux_shared::plugins::{
+use forgearr_shared::plugins::{
     PluginConnectionTestResult, PluginSettingsView, ResolvedSettingsField, SettingsFieldType,
 };
 use leptos::prelude::*;

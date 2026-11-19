@@ -199,7 +199,7 @@ pub async fn execute_claim_processing(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::flows::FlowRecord;
+    use forgearr_shared::flows::FlowRecord;
     use serde_json::json;
     use uuid::Uuid;
 

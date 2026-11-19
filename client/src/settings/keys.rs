@@ -5,8 +5,8 @@ use crate::api;
 use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, Icon, IconName, SectionHeader, Toasts};
 use crate::workers::origin;
-use flux_shared::accounts::{ApiKeyRecord, CreateKeyRequest, CreatedKey};
-use flux_shared::{Permission, Role};
+use forgearr_shared::accounts::{ApiKeyRecord, CreateKeyRequest, CreatedKey};
+use forgearr_shared::{Permission, Role};
 use leptos::prelude::*;
 
 const KEYS_PATH: &str = "/api/v1/api-keys";
@@ -28,7 +28,7 @@ pub fn build_mcp_client_snippet(central_origin: &str, key: &str) -> String {
         base
     };
     format!(
-        "{{\n  \"mcpServers\": {{\n    \"flux-de-fichiers\": {{\n      \"type\": \"http\",\n      \"url\": \"{base}/mcp\",\n      \"headers\": {{\n        \"Authorization\": \"Bearer {key}\"\n      }}\n    }}\n  }}\n}}"
+        "{{\n  \"mcpServers\": {{\n    \"forgearr\": {{\n      \"type\": \"http\",\n      \"url\": \"{base}/mcp\",\n      \"headers\": {{\n        \"Authorization\": \"Bearer {key}\"\n      }}\n    }}\n  }}\n}}"
     )
 }
 

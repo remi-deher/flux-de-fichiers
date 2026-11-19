@@ -16,7 +16,7 @@ l'utilisateur du 14 nov. 2026 :
 
 1. **Le central est un serveur MCP.** Les outils exposés reprennent l'API existante, sans
    seconde logique métier : un outil MCP appelle la même couche que la route HTTP
-   correspondante, avec les mêmes types de `flux-shared`.
+   correspondante, avec les mêmes types de `forgearr-shared`.
 2. **Trois familles d'outils**, par objet (bibliothèques, flux, plugins) :
    - *analyser* : lecture seule (état d'une bibliothèque, validité et historique d'un flux,
      réglages d'un plugin, échecs de tâches) ;
@@ -46,7 +46,7 @@ l'utilisateur du 14 nov. 2026 :
 - **Limitation de débit par clé** : fenêtre glissante de 120 requêtes par minute sur `/mcp` par identifiant de clé (`429 Too Many Requests` + consignation `rate_limited` dans l'historique).
 - **Protocole MCP complet et simulation/diagnostic** :
   - `annotations` standard (`readOnlyHint`, `destructiveHint`, `idempotentHint`) sur tous les outils MCP ;
-  - couverture étendue (`simulate_flow` via `flux_shared::flow_analysis`, `diff_flow_versions`, `diagnose_job`, `cancel_job`, `batch_jobs`, `update_job_priority`, `get_job_stats`, `browse_filesystem`, `test_plugin_connection`, `update_worker_settings`, gestion de l'enrôlement) ;
+  - couverture étendue (`simulate_flow` via `forgearr_shared::flow_analysis`, `diff_flow_versions`, `diagnose_job`, `cancel_job`, `batch_jobs`, `update_job_priority`, `get_job_stats`, `browse_filesystem`, `test_plugin_connection`, `update_worker_settings`, gestion de l'enrôlement) ;
   - ressources enrichies (`flux://workers`, `flux://jobs/recent`, `flux://jobs/stats`, `flux://system/hardware`), capacité `prompts` (`diagnose_failures`, `design_flow`, `audit_libraries`) et extrait `.mcp.json` clé-en-main affiché à la création d'une clé `mcp`.
 - **Assistant IA intégré dans l'interface web** :
   - fournisseurs supportés : **Ollama** (local/LAN), **OpenAI / API compatible** et **Anthropic Claude** ;
@@ -192,6 +192,6 @@ est devant l'écran) ; le MCP externe garde « pas de file d'approbation » (dé
 
 - Nouvelle crate ou module `mcp` du central, un fichier par famille d'outils, testé comme les
   routes (tests natifs).
-- Nouveau rôle de clé et ses tests d'autorisation dans `flux-shared`.
+- Nouveau rôle de clé et ses tests d'autorisation dans `forgearr-shared`.
 - Aucun changement de la stack (ADR 0001) ; la dépendance MCP (SDK Rust) est à choisir à
   l'implémentation, après vérification de sa maintenance.

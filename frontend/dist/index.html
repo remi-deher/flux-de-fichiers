@@ -4,15 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark light">
-  <meta name="theme-color" content="#090b10" media="(prefers-color-scheme: dark)">
-  <meta name="theme-color" content="#f1f5f9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#151416" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f5f2ef" media="(prefers-color-scheme: light)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Flux de Fichiers">
-  <meta name="application-name" content="Flux de Fichiers">
+  <meta name="apple-mobile-web-app-title" content="Forgearr">
+  <meta name="application-name" content="Forgearr">
   <meta name="format-detection" content="telephone=no">
-  <meta name="description" content="Console de pilotage et supervision de remuxage Flux de Fichiers.">
-  <title>Flux de Fichiers — Pilotage et supervision</title>
+  <meta name="description" content="Forgearr, le moteur de traitement média pour les stacks *arr.">
+  <link rel="icon" type="image/svg+xml" href="/forgearr.svg">
+  <title>Forgearr — Pilotage et supervision</title>
   <style>
 
 :root {
@@ -54,22 +55,22 @@
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
   /* --- Surfaces & Couleurs Thème Sombre --- */
-  --bg-app: #090b10;
-  --bg-card: #151922;
-  --bg-elevated: #0e1117;
-  --bg-subtle: #1c212c;
-  --bg-glass: rgba(14, 17, 23, 0.82);
-  --border-color: #262c3a;
+  --bg-app: #151416;
+  --bg-card: #242326;
+  --bg-elevated: #1c1b1e;
+  --bg-subtle: #302e32;
+  --bg-glass: rgba(28, 27, 30, 0.82);
+  --border-color: #403d42;
   --border-subtle: rgba(240, 246, 252, 0.07);
-  --border-highlight: rgba(99, 102, 241, 0.55);
-  --border-control: #626d84;
+  --border-highlight: rgba(240, 173, 128, 0.55);
+  --border-control: #817b83;
   --text-main: #f3f6fc;
   --text-dim: #94a3b8;
-  --text-muted: #8291a7;
-  --primary: #818cf8;
-  --primary-fill: #4f46e5;
+  --text-muted: #a09aa1;
+  --primary: #f0ad80;
+  --primary-fill: #994823;
   --primary-contrast: #ffffff;
-  --primary-bg: rgba(99, 102, 241, 0.16);
+  --primary-bg: rgba(240, 173, 128, 0.16);
   --accent: #22d3ee;
   --success: #10b981;
   --success-bg: rgba(16, 185, 129, 0.14);
@@ -84,27 +85,27 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24);
   --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.36);
   --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
-  --shadow-glow: 0 0 0 1px rgba(99, 102, 241, 0.35), 0 8px 24px rgba(99, 102, 241, 0.2);
+  --shadow-glow: 0 0 0 1px rgba(240, 173, 128, 0.35), 0 8px 24px rgba(240, 173, 128, 0.2);
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-  --bg-app: #f1f5f9;
+  --bg-app: #f5f2ef;
   --bg-card: #ffffff;
-  --bg-elevated: #f8fafc;
-  --bg-subtle: #f1f5f9;
-  --bg-glass: rgba(248, 250, 252, 0.88);
-  --border-color: #e2e8f0;
+  --bg-elevated: #fbf8f6;
+  --bg-subtle: #f5f2ef;
+  --bg-glass: rgba(251, 248, 246, 0.88);
+  --border-color: #e6ded9;
   --border-subtle: rgba(15, 23, 42, 0.07);
-  --border-highlight: rgba(79, 70, 229, 0.45);
+  --border-highlight: rgba(153, 72, 35, 0.45);
   --border-control: #7c8a9c;
   --text-main: #0f172a;
   --text-dim: #475569;
   --text-muted: #5b6b80;
-  --primary: #4f46e5;
-  --primary-fill: #4f46e5;
+  --primary: #994823;
+  --primary-fill: #994823;
   --primary-contrast: #ffffff;
-  --primary-bg: rgba(79, 70, 229, 0.10);
+  --primary-bg: rgba(153, 72, 35, 0.10);
   --accent: #0e7490;
   --success: #047857;
   --success-bg: rgba(5, 150, 105, 0.10);
@@ -124,22 +125,22 @@
 }
 
 [data-theme="light"] {
-  --bg-app: #f1f5f9;
+  --bg-app: #f5f2ef;
   --bg-card: #ffffff;
-  --bg-elevated: #f8fafc;
-  --bg-subtle: #f1f5f9;
-  --bg-glass: rgba(248, 250, 252, 0.88);
-  --border-color: #e2e8f0;
+  --bg-elevated: #fbf8f6;
+  --bg-subtle: #f5f2ef;
+  --bg-glass: rgba(251, 248, 246, 0.88);
+  --border-color: #e6ded9;
   --border-subtle: rgba(15, 23, 42, 0.07);
-  --border-highlight: rgba(79, 70, 229, 0.45);
+  --border-highlight: rgba(153, 72, 35, 0.45);
   --border-control: #7c8a9c;
   --text-main: #0f172a;
   --text-dim: #475569;
   --text-muted: #5b6b80;
-  --primary: #4f46e5;
-  --primary-fill: #4f46e5;
+  --primary: #994823;
+  --primary-fill: #994823;
   --primary-contrast: #ffffff;
-  --primary-bg: rgba(79, 70, 229, 0.10);
+  --primary-bg: rgba(153, 72, 35, 0.10);
   --accent: #0e7490;
   --success: #047857;
   --success-bg: rgba(5, 150, 105, 0.10);
@@ -158,22 +159,22 @@
 }
 
 [data-theme="dark"] {
-  --bg-app: #090b10;
-  --bg-card: #151922;
-  --bg-elevated: #0e1117;
-  --bg-subtle: #1c212c;
-  --bg-glass: rgba(14, 17, 23, 0.82);
-  --border-color: #262c3a;
+  --bg-app: #151416;
+  --bg-card: #242326;
+  --bg-elevated: #1c1b1e;
+  --bg-subtle: #302e32;
+  --bg-glass: rgba(28, 27, 30, 0.82);
+  --border-color: #403d42;
   --border-subtle: rgba(240, 246, 252, 0.07);
-  --border-highlight: rgba(99, 102, 241, 0.55);
-  --border-control: #626d84;
+  --border-highlight: rgba(240, 173, 128, 0.55);
+  --border-control: #817b83;
   --text-main: #f3f6fc;
   --text-dim: #94a3b8;
-  --text-muted: #8291a7;
-  --primary: #818cf8;
-  --primary-fill: #4f46e5;
+  --text-muted: #a09aa1;
+  --primary: #f0ad80;
+  --primary-fill: #994823;
   --primary-contrast: #ffffff;
-  --primary-bg: rgba(99, 102, 241, 0.16);
+  --primary-bg: rgba(240, 173, 128, 0.16);
   --accent: #22d3ee;
   --success: #10b981;
   --success-bg: rgba(16, 185, 129, 0.14);
@@ -188,7 +189,7 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24);
   --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.36);
   --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
-  --shadow-glow: 0 0 0 1px rgba(99, 102, 241, 0.35), 0 8px 24px rgba(99, 102, 241, 0.2);
+  --shadow-glow: 0 0 0 1px rgba(240, 173, 128, 0.35), 0 8px 24px rgba(240, 173, 128, 0.2);
 }
 
 
@@ -393,18 +394,8 @@ button, a, select, input {
 }
 
 .brand-mark {
-  width: 38px;
-  height: 38px;
-  border-radius: var(--radius-md);
-  background: var(--primary-fill);
-  color: var(--primary-contrast);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  font-size: var(--font-size-xs);
-  letter-spacing: 0.5px;
-  box-shadow: var(--shadow-sm);
+  width: var(--space-4);
+  height: var(--space-4);
   flex-shrink: 0;
 }
 
@@ -6174,18 +6165,6 @@ button.widget-row:hover {
   margin-bottom: var(--space-3);
 }
 
-.auth-gate__logo {
-  display: inline-grid;
-  place-items: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: var(--radius-md);
-  background-color: var(--primary-fill);
-  color: var(--primary-contrast);
-  font-size: var(--font-size-xs);
-  font-weight: 800;
-}
-
 .auth-gate__name {
   font-weight: 700;
   color: var(--text-main);
@@ -6293,7 +6272,7 @@ input[type="radio"] {
   </style>
 </head>
 <body>
-  <noscript>Flux de Fichiers demande JavaScript et WebAssembly.</noscript>
+  <noscript>Forgearr demande JavaScript et WebAssembly.</noscript>
   <script type="module">import init from "/pkg/flux_client.js"; init();</script>
 </body>
 </html>

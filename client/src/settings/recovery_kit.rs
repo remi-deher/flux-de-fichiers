@@ -2,7 +2,7 @@
 
 use crate::access::forms::Field;
 use crate::api::{self, ApiError};
-use flux_shared::system::{
+use forgearr_shared::system::{
     ExportRecoveryKitRequest, RECOVERY_PASSPHRASE_MIN_LEN, RecoveryKit, RestoreRecoveryKitRequest,
     SystemStatus,
 };
@@ -12,7 +12,7 @@ use wasm_bindgen::JsCast;
 const EXPORT_PATH: &str = "/api/v1/system/secret-key/recovery-kit";
 const RESTORE_PATH: &str = "/api/v1/system/secret-key/restore";
 const BAD_REQUEST_STATUS: u16 = 400;
-const KIT_FILE_PREFIX: &str = "flux-kit-recuperation";
+const KIT_FILE_PREFIX: &str = "forgearr-kit-recuperation";
 
 /// Le dernier kit exporté couvre-t-il la clé active ?
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

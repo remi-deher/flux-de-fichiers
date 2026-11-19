@@ -64,4 +64,4 @@ chercher dans les journaux** ; préférence pour une **demande à approuver**.
   fermée, limite de débit, remise unique de la clé).
 - L'écran Workers gagne « Demandes en attente » et le bouton « Ajouter un worker » (le bloc
   `compose` du lot A du réseau devient une simple explication sans valeur à copier).
-- Le contrat `flux-shared` expose le statut d'une demande (enum Serde).
+- Le contrat `forgearr-shared` expose le statut d'une demande (enum Serde).

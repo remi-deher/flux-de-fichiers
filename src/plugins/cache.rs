@@ -7,7 +7,7 @@ use super::{
     summarize_tool,
 };
 use crate::{flows::OperationRegistry, tools_cache::ToolCacheManager};
-use flux_shared::flows::OwnedBlockSpec;
+use forgearr_shared::flows::OwnedBlockSpec;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::RwLock;
 

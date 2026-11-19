@@ -3,7 +3,7 @@
 use leptos::prelude::*;
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 
-use flux_shared::app;
+use forgearr_shared::app;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {

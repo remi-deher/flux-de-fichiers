@@ -85,11 +85,12 @@ pub fn get(name: &str, args: &Value) -> Result<(&'static str, Vec<McpPromptMessa
                 .map(|id| format!(" pour la bibliothèque `{id}` (lis-la via `get_library`)"))
                 .unwrap_or_default();
             let text = format!(
-                "Conçois un flux Flux de Fichiers pour l'objectif suivant{lib_note} : {goal}\n\
+                "Conçois un flux {} pour l'objectif suivant{lib_note} : {goal}\n\
                  1. Appelle `list_blocks` pour connaître exactement les types de blocs et champs disponibles.\n\
                  2. Appelle `get_system_hardware` et `list_workers` pour adapter l'encodeur matériel (VAAPI/NVENC/CPU).\n\
                  3. Construis le graphe JSON complet, valide-le avec `validate_flow`, puis simule-le avec `simulate_flow` sur les profils utiles (`structured_tracks`, `minimal`).\n\
-                 4. Enregistre le flux avec `save_flow` uniquement une fois la simulation complète."
+                 4. Enregistre le flux avec `save_flow` uniquement une fois la simulation complète.",
+                forgearr_shared::brand::NAME
             );
             Ok((
                 "Conception et validation d'un nouveau flux",

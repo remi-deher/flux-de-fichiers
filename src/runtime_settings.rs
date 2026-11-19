@@ -13,7 +13,7 @@ use crate::{
     repository,
     secrets::{SecretBox, is_encrypted},
 };
-use flux_shared::system::{OutboundPolicyStatus, SmtpStatus, UpdateSystemSettingsRequest};
+use forgearr_shared::system::{OutboundPolicyStatus, SmtpStatus, UpdateSystemSettingsRequest};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::env;

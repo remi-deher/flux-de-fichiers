@@ -20,7 +20,7 @@ L'utilisateur a validé le passage au **modèle simplifié style *arr (Sonarr, R
 
 ### 1. Conteneur unique et port HTTP unique (3000)
 
-- L'application `flux-de-fichiers` s'exécute dans un **conteneur Docker unique**.
+- L'application `forgearr` s'exécute dans un **conteneur Docker unique**.
 - Le coordinateur écoute directement en **HTTP clair** sur un port unique via l'adresse de liaison `BIND_ADDR` (ou `BIND`, par défaut `0.0.0.0:3000`).
 - La contrainte imposant le TLS obligatoire hors boucle locale (`127.0.0.1`) et le conteneur Nginx séparé sont supprimés.
 - Si une sécurisation TLS externe est requise par l'infrastructure de l'utilisateur, elle est déléguée au reverse proxy d'entrée de son choix (Traefik, Caddy, Nginx Proxy Manager).
@@ -52,7 +52,7 @@ Au premier démarrage du coordinateur :
 Le serveur Axum dessert désormais l'ensemble des fonctionnalités sur le port 3000 :
 - `/health` : sonde de santé pour l'orchestrateur Docker ;
 - `/api/v1/*` : endpoints d'API REST (jobs, fichiers, workers, sessions, configuration, transferts) ;
-- Fichiers statiques du frontend Leptos : servis depuis `STATIC_DIR` (défaut `/usr/share/flux-de-fichiers/frontend`, avec repli sur `frontend/dist` en développement) avec repli SPA automatique vers `index.html` pour les routes de navigation d'interface (hors requêtes sous `/api/`).
+- Fichiers statiques du frontend Leptos : servis depuis `STATIC_DIR` (défaut `/usr/share/forgearr/frontend`, avec repli sur `frontend/dist` en développement) avec repli SPA automatique vers `index.html` pour les routes de navigation d'interface (hors requêtes sous `/api/`).
 
 ### 5. Communication des workers distants en HTTP
 
@@ -61,6 +61,6 @@ Le serveur Axum dessert désormais l'ensemble des fonctionnalités sur le port 3
 
 ## Conséquences
 
-- **Simplicité opérationnelle maximale** : une simple commande `docker run -p 3000:3000 -v /chemin/config:/config -v /chemin/data:/data flux-de-fichiers` suffit à faire tourner le service complet.
+- **Simplicité opérationnelle maximale** : une simple commande `docker run -p 3000:3000 -v /chemin/config:/config -v /chemin/data:/data forgearr` suffit à faire tourner le service complet.
 - **Consommation réduite** : disparition des processus Nginx et PostgreSQL, démarrage instantané.
 - **Rétrocompatibilité API** : les contrats d'API `/api/v1/*` restent inchangés pour le frontend Leptos et les agents de traitement.

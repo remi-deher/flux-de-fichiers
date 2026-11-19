@@ -1,7 +1,7 @@
 //! Abonnement au flux SSE des tâches : progression en direct et relecture de la liste.
 
 use super::model::{EVENT_NAMES, needs_reload, progress_of};
-use flux_shared::jobs::JobEvent;
+use forgearr_shared::jobs::JobEvent;
 use leptos::prelude::*;
 use std::collections::HashMap;
 use uuid::Uuid;

@@ -10,7 +10,7 @@ use crate::{
     telemetry::TelemetrySnapshot,
 };
 use chrono::{DateTime, Datelike, Timelike, Utc};
-use flux_shared::workers::WorkerTelemetry;
+use forgearr_shared::workers::WorkerTelemetry;
 use sqlx::SqlitePool;
 use std::future::Future;
 use uuid::Uuid;

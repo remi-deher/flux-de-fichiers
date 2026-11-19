@@ -10,7 +10,7 @@ use crate::{
     telemetry::{TelemetryProbe, TelemetrySnapshot},
 };
 use axum::{Json, extract::State};
-pub use flux_shared::system::{
+pub use forgearr_shared::system::{
     HardwareStatus, KeySource, NetworkStatus, StorageStatus, SystemStatus, UpdateCheckStatus,
     UpdateSystemSettingsRequest, VolumeSpace,
 };
@@ -224,10 +224,7 @@ pub async fn updates(State(state): State<AppState>, _auth: AdminAuth) -> Json<Up
         Ok(client) => {
             let resp = client
                 .get(GITHUB_RELEASES_API)
-                .header(
-                    reqwest::header::USER_AGENT,
-                    format!("flux-de-fichiers/{current}"),
-                )
+                .header(reqwest::header::USER_AGENT, format!("forgearr/{current}"))
                 .send()
                 .await;
             match resp {

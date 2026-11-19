@@ -3,9 +3,9 @@
 use super::draft::{LibraryDraft, access_label};
 use crate::api;
 use crate::ui::FolderTreePicker;
-use flux_shared::flows::FlowRecord;
-use flux_shared::libraries::{Library, LibraryAccess, LibraryOutputPolicy, LibraryWrite};
-use flux_shared::workers::Worker;
+use forgearr_shared::flows::FlowRecord;
+use forgearr_shared::libraries::{Library, LibraryAccess, LibraryOutputPolicy, LibraryWrite};
+use forgearr_shared::workers::Worker;
 use leptos::prelude::*;
 use uuid::Uuid;
 

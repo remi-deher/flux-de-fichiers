@@ -1,4 +1,4 @@
-# Construit l'image Flux de Fichiers (une seule définition des arguments de build).
+# Construit l'image Forgearr (une seule définition des arguments de build).
 # L'appelant a déjà récupéré le dépôt au commit à construire (`actions/checkout`).
 name: Construire l'image
 description: Construit l'image, la charge localement ou la pousse sur Docker Hub.

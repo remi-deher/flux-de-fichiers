@@ -7,7 +7,7 @@ use crate::{
     plugins::CreateRepositoryRequest,
 };
 use axum::extract::{Json, Path, State};
-use flux_shared::local::{
+use forgearr_shared::local::{
     CreateBlockTemplateRequest, CreateFlowTemplateRequest, CreateLocalPackRequest,
     UploadLocalResourceRequest, UpsertLocalScriptRequest,
 };
@@ -529,7 +529,7 @@ pub async fn call(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
+    use forgearr_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
 
     #[test]
     fn the_script_tool_advertises_the_fields_its_handler_requires() -> anyhow::Result<()> {

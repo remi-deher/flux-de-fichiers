@@ -8,8 +8,8 @@ use super::model::{
 use crate::ai::AiAssistantState;
 use crate::ui::{Icon, IconName, StatusBadge, Tag, TagTone, Toasts};
 use crate::{api, format};
-use flux_shared::format::format_bytes;
-use flux_shared::jobs::{Job, JobStatus, JobStepLog, MAX_ATTEMPTS, UpdateJobPriorityRequest};
+use forgearr_shared::format::format_bytes;
+use forgearr_shared::jobs::{Job, JobStatus, JobStepLog, MAX_ATTEMPTS, UpdateJobPriorityRequest};
 use leptos::prelude::*;
 use std::collections::HashMap;
 use uuid::Uuid;

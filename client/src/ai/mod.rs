@@ -6,12 +6,12 @@ mod run;
 use crate::api;
 use crate::route::{Route, use_router};
 use crate::ui::{Drawer, Icon, IconName, Tag, TagTone};
-use flux_shared::Permission;
-use flux_shared::ai::{
+use forgearr_shared::Permission;
+use forgearr_shared::ai::{
     AiChatMessage, AiChatRequest, AiChatRole, AiClientStatus, AiContext, AiContextKind,
     AiContextObject, AiRunEvent, AiToolCallTrace,
 };
-use flux_shared::session::Me;
+use forgearr_shared::session::Me;
 use leptos::ev;
 use leptos::prelude::*;
 
@@ -266,7 +266,7 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
     let history_reload = RwSignal::new(0u64);
 
     // Termine la conversation en cours (réponse, échec ou perte du flux).
-    let finish = move |outcome: Result<flux_shared::ai::AiChatResponse, String>| {
+    let finish = move |outcome: Result<forgearr_shared::ai::AiChatResponse, String>| {
         steps.set(Vec::new());
         streamed.set(String::new());
         confirmation.set(None);
@@ -465,7 +465,7 @@ pub fn AiAssistantDrawer(me: Me) -> impl IntoView {
     view! {
         <Drawer
             open=state.open
-            eyebrow="Copilote Flux"
+            eyebrow="Copilote Forgearr"
             title="Assistant IA"
             actions=header_actions
         >

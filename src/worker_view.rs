@@ -3,8 +3,8 @@
 //! Le central expose des routes limitées au worker de la clé présentée ; le worker n'a jamais de
 //! proxy générique, seulement cette liste de routes.
 
-use flux_shared::Role;
-pub use flux_shared::workers::{JobCounts, WorkerOverview};
+use forgearr_shared::Role;
+pub use forgearr_shared::workers::{JobCounts, WorkerOverview};
 use serde::{Deserialize, Serialize};
 
 pub const OVERVIEW_PATH: &str = "/api/v1/worker/overview";

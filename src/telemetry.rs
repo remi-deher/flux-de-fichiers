@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use flux_shared::workers::WorkerTelemetry;
+use forgearr_shared::workers::WorkerTelemetry;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,

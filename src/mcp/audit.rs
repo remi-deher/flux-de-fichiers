@@ -6,7 +6,7 @@ use crate::{
     repository::{self, NewMcpAuditEntry},
     tool_run::mask_log_secrets,
 };
-use flux_shared::mcp::McpAuditOutcome;
+use forgearr_shared::mcp::McpAuditOutcome;
 use serde_json::Value;
 use sqlx::SqlitePool;
 use std::{

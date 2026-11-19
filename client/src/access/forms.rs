@@ -3,11 +3,12 @@
 use super::{Gate, access_error, identity_after};
 use crate::api;
 use crate::sleep::sleep;
-use crate::ui::{Icon, IconName};
-use flux_shared::InstanceKind;
-use flux_shared::accounts::LoginRequest;
-use flux_shared::session::{Me, SessionInfo};
-use flux_shared::system::{
+use crate::ui::{BrandMark, Icon, IconName};
+use forgearr_shared::InstanceKind;
+use forgearr_shared::accounts::LoginRequest;
+use forgearr_shared::brand::NAME;
+use forgearr_shared::session::{Me, SessionInfo};
+use forgearr_shared::system::{
     SetupRequest, SetupStatus, SetupWorkerApprovalRequest, SetupWorkerRequest,
     SetupWorkerRequestStatus, WorkerSetupRequestState,
 };
@@ -57,10 +58,8 @@ pub fn GateCard(
         <div class="auth-gate" role="dialog" aria-modal="true" aria-labelledby="auth-gate-title">
             <div class="auth-gate__card" class:auth-gate__card--wide=wide>
                 <div class="auth-gate__brand">
-                    <span class="auth-gate__logo" aria-hidden="true">
-                        <Icon name=IconName::Flows size=18 />
-                    </span>
-                    <span class="auth-gate__name">"Flux de Fichiers"</span>
+                    <BrandMark />
+                    <span class="auth-gate__name">{NAME}</span>
                 </div>
                 <h1 id="auth-gate-title" class="auth-gate__title">{title}</h1>
                 <p class="auth-gate__subtitle">{subtitle}</p>

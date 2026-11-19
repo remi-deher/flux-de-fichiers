@@ -1,7 +1,7 @@
 # Worker-only deployment on an additional Docker host.
 services:
   worker:
-    image: ${FLUX_IMAGE:?Provide an immutable Flux image tag or digest}
+    image: ${FLUX_IMAGE:?Provide an immutable Forgearr image tag or digest}
     command: [worker]
     user: "10001:10001"
     restart: unless-stopped

@@ -1,7 +1,7 @@
 //! Réinitialisation d'un mot de passe oublié en ligne de commande (ADR 0011).
 
-use flux_de_fichiers::{account_admin::reset_password, error::AppError, password, repository};
-use flux_shared::Role;
+use forgearr::{account_admin::reset_password, error::AppError, password, repository};
+use forgearr_shared::Role;
 use sqlx::sqlite::SqlitePoolOptions;
 
 const USERNAME: &str = "admin";
@@ -59,10 +59,10 @@ async fn test_reset_closes_every_session_of_the_account() -> anyhow::Result<()> 
         .await
         .map_err(|_| anyhow::anyhow!("lecture"))?
         .ok_or_else(|| anyhow::anyhow!("compte absent"))?;
-    let session = flux_de_fichiers::web_session::create(&pool, 600, &account.id)
+    let session = forgearr::web_session::create(&pool, 600, &account.id)
         .await
         .map_err(|_| anyhow::anyhow!("session"))?;
-    let token_hash = flux_de_fichiers::web_session::digest(&session.token);
+    let token_hash = forgearr::web_session::digest(&session.token);
     let open = |pool: sqlx::SqlitePool, hash: String| async move {
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sessions WHERE token_hash = ?1")
             .bind(hash)

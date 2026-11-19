@@ -7,6 +7,7 @@ pub mod accounts;
 pub mod ai;
 pub mod app;
 pub mod base64;
+pub mod brand;
 pub mod diagnostics;
 pub mod flow_analysis;
 pub mod flows;

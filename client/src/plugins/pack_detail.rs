@@ -4,7 +4,7 @@ use super::{date_row, section_badge_label};
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::{Icon, IconName, Tag, TagTone, Toasts};
-use flux_shared::plugins::{PackDetailView, PackInstallResult};
+use forgearr_shared::plugins::{PackDetailView, PackInstallResult};
 use leptos::prelude::*;
 
 const INSTALL_ICON_SIZE: u32 = 15;

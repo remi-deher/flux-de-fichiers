@@ -4,7 +4,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use flux_de_fichiers::{
+use forgearr::{
     api::{AppState, router},
     config::Config,
     plugins::PluginRepository,
@@ -58,6 +58,7 @@ async fn test_repositories_lifecycle_and_official_protection() -> anyhow::Result
     let initial_repos: Vec<PluginRepository> = serde_json::from_slice(&bytes)?;
     assert_eq!(initial_repos.len(), 1);
     assert_eq!(initial_repos[0].id, "repo.official");
+    assert_eq!(initial_repos[0].name, "Catalogue officiel Forgearr");
     assert!(initial_repos[0].is_official);
     assert!(initial_repos[0].index_url.ends_with("/dev/index.json"));
     assert!(initial_repos[0].enabled);

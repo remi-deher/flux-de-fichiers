@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 env:
-  IMAGE_NAME: flux-de-fichiers
+  IMAGE_NAME: forgearr
   LOCAL_IMAGE_TAG: ci
   # Durée maximale d'attente du démarrage des conteneurs, en secondes.
   START_TIMEOUT_SECONDS: 90

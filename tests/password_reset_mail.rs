@@ -6,7 +6,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use flux_de_fichiers::{
+use forgearr::{
     api::{AppState, router},
     api_keys::hash_secret,
     config::{Config, SmtpConfig, SmtpTls},
@@ -14,7 +14,7 @@ use flux_de_fichiers::{
     mail::{MailSender, OutgoingMail},
     password, password_reset, repository, web_session,
 };
-use flux_shared::Role;
+use forgearr_shared::Role;
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 use std::sync::{Arc, Mutex};
 use tower::ServiceExt;

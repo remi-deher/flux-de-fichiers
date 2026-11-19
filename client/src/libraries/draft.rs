@@ -1,6 +1,6 @@
 //! Brouillon d'une bibliothèque en cours d'édition, sans DOM.
 
-use flux_shared::libraries::{
+use forgearr_shared::libraries::{
     LIBRARY_NAME_MAX, Library, LibraryAccess, LibraryOutputPolicy, LibraryWorkerPath, LibraryWrite,
     MAX_SCAN_INTERVAL_MINUTES, suggested_library_name_from_path,
 };

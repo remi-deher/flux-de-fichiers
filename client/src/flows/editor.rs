@@ -11,9 +11,11 @@ use crate::api;
 use crate::route::{Link, Route, encode_segment, use_router};
 use crate::ui::{Icon, IconName, Toasts};
 use chrono::{DateTime, Utc};
-use flux_shared::Permission;
-use flux_shared::flows::{FlowGraph, FlowRecord, OwnedBlockSpec, UpdateFlowRequest, new_flow_id};
-use flux_shared::session::Me;
+use forgearr_shared::Permission;
+use forgearr_shared::flows::{
+    FlowGraph, FlowRecord, OwnedBlockSpec, UpdateFlowRequest, new_flow_id,
+};
+use forgearr_shared::session::Me;
 use leptos::ev;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
@@ -864,7 +866,7 @@ pub fn FlowEditor(me: Me, flow_id: Option<String>) -> impl IntoView {
 mod tests {
     use super::super::test_support::test_catalog;
     use super::*;
-    use flux_shared::flows::FlowBlockKind;
+    use forgearr_shared::flows::FlowBlockKind;
     use serde_json::json;
 
     #[test]

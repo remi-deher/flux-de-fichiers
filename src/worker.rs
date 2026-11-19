@@ -233,7 +233,7 @@ impl WorkerLoop {
         }
         job_runner::ensure_probe_ready(&cache_mgr, claim)?;
 
-        let input = dir.join(flux_shared::jobs::source_working_filename(
+        let input = dir.join(forgearr_shared::jobs::source_working_filename(
             &claim.source_name,
         ));
         let response = self

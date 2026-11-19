@@ -11,7 +11,7 @@ use crate::{
     },
     tools_cache::ToolCacheManager,
 };
-use flux_shared::jobs::JobErrorCode;
+use forgearr_shared::jobs::JobErrorCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{

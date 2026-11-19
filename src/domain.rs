@@ -1,19 +1,19 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub use flux_shared::flows::{FlowRecord, FlowVersionSummary, UpdateFlowRequest};
-pub use flux_shared::jobs::{
+pub use forgearr_shared::flows::{FlowRecord, FlowVersionSummary, UpdateFlowRequest};
+pub use forgearr_shared::jobs::{
     JOB_PRIORITY_MAX, JOB_PRIORITY_MIN, Job, JobBatchAction, JobBatchRequest, JobBatchResult,
     JobErrorCode, JobEvent, JobEventType, JobStatus, JobStepLog, JobStepStatus, JobStorageStats,
     LibraryJobStats, MAX_ATTEMPTS, MediaFile, NewJob, UpdateJobPriorityRequest,
 };
 
-pub use flux_shared::libraries::{
+pub use forgearr_shared::libraries::{
     DirectoryEntry, DirectoryListing, LIBRARY_NAME_MAX, LIBRARY_PATH_MAX, Library, LibraryAccess,
     LibraryOutputPolicy, LibraryWorkerPath, LibraryWrite, MAX_SCAN_INTERVAL_MINUTES,
     MediaFileEntry, RootShortcut, WorkerBrowseReport, WorkerBrowseTask, library_accepts_file,
 };
-pub use flux_shared::workers::{
+pub use forgearr_shared::workers::{
     SystemConfig, UpdateWorkerSettingsRequest, WORKER_MAX_CONCURRENCY, WORKER_MIN_CONCURRENCY,
     Worker, WorkerSchedule,
 };

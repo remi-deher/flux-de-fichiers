@@ -19,7 +19,7 @@ def tag(name, updated="2026-10-01T00:00:00Z", digest="sha256:shared"):
 
 
 class FakeHub:
-    repository = "example/flux-de-fichiers"
+    repository = "example/forgearr"
 
     def __init__(self, tags):
         self.data = {item["name"]: item for item in tags}
@@ -77,14 +77,14 @@ class CleanupTests(unittest.TestCase):
 
     def test_delete_uses_tag_endpoint_not_manifest_digest(self):
         hub = object.__new__(Hub)
-        hub.tags_url = "https://hub.docker.com/v2/repositories/example/flux-de-fichiers/tags/"
+        hub.tags_url = "https://hub.docker.com/v2/repositories/example/forgearr/tags/"
         with patch.object(hub, "request") as request:
             hub.delete(PR_NAME)
         request.assert_called_once_with("DELETE", hub.tags_url + PR_NAME + "/")
 
     def test_pagination(self):
         hub = object.__new__(Hub)
-        hub.tags_url = "https://hub.docker.com/v2/repositories/example/flux-de-fichiers/tags/"
+        hub.tags_url = "https://hub.docker.com/v2/repositories/example/forgearr/tags/"
         next_url = hub.tags_url + "?page=2"
         with patch.object(hub, "request", side_effect=[
             {"results": [tag(PR_NAME)], "next": next_url},
@@ -95,7 +95,7 @@ class CleanupTests(unittest.TestCase):
 
     def test_denied_delete_reports_error_without_secret(self):
         hub = object.__new__(Hub)
-        hub.tags_url = "https://hub.docker.com/v2/repositories/example/flux-de-fichiers/tags/"
+        hub.tags_url = "https://hub.docker.com/v2/repositories/example/forgearr/tags/"
         hub.token = "dummy-test-token"
         hub.credentials = [hub.token]
         error = HTTPError(hub.tags_url, 403, "Forbidden", {},
@@ -107,7 +107,7 @@ class CleanupTests(unittest.TestCase):
 
     def test_foreign_pagination_host_is_rejected(self):
         hub = object.__new__(Hub)
-        hub.tags_url = "https://hub.docker.com/v2/repositories/example/flux-de-fichiers/tags/"
+        hub.tags_url = "https://hub.docker.com/v2/repositories/example/forgearr/tags/"
         with self.assertRaisesRegex(RuntimeError, "Unexpected"):
             hub.request("GET", "https://other.invalid/tags/")
 
@@ -126,7 +126,7 @@ class CleanupTests(unittest.TestCase):
     @patch("dockerhub_cleanup.subprocess.run")
     def test_download_and_promotion_are_checked(self, run):
         from dockerhub_cleanup import verify_test_image
-        verify_test_image("example/flux-de-fichiers", TEST_NAME)
+        verify_test_image("example/forgearr", TEST_NAME)
         self.assertEqual(run.call_args_list[0].args[0][:2], ["docker", "pull"])
         self.assertIn("--dry-run", run.call_args_list[1].args[0])
         self.assertTrue(all(call.kwargs["check"] for call in run.call_args_list))

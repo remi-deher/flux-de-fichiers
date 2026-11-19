@@ -4,7 +4,7 @@ Date : 9 novembre 2026. Statut : architecture technique cible (ADR 0004).
 
 ## 1. Vue d'ensemble du socle
 
-Le socle d'exécution concrétise la décision utilisateur du 9 novembre 2026 (**Option B : Bare Core et outils distribués**) à travers une articulation claire entre le dépôt applicatif `flux-de-fichiers` et le catalogue déclaratif `flux-de-fichiers-plugins`.
+Le socle d'exécution concrétise la décision utilisateur du 9 novembre 2026 (**Option B : Bare Core et outils distribués**) à travers une articulation claire entre le dépôt applicatif `forgearr` et le catalogue déclaratif `flux-de-fichiers-plugins`.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐

@@ -11,7 +11,7 @@ use crate::{
     mcp::protocol::McpTool,
     net_policy::{NetPolicyError, OutboundPolicy, build_pinned_client, resolve_checked},
 };
-use flux_shared::ai::{AiChatMessage, AiChatRole, AiModelOption, AiProvider, AiTestResponse};
+use forgearr_shared::ai::{AiChatMessage, AiChatRole, AiModelOption, AiProvider, AiTestResponse};
 use reqwest::{Client, Url};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
@@ -22,7 +22,7 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 const ANTHROPIC_MAX_TOKENS: u32 = 2048;
 const MAX_DETECTED_MODELS: usize = 40;
 const MAX_PROVIDER_ERROR_CHARS: usize = 240;
-const CHATGPT_ORIGINATOR: &str = "flux_de_fichiers";
+const CHATGPT_ORIGINATOR: &str = "forgearr";
 const CHATGPT_ACCOUNT_HEADER: &str = "chatgpt-account-id";
 const SSE_DATA_PREFIX: &str = "data:";
 const CHATGPT_MODEL_VISIBLE: &str = "list";

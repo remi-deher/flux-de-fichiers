@@ -18,12 +18,12 @@ use crate::ui::{
 };
 use crate::{api, format};
 use draft::{LibraryDraft, access_label, is_ready, library_counts};
-use flux_shared::Permission;
-use flux_shared::flows::FlowRecord;
-use flux_shared::libraries::{Library, LibraryOutputPolicy};
-use flux_shared::local::LocalLibrarySnapshot;
-use flux_shared::session::Me;
-use flux_shared::workers::Worker;
+use forgearr_shared::Permission;
+use forgearr_shared::flows::FlowRecord;
+use forgearr_shared::libraries::{Library, LibraryOutputPolicy};
+use forgearr_shared::local::LocalLibrarySnapshot;
+use forgearr_shared::session::Me;
+use forgearr_shared::workers::Worker;
 use form::LibraryForm;
 use leptos::prelude::*;
 use packs::LocalPacksSection;
@@ -447,9 +447,9 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_shared::InstanceKind;
-    use flux_shared::Role;
-    use flux_shared::session::CallerKind;
+    use forgearr_shared::InstanceKind;
+    use forgearr_shared::Role;
+    use forgearr_shared::session::CallerKind;
 
     #[test]
     fn library_tabs_respect_flow_view_permission() {

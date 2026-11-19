@@ -4,7 +4,7 @@
 //! catalogue retourné est vide.
 
 use super::{CatalogItemType, catalog_with_roots};
-use flux_shared::flows::{OwnedBlockSpec, OwnedFieldKind, OwnedFieldSpec};
+use forgearr_shared::flows::{OwnedBlockSpec, OwnedFieldKind, OwnedFieldSpec};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 

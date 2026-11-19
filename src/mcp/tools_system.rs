@@ -13,7 +13,7 @@ use axum::{
     extract::{Json, Path, State},
     http::HeaderMap,
 };
-use flux_shared::{
+use forgearr_shared::{
     Permission,
     diagnostics::DiagnosticsRequest,
     system::UpdateSystemSettingsRequest,

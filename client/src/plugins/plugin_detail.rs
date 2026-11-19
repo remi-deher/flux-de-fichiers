@@ -6,10 +6,10 @@ use crate::api;
 use crate::flows::NodeDomain;
 use crate::route::encode_segment;
 use crate::ui::{Icon, Tag, TagTone};
-use flux_shared::flows::OwnedBlockSpec;
+use forgearr_shared::flows::OwnedBlockSpec;
 #[cfg(test)]
-use flux_shared::flows::{OwnedFieldKind, OwnedFieldSpec};
-use flux_shared::plugins::PluginDetailView;
+use forgearr_shared::flows::{OwnedFieldKind, OwnedFieldSpec};
+use forgearr_shared::plugins::PluginDetailView;
 use leptos::prelude::*;
 
 const BLOCK_CARD_ICON_SIZE: u32 = 16;

@@ -4,7 +4,7 @@ use crate::api;
 use crate::format;
 use crate::ui::{SectionHeader, Tag, TagTone, Toasts};
 use chrono::DateTime;
-use flux_shared::ai::{
+use forgearr_shared::ai::{
     AiDiagnosis, AiDiagnosisSettings, AiHealth, AiQuotaSettings, MAX_AI_DAILY_QUOTA,
 };
 use leptos::ev;

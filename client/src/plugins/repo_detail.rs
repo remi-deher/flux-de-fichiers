@@ -1,5 +1,6 @@
 //! Tiroir d'inspection à onglets d'un dépôt de plugins : contenu, synchronisation et informations.
 
+use super::metadata::{MetaRow, StatusBanner, StoreTone};
 use super::repos::RepoAction;
 use super::{REPOSITORIES_PATH, section_badge_label};
 use crate::api;
@@ -34,21 +35,16 @@ fn ContentTab(detail: RepositoryDetailView) -> impl IntoView {
     let skipped_count = detail.skipped_count.to_string();
     view! {
         <div class="detail-grid">
-            <div class="detail-term">"Copie locale"</div>
-            <div class="detail-val">
+            <MetaRow term="Copie locale">
                 {if detail.synced_on_disk { "Synchronisée" } else { "Absente" }}
-            </div>
-            <div class="detail-term">"Entrées indexées"</div>
-            <div class="detail-val">{entries_count}</div>
-            <div class="detail-term">"Fiches ignorées"</div>
-            <div class="detail-val">{skipped_count}</div>
+            </MetaRow>
+            <MetaRow term="Entrées indexées">{entries_count}</MetaRow>
+            <MetaRow term="Fiches ignorées">{skipped_count}</MetaRow>
             {detail.release_version.map(|rel| view! {
-                <div class="detail-term">"Version release"</div>
-                <div class="detail-val text-mono">{rel}</div>
+                <MetaRow term="Version release" mono=true>{rel}</MetaRow>
             })}
             {detail.schema_version.map(|schema| view! {
-                <div class="detail-term">"Schéma d'index"</div>
-                <div class="detail-val text-mono">{schema}</div>
+                <MetaRow term="Schéma d'index" mono=true>{schema}</MetaRow>
             })}
         </div>
         <div class="pack-components">
@@ -97,16 +93,14 @@ fn SyncTab(
 
     view! {
         <div class="detail-grid">
-            <div class="detail-term">"État"</div>
-            <div class="detail-val">
-                <span class=if repo.enabled { "status-pill success" } else { "status-pill info" }>
-                    {if repo.enabled { "Actif" } else { "Désactivé" }}
-                </span>
-            </div>
-            <div class="detail-term">"URL de l'index"</div>
-            <div class="detail-val text-mono">{repo.index_url}</div>
-            <div class="detail-term">"Dernière synchro"</div>
-            <div class="detail-val">{last_sync}</div>
+            <MetaRow term="État">
+                <Tag
+                    label=if repo.enabled { "Actif" } else { "Désactivé" }
+                    tone=if repo.enabled { TagTone::Success } else { TagTone::Neutral }
+                />
+            </MetaRow>
+            <MetaRow term="URL de l'index" mono=true>{repo.index_url}</MetaRow>
+            <MetaRow term="Dernière synchro">{last_sync}</MetaRow>
         </div>
         <div class="inspection-drawer__actions">
             <button
@@ -144,19 +138,15 @@ fn InfoTab(detail: RepositoryDetailView) -> impl IntoView {
     let repo = detail.repository;
     view! {
         <div class="detail-grid">
-            <div class="detail-term">"Identifiant"</div>
-            <div class="detail-val text-mono">{repo.id}</div>
-            <div class="detail-term">"Nom"</div>
-            <div class="detail-val">{repo.name}</div>
-            <div class="detail-term">"Origine"</div>
-            <div class="detail-val">
+            <MetaRow term="Identifiant" mono=true>{repo.id}</MetaRow>
+            <MetaRow term="Nom">{repo.name}</MetaRow>
+            <MetaRow term="Origine">
                 <Tag
                     label=if repo.is_official { "Officiel" } else { "Tiers" }
                     tone=if repo.is_official { TagTone::Primary } else { TagTone::Neutral }
                 />
-            </div>
-            <div class="detail-term">"Ajouté le"</div>
-            <div class="detail-val">{repo.created_at}</div>
+            </MetaRow>
+            <MetaRow term="Ajouté le">{repo.created_at}</MetaRow>
         </div>
     }
 }
@@ -183,14 +173,58 @@ pub fn RepoDetail(
                 match detail.get() {
                     None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),
                     Some(Err(error)) => view! { <p class="text-danger">{error.message()}</p> }.into_any(),
-                    Some(Ok(data)) => match active_tab {
-                        RepoDrawerTab::Content => view! { <ContentTab detail=data /> }.into_any(),
-                        RepoDrawerTab::Sync => view! {
-                            <SyncTab detail=data on_action=on_action action_pending=action_pending />
+                    Some(Ok(data)) => {
+                        let sync_id = data.repository.id.clone();
+                        let banner_tone = if !data.repository.enabled {
+                            StoreTone::Neutral
+                        } else if data.skipped_count > 0 {
+                            StoreTone::Warning
+                        } else if data.synced_on_disk {
+                            StoreTone::Success
+                        } else {
+                            StoreTone::Primary
+                        };
+                        let banner_title = if !data.repository.enabled {
+                            "Dépôt désactivé".to_owned()
+                        } else if !data.synced_on_disk {
+                            "Synchronisation requise".to_owned()
+                        } else {
+                            format!("{} entrée(s) indexée(s)", data.entries_count)
+                        };
+                        let banner_text = if data.skipped_count > 0 {
+                            Some(format!("{} fiche(s) ignorée(s) lors du dernier index.", data.skipped_count))
+                        } else {
+                            data.repository.last_synced_at.as_ref().map(|dt| format!("Dernière synchro : {dt}"))
+                        };
+                        let sync_btn = view! {
+                            <button
+                                type="button"
+                                class="btn btn-primary btn-sm"
+                                disabled=action_pending
+                                on:click=move |_| on_action.run((sync_id.clone(), RepoAction::Sync))
+                            >
+                                "Synchroniser"
+                            </button>
                         }
-                        .into_any(),
-                        RepoDrawerTab::Info => view! { <InfoTab detail=data /> }.into_any(),
-                    },
+                        .into_any();
+                        view! {
+                            <StatusBanner
+                                title=banner_title
+                                text=banner_text
+                                tone=banner_tone
+                                action=Some(sync_btn)
+                            />
+                            {match active_tab {
+                                RepoDrawerTab::Content => view! { <ContentTab detail=data /> }.into_any(),
+                                RepoDrawerTab::Sync => view! {
+                                    <SyncTab detail=data on_action=on_action action_pending=action_pending />
+                                }
+                                .into_any(),
+                                RepoDrawerTab::Info => view! { <InfoTab detail=data /> }.into_any(),
+                            }}
+                        }
+                        .into_any()
+                    }
                 }
             }}
         </div>

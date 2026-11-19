@@ -14,6 +14,17 @@ pub async fn get_plugin_settings(pool: &SqlitePool, plugin_id: &str) -> AppResul
     Ok(settings)
 }
 
+/// Retourne les couples `(plugin_id, settings_json)` enregistrés en base.
+pub async fn list_all_plugin_settings(
+    pool: &SqlitePool,
+) -> AppResult<std::collections::HashMap<String, String>> {
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT plugin_id, settings FROM plugin_settings")
+            .fetch_all(pool)
+            .await?;
+    Ok(rows.into_iter().collect())
+}
+
 pub async fn set_plugin_settings(
     pool: &SqlitePool,
     plugin_id: &str,

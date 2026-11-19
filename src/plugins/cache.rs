@@ -65,6 +65,48 @@ impl CatalogCache {
             .collect()
     }
 
+    /// Catalogue exposé enrichi de l'état opérationnel (`CatalogRuntimeSummary`) de chaque pièce.
+    pub async fn exposed_catalog_enriched(
+        &self,
+        roots: &[PathBuf],
+        cache_mgr: &ToolCacheManager,
+        saved_settings: &std::collections::HashMap<String, String>,
+    ) -> Vec<CatalogEntry> {
+        let snapshot = self.snapshot(roots).await;
+        let tool_statuses: std::collections::HashMap<String, super::ToolStatus> = snapshot
+            .tool_descriptions
+            .iter()
+            .map(|(entry, description, installable)| {
+                let summary =
+                    summarize_tool(entry.clone(), description.clone(), *installable, cache_mgr);
+                (summary.id, summary.status)
+            })
+            .collect();
+        let owned_roots = roots.to_vec();
+        let saved = saved_settings.clone();
+        tokio::task::spawn_blocking(move || {
+            snapshot
+                .entries
+                .into_iter()
+                .filter_map(|(root, mut entry)| {
+                    entry.entry_type.section()?;
+                    let runtime = super::compute_entry_runtime(
+                        &owned_roots,
+                        &root,
+                        &entry,
+                        &snapshot.blocks,
+                        &tool_statuses,
+                        &saved,
+                    );
+                    entry.runtime = Some(runtime);
+                    Some(entry)
+                })
+                .collect()
+        })
+        .await
+        .unwrap_or_default()
+    }
+
     pub async fn blocks(&self, roots: &[PathBuf]) -> Vec<OwnedBlockSpec> {
         self.snapshot(roots).await.blocks
     }

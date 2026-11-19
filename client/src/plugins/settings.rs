@@ -1,5 +1,6 @@
 //! Réglages d'un plugin, générés depuis son `settingsSchema` (secrets jamais relus).
 
+use super::metadata::{StatusBanner, StoreTone};
 use crate::api;
 use crate::route::encode_segment;
 use forgearr_shared::plugins::{
@@ -25,7 +26,10 @@ fn input_kind(field: &ResolvedSettingsField) -> &'static str {
 }
 
 #[component]
-pub fn PluginSettings(plugin_id: String) -> impl IntoView {
+pub fn PluginSettings(
+    plugin_id: String,
+    #[prop(optional)] on_saved: Option<Callback<()>>,
+) -> impl IntoView {
     let path = format!("/api/v1/plugins/{}/settings", encode_segment(&plugin_id));
     let load_path = path.clone();
     let view_data = LocalResource::new(move || {
@@ -33,7 +37,7 @@ pub fn PluginSettings(plugin_id: String) -> impl IntoView {
         async move { api::get::<PluginSettingsView>(&path).await }
     });
     let test_path = format!("/api/v1/plugins/{}/test", encode_segment(&plugin_id));
-    let feedback = RwSignal::new(None::<String>);
+    let feedback = RwSignal::new(None::<(bool, String)>);
     let test_feedback = RwSignal::new(None::<(bool, String)>);
     let save = Action::new_local(move |body: &Map<String, Value>| {
         let (path, body) = (path.clone(), body.clone());
@@ -46,8 +50,13 @@ pub fn PluginSettings(plugin_id: String) -> impl IntoView {
         }
     });
     Effect::new(move |_| match save.value().get() {
-        Some(Ok(_)) => feedback.set(Some("Réglages enregistrés.".into())),
-        Some(Err(error)) => feedback.set(Some(error.message())),
+        Some(Ok(_)) => {
+            feedback.set(Some((true, "Réglages enregistrés.".into())));
+            if let Some(cb) = on_saved {
+                cb.run(());
+            }
+        }
+        Some(Err(error)) => feedback.set(Some((false, error.message()))),
         None => {}
     });
     Effect::new(move |_| match test_conn.value().get() {
@@ -57,6 +66,20 @@ pub fn PluginSettings(plugin_id: String) -> impl IntoView {
     });
     view! {
         <div class="inspection-panel">
+            {move || feedback.get().map(|(ok, msg)| view! {
+                <StatusBanner
+                    title=if ok { "Enregistrement réussi" } else { "Erreur d'enregistrement" }
+                    text=Some(msg)
+                    tone=if ok { StoreTone::Success } else { StoreTone::Danger }
+                />
+            })}
+            {move || test_feedback.get().map(|(ok, msg)| view! {
+                <StatusBanner
+                    title=if ok { "Connexion vérifiée" } else { "Échec de la connexion" }
+                    text=Some(msg)
+                    tone=if ok { StoreTone::Success } else { StoreTone::Danger }
+                />
+            })}
             {move || match view_data.get() {
                 None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),
                 Some(Err(error)) => view! { <p class="text-danger">{error.message()}</p> }.into_any(),
@@ -118,10 +141,6 @@ pub fn PluginSettings(plugin_id: String) -> impl IntoView {
                     }.into_any()
                 }
             }}
-            <p class="form-help" role="status">{move || feedback.get()}</p>
-            {move || test_feedback.get().map(|(ok, msg)| view! {
-                <p class=if ok { "form-help" } else { "form-error" } role="status">{msg}</p>
-            })}
         </div>
     }
 }

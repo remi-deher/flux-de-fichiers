@@ -1,5 +1,8 @@
-//! Plugins : catalogue d'extensions, outils distribués, dépôts synchronisés et réglages (ADR 0010, 0014).
+//! Plugins : catalogue App Store, outils distribués, dépôts synchronisés et tiroirs croisés (ADR 0010, 0014).
 
+mod catalog;
+mod item_detail;
+mod metadata;
 mod pack_detail;
 mod plugin_detail;
 mod repo_detail;
@@ -10,13 +13,8 @@ mod tools;
 
 use crate::api;
 use crate::route::encode_segment;
-use crate::ui::filters::{Filters, PluginKindFilter, plugin_kind};
-use crate::ui::search::{matches, query};
-use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
-use crate::ui::{
-    Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
-    Toasts,
-};
+use crate::ui::{Drawer, IconName, Toasts};
+use catalog::{CatalogSectionView, summarize_catalog};
 use chrono::NaiveDate;
 use forgearr_shared::format::format_day;
 use forgearr_shared::plugins::vocab::{CatalogItemType, CatalogSection};
@@ -25,10 +23,12 @@ use forgearr_shared::plugins::{
 };
 use forgearr_shared::session::Me;
 use forgearr_shared::{InstanceKind, Permission};
+use item_detail::CatalogItemDetail;
 use leptos::prelude::*;
 pub(crate) use pack_detail::{PackDetail, PackDrawerTab};
 use plugin_detail::{PluginDetail, PluginDrawerTab};
 use repos::ReposSection;
+use tool_detail::{ToolDetail, ToolDrawerTab};
 use tools::ToolsSection;
 
 const REPOSITORIES_PATH: &str = "/api/v1/plugins/repositories";
@@ -43,81 +43,11 @@ pub fn tool_status_label(status: ToolStatus) -> (&'static str, &'static str) {
     }
 }
 
-fn bump(signal: RwSignal<u32>) {
+pub(super) fn bump(signal: RwSignal<u32>) {
     signal.update(|count| *count = count.wrapping_add(1));
 }
 
-/// Compteurs affichés dans le bandeau `StatStrip` du catalogue.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct CatalogCounts {
-    pub total: usize,
-    pub plugins: usize,
-    pub packs: usize,
-    pub flows: usize,
-    pub scripts: usize,
-    pub resources: usize,
-}
-
-/// Synthèse des entrées du catalogue par section (hors blocs et outils distribués).
-pub fn summarize_catalog(entries: &[CatalogEntry]) -> CatalogCounts {
-    let mut counts = CatalogCounts::default();
-    for entry in entries {
-        match entry.entry_type.section() {
-            Some(CatalogSection::Plugins) => {
-                counts.total += 1;
-                counts.plugins += 1;
-            }
-            Some(CatalogSection::Flows) => {
-                counts.total += 1;
-                counts.flows += 1;
-            }
-            Some(CatalogSection::Scripts) => {
-                counts.total += 1;
-                counts.scripts += 1;
-            }
-            Some(CatalogSection::Packs) => {
-                counts.total += 1;
-                counts.packs += 1;
-            }
-            Some(CatalogSection::Other) => {
-                counts.total += 1;
-                counts.resources += 1;
-            }
-            Some(CatalogSection::Applications) | None => {}
-        }
-    }
-    counts
-}
-
-/// Filtre les entrées du catalogue par catégorie active et recherche textuelle.
-pub fn filter_catalog(
-    entries: Vec<CatalogEntry>,
-    kind: PluginKindFilter,
-    text: &str,
-) -> Vec<CatalogEntry> {
-    entries
-        .into_iter()
-        .filter(|entry| kind.accepts(entry) && catalog_entry_matches(entry, text))
-        .collect()
-}
-
-fn catalog_entry_matches(entry: &CatalogEntry, text: &str) -> bool {
-    let mut fields: Vec<&str> = Vec::with_capacity(4 + entry.tags.len());
-    fields.push(&entry.name);
-    fields.push(&entry.id);
-    if let Some(cap) = entry.capability.as_ref() {
-        fields.push(cap.as_str());
-    }
-    if let Some(sub) = entry.entry_type.subtitle() {
-        fields.push(sub);
-    }
-    for tag in &entry.tags {
-        fields.push(tag.as_str());
-    }
-    matches(&fields, text)
-}
-
-fn section_icon(entry_type: CatalogItemType) -> IconName {
+pub(super) fn section_icon(entry_type: CatalogItemType) -> IconName {
     match entry_type.section() {
         Some(CatalogSection::Plugins) => IconName::Plugins,
         Some(CatalogSection::Flows) => IconName::Flows,
@@ -126,16 +56,6 @@ fn section_icon(entry_type: CatalogItemType) -> IconName {
         Some(CatalogSection::Applications) => IconName::Package,
         Some(CatalogSection::Other) | None => IconName::Layers,
     }
-}
-
-/// Ligne « terme / date » d'une fiche ; rien si la date est inconnue.
-pub(super) fn date_row(term: &'static str, date: Option<NaiveDate>) -> impl IntoView {
-    date.map(|day| {
-        view! {
-            <div class="detail-term">{term}</div>
-            <div class="detail-val">{format_day(day)}</div>
-        }
-    })
 }
 
 /// Synthèse du bilan d'installation d'un outil ou d'un plugin et de ses dépendances.
@@ -229,7 +149,7 @@ fn section_fallback_desc(entry_type: CatalogItemType) -> &'static str {
 }
 
 /// Texte d'une carte : description du manifeste, sinon libellé du type, sinon description par section.
-fn card_description(entry: &CatalogEntry) -> String {
+pub(super) fn card_description(entry: &CatalogEntry) -> String {
     entry
         .description
         .clone()
@@ -263,297 +183,34 @@ impl PluginsTab {
         }
     }
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct SelectedItem {
+pub struct SelectedItem {
     pub id: String,
     pub name: String,
 }
 
-#[derive(Clone, PartialEq, Eq)]
-enum CatalogDrawer {
+#[derive(Clone, PartialEq)]
+enum InspectionTarget {
     Plugin(SelectedItem),
-    PackDetails(SelectedItem),
+    Pack(SelectedItem),
+    Tool(SelectedItem),
+    Item(CatalogEntry),
 }
 
-#[component]
-fn CatalogSectionView(
-    catalog: LocalResource<Result<Vec<CatalogEntry>, api::ApiError>>,
-    reload_tools: RwSignal<u32>,
-    can_configure: bool,
-) -> impl IntoView {
-    let filters = use_context::<Filters>();
-    let inspecting_plugin = RwSignal::new(None::<SelectedItem>);
-    let plugin_drawer_open = RwSignal::new(false);
-    let plugin_tab = RwSignal::new(0_usize);
-    let inspecting_pack = RwSignal::new(None::<SelectedItem>);
-    let pack_drawer_open = RwSignal::new(false);
-    let pack_tab = RwSignal::new(0_usize);
-    let plugin_title = Signal::derive(move || {
-        inspecting_plugin
-            .get()
-            .map(|item| item.name)
-            .unwrap_or_default()
-    });
-    let pack_title = Signal::derive(move || {
-        inspecting_pack
-            .get()
-            .map(|item| item.name)
-            .unwrap_or_default()
-    });
-    let on_pack_installed = Callback::new(move |()| bump(reload_tools));
-    let stats = Signal::derive(move || {
-        let catalog_entries = catalog.get().and_then(Result::ok).unwrap_or_default();
-        let counts = summarize_catalog(&catalog_entries);
-        let active_kind = plugin_kind();
-        let set_kind = move |next: PluginKindFilter| {
-            Callback::new(move |()| {
-                if let Some(filters) = filters {
-                    filters.plugin_kind.set(next);
-                }
-            })
-        };
-        vec![
-            StatItem::new("Tous", counts.total.to_string(), MetricTone::Neutral).with_filter(
-                active_kind == PluginKindFilter::Any,
-                set_kind(PluginKindFilter::Any),
-            ),
-            StatItem::new(
-                "Plugins",
-                counts.plugins.to_string(),
-                if counts.plugins > 0 {
-                    MetricTone::Success
-                } else {
-                    MetricTone::Neutral
-                },
-            )
-            .with_filter(
-                active_kind == PluginKindFilter::Plugins,
-                set_kind(PluginKindFilter::Plugins),
-            ),
-            StatItem::new("Packs", counts.packs.to_string(), MetricTone::Neutral).with_filter(
-                active_kind == PluginKindFilter::Packs,
-                set_kind(PluginKindFilter::Packs),
-            ),
-            StatItem::new("Flux", counts.flows.to_string(), MetricTone::Neutral).with_filter(
-                active_kind == PluginKindFilter::Flows,
-                set_kind(PluginKindFilter::Flows),
-            ),
-            StatItem::new("Scripts", counts.scripts.to_string(), MetricTone::Neutral).with_filter(
-                active_kind == PluginKindFilter::Scripts,
-                set_kind(PluginKindFilter::Scripts),
-            ),
-            StatItem::new(
-                "Ressources",
-                counts.resources.to_string(),
-                MetricTone::Neutral,
-            )
-            .with_filter(
-                active_kind == PluginKindFilter::Resources,
-                set_kind(PluginKindFilter::Resources),
-            ),
-        ]
-    });
+impl InspectionTarget {
+    fn id(&self) -> &str {
+        match self {
+            Self::Plugin(s) | Self::Pack(s) | Self::Tool(s) => &s.id,
+            Self::Item(entry) => &entry.id,
+        }
+    }
 
-    view! {
-        <StatStrip aria_label="Synthèse du catalogue" items=stats />
-        <Drawer
-            open=plugin_drawer_open
-            eyebrow="Plugin"
-            title=plugin_title
-            tabs=PluginDrawerTab::tabs(can_configure).to_vec()
-            tab=plugin_tab
-        >
-            {move || inspecting_plugin.get().map(|item| {
-                view! { <PluginDetail plugin_id=item.id tab=plugin_tab can_configure=can_configure /> }
-            })}
-        </Drawer>
-        <Drawer
-            open=pack_drawer_open
-            eyebrow="Pack"
-            title=pack_title
-            tabs=PackDrawerTab::TABS.to_vec()
-            tab=pack_tab
-        >
-            {move || inspecting_pack.get().map(|item| {
-                view! {
-                    <PackDetail
-                        pack_id=item.id
-                        tab=pack_tab
-                        can_install=can_configure
-                        on_installed=on_pack_installed
-                    />
-                }
-            })}
-        </Drawer>
-        <section class="page-section">
-            {move || {
-                let text = query();
-                let kind = plugin_kind();
-                match catalog.get() {
-                    None => view! {
-                        <div class="empty-state-panel">
-                            <p class="text-dim">"Chargement du catalogue…"</p>
-                        </div>
-                    }
-                    .into_any(),
-                    Some(Err(error)) => view! {
-                        <div class="empty-state-panel">
-                            <p class="form-error">{error.message()}</p>
-                        </div>
-                    }
-                    .into_any(),
-                    Some(Ok(all)) => {
-                        let shown = filter_catalog(all, kind, &text);
-                        if shown.is_empty() {
-                            return view! {
-                                <div class="empty-state-panel">
-                                    <EmptyState
-                                        title=if text.trim().is_empty() && kind == PluginKindFilter::Any {
-                                            "Catalogue vide"
-                                        } else {
-                                            "Aucune extension correspondante"
-                                        }
-                                        message=if text.trim().is_empty() && kind == PluginKindFilter::Any {
-                                            "Synchronisez un dépôt de plugins pour peupler ce catalogue."
-                                        } else {
-                                            "Ajustez votre recherche ou le filtre de catégorie pour afficher des extensions."
-                                        }
-                                        icon_name=IconName::Plugins
-                                    />
-                                </div>
-                            }
-                            .into_any();
-                        }
-                        view! {
-                            <div class="resource-grid resource-grid--list">
-                                {shown.into_iter().map(|entry| {
-                                    let id = entry.id.clone();
-                                    let active_id = id.clone();
-                                    let updated = updated_label(entry.updated_at);
-                                    let target = match entry.entry_type {
-                                        CatalogItemType::Plugin => Some((
-                                            CatalogDrawer::Plugin(SelectedItem {
-                                                id: id.clone(),
-                                                name: entry.name.clone(),
-                                            }),
-                                            if can_configure { "Configurer" } else { "Détails" },
-                                        )),
-                                        CatalogItemType::Pack => Some((
-                                            CatalogDrawer::PackDetails(SelectedItem {
-                                                id: id.clone(),
-                                                name: entry.name.clone(),
-                                            }),
-                                            if can_configure { "Voir / Installer" } else { "Détails" },
-                                        )),
-                                        _ => None,
-                                    };
-                                    let is_template = matches!(
-                                        entry.entry_type,
-                                        CatalogItemType::Flow | CatalogItemType::Preset
-                                    );
-                                    let badge_label = section_badge_label(entry.entry_type);
-                                    let subtitle = card_description(&entry);
-                                    let tone = match entry.entry_type.section() {
-                                        Some(CatalogSection::Plugins) => MetricTone::Success,
-                                        Some(CatalogSection::Flows) => MetricTone::Warning,
-                                        _ => MetricTone::Neutral,
-                                    };
-                                    let badge = view! {
-                                        <div class="cluster">
-                                            <Tag label=entry.version tone=TagTone::Mono />
-                                            <Tag label=badge_label tone=TagTone::Primary />
-                                        </div>
-                                    }
-                                    .into_any();
-                                    let open_target = move |dest: CatalogDrawer| match dest {
-                                        CatalogDrawer::Plugin(plugin_id) => {
-                                            pack_drawer_open.set(false);
-                                            inspecting_plugin.set(Some(plugin_id));
-                                            plugin_tab.set(0);
-                                            plugin_drawer_open.set(true);
-                                        }
-                                        CatalogDrawer::PackDetails(pack_id) => {
-                                            plugin_drawer_open.set(false);
-                                            inspecting_pack.set(Some(pack_id));
-                                            pack_tab.set(0);
-                                            pack_drawer_open.set(true);
-                                        }
-                                    };
-                                    let open_drawer = target.as_ref().map(|(dest, _)| {
-                                        let dest = dest.clone();
-                                        Callback::new(move |()| open_target(dest.clone()))
-                                    });
-                                    let actions = target.as_ref().map(|(dest, label)| {
-                                        let dest = dest.clone();
-                                        let label = *label;
-                                        view! {
-                                            <button type="button" class="btn btn-secondary btn-sm"
-                                                on:click=move |_| open_target(dest.clone())>
-                                                {label}
-                                            </button>
-                                        }
-                                        .into_any()
-                                    });
-                                    let has_meta = is_template
-                                        || entry.capability.is_some()
-                                        || entry.category.is_some_and(|cat| cat.shows_badge())
-                                        || entry.distribution.is_some()
-                                        || !entry.tags.is_empty();
-                                    view! {
-                                        <ResourceCard
-                                            title=entry.name
-                                            subtitle=Some(subtitle)
-                                            icon=section_icon(entry.entry_type)
-                                            tone=tone
-                                            badge=Some(badge)
-                                            active=Some(Signal::derive(move || {
-                                                (plugin_drawer_open.get()
-                                                    && inspecting_plugin
-                                                        .get()
-                                                        .is_some_and(|item| item.id == active_id))
-                                                    || (pack_drawer_open.get()
-                                                        && inspecting_pack
-                                                            .get()
-                                                            .is_some_and(|item| item.id == active_id))
-                                            }))
-                                            on_click=open_drawer
-                                            footer_meta=updated
-                                            footer_actions=actions
-                                        >
-                                            {if has_meta {
-                                                view! {
-                                                    <div class="cluster">
-                                                        {is_template.then(|| view! {
-                                                            <Tag label="Modèle prêt à l'emploi" tone=TagTone::Success />
-                                                        })}
-                                                        {entry.capability.map(|cap| view! {
-                                                            <Tag label=cap.as_str() tone=TagTone::Success />
-                                                        })}
-                                                        {entry.category.filter(|cat| cat.shows_badge()).map(|cat| view! {
-                                                            <Tag label=cat.as_str() tone=TagTone::Neutral />
-                                                        })}
-                                                        {entry.distribution.map(|dist| view! {
-                                                            <Tag label=dist tone=TagTone::Mono />
-                                                        })}
-                                                        {entry.tags.into_iter().map(|tag| view! {
-                                                            <Tag label=tag tone=TagTone::Neutral />
-                                                        }).collect_view()}
-                                                    </div>
-                                                }
-                                                .into_any()
-                                            } else {
-                                                ().into_any()
-                                            }}
-                                        </ResourceCard>
-                                    }
-                                }).collect_view()}
-                            </div>
-                        }
-                        .into_any()
-                    }
-                }
-            }}
-        </section>
+    fn title(&self) -> String {
+        match self {
+            Self::Plugin(s) | Self::Pack(s) | Self::Tool(s) => s.name.clone(),
+            Self::Item(entry) => entry.name.clone(),
+        }
     }
 }
 
@@ -565,17 +222,63 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
     let reload_catalog = RwSignal::new(0_u32);
     let reload_tools = RwSignal::new(0_u32);
     let reload_repos = RwSignal::new(0_u32);
-    let adding = RwSignal::new(false);
+    let adding_repo = RwSignal::new(false);
 
-    if can_manage {
-        provide_topbar_action(ActionSpec {
-            label: "Ajouter un dépôt",
-            on_click: Callback::new(move |()| {
-                active_tab.set(PluginsTab::Repositories);
-                adding.set(true);
-            }),
-        });
-    }
+    // Tiroir d'inspection unifié permettant la navigation croisée Plugin <-> Outil.
+    let target = RwSignal::new(None::<InspectionTarget>);
+    let plugin_open = RwSignal::new(false);
+    let plugin_tab = RwSignal::new(0_usize);
+    let pack_open = RwSignal::new(false);
+    let pack_tab = RwSignal::new(0_usize);
+    let tool_open = RwSignal::new(false);
+    let tool_tab = RwSignal::new(0_usize);
+    let item_open = RwSignal::new(false);
+
+    let close_all_drawers = move || {
+        plugin_open.set(false);
+        pack_open.set(false);
+        tool_open.set(false);
+        item_open.set(false);
+    };
+
+    let open_plugin = Callback::new(move |item: SelectedItem| {
+        close_all_drawers();
+        target.set(Some(InspectionTarget::Plugin(item)));
+        plugin_tab.set(0);
+        plugin_open.set(true);
+    });
+    let open_pack = Callback::new(move |item: SelectedItem| {
+        close_all_drawers();
+        target.set(Some(InspectionTarget::Pack(item)));
+        pack_tab.set(0);
+        pack_open.set(true);
+    });
+    let open_tool = Callback::new(move |item: SelectedItem| {
+        close_all_drawers();
+        target.set(Some(InspectionTarget::Tool(item)));
+        tool_tab.set(0);
+        tool_open.set(true);
+    });
+    let open_item = Callback::new(move |entry: CatalogEntry| {
+        close_all_drawers();
+        target.set(Some(InspectionTarget::Item(entry)));
+        item_open.set(true);
+    });
+
+    let active_item_id = Signal::derive(move || {
+        let any_open = plugin_open.get() || pack_open.get() || item_open.get();
+        any_open
+            .then(|| target.get().map(|t| t.id().to_owned()))
+            .flatten()
+    });
+    let active_tool_id = Signal::derive(move || {
+        tool_open
+            .get()
+            .then(|| target.get().map(|t| t.id().to_owned()))
+            .flatten()
+    });
+
+    let drawer_title = Signal::derive(move || target.get().map(|t| t.title()).unwrap_or_default());
 
     let catalog = LocalResource::new(move || {
         reload_catalog.track();
@@ -591,6 +294,24 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
             api::get::<Vec<PluginRepository>>(REPOSITORIES_PATH)
         })
     });
+    let on_pack_installed = Callback::new(move |()| {
+        bump(reload_tools);
+        bump(reload_catalog);
+    });
+
+    let tab_count = move |tab: PluginsTab| -> Option<usize> {
+        match tab {
+            PluginsTab::Catalog => catalog
+                .get()
+                .and_then(Result::ok)
+                .map(|entries| summarize_catalog(&entries).total),
+            PluginsTab::Tools => tools.get().and_then(Result::ok).map(|list| list.len()),
+            PluginsTab::Repositories => repositories
+                .and_then(|res| res.get())
+                .and_then(Result::ok)
+                .map(|list| list.len()),
+        }
+    };
 
     view! {
         <div class="tab-panel" role="tabpanel">
@@ -606,24 +327,106 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
                             aria-selected=move || is_active().to_string()
                             on:click=move |_| active_tab.set(tab)
                         >
-                            {tab.label()}
+                            <span>{tab.label()}</span>
+                            {move || tab_count(tab).map(|count| view! {
+                                <span class="tab-btn-badge">{count}</span>
+                            })}
                         </button>
                     }
                 }).collect_view()}
             </nav>
+
+            <Drawer
+                open=plugin_open
+                eyebrow="Plugin"
+                title=drawer_title
+                tabs=PluginDrawerTab::tabs(can_manage).to_vec()
+                tab=plugin_tab
+            >
+                {move || match target.get() {
+                    Some(InspectionTarget::Plugin(item)) => view! {
+                        <PluginDetail
+                            plugin_id=item.id
+                            tab=plugin_tab
+                            can_configure=can_manage
+                            reload_tools=reload_tools
+                            reload_catalog=reload_catalog
+                            on_open_tool=open_tool
+                        />
+                    }.into_any(),
+                    _ => ().into_any(),
+                }}
+            </Drawer>
+            <Drawer
+                open=pack_open
+                eyebrow="Pack"
+                title=drawer_title
+                tabs=PackDrawerTab::TABS.to_vec()
+                tab=pack_tab
+            >
+                {move || match target.get() {
+                    Some(InspectionTarget::Pack(item)) => view! {
+                        <PackDetail
+                            pack_id=item.id
+                            tab=pack_tab
+                            can_install=can_manage
+                            on_installed=on_pack_installed
+                            on_open_plugin=open_plugin
+                            on_open_tool=open_tool
+                        />
+                    }.into_any(),
+                    _ => ().into_any(),
+                }}
+            </Drawer>
+            <Drawer
+                open=tool_open
+                eyebrow="Outil"
+                title=drawer_title
+                tabs=ToolDrawerTab::TABS.to_vec()
+                tab=tool_tab
+            >
+                {move || match target.get() {
+                    Some(InspectionTarget::Tool(item)) => view! {
+                        <ToolDetail
+                            tool_id=item.id
+                            tab=tool_tab
+                            can_install=can_manage
+                            reload_tools=reload_tools
+                            reload_catalog=reload_catalog
+                            on_open_plugin=open_plugin
+                        />
+                    }.into_any(),
+                    _ => ().into_any(),
+                }}
+            </Drawer>
+            <Drawer open=item_open eyebrow="Catalogue" title=drawer_title>
+                {move || match target.get() {
+                    Some(InspectionTarget::Item(entry)) => view! {
+                        <CatalogItemDetail entry=entry />
+                    }.into_any(),
+                    _ => ().into_any(),
+                }}
+            </Drawer>
+
             {move || match active_tab.get() {
                 PluginsTab::Catalog => view! {
                     <CatalogSectionView
                         catalog=catalog
-                        reload_tools=reload_tools
                         can_configure=can_manage
+                        active_item_id=active_item_id
+                        on_open_plugin=open_plugin
+                        on_open_pack=open_pack
+                        on_open_item=open_item
                     />
                 }.into_any(),
                 PluginsTab::Tools => view! {
                     <ToolsSection
                         tools=tools
                         reload_tools=reload_tools
+                        reload_catalog=reload_catalog
                         can_install=can_manage
+                        active_tool_id=active_tool_id
+                        on_open_tool=open_tool
                     />
                 }.into_any(),
                 PluginsTab::Repositories => match repositories {
@@ -632,7 +435,7 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
                             repositories=repos
                             reload_repos=reload_repos
                             reload_catalog=reload_catalog
-                            adding=adding
+                            adding=adding_repo
                         />
                     }.into_any(),
                     None => ().into_any(),
@@ -645,7 +448,6 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use forgearr_shared::plugins::vocab::CatalogCapability;
 
     #[test]
     fn visible_tabs_hide_repositories_without_manage_permission() {
@@ -661,6 +463,7 @@ mod tests {
                 PluginsTab::Repositories
             ]
         );
+        assert_eq!(PluginsTab::Catalog.label(), "Catalogue");
     }
 
     #[test]
@@ -690,6 +493,7 @@ mod tests {
             owner: None,
             sha256: None,
             updated_at: None,
+            runtime: None,
         }
     }
 
@@ -744,50 +548,6 @@ mod tests {
     }
 
     #[test]
-    fn summarize_and_filter_catalog_exclude_apps_and_blocks() {
-        let mut plugin = entry("sonarr", CatalogItemType::Plugin);
-        plugin.capability = Some(CatalogCapability::new("integration"));
-        plugin.tags = vec!["arr".into(), "tv".into()];
-        let flow = entry("flow.remux", CatalogItemType::Flow);
-        let script = entry("script.post", CatalogItemType::Script);
-        let pack = entry("pack.base", CatalogItemType::Pack);
-        let preset = entry("preset.fast", CatalogItemType::Preset);
-        let subtitle = entry("res.sub", CatalogItemType::ResourceSubtitle);
-        let app = entry("ffmpeg", CatalogItemType::App);
-        let block = entry("block.remux", CatalogItemType::Block);
-
-        let all = vec![plugin, flow, script, pack, preset, subtitle, app, block];
-        assert_eq!(
-            summarize_catalog(&all),
-            CatalogCounts {
-                total: 6,
-                plugins: 1,
-                packs: 1,
-                flows: 1,
-                scripts: 1,
-                resources: 2,
-            }
-        );
-        assert_eq!(
-            filter_catalog(all.clone(), PluginKindFilter::Any, "").len(),
-            6
-        );
-        assert_eq!(
-            filter_catalog(all.clone(), PluginKindFilter::Plugins, "arr").len(),
-            1
-        );
-        assert_eq!(
-            filter_catalog(all.clone(), PluginKindFilter::Scripts, "").len(),
-            1
-        );
-        assert_eq!(
-            filter_catalog(all.clone(), PluginKindFilter::Resources, "").len(),
-            2
-        );
-        assert_eq!(filter_catalog(all, PluginKindFilter::Flows, "").len(), 1);
-    }
-
-    #[test]
     fn badge_labels_cover_all_catalog_item_types() {
         assert_eq!(section_badge_label(CatalogItemType::Plugin), "Plugin");
         assert_eq!(section_badge_label(CatalogItemType::Flow), "Flow");
@@ -798,8 +558,8 @@ mod tests {
             "Images"
         );
         assert_eq!(
-            section_badge_label(CatalogItemType::ResourceSubtitle),
-            "Sous-titres"
+            section_badge_label(CatalogItemType::ResourceFont),
+            "Polices"
         );
     }
 }

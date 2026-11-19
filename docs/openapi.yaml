@@ -507,10 +507,10 @@ paths:
   /api/v1/plugins:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Catalogue lu dans les dépôts de plugins synchronisés (vide tant qu'aucun dépôt n'est synchronisé)
+      summary: Catalogue lu dans les dépôts de plugins synchronisés (enrichi de `runtime` : état opérationnel, réglages, outils manquants, blocs/composants)
       responses:
         '200':
-          description: Fiches du catalogue ; une fiche inconnue du central est ignorée
+          description: Fiches du catalogue enrichies de `runtime` (`readiness`, `hasSettings`, `configured`, `missingToolsCount`, `blocksCount`, `componentsCount`) ; une fiche inconnue du central est ignorée
           content:
             application/json:
               schema: {type: array, items: {type: object}}
@@ -518,10 +518,10 @@ paths:
   /api/v1/plugins/{id}:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Détail d'un plugin, dépendances, blocs fournis et statut des outils requis
+      summary: Détail d'un plugin, dépendances (avec `status` réel dans le cache d'outils), blocs fournis et statut des outils requis
       parameters: [{in: path, name: id, required: true, schema: {type: string}}]
       responses:
-        '200': {description: Vue détaillée du plugin}
+        '200': {description: Vue détaillée du plugin (`dependencies[].status` indique `ready`, `installing` ou `not_installed`)}
         '404': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins/repositories:

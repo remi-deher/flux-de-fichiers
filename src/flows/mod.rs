@@ -152,6 +152,7 @@ impl<'a> FlowEngine<'a> {
                 tool_versions: self.tool_versions,
                 work_dir,
                 working_file: source_file,
+                source_file,
                 media_info: &media_info,
                 step_index: 0,
                 on_progress,
@@ -202,18 +203,31 @@ impl<'a> FlowEngine<'a> {
                 steps: Vec::new(),
             })?;
 
-        let media_info = binary_runner::probe_media_tree(
+        let media_info = match binary_runner::probe_media_tree(
             self.registry,
             self.cache_mgr,
             self.tool_versions,
             source_file,
         )
         .await
-        .map_err(|err| FlowExecutionError {
-            code: err.code,
-            message: err.message,
-            steps: Vec::new(),
-        })?;
+        {
+            Ok(info) => info,
+            Err(err) if self.registry.graph_accepts_non_media(&graph) => {
+                tracing::info!(
+                    job_id = %job_id,
+                    error = %err.message,
+                    "entrée non média acceptée par le flux ; sonde différée"
+                );
+                Value::Object(serde_json::Map::new())
+            }
+            Err(err) => {
+                return Err(FlowExecutionError {
+                    code: err.code,
+                    message: err.message,
+                    steps: Vec::new(),
+                });
+            }
+        };
 
         let mut current_working_file = source_file.to_path_buf();
         let mut is_in_place = true;
@@ -300,6 +314,7 @@ impl<'a> FlowEngine<'a> {
                             tool_versions: self.tool_versions,
                             work_dir,
                             working_file: &current_working_file,
+                            source_file,
                             media_info: &ctx.media_info,
                             step_index,
                             on_progress: on_progress.clone(),
@@ -418,6 +433,7 @@ impl<'a> FlowEngine<'a> {
                         &node.config,
                         work_dir,
                         &current_working_file,
+                        source_file,
                         &ctx.media_info,
                         step_index,
                         on_progress.clone(),
@@ -432,6 +448,8 @@ impl<'a> FlowEngine<'a> {
                             message,
                             excerpt,
                         }) => {
+                            let reprobe =
+                                next_working_file.is_some() && updated_media_info.is_none();
                             if let Some(updated_info) = updated_media_info {
                                 ctx.media_info = updated_info;
                             }
@@ -439,6 +457,37 @@ impl<'a> FlowEngine<'a> {
                                 current_working_file = next_file;
                                 ctx.working_file = current_working_file.clone();
                                 is_in_place = false;
+                            }
+                            // Nouveau fichier sans métadonnées fournies : il est inspecté à son tour.
+                            if reprobe {
+                                match binary_runner::probe_media_tree(
+                                    self.registry,
+                                    self.cache_mgr,
+                                    self.tool_versions,
+                                    &current_working_file,
+                                )
+                                .await
+                                {
+                                    Ok(info) => ctx.media_info = info,
+                                    Err(err) => {
+                                        let message = format!(
+                                            "fichier produit par le script illisible : {}",
+                                            err.message
+                                        );
+                                        steps.push(failed_step(
+                                            step_index,
+                                            &node,
+                                            Some(op.id.clone()),
+                                            message.clone(),
+                                            None,
+                                        ));
+                                        return Err(FlowExecutionError {
+                                            code: err.code,
+                                            message,
+                                            steps,
+                                        });
+                                    }
+                                }
                             }
                             next_port = script_port;
                             stop_pipeline = script_stop;

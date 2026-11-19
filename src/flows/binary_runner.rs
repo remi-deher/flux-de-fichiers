@@ -3,7 +3,7 @@
 use crate::{
     flows::contract::{
         BinaryExecutionMode, BinaryRuntime, OperationContract, OperationRegistry, OperationRuntime,
-        apply_derived, build_binary_argv, evaluate_condition, merge_params,
+        ToolRef, apply_derived, build_binary_argv, evaluate_condition, merge_params,
     },
     media::{
         PostValidateMode, PostValidateSpec, ProbeCommand, ensure_non_empty_file,
@@ -113,6 +113,32 @@ pub async fn run_probe_contract(
     run_probe_json(cmd).await.map_err(|e| e.to_string())
 }
 
+/// `PATH` plaçant en tête les dossiers binaires des outils du cache listés, puis `base`
+/// (le `PATH` courant si absent) ; `None` sans outil, pour hériter de l'environnement.
+pub fn tool_search_path(
+    cache_mgr: &ToolCacheManager,
+    tool_versions: &HashMap<String, String>,
+    tools: &[ToolRef],
+    base: Option<std::ffi::OsString>,
+) -> Option<std::ffi::OsString> {
+    if tools.is_empty() {
+        return None;
+    }
+    let arch = host_arch();
+    let tool_dirs = tools.iter().map(|tool| {
+        let version = tool_versions
+            .get(&tool.id)
+            .map(String::as_str)
+            .unwrap_or(&tool.version);
+        cache_mgr.tool_dir(&tool.id, version, arch).join("bin")
+    });
+    let base = base
+        .or_else(|| std::env::var_os("PATH"))
+        .unwrap_or_default();
+    let inherited: Vec<PathBuf> = std::env::split_paths(&base).collect();
+    std::env::join_paths(tool_dirs.chain(inherited)).ok()
+}
+
 fn enrichment_key<'a>(op: &'a OperationContract, rt: &'a BinaryRuntime) -> &'a str {
     rt.probe_enrichment_key.as_deref().unwrap_or(op.id.as_str())
 }
@@ -180,6 +206,8 @@ pub struct BinaryExecContext<'a> {
     pub tool_versions: &'a HashMap<String, String>,
     pub work_dir: &'a Path,
     pub working_file: &'a Path,
+    /// Fichier d'origine de la tâche, exposé aux contrats par le chemin `reference`.
+    pub source_file: &'a Path,
     pub media_info: &'a Value,
     pub step_index: i32,
     pub on_progress: ProgressCallback,
@@ -226,7 +254,8 @@ pub async fn execute_binary_operation(
             })
         }
         BinaryExecutionMode::InPlace => {
-            let paths = HashMap::from([("source", ctx.working_file)]);
+            let paths =
+                HashMap::from([("source", ctx.working_file), ("reference", ctx.source_file)]);
             let (args, has_changes) =
                 build_binary_argv(rt, node_config, &paths, None).map_err(|err| {
                     BinaryStepError {
@@ -246,7 +275,8 @@ pub async fn execute_binary_operation(
                 });
             }
             let bin = resolve_contract_binary(ctx.cache_mgr, rt, ctx.tool_versions);
-            let spec = command_spec_from_contract(rt, &bin, &args, None);
+            let path_env = tool_search_path(ctx.cache_mgr, ctx.tool_versions, &rt.path_tools, None);
+            let spec = command_spec_from_contract(rt, &bin, &args, None, path_env);
             let outcome = run_command(spec, |_, _| {}).await.map_err(|err| {
                 let excerpt = extract_excerpt(&err);
                 BinaryStepError {
@@ -290,8 +320,10 @@ pub async fn execute_binary_operation(
             }
             let paths = HashMap::from([
                 ("source", ctx.working_file),
+                ("reference", ctx.source_file),
                 ("destination", destination.as_path()),
             ]);
+            let path_env = tool_search_path(ctx.cache_mgr, ctx.tool_versions, &rt.path_tools, None);
             let (args, _) = build_binary_argv(rt, node_config, &paths, None).map_err(|err| {
                 BinaryStepError {
                     code: error_code,
@@ -306,7 +338,7 @@ pub async fn execute_binary_operation(
             let bin = resolve_contract_binary(ctx.cache_mgr, rt, ctx.tool_versions);
             let on_p = ctx.on_progress.clone();
             let first_attempt = run_command(
-                command_spec_from_contract(rt, &bin, &args, duration_secs),
+                command_spec_from_contract(rt, &bin, &args, duration_secs, path_env.clone()),
                 move |pct, line| on_p(pct, line),
             )
             .await;
@@ -329,7 +361,13 @@ pub async fn execute_binary_operation(
                                 })?;
                         let on_p2 = ctx.on_progress.clone();
                         let retry_out = run_command(
-                            command_spec_from_contract(rt, &bin, &retry_args, duration_secs),
+                            command_spec_from_contract(
+                                rt,
+                                &bin,
+                                &retry_args,
+                                duration_secs,
+                                path_env.clone(),
+                            ),
                             move |pct, line| on_p2(pct, line),
                         )
                         .await
@@ -397,8 +435,10 @@ fn command_spec_from_contract<'a>(
     bin: &'a Path,
     args: &'a [String],
     duration_secs: Option<f64>,
+    path_env: Option<std::ffi::OsString>,
 ) -> CommandSpec<'a> {
     let mut spec = CommandSpec::new(&rt.executable, bin, args);
+    spec.path_env = path_env;
     spec.progress_parser = rt.console.progress_format;
     spec.progress_stream = rt.console.progress_stream;
     spec.success_exit_codes = &rt.console.success_exit_codes;

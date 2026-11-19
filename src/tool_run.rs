@@ -73,6 +73,8 @@ pub struct CommandSpec<'a> {
     pub duration_secs: Option<f64>,
     pub timeout: Duration,
     pub capture_stdout: bool,
+    /// `PATH` explicite de la commande (outils du cache en tête) ; hérité sinon.
+    pub path_env: Option<std::ffi::OsString>,
 }
 
 impl<'a> CommandSpec<'a> {
@@ -88,6 +90,7 @@ impl<'a> CommandSpec<'a> {
             duration_secs: None,
             timeout: DEFAULT_TOOL_TIMEOUT,
             capture_stdout: false,
+            path_env: None,
         }
     }
 }
@@ -283,10 +286,15 @@ async fn spawn_tool(
     bin: &Path,
     args: &[String],
     pipe_stdout: bool,
+    path_env: Option<&std::ffi::OsStr>,
 ) -> std::io::Result<tokio::process::Child> {
     let mut attempt = 0;
     loop {
-        let spawned = Command::new(bin)
+        let mut command = Command::new(bin);
+        if let Some(path) = path_env {
+            command.env("PATH", path);
+        }
+        let spawned = command
             .args(args)
             .stdout(if pipe_stdout {
                 Stdio::piped()
@@ -318,7 +326,7 @@ where
     F: FnMut(u32, &str) + Send + 'static,
 {
     let pipe_stdout = spec.capture_stdout || spec.progress_stream == ProgressStream::Stdout;
-    let mut child = spawn_tool(spec.bin, spec.args, pipe_stdout)
+    let mut child = spawn_tool(spec.bin, spec.args, pipe_stdout, spec.path_env.as_deref())
         .await
         .map_err(|source| ToolRunError::Spawn {
             tool: spec.tool_label.to_owned(),

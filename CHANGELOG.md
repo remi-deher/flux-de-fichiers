@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.57.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.57.0...v0.57.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* détection automatique et notification des mises à jour ([13bd056](https://github.com/remi-deher/flux-de-fichiers/commit/13bd0563e6a0f335017a3adde834906227f8e21a))
+* détection automatique et notification des mises à jour ([fa22ac3](https://github.com/remi-deher/flux-de-fichiers/commit/fa22ac314794525c290a34a1c6c371d6eadb083a))
+
 ## [0.57.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.56.0...v0.57.0) (2026-11-19)
 
 

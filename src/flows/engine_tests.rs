@@ -806,3 +806,133 @@ async fn unified_script_block_supports_inline_library_ref_and_strict_next_port()
     assert_eq!(outcome.steps[2].message.as_deref(), Some("branche fausse"));
     Ok(())
 }
+
+#[test]
+fn path_tools_count_as_required_tools_of_the_flow() -> Result<(), Box<dyn std::error::Error>> {
+    let mut reg = base_registry();
+    reg.register_json(json!({
+        "schemaVersion": "1.1.0",
+        "id": "operation.vmaf.target",
+        "version": "1.0.0",
+        "name": "Encodage à qualité cible",
+        "providerId": "vmaf",
+        "providerKind": "plugin",
+        "capability": "encode",
+        "status": "validated",
+        "runtime": {
+            "kind": "binary",
+            "tool": { "id": "ab-av1", "version": "1.0.0" },
+            "pathTools": [
+                { "id": "ffmpeg-vmaf", "version": "1.0.0" },
+                { "id": "ab-av1", "version": "1.0.0" }
+            ],
+            "executable": "ab-av1",
+            "executionMode": "staged-output",
+            "argv": [{ "param": "source", "as": "filePath" }]
+        }
+    }))?;
+    reg.register_block_mapping("vmaf.target", "operation.vmaf.target");
+    let flow = flow_record(json!({
+        "nodes": [{ "id": "n1", "type": "vmaf.target", "name": "AV1" }],
+        "connections": []
+    }));
+    let ids: Vec<String> = reg
+        .required_tool_refs_for_flow(Some(&flow))
+        .into_iter()
+        .map(|tool| tool.id)
+        .collect();
+    assert!(ids.contains(&"ab-av1".to_owned()));
+    assert!(ids.contains(&"ffmpeg-vmaf".to_owned()));
+    assert_eq!(ids.iter().filter(|id| *id == "ab-av1").count(), 1);
+    Ok(())
+}
+
+/// Sonde factice : refuse les archives, reconnaît le reste.
+const PROBE_REFUSING_ARCHIVES: &str = r#"for a; do last=$a; done
+case "$last" in *.rar) echo 'conteneur non reconnu' >&2; exit 2;; esac"#;
+
+fn archive_flow_registry(
+    accepts_non_media: bool,
+) -> Result<OperationRegistry, Box<dyn std::error::Error>> {
+    let mut reg = OperationRegistry::new();
+    register_core_and_probe(&mut reg)?;
+    reg.register_json(json!({
+        "schemaVersion": "1.1.0",
+        "id": "operation.archives.extract",
+        "version": "1.0.0",
+        "name": "Extraire une archive",
+        "providerId": "archives",
+        "providerKind": "plugin",
+        "capability": "archive",
+        "status": "validated",
+        "runtime": {
+            "kind": "script",
+            "interpreter": "sh",
+            "acceptsNonMedia": accepts_non_media,
+            "code": "cat >/dev/null\nprintf video > film.mkv\nprintf '{\"status\":\"ok\",\"workingFile\":\"film.mkv\"}'"
+        }
+    }))?;
+    reg.register_block_mapping("archives.extract", "operation.archives.extract");
+    Ok(reg)
+}
+
+#[tokio::test]
+async fn non_media_input_is_accepted_then_the_extracted_file_is_probed()
+-> Result<(), Box<dyn std::error::Error>> {
+    let dir = tempfile::tempdir()?;
+    let cache = ToolCacheManager::new(dir.path().join("cache"));
+    install_fake_tool(
+        &cache,
+        "mkvtoolnix",
+        "1.0.0",
+        "mkvmerge",
+        &format!("{PROBE_REFUSING_ARCHIVES}\necho '{INSPECT_JSON}'"),
+    )?;
+    let source = dir.path().join("sortie.rar");
+    std::fs::write(&source, b"Rar!")?;
+    let work = dir.path().join("work");
+    std::fs::create_dir(&work)?;
+    let flow = flow_record(json!({
+        "nodes": [
+            {"id": "n1", "type": "file-input", "name": "in"},
+            {"id": "n2", "type": "archives.extract", "name": "extraire"},
+            {"id": "n3", "type": "file-output", "name": "out"}
+        ],
+        "connections": [{"from": "n1", "to": "n2"}, {"from": "n2", "to": "n3"}]
+    }));
+    let http = reqwest::Client::new();
+    let run = |reg: OperationRegistry| {
+        let cache = &cache;
+        let http = &http;
+        let flow = &flow;
+        let source = &source;
+        let work = &work;
+        async move {
+            let (progress, _) = recording_progress();
+            FlowEngine {
+                registry: &reg,
+                cache_mgr: cache,
+                http_client: http,
+                secrets_dir: None,
+                plugin_configs: &HashMap::new(),
+                tool_versions: &HashMap::new(),
+                media_root: None,
+                allow_private_integrations: None,
+            }
+            .execute_flow(Uuid::new_v4(), flow, source, work, progress)
+            .await
+        }
+    };
+
+    let outcome = run(archive_flow_registry(true)?)
+        .await
+        .map_err(|err| err.message)?;
+    assert_eq!(outcome.final_file, work.join("film.mkv"));
+
+    let refused = run(archive_flow_registry(false)?).await;
+    assert!(
+        refused.is_err(),
+        "sans acceptsNonMedia, la sonde initiale doit échouer"
+    );
+    Ok(())
+}

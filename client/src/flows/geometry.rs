@@ -464,25 +464,25 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let input = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
         );
         let cond = graph.append(
-            FlowBlockKind::parse("block.core.condition"),
+            FlowBlockKind::parse("essentiel.condition"),
             "Si",
             json!({}),
             &catalog,
         );
         let yes = graph.append(
-            FlowBlockKind::parse("block.video.remux-mkv"),
+            FlowBlockKind::parse("video.remux-mkv"),
             "Oui",
             json!({}),
             &catalog,
         );
         let no = graph.append(
-            FlowBlockKind::parse("block.core.webhook"),
+            FlowBlockKind::parse("essentiel.webhook"),
             "Non",
             json!({}),
             &catalog,
@@ -504,7 +504,7 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let n1 = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
@@ -667,7 +667,7 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let id = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
@@ -740,38 +740,38 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let input = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
         );
         let cond = graph.append(
-            FlowBlockKind::parse("block.core.condition"),
+            FlowBlockKind::parse("essentiel.condition"),
             "Si",
             json!({}),
             &catalog,
         );
         // Insérer sciemment "false" avant "true", puis ses enfants dans l'ordre inverse.
         let no = graph.append(
-            FlowBlockKind::parse("block.core.webhook"),
+            FlowBlockKind::parse("essentiel.webhook"),
             "Non",
             json!({}),
             &catalog,
         );
         let yes = graph.append(
-            FlowBlockKind::parse("block.video.remux-mkv"),
+            FlowBlockKind::parse("video.remux-mkv"),
             "Oui",
             json!({}),
             &catalog,
         );
         let no_child = graph.append(
-            FlowBlockKind::parse("block.core.file-output"),
+            FlowBlockKind::parse("essentiel.file-output"),
             "Fin non",
             json!({}),
             &catalog,
         );
         let yes_child = graph.append(
-            FlowBlockKind::parse("block.core.webhook"),
+            FlowBlockKind::parse("essentiel.webhook"),
             "Fin oui",
             json!({}),
             &catalog,

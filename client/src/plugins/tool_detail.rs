@@ -1,12 +1,11 @@
 //! Tiroir d'inspection à onglets d'un outil distribué : distribution, utilisation et informations.
 
-use super::{TOOLS_PATH, bump, tool_status_label};
+use super::{TOOLS_PATH, bump, date_row, install_with_dependencies_action, tool_status_label};
 use crate::api;
 use crate::route::encode_segment;
-use crate::ui::{Icon, IconName, Tag, TagTone, Toasts};
+use crate::ui::{Icon, IconName, Tag, TagTone};
 use flux_shared::plugins::{ToolDetailView, ToolStatus};
 use leptos::prelude::*;
-use serde_json::Value;
 
 const INSTALL_ICON_SIZE: u32 = 15;
 const SHA_PREVIEW_LEN: usize = 12;
@@ -54,18 +53,9 @@ fn DistributionTab(
         && detail.summary.status == ToolStatus::NotInstalled
         && detail.release_status.as_deref() != Some("contract-only");
     let feedback = RwSignal::new(None::<String>);
-    let install = Action::new_local(move |(): &()| {
-        let path = format!("{TOOLS_PATH}/{}/install", encode_segment(&tool_id));
-        async move { api::post::<(), Value>(&path, None).await }
-    });
-    Effect::new(move |_| match install.value().get() {
-        Some(Ok(_)) => {
-            Toasts::set_success(feedback, "Outil installé.");
-            bump(reload_tools);
-            bump(reload_detail);
-        }
-        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
-        None => {}
+    let install = install_with_dependencies_action(TOOLS_PATH, feedback, move || {
+        bump(reload_tools);
+        bump(reload_detail);
     });
 
     view! {
@@ -82,6 +72,7 @@ fn DistributionTab(
                 <div class="detail-term">"Disponibilité"</div>
                 <div class="detail-val text-mono">{status}</div>
             })}
+            {date_row("Publication", detail.released_at)}
             {detail.distribution_mode.map(|mode| view! {
                 <div class="detail-term">"Installation"</div>
                 <div class="detail-val text-mono">{mode}</div>
@@ -119,7 +110,7 @@ fn DistributionTab(
                     type="button"
                     class="btn btn-primary"
                     disabled=move || install.pending().get()
-                    on:click=move |_| { install.dispatch(()); }
+                    on:click=move |_| { install.dispatch(tool_id.clone()); }
                 >
                     <Icon name=IconName::Download size=INSTALL_ICON_SIZE />
                     <span>{move || if install.pending().get() { "Installation…" } else { "Installer l'outil" }}</span>
@@ -183,6 +174,7 @@ fn InfoTab(detail: ToolDetailView) -> impl IntoView {
             <div class="detail-val text-mono">{detail.summary.id}</div>
             <div class="detail-term">"Version catalogue"</div>
             <div class="detail-val text-mono">{detail.summary.version}</div>
+            {date_row("Mise à jour", detail.summary.updated_at)}
             <div class="detail-term">"Architecture hôte"</div>
             <div class="detail-val text-mono">{detail.summary.arch}</div>
             {detail.author.map(|author| view! {

@@ -210,7 +210,7 @@ mod tests {
     fn test_catalog() -> Vec<OwnedBlockSpec> {
         vec![
             OwnedBlockSpec {
-                kind: "block.core.file-input".into(),
+                kind: "essentiel.file-input".into(),
                 aliases: vec!["file-input".into()],
                 label: "Entrée".into(),
                 description: String::new(),
@@ -226,7 +226,7 @@ mod tests {
                 fields: Vec::new(),
             },
             OwnedBlockSpec {
-                kind: "block.core.condition".into(),
+                kind: "essentiel.condition".into(),
                 aliases: vec!["condition".into()],
                 label: "Condition".into(),
                 description: String::new(),
@@ -245,7 +245,7 @@ mod tests {
                 fields: Vec::new(),
             },
             OwnedBlockSpec {
-                kind: "block.video.encode".into(),
+                kind: "video.encode".into(),
                 aliases: vec![],
                 label: "Encodage".into(),
                 description: String::new(),
@@ -261,7 +261,7 @@ mod tests {
                 fields: Vec::new(),
             },
             OwnedBlockSpec {
-                kind: "block.core.file-output".into(),
+                kind: "essentiel.file-output".into(),
                 aliases: vec!["file-output".into()],
                 label: "Sortie".into(),
                 description: String::new(),
@@ -284,25 +284,25 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let entry = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
         );
         let cond = graph.append(
-            FlowBlockKind::parse("block.core.condition"),
+            FlowBlockKind::parse("essentiel.condition"),
             "Condition codec ?",
             json!({"property": "tracks[type=video].codec", "operator": "eq", "target": "hevc"}),
             &catalog,
         );
         let encode = graph.append(
-            FlowBlockKind::parse("block.video.encode"),
+            FlowBlockKind::parse("video.encode"),
             "Traitement",
             json!({}),
             &catalog,
         );
         let out = graph.append(
-            FlowBlockKind::parse("block.core.file-output"),
+            FlowBlockKind::parse("essentiel.file-output"),
             "Sortie",
             json!({}),
             &catalog,
@@ -352,19 +352,19 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         let entry = graph.append(
-            FlowBlockKind::parse("block.core.file-input"),
+            FlowBlockKind::parse("essentiel.file-input"),
             "Entrée",
             json!({}),
             &catalog,
         );
         let doc_cond = graph.append(
-            FlowBlockKind::parse("block.core.condition"),
+            FlowBlockKind::parse("essentiel.condition"),
             "Format EPUB ?",
             json!({"property": "format", "operator": "exact", "target": "epub"}),
             &catalog,
         );
         let dead = graph.append(
-            FlowBlockKind::parse("block.video.encode"),
+            FlowBlockKind::parse("video.encode"),
             "Traitement sans suite",
             json!({}),
             &catalog,

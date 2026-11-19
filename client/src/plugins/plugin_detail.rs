@@ -1,6 +1,7 @@
 //! Tiroir d'inspection à onglets d'un plugin : blocs exposés, paramètres et informations.
 
 use super::settings::PluginSettings;
+use super::{CATALOG_PATH, date_row, install_with_dependencies_action};
 use crate::api;
 use crate::flows::NodeDomain;
 use crate::route::encode_segment;
@@ -128,7 +129,11 @@ fn BlocksTab(blocks: Vec<OwnedBlockSpec>) -> impl IntoView {
 }
 
 #[component]
-fn InfoTab(detail: PluginDetailView) -> impl IntoView {
+fn InfoTab(detail: PluginDetailView, can_install: bool) -> impl IntoView {
+    let plugin_id = detail.id.clone();
+    let has_dependencies = !detail.dependencies.is_empty();
+    let feedback = RwSignal::new(None::<String>);
+    let install = install_with_dependencies_action(CATALOG_PATH, feedback, || {});
     let blocks_count = detail.blocks.len().to_string();
     let settings_label = if detail.has_settings {
         "Configurables"
@@ -144,6 +149,7 @@ fn InfoTab(detail: PluginDetailView) -> impl IntoView {
             <div class="detail-val text-mono">{detail.id}</div>
             <div class="detail-term">"Version"</div>
             <div class="detail-val text-mono">{detail.version}</div>
+            {date_row("Mise à jour", detail.updated_at)}
             {detail.capability.map(|cap| view! {
                 <div class="detail-term">"Capacité"</div>
                 <div class="detail-val"><Tag label=cap.as_str().to_owned() tone=TagTone::Success /></div>
@@ -211,6 +217,21 @@ fn InfoTab(detail: PluginDetailView) -> impl IntoView {
                         </li>
                     }).collect_view()}
                 </ul>
+                {(can_install && has_dependencies).then(|| view! {
+                    <button
+                        type="button"
+                        class="btn btn-primary btn-sm"
+                        disabled=move || install.pending().get()
+                        on:click=move |_| { install.dispatch(plugin_id.clone()); }
+                    >
+                        {move || if install.pending().get() {
+                            "Installation…"
+                        } else {
+                            "Installer les outils requis"
+                        }}
+                    </button>
+                })}
+                <p class="form-help" role="status">{move || feedback.get()}</p>
             </div>
         })}
     }
@@ -246,7 +267,7 @@ pub fn PluginDetail(plugin_id: String, tab: RwSignal<usize>, can_configure: bool
                                 .into_any()
                             }
                         }
-                        PluginDrawerTab::Info => view! { <InfoTab detail=data /> }.into_any(),
+                        PluginDrawerTab::Info => view! { <InfoTab detail=data can_install=can_configure /> }.into_any(),
                     },
                 }
             }}

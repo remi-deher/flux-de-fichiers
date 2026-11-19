@@ -492,7 +492,7 @@ async fn test_flow_blocks_catalog_loads_from_plugins_directory() -> anyhow::Resu
             "schemaVersion": "1.0.0",
             "entries": [
                 {
-                    "id": "plugin.core",
+                    "id": "essentiel",
                     "type": "plugin",
                     "version": "1.0.0",
                     "name": "Noyau",
@@ -500,7 +500,7 @@ async fn test_flow_blocks_catalog_loads_from_plugins_directory() -> anyhow::Resu
                     "capability": "other"
                 },
                 {
-                    "id": "plugin.video",
+                    "id": "video",
                     "type": "plugin",
                     "version": "1.0.0",
                     "name": "Vidéo",
@@ -508,17 +508,17 @@ async fn test_flow_blocks_catalog_loads_from_plugins_directory() -> anyhow::Resu
                     "capability": "video"
                 },
                 {
-                    "id": "block.core.file-input",
+                    "id": "essentiel.file-input",
                     "type": "block",
-                    "owner": "plugin.core",
+                    "owner": "essentiel",
                     "version": "1.0.0",
                     "name": "Fichier source",
                     "manifestPath": "plugins/core/blocks/file-input.json"
                 },
                 {
-                    "id": "block.video.encode",
+                    "id": "video.encode",
                     "type": "block",
-                    "owner": "plugin.video",
+                    "owner": "video",
                     "version": "1.0.0",
                     "name": "Encodage Vidéo",
                     "manifestPath": "plugins/video/blocks/video-encode.json"
@@ -529,17 +529,17 @@ async fn test_flow_blocks_catalog_loads_from_plugins_directory() -> anyhow::Resu
     )?;
     std::fs::write(
         dir.path().join("plugins/core/manifest.json"),
-        r#"{"schemaVersion":"1.1.0","id":"plugin.core","type":"plugin","version":"1.0.0","name":"Noyau"}"#,
+        r#"{"schemaVersion":"1.1.0","id":"essentiel","type":"plugin","version":"1.0.0","name":"Noyau"}"#,
     )?;
     std::fs::write(
         dir.path().join("plugins/video/manifest.json"),
-        r#"{"schemaVersion":"1.1.0","id":"plugin.video","type":"plugin","version":"1.0.0","name":"Vidéo"}"#,
+        r#"{"schemaVersion":"1.1.0","id":"video","type":"plugin","version":"1.0.0","name":"Vidéo"}"#,
     )?;
     std::fs::write(
         dir.path().join("plugins/core/blocks/file-input.json"),
         serde_json::json!({
             "schemaVersion": "1.1.0",
-            "id": "block.core.file-input",
+            "id": "essentiel.file-input",
             "aliases": ["file-input"],
             "version": "1.0.0",
             "name": "Fichier source",
@@ -552,7 +552,7 @@ async fn test_flow_blocks_catalog_loads_from_plugins_directory() -> anyhow::Resu
         dir.path().join("plugins/video/blocks/video-encode.json"),
         serde_json::json!({
             "schemaVersion": "1.1.0",
-            "id": "block.video.encode",
+            "id": "video.encode",
             "version": "1.0.0",
             "name": "Encodage Vidéo",
             "category": "media",
@@ -578,10 +578,10 @@ async fn test_flow_blocks_catalog_loads_from_plugins_directory() -> anyhow::Resu
     let bytes = to_bytes(resp.into_body(), 64 * 1024).await?;
     let blocks: Vec<serde_json::Value> = serde_json::from_slice(&bytes)?;
     assert_eq!(blocks.len(), 2);
-    assert_eq!(blocks[0]["kind"], "block.core.file-input");
+    assert_eq!(blocks[0]["kind"], "essentiel.file-input");
     assert_eq!(blocks[0]["hasInput"], false);
     assert_eq!(blocks[0]["fromPlugin"], true);
-    assert_eq!(blocks[1]["kind"], "block.video.encode");
+    assert_eq!(blocks[1]["kind"], "video.encode");
     assert!(
         blocks[1]["fields"]
             .as_array()

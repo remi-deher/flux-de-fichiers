@@ -272,6 +272,10 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/plugins", get(plugins::catalog))
         .route("/api/v1/plugins/{id}", get(plugins::plugin_detail))
         .route(
+            "/api/v1/plugins/{id}/install",
+            post(plugins::install_plugin),
+        )
+        .route(
             "/api/v1/plugins/repositories",
             get(plugins::list_repositories).post(plugins::add_repository),
         )
@@ -837,17 +841,38 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         tokio::spawn(crate::local_worker::run(state.clone()));
     }
     match crate::secrets::SecretBox::open(&state.config.config_dir) {
-        Ok(secrets) => match crate::flows::migrate_flow_secrets(&state.pool, &secrets).await {
-            Ok(0) => {}
-            Ok(count) => tracing::info!(
-                count,
-                "en-têtes de webhook chiffrés dans les flux existants"
-            ),
-            Err(error) => {
-                tracing::warn!(error = %error, "migration des en-têtes de webhook impossible")
+        Ok(secrets) => {
+            match crate::flows::migrate_flow_secrets(&state.pool, &secrets).await {
+                Ok(0) => {}
+                Ok(count) => tracing::info!(
+                    count,
+                    "en-têtes de webhook chiffrés dans les flux existants"
+                ),
+                Err(error) => {
+                    tracing::warn!(error = %error, "migration des en-têtes de webhook impossible")
+                }
             }
-        },
+            match crate::plugins::migrate_legacy_plugin_secrets(&state.pool, &secrets).await {
+                Ok(0) => {}
+                Ok(count) => tracing::info!(
+                    count,
+                    "secrets de plugins repris sous les identifiants du catalogue 2.0.0"
+                ),
+                Err(error) => {
+                    tracing::warn!(error = %error, "reprise des secrets de plugins impossible")
+                }
+            }
+        }
         Err(error) => tracing::warn!(error = %error, "clé de chiffrement indisponible"),
+    }
+    let local_dir = crate::plugins::local_catalog_dir(&state.config);
+    match crate::plugins::migrate_legacy_block_kinds(&state.pool, &local_dir).await {
+        Ok(0) => {}
+        Ok(count) => tracing::info!(
+            count,
+            "types de blocs repris sous les identifiants du catalogue 2.0.0"
+        ),
+        Err(error) => tracing::warn!(error = %error, "reprise des types de blocs impossible"),
     }
     let plugin_sync = tokio::spawn(plugin_sync_loop(state.clone()));
     let lib_scans = tokio::spawn(library_scan_loop(state.clone()));

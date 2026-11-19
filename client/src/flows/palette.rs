@@ -375,7 +375,7 @@ mod tests {
         let listed = categories(&catalog);
         assert!(catalog.iter().all(|spec| listed.contains(&spec.category)));
         assert_eq!(listed.first().map(String::as_str), Some("Entrée"));
-        assert!(catalog.iter().any(|spec| spec.kind == "block.video.encode"));
+        assert!(catalog.iter().any(|spec| spec.kind == "video.encode"));
     }
 
     #[test]

@@ -3,6 +3,7 @@
 pub mod vocab;
 
 use crate::flows::OwnedBlockSpec;
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use vocab::{CatalogCapability, CatalogItemType, PluginCategory};
@@ -60,6 +61,13 @@ pub struct CatalogEntry {
     /// Empreinte SHA-256 optionnelle du manifeste pour vérification à la synchronisation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
+    /// Date de dernière modification du contenu, calculée par le générateur d'index.
+    #[serde(
+        default,
+        deserialize_with = "vocab::deserialize_optional_date",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub updated_at: Option<NaiveDate>,
 }
 
 /// État d'un outil dans le cache local.
@@ -102,6 +110,12 @@ pub struct ToolStatusSummary {
     pub description: String,
     #[serde(default = "default_true")]
     pub installable: bool,
+    #[serde(
+        default,
+        deserialize_with = "vocab::deserialize_optional_date",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub updated_at: Option<NaiveDate>,
 }
 
 /// Type de champ connu des manifestes Sonarr et Radarr. Une valeur inconnue est refusée.
@@ -176,6 +190,17 @@ pub struct PackInstallResult {
     pub missing_components: Vec<String>,
 }
 
+/// Bilan d'installation d'une pièce du catalogue et des outils qu'elle requiert
+/// (`POST /api/v1/plugins/{id}/install`, `POST /api/v1/tools/{id}/install`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DependencyInstallResult {
+    pub item_id: String,
+    pub installed_tools: Vec<String>,
+    pub failed_tools: Vec<(String, String)>,
+    pub missing_dependencies: Vec<String>,
+}
+
 /// Dépendance déclarée dans le manifeste d'un plugin.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -226,6 +251,12 @@ pub struct PluginDetailView {
     pub has_settings: bool,
     #[serde(default)]
     pub blocks: Vec<OwnedBlockSpec>,
+    #[serde(
+        default,
+        deserialize_with = "vocab::deserialize_optional_date",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub updated_at: Option<NaiveDate>,
 }
 
 /// Fiche détaillée d'un pack pour le tiroir à onglets (`GET /api/v1/packs/{id}`).
@@ -248,6 +279,12 @@ pub struct PackDetailView {
     #[serde(default)]
     pub compatibility: PluginCompatibility,
     pub installation: PackInstallation,
+    #[serde(
+        default,
+        deserialize_with = "vocab::deserialize_optional_date",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub updated_at: Option<NaiveDate>,
 }
 
 /// Artefact déclaré dans `distribution.v1.json` pour une architecture donnée.
@@ -282,6 +319,13 @@ pub struct ToolDetailView {
     pub tool_version: Option<String>,
     #[serde(default)]
     pub release_status: Option<String>,
+    /// Date de publication de la Release des artefacts (`releasedAt` du contrat).
+    #[serde(
+        default,
+        deserialize_with = "vocab::deserialize_optional_date",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub released_at: Option<NaiveDate>,
     #[serde(default)]
     pub distribution_mode: Option<String>,
     #[serde(default)]

@@ -181,8 +181,8 @@ mod tests {
     fn kind_roundtrip_preserves_any_identifier() -> Result<(), serde_json::Error> {
         for stored in [
             "file-input",
-            "block.core.file-input",
-            "block.video.encode",
+            "essentiel.file-input",
+            "video.encode",
             "macro.unknown",
         ] {
             let kind = FlowBlockKind::parse(stored);

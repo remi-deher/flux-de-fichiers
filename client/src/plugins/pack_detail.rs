@@ -1,6 +1,6 @@
 //! Fiche d'inspection à onglets d'un pack : composants, installation et informations.
 
-use super::section_badge_label;
+use super::{date_row, section_badge_label};
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::{Icon, IconName, Tag, TagTone, Toasts};
@@ -163,6 +163,7 @@ fn InfoTab(detail: PackDetailView) -> impl IntoView {
             <div class="detail-val">{detail.name}</div>
             <div class="detail-term">"Version"</div>
             <div class="detail-val text-mono">{detail.version}</div>
+            {date_row("Mise à jour", detail.updated_at)}
             <div class="detail-term">"Format"</div>
             <div class="detail-val text-mono">{detail.installation.kind}</div>
             {detail.category.filter(|cat| cat.shows_badge()).map(|cat| view! {
@@ -289,11 +290,11 @@ mod tests {
     #[test]
     fn pack_install_summary_reports_success_and_failures() {
         let ok = PackInstallResult {
-            pack_id: "pack.media".into(),
+            pack_id: "media".into(),
             pack_version: "1.0.0".into(),
-            installed_tools: vec!["app.ffmpeg".into(), "app.mp4box".into()],
+            installed_tools: vec!["ffmpeg".into(), "mp4box".into()],
             failed_tools: Vec::new(),
-            verified_components: vec!["plugin.video".into()],
+            verified_components: vec!["video".into()],
             missing_components: Vec::new(),
         };
         let (passed, summary) = pack_install_summary(&ok);
@@ -302,8 +303,8 @@ mod tests {
         assert!(summary.contains("1 composant(s) vérifié(s)"));
 
         let partial = PackInstallResult {
-            failed_tools: vec![("app.ffmpeg".into(), "réseau indisponible".into())],
-            missing_components: vec!["plugin.audio".into()],
+            failed_tools: vec![("ffmpeg".into(), "réseau indisponible".into())],
+            missing_components: vec!["audio".into()],
             ..ok
         };
         let (passed, summary) = pack_install_summary(&partial);

@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn summarize_target_ignores_secrets_and_extracts_identifiers() {
         let args = json!({
-            "id": "plugin.radarr",
+            "id": "radarr",
             "settings": {
                 "apiKey": "super-secret-value",
                 "password": "hunter2"
@@ -210,7 +210,7 @@ mod tests {
             "version": 4
         });
         let summary = summarize_target(&args).unwrap_or_default();
-        assert!(summary.contains("plugin.radarr"));
+        assert!(summary.contains("radarr"));
         assert!(summary.contains("version=4"));
         assert!(!summary.contains("super-secret-value"));
         assert!(!summary.contains("hunter2"));

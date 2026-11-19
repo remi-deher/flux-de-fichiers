@@ -1,4 +1,4 @@
-//! Inspecteur dédié au bloc unique « Script » (`block.scripts.run`) :
+//! Inspecteur dédié au bloc unique « Script » (`scripts.run`) :
 //! choix d'un script de la librairie, création rapide, code inline et routage conditionnel.
 
 use super::state::Editor;
@@ -12,7 +12,7 @@ use flux_shared::local::{
 use leptos::prelude::*;
 use serde_json::{Map, Value, json};
 
-pub const UNIFIED_SCRIPT_KIND: &str = "block.scripts.run";
+pub const UNIFIED_SCRIPT_KIND: &str = "scripts.run";
 
 fn update_node_config(
     editor: Editor,

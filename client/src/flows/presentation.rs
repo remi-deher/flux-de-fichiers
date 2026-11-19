@@ -464,18 +464,15 @@ mod tests {
     #[test]
     fn node_domain_maps_known_kinds_and_unknown_categories() {
         let catalog = test_catalog();
-        let entry = find_owned(&catalog, &FlowBlockKind::parse("block.core.file-input"));
+        let entry = find_owned(&catalog, &FlowBlockKind::parse("essentiel.file-input"));
         assert_eq!(NodeDomain::from_spec(entry, "Entrée"), NodeDomain::Input);
-        let cond = find_owned(&catalog, &FlowBlockKind::parse("block.core.condition"));
+        let cond = find_owned(&catalog, &FlowBlockKind::parse("essentiel.condition"));
         assert_eq!(NodeDomain::from_spec(cond, "Logique"), NodeDomain::Logic);
-        let video = find_owned(&catalog, &FlowBlockKind::parse("block.video.encode"));
+        let video = find_owned(&catalog, &FlowBlockKind::parse("video.encode"));
         assert_eq!(NodeDomain::from_spec(video, "Média"), NodeDomain::Process);
-        let audio = find_owned(&catalog, &FlowBlockKind::parse("block.audio.encode"));
+        let audio = find_owned(&catalog, &FlowBlockKind::parse("audio.encode"));
         assert_eq!(NodeDomain::from_spec(audio, "Média"), NodeDomain::Process);
-        let mkv = find_owned(
-            &catalog,
-            &FlowBlockKind::parse("block.metadata.mkvpropedit"),
-        );
+        let mkv = find_owned(&catalog, &FlowBlockKind::parse("video.mkvpropedit"));
         assert_eq!(NodeDomain::from_spec(mkv, "Plugins"), NodeDomain::Process);
         assert_eq!(
             NodeDomain::from_spec(None, "Intégrations"),
@@ -485,7 +482,7 @@ mod tests {
             NodeDomain::from_spec(None, "Inspection"),
             NodeDomain::Inspect
         );
-        let output = find_owned(&catalog, &FlowBlockKind::parse("block.core.file-output"));
+        let output = find_owned(&catalog, &FlowBlockKind::parse("essentiel.file-output"));
         assert_eq!(NodeDomain::from_spec(output, "Sortie"), NodeDomain::Output);
     }
 
@@ -511,7 +508,7 @@ mod tests {
     fn node_summary_formats_condition_and_ignores_secrets() {
         let catalog = test_catalog();
         let cond = make_node(
-            FlowBlockKind::parse("block.core.condition"),
+            FlowBlockKind::parse("essentiel.condition"),
             "HEVC ?",
             json!({"property": "video.codec", "operator": "eq", "target": "hevc"}),
         );
@@ -521,7 +518,7 @@ mod tests {
         );
 
         let hook = make_node(
-            FlowBlockKind::parse("block.core.webhook"),
+            FlowBlockKind::parse("essentiel.webhook"),
             "Hook",
             json!({
                 "url": "https://hook.test",
@@ -538,7 +535,7 @@ mod tests {
         );
 
         let long_hook = make_node(
-            FlowBlockKind::parse("block.core.webhook"),
+            FlowBlockKind::parse("essentiel.webhook"),
             "Hook long",
             json!({
                 "url": "https://example.test/very/long/webhook/endpoint/path",
@@ -572,7 +569,7 @@ mod tests {
 
         let catalog = test_catalog();
         let cond_empty_target = make_node(
-            FlowBlockKind::parse("block.core.condition"),
+            FlowBlockKind::parse("essentiel.condition"),
             "Condition",
             json!({"property": "any", "operator": "eq", "target": ""}),
         );
@@ -587,14 +584,14 @@ mod tests {
             }]
         );
         let cond_blank = make_node(
-            FlowBlockKind::parse("block.core.condition"),
+            FlowBlockKind::parse("essentiel.condition"),
             "Condition vide",
             json!({}),
         );
         assert!(node_chips(&cond_blank, find_owned(&catalog, &cond_blank.kind)).is_empty());
 
         let cond = make_node(
-            FlowBlockKind::parse("block.core.condition"),
+            FlowBlockKind::parse("essentiel.condition"),
             "HEVC ?",
             json!({"property": "video.codec", "operator": "eq", "target": "hevc"}),
         );
@@ -607,7 +604,7 @@ mod tests {
         );
 
         let hook = make_node(
-            FlowBlockKind::parse("block.core.webhook"),
+            FlowBlockKind::parse("essentiel.webhook"),
             "Hook",
             json!({
                 "url": "https://hook.test",
@@ -646,13 +643,13 @@ mod tests {
 
         let mut graph = FlowGraph::default();
         let cond = graph.append(
-            FlowBlockKind::parse("block.core.condition"),
+            FlowBlockKind::parse("essentiel.condition"),
             "Condition vide",
             json!({}),
             &catalog,
         );
         let orphan = graph.append(
-            FlowBlockKind::parse("block.media.inspect"),
+            FlowBlockKind::parse("video.inspect"),
             "Orphelin",
             json!({}),
             &catalog,

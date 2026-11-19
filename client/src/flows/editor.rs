@@ -879,7 +879,7 @@ mod tests {
         let catalog = test_catalog();
         let mut graph = FlowGraph::default();
         graph.append(
-            FlowBlockKind::parse("block.core.webhook"),
+            FlowBlockKind::parse("essentiel.webhook"),
             "Hook",
             json!({}),
             &catalog,

@@ -213,7 +213,7 @@ fn find_entry_node<'a>(graph: &'a FlowGraph, catalog: &[OwnedBlockSpec]) -> Opti
         let spec = find_owned(catalog, &node.kind);
         spec.is_some_and(|s| !s.has_input)
             || node.kind.as_str() == "file-input"
-            || node.kind.as_str() == "block.core.file-input"
+            || node.kind.as_str() == "essentiel.file-input"
     }) {
         return Some(input_node);
     }
@@ -308,7 +308,7 @@ pub fn simulate_flow_with(
 
         let is_terminal = spec.is_some_and(|s| s.terminal)
             || node.kind.as_str() == "file-output"
-            || node.kind.as_str() == "block.core.file-output";
+            || node.kind.as_str() == "essentiel.file-output";
 
         let next_edge = if is_terminal {
             None

@@ -164,7 +164,7 @@ impl SecretBox {
         &self.key_id
     }
 
-    /// Chiffre `plaintext` en le liant à `aad` (par exemple `plugin:plugin.sonarr:apiKey`) : la valeur
+    /// Chiffre `plaintext` en le liant à `aad` (par exemple `plugin:sonarr:apiKey`) : la valeur
     /// ne se déchiffre pas si on la copie vers un autre champ.
     pub fn encrypt(&self, plaintext: &str, aad: &str) -> AppResult<String> {
         let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);

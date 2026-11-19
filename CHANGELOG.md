@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.53.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.52.0...v0.53.0) (2026-11-19)
+
+
+### Features
+
+* améliorer le pilotage des traitements et les montages partagés ([deb391a](https://github.com/remi-deher/flux-de-fichiers/commit/deb391a672d4a9423b170191092c2d45075129bb))
+* améliorer le pilotage des traitements et les montages partagés ([ae6675e](https://github.com/remi-deher/flux-de-fichiers/commit/ae6675ed87c47355daebbb0bdccf18648f79538b))
+* gérer les bibliothèques média sur plusieurs hôtes ([4685d84](https://github.com/remi-deher/flux-de-fichiers/commit/4685d84e44a8b4b502101f7588414c3ce9563cc5))
+* gérer les bibliothèques média sur plusieurs hôtes ([4e4a239](https://github.com/remi-deher/flux-de-fichiers/commit/4e4a239660e6ed3b7de54d43e67f0f64dbebd990))
+
+
+### Bug Fixes
+
+* typer les lignes de l’historique des sources ([e3d1feb](https://github.com/remi-deher/flux-de-fichiers/commit/e3d1feb05a04003518cfd88c93406981706a8c32))
+
 ## [0.52.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.51.0...v0.52.0) (2026-11-19)
 
 

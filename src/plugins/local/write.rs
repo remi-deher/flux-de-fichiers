@@ -443,6 +443,7 @@ pub fn save_local_pack(local_dir: &Path, req: CreateLocalPackRequest) -> AppResu
         version: "1.0.0".to_owned(),
         name: name.to_owned(),
         manifest_path: format!("packs/{slug}/manifest.json"),
+        description: Some(description),
         capability: None,
         current_choice: None,
         distribution: None,

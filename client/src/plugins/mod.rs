@@ -204,15 +204,37 @@ pub(super) fn section_badge_label(entry_type: CatalogItemType) -> &'static str {
     }
 }
 
+/// Ce que fait une pièce dont le manifeste ne donne pas de description.
 fn section_fallback_desc(entry_type: CatalogItemType) -> &'static str {
     match entry_type.section() {
-        Some(CatalogSection::Plugins) => "Intégration et blocs exécutables dans vos flux.",
-        Some(CatalogSection::Flows) => "Modèle de pipeline nodal prêt à l'emploi.",
-        Some(CatalogSection::Scripts) => "Script automatisé réutilisable dans vos flux.",
-        Some(CatalogSection::Packs) => "Ensemble groupé d'extensions et de ressources.",
-        Some(CatalogSection::Applications) => "Outil externe installé sur les nœuds.",
-        Some(CatalogSection::Other) | None => "Ressource réutilisable par les pipelines.",
+        Some(CatalogSection::Plugins) => {
+            "Ajoute des blocs à vos flux : encoder, extraire, notifier ou prévenir Sonarr, Radarr et Plex."
+        }
+        Some(CatalogSection::Flows) => {
+            "Flux complet prêt à l'emploi : il traite un fichier de bout en bout, de l'entrée à la sortie."
+        }
+        Some(CatalogSection::Scripts) => {
+            "Script appelé par un bloc de flux pour une étape sur mesure."
+        }
+        Some(CatalogSection::Packs) => {
+            "Installe d'un coup des plugins, flux et ressources prévus pour fonctionner ensemble."
+        }
+        Some(CatalogSection::Applications) => {
+            "Programme installé sur les nœuds (FFmpeg, MKVToolNix…) et utilisé par les plugins."
+        }
+        Some(CatalogSection::Other) | None => {
+            "Ressource utilisée par les flux : police, image, sous-titre, préréglage…"
+        }
     }
+}
+
+/// Texte d'une carte : description du manifeste, sinon libellé du type, sinon description par section.
+fn card_description(entry: &CatalogEntry) -> String {
+    entry
+        .description
+        .clone()
+        .or_else(|| entry.entry_type.subtitle().map(str::to_owned))
+        .unwrap_or_else(|| section_fallback_desc(entry.entry_type).to_owned())
 }
 
 /// Sous-onglets de l'écran Plugins, séparés par intention.
@@ -430,12 +452,7 @@ fn CatalogSectionView(
                                         CatalogItemType::Flow | CatalogItemType::Preset
                                     );
                                     let badge_label = section_badge_label(entry.entry_type);
-                                    let fallback_desc = section_fallback_desc(entry.entry_type);
-                                    let subtitle = entry
-                                        .entry_type
-                                        .subtitle()
-                                        .unwrap_or(fallback_desc)
-                                        .to_owned();
+                                    let subtitle = card_description(&entry);
                                     let tone = match entry.entry_type.section() {
                                         Some(CatalogSection::Plugins) => MetricTone::Success,
                                         Some(CatalogSection::Flows) => MetricTone::Warning,
@@ -525,7 +542,7 @@ fn CatalogSectionView(
                                                 }
                                                 .into_any()
                                             } else {
-                                                view! { <p class="text-dim text-sm">{fallback_desc}</p> }.into_any()
+                                                ().into_any()
                                             }}
                                         </ResourceCard>
                                     }
@@ -664,6 +681,7 @@ mod tests {
             version: "1.0.0".to_owned(),
             name: id.to_owned(),
             manifest_path: format!("{id}.json"),
+            description: None,
             capability: None,
             current_choice: None,
             distribution: None,
@@ -673,6 +691,24 @@ mod tests {
             sha256: None,
             updated_at: None,
         }
+    }
+
+    #[test]
+    fn the_card_prefers_the_manifest_description() {
+        let mut plugin = entry("archives", CatalogItemType::Plugin);
+        assert_eq!(
+            card_description(&plugin),
+            section_fallback_desc(CatalogItemType::Plugin)
+        );
+        plugin.description = Some("Extraction des archives téléchargées.".to_owned());
+        assert_eq!(
+            card_description(&plugin),
+            "Extraction des archives téléchargées."
+        );
+        assert_eq!(
+            card_description(&entry("polices", CatalogItemType::ResourceFont)),
+            "Polices"
+        );
     }
 
     #[test]

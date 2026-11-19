@@ -2003,13 +2003,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   color: var(--text-muted);
 }
 
-/* Assistant IA intégré dans la barre supérieure et son tiroir conversationnel */
-.ai-trigger-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
+/* Assistant IA intégré : tiroir conversationnel */
 .ai-chat {
   display: flex;
   flex-direction: column;

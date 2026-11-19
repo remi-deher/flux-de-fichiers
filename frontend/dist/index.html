@@ -326,18 +326,11 @@ button, a, select, input {
 .application-sidebar.is-collapsed .tab-btn-badge,
 .application-sidebar.is-collapsed .nav-group-label,
 .application-sidebar.is-collapsed .collapse-label,
-.application-sidebar.is-collapsed .sidebar-cmd-btn__label,
-.application-sidebar.is-collapsed .sidebar-cmd-btn__kbd,
 .application-sidebar.is-collapsed .sidebar-user-meta {
   display: none;
 }
 
-.application-sidebar.is-collapsed .sidebar-cmd-btn {
-  justify-content: center;
-  padding: 0.5rem;
-}
-
-.application-sidebar.is-collapsed .sidebar-user-card {
+.application-sidebar.is-collapsed .application-sidebar.is-collapsed .sidebar-user-card {
   flex-direction: column;
   padding: 0.4rem;
 }
@@ -434,43 +427,6 @@ button, a, select, input {
 .brand-version {
   font-size: var(--font-size-xs);
   color: var(--text-dim);
-}
-
-.sidebar-cmd-btn {
-  margin-top: 0.75rem;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.45rem 0.6rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-color);
-  background: var(--bg-subtle);
-  color: var(--text-dim);
-  font-size: var(--font-size-xs);
-  cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
-}
-
-.sidebar-cmd-btn:hover {
-  border-color: var(--primary);
-  color: var(--text-main);
-}
-
-.sidebar-cmd-btn__label {
-  flex: 1;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.sidebar-cmd-btn__kbd {
-  font-family: var(--font-mono);
-  font-size: var(--font-size-xs);
-  padding: 0.05rem 0.35rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-color);
-  background: var(--bg-card);
-  color: var(--text-muted);
 }
 
 /* Groupes et boutons de navigation */
@@ -588,6 +544,12 @@ button, a, select, input {
 }
 
 /* Pied de la barre latérale */
+.sidebar-footer-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
 .sidebar-footer {
   padding: 0.75rem;
   border-top: 1px solid var(--border-color);
@@ -776,11 +738,14 @@ button, a, select, input {
   pointer-events: none;
 }
 
+/* Trois zones : les colonnes latérales sont égales, la recherche garde donc la même place
+   sur tous les écrans, quel que soit le contenu de la zone d'actions. */
 .topbar-container {
+  --topbar-search-width: 34rem;
   position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, var(--topbar-search-width)) minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 1rem;
   padding: 0.5rem 1rem;
   min-height: 52px;
@@ -823,17 +788,12 @@ button, a, select, input {
   display: none;
 }
 
-.topbar-search-anchor {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
-  max-width: 720px;
-  margin-inline: auto;
-}
-
 .topbar-search {
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0 0.5rem 0 0.65rem;
   min-height: 36px;
   background: var(--bg-subtle);
   border: 1px solid var(--border-control);
@@ -857,15 +817,6 @@ body[data-filter-sheet] .topbar-search {
 .flow-quick-add__search:focus-within {
   outline: 2px solid var(--primary);
   outline-offset: -2px;
-}
-
-.search-capsule__query {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 0;
-  padding: 0 0.65rem;
 }
 
 .topbar-search .search-icon {
@@ -986,20 +937,141 @@ body[data-filter-sheet] .topbar-search {
 .topbar-actions {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
-  flex-shrink: 0;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  min-width: 0;
 }
 
-.status-pill-link {
+.topbar-actions__sep {
+  width: 1px;
+  height: 20px;
+  margin-inline: 0.15rem;
+  background: var(--border-color);
+}
+
+/* Titre de l'écran : le `h1` de la page, avec le groupe de la navigation en fil d'Ariane. */
+.topbar-heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.topbar-crumb {
+  min-height: 1.2em;
+  font-size: var(--font-size-xs);
+  line-height: 1.2;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.topbar-title {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Filtre de période, dans la capsule de recherche. */
+.topbar-search-filter {
   display: inline-flex;
-  text-decoration: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
 }
 
-.status-pill-link:hover .status-pill {
-  filter: brightness(1.08);
+.topbar-search-filter:hover {
+  background: var(--bg-elevated);
+  color: var(--text-main);
+}
+
+/* Menus du header : icône de taille fixe, panneau ancré à droite. */
+.header-menu {
+  position: relative;
+}
+
+.header-menu__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 44;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.header-menu__panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 13rem;
+  margin-top: 0.35rem;
+  padding: 0.35rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.header-menu__scrim[hidden],
+.header-menu__panel[hidden] {
+  display: none;
+}
+
+.header-menu__item {
+  display: block;
+  padding: 0.5rem 0.65rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-main);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.header-menu__item:hover {
+  background: var(--bg-subtle);
+}
+
+.header-menu__note {
+  padding: 0.5rem 0.65rem;
+  font-size: var(--font-size-sm);
+  color: var(--text-dim);
+}
+
+.header-icon-btn__dot {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-card);
+  background: var(--success);
+}
+
+.header-icon-btn__dot[data-tone="warning"] {
+  background: var(--warning);
+}
+
+.header-icon-btn__dot[data-tone="danger"] {
+  background: var(--danger);
 }
 
 .header-icon-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1464,9 +1536,7 @@ body[data-filter-sheet] .topbar-search {
   .application-sidebar.is-collapsed .tab-btn-label,
   .application-sidebar.is-collapsed .tab-btn-badge,
   .application-sidebar.is-collapsed .nav-group-label,
-  .application-sidebar.is-collapsed .sidebar-cmd-btn__label,
-  .application-sidebar.is-collapsed .sidebar-cmd-btn__kbd,
-  .application-sidebar.is-collapsed .sidebar-user-meta {
+      .application-sidebar.is-collapsed .sidebar-user-meta {
     display: revert;
   }
 
@@ -1475,10 +1545,6 @@ body[data-filter-sheet] .topbar-search {
     padding: 0.45rem 0.55rem;
   }
 
-  .application-sidebar.is-collapsed .sidebar-cmd-btn {
-    justify-content: flex-start;
-    padding: 0.45rem 0.6rem;
-  }
 
   .sidebar-scrim {
     display: block;
@@ -1536,10 +1602,6 @@ body[data-filter-sheet] .topbar-search {
     padding: 0.35rem 0.5rem;
   }
 
-  .topbar-search-anchor {
-    max-width: none;
-  }
-
   .main-content {
     padding: 1rem;
     max-width: 100vw;
@@ -1552,24 +1614,19 @@ body[data-filter-sheet] .topbar-search {
   }
 }
 
-/* --- Barre du haut compacte (< 640px) : la recherche passe sur sa propre ligne, pleine largeur ;
-   les statuts secondaires cèdent la place (le compteur des workers reste dans la navigation). --- */
+/* --- Header compact (< 640px) : la recherche passe sur sa propre ligne, pleine largeur. --- */
 @media (max-width: 640px) {
   .topbar-container {
-    flex-wrap: wrap;
+    grid-template-columns: minmax(0, 1fr) auto;
     row-gap: 0.35rem;
   }
 
-  .topbar-search-anchor {
-    order: 3;
-    flex: 1 0 100%;
+  .topbar-search {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
 
-  .status-pill-link {
-    display: none;
-  }
-
-  .ai-trigger-btn > span {
+  .topbar-crumb {
     display: none;
   }
 }
@@ -3577,13 +3634,7 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   color: var(--text-muted);
 }
 
-/* Assistant IA intégré dans la barre supérieure et son tiroir conversationnel */
-.ai-trigger-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
+/* Assistant IA intégré : tiroir conversationnel */
 .ai-chat {
   display: flex;
   flex-direction: column;
@@ -6807,7 +6858,6 @@ input[type="radio"] {
   .form-input,
   .form-select,
   .topbar-search,
-  .sidebar-cmd-btn,
   .theme-segmented__btn,
   .sidebar-collapse-btn,
   .inspection-drawer__tab {
@@ -6832,8 +6882,7 @@ input[type="radio"] {
 
 /* Sans survol (écran tactile seul) : pas de raccourcis clavier affichés. */
 @media (hover: none) {
-  .kbd-shortcut,
-  .sidebar-cmd-btn__kbd {
+  .kbd-shortcut {
     display: none;
   }
 }

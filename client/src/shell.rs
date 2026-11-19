@@ -1,13 +1,15 @@
 //! Coque de l'application : barre latérale (marque, navigation par groupes, compteurs live, thème, déconnexion)
-//! et barre du haut (filtre instantané, période, workers en ligne et action contextuelle).
+//! et header commun (titre, recherche, action contextuelle, statut), voir [`header`].
+
+mod header;
 
 use crate::ai::{AiAssistantDrawer, AiAssistantState};
 use crate::route::{Link, Route, use_router};
 use crate::settings::{logout, role_label};
 use crate::theme::ThemePicker;
-use crate::ui::filters::{FilterSheet, Filters};
+use crate::ui::filters::Filters;
 use crate::ui::search::Search;
-use crate::ui::topbar_action::{TopbarAction, TopbarActionSlot};
+use crate::ui::topbar_action::TopbarAction;
 use crate::ui::{
     BrandMark, CommandPalette, CommandPaletteState, Icon, IconName, TagTone, ToastViewport, Toasts,
 };
@@ -18,6 +20,7 @@ use forgearr_shared::session::Me;
 use forgearr_shared::system::UpdateCheckStatus;
 use forgearr_shared::workers::Worker;
 use forgearr_shared::{InstanceKind, Permission};
+use header::Topbar;
 use leptos::prelude::*;
 
 const SYSTEM_UPDATES_PATH: &str = "/api/v1/system/updates";
@@ -50,30 +53,34 @@ const fn screen(
     }
 }
 
+/// Groupe d'ouverture de la barre latérale : affiché sans libellé.
+const GENERAL_GROUP: &str = "Général";
+/// Groupe épinglé en pied de barre latérale, au-dessus de la carte utilisateur.
+const SETTINGS_GROUP: &str = "Système";
+
 /// Groupes de la barre latérale, dans l'ordre d'affichage.
 pub fn groups() -> Vec<(&'static str, Vec<Screen>)> {
     vec![
         (
-            "Vue générale",
-            vec![screen(
-                Route::Overview,
-                "Vue d'ensemble",
-                IconName::Dashboard,
-                Permission::ViewOverview,
-                true,
-                "Rechercher dans la vue d'ensemble…",
-            )],
-        ),
-        (
-            "Librairies",
-            vec![screen(
-                Route::Libraries,
-                "Librairies",
-                IconName::Libraries,
-                Permission::ViewLibraries,
-                false,
-                "Filtrer les librairies…",
-            )],
+            GENERAL_GROUP,
+            vec![
+                screen(
+                    Route::Overview,
+                    "Vue d'ensemble",
+                    IconName::Dashboard,
+                    Permission::ViewOverview,
+                    true,
+                    "Rechercher dans la vue d'ensemble…",
+                ),
+                screen(
+                    Route::Libraries,
+                    "Librairies",
+                    IconName::Libraries,
+                    Permission::ViewLibraries,
+                    false,
+                    "Filtrer les librairies…",
+                ),
+            ],
         ),
         (
             "Traitements",
@@ -118,7 +125,7 @@ pub fn groups() -> Vec<(&'static str, Vec<Screen>)> {
             ],
         ),
         (
-            "Système",
+            SETTINGS_GROUP,
             vec![screen(
                 Route::Settings,
                 "Paramètres",
@@ -167,6 +174,15 @@ pub fn screen_title(route: &Route) -> &'static str {
             .find(|entry| entry.route == *other)
             .map_or("Vue d'ensemble", |entry| entry.label),
     }
+}
+
+/// Groupe de la barre latérale auquel appartient l'écran : fil d'Ariane du header.
+fn screen_group(route: &Route) -> Option<&'static str> {
+    let section = route.section();
+    groups()
+        .into_iter()
+        .find(|(_, screens)| screens.iter().any(|entry| entry.route == section))
+        .map(|(label, _)| label)
 }
 
 /// Titre du document pour un écran : « Écran — Forgearr ».
@@ -266,6 +282,41 @@ pub fn is_workbench_route(route: &Route) -> bool {
     matches!(route, Route::FlowEditor(_) | Route::NewFlow)
 }
 
+/// Écrans visibles pour ces droits sur cette installation.
+fn visible_screens(me: &Me, screens: Vec<Screen>) -> Vec<Screen> {
+    screens
+        .into_iter()
+        .filter(|entry| allowed(me, &entry.route))
+        .collect()
+}
+
+/// Entrée de navigation : lien, pictogramme, libellé et badge live (activité, workers).
+#[component]
+fn NavEntry(entry: Screen, jobs: Signal<Vec<Job>>, workers: Signal<Vec<Worker>>) -> impl IntoView {
+    let router = use_router();
+    let section = entry.route.clone();
+    let target = entry.route.clone();
+    let current = Signal::derive(move || router.current().section() == section);
+    let badge_slot = matches!(entry.route, Route::Jobs | Route::Workers).then(|| {
+        let badge_route = entry.route.clone();
+        move || {
+            let badge = workers.with(|workers| {
+                jobs.with(|jobs| screen_badge(&badge_route, jobs, workers, Utc::now()))
+            });
+            badge.map(|(count, tone)| {
+                view! { <span class="tab-btn-badge" data-tone=tone.as_attr()>{count}</span> }
+            })
+        }
+    });
+    view! {
+        <Link to=target class="tab-btn" title=entry.label current=current>
+            <Icon name=entry.icon size=18 class="tab-role-icon" />
+            <span class="tab-btn-label">{entry.label}</span>
+            {badge_slot}
+        </Link>
+    }
+}
+
 #[component]
 fn Sidebar(me: Me, jobs: Signal<Vec<Job>>, workers: Signal<Vec<Worker>>) -> impl IntoView {
     let router = use_router();
@@ -284,7 +335,6 @@ fn Sidebar(me: Me, jobs: Signal<Vec<Job>>, workers: Signal<Vec<Worker>>) -> impl
         was_workbench.set(in_workbench);
     });
     let drawer = use_context::<NavDrawer>().map(|drawer| drawer.0);
-    let palette = use_context::<CommandPaletteState>();
     let user_name = me.name.clone();
     let initials = user_initials(&user_name);
     let user_role = role_label(me.role);
@@ -304,52 +354,28 @@ fn Sidebar(me: Me, jobs: Signal<Vec<Job>>, workers: Signal<Vec<Worker>>) -> impl
                         </div>
                     </div>
                 </a>
-                <button
-                    type="button"
-                    class="sidebar-cmd-btn"
-                    title="Palette de commandes (Ctrl+K)"
-                    aria-label="Ouvrir la palette de commandes"
-                    on:click=move |_| if let Some(palette) = palette { palette.show(); }
-                >
-                    <Icon name=IconName::Search size=14 />
-                    <span class="sidebar-cmd-btn__label">"Aller à…"</span>
-                    <kbd class="sidebar-cmd-btn__kbd">"Ctrl K"</kbd>
-                </button>
             </div>
             <nav class="tab-navigation" aria-label="Navigation principale par groupes métier">
                 <div class="tab-list">
-                    {groups().into_iter().filter_map(|(label, screens)| {
-                        let visible: Vec<Screen> = screens.into_iter().filter(|entry| allowed(&me, &entry.route)).collect();
+                    {groups().into_iter().filter(|(label, _)| *label != SETTINGS_GROUP).filter_map(|(label, screens)| {
+                        let visible = visible_screens(&me, screens);
                         (!visible.is_empty()).then(|| view! {
-                            <span class="nav-group-label" aria-hidden="true">{label}</span>
-                            {visible.into_iter().map(|entry| {
-                                let section = entry.route.clone();
-                                let target = entry.route.clone();
-                                let current = Signal::derive(move || router.current().section() == section);
-                                let badge_slot = matches!(entry.route, Route::Jobs | Route::Workers).then(|| {
-                                    let badge_route = entry.route.clone();
-                                    move || {
-                                        let badge = workers.with(|workers| {
-                                            jobs.with(|jobs| screen_badge(&badge_route, jobs, workers, Utc::now()))
-                                        });
-                                        badge.map(|(count, tone)| view! {
-                                            <span class="tab-btn-badge" data-tone=tone.as_attr()>{count}</span>
-                                        })
-                                    }
-                                });
-                                view! {
-                                    <Link to=target class="tab-btn" title=entry.label current=current>
-                                        <Icon name=entry.icon size=18 class="tab-role-icon" />
-                                        <span class="tab-btn-label">{entry.label}</span>
-                                        {badge_slot}
-                                    </Link>
-                                }
+                            {(label != GENERAL_GROUP).then(|| view! {
+                                <span class="nav-group-label" aria-hidden="true">{label}</span>
+                            })}
+                            {visible.into_iter().map(|entry| view! {
+                                <NavEntry entry=entry jobs=jobs workers=workers />
                             }).collect_view()}
                         })
                     }).collect_view()}
                 </div>
             </nav>
             <div class="sidebar-footer">
+                <div class="sidebar-footer-nav">
+                    {groups().into_iter().filter(|(label, _)| *label == SETTINGS_GROUP).flat_map(|(_, screens)| visible_screens(&me, screens)).map(|entry| view! {
+                        <NavEntry entry=entry jobs=jobs workers=workers />
+                    }).collect_view()}
+                </div>
                 <div class="sidebar-user-card">
                     <span class="sidebar-user-avatar" aria-hidden="true">{initials}</span>
                     <div class="sidebar-user-meta">
@@ -372,155 +398,6 @@ fn Sidebar(me: Me, jobs: Signal<Vec<Job>>, workers: Signal<Vec<Worker>>) -> impl
                 </div>
             </div>
         </aside>
-    }
-}
-
-/// Indicateur cliquable des workers en ligne (central seulement), relu à chaque événement SSE.
-#[component]
-fn WorkersPill(workers: Signal<Option<Vec<Worker>>>) -> impl IntoView {
-    move || {
-        let list = workers.get()?;
-        let online = list
-            .iter()
-            .filter(|worker| worker.is_online(Utc::now()))
-            .count();
-        let (class, text) = match online {
-            0 => ("status-pill offline", "Aucun worker en ligne".to_owned()),
-            1 => ("status-pill online", "1 worker en ligne".to_owned()),
-            count => ("status-pill online", format!("{count} workers en ligne")),
-        };
-        Some(view! {
-            <Link to=Route::Workers class="status-pill-link">
-                <span class=class aria-live="polite" title="Ouvrir les workers (central inclus)">
-                    <span class="status-dot"></span>
-                    <span>{text}</span>
-                </span>
-            </Link>
-        })
-    }
-}
-
-#[component]
-fn UpdatePill(update: Signal<Option<UpdateCheckStatus>>) -> impl IntoView {
-    move || {
-        let info = update.get()?;
-        if !info.enabled || !info.update_available {
-            return None;
-        }
-        let version = info.latest_version.unwrap_or_default();
-        let label = format!("Mise à jour v{version}");
-        let title = format!(
-            "Nouvelle version v{version} disponible (installée : v{})",
-            info.current_version
-        );
-        Some(match info.release_url {
-            Some(url) => view! {
-                <a href=url target="_blank" rel="noopener noreferrer" class="status-pill-link" title=title>
-                    <span class="status-pill warning" aria-live="polite">
-                        <span class="status-dot"></span>
-                        <span>{label}</span>
-                    </span>
-                </a>
-            }
-            .into_any(),
-            None => view! {
-                <Link to=Route::Settings class="status-pill-link">
-                    <span class="status-pill warning" aria-live="polite" title=title>
-                        <span class="status-dot"></span>
-                        <span>{label}</span>
-                    </span>
-                </Link>
-            }
-            .into_any(),
-        })
-    }
-}
-
-#[component]
-fn Topbar(
-    me: Me,
-    workers: Signal<Option<Vec<Worker>>>,
-    update: Signal<Option<UpdateCheckStatus>>,
-) -> impl IntoView {
-    let router = use_router();
-    let search = use_context::<Search>().unwrap_or_else(Search::install);
-    let nav = use_context::<NavDrawer>().map(|drawer| drawer.0);
-    let filters = use_context::<Filters>().unwrap_or_else(Filters::install);
-    let palette = use_context::<CommandPaletteState>();
-    Effect::new(move |_| {
-        router.current();
-        search.text.set(String::new());
-        filters.apply_route_change();
-        if let Some(nav) = nav {
-            nav.set(false);
-        }
-    });
-    let central = me.instance_kind == InstanceKind::Central && me.allows(Permission::ViewWorkers);
-    let central_ai = me.instance_kind == InstanceKind::Central;
-    let ai_state = central_ai.then(use_context::<AiAssistantState>).flatten();
-    view! {
-        <header class="app-topbar" role="banner">
-            <div class="topbar-container">
-                <div class="topbar-lead">
-                    <button type="button" class="topbar-menu-btn" aria-label="Ouvrir la navigation"
-                        aria-expanded=move || nav.is_some_and(|open| open.get()).to_string()
-                        on:click=move |_| if let Some(nav) = nav { nav.update(|open| *open = !*open) }>
-                        <Icon name=IconName::Menu size=20 />
-                    </button>
-                </div>
-                <div class="topbar-search-anchor">
-                    <div class="topbar-search" role="search">
-                        <div class="search-capsule__query">
-                            <Icon name=IconName::Search size=15 class="search-icon" />
-                            <input type="search" class="topbar-search-input" autocomplete="off" spellcheck="false"
-                                enterkeyhint="search" aria-label="Filtrer l'écran actif"
-                                placeholder=move || search_placeholder(&router.current())
-                                prop:value=move || search.text.get()
-                                on:input=move |event| search.text.set(event_target_value(&event)) />
-                            {move || (!search.text.get().is_empty()).then(|| view! {
-                                <button
-                                    type="button"
-                                    class="topbar-search-clear"
-                                    aria-label="Effacer le filtre"
-                                    title="Effacer le filtre"
-                                    on:click=move |_| search.text.set(String::new())
-                                >
-                                    <Icon name=IconName::Close size=13 />
-                                </button>
-                            })}
-                            <button
-                                type="button"
-                                class="kbd-shortcut"
-                                title="Ouvrir la palette de commandes (Ctrl+K)"
-                                aria-label="Ouvrir la palette de commandes"
-                                on:click=move |_| if let Some(palette) = palette { palette.show(); }
-                            >
-                                "Ctrl K"
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <div class="topbar-actions">
-                    <FilterSheet route=Signal::derive(move || router.current()) />
-                    <UpdatePill update=update />
-                    {central.then(|| view! { <WorkersPill workers=workers /> })}
-                    {ai_state.map(|ai| view! {
-                        <button
-                            type="button"
-                            class="btn btn-secondary btn-sm ai-trigger-btn"
-                            title="Ouvrir l'assistant IA intégré"
-                            aria-label="Assistant IA"
-                            aria-expanded=move || ai.open.get().to_string()
-                            on:click=move |_| ai.toggle()
-                        >
-                            <Icon name=IconName::Sparkles size=15 />
-                            <span>"Assistant IA"</span>
-                        </button>
-                    })}
-                    <TopbarActionSlot />
-                </div>
-            </div>
-        </header>
     }
 }
 
@@ -606,7 +483,6 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
                         class="main-content"
                         class:is-workbench=is_workbench
                     >
-                        <h1 class="visually-hidden">{move || screen_title(&router.current())}</h1>
                         {children()}
                     </main>
                 </div>
@@ -675,6 +551,28 @@ mod tests {
             document_title(&Route::Overview),
             "Vue d'ensemble — Forgearr"
         );
+    }
+
+    #[test]
+    fn sidebar_groups_pin_settings_alone_and_open_with_the_general_group() {
+        let all = groups();
+        assert_eq!(all.first().map(|(label, _)| *label), Some(GENERAL_GROUP));
+        let settings: Vec<_> = all
+            .iter()
+            .filter(|(label, _)| *label == SETTINGS_GROUP)
+            .flat_map(|(_, screens)| screens.iter().map(|entry| entry.route.clone()))
+            .collect();
+        assert_eq!(settings, vec![Route::Settings]);
+        let general: Vec<_> = all[0].1.iter().map(|entry| entry.route.clone()).collect();
+        assert_eq!(general, vec![Route::Overview, Route::Libraries]);
+    }
+
+    #[test]
+    fn the_breadcrumb_is_the_sidebar_group_of_the_screen() {
+        assert_eq!(screen_group(&Route::Jobs), Some("Traitements"));
+        assert_eq!(screen_group(&Route::Workers), Some("Infrastructure"));
+        assert_eq!(screen_group(&Route::Settings), Some(SETTINGS_GROUP));
+        assert_eq!(screen_group(&Route::NewFlow), None);
     }
 
     #[test]

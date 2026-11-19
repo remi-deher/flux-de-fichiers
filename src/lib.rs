@@ -10,6 +10,7 @@ pub mod enrollment;
 pub mod error;
 pub mod filesystem_browser;
 pub mod flows;
+pub mod hardware_probe;
 pub mod instance;
 pub mod job_runner;
 mod library_scan;

@@ -429,6 +429,7 @@ async fn worker_version_remote_addr_and_telemetry_are_persisted() -> anyhow::Res
         ram_used_bytes: 4 * 1024 * 1024 * 1024,
         gpu_detected: true,
         gpu_devices: vec!["nvidia RTX 4060".into()],
+        capabilities: Default::default(),
         storage_total_bytes: 500 * 1024 * 1024 * 1024,
         storage_available_bytes: 300 * 1024 * 1024 * 1024,
     };

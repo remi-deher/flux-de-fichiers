@@ -83,8 +83,12 @@ requiert pas.
 
 ## Conséquences
 
-- Migration à venir (`0031_*`) : capacités des workers, contrainte de cible et compteur de relais
-  du job, trace du point de reprise. Les migrations existantes ne changent pas.
+- Étape 1 (capacités) : aucune migration. Les capacités voyagent dans la télémétrie déjà persistée
+  (`workers.telemetry_json`, champ `capabilities`), relevées une fois par `hardware_probe`.
+- Migration à venir (`0031_*`, étapes suivantes) : contrainte de cible et compteur de relais du
+  job, trace du point de reprise. Les migrations existantes ne changent pas.
+- Les capacités décrivent le matériel seulement : l'encodage logiciel (x265, SVT-AV1) dépend de
+  l'outil FFmpeg des plugins et sera traité avec le bloc de relais.
 - `Dockerfile` : ajout des sondes légères (construction des images sur GitHub CI uniquement).
 - Nouveau code d'erreur de job `no_capable_worker` et événement de journal `job_relayed`.
 - Le moteur de flux gagne une sortie de type « relais » qui suspend l'exécution locale sans erreur.

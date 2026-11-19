@@ -386,6 +386,7 @@ mod tests {
             ram_used_bytes: 6144,
             gpu_detected: true,
             gpu_devices: vec!["/dev/dri/renderD128".into()],
+            capabilities: Default::default(),
             storage_total_bytes,
             storage_available_bytes: 100,
         }

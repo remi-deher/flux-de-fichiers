@@ -1,5 +1,6 @@
 //! Contrat des workers et de la configuration système lue par l'interface (ADR 0014).
 
+use crate::capabilities::WorkerCapabilities;
 use crate::jobs::JobStatus;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,9 @@ pub struct WorkerTelemetry {
     pub storage_available_bytes: u64,
     #[serde(default)]
     pub gpu_devices: Vec<String>,
+    /// Capacités matérielles relevées par les sondes du worker (ADR 0018).
+    #[serde(default)]
+    pub capabilities: WorkerCapabilities,
 }
 
 /// Fenêtre horaire d'activité autorisée pour un worker (ex. nuit 22h -> 06h).

@@ -1,5 +1,6 @@
 //! Système : versions et mise à jour, clé de chiffrement, base de données, limites et espace disque ; socle du tableau de bord Paramètres.
 
+use super::key_rotation::KeyRotationControl;
 use crate::api;
 use crate::ui::{ProgressBar, SectionHeader};
 use flux_shared::format::format_bytes;
@@ -195,7 +196,10 @@ fn system_rows(status: &SystemStatus) -> Vec<DetailRow> {
 }
 
 #[component]
-pub fn SystemSection(status: Signal<Option<Result<SystemStatus, String>>>) -> impl IntoView {
+pub fn SystemSection(
+    status: Signal<Option<Result<SystemStatus, String>>>,
+    on_changed: Callback<()>,
+) -> impl IntoView {
     let check_updates = Action::new_local(move |()| async move {
         api::get::<UpdateCheckStatus>(SYSTEM_UPDATES_PATH).await
     });
@@ -207,6 +211,7 @@ pub fn SystemSection(status: Signal<Option<Result<SystemStatus, String>>>) -> im
     });
     let footer = view! {
         <div class="stack">
+            <KeyRotationControl status=status on_changed=on_changed />
             {move || updates_enabled.get().then(|| view! {
                 <div class="cluster cluster-wrap">
                     <button type="button" class="btn btn-secondary btn-sm"
@@ -239,9 +244,9 @@ pub fn SystemSection(status: Signal<Option<Result<SystemStatus, String>>>) -> im
                 </summary>
                 <div class="settings-help-details__body">
                     <p class="form-help">
-                        "Rotation de la clé : arrêter le central, puis lancer "
+                        "Clé de chiffrement : le bouton « Renouveler la clé de chiffrement » suffit. En secours, central arrêté : "
                         <code>"flux-de-fichiers rotate-secret"</code>
-                        " ; une copie de l'ancienne clé et de la base est rangée dans /config/backups."
+                        "."
                     </p>
                     <p class="form-help">
                         "Version disponible : désactivée par défaut ; activez la vérification facultative dans Paramètres → Réseau."

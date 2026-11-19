@@ -34,6 +34,14 @@ pub(super) fn load(config_dir: &Path) -> AppResult<Vec<KeyEntry>> {
         .collect()
 }
 
+/// Oublie toutes les clés retirées. À n'appeler qu'une fois chaque valeur rechiffrée sous la clé active.
+pub fn clear_retired_keys(config_dir: &Path) -> AppResult<()> {
+    match fs::remove_file(retired_keys_path(config_dir)) {
+        Err(error) if error.kind() != ErrorKind::NotFound => Err(AppError::Storage(error)),
+        _ => Ok(()),
+    }
+}
+
 /// Ajoute une clé au trousseau des clés retirées, sans doublon. La clé est validée avant écriture.
 pub fn retire_key(config_dir: &Path, key_hex: &str) -> AppResult<()> {
     let key_hex = key_hex.trim();

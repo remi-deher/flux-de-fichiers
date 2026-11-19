@@ -1,26 +1,31 @@
-//! Rotation de la clé de chiffrement des secrets (ADR 0011).
+//! Rotation de la clé de chiffrement des secrets (ADR 0011), possible central en marche.
 //!
-//! Tous les secrets stockés (réglages de plugins, en-têtes de webhook) sont rechiffrés avec une clé
-//! neuve en une seule transaction : si une valeur ne se déchiffre pas, rien ne change. Avant d'y toucher,
-//! l'ancienne clé, la nouvelle et une copie cohérente de la base sont rangées dans
-//! `<config>/backups/secret-rotation-<date>-<ancienne clé>/`.
+//! 1. Bascule : l'ancienne clé rejoint le trousseau des clés retirées, puis une clé neuve devient
+//!    active. Les nouvelles écritures l'utilisent aussitôt ; les anciennes valeurs restent lisibles.
+//! 2. Rechiffrement : tous les secrets stockés passent sous la clé active en une seule transaction ;
+//!    si une valeur ne se déchiffre pas, rien ne change et les clés retirées sont gardées.
+//! 3. Retrait : une fois la transaction validée, plus aucune valeur n'utilise de clé retirée, qui est
+//!    oubliée. Aucune étape ne détruit une clé encore utile : il n'y a rien à sauvegarder en clair.
 
 use crate::{
     error::{AppError, AppResult},
     flows, plugins, repository,
-    secrets::SecretBox,
+    secrets::{self, SecretBox},
     worker_settings,
 };
-use chrono::Utc;
 use sqlx::SqlitePool;
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 
-const BACKUPS_DIR: &str = "backups";
-const BACKUP_PREFIX: &str = "secret-rotation";
-const DATABASE_BACKUP_NAME: &str = "flux.db";
-const OLD_KEY_BACKUP_NAME: &str = "secret_key";
-const NEW_KEY_BACKUP_NAME: &str = "secret_key.next";
-const BACKUP_TIMESTAMP_FORMAT: &str = "%Y%m%d-%H%M%S";
+/// Délai laissé, central en marche, aux requêtes qui ont ouvert l'ancienne clé avant la bascule pour
+/// terminer leur écriture, avant le rechiffrement et le retrait.
+pub const RETIRED_KEY_GRACE: Duration = Duration::from_secs(30);
+
+/// Une seule rotation à la fois : une seconde bascule pendant le délai de grâce est refusée.
+static ROTATION_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 /// Valeurs rechiffrées, par origine.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -29,12 +34,17 @@ pub struct RotationReport {
     pub flow_values: usize,
 }
 
-#[derive(Debug)]
-pub struct RotationOutcome {
-    pub report: RotationReport,
-    pub backup_dir: PathBuf,
+/// Identifiants des clés avant et après la bascule.
+#[derive(Debug, PartialEq, Eq)]
+pub struct KeySwitch {
     pub old_key_id: String,
     pub new_key_id: String,
+}
+
+#[derive(Debug)]
+pub struct RotationOutcome {
+    pub switch: KeySwitch,
+    pub report: RotationReport,
 }
 
 /// Rechiffre toutes les valeurs stockées de `old` vers `new`, dans une seule transaction.
@@ -83,46 +93,90 @@ pub async fn rotate_values(
 }
 
 fn storage_error(error: anyhow::Error) -> AppError {
-    tracing::error!(error = %error, "écriture de la sauvegarde de rotation impossible");
+    tracing::error!(error = %error, "écriture de la clé de chiffrement impossible");
     AppError::Internal
 }
 
-/// Copie cohérente de la base (`VACUUM INTO`), lisible même pendant que le central écrit.
-async fn backup_database(pool: &SqlitePool, destination: &Path) -> AppResult<()> {
-    let literal = destination.to_string_lossy().replace('\'', "''");
-    sqlx::query(&format!("VACUUM INTO '{literal}'"))
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
-/// Fait tourner la clé locale : sauvegarde, rechiffrement en transaction, puis remplacement du fichier.
-/// La clé fournie par `SECRET_KEY_FILE` n'est pas gérée ici : elle appartient à l'orchestrateur.
-pub async fn rotate_local_key(pool: &SqlitePool, config_dir: &Path) -> AppResult<RotationOutcome> {
-    let key_path = SecretBox::local_key_path(config_dir);
+/// Étape 1 : retire la clé locale active, puis en publie une neuve. Refusée si la clé vient de
+/// `SECRET_KEY_FILE`, car elle appartient alors à l'orchestrateur.
+pub fn switch_active_key(
+    config_dir: &Path,
+    external_key_file: Option<&Path>,
+) -> AppResult<KeySwitch> {
+    if external_key_file.is_some() {
+        return Err(AppError::Conflict);
+    }
     let old = SecretBox::open_with(config_dir, None)?;
+    let key_path: PathBuf = SecretBox::local_key_path(config_dir);
+    secrets::retire_key(config_dir, &std::fs::read_to_string(&key_path)?)?;
     let new_hex = SecretBox::generate_key_hex();
     let new = SecretBox::from_key_hex(&new_hex)?;
-
-    let backup_dir = config_dir.join(BACKUPS_DIR).join(format!(
-        "{BACKUP_PREFIX}-{}-{}",
-        Utc::now().format(BACKUP_TIMESTAMP_FORMAT),
-        old.key_id()
-    ));
-    std::fs::create_dir_all(&backup_dir)?;
-    let old_hex = std::fs::read_to_string(&key_path)?;
-    worker_settings::write_private(&backup_dir.join(OLD_KEY_BACKUP_NAME), old_hex.trim())
-        .map_err(storage_error)?;
-    worker_settings::write_private(&backup_dir.join(NEW_KEY_BACKUP_NAME), &new_hex)
-        .map_err(storage_error)?;
-    backup_database(pool, &backup_dir.join(DATABASE_BACKUP_NAME)).await?;
-
-    let report = rotate_values(pool, &old, &new).await?;
     worker_settings::write_private(&key_path, &new_hex).map_err(storage_error)?;
-    Ok(RotationOutcome {
-        report,
-        backup_dir,
+    Ok(KeySwitch {
         old_key_id: old.key_id().to_owned(),
         new_key_id: new.key_id().to_owned(),
     })
+}
+
+/// Étapes 2 et 3 : rechiffre tout sous la clé active, puis oublie les clés retirées. Sans clé retirée,
+/// rien n'est fait. Sert aussi au démarrage, pour achever une rotation interrompue.
+pub async fn reseal_and_retire(
+    pool: &SqlitePool,
+    config_dir: &Path,
+    external_key_file: Option<&Path>,
+) -> AppResult<RotationReport> {
+    let ring = SecretBox::open_with(config_dir, external_key_file)?;
+    if ring.retired_key_ids().is_empty() {
+        return Ok(RotationReport::default());
+    }
+    let report = rotate_values(pool, &ring, &ring).await?;
+    secrets::clear_retired_keys(config_dir)?;
+    Ok(report)
+}
+
+/// Rotation complète d'un coup, central arrêté (`flux-de-fichiers rotate-secret`).
+pub async fn rotate_local_key(pool: &SqlitePool, config_dir: &Path) -> AppResult<RotationOutcome> {
+    let switch = switch_active_key(config_dir, None)?;
+    let report = reseal_and_retire(pool, config_dir, None).await?;
+    Ok(RotationOutcome { switch, report })
+}
+
+/// Libère le verrou de rotation quand la tâche se termine, même en cas d'échec.
+struct RotationGuard;
+
+impl Drop for RotationGuard {
+    fn drop(&mut self) {
+        ROTATION_IN_PROGRESS.store(false, Ordering::Release);
+    }
+}
+
+/// Rotation central en marche : bascule tout de suite, puis rechiffre et retire en tâche de fond
+/// après `grace`. Refusée si une rotation est déjà en cours.
+pub fn start_online_rotation(
+    pool: SqlitePool,
+    config_dir: PathBuf,
+    external_key_file: Option<PathBuf>,
+    grace: Duration,
+) -> AppResult<KeySwitch> {
+    if ROTATION_IN_PROGRESS.swap(true, Ordering::AcqRel) {
+        return Err(AppError::Conflict);
+    }
+    let guard = RotationGuard;
+    let switch = switch_active_key(&config_dir, external_key_file.as_deref())?;
+    tokio::spawn(async move {
+        let _guard = guard;
+        tokio::time::sleep(grace).await;
+        match reseal_and_retire(&pool, &config_dir, None).await {
+            Ok(report) => tracing::info!(
+                plugin_values = report.plugin_values,
+                flow_values = report.flow_values,
+                "secrets rechiffrés sous la nouvelle clé, anciennes clés retirées"
+            ),
+            Err(error) => tracing::error!(
+                error = %error,
+                "rechiffrement impossible : les anciennes clés sont gardées pour déchiffrer"
+            ),
+        }
+    });
+    Ok(switch)
 }

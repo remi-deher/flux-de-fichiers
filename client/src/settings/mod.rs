@@ -6,6 +6,7 @@ mod ai;
 mod ai_model;
 mod ai_oauth;
 mod ai_status;
+mod key_rotation;
 mod keys;
 mod mcp_audit;
 mod network;
@@ -210,7 +211,7 @@ pub fn SettingsPage(me: Me) -> impl IntoView {
                     </div>
                 }).into_any(),
                 Section::System => status_signal.map(|status| view! {
-                    <SystemSection status=status />
+                    <SystemSection status=status on_changed=on_settings_saved />
                 }).into_any(),
             }}
         </div>

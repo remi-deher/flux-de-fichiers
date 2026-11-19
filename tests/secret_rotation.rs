@@ -1,13 +1,17 @@
 //! Rotation de la clé de chiffrement : tout est rechiffré ou rien ne change (ADR 0011).
 
 use flux_de_fichiers::{
+    error::AppError,
     plugins::plugin_secret_aad,
-    secret_rotation::{RotationReport, rotate_local_key, rotate_values},
-    secrets::SecretBox,
+    secret_rotation::{
+        KeySwitch, RotationReport, reseal_and_retire, rotate_local_key, rotate_values,
+        start_online_rotation, switch_active_key,
+    },
+    secrets::{SecretBox, retired_keys_path},
 };
 use serde_json::json;
 use sqlx::sqlite::SqlitePoolOptions;
-use std::path::Path;
+use std::time::Duration;
 
 const PLUGIN: &str = "sonarr";
 const FLOW: &str = "flow.hook";
@@ -23,19 +27,6 @@ async fn seeded_pool(secrets: &SecretBox) -> anyhow::Result<sqlx::SqlitePool> {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
-        .await?;
-    seed(&pool, secrets).await?;
-    Ok(pool)
-}
-
-/// Même contenu dans un fichier, comme la base de production : c'est ce cas que la sauvegarde doit couvrir.
-async fn seeded_file_pool(secrets: &SecretBox, file: &Path) -> anyhow::Result<sqlx::SqlitePool> {
-    let options = sqlx::sqlite::SqliteConnectOptions::new()
-        .filename(file)
-        .create_if_missing(true);
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect_with(options)
         .await?;
     seed(&pool, secrets).await?;
     Ok(pool)
@@ -96,17 +87,6 @@ fn two_boxes() -> anyhow::Result<(SecretBox, SecretBox)> {
     ))
 }
 
-fn config_dir_files(dir: &Path) -> Vec<String> {
-    std::fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .flatten()
-                .map(|entry| entry.file_name().to_string_lossy().into_owned())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 #[tokio::test]
 async fn test_every_stored_secret_moves_to_the_new_key() -> anyhow::Result<()> {
     let (old, new) = two_boxes()?;
@@ -164,39 +144,125 @@ async fn test_a_second_rotation_with_the_old_key_is_refused() -> anyhow::Result<
     Ok(())
 }
 
+const BACKGROUND_TIMEOUT: Duration = Duration::from_secs(5);
+const BACKGROUND_POLL: Duration = Duration::from_millis(20);
+
+/// Les deux secrets semés se lisent avec `secrets`.
+async fn assert_readable(pool: &sqlx::SqlitePool, secrets: &SecretBox) -> anyhow::Result<()> {
+    let api_key = stored_api_key(pool).await?;
+    assert_eq!(
+        secrets.decrypt(&api_key, &plugin_secret_aad(PLUGIN, "apiKey"))?,
+        "CLE-ARR"
+    );
+    let header = stored_header(pool, HEADER).await?;
+    assert_eq!(secrets.decrypt(&header, &header_aad())?, "Bearer SECRET");
+    Ok(())
+}
+
 #[tokio::test]
-async fn test_local_key_rotation_backs_up_then_replaces_the_key_file() -> anyhow::Result<()> {
+async fn test_after_the_switch_old_values_stay_readable_until_resealed() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let old = SecretBox::open(dir.path())?;
-    let pool = seeded_file_pool(&old, &dir.path().join("live.db")).await?;
-    let old_key_file = std::fs::read_to_string(SecretBox::local_key_path(dir.path()))?;
+    let pool = seeded_pool(&old).await?;
+
+    let switch = switch_active_key(dir.path(), None)?;
+    assert_eq!(switch.old_key_id, old.key_id());
+    let ring = SecretBox::open(dir.path())?;
+    assert_eq!(ring.key_id(), switch.new_key_id);
+    assert_eq!(ring.retired_key_ids(), [old.key_id()]);
+    assert_readable(&pool, &ring).await?;
+
+    let report = reseal_and_retire(&pool, dir.path(), None).await?;
+    assert_eq!(
+        report,
+        RotationReport {
+            plugin_values: 1,
+            flow_values: 1
+        }
+    );
+    assert!(!retired_keys_path(dir.path()).exists());
+    let new_only = SecretBox::open(dir.path())?;
+    assert!(new_only.retired_key_ids().is_empty());
+    assert_readable(&pool, &new_only).await?;
+    // Sans clé retirée, il n'y a rien à faire.
+    assert_eq!(
+        reseal_and_retire(&pool, dir.path(), None).await?,
+        RotationReport::default()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_a_failed_reseal_keeps_the_retired_keys() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let old = SecretBox::open(dir.path())?;
+    let pool = seeded_pool(&old).await?;
+    let api_key = stored_api_key(&pool).await?;
+    sqlx::query("UPDATE plugin_settings SET settings = ?1 WHERE plugin_id = ?2")
+        .bind(json!({"apiKey": api_key, "token": "enc:v2:cle:zz"}).to_string())
+        .bind(PLUGIN)
+        .execute(&pool)
+        .await?;
+    switch_active_key(dir.path(), None)?;
+    assert!(reseal_and_retire(&pool, dir.path(), None).await.is_err());
+    let ring = SecretBox::open(dir.path())?;
+    assert_eq!(ring.retired_key_ids(), [old.key_id()]);
+    assert_readable(&pool, &ring).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_an_external_key_is_never_switched() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let external = dir.path().join("cle-orchestrateur");
+    std::fs::write(&external, SecretBox::generate_key_hex())?;
+    assert!(matches!(
+        switch_active_key(dir.path(), Some(&external)),
+        Err(AppError::Conflict)
+    ));
+    assert!(!SecretBox::local_key_path(dir.path()).exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_local_key_rotation_replaces_the_key_and_forgets_the_old_one() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let old = SecretBox::open(dir.path())?;
+    let pool = seeded_pool(&old).await?;
 
     let outcome = rotate_local_key(&pool, dir.path()).await?;
-    assert_eq!(outcome.old_key_id, old.key_id());
-    assert_ne!(outcome.new_key_id, outcome.old_key_id);
+    assert_eq!(outcome.switch.old_key_id, old.key_id());
+    assert_ne!(outcome.switch.new_key_id, outcome.switch.old_key_id);
     assert_eq!(outcome.report.plugin_values, 1);
     assert_eq!(outcome.report.flow_values, 1);
 
-    // La clé locale a changé et déchiffre désormais les secrets.
     let reopened = SecretBox::open(dir.path())?;
-    assert_eq!(reopened.key_id(), outcome.new_key_id);
-    let api_key = stored_api_key(&pool).await?;
-    assert_eq!(
-        reopened.decrypt(&api_key, &plugin_secret_aad(PLUGIN, "apiKey"))?,
-        "CLE-ARR"
-    );
+    assert_eq!(reopened.key_id(), outcome.switch.new_key_id);
+    assert!(reopened.retired_key_ids().is_empty());
+    assert_readable(&pool, &reopened).await?;
+    assert!(!dir.path().join("backups").exists());
+    Ok(())
+}
 
-    // La sauvegarde contient l'ancienne clé, la nouvelle et une copie de la base.
-    let files = config_dir_files(&outcome.backup_dir);
-    for expected in ["secret_key", "secret_key.next", "flux.db"] {
-        assert!(files.iter().any(|name| name == expected), "{expected}");
+#[tokio::test]
+async fn test_online_rotation_reseals_and_retires_in_the_background() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let old = SecretBox::open(dir.path())?;
+    let pool = seeded_pool(&old).await?;
+
+    let KeySwitch { new_key_id, .. } =
+        start_online_rotation(pool.clone(), dir.path().to_path_buf(), None, Duration::ZERO)?;
+    let deadline = tokio::time::Instant::now() + BACKGROUND_TIMEOUT;
+    while retired_keys_path(dir.path()).exists() {
+        anyhow::ensure!(
+            tokio::time::Instant::now() < deadline,
+            "la rotation en tâche de fond ne s'est pas achevée"
+        );
+        tokio::time::sleep(BACKGROUND_POLL).await;
     }
-    let saved_key = std::fs::read_to_string(outcome.backup_dir.join("secret_key"))?;
-    assert_eq!(saved_key.trim(), old_key_file.trim());
-    let saved_next = std::fs::read_to_string(outcome.backup_dir.join("secret_key.next"))?;
-    assert_eq!(
-        SecretBox::from_key_hex(&saved_next)?.key_id(),
-        outcome.new_key_id
-    );
+    let ring = SecretBox::open(dir.path())?;
+    assert_eq!(ring.key_id(), new_key_id);
+    assert!(ring.retired_key_ids().is_empty());
+    assert_readable(&pool, &ring).await?;
     Ok(())
 }

@@ -4,7 +4,7 @@
 //! déchiffrer les valeurs qui portent encore leur identifiant.
 
 mod retired_keys;
-pub use retired_keys::{retire_key, retired_keys_path};
+pub use retired_keys::{clear_retired_keys, retire_key, retired_keys_path};
 
 use crate::error::{AppError, AppResult};
 use chacha20poly1305::{
@@ -51,6 +51,13 @@ fn decode_hex(text: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
+/// Fichier de clé fourni par l'orchestrateur (`SECRET_KEY_FILE`), s'il est défini.
+pub fn external_key_file() -> Option<std::path::PathBuf> {
+    std::env::var(KEY_FILE_ENV)
+        .ok()
+        .map(std::path::PathBuf::from)
+}
+
 /// Valeur déjà chiffrée par ce module ?
 pub fn is_encrypted(value: &str) -> bool {
     value.starts_with(ENCRYPTED_PREFIX)
@@ -95,10 +102,7 @@ impl SecretBox {
     /// Ouvre la clé : le fichier de `SECRET_KEY_FILE` s'il est défini, sinon `secret_key` du dossier
     /// de configuration, généré (lecture et écriture propriétaire seules) s'il manque.
     pub fn open(config_dir: &Path) -> AppResult<Self> {
-        let external = std::env::var(KEY_FILE_ENV)
-            .ok()
-            .map(std::path::PathBuf::from);
-        Self::open_with(config_dir, external.as_deref())
+        Self::open_with(config_dir, external_key_file().as_deref())
     }
 
     /// Clé active (fichier externe ou locale) et clés retirées du dossier de configuration.

@@ -186,6 +186,9 @@ pub struct SystemStatus {
     #[serde(default)]
     pub build_version: String,
     pub key_id: String,
+    /// Anciennes clés gardées pour déchiffrer seulement : non vide pendant une rotation.
+    #[serde(default)]
+    pub retired_key_ids: Vec<String>,
     pub key_source: KeySource,
     /// Taille de la base SQLite et de son journal ; `None` pour une base en mémoire.
     pub database_bytes: Option<u64>,

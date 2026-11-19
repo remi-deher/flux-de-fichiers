@@ -141,11 +141,16 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
         tracing::warn!(job_id=%claim.job_id, error=%error, "local work directory creation failed");
         return;
     }
+    if let Err(error) = repository::attach_source_ticket(&state.pool, worker_id, &mut claim).await {
+        tracing::warn!(job_id=%claim.job_id, error=%error, "local source ticket unavailable");
+    }
+    // Source du central, sinon lecture directe chez le worker qui la détient (billet, ADR 0019).
     let source =
         match crate::library_scan::central_job_source(&state.pool, &state.config.input_dir, &job)
             .await
         {
-            Ok(Some(path)) => path,
+            Ok(Some(path)) => Some(path),
+            Ok(None) if claim.source_ticket.is_some() => None,
             _ => {
                 report_failure(state, claim.job_id, &lease, JobErrorCode::SourceIntegrity).await;
                 cleanup(&work_dir).await;
@@ -162,14 +167,30 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
         lease.clone(),
     ));
     let processing = async {
-        copy_verified_source(
-            &source,
-            &source_snapshot,
-            state.config.max_file_bytes,
-            &claim.source_sha256,
-            claim.source_bytes,
-        )
-        .await?;
+        match (&source, claim.source_ticket.as_ref()) {
+            (Some(source), _) => {
+                copy_verified_source(
+                    source,
+                    &source_snapshot,
+                    state.config.max_file_bytes,
+                    &claim.source_sha256,
+                    claim.source_bytes,
+                )
+                .await?;
+            }
+            (None, Some(ticket)) => {
+                crate::worker_transfer::download_direct(
+                    &crate::worker_transfer::direct_client()?,
+                    ticket,
+                    &source_snapshot,
+                    state.config.max_file_bytes,
+                    &claim.source_sha256,
+                    claim.source_bytes,
+                )
+                .await?;
+            }
+            (None, None) => anyhow::bail!("source_integrity"),
+        }
 
         let state_progress = state.clone();
         let job_id = claim.job_id;

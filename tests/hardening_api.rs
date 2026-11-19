@@ -778,3 +778,174 @@ async fn a_relay_without_capable_worker_fails_the_job_visibly() -> anyhow::Resul
     );
     Ok(())
 }
+
+/// Enregistre un worker qui annonce un serveur de transfert.
+async fn register_worker_with_transfer(
+    h: &Harness,
+    name: &str,
+    transfer_url: &str,
+) -> anyhow::Result<Uuid> {
+    let (st, worker) = json_call(
+        &h.app,
+        "POST",
+        "/api/v1/workers",
+        Some(common::WORKER_KEY),
+        Some(serde_json::json!({"name": name, "transfer_url": transfer_url})),
+    )
+    .await?;
+    assert_eq!(st, StatusCode::OK);
+    Ok(Uuid::parse_str(worker["id"].as_str().unwrap_or_default())?)
+}
+
+/// Crée une tâche dont la source est détenue (montée) par `owner`, puis la fait relayer vers `target`.
+async fn relayed_job_from(
+    h: &Harness,
+    owner: Uuid,
+    target: Uuid,
+) -> anyhow::Result<forgearr::domain::Job> {
+    let job = repository::insert_job(
+        &h.pool,
+        "film.mkv",
+        None,
+        &"ee".repeat(32),
+        SOURCE_CONTENT.len() as i64,
+    )
+    .await?;
+    sqlx::query("UPDATE jobs SET source_root='/mnt/owner', source_worker_id=?1 WHERE id=?2")
+        .bind(owner)
+        .bind(job.id)
+        .execute(&h.pool)
+        .await?;
+    let claim = claim_for(h, owner)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("le détenteur doit obtenir la tâche"))?;
+    assert!(
+        claim.source_ticket.is_none(),
+        "le détenteur lit sa propre source"
+    );
+    let response = relay_call(
+        h,
+        &claim,
+        owner,
+        serde_json::json!({"mode": "worker", "worker_id": target}),
+    )
+    .await?;
+    assert_eq!(response["relayed"], true);
+    Ok(job)
+}
+
+#[tokio::test]
+async fn a_relayed_job_gets_a_ticket_that_only_the_source_worker_can_redeem() -> anyhow::Result<()>
+{
+    let h = harness().await?;
+    let owner =
+        register_worker_with_transfer(&h, "detenteur", "http://detenteur.lan:9000/").await?;
+    let target = register_worker_with_encoders(&h, "traitant", &[]).await?;
+    let job = relayed_job_from(&h, owner, target).await?;
+
+    let claim = claim_for(&h, target)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("la cible doit obtenir la tâche"))?;
+    assert_eq!(claim.job_id, job.id);
+    let ticket = claim
+        .source_ticket
+        .ok_or_else(|| anyhow::anyhow!("un billet est attendu"))?;
+    assert_eq!(ticket.url, "http://detenteur.lan:9000");
+
+    let redeem = |worker: Uuid, token: &str| {
+        json_call(
+            &h.app,
+            "POST",
+            "/api/v1/worker/transfers/redeem",
+            Some(common::WORKER_KEY),
+            Some(serde_json::json!({"token": token, "worker_id": worker})),
+        )
+    };
+    let (st, grant) = redeem(owner, &ticket.token).await?;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(grant["root"], "/mnt/owner");
+    assert_eq!(grant["source_name"], "film.mkv");
+    assert_eq!(grant["bytes"], SOURCE_CONTENT.len());
+    let (st, _) = redeem(target, &ticket.token).await?;
+    assert_eq!(
+        st,
+        StatusCode::UNAUTHORIZED,
+        "seul le worker source valide le billet"
+    );
+    let (st, _) = redeem(owner, "inconnu").await?;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_worker_without_transfer_url_gets_no_ticket_and_an_invalid_url_is_ignored()
+-> anyhow::Result<()> {
+    let h = harness().await?;
+    let owner = register_worker_with_transfer(&h, "detenteur", "ftp://nope").await?;
+    let target = register_worker_with_encoders(&h, "traitant", &[]).await?;
+    relayed_job_from(&h, owner, target).await?;
+    let claim = claim_for(&h, target)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("la cible doit obtenir la tâche"))?;
+    assert!(
+        claim.source_ticket.is_none(),
+        "repli par le central seulement"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_central_relays_a_worker_held_source_without_storing_it() -> anyhow::Result<()> {
+    let h = harness().await?;
+    let owner = register_worker_with_encoders(&h, "detenteur", &[]).await?;
+    let target = register_worker_with_encoders(&h, "traitant", &[]).await?;
+    let job = relayed_job_from(&h, owner, target).await?;
+    let claim = claim_for(&h, target)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("la cible doit obtenir la tâche"))?;
+
+    // Le worker traitant demande la source au central ; le détenteur l'envoie en parallèle.
+    let download = {
+        let app = h.app.clone();
+        let request = Request::builder()
+            .uri(format!("/api/v1/jobs/{}/source", job.id))
+            .header("authorization", format!("Bearer {}", common::WORKER_KEY))
+            .header("x-worker-id", target.to_string())
+            .header("x-lease-token", claim.lease_token.to_string())
+            .header("x-lease-epoch", claim.lease_epoch.to_string())
+            .body(Body::empty())?;
+        tokio::spawn(async move {
+            let response = app.oneshot(request).await?;
+            let status = response.status();
+            let body = to_bytes(response.into_body(), JSON_LIMIT).await?;
+            anyhow::Ok((status, body))
+        })
+    };
+    let (st, tasks) = json_call(
+        &h.app,
+        "GET",
+        &format!("/api/v1/worker/source-relay/pending?worker_id={owner}&wait_ms=5000"),
+        Some(common::WORKER_KEY),
+        None,
+    )
+    .await?;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(tasks[0]["root"], "/mnt/owner");
+    assert_eq!(tasks[0]["source_name"], "film.mkv");
+    let request_id = tasks[0]["request_id"].as_str().unwrap_or_default();
+    let send = Request::builder()
+        .method("PUT")
+        .uri(format!(
+            "/api/v1/worker/source-relay/{request_id}?worker_id={owner}"
+        ))
+        .header("authorization", format!("Bearer {}", common::WORKER_KEY))
+        .body(Body::from(SOURCE_CONTENT))?;
+    assert_eq!(
+        h.app.clone().oneshot(send).await?.status(),
+        StatusCode::NO_CONTENT
+    );
+    let (status, body) = download.await??;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_ref(), SOURCE_CONTENT);
+    Ok(())
+}

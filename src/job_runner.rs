@@ -231,6 +231,7 @@ mod tests {
             media_root: None,
             local_source_root: None,
             resume_node_id: None,
+            source_ticket: None,
         }
     }
 

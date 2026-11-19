@@ -8,9 +8,8 @@ use crate::{
     job_runner::{self, JobRunError},
     storage,
     worker_http::{WorkerState, WorkerWeb},
-    worker_settings,
+    worker_settings, worker_transfer,
 };
-use futures_util::StreamExt;
 use reqwest::{Client, RequestBuilder};
 use std::{
     env,
@@ -21,7 +20,6 @@ use std::{
     },
     time::Duration,
 };
-use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
@@ -39,7 +37,27 @@ pub struct WorkerConfig {
     pub tools_cache_dir: PathBuf,
     pub ca: Option<PathBuf>,
     pub max_bytes: u64,
+    /// Adresse annoncée du serveur de transfert et port d'écoute (ADR 0019), tous deux facultatifs.
+    pub transfer_url: Option<String>,
+    pub transfer_port: Option<u16>,
 }
+
+/// Lit `WORKER_TRANSFER_URL` (adresse annoncée) et `WORKER_TRANSFER_PORT` (écoute, sinon le port de l'adresse).
+fn transfer_settings() -> (Option<String>, Option<u16>) {
+    let url = env::var("WORKER_TRANSFER_URL")
+        .ok()
+        .and_then(|raw| crate::repository::valid_transfer_url(&raw));
+    let port = env::var("WORKER_TRANSFER_PORT")
+        .ok()
+        .and_then(|raw| raw.trim().parse().ok())
+        .or_else(|| {
+            url.as_deref()
+                .and_then(|raw| reqwest::Url::parse(raw).ok())
+                .and_then(|parsed| parsed.port())
+        });
+    (url, port)
+}
+
 impl WorkerConfig {
     /// Un worker enrôlé lit adresse, nom et clé dans `/config` ; sinon (automatisation) dans l'environnement.
     pub fn load(config_dir: &Path) -> anyhow::Result<Self> {
@@ -61,6 +79,7 @@ impl WorkerConfig {
                 env::var("WORKER_NAME").or_else(|_| env::var("HOSTNAME"))?,
             ),
         };
+        let (transfer_url, transfer_port) = transfer_settings();
         Ok(Self {
             url,
             key,
@@ -71,6 +90,8 @@ impl WorkerConfig {
             max_bytes: env::var("MAX_FILE_BYTES")
                 .unwrap_or_else(|_| "536870912".into())
                 .parse()?,
+            transfer_url,
+            transfer_port,
         })
     }
 }
@@ -316,44 +337,53 @@ impl WorkerLoop {
         Ok(())
     }
 
+    /// Récupère la source : voie directe chez le worker qui la détient (si un billet est fourni),
+    /// puis repli par le central (ADR 0019).
     async fn download_source(
         &self,
         claim: &Claim,
         worker: Uuid,
         input: &Path,
     ) -> anyhow::Result<()> {
+        if let Some(ticket) = claim.source_ticket.as_ref() {
+            let direct = worker_transfer::direct_client()?;
+            match worker_transfer::download_direct(
+                &direct,
+                ticket,
+                input,
+                self.config.max_bytes,
+                &claim.source_sha256,
+                claim.source_bytes,
+            )
+            .await
+            {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    tracing::warn!(job_id = %claim.job_id, error = %error, "voie directe indisponible, repli par le central");
+                    let _ = tokio::fs::remove_file(input).await;
+                }
+            }
+        }
         let response = self
             .leased(reqwest::Method::GET, claim, worker, "source")
             .send()
             .await?
             .error_for_status()?;
-        let mut chunks = response.bytes_stream();
-        let mut file = tokio::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(input)
-            .await?;
-        let mut total = 0;
-        while let Some(chunk) = chunks.next().await {
-            let chunk = chunk?;
-            total += chunk.len() as u64;
-            if total > self.config.max_bytes {
-                return Err(
-                    JobRunError::simple(JobErrorCode::SourceIntegrity, "source_integrity").into(),
-                );
+        worker_transfer::save_verified(
+            response,
+            input,
+            self.config.max_bytes,
+            &claim.source_sha256,
+            claim.source_bytes,
+        )
+        .await
+        .map_err(|error| {
+            if error.to_string() == "source_integrity" {
+                JobRunError::simple(JobErrorCode::SourceIntegrity, "source_integrity").into()
+            } else {
+                error
             }
-            file.write_all(&chunk).await?;
-        }
-        file.flush().await?;
-        drop(file);
-        let (hash, bytes) = storage::fingerprint(input, self.config.max_bytes).await?;
-        if hash != claim.source_sha256 || bytes as i64 != claim.source_bytes {
-            return Err(
-                JobRunError::simple(JobErrorCode::SourceIntegrity, "source_integrity").into(),
-            );
-        }
-
-        Ok(())
+        })
     }
 
     async fn execute(&self, claim: Claim, worker: Uuid) -> anyhow::Result<()> {
@@ -561,6 +591,84 @@ impl WorkerLoop {
         }
     }
 
+    /// Envoie au central, à sa demande, les sources que ce worker détient (repli, ADR 0019).
+    async fn respond_to_source_relay_requests(&self, worker_id: Uuid) {
+        let pending = format!(
+            "/api/v1/worker/source-relay/pending?worker_id={worker_id}&wait_ms={REMOTE_BROWSE_WAIT_MS}"
+        );
+        loop {
+            let tasks = tokio::select! {
+                _ = crate::api::shutdown_signal() => return,
+                result = async {
+                    self.request(reqwest::Method::GET, &pending)
+                        .timeout(REMOTE_BROWSE_HTTP_TIMEOUT)
+                        .send()
+                        .await?
+                        .error_for_status()?
+                        .json::<Vec<forgearr_shared::transfer::SourceRelayTask>>()
+                        .await
+                } => result,
+            };
+            let Ok(tasks) = tasks else {
+                tokio::time::sleep(REMOTE_BROWSE_RETRY_DELAY).await;
+                continue;
+            };
+            for task in tasks {
+                let runner = self.clone();
+                tokio::spawn(async move {
+                    if let Err(error) = runner.send_source_to_central(task).await {
+                        tracing::warn!(error = %error, "envoi de source au central interrompu");
+                    }
+                });
+            }
+        }
+    }
+
+    async fn send_source_to_central(
+        &self,
+        task: forgearr_shared::transfer::SourceRelayTask,
+    ) -> anyhow::Result<()> {
+        let path =
+            crate::library_scan::source_path(Path::new(&task.root), &task.source_name).await?;
+        let file = tokio::fs::File::open(path).await?;
+        self.request(
+            reqwest::Method::PUT,
+            &format!(
+                "/api/v1/worker/source-relay/{}?worker_id={}",
+                task.request_id, task.worker_id
+            ),
+        )
+        .body(reqwest::Body::wrap_stream(ReaderStream::new(file)))
+        .send()
+        .await?
+        .error_for_status()?;
+        Ok(())
+    }
+
+    /// Démarre le serveur de transfert en lecture seule si une adresse et un port sont configurés.
+    fn spawn_transfer_server(&self, worker_id: Uuid) -> Option<tokio::task::JoinHandle<()>> {
+        let port = self.config.transfer_port?;
+        self.config.transfer_url.as_ref()?;
+        let state = worker_transfer::TransferState::new(worker_transfer::central_redeemer(
+            self.client.clone(),
+            self.config.url.clone(),
+            self.config.key.clone(),
+            worker_id,
+        ));
+        Some(tokio::spawn(async move {
+            let address = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+            match tokio::net::TcpListener::bind(address).await {
+                Ok(listener) => {
+                    tracing::info!(%address, "serveur de transfert de sources démarré");
+                    let _ = axum::serve(listener, worker_transfer::transfer_router(state)).await;
+                }
+                Err(error) => {
+                    tracing::warn!(%address, error = %error, "serveur de transfert indisponible");
+                }
+            }
+        }))
+    }
+
     /// Enregistre le worker puis réclame des tâches jusqu'à l'arrêt.
     async fn work(&self) -> anyhow::Result<()> {
         let runner = self;
@@ -574,6 +682,7 @@ impl WorkerLoop {
                         name: runner.config.name.clone(),
                         version: Some(crate::version::app_version().to_owned()),
                         telemetry: Some(probe.sample()),
+                        transfer_url: runner.config.transfer_url.clone(),
                     })
                     .send()
                     .await?
@@ -597,6 +706,15 @@ impl WorkerLoop {
                 browse_runner.respond_to_browse_requests(worker.id).await;
             })
         };
+        let transfer_server = runner.spawn_transfer_server(worker.id);
+        let source_relay_responder = {
+            let relay_runner = runner.clone();
+            tokio::spawn(async move {
+                relay_runner
+                    .respond_to_source_relay_requests(worker.id)
+                    .await;
+            })
+        };
         let outcome: anyhow::Result<()> = async {
             let mut was_disconnected = false;
             let mut idle_polls: u32 = 0;
@@ -613,6 +731,7 @@ impl WorkerLoop {
                             name: runner.config.name.clone(),
                             version: Some(crate::version::app_version().to_owned()),
                             telemetry: Some(probe.sample()),
+                            transfer_url: runner.config.transfer_url.clone(),
                         })
                         .send()
                         .await
@@ -711,6 +830,10 @@ impl WorkerLoop {
         }
         .await;
         browse_responder.abort();
+        source_relay_responder.abort();
+        if let Some(server) = transfer_server {
+            server.abort();
+        }
         outcome
     }
 }

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.59.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.58.0...v0.59.0) (2026-11-19)
+
+
+### Features
+
+* **flows:** blocs de relais de tâche entre workers ([28694d9](https://github.com/remi-deher/flux-de-fichiers/commit/28694d96cf4300cfcefff39d908ee01f5d0f2099))
+* **workers:** capacités matérielles d'encodage relevées par sondes légères ([0b66e53](https://github.com/remi-deher/flux-de-fichiers/commit/0b66e53d703c0f618bfbda4de2c5209a0636bd0a))
+* **workers:** capacités matérielles et blocs de relais de tâche (ADR 0018) ([c552524](https://github.com/remi-deher/flux-de-fichiers/commit/c552524e2fd1b258f9b522b8dc0b520ad4d2a400))
+* **workers:** relais ouvert aux workers capables et marque relayée dans l'interface ([fd85a7e](https://github.com/remi-deher/flux-de-fichiers/commit/fd85a7e66d23fc0e231d070ce1c4a89d8a9f2395))
+
 ## [0.58.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.57.1...v0.58.0) (2026-11-19)
 
 

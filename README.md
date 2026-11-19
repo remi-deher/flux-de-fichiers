@@ -30,6 +30,8 @@ via un reverse proxy externe). Au premier démarrage, le central crée dans `/co
 |---------|------|
 | `flux.db` | base SQLite (tâches, flux, bibliothèques, réglages) |
 | `secret_key` | clé de chiffrement des secrets, générée à l'installation (0600) |
+| `secret_keys.retired` | anciennes clés gardées pour déchiffrer seulement, si présent (0600) |
+| `recovery_kit.exported` | clé couverte par le dernier kit de récupération exporté |
 | `plugins/<dépôt>/` | copie locale de chaque dépôt de plugins synchronisé |
 
 **Première ouverture** : la page d'installation demande le nom du central, puis un
@@ -37,6 +39,8 @@ identifiant et un mot de passe administrateur ; la session s'ouvre ensuite toute
 ([ADR 0011](docs/adr/0011-installation-comptes-et-noeuds.md)). Tant que l'installation n'est
 pas faite, la page est ouverte à qui atteint le port : à faire sur un réseau de confiance.
 Le secret n'est jamais affiché ; pour le fournir par fichier, `SECRET_KEY_FILE`.
+Pour ne pas perdre les secrets lors d'une restauration, créez depuis Paramètres → Système un
+**kit de récupération** (fichier protégé par une phrase de passe) et rangez-le avec vos sauvegardes.
 
 Un worker distant utilise la même image : `docker run … worker` avec `CENTRAL_URL`,
 `WORKER_KEY_FILE` (clé d'API de rôle worker créée dans Réglages → Clés d'API),

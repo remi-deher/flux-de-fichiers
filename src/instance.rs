@@ -84,7 +84,7 @@ async fn reset_password(username: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Fait tourner la clé de chiffrement locale et rechiffre tous les secrets, après sauvegarde.
+/// Fait tourner la clé de chiffrement locale et rechiffre tous les secrets, central arrêté.
 async fn rotate_secret() -> anyhow::Result<()> {
     anyhow::ensure!(
         std::env::var(secrets::KEY_FILE_ENV).is_err(),
@@ -95,17 +95,17 @@ async fn rotate_secret() -> anyhow::Result<()> {
     let pool = api::connect_database(&config).await?;
     let outcome = secret_rotation::rotate_local_key(&pool, &config.config_dir)
         .await
-        .map_err(|error| anyhow::anyhow!("rotation impossible, rien n'a changé : {error}"))?;
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "rechiffrement impossible : les anciennes clés restent dans le trousseau, aucun secret n'est perdu ({error})"
+            )
+        })?;
     println!(
         "Clé {} remplacée par {} : {} valeur(s) de plugins et {} en-tête(s) de webhook rechiffrés.",
-        outcome.old_key_id,
-        outcome.new_key_id,
+        outcome.switch.old_key_id,
+        outcome.switch.new_key_id,
         outcome.report.plugin_values,
         outcome.report.flow_values
-    );
-    println!(
-        "Sauvegarde (ancienne clé et base) : {}",
-        outcome.backup_dir.display()
     );
     Ok(())
 }

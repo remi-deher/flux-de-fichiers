@@ -5,7 +5,8 @@ use crate::{
     config::Config,
     error::AppResult,
     runtime_settings::{self, EffectiveRuntimeSettings},
-    secrets::{KEY_FILE_ENV, SecretBox},
+    secret_rotation::{self, RETIRED_KEY_GRACE},
+    secrets::{self, SecretBox},
     telemetry::{TelemetryProbe, TelemetrySnapshot},
 };
 use axum::{Json, extract::State};
@@ -124,7 +125,15 @@ fn build_system_status(effective: &EffectiveRuntimeSettings, secrets: &SecretBox
         version: crate::version::app_version().to_owned(),
         build_version: crate::version::BUILD_VERSION.to_owned(),
         key_id: secrets.key_id().to_owned(),
-        key_source: if std::env::var(KEY_FILE_ENV).is_ok() {
+        retired_key_ids: secrets
+            .retired_key_ids()
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        recovery_kit_key_id: secrets::recovery_kit::exported_key_id(&effective.config.config_dir)
+            .ok()
+            .flatten(),
+        key_source: if secrets::external_key_file().is_some() {
             KeySource::External
         } else {
             KeySource::Local
@@ -138,13 +147,33 @@ fn build_system_status(effective: &EffectiveRuntimeSettings, secrets: &SecretBox
     }
 }
 
+pub(super) async fn current_status(state: &AppState) -> AppResult<Json<SystemStatus>> {
+    let secrets = SecretBox::open(&state.config.config_dir)?;
+    let effective = runtime_settings::load_effective(&state.pool, &state.config).await;
+    Ok(Json(build_system_status(&effective, &secrets)))
+}
+
 pub async fn status(
     State(state): State<AppState>,
     _auth: AdminAuth,
 ) -> AppResult<Json<SystemStatus>> {
-    let secrets = SecretBox::open(&state.config.config_dir)?;
-    let effective = runtime_settings::load_effective(&state.pool, &state.config).await;
-    Ok(Json(build_system_status(&effective, &secrets)))
+    current_status(&state).await
+}
+
+/// Renouvelle la clé de chiffrement central en marche : la nouvelle clé est active dès la réponse,
+/// l'ancienne est retirée en tâche de fond une fois tous les secrets rechiffrés. 409 si la clé vient
+/// de `SECRET_KEY_FILE` ou si une rotation est déjà en cours.
+pub async fn rotate_key(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+) -> AppResult<Json<SystemStatus>> {
+    secret_rotation::start_online_rotation(
+        state.pool.clone(),
+        state.config.config_dir.clone(),
+        secrets::external_key_file(),
+        RETIRED_KEY_GRACE,
+    )?;
+    current_status(&state).await
 }
 
 /// Met à jour les réglages réseau, session, SMTP et politique sortante (Lots B & C).

@@ -1,6 +1,6 @@
 //! Accès : installation (central ou worker), connexion et session (ADR 0011, 0014).
 
-mod forms;
+pub(crate) mod forms;
 mod recovery;
 
 use crate::api::{self, ApiError};

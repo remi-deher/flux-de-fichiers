@@ -6,10 +6,12 @@ mod ai;
 mod ai_model;
 mod ai_oauth;
 mod ai_status;
+mod key_rotation;
 mod keys;
 mod mcp_audit;
 mod network;
 mod network_diagnostics;
+mod recovery_kit;
 pub mod system;
 
 pub use account::{logout, role_label};
@@ -29,6 +31,7 @@ use leptos::prelude::*;
 use mcp_audit::McpAuditSection;
 use network::ConfigurationCard;
 use network_diagnostics::DiagnosticsCard;
+use recovery_kit::{KitState, kit_state};
 use system::{SystemSection, is_version_coherent};
 
 const STATUS_PATH: &str = "/api/v1/system/status";
@@ -144,9 +147,14 @@ pub fn SettingsPage(me: Me) -> impl IntoView {
                             "Décalée"
                         }),
                     );
+                    let (key_tone, key_detail) =
+                        match kit_state(&st.key_id, st.recovery_kit_key_id.as_deref()) {
+                            KitState::UpToDate => (MetricTone::Neutral, key_detail),
+                            KitState::Missing => (MetricTone::Warning, "Kit à créer"),
+                            KitState::Outdated => (MetricTone::Warning, "Kit à refaire"),
+                        };
                     items.push(
-                        StatItem::new("Chiffrement", st.key_id, MetricTone::Neutral)
-                            .with_detail(key_detail),
+                        StatItem::new("Chiffrement", st.key_id, key_tone).with_detail(key_detail),
                     );
                     items.push(
                         StatItem::new(
@@ -210,7 +218,7 @@ pub fn SettingsPage(me: Me) -> impl IntoView {
                     </div>
                 }).into_any(),
                 Section::System => status_signal.map(|status| view! {
-                    <SystemSection status=status />
+                    <SystemSection status=status on_changed=on_settings_saved />
                 }).into_any(),
             }}
         </div>

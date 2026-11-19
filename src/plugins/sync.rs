@@ -575,6 +575,7 @@ mod tests {
             version: "1.0.0".to_owned(),
             name: id.to_owned(),
             manifest_path: manifest.to_owned(),
+            description: None,
             capability: None,
             current_choice: None,
             distribution: None,

@@ -51,6 +51,7 @@ mod tests {
             version: version.to_owned(),
             name: id.to_owned(),
             manifest_path: format!("{id}.json"),
+            description: None,
             capability: Some(capability),
             current_choice: Some(current),
             distribution: None,

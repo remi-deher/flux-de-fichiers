@@ -413,6 +413,7 @@ pub const COMPONENTS_CSS: &str = r#"
 
 .page-subnav {
   display: flex;
+  margin-bottom: var(--space-3);
   border-bottom: 1px solid var(--border-color);
 }
 

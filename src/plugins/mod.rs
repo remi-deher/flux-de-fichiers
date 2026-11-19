@@ -290,7 +290,7 @@ pub fn catalog_with_roots(roots: &[PathBuf]) -> Vec<(PathBuf, CatalogEntry)> {
             if !seen.insert(entry.id.clone()) {
                 continue;
             }
-            apply_document_labels(root, &mut entry);
+            apply_document_metadata(root, &mut entry);
             listed.push((root.clone(), entry));
         }
     }
@@ -313,7 +313,8 @@ pub fn exposed_catalog(roots: &[PathBuf]) -> Vec<CatalogEntry> {
         .collect()
 }
 
-fn apply_document_labels(root: &Path, entry: &mut CatalogEntry) {
+/// Complète l'entrée d'index avec son manifeste : catégorie, étiquettes et description.
+fn apply_document_metadata(root: &Path, entry: &mut CatalogEntry) {
     let Ok(content) = std::fs::read_to_string(root.join(&entry.manifest_path)) else {
         return;
     };
@@ -326,6 +327,14 @@ fn apply_document_labels(root: &Path, entry: &mut CatalogEntry) {
     }
     if labels.tags_declared {
         entry.tags = labels.tags;
+    }
+    if entry.description.is_none() {
+        entry.description = value
+            .get("description")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned);
     }
 }
 
@@ -648,6 +657,45 @@ mod tests {
     }
 
     #[test]
+    fn the_catalog_takes_each_description_from_its_manifest() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::write(
+            dir.path().join("index.json"),
+            r#"{"schemaVersion":"1.0.0","entries":[
+                {"id":"archives","type":"plugin","version":"1.0.0","name":"Archives","manifestPath":"archives.json"},
+                {"id":"muet","type":"plugin","version":"1.0.0","name":"Muet","manifestPath":"muet.json"},
+                {"id":"indexe","type":"plugin","version":"1.0.0","name":"Indexé","manifestPath":"indexe.json","description":"Donnée par l'index."}
+            ]}"#,
+        )?;
+        std::fs::write(
+            dir.path().join("archives.json"),
+            r#"{"description":"  Extraction des archives téléchargées.  "}"#,
+        )?;
+        std::fs::write(dir.path().join("muet.json"), r#"{"description":"   "}"#)?;
+        std::fs::write(
+            dir.path().join("indexe.json"),
+            r#"{"description":"Celle du manifeste."}"#,
+        )?;
+        let catalog = list_catalog(&[dir.path().to_path_buf()]);
+        let description = |id: &str| {
+            catalog
+                .iter()
+                .find(|entry| entry.id == id)
+                .and_then(|entry| entry.description.clone())
+        };
+        assert_eq!(
+            description("archives").as_deref(),
+            Some("Extraction des archives téléchargées.")
+        );
+        assert_eq!(description("muet"), None);
+        assert_eq!(
+            description("indexe").as_deref(),
+            Some("Donnée par l'index.")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn other_category_is_kept_in_memory_and_omitted_from_json() -> Result<(), serde_json::Error> {
         let entry = CatalogEntry {
             id: "plugin.demo".to_owned(),
@@ -655,6 +703,7 @@ mod tests {
             version: "1.0.0".to_owned(),
             name: "Démo".to_owned(),
             manifest_path: "plugins/demo.json".to_owned(),
+            description: None,
             capability: None,
             current_choice: None,
             distribution: None,
@@ -884,6 +933,7 @@ mod tests {
             version: "1.2.0".into(),
             name: "Sonarr Integration".into(),
             manifest_path: "plugins/sonarr/manifest.json".into(),
+            description: None,
             capability: None,
             current_choice: None,
             distribution: None,

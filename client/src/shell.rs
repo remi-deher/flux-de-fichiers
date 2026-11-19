@@ -15,9 +15,12 @@ use chrono::{DateTime, Utc};
 use forgearr_shared::brand::NAME as APP_NAME;
 use forgearr_shared::jobs::{Job, JobStatus};
 use forgearr_shared::session::Me;
+use forgearr_shared::system::UpdateCheckStatus;
 use forgearr_shared::workers::Worker;
 use forgearr_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
+
+const SYSTEM_UPDATES_PATH: &str = "/api/v1/system/updates";
 
 /// Écran de la navigation : route, libellé, pictogramme, droit, hébergé sur un worker, recherche.
 pub struct Screen {
@@ -398,7 +401,47 @@ fn WorkersPill(workers: Signal<Option<Vec<Worker>>>) -> impl IntoView {
 }
 
 #[component]
-fn Topbar(me: Me, workers: Signal<Option<Vec<Worker>>>) -> impl IntoView {
+fn UpdatePill(update: Signal<Option<UpdateCheckStatus>>) -> impl IntoView {
+    move || {
+        let info = update.get()?;
+        if !info.enabled || !info.update_available {
+            return None;
+        }
+        let version = info.latest_version.unwrap_or_default();
+        let label = format!("Mise à jour v{version}");
+        let title = format!(
+            "Nouvelle version v{version} disponible (installée : v{})",
+            info.current_version
+        );
+        Some(match info.release_url {
+            Some(url) => view! {
+                <a href=url target="_blank" rel="noopener noreferrer" class="status-pill-link" title=title>
+                    <span class="status-pill warning" aria-live="polite">
+                        <span class="status-dot"></span>
+                        <span>{label}</span>
+                    </span>
+                </a>
+            }
+            .into_any(),
+            None => view! {
+                <Link to=Route::Settings class="status-pill-link">
+                    <span class="status-pill warning" aria-live="polite" title=title>
+                        <span class="status-dot"></span>
+                        <span>{label}</span>
+                    </span>
+                </Link>
+            }
+            .into_any(),
+        })
+    }
+}
+
+#[component]
+fn Topbar(
+    me: Me,
+    workers: Signal<Option<Vec<Worker>>>,
+    update: Signal<Option<UpdateCheckStatus>>,
+) -> impl IntoView {
     let router = use_router();
     let search = use_context::<Search>().unwrap_or_else(Search::install);
     let nav = use_context::<NavDrawer>().map(|drawer| drawer.0);
@@ -459,6 +502,7 @@ fn Topbar(me: Me, workers: Signal<Option<Vec<Worker>>>) -> impl IntoView {
                 </div>
                 <div class="topbar-actions">
                     <FilterSheet route=Signal::derive(move || router.current()) />
+                    <UpdatePill update=update />
                     {central.then(|| view! { <WorkersPill workers=workers /> })}
                     {ai_state.map(|ai| view! {
                         <button
@@ -498,6 +542,18 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
         me.instance_kind == InstanceKind::Central && me.allows(Permission::ViewWorkers);
     let can_central_jobs =
         me.instance_kind == InstanceKind::Central && me.allows(Permission::ViewJobs);
+    let can_check_updates =
+        me.instance_kind == InstanceKind::Central && me.allows(Permission::ManageSettings);
+    let update_resource = LocalResource::new(move || async move {
+        if can_check_updates {
+            crate::api::get::<UpdateCheckStatus>(SYSTEM_UPDATES_PATH)
+                .await
+                .ok()
+        } else {
+            None
+        }
+    });
+    let update_opt = Signal::derive(move || update_resource.get().flatten());
     let central_workers = LocalResource::new(move || {
         if let Some(reload) = reload {
             reload.track();
@@ -544,7 +600,7 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
                     hidden=move || !nav.get() on:click=move |_| nav.set(false)></button>
                 <Sidebar me=me.clone() jobs=jobs_list workers=workers_list />
                 <div class="page-transition-region">
-                    <Topbar me=me.clone() workers=workers_opt />
+                    <Topbar me=me.clone() workers=workers_opt update=update_opt />
                     <main
                         id="main-content"
                         class="main-content"

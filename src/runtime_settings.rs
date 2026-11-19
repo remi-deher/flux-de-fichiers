@@ -206,7 +206,7 @@ fn resolve_effective(
         config: effective,
         smtp_status,
         outbound,
-        check_updates_enabled: persisted.check_updates_enabled.unwrap_or(false),
+        check_updates_enabled: persisted.check_updates_enabled.unwrap_or(true),
         timezone,
     }
 }

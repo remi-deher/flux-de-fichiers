@@ -865,6 +865,15 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         }
         Err(error) => tracing::warn!(error = %error, "clé de chiffrement indisponible"),
     }
+    let local_dir = crate::plugins::local_catalog_dir(&state.config);
+    match crate::plugins::migrate_legacy_block_kinds(&state.pool, &local_dir).await {
+        Ok(0) => {}
+        Ok(count) => tracing::info!(
+            count,
+            "types de blocs repris sous les identifiants du catalogue 2.0.0"
+        ),
+        Err(error) => tracing::warn!(error = %error, "reprise des types de blocs impossible"),
+    }
     let plugin_sync = tokio::spawn(plugin_sync_loop(state.clone()));
     let lib_scans = tokio::spawn(library_scan_loop(state.clone()));
     let ai_diagnosis = tokio::spawn(crate::ai::diagnosis::run_loop(state.clone()));

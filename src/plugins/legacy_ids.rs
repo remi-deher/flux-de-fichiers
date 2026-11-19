@@ -1,12 +1,48 @@
-//! Reprise des réglages de plugins enregistrés sous les identifiants d'avant le catalogue 2.0.0
-//! (`plugin.sonarr` → `sonarr`), pour que les secrets n'aient jamais à être ressaisis.
-//!
-//! La migration SQL `0027_plugin_ids_without_prefix.sql` renomme les lignes ; les secrets, scellés
-//! avec l'identifiant dans leurs données associées, sont rescellés ici au démarrage.
+//! Reprise des données enregistrées sous les identifiants d'avant le catalogue 2.0.0, pour que
+//! rien n'ait à être ressaisi après la mise à jour :
+//! - réglages de plugins (`plugin.sonarr` → `sonarr`) : la migration SQL
+//!   `0027_plugin_ids_without_prefix.sql` renomme les lignes, puis les secrets, scellés avec
+//!   l'identifiant dans leurs données associées, sont rescellés ici au démarrage ;
+//! - types de blocs des flux (`block.video.encode` → `video.encode`) : définitions en base
+//!   (flux et versions figées) et modèles locaux sur disque, réécrits au démarrage.
 
-use super::secret_settings::reseal_legacy_settings;
-use crate::{error::AppResult, secrets::SecretBox};
+use super::{local::rebuild_local_index, secret_settings::reseal_legacy_settings};
+use crate::{error::AppResult, repository::DEFINITION_STORES, secrets::SecretBox};
 use sqlx::SqlitePool;
+use std::path::{Path, PathBuf};
+
+/// Ancien type → type actuel des blocs officiels.
+const LEGACY_BLOCK_KINDS: [(&str, &str); 24] = [
+    ("block.core.file-input", "essentiel.file-input"),
+    ("block.core.condition", "essentiel.condition"),
+    ("block.core.webhook", "essentiel.webhook"),
+    ("block.core.file-output", "essentiel.file-output"),
+    ("block.media.inspect", "video.inspect"),
+    ("block.metadata.mkvpropedit", "video.mkvpropedit"),
+    ("block.video.remux-mkv", "video.remux-mkv"),
+    ("block.video.remux-mp4", "video.remux-mp4"),
+    ("block.video.encode", "video.encode"),
+    ("block.audio.encode", "audio.encode"),
+    ("block.sonarr.rescan", "sonarr.rescan"),
+    ("block.sonarr.rename", "sonarr.rename"),
+    ("block.radarr.rescan", "radarr.rescan"),
+    ("block.radarr.rename", "radarr.rename"),
+    ("block.scripts.run", "scripts.run"),
+    ("block.emby.refresh", "emby.refresh"),
+    ("block.jellyfin.refresh", "jellyfin.refresh"),
+    ("block.plex.refresh", "plex.refresh"),
+    ("block.notifications.apprise", "notifications.apprise"),
+    ("block.notifications.discord", "notifications.discord"),
+    ("block.notifications.gotify", "notifications.gotify"),
+    ("block.notifications.ntfy", "notifications.ntfy"),
+    ("block.subtitles.clean", "sous-titres.clean"),
+    ("block.subtitles.flags", "sous-titres.flags"),
+];
+
+/// Extension des documents JSON réécrits dans le catalogue local.
+const JSON_EXTENSION: &str = "json";
+/// Index du catalogue local, régénéré plutôt que réécrit.
+const LOCAL_INDEX_FILE: &str = "index.json";
 
 /// Identifiant actuel → ancien identifiant des plugins officiels qui portent des réglages.
 const LEGACY_PLUGIN_IDS: [(&str, &str); 11] = [
@@ -64,6 +100,71 @@ pub async fn migrate_legacy_plugin_secrets(
     Ok(resealed)
 }
 
+/// Remplace dans un document JSON les anciens types de blocs (chaînes exactes) par les actuels ;
+/// `None` si le document n'en contient aucun.
+pub fn rename_legacy_block_kinds(document: &str) -> Option<String> {
+    let mut renamed = document.to_owned();
+    for (legacy, current) in LEGACY_BLOCK_KINDS {
+        renamed = renamed.replace(&format!("\"{legacy}\""), &format!("\"{current}\""));
+    }
+    (renamed != document).then_some(renamed)
+}
+
+/// Réécrit les types de blocs hérités des flux en base (en une transaction) et des modèles du
+/// catalogue local. Idempotent : renvoie le nombre de documents réécrits.
+pub async fn migrate_legacy_block_kinds(pool: &SqlitePool, local_dir: &Path) -> AppResult<usize> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut rewritten = 0;
+    for store in DEFINITION_STORES {
+        for (_, rowid, definition) in store.fetch_definitions(&mut *tx).await? {
+            if let Some(renamed) = rename_legacy_block_kinds(&definition) {
+                store.update_definition(&mut *tx, rowid, &renamed).await?;
+                rewritten += 1;
+            }
+        }
+    }
+    tx.commit().await?;
+
+    let mut local_files = 0;
+    for path in local_json_documents(local_dir) {
+        let content = std::fs::read_to_string(&path)?;
+        if let Some(renamed) = rename_legacy_block_kinds(&content) {
+            std::fs::write(&path, renamed)?;
+            local_files += 1;
+        }
+    }
+    if local_files > 0 {
+        rebuild_local_index(local_dir)?;
+    }
+    Ok(rewritten + local_files)
+}
+
+/// Documents JSON du catalogue local (hors index), dossiers parcourus récursivement.
+fn local_json_documents(local_dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut pending = vec![local_dir.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                pending.push(path);
+            } else if file_type.is_file()
+                && path.extension().and_then(|ext| ext.to_str()) == Some(JSON_EXTENSION)
+                && path.file_name().and_then(|name| name.to_str()) != Some(LOCAL_INDEX_FILE)
+            {
+                found.push(path);
+            }
+        }
+    }
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,6 +182,64 @@ mod tests {
             .await?;
         sqlx::migrate!().run(&pool).await?;
         Ok(pool)
+    }
+
+    #[test]
+    fn rename_legacy_block_kinds_rewrites_exact_kinds_only() {
+        let graph = r#"{"nodes":[{"id":"n1","type":"block.video.encode"},{"id":"n2","type":"block.video.encode-x"},{"id":"n3","type":"condition"}]}"#;
+        let renamed = rename_legacy_block_kinds(graph);
+        assert_eq!(
+            renamed.as_deref(),
+            Some(
+                r#"{"nodes":[{"id":"n1","type":"video.encode"},{"id":"n2","type":"block.video.encode-x"},{"id":"n3","type":"condition"}]}"#
+            )
+        );
+        assert!(
+            renamed
+                .as_deref()
+                .and_then(rename_legacy_block_kinds)
+                .is_none()
+        );
+        let mut legacy: Vec<_> = LEGACY_BLOCK_KINDS.iter().map(|(old, _)| *old).collect();
+        legacy.sort_unstable();
+        legacy.dedup();
+        assert_eq!(legacy.len(), LEGACY_BLOCK_KINDS.len());
+    }
+
+    #[tokio::test]
+    async fn stored_flows_and_local_templates_get_current_block_kinds() -> anyhow::Result<()> {
+        let pool = pool().await?;
+        let legacy = r#"{"nodes":[{"id":"in","type":"block.core.file-input","name":"Entrée","config":{}},{"id":"enc","type":"block.video.encode","name":"Encodage","config":{}}],"connections":[{"from":"in","to":"enc"}]}"#;
+        sqlx::raw_sql(&format!(
+            "INSERT INTO flows (id, name, description, file_mask, is_default, definition) \
+             VALUES ('flux.ancien', 'Ancien', '', '*', 0, '{legacy}'); \
+             INSERT INTO flow_versions (flow_id, version, name, description, file_mask, definition) \
+             VALUES ('flux.ancien', 1, 'Ancien', '', '*', '{legacy}');"
+        ))
+        .execute(&pool)
+        .await?;
+        let local = tempfile::tempdir()?;
+        let template = local.path().join("templates/blocks/encode/manifest.json");
+        let template_dir = template
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("dossier du modèle"))?;
+        std::fs::create_dir_all(template_dir)?;
+        std::fs::write(
+            &template,
+            r#"{"schemaVersion":"1.1.0","id":"template.block.encode","type":"preset","version":"1.0.0","name":"Encode","definition":{"nodes":[{"id":"n","type":"block.video.encode"}]}}"#,
+        )?;
+
+        assert_eq!(migrate_legacy_block_kinds(&pool, local.path()).await?, 3);
+        assert_eq!(migrate_legacy_block_kinds(&pool, local.path()).await?, 0);
+
+        let flow = crate::repository::get_flow(&pool, "flux.ancien").await?;
+        assert!(flow.definition.contains(r#""type":"video.encode""#));
+        assert!(flow.definition.contains(r#""type":"essentiel.file-input""#));
+        let frozen = crate::repository::get_flow_version(&pool, "flux.ancien", 1).await?;
+        assert!(!frozen.definition.contains("block."));
+        assert!(std::fs::read_to_string(&template)?.contains(r#""type":"video.encode""#));
+        assert!(local.path().join("index.json").is_file());
+        Ok(())
     }
 
     #[test]

@@ -59,10 +59,11 @@ pub use forgearr_shared::plugins::vocab::{
     self, CatalogCapability, CatalogItemType, PluginCategory,
 };
 pub use forgearr_shared::plugins::{
-    CatalogEntry, CatalogReadiness, CatalogRuntimeSummary, CreateRepositoryRequest, PackDetailView,
-    PluginCompatibility, PluginConnectionTestResult, PluginDependency, PluginDetailView,
-    PluginRepository, PluginSettingsView, RepositoryDetailView, ToolArtifactSummary,
-    ToolDetailView, ToolStatus, ToolStatusSummary,
+    CatalogEntry, CatalogFlowEdge, CatalogFlowNode, CatalogFlowPreview, CatalogReadiness,
+    CatalogRuntimeSummary, CreateRepositoryRequest, PackDetailView, PluginCompatibility,
+    PluginConnectionTestResult, PluginDependency, PluginDetailView, PluginRepository,
+    PluginSettingsView, RepositoryDetailView, ToolArtifactSummary, ToolDetailView, ToolStatus,
+    ToolStatusSummary,
 };
 pub use secret_settings::{
     decrypt_all, mask, migrate_plaintext, plugin_secret_aad, reseal_legacy_settings,

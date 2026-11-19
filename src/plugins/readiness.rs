@@ -2,8 +2,9 @@
 //! et de l'état des dépendances d'un plugin à partir du cache d'outils et des réglages enregistrés.
 
 use super::{
-    CatalogEntry, CatalogItemType, CatalogReadiness, CatalogRuntimeSummary, PluginDetailView,
-    SettingsField, ToolStatus, load_manifest, read_pack_installation,
+    CatalogEntry, CatalogFlowEdge, CatalogFlowNode, CatalogFlowPreview, CatalogItemType,
+    CatalogReadiness, CatalogRuntimeSummary, PluginDetailView, SettingsField, ToolStatus,
+    load_manifest, read_pack_installation,
 };
 use forgearr_shared::flows::OwnedBlockSpec;
 use serde_json::Value;
@@ -11,6 +12,119 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
 };
+
+const MAX_NODE_SUMMARY_ITEMS: usize = 3;
+
+fn format_config_value(val: &Value) -> Option<String> {
+    match val {
+        Value::String(s) if !s.trim().is_empty() => Some(s.trim().to_owned()),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Bool(b) => Some(if *b { "oui" } else { "non" }.to_owned()),
+        Value::Array(items) if !items.is_empty() => {
+            let parts: Vec<String> = items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .take(MAX_NODE_SUMMARY_ITEMS)
+                .collect();
+            (!parts.is_empty()).then(|| parts.join(", "))
+        }
+        _ => None,
+    }
+}
+
+/// Extrait l'aperçu structuré d'un manifeste JSON de flux (`definition.nodes` / `definition.connections`
+/// ou format graphe `nodes` / `edges`).
+pub fn parse_flow_preview(raw: &Value) -> Option<CatalogFlowPreview> {
+    let def = raw.get("definition").unwrap_or(raw);
+    let raw_nodes = def.get("nodes").and_then(Value::as_array)?;
+    if raw_nodes.is_empty() {
+        return None;
+    }
+    let nodes: Vec<CatalogFlowNode> = raw_nodes
+        .iter()
+        .filter_map(|node| {
+            let id = node.get("id").and_then(Value::as_str)?.to_owned();
+            let kind = node
+                .get("type")
+                .or_else(|| node.get("kind"))
+                .and_then(Value::as_str)
+                .unwrap_or("block")
+                .to_owned();
+            let name = node
+                .get("name")
+                .or_else(|| node.get("label"))
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(&kind)
+                .to_owned();
+            let summary: Vec<String> = node
+                .get("config")
+                .and_then(Value::as_object)
+                .map(|obj| {
+                    obj.iter()
+                        .filter_map(|(k, v)| {
+                            format_config_value(v).map(|val| format!("{k}: {val}"))
+                        })
+                        .take(MAX_NODE_SUMMARY_ITEMS)
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some(CatalogFlowNode {
+                id,
+                kind,
+                name,
+                summary,
+            })
+        })
+        .collect();
+    if nodes.is_empty() {
+        return None;
+    }
+    let raw_edges = def
+        .get("connections")
+        .or_else(|| def.get("edges"))
+        .and_then(Value::as_array);
+    let connections: Vec<CatalogFlowEdge> = raw_edges
+        .into_iter()
+        .flatten()
+        .filter_map(|edge| {
+            let from = edge
+                .get("from")
+                .or_else(|| edge.get("source"))
+                .and_then(Value::as_str)?
+                .to_owned();
+            let to = edge
+                .get("to")
+                .or_else(|| edge.get("target"))
+                .and_then(Value::as_str)?
+                .to_owned();
+            let port = edge
+                .get("port")
+                .or_else(|| edge.get("sourcePort"))
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_owned);
+            Some(CatalogFlowEdge { from, to, port })
+        })
+        .collect();
+    let file_mask = raw
+        .get("fileMask")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_owned);
+    Some(CatalogFlowPreview {
+        file_mask,
+        nodes,
+        connections,
+    })
+}
+
+fn load_flow_preview(root: &Path, manifest_path: &str) -> Option<CatalogFlowPreview> {
+    let full_path = root.join(manifest_path);
+    let text = std::fs::read_to_string(full_path).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    parse_flow_preview(&value)
+}
 
 /// Détermine si les réglages enregistrés satisfont les champs du schéma d'un plugin.
 pub fn is_plugin_configured(fields: &[SettingsField], saved_json: Option<&str>) -> bool {
@@ -97,6 +211,7 @@ pub fn compute_entry_runtime(
                 missing_tools_count,
                 blocks_count,
                 components_count: 0,
+                flow_preview: None,
             }
         }
         CatalogItemType::Pack => {
@@ -124,6 +239,20 @@ pub fn compute_entry_runtime(
                 missing_tools_count,
                 blocks_count: 0,
                 components_count,
+                flow_preview: None,
+            }
+        }
+        CatalogItemType::Flow | CatalogItemType::Preset => {
+            let flow_preview = load_flow_preview(root, &entry.manifest_path);
+            let blocks_count = flow_preview.as_ref().map_or(0, |p| p.nodes.len());
+            CatalogRuntimeSummary {
+                readiness: CatalogReadiness::Available,
+                has_settings: false,
+                configured: true,
+                missing_tools_count: 0,
+                blocks_count,
+                components_count: 0,
+                flow_preview,
             }
         }
         _ => CatalogRuntimeSummary {
@@ -133,6 +262,7 @@ pub fn compute_entry_runtime(
             missing_tools_count: 0,
             blocks_count: 0,
             components_count: 0,
+            flow_preview: None,
         },
     }
 }
@@ -220,5 +350,31 @@ mod tests {
         attach_dependency_statuses(&mut detail, &statuses);
         assert_eq!(detail.dependencies[0].status, Some(ToolStatus::Ready));
         assert_eq!(detail.dependencies[1].status, None);
+    }
+
+    #[test]
+    fn parse_flow_preview_extracts_nodes_edges_and_file_mask() {
+        let raw = serde_json::json!({
+            "fileMask": "*.mkv, *.mp4",
+            "definition": {
+                "nodes": [
+                    {"id": "n1", "type": "file-input", "name": "Source"},
+                    {"id": "n2", "type": "condition", "name": "HEVC ?", "config": {"target": "hevc"}},
+                    {"id": "n3", "type": "file-output", "name": "Sortie"}
+                ],
+                "connections": [
+                    {"from": "n1", "to": "n2"},
+                    {"from": "n2", "to": "n3", "port": "true"}
+                ]
+            }
+        });
+        let Some(preview) = parse_flow_preview(&raw) else {
+            panic!("expected flow preview");
+        };
+        assert_eq!(preview.file_mask.as_deref(), Some("*.mkv, *.mp4"));
+        assert_eq!(preview.nodes.len(), 3);
+        assert_eq!(preview.nodes[1].summary, vec!["target: hevc".to_owned()]);
+        assert_eq!(preview.connections.len(), 2);
+        assert_eq!(preview.connections[1].port.as_deref(), Some("true"));
     }
 }

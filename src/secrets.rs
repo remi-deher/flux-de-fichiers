@@ -1,4 +1,11 @@
 //! Chiffrement au repos des secrets (clés d'API de plugins) avec une clé locale générée dans `/config`.
+//!
+//! Trousseau : une clé active chiffre ; les clés retirées (`retired_keys`) ne servent plus qu'à
+//! déchiffrer les valeurs qui portent encore leur identifiant.
+
+pub mod recovery_kit;
+mod retired_keys;
+pub use retired_keys::{clear_retired_keys, retire_key, retired_keys_path};
 
 use crate::error::{AppError, AppResult};
 use chacha20poly1305::{
@@ -45,14 +52,43 @@ fn decode_hex(text: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
+/// Fichier de clé fourni par l'orchestrateur (`SECRET_KEY_FILE`), s'il est défini.
+pub fn external_key_file() -> Option<std::path::PathBuf> {
+    std::env::var(KEY_FILE_ENV)
+        .ok()
+        .map(std::path::PathBuf::from)
+}
+
 /// Valeur déjà chiffrée par ce module ?
 pub fn is_encrypted(value: &str) -> bool {
     value.starts_with(ENCRYPTED_PREFIX)
 }
 
-pub struct SecretBox {
+/// Une clé du trousseau et son identifiant.
+struct KeyEntry {
     cipher: ChaCha20Poly1305,
     key_id: String,
+}
+
+impl KeyEntry {
+    fn from_bytes(key_bytes: &[u8]) -> Self {
+        Self {
+            cipher: ChaCha20Poly1305::new(Key::from_slice(key_bytes)),
+            key_id: key_id_of(key_bytes),
+        }
+    }
+
+    fn from_hex(key_hex: &str) -> AppResult<Self> {
+        let key_bytes = decode_hex(key_hex.trim())
+            .filter(|bytes| bytes.len() == KEY_BYTES)
+            .ok_or(AppError::Internal)?;
+        Ok(Self::from_bytes(&key_bytes))
+    }
+}
+
+pub struct SecretBox {
+    active: KeyEntry,
+    retired: Vec<KeyEntry>,
 }
 
 fn key_id_of(key_bytes: &[u8]) -> String {
@@ -67,28 +103,28 @@ impl SecretBox {
     /// Ouvre la clé : le fichier de `SECRET_KEY_FILE` s'il est défini, sinon `secret_key` du dossier
     /// de configuration, généré (lecture et écriture propriétaire seules) s'il manque.
     pub fn open(config_dir: &Path) -> AppResult<Self> {
-        let external = std::env::var(KEY_FILE_ENV)
-            .ok()
-            .map(std::path::PathBuf::from);
-        Self::open_with(config_dir, external.as_deref())
+        Self::open_with(config_dir, external_key_file().as_deref())
     }
 
+    /// Clé active (fichier externe ou locale) et clés retirées du dossier de configuration.
     pub fn open_with(config_dir: &Path, external_key_file: Option<&Path>) -> AppResult<Self> {
         let key_hex = match external_key_file {
             Some(path) => fs::read_to_string(path)?,
             None => Self::read_or_create_local_key(config_dir)?,
         };
-        Self::from_key_hex(&key_hex)
+        let active = KeyEntry::from_hex(&key_hex)?;
+        let retired = retired_keys::load(config_dir)?
+            .into_iter()
+            .filter(|entry| entry.key_id != active.key_id)
+            .collect();
+        Ok(Self { active, retired })
     }
 
-    /// Boîte construite sur une clé de 32 octets écrite en hexadécimal.
+    /// Boîte construite sur une seule clé de 32 octets écrite en hexadécimal, sans clé retirée.
     pub fn from_key_hex(key_hex: &str) -> AppResult<Self> {
-        let key_bytes = decode_hex(key_hex.trim())
-            .filter(|bytes| bytes.len() == KEY_BYTES)
-            .ok_or(AppError::Internal)?;
         Ok(Self {
-            cipher: ChaCha20Poly1305::new(Key::from_slice(&key_bytes)),
-            key_id: key_id_of(&key_bytes),
+            active: KeyEntry::from_hex(key_hex)?,
+            retired: Vec::new(),
         })
     }
 
@@ -114,10 +150,9 @@ impl SecretBox {
         hasher.update(job_id.as_bytes());
         hasher.update(b":");
         hasher.update(lease_epoch.to_be_bytes());
-        let key_bytes = hasher.finalize();
         Ok(Self {
-            cipher: ChaCha20Poly1305::new(Key::from_slice(&key_bytes)),
-            key_id: key_id_of(&key_bytes),
+            active: KeyEntry::from_bytes(&hasher.finalize()),
+            retired: Vec::new(),
         })
     }
 
@@ -159,9 +194,23 @@ impl SecretBox {
         }
     }
 
-    /// Identifiant de la clé courante, inscrit dans chaque valeur chiffrée.
+    /// Identifiant de la clé active, inscrit dans chaque valeur chiffrée.
     pub fn key_id(&self) -> &str {
-        &self.key_id
+        &self.active.key_id
+    }
+
+    /// Identifiants des clés retirées, encore utilisées pour déchiffrer.
+    pub fn retired_key_ids(&self) -> Vec<&str> {
+        self.retired
+            .iter()
+            .map(|entry| entry.key_id.as_str())
+            .collect()
+    }
+
+    fn entry_for(&self, key_id: &str) -> Option<&KeyEntry> {
+        std::iter::once(&self.active)
+            .chain(&self.retired)
+            .find(|entry| entry.key_id == key_id)
     }
 
     /// Chiffre `plaintext` en le liant à `aad` (par exemple `plugin:sonarr:apiKey`) : la valeur
@@ -169,6 +218,7 @@ impl SecretBox {
     pub fn encrypt(&self, plaintext: &str, aad: &str) -> AppResult<String> {
         let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
         let sealed = self
+            .active
             .cipher
             .encrypt(
                 &nonce,
@@ -182,26 +232,30 @@ impl SecretBox {
         payload.extend_from_slice(&sealed);
         Ok(format!(
             "{ENCRYPTED_PREFIX}{FORMAT_VERSION}:{}:{}",
-            self.key_id,
+            self.active.key_id,
             encode_hex(&payload)
         ))
     }
 
+    /// Déchiffre avec la clé du trousseau dont l'identifiant figure dans la valeur.
     pub fn decrypt(&self, stored: &str, aad: &str) -> AppResult<String> {
         let mut parts = stored
             .strip_prefix(ENCRYPTED_PREFIX)
             .ok_or(AppError::Invalid)?
             .splitn(3, ':');
         let (version, key_id, hex) = (parts.next(), parts.next(), parts.next());
-        if version != Some(FORMAT_VERSION) || key_id != Some(self.key_id.as_str()) {
+        if version != Some(FORMAT_VERSION) {
             return Err(AppError::Invalid);
         }
+        let entry = key_id
+            .and_then(|id| self.entry_for(id))
+            .ok_or(AppError::Invalid)?;
         let payload = hex
             .and_then(decode_hex)
             .filter(|bytes| bytes.len() > NONCE_BYTES)
             .ok_or(AppError::Invalid)?;
         let (nonce, sealed) = payload.split_at(NONCE_BYTES);
-        let plaintext = self
+        let plaintext = entry
             .cipher
             .decrypt(
                 Nonce::from_slice(nonce),
@@ -359,6 +413,92 @@ mod tests {
             fs::read_to_string(dir.path().join(KEY_FILE_NAME))?.len(),
             KEY_BYTES * 2
         );
+        Ok(())
+    }
+
+    /// Remplace la clé locale par une neuve après avoir retiré l'ancienne ; renvoie l'ancienne boîte.
+    fn replace_local_key_keeping_old(dir: &Path) -> AppResult<SecretBox> {
+        let old = SecretBox::open_with(dir, None)?;
+        let old_hex = fs::read_to_string(dir.join(KEY_FILE_NAME))?;
+        retire_key(dir, &old_hex)?;
+        fs::write(dir.join(KEY_FILE_NAME), SecretBox::generate_key_hex())?;
+        Ok(old)
+    }
+
+    #[test]
+    fn test_retired_keys_still_decrypt_but_never_encrypt() -> AppResult<()> {
+        let dir = tempfile::tempdir()?;
+        let old = replace_local_key_keeping_old(dir.path())?;
+        let sealed_with_old = old.encrypt("ancienne", AAD)?;
+
+        let ring = SecretBox::open_with(dir.path(), None)?;
+        assert_ne!(ring.key_id(), old.key_id());
+        assert_eq!(ring.retired_key_ids(), [old.key_id()]);
+        assert_eq!(ring.decrypt(&sealed_with_old, AAD)?, "ancienne");
+        assert!(
+            ring.encrypt("neuve", AAD)?
+                .starts_with(&format!("enc:v2:{}:", ring.key_id()))
+        );
+        assert!(matches!(
+            ring.decrypt(&sealed_with_old, "plugin:plugin.autre:apiKey"),
+            Err(AppError::Invalid)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn test_retire_key_is_private_deduplicated_and_validated() -> AppResult<()> {
+        let dir = tempfile::tempdir()?;
+        let key_hex = SecretBox::generate_key_hex();
+        retire_key(dir.path(), &key_hex)?;
+        retire_key(dir.path(), &format!("{key_hex}\n"))?;
+        let path = retired_keys_path(dir.path());
+        assert_eq!(fs::read_to_string(&path)?, key_hex);
+        assert_eq!(
+            fs::metadata(&path)?.permissions().mode() & 0o777,
+            KEY_FILE_MODE
+        );
+        assert!(matches!(
+            retire_key(dir.path(), "pas une clé"),
+            Err(AppError::Internal)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn test_the_active_key_is_not_listed_as_retired() -> AppResult<()> {
+        let dir = tempfile::tempdir()?;
+        SecretBox::open_with(dir.path(), None)?;
+        let active_hex = fs::read_to_string(dir.path().join(KEY_FILE_NAME))?;
+        retire_key(dir.path(), &active_hex)?;
+        assert!(
+            SecretBox::open_with(dir.path(), None)?
+                .retired_key_ids()
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_retired_keys_apply_with_an_external_key_file() -> AppResult<()> {
+        let config = tempfile::tempdir()?;
+        let old = replace_local_key_keeping_old(config.path())?;
+        let sealed = old.encrypt("valeur", AAD)?;
+        let external = config.path().join("cle-orchestrateur");
+        fs::write(&external, SecretBox::generate_key_hex())?;
+        let ring = SecretBox::open_with(config.path(), Some(&external))?;
+        assert_eq!(ring.decrypt(&sealed, AAD)?, "valeur");
+        Ok(())
+    }
+
+    #[test]
+    fn test_a_corrupted_retired_key_file_is_an_internal_failure() -> AppResult<()> {
+        let dir = tempfile::tempdir()?;
+        fs::write(retired_keys_path(dir.path()), "pas de l'hexadécimal")?;
+        assert!(matches!(
+            SecretBox::open_with(dir.path(), None),
+            Err(AppError::Internal)
+        ));
         Ok(())
     }
 

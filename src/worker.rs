@@ -236,35 +236,23 @@ impl WorkerLoop {
         let input = dir.join(forgearr_shared::jobs::source_working_filename(
             &claim.source_name,
         ));
-        let response = self
-            .leased(reqwest::Method::GET, claim, worker, "source")
-            .send()
-            .await?
-            .error_for_status()?;
-        let mut chunks = response.bytes_stream();
-        let mut file = tokio::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&input)
-            .await?;
-        let mut total = 0;
-        while let Some(chunk) = chunks.next().await {
-            let chunk = chunk?;
-            total += chunk.len() as u64;
-            if total > self.config.max_bytes {
-                return Err(
-                    JobRunError::simple(JobErrorCode::SourceIntegrity, "source_integrity").into(),
-                );
-            }
-            file.write_all(&chunk).await?;
-        }
-        file.flush().await?;
-        drop(file);
-        let (hash, bytes) = storage::fingerprint(&input, self.config.max_bytes).await?;
-        if hash != claim.source_sha256 || bytes as i64 != claim.source_bytes {
-            return Err(
-                JobRunError::simple(JobErrorCode::SourceIntegrity, "source_integrity").into(),
-            );
+        if let Some(root) = claim.local_source_root.as_deref() {
+            let source = crate::library_scan::source_path(Path::new(root), &claim.source_name)
+                .await
+                .map_err(|_| {
+                    JobRunError::simple(JobErrorCode::SourceIntegrity, "source_integrity")
+                })?;
+            crate::local_worker::copy_verified_source(
+                &source,
+                &input,
+                self.config.max_bytes,
+                &claim.source_sha256,
+                claim.source_bytes,
+            )
+            .await
+            .map_err(|_| JobRunError::simple(JobErrorCode::SourceIntegrity, "source_integrity"))?;
+        } else {
+            self.download_source(claim, worker, &input).await?;
         }
 
         let progress_cb = self.progress_callback(claim, worker);
@@ -296,6 +284,46 @@ impl WorkerLoop {
             .error_for_status()?;
         Ok(())
     }
+    async fn download_source(
+        &self,
+        claim: &Claim,
+        worker: Uuid,
+        input: &Path,
+    ) -> anyhow::Result<()> {
+        let response = self
+            .leased(reqwest::Method::GET, claim, worker, "source")
+            .send()
+            .await?
+            .error_for_status()?;
+        let mut chunks = response.bytes_stream();
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(input)
+            .await?;
+        let mut total = 0;
+        while let Some(chunk) = chunks.next().await {
+            let chunk = chunk?;
+            total += chunk.len() as u64;
+            if total > self.config.max_bytes {
+                return Err(
+                    JobRunError::simple(JobErrorCode::SourceIntegrity, "source_integrity").into(),
+                );
+            }
+            file.write_all(&chunk).await?;
+        }
+        file.flush().await?;
+        drop(file);
+        let (hash, bytes) = storage::fingerprint(input, self.config.max_bytes).await?;
+        if hash != claim.source_sha256 || bytes as i64 != claim.source_bytes {
+            return Err(
+                JobRunError::simple(JobErrorCode::SourceIntegrity, "source_integrity").into(),
+            );
+        }
+
+        Ok(())
+    }
+
     async fn execute(&self, claim: Claim, worker: Uuid) -> anyhow::Result<()> {
         let dir = self
             .config
@@ -463,28 +491,34 @@ impl WorkerLoop {
                 }
             };
             for task in tasks {
-                let report = match crate::filesystem_browser::browse_local(
+                let mut report = crate::domain::WorkerBrowseReport {
+                    request_id: task.request_id,
                     worker_id,
-                    task.path.as_deref(),
-                    None,
-                )
-                .await
-                {
-                    Ok(listing) => crate::domain::WorkerBrowseReport {
-                        request_id: task.request_id,
-                        worker_id,
-                        listing: Some(listing),
-                        error: None,
-                    },
-                    Err(err) => crate::domain::WorkerBrowseReport {
-                        request_id: task.request_id,
-                        worker_id,
-                        listing: None,
-                        error: Some(
-                            crate::filesystem_browser::error_code_for_report(&err).to_owned(),
-                        ),
-                    },
+                    listing: None,
+                    scan: None,
+                    error: None,
                 };
+                let result = if let Some(mut options) = task.scan {
+                    options.max_bytes = options.max_bytes.min(self.config.max_bytes);
+                    match task.path.as_deref() {
+                        Some(path) => crate::library_scan::scan_folder(
+                            Path::new(path),
+                            &options,
+                            &[&self.config.work_dir, &self.config.tools_cache_dir],
+                        )
+                        .await
+                        .map(|scan| report.scan = Some(scan)),
+                        None => Err(crate::error::AppError::Invalid),
+                    }
+                } else {
+                    crate::filesystem_browser::browse_local(worker_id, task.path.as_deref(), None)
+                        .await
+                        .map(|listing| report.listing = Some(listing))
+                };
+                if let Err(err) = result {
+                    report.error =
+                        Some(crate::filesystem_browser::error_code_for_report(&err).to_owned());
+                }
                 let _ = self
                     .request(reqwest::Method::POST, "/api/v1/worker/filesystem")
                     .timeout(REMOTE_BROWSE_REPORT_TIMEOUT)

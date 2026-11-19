@@ -3,6 +3,7 @@ mod flows;
 mod identity;
 mod jobs;
 mod libraries;
+pub(crate) mod library_history;
 mod mcp_audit;
 mod password_reset;
 mod plugins;
@@ -24,17 +25,19 @@ pub use identity::{
     set_account_email, set_setting, touch_api_key, update_account, update_password,
 };
 pub use jobs::{
-    PublishedOutput, active, batch_jobs, cancel_job, claim, clear_job_output_name,
-    count_jobs_for_worker, delete_job, delete_worker, fail, find_worker_by_name, get_job,
-    get_worker, has_library_file_job, heartbeat, insert_job, insert_job_with_options,
-    insert_job_with_priority, job_storage_stats, list_job_steps, list_jobs, list_jobs_for_worker,
-    list_workers, ping, publish_succeeded, register, register_with_metadata, retry_job,
-    save_job_steps, succeeded_output_name, touch_worker_telemetry, update_job_priority,
-    update_worker_settings, worker_exists,
+    JobSource, PublishedOutput, active, batch_jobs, cancel_job, claim, clear_job_output_name,
+    count_jobs_for_worker, delete_job, delete_worker, enqueue_library_source, fail, filtered_jobs,
+    find_worker_by_name, get_job, get_worker, has_library_file_job, heartbeat, insert_job,
+    insert_job_with_options, insert_job_with_priority, job_source, job_storage_stats,
+    known_library_file_signatures, list_job_steps, list_jobs, list_jobs_for_worker, list_workers,
+    ping, publish_succeeded, register, register_with_metadata, retry_job, save_job_steps,
+    succeeded_output_name, touch_worker_telemetry, update_job_priority, update_worker_settings,
+    worker_exists,
 };
 pub use libraries::{
     delete_library, due_scheduled_libraries, get_library, insert_library,
-    library_worker_local_path, list_libraries, touch_library_scanned, update_library,
+    library_worker_local_path, library_worker_local_path_for_job, list_libraries,
+    touch_library_scanned, update_library,
 };
 pub use mcp_audit::{
     DEFAULT_AUDIT_LIMIT, MAX_AUDIT_LIMIT, NewMcpAuditEntry, list_mcp_audit, record_mcp_audit,

@@ -15,6 +15,9 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
 };
+use forgearr_shared::libraries::{
+    FolderScanOptions, IgnoredScanFile, LibraryAccess, LibraryAutomation,
+};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -22,6 +25,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
+const REMOTE_SCAN_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const REMOTE_BROWSE_TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_BROWSE_WAIT_MS: u64 = 15_000;
 
@@ -75,6 +79,10 @@ pub struct LibraryScanResult {
     pub created_jobs: usize,
     pub skipped_existing: usize,
     pub created_files: Vec<String>,
+    pub waiting_for_stability: usize,
+    pub pending_files: Vec<String>,
+    pub ignored_files: Vec<IgnoredScanFile>,
+    pub unavailable_folders: Vec<String>,
 }
 
 pub async fn list(
@@ -217,6 +225,9 @@ pub async fn scan_library_inner(
     {
         return Err(AppError::Invalid);
     }
+    if !library.workers.is_empty() {
+        return scan_configured_folders(s, &library, &req).await;
+    }
     let files: Vec<MediaFile> =
         storage::list_inputs(&s.config.input_dir, s.config.max_file_bytes).await?;
     let scanned_files = files.len();
@@ -259,7 +270,150 @@ pub async fn scan_library_inner(
         created_jobs,
         skipped_existing,
         created_files,
+        waiting_for_stability: 0,
+        pending_files: Vec::new(),
+        ignored_files: Vec::new(),
+        unavailable_folders: Vec::new(),
     })
+}
+
+async fn scan_configured_folders(
+    s: &AppState,
+    library: &Library,
+    req: &LibraryScanRequest,
+) -> AppResult<LibraryScanResult> {
+    let mut options = FolderScanOptions {
+        max_bytes: s.config.max_file_bytes,
+        known_files: Default::default(),
+        library: LibraryAutomation {
+            include_extensions: library.include_extensions.clone(),
+            exclude_patterns: library.exclude_patterns.clone(),
+            min_file_bytes: library.min_file_bytes,
+            ..Default::default()
+        },
+    };
+    let mut result = LibraryScanResult {
+        library_id: library.id,
+        dry_run: req.dry_run,
+        scanned_files: 0,
+        created_jobs: 0,
+        skipped_existing: 0,
+        created_files: Vec::new(),
+        waiting_for_stability: 0,
+        pending_files: Vec::new(),
+        ignored_files: Vec::new(),
+        unavailable_folders: Vec::new(),
+    };
+    let workers = repository::list_workers(&s.pool).await?;
+    for folder in &library.workers {
+        let host = workers.iter().find(|worker| worker.id == folder.worker_id);
+        let remote = host.filter(|worker| !worker.is_integrated());
+        if let Some(worker) = remote
+            && req
+                .target_worker_id
+                .is_some_and(|target| target != worker.id)
+        {
+            continue;
+        }
+        let mut source = repository::JobSource {
+            source_key: folder.source_key.clone(),
+            source_root: folder.local_path.clone(),
+            source_worker_id: remote.map(|worker| worker.id),
+            source_mtime_ns: None,
+            source_writable: folder.access == LibraryAccess::ReadWrite,
+        };
+        options.known_files =
+            repository::known_library_file_signatures(&s.pool, library.id, &source).await?;
+        let scan = if let Some(worker) = remote {
+            if !worker.is_online(chrono::Utc::now()) {
+                result.unavailable_folders.push(folder.local_path.clone());
+                continue;
+            }
+            s.browse_broker
+                .scan(
+                    worker.id,
+                    folder.local_path.clone(),
+                    options.clone(),
+                    REMOTE_SCAN_TIMEOUT,
+                )
+                .await
+        } else if folder.worker_id.is_nil() || host.is_some() {
+            crate::library_scan::scan_folder(
+                std::path::Path::new(&folder.local_path),
+                &options,
+                &[
+                    &s.config.config_dir,
+                    &s.config.data_dir.join("output"),
+                    &s.config.data_dir.join("staging"),
+                    &s.config.tools_cache_dir,
+                ],
+            )
+            .await
+        } else {
+            Err(AppError::NotFound)
+        };
+        let Ok(scan) = scan else {
+            result.unavailable_folders.push(folder.local_path.clone());
+            continue;
+        };
+        result.scanned_files += scan.scanned;
+        result.waiting_for_stability += scan.waiting_for_stability;
+        result.skipped_existing += scan.skipped_known;
+        result.pending_files.extend(
+            scan.pending_files
+                .into_iter()
+                .map(|name| format!("{}/{name}", folder.local_path)),
+        );
+        result
+            .ignored_files
+            .extend(scan.ignored_files.into_iter().map(|file| IgnoredScanFile {
+                path: format!("{}/{}", folder.local_path, file.path),
+                reason: file.reason,
+            }));
+        for file in scan.files {
+            if !crate::library_scan::valid_relative_name(&file.name)
+                || file.bytes == 0
+                || file.bytes > options.max_bytes
+                || !crate::domain::library_accepts_file(library, &file.name, file.bytes)
+                || file.sha256.len() != 64
+                || !file.sha256.bytes().all(|b| b.is_ascii_hexdigit())
+            {
+                continue;
+            }
+            source.source_mtime_ns = file.mtime_ns;
+            let job = repository::enqueue_library_source(
+                &s.pool,
+                library.id,
+                &source,
+                &file.name,
+                &file.sha256,
+                file.bytes as i64,
+                req.target_worker_id.or_else(|| {
+                    source
+                        .source_key
+                        .is_none()
+                        .then_some(source.source_worker_id)
+                        .flatten()
+                }),
+                req.flow_id.as_deref(),
+                req.dry_run,
+            )
+            .await?;
+            if let Some(job) = job {
+                result.created_jobs += 1;
+                result.created_files.push(file.name);
+                if !req.dry_run {
+                    s.notify_job_event(JobEventType::JobCreated, job.id, JobStatus::Queued, None);
+                }
+            } else {
+                result.skipped_existing += 1;
+            }
+        }
+    }
+    if !req.dry_run {
+        repository::touch_library_scanned(&s.pool, library.id).await?;
+    }
+    Ok(result)
 }
 
 /// Exécute les scans automatiques échus pour toutes les bibliothèques planifiées.
@@ -313,7 +467,7 @@ pub async fn browse(
     _auth: ManageLibrariesAuth,
 ) -> AppResult<Json<DirectoryListing>> {
     let listing = match q.worker_id {
-        Some(worker_id) => {
+        Some(worker_id) if !worker_id.is_nil() => {
             let worker = repository::get_worker(&s.pool, worker_id).await?;
             if worker.is_integrated() || worker.remote_addr.as_deref() == Some("local") {
                 filesystem_browser::browse_local(
@@ -331,7 +485,7 @@ pub async fn browse(
                     .await?
             }
         }
-        None => {
+        _ => {
             filesystem_browser::browse_local(
                 Uuid::nil(),
                 q.path.as_deref(),
@@ -367,4 +521,34 @@ pub async fn worker_report_browse(
     crate::auth::authorize_worker(&s.pool, &headers).await?;
     let _ = s.browse_broker.complete(report).await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct HistoryPage {
+    offset: Option<i64>,
+}
+
+pub async fn file_history(
+    State(s): State<AppState>,
+    Path(library): Path<Uuid>,
+    Query(page): Query<HistoryPage>,
+    _libraries: ViewLibrariesAuth,
+    _jobs: super::ViewJobsAuth,
+) -> AppResult<Json<Vec<forgearr_shared::libraries::LibraryFileHistory>>> {
+    Ok(Json(
+        repository::library_history::files(&s.pool, library, page.offset.unwrap_or_default())
+            .await?,
+    ))
+}
+
+pub async fn reprocess_file(
+    State(s): State<AppState>,
+    Path((library, job)): Path<(Uuid, Uuid)>,
+    _auth: super::ManageJobsAuth,
+    Json(request): Json<forgearr_shared::libraries::ReprocessLibraryFile>,
+) -> AppResult<(StatusCode, Json<Job>)> {
+    let job =
+        repository::library_history::reprocess(&s.pool, library, job, request.flow_version).await?;
+    s.notify_job_event(JobEventType::JobCreated, job.id, JobStatus::Queued, None);
+    Ok((StatusCode::CREATED, Json(job)))
 }

@@ -7,7 +7,6 @@ mod widgets;
 
 use crate::jobs::LiveJobs;
 use crate::route::{Route, use_router};
-use crate::ui::filters::{Filters, JobStateFilter};
 use crate::ui::{EmptyState, Icon, IconName, MetricTone, SectionHeader, StatItem, StatStrip};
 use crate::{api, format};
 use chrono::Utc;
@@ -54,22 +53,10 @@ fn Hero(
     }
 }
 
-fn open_jobs_filtered(
-    router: crate::route::Router,
-    filters: Option<Filters>,
-    state: JobStateFilter,
-) {
-    if let Some(filters) = filters {
-        filters.pending_job_state.set(Some(state));
-    }
-    router.go(Route::Jobs);
-}
-
 #[component]
 pub fn CentralOverview(me: Me) -> impl IntoView {
     let _ = me;
     let router = use_router();
-    let filters = use_context::<Filters>();
     let live_progress = use_context::<LiveJobs>().map(|live| live.progress);
     let jobs = LocalResource::new(|| api::get::<Vec<Job>>(JOBS_PATH));
     let job_stats = LocalResource::new(|| api::get::<JobStorageStats>(JOBS_STATS_PATH));
@@ -96,25 +83,17 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                 view! {
                     <Hero tone=tone status=status actions=actions />
                     {layout_now.is_visible(Widget::Metrics).then(|| {
-                        let go_active = Callback::new(move |()| {
-                            open_jobs_filtered(router, filters, JobStateFilter::Active)
-                        });
-                        let go_failed = Callback::new(move |()| {
-                            open_jobs_filtered(router, filters, JobStateFilter::Failed)
-                        });
                         let go_workers = Callback::new(move |()| router.go(Route::Workers));
                         let go_libraries = Callback::new(move |()| router.go(Route::Libraries));
                         let kpis = vec![
-                            StatItem::new("Tâches en cours", summary.running.to_string(), MetricTone::Neutral)
-                                .with_detail(format!("{} en attente", summary.queued))
-                                .with_filter(false, go_active),
+                            StatItem::new("En cours et en file", storage_stats.active_jobs.to_string(), MetricTone::Neutral)
+                                .with_link("/jobs?state=active"),
                             StatItem::new(
                                 "Tâches échouées",
-                                summary.failed.to_string(),
-                                if summary.failed > 0 { MetricTone::Danger } else { MetricTone::Neutral },
+                                storage_stats.failed_jobs.to_string(),
+                                if storage_stats.failed_jobs > 0 { MetricTone::Danger } else { MetricTone::Neutral },
                             )
-                            .with_detail(format!("{} relançable(s)", summary.retryable))
-                            .with_filter(false, go_failed),
+                            .with_link("/jobs?state=failed"),
                             StatItem::new(
                                 "Workers en ligne",
                                 format!("{} / {}", summary.workers_online, summary.workers_total),
@@ -178,6 +157,8 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                         view! {
                             <section class="section-panel">
                                 <SectionHeader title="Économies de stockage" subtitle=format!("{saved_label} ({pct_detail})") />
+                                <a href="/jobs?state=succeeded">"Voir les traitements réussis"</a>
+
                                 {if storage_stats.by_library.is_empty() {
                                     view! { <EmptyState title="Aucune statistique" message="Les gains d'espace disque apparaîtront après les premières tâches réussies." icon_name=IconName::Libraries /> }.into_any()
                                 } else {
@@ -202,7 +183,10 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                                                         };
                                                         view! {
                                                             <tr>
-                                                                <td class="text-strong">{row.library_name}</td>
+                                                                <td class="text-strong">{match row.library_id {
+                                                                    Some(id) => view! { <a href=format!("/jobs?state=succeeded&library={id}")>{row.library_name}</a> }.into_any(),
+                                                                    None => row.library_name.into_any(),
+                                                                }}</td>
                                                                 <td>{row.succeeded_count}</td>
                                                                 <td class="text-dim">{format_bytes(row.source_bytes.unsigned_abs())}</td>
                                                                 <td class="text-dim">{format_bytes(row.output_bytes.unsigned_abs())}</td>
@@ -215,6 +199,27 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
                                         </div>
                                     }.into_any()
                                 }}
+                                {(!storage_stats.by_volume.is_empty()).then(|| view! {
+                                    <div class="table-wrapper">
+                                        <table class="data-table">
+                                            <caption>"Gain net par volume"</caption>
+                                            <thead><tr>
+                                                <th scope="col">"Volume"</th><th scope="col">"Gain net"</th>
+                                                <th scope="col">"Fichiers plus gros"</th><th scope="col">"Octets ajoutés"</th>
+                                            </tr></thead>
+                                            <tbody>{storage_stats.by_volume.into_iter().map(|row| {
+                                                let label = if row.volume.is_empty() { "Entrée par défaut".to_owned() } else { row.volume };
+                                                let library = row.library_id.map_or_else(String::new, |id| format!("&library={id}"));
+                                                let link = format!("/jobs?state=succeeded&volume={}{}", crate::route::encode_segment(&row.key), library);
+                                                let sign = if row.saved_bytes < 0 { "−" } else { "+" };
+                                                view! { <tr><td><a href=link>{label}</a></td>
+                                                    <td>{format!("{sign}{}", format_bytes(row.saved_bytes.unsigned_abs()))}</td>
+                                                    <td>{row.grown_count}</td><td>{format_bytes(row.grown_bytes.unsigned_abs())}</td>
+                                                </tr> }
+                                            }).collect_view()}</tbody>
+                                        </table>
+                                    </div>
+                                })}
                             </section>
                         }
                     })}
@@ -227,8 +232,6 @@ pub fn CentralOverview(me: Me) -> impl IntoView {
 #[component]
 pub fn WorkerOverviewPage(me: Me) -> impl IntoView {
     let can_jobs = me.allows(forgearr_shared::Permission::ViewJobs);
-    let router = use_router();
-    let filters = use_context::<Filters>();
     let overview = LocalResource::new(|| api::get::<WorkerOverview>(WORKER_OVERVIEW_PATH));
     view! {
         <div class="tab-panel" role="tabpanel">
@@ -252,21 +255,9 @@ pub fn WorkerOverviewPage(me: Me) -> impl IntoView {
                         .with_detail("sur ce worker"),
                     ];
                     if can_jobs {
-                        let states = [
-                            JobStateFilter::Active,
-                            JobStateFilter::Active,
-                            JobStateFilter::Completed,
-                            JobStateFilter::Failed,
-                        ];
-                        for (item, state) in items.iter_mut().zip(states) {
-                            *item = std::mem::replace(
-                                item,
-                                StatItem::new("", "", MetricTone::Neutral),
-                            )
-                            .with_filter(
-                                false,
-                                Callback::new(move |()| open_jobs_filtered(router, filters, state)),
-                            );
+                        let links = ["/jobs?state=active", "/jobs?state=active", "/jobs?state=succeeded", "/jobs?state=failed"];
+                        for (item, href) in items.iter_mut().zip(links) {
+                            item.href = Some(href.to_owned());
                         }
                     }
                     view! {

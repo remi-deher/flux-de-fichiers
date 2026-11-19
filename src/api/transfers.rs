@@ -71,12 +71,10 @@ pub async fn source(
 ) -> AppResult<Response> {
     crate::auth::authorize_worker(&s.pool, &h).await?;
     let job = repository::active(&s.pool, id, &lease(&h)?).await?;
-    stream_file(
-        &storage::input_path(&s.config.input_dir, &job.source_name).await?,
-        None,
-        "application/octet-stream",
-    )
-    .await
+    let source = crate::library_scan::central_job_source(&s.pool, &s.config.input_dir, &job)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    stream_file(&source, None, "application/octet-stream").await
 }
 
 fn extension_for_name(name: &str) -> &str {
@@ -223,8 +221,8 @@ async fn receive(
     }
     file.sync_all().await?;
     drop(file);
-    let source = storage::input_path(&s.config.input_dir, &job.source_name).await?;
-    publish_staged(s, id, lease, job, &source, staging, warning, spec).await?;
+    let source = crate::library_scan::central_job_source(&s.pool, &s.config.input_dir, job).await?;
+    publish_staged(s, id, lease, job, source.as_deref(), staging, warning, spec).await?;
     Ok(())
 }
 
@@ -269,21 +267,24 @@ pub(crate) async fn publish_staged(
     id: Uuid,
     lease: &LeaseRequest,
     job: &Job,
-    source: &std::path::Path,
+    source: Option<&std::path::Path>,
     staging: &std::path::Path,
     warning: bool,
     spec: &media::OutputSpec,
 ) -> AppResult<()> {
     let (hash, size) = storage::fingerprint(staging, s.config.max_file_bytes).await?;
-    let (source_hash, source_size) = storage::fingerprint(source, s.config.max_file_bytes).await?;
-    if Some(&source_hash) != job.source_sha256.as_ref()
-        || job.source_bytes != Some(source_size as i64)
-    {
-        return Err(AppError::Conflict);
+    if let Some(source) = source {
+        let (source_hash, source_size) =
+            storage::fingerprint(source, s.config.max_file_bytes).await?;
+        if Some(&source_hash) != job.source_sha256.as_ref()
+            || job.source_bytes != Some(source_size as i64)
+        {
+            return Err(AppError::Conflict);
+        }
+        validate_staged_output(s, spec, source, staging)
+            .await
+            .map_err(|_| AppError::Invalid)?;
     }
-    validate_staged_output(s, spec, source, staging)
-        .await
-        .map_err(|_| AppError::Invalid)?;
     let name = format!("{id}-{}.{}", lease.lease_token, spec.extension);
     let destination = s.config.data_dir.join("output").join(&name);
     if let Err(error) = repository::publish_succeeded(
@@ -312,14 +313,37 @@ pub(crate) async fn publish_staged(
     if let Some(lib_id) = job.library_id
         && let Ok(lib) = repository::get_library(&s.pool, lib_id).await
     {
-        apply_library_output_policy(
-            lib.output_policy,
-            &s.config.input_dir,
-            &job.source_name,
-            &destination,
-            &spec.extension,
-        )
-        .await;
+        let stored = repository::job_source(&s.pool, id).await;
+        if lib.output_policy != crate::domain::LibraryOutputPolicy::OutputDir
+            && stored.is_ok_and(|source| {
+                source.is_none_or(|source| {
+                    source.source_worker_id.is_none() && source.source_writable
+                })
+            })
+            && let Ok(Some(source_path)) =
+                crate::library_scan::central_job_source(&s.pool, &s.config.input_dir, job).await
+        {
+            let current = storage::fingerprint(&source_path, s.config.max_file_bytes).await;
+            if current.is_ok_and(|(hash, bytes)| {
+                job.source_sha256.as_deref() == Some(hash.as_str())
+                    && job.source_bytes == Some(bytes as i64)
+            }) && let Err(error) = apply_library_output_policy(
+                lib.output_policy,
+                &source_path,
+                &destination,
+                &spec.extension,
+            )
+            .await
+            {
+                tracing::warn!(job_id=%id, %error, "remplacement de la source indisponible");
+            }
+        }
+    }
+    if let Err(error) =
+        crate::flows::publication::notify_after_publication(s, job, lease.worker_id, &destination)
+            .await
+    {
+        tracing::warn!(job_id=%id, error=%error, "notification après publication indisponible");
     }
     s.notify_job_event(JobEventType::JobSucceeded, id, JobStatus::Succeeded, None);
     Ok(())
@@ -327,42 +351,84 @@ pub(crate) async fn publish_staged(
 
 async fn apply_library_output_policy(
     policy: crate::domain::LibraryOutputPolicy,
-    input_dir: &std::path::Path,
-    source_name: &str,
-    published_output: &std::path::Path,
-    output_ext: &str,
-) {
+    source: &std::path::Path,
+    output: &std::path::Path,
+    extension: &str,
+) -> std::io::Result<()> {
     use crate::domain::LibraryOutputPolicy;
-    if matches!(policy, LibraryOutputPolicy::OutputDir) {
-        return;
+    if policy == LibraryOutputPolicy::OutputDir {
+        return Ok(());
     }
-    let Ok(source_path) = storage::input_path(input_dir, source_name).await else {
-        return;
-    };
-    let Some(parent) = source_path.parent() else {
-        return;
-    };
-    let stem = source_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("output");
-    let target_name = format!("{stem}.{output_ext}");
-    let target_path = parent.join(&target_name);
-    if matches!(policy, LibraryOutputPolicy::ReplaceWithBackup) {
-        let mut backup = source_path.as_os_str().to_owned();
-        backup.push(".bak");
-        if let Err(err) = tokio::fs::rename(&source_path, &backup).await {
-            tracing::warn!(error = %err, "backup before library replacement failed");
-            return;
+    let target = source.with_extension(extension);
+    let temp = source.with_file_name(format!(".forgearr-replace-{}.tmp", Uuid::new_v4()));
+    let metadata = tokio::fs::metadata(source).await?;
+    let result = async {
+        let mut input = tokio::fs::File::open(output).await?;
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .await?;
+        tokio::io::copy(&mut input, &mut file).await?;
+        file.set_permissions(metadata.permissions()).await?;
+        file.sync_all().await?;
+        drop(file);
+        if policy == LibraryOutputPolicy::ReplaceWithBackup {
+            let mut backup = source.as_os_str().to_owned();
+            backup.push(".bak");
+            tokio::fs::hard_link(source, std::path::PathBuf::from(backup)).await?;
         }
-    } else if target_path != source_path {
-        let _ = tokio::fs::remove_file(&source_path).await;
+        if target == source {
+            tokio::fs::rename(&temp, &target).await?;
+        } else {
+            tokio::fs::hard_link(&temp, &target).await?;
+            tokio::fs::remove_file(source).await?;
+        }
+        Ok(())
     }
-    if tokio::fs::hard_link(published_output, &target_path)
-        .await
-        .is_err()
-        && let Err(err) = tokio::fs::copy(published_output, &target_path).await
-    {
-        tracing::warn!(error = %err, "library in-place replacement failed");
+    .await;
+    let _ = tokio::fs::remove_file(temp).await;
+    result
+}
+
+#[cfg(test)]
+mod replacement_tests {
+    use super::*;
+    use crate::domain::LibraryOutputPolicy;
+
+    #[tokio::test]
+    async fn preserves_source_and_existing_target_on_name_collision() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("film.mp4");
+        let target = directory.path().join("film.mkv");
+        let output = directory.path().join("result.mkv");
+        std::fs::write(&source, b"source")?;
+        std::fs::write(&target, b"other")?;
+        std::fs::write(&output, b"result")?;
+        assert!(
+            apply_library_output_policy(
+                LibraryOutputPolicy::ReplaceInPlace,
+                &source,
+                &output,
+                "mkv"
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(std::fs::read(&source)?, b"source");
+        assert_eq!(std::fs::read(&target)?, b"other");
+        apply_library_output_policy(
+            LibraryOutputPolicy::ReplaceWithBackup,
+            &source,
+            &output,
+            "mp4",
+        )
+        .await?;
+        assert_eq!(std::fs::read(&source)?, b"result");
+        assert_eq!(
+            std::fs::read(directory.path().join("film.mp4.bak"))?,
+            b"source"
+        );
+        Ok(())
     }
 }

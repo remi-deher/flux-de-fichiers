@@ -242,6 +242,7 @@ async fn remux_mp4_contract_runs_mp4box_and_reports_progress()
         plugin_configs: &HashMap::new(),
         tool_versions: &HashMap::new(),
         media_root: None,
+        logical_source_name: None,
         allow_private_integrations: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
@@ -303,6 +304,7 @@ exit 2
         plugin_configs: &HashMap::new(),
         tool_versions: &HashMap::new(),
         media_root: None,
+        logical_source_name: None,
         allow_private_integrations: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
@@ -390,6 +392,7 @@ exit 9
         plugin_configs: &HashMap::new(),
         tool_versions: &HashMap::new(),
         media_root: None,
+        logical_source_name: None,
         allow_private_integrations: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
@@ -428,6 +431,7 @@ async fn mkvpropedit_skips_when_unchanged_and_fails_cleanly_on_error()
         plugin_configs: &HashMap::new(),
         tool_versions: &HashMap::new(),
         media_root: None,
+        logical_source_name: None,
         allow_private_integrations: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, dir.path(), progress)
@@ -607,6 +611,7 @@ async fn local_script_executes_end_to_end_across_registry_routing_and_claim_payl
         plugin_configs: &HashMap::new(),
         tool_versions: &HashMap::new(),
         media_root: None,
+        logical_source_name: None,
         allow_private_integrations: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
@@ -684,6 +689,7 @@ async fn local_script_stop_pipeline_halts_execution_before_output()
         plugin_configs: &HashMap::new(),
         tool_versions: &HashMap::new(),
         media_root: None,
+        logical_source_name: None,
         allow_private_integrations: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
@@ -794,6 +800,7 @@ async fn unified_script_block_supports_inline_library_ref_and_strict_next_port()
         plugin_configs: &HashMap::new(),
         tool_versions: &HashMap::new(),
         media_root: None,
+        logical_source_name: None,
         allow_private_integrations: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
@@ -917,6 +924,7 @@ async fn non_media_input_is_accepted_then_the_extracted_file_is_probed()
                 plugin_configs: &HashMap::new(),
                 tool_versions: &HashMap::new(),
                 media_root: None,
+                logical_source_name: None,
                 allow_private_integrations: None,
             }
             .execute_flow(Uuid::new_v4(), flow, source, work, progress)
@@ -934,5 +942,62 @@ async fn non_media_input_is_accepted_then_the_extracted_file_is_probed()
         refused.is_err(),
         "sans acceptsNonMedia, la sonde initiale doit échouer"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn arr_notification_is_deferred_until_publication() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let cache = ToolCacheManager::new(dir.path().join("cache"));
+    install_fake_probe(&cache)?;
+    let source = dir.path().join("in.mkv");
+    std::fs::write(&source, b"movie")?;
+    let mut registry = base_registry();
+    registry.register_json(json!({
+        "schemaVersion": "1.1.0",
+        "id": "operation.sonarr.rescan",
+        "version": "1.0.0",
+        "name": "Rescan",
+        "providerId": "sonarr",
+        "providerKind": "plugin",
+        "capability": "integration",
+        "status": "validated",
+        "runtime": {"kind":"http","steps":[{"url":"https://example.invalid/not-used","method":"POST"}]}
+    }))?;
+    registry.register_block_mapping("sonarr.rescan", "operation.sonarr.rescan");
+    let flow = flow_record(json!({
+        "nodes":[
+            {"id":"entry","type":"file-input","name":"Input"},
+            {"id":"notify","type":"sonarr.rescan","name":"Rescan","config":{"after_publication":true}},
+            {"id":"end","type":"file-output","name":"Output"}
+        ],
+        "connections":[{"from":"entry","to":"notify"},{"from":"notify","to":"end"}]
+    }));
+    let engine = FlowEngine {
+        registry: &registry,
+        cache_mgr: &cache,
+        http_client: &reqwest::Client::new(),
+        secrets_dir: None,
+        plugin_configs: &HashMap::new(),
+        tool_versions: &HashMap::new(),
+        media_root: None,
+        logical_source_name: Some("series/episode.mkv"),
+        allow_private_integrations: Some(false),
+    };
+    let outcome = engine
+        .execute_flow(
+            Uuid::new_v4(),
+            &flow,
+            &source,
+            dir.path(),
+            recording_progress().0,
+        )
+        .await
+        .map_err(|error| anyhow::anyhow!(error.message))?;
+    assert!(outcome.steps.iter().any(|step| {
+        step.node_id == "notify"
+            && step.status == crate::domain::JobStepStatus::Skipped
+            && step.message.as_deref() == Some(publication::DEFERRED_MESSAGE)
+    }));
     Ok(())
 }

@@ -241,7 +241,20 @@ fn json_routes() -> Router<AppState> {
                 .put(libraries::update)
                 .delete(libraries::delete),
         )
-        .route("/api/v1/libraries/{id}/scan", post(libraries::scan))
+        .route("/api/v1/libraries/{id}/files", get(libraries::file_history))
+        .route(
+            "/api/v1/libraries/{id}/files/{job}/reprocess",
+            post(libraries::reprocess_file),
+        )
+        .route("/api/v1/jobs/{id}/placement", get(jobs::placement))
+        .route(
+            "/api/v1/jobs/{id}/notifications/retry",
+            post(jobs::retry_notifications),
+        )
+        .route(
+            "/api/v1/jobs/failures",
+            get(jobs::failure_details).post(jobs::replay_failures),
+        )
         .route(
             "/api/v1/worker/filesystem/pending",
             get(libraries::worker_pending_browse),
@@ -476,6 +489,7 @@ fn json_routes() -> Router<AppState> {
 
 fn transfer_routes() -> Router<AppState> {
     Router::new()
+        .route("/api/v1/libraries/{id}/scan", post(libraries::scan))
         .route("/api/v1/jobs/events", get(jobs::events))
         .route("/api/v1/ai/runs/{id}/events", get(crate::ai::run_events))
         .route(
@@ -727,7 +741,9 @@ pub(crate) async fn populate_claim_contracts(
                 .await;
         if !claim.plugin_configs.is_empty() {
             let mut media_root = config.input_dir.clone();
-            if let Some(lib_id) = claim.library_id
+            if let Some(source) = repository::job_source(pool, claim.job_id).await? {
+                media_root = source.source_root.into();
+            } else if let Some(lib_id) = claim.library_id
                 && let Ok(Some(local_path)) =
                     repository::library_worker_local_path(pool, lib_id, worker_id).await
             {

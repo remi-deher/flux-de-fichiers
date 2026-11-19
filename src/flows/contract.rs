@@ -1319,6 +1319,68 @@ mod tests {
     }
 
     #[test]
+    fn arr_templates_resolve_and_compose_video_audio_and_subtitles_in_one_argv()
+    -> anyhow::Result<()> {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../flux-de-fichiers-plugins");
+        let operation = root.join("plugins/video/operations/video-encode.json");
+        let first_template = root.join("flows/radarr-media-normalize/manifest.json");
+        if !first_template.is_file() {
+            return Ok(());
+        }
+        let op: OperationContract = serde_json::from_reader(std::fs::File::open(operation)?)?;
+        let OperationRuntime::Binary(runtime) = op.runtime else {
+            anyhow::bail!("binary expected")
+        };
+        let paths = HashMap::from([
+            ("source", Path::new("/tmp/input.mkv")),
+            ("destination", Path::new("/tmp/output.mkv")),
+        ]);
+        let (argv, _) = build_binary_argv(
+            &runtime,
+            &json!({
+                "video_mode": "copy", "audio_codec": "opus", "audio_language": "fra", "subtitle_language": "eng"
+            }),
+            &paths,
+            None,
+        )?;
+        assert_eq!(argv.iter().filter(|arg| *arg == "-i").count(), 1);
+        for pair in [
+            ["-c:v", "copy"],
+            ["-c:a", "libopus"],
+            ["-map", "0:a:m:language:fra"],
+            ["-map", "0:s:m:language:eng"],
+            ["-c:s", "copy"],
+        ] {
+            assert!(
+                argv.windows(2)
+                    .any(|args| args[0] == pair[0] && args[1] == pair[1]),
+                "{pair:?}"
+            );
+        }
+        assert_eq!(argv.last().map(String::as_str), Some("/tmp/output.mkv"));
+        let registry = OperationRegistry::load_from_roots(std::slice::from_ref(&root));
+        for product in ["radarr", "sonarr"] {
+            let template: Value = serde_json::from_reader(std::fs::File::open(
+                root.join(format!("flows/{product}-media-normalize/manifest.json")),
+            )?)?;
+            let graph: FlowGraph = serde_json::from_value(template["definition"].clone())?;
+            assert!(
+                graph
+                    .nodes
+                    .iter()
+                    .all(|node| registry.resolve_node_operation(node).is_some())
+            );
+            assert!(
+                graph
+                    .nodes
+                    .iter()
+                    .any(|node| node.config["after_publication"] == true)
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn probe_selection_matches_file_extension_and_priority() -> anyhow::Result<()> {
         let mut reg = OperationRegistry::default();
         for op in [

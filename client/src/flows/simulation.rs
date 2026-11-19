@@ -88,6 +88,7 @@ pub fn FlowSimulationPanel(editor: Editor) -> impl IntoView {
                 </header>
 
                 <div class="flow-inspector__body">
+                    <super::plan::ProcessingPlan graph=Signal::derive(move || editor.graph.get()) report=report flow_id=editor.flow_id />
                     <div class="flow-inspector__section">
                         <span class="flow-inspector__section-title">"Entrée de simulation"</span>
                         <div class="flow-sim__presets">

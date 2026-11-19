@@ -8,7 +8,7 @@ use crate::{
     error::{AppError, AppResult},
 };
 use sqlx::SqlitePool;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 struct LibraryRow {
@@ -25,9 +25,11 @@ struct LibraryRow {
     updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(sqlx::FromRow)]
 struct LibraryWorkerRow {
     library_id: Uuid,
-    worker_id: Uuid,
+    worker_id: Option<Uuid>,
+    source_key: Option<String>,
     local_path: String,
     access: LibraryAccess,
 }
@@ -113,18 +115,38 @@ pub fn normalize_worker_path(path: &str) -> AppResult<String> {
 }
 
 pub fn prepare_workers(workers: Vec<LibraryWorkerPath>) -> AppResult<Vec<LibraryWorkerPath>> {
-    let mut seen = Vec::with_capacity(workers.len());
+    let mut seen = HashSet::with_capacity(workers.len());
     let mut prepared = Vec::with_capacity(workers.len());
     for entry in workers {
-        if seen.contains(&entry.worker_id) {
+        let path = normalize_worker_path(&entry.local_path)?;
+        if !seen.insert((entry.worker_id, path.clone())) {
             return Err(AppError::Invalid);
         }
-        seen.push(entry.worker_id);
         prepared.push(LibraryWorkerPath {
             worker_id: entry.worker_id,
-            local_path: normalize_worker_path(&entry.local_path)?,
+            local_path: path,
+            source_key: entry
+                .source_key
+                .map(|key| {
+                    let key = key.trim();
+                    if key.len() > LIBRARY_NAME_MAX || key.chars().any(char::is_control) {
+                        return Err(AppError::Invalid);
+                    }
+                    Ok(key.to_owned())
+                })
+                .transpose()?
+                .filter(|key| !key.is_empty()),
             access: entry.access,
         });
+    }
+    let mut per_host = HashSet::new();
+    if prepared.iter().any(|folder| {
+        folder
+            .source_key
+            .as_ref()
+            .is_some_and(|key| !per_host.insert((folder.worker_id, key)))
+    }) {
+        return Err(AppError::Invalid);
     }
     Ok(prepared)
 }
@@ -141,7 +163,7 @@ async fn prepare(pool: &SqlitePool, write: LibraryWrite) -> AppResult<PreparedLi
     }
     let workers = prepare_workers(write.workers)?;
     for entry in &workers {
-        if !super::worker_exists(pool, entry.worker_id).await? {
+        if !entry.worker_id.is_nil() && !super::worker_exists(pool, entry.worker_id).await? {
             return Err(AppError::Invalid);
         }
     }
@@ -184,18 +206,17 @@ async fn workers_of(
     executor: impl sqlx::SqliteExecutor<'_>,
     id: Uuid,
 ) -> AppResult<Vec<LibraryWorkerPath>> {
-    let rows = sqlx::query_as!(
-        LibraryWorkerRow,
-        r#"SELECT library_id AS "library_id!: Uuid", worker_id AS "worker_id!: Uuid", local_path, access AS "access: LibraryAccess" FROM library_workers WHERE library_id=?1 ORDER BY local_path"#,
-        id,
-    )
+    let rows = sqlx::query_as::<_, LibraryWorkerRow>(
+        "SELECT library_id, worker_id, local_path, access, source_key FROM library_folders WHERE library_id=?1 ORDER BY local_path",
+    ).bind(id)
     .fetch_all(executor)
     .await?;
     Ok(rows
         .into_iter()
         .map(|row| LibraryWorkerPath {
-            worker_id: row.worker_id,
+            worker_id: row.worker_id.unwrap_or_default(),
             local_path: row.local_path,
+            source_key: row.source_key,
             access: row.access,
         })
         .collect())
@@ -207,14 +228,14 @@ async fn insert_workers(
     workers: &[LibraryWorkerPath],
 ) -> AppResult<()> {
     for entry in workers {
-        sqlx::query!(
-            "INSERT INTO library_workers (library_id, worker_id, local_path, access) \
-             VALUES (?1, ?2, ?3, ?4)",
-            library_id,
-            entry.worker_id,
-            entry.local_path,
-            entry.access,
+        sqlx::query(
+            "INSERT INTO library_folders (library_id, worker_id, local_path, access, source_key) VALUES (?1, ?2, ?3, ?4, ?5)",
         )
+        .bind(library_id)
+        .bind((!entry.worker_id.is_nil()).then_some(entry.worker_id))
+        .bind(&entry.local_path)
+        .bind(entry.access)
+        .bind(&entry.source_key)
         .execute(&mut *conn)
         .await?;
     }
@@ -228,9 +249,8 @@ pub async fn list_libraries(pool: &SqlitePool) -> AppResult<Vec<Library>> {
     )
     .fetch_all(pool)
     .await?;
-    let worker_rows = sqlx::query_as!(
-        LibraryWorkerRow,
-        r#"SELECT library_id AS "library_id!: Uuid", worker_id AS "worker_id!: Uuid", local_path, access AS "access: LibraryAccess" FROM library_workers ORDER BY local_path"#,
+    let worker_rows = sqlx::query_as::<_, LibraryWorkerRow>(
+        "SELECT library_id, worker_id, local_path, access, source_key FROM library_folders ORDER BY local_path",
     )
     .fetch_all(pool)
     .await?;
@@ -240,8 +260,9 @@ pub async fn list_libraries(pool: &SqlitePool) -> AppResult<Vec<Library>> {
             .entry(entry.library_id)
             .or_default()
             .push(LibraryWorkerPath {
-                worker_id: entry.worker_id,
+                worker_id: entry.worker_id.unwrap_or_default(),
                 local_path: entry.local_path,
+                source_key: entry.source_key,
                 access: entry.access,
             });
     }
@@ -314,7 +335,8 @@ pub async fn update_library(
     let Some(row) = row else {
         return Err(AppError::NotFound);
     };
-    sqlx::query!("DELETE FROM library_workers WHERE library_id=?1", id)
+    sqlx::query("DELETE FROM library_folders WHERE library_id=?1")
+        .bind(id)
         .execute(&mut *tx)
         .await?;
     insert_workers(&mut tx, id, &prepared.workers).await?;
@@ -324,7 +346,8 @@ pub async fn update_library(
 
 pub async fn delete_library(pool: &SqlitePool, id: Uuid) -> AppResult<()> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    sqlx::query!("DELETE FROM library_workers WHERE library_id=?1", id)
+    sqlx::query("DELETE FROM library_folders WHERE library_id=?1")
+        .bind(id)
         .execute(&mut *tx)
         .await?;
     let affected = sqlx::query!("DELETE FROM libraries WHERE id=?1", id)
@@ -344,13 +367,24 @@ pub async fn library_worker_local_path(
     library_id: Uuid,
     worker_id: Uuid,
 ) -> AppResult<Option<String>> {
-    Ok(sqlx::query_scalar!(
-        "SELECT local_path FROM library_workers WHERE library_id=?1 AND worker_id=?2",
-        library_id,
-        worker_id,
+    Ok(sqlx::query_scalar(
+        "SELECT CASE WHEN count(*) = 1 THEN min(local_path) END FROM library_folders WHERE library_id=?1 AND worker_id=?2",
     )
-    .fetch_optional(pool)
+    .bind(library_id)
+    .bind(worker_id)
+    .fetch_one(pool)
     .await?)
+}
+
+pub async fn library_worker_local_path_for_job(
+    pool: &SqlitePool,
+    job: &crate::domain::Job,
+    worker_id: Uuid,
+) -> AppResult<Option<String>> {
+    match job.library_id {
+        Some(id) => library_worker_local_path(pool, id, worker_id).await,
+        None => Ok(None),
+    }
 }
 
 /// Met à jour l'horodatage du dernier scan d'une bibliothèque.
@@ -411,20 +445,30 @@ mod tests {
     }
 
     #[test]
-    fn the_same_node_cannot_be_attached_twice() {
+    fn the_same_host_can_mount_distinct_paths() {
         let id = Uuid::nil();
         let workers = vec![
             LibraryWorkerPath {
+                source_key: None,
                 worker_id: id,
                 local_path: "/mnt/a".into(),
                 access: LibraryAccess::Read,
             },
             LibraryWorkerPath {
+                source_key: None,
                 worker_id: id,
                 local_path: "/mnt/b".into(),
                 access: LibraryAccess::ReadWrite,
             },
         ];
-        assert!(prepare_workers(workers).is_err());
+        assert_eq!(
+            prepare_workers(workers.clone())
+                .map(|paths| paths.len())
+                .ok(),
+            Some(2)
+        );
+        let mut duplicate = workers;
+        duplicate[1].local_path = "/mnt/a/".into();
+        assert!(prepare_workers(duplicate).is_err());
     }
 }

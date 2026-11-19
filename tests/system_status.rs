@@ -316,6 +316,35 @@ async fn test_updates_check_is_disabled_by_default_and_can_be_toggled() -> anyho
     assert_eq!(status, StatusCode::OK);
     let admin = cookies_of(&headers);
 
+    let (status, _, initial_status) =
+        call(&app, "GET", "/api/v1/system/status", Some(&admin), None).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(initial_status["checkUpdatesEnabled"], true);
+
+    let (status, _, disabled) = call(
+        &app,
+        "PUT",
+        "/api/v1/system/settings",
+        Some(&admin),
+        Some(serde_json::json!({
+            "webOrigin": null,
+            "sessionTtlSeconds": 28800,
+            "smtpEnabled": false,
+            "smtpHost": null,
+            "smtpPort": null,
+            "smtpTls": "starttls",
+            "smtpUsername": null,
+            "smtpPassword": null,
+            "smtpFrom": null,
+            "allowPrivatePluginHosts": false,
+            "blockPrivateIntegrationHosts": false,
+            "checkUpdatesEnabled": false
+        })),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(disabled["checkUpdatesEnabled"], false);
+
     let (status, _, body) = call(&app, "GET", "/api/v1/system/updates", Some(&admin), None).await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["enabled"], false);

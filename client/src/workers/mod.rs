@@ -1016,6 +1016,7 @@ mod tests {
                 telemetry: None,
                 max_concurrency: 1,
                 schedule: None,
+                transfer_enabled: false,
             },
             Worker {
                 id: Uuid::from_u128(2),
@@ -1026,6 +1027,7 @@ mod tests {
                 telemetry: None,
                 max_concurrency: 1,
                 schedule: None,
+                transfer_enabled: false,
             },
             Worker {
                 id: Uuid::from_u128(3),
@@ -1036,6 +1038,7 @@ mod tests {
                 telemetry: None,
                 max_concurrency: 1,
                 schedule: None,
+                transfer_enabled: false,
             },
         ];
         let jobs = vec![Job {

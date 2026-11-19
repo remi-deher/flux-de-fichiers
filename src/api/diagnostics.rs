@@ -353,6 +353,7 @@ mod tests {
             telemetry: None,
             max_concurrency: 1,
             schedule: None,
+            transfer_enabled: false,
         }
     }
 

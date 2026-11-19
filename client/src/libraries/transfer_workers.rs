@@ -26,6 +26,7 @@ pub fn TransferWorkersSection(
     workers: Vec<Worker>,
 ) -> impl IntoView {
     let workers = StoredValue::new(workers);
+    let route_warning = move || workers.with_value(|list| draft.get().transfer_route_warning(list));
     view! {
         <div class="inspection-panel__section">
             <p class="inspection-panel__title">"Workers sans accès direct"</p>
@@ -61,6 +62,9 @@ pub fn TransferWorkersSection(
                     }).collect_view().into_any()
                 }}
             </ul>
+            {move || route_warning().map(|message| view! {
+                <p class="form-help library-access-warning">{message}</p>
+            })}
             {move || draft.get().transfer_conflicts_with_policy().then(|| view! {
                 <p class="form-help library-access-warning">{POLICY_CONFLICT_HELP}</p>
             })}

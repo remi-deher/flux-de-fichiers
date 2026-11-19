@@ -49,6 +49,7 @@ impl WorkerRow {
                 .max_concurrency
                 .clamp(WORKER_MIN_CONCURRENCY, WORKER_MAX_CONCURRENCY),
             schedule,
+            transfer_enabled: false,
         }
     }
 }
@@ -218,7 +219,20 @@ pub async fn list_workers(pool: &SqlitePool) -> AppResult<Vec<Worker>> {
     )
     .fetch_all(pool)
     .await?;
-    Ok(workers.into_iter().map(WorkerRow::into_worker).collect())
+    let announcing: std::collections::HashSet<Uuid> =
+        sqlx::query_scalar("SELECT id FROM workers WHERE transfer_url IS NOT NULL")
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .collect();
+    Ok(workers
+        .into_iter()
+        .map(WorkerRow::into_worker)
+        .map(|worker| Worker {
+            transfer_enabled: announcing.contains(&worker.id),
+            ..worker
+        })
+        .collect())
 }
 
 pub async fn delete_worker(pool: &SqlitePool, id: Uuid) -> AppResult<()> {

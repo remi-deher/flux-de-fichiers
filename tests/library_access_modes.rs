@@ -282,3 +282,24 @@ fn transfer_worker_rules_are_checked_without_a_database() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn the_worker_list_tells_which_workers_announce_a_transfer_address() -> anyhow::Result<()> {
+    let pool = pool().await?;
+    let announcing = repository::register(&pool, "annonce").await?;
+    let silent = repository::register(&pool, "silencieux").await?;
+    repository::set_transfer_url(&pool, announcing.id, Some("http://nas.lan:9000")).await?;
+    let workers = repository::list_workers(&pool).await?;
+    let flag = |id: Uuid| {
+        workers
+            .iter()
+            .find(|worker| worker.id == id)
+            .map(|w| w.transfer_enabled)
+    };
+    assert_eq!(flag(announcing.id), Some(true));
+    assert_eq!(flag(silent.id), Some(false));
+    repository::set_transfer_url(&pool, announcing.id, None).await?;
+    let workers = repository::list_workers(&pool).await?;
+    assert!(workers.iter().all(|worker| !worker.transfer_enabled));
+    Ok(())
+}

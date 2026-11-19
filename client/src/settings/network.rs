@@ -135,6 +135,7 @@ fn build_settings_request(
         allow_private_plugin_hosts: input.allow_private_plugin_hosts,
         block_private_integration_hosts: input.block_private_integration_hosts,
         check_updates_enabled: input.check_updates_enabled,
+        timezone: None,
     })
 }
 

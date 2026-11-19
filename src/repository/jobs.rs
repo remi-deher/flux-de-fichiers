@@ -9,7 +9,7 @@ use crate::{
     error::{AppError, AppResult},
     telemetry::TelemetrySnapshot,
 };
-use chrono::{DateTime, Datelike, Timelike, Utc};
+use chrono::{DateTime, Utc};
 use forgearr_shared::workers::WorkerTelemetry;
 use sqlx::SqlitePool;
 use std::future::Future;
@@ -566,6 +566,7 @@ pub async fn list_jobs(pool: &SqlitePool, before: Option<Uuid>, limit: i64) -> A
 }
 
 pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> {
+    let timezone = crate::runtime_settings::load_timezone(pool).await;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let worker_cfg = sqlx::query!(
         r#"UPDATE workers SET last_seen=datetime('now') WHERE id=?1 RETURNING max_concurrency AS "max_concurrency: i32", schedule_json"#,
@@ -598,9 +599,8 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
         .as_deref()
         .and_then(|raw| serde_json::from_str::<WorkerSchedule>(raw).ok())
     {
-        let now_local = chrono::Local::now();
-        let weekday = now_local.weekday().number_from_monday() as u8;
-        let hour = now_local.hour() as u8;
+        let (weekday, hour) =
+            forgearr_shared::timezone::local_weekday_and_hour(Utc::now(), &timezone);
         if !sched.allows_at(weekday, hour) {
             tx.commit().await?;
             return Ok(None);

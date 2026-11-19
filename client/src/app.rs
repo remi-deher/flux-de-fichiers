@@ -41,9 +41,12 @@ fn Screen(me: Me) -> impl IntoView {
 #[component]
 fn Session() -> impl IntoView {
     let me = expect_context::<Me>();
-    // Le flux d'événements des tâches n'existe que sur le central.
-    if me.instance_kind == InstanceKind::Central && me.allows(Permission::ViewJobs) {
-        crate::jobs::LiveJobs::install();
+    // Le flux d'événements des tâches et le fuseau horaire central n'existent que sur le central.
+    if me.instance_kind == InstanceKind::Central {
+        crate::timezone::sync_from_server();
+        if me.allows(Permission::ViewJobs) {
+            crate::jobs::LiveJobs::install();
+        }
     }
     view! { <Shell me=me.clone()><Screen me=me /></Shell> }
 }
@@ -52,5 +55,6 @@ fn Session() -> impl IntoView {
 pub fn App() -> impl IntoView {
     Router::install();
     crate::theme::install();
+    crate::timezone::install();
     view! { <AccessGate><Session /></AccessGate> }
 }

@@ -203,6 +203,13 @@ pub struct SystemStatus {
     pub outbound: OutboundPolicyStatus,
     #[serde(default)]
     pub check_updates_enabled: bool,
+    /// Fuseau horaire IANA actif sur le central (`Europe/Paris`, `UTC`, `Etc/GMT`…).
+    #[serde(default = "default_timezone")]
+    pub timezone: String,
+}
+
+fn default_timezone() -> String {
+    crate::timezone::DEFAULT_TIMEZONE.to_owned()
 }
 
 impl SystemStatus {
@@ -235,6 +242,9 @@ pub struct UpdateSystemSettingsRequest {
     pub block_private_integration_hosts: bool,
     #[serde(default)]
     pub check_updates_enabled: bool,
+    /// Fuseau horaire IANA optionnel (`None` conserve la valeur actuelle).
+    #[serde(default)]
+    pub timezone: Option<String>,
 }
 
 /// Charge matérielle du central, relevée à la demande (`GET /api/v1/system/hardware`).

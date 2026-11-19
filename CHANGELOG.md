@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.56.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.55.0...v0.56.0) (2026-11-19)
+
+
+### Features
+
+* **ui:** alignement catalogue, séparation sections, bouton économies et aperçu visuel des flux ([78a1448](https://github.com/remi-deher/flux-de-fichiers/commit/78a144892330c04bb4aabffc5ea56e4cda0dc176))
+* **ui:** alignement catalogue, séparation sections, bouton économies et aperçu visuel des flux ([7827177](https://github.com/remi-deher/flux-de-fichiers/commit/7827177823b8ab06b26fd69b2d7e08118e9b9399))
+
 ## [0.55.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.54.0...v0.55.0) (2026-11-19)
 
 

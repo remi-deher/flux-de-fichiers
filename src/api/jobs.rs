@@ -58,6 +58,8 @@ pub async fn create(
 pub struct Page {
     limit: Option<i64>,
     before: Option<Uuid>,
+    #[serde(flatten)]
+    filter: forgearr_shared::jobs::JobListFilter,
 }
 pub async fn list(
     State(s): State<AppState>,
@@ -68,7 +70,9 @@ pub async fn list(
     if !(1..=200).contains(&limit) {
         return Err(AppError::Invalid);
     }
-    Ok(Json(repository::list_jobs(&s.pool, p.before, limit).await?))
+    Ok(Json(
+        repository::filtered_jobs(&s.pool, p.before, limit, &p.filter).await?,
+    ))
 }
 
 struct EventsCursor {
@@ -378,4 +382,94 @@ pub async fn placement(
         workers,
         catalog_tools_unavailable,
     }))
+}
+
+#[derive(Deserialize)]
+pub struct FailureDetailsQuery {
+    ids: String,
+}
+
+pub async fn failure_details(
+    State(s): State<AppState>,
+    Query(query): Query<FailureDetailsQuery>,
+    _auth: ViewJobsAuth,
+) -> AppResult<Json<Vec<forgearr_shared::jobs::JobFailureDetail>>> {
+    let mut details = Vec::new();
+    for id in query.ids.split(',').take(200) {
+        let id = id.parse::<Uuid>().map_err(|_| AppError::Invalid)?;
+        if let Some((step_index, block_kind, message)) = sqlx::query_as::<_, (i32, String, Option<String>)>(
+            "SELECT step_index,block_kind,message FROM job_steps WHERE job_id=? AND status='failed' ORDER BY step_index DESC LIMIT 1"
+        ).bind(id).fetch_optional(&s.pool).await? {
+            details.push(forgearr_shared::jobs::JobFailureDetail {job_id:id, step_index,block_kind,message});
+        }
+    }
+    Ok(Json(details))
+}
+
+pub async fn replay_failures(
+    State(s): State<AppState>,
+    _auth: ManageJobsAuth,
+    Json(request): Json<forgearr_shared::jobs::FailureReplay>,
+) -> AppResult<Json<JobBatchResult>> {
+    const MAX_BATCH: usize = 100;
+    if request.ids.is_empty() || request.ids.len() > MAX_BATCH {
+        return Err(AppError::Invalid);
+    }
+    let mut result = JobBatchResult {
+        updated: 0,
+        skipped: 0,
+    };
+    for id in request
+        .ids
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>()
+    {
+        let job = match repository::get_job(&s.pool, id).await {
+            Ok(job) => job,
+            Err(AppError::NotFound) => {
+                result.skipped += 1;
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        let Some(library) = job.library_id.filter(|_| job.status == JobStatus::Failed) else {
+            result.skipped += 1;
+            continue;
+        };
+        match repository::library_history::reprocess(&s.pool, library, id, request.version).await {
+            Ok(next) => {
+                s.notify_job_event(JobEventType::JobCreated, next.id, JobStatus::Queued, None);
+                result.updated += 1;
+            }
+            Err(AppError::Conflict | AppError::NotFound | AppError::Invalid) => result.skipped += 1,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(Json(result))
+}
+
+pub async fn retry_notifications(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    _auth: ManageJobsAuth,
+) -> AppResult<Json<usize>> {
+    let job = repository::get_job(&s.pool, id).await?;
+    if job.status != JobStatus::Succeeded {
+        return Err(AppError::Conflict);
+    }
+    let name = job
+        .output_name
+        .as_deref()
+        .filter(|name| storage::valid_name(name))
+        .ok_or(AppError::NotFound)?;
+    let output = s.config.data_dir.join("output").join(name);
+    if !tokio::fs::metadata(&output)
+        .await
+        .is_ok_and(|metadata| metadata.is_file())
+    {
+        return Err(AppError::NotFound);
+    }
+    Ok(Json(
+        crate::flows::publication::retry_notifications(&s, &job, &output).await?,
+    ))
 }

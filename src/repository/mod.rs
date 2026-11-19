@@ -26,7 +26,7 @@ pub use identity::{
 };
 pub use jobs::{
     JobSource, PublishedOutput, active, batch_jobs, cancel_job, claim, clear_job_output_name,
-    count_jobs_for_worker, delete_job, delete_worker, enqueue_library_source, fail,
+    count_jobs_for_worker, delete_job, delete_worker, enqueue_library_source, fail, filtered_jobs,
     find_worker_by_name, get_job, get_worker, has_library_file_job, heartbeat, insert_job,
     insert_job_with_options, insert_job_with_priority, job_source, job_storage_stats,
     known_library_file_signatures, list_job_steps, list_jobs, list_jobs_for_worker, list_workers,

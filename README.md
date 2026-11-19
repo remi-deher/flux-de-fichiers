@@ -73,6 +73,11 @@ Une bibliothèque sans dossier déclaré continue de passer par l’entrée de l
 configurés sont scannés récursivement avec un délai de stabilité d’une minute et la limite `MAX_FILE_BYTES`.
 Un dossier indisponible est signalé dans le bilan du scan.
 
+Indiquez le même **identifiant de source partagée** pour les montages d’un même dossier sur des
+hôtes différents. Forgearr enregistre un seul traitement par source logique, chemin relatif et
+empreinte. Un autre worker ne peut prendre le bail que si son montage a déjà signalé cette empreinte.
+Laissez l’identifiant vide pour les volumes indépendants.
+
 Un worker lit les sources de ses propres montages et renvoie le résultat à la centrale.
 Le remplacement sur place s’applique aux dossiers de la centrale déclarés en écriture.
 L’onglet **Fichiers** de chaque bibliothèque regroupe les tâches par chemin source et donne accès à

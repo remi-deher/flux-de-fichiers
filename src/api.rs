@@ -248,6 +248,14 @@ fn json_routes() -> Router<AppState> {
         )
         .route("/api/v1/jobs/{id}/placement", get(jobs::placement))
         .route(
+            "/api/v1/jobs/{id}/notifications/retry",
+            post(jobs::retry_notifications),
+        )
+        .route(
+            "/api/v1/jobs/failures",
+            get(jobs::failure_details).post(jobs::replay_failures),
+        )
+        .route(
             "/api/v1/worker/filesystem/pending",
             get(libraries::worker_pending_browse),
         )

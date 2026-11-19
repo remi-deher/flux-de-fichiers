@@ -59,12 +59,21 @@ impl LibraryDraft {
             existing.access = access;
         } else {
             self.workers.push(LibraryWorkerPath {
+                source_key: None,
                 worker_id,
                 local_path: path.to_owned(),
                 access,
             });
         }
         Ok(())
+    }
+
+    pub fn set_source_key(&mut self, host: Uuid, location: &str, key: &str) {
+        if let Some(folder) = self.workers.iter_mut().find(|folder| {
+            folder.worker_id == host && folder.local_path == location.trim().trim_end_matches('/')
+        }) {
+            folder.source_key = Some(key.trim().to_owned()).filter(|value| !value.is_empty());
+        }
     }
 
     /// Pré-remplit le nom s'il est encore vide à partir du dossier choisi.
@@ -236,6 +245,7 @@ mod tests {
             "Films",
             Some("remux"),
             vec![LibraryWorkerPath {
+                source_key: None,
                 worker_id: Uuid::nil(),
                 local_path: "/media/films".into(),
                 access: LibraryAccess::ReadWrite,

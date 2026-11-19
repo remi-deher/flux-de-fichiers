@@ -335,6 +335,10 @@ pub struct JobStorageStats {
     pub total_output_bytes: i64,
     pub saved_bytes: i64,
     pub by_library: Vec<LibraryJobStats>,
+    #[serde(default)]
+    pub by_volume: Vec<VolumeJobStats>,
+    #[serde(default)]
+    pub active_jobs: i64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -414,4 +418,46 @@ mod tests {
         assert_eq!(back.lease_token, None);
         Ok(())
     }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct JobListFilter {
+    pub state: Option<JobListState>,
+    pub library: Option<Uuid>,
+    pub volume: Option<String>,
+    pub error: Option<JobErrorCode>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobListState {
+    Active,
+    Completed,
+    Succeeded,
+    Failed,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct JobFailureDetail {
+    pub job_id: Uuid,
+    pub step_index: i32,
+    pub block_kind: String,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct FailureReplay {
+    pub ids: Vec<Uuid>,
+    pub version: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VolumeJobStats {
+    pub library_id: Option<Uuid>,
+    pub volume: String,
+    pub key: String,
+    pub saved_bytes: i64,
+    pub grown_bytes: i64,
+    pub grown_count: i64,
 }

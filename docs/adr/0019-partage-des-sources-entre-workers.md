@@ -1,6 +1,6 @@
 # 0019 — Partage des sources entre workers : HTTP direct, repli par le central
 
-Statut : proposé (19 nov. 2026), transport validé par l'utilisateur (HTTP direct avec repli par le
+Statut : implémenté (19 nov. 2026), transport validé par l'utilisateur (HTTP direct avec repli par le
 central ; WebDAV écarté). Complète l'[ADR 0018](0018-relais-de-tache-par-bloc.md), qui relaie une
 tâche vers un autre worker mais ne sait pas encore lui faire parvenir une source locale.
 
@@ -38,13 +38,17 @@ la tâche.
    `Range` pris en charge (reprise), flux sans copie, aucun listage de dossier, nombre de transferts
    simultanés borné. Il est facultatif : sans adresse annoncée, le worker n'est servi que par le repli.
    L'adresse annoncée est enregistrée avec le worker (enrôlement et heartbeat).
-4. **Autorisation par billet court, négocié par le central.** À l'attribution d'une tâche dont la
-   source est sur un autre worker, le central remet au worker traitant un **billet** : adresse du worker
-   source, référence de la source (dossier de bibliothèque et nom, jamais un chemin libre), worker
-   traitant, époque du bail, expiration courte (quelques minutes). Le billet est signé par HMAC-SHA256
-   avec la clé propre du worker source, que ce dernier connaît et que le central connaît : le worker
-   source le vérifie seul, sans rappeler le central. Il voyage dans un en-tête (`Authorization`), jamais
-   dans l'URL, et n'est jamais journalisé. Il est invalide si le bail change d'époque.
+4. **Autorisation par billet opaque et court, validé par le central.** À l'attribution d'une tâche
+   dont la source est sur un autre worker, le central remet au worker traitant un **billet** :
+   adresse du worker source et secret aléatoire (244 bits). Seule l'empreinte SHA-256 du secret est
+   stockée (`source_tickets`), avec le job, le worker source, le worker traitant, l'époque du bail et
+   une expiration courte (10 minutes, assez pour une reprise par `Range`). Le worker source présente
+   le secret au central (`POST /api/v1/worker/transfers/redeem`), qui répond seulement si le billet
+   n'est pas expiré, lui est destiné et si le bail du worker traitant est toujours en cours à la même
+   époque ; il reçoit alors ce qu'il doit servir (racine, nom, taille, SHA-256). Le secret voyage dans
+   un en-tête, jamais dans l'URL, et n'est jamais journalisé. (Remplace l'idée initiale d'un HMAC
+   signé avec une clé de worker : le central ne conserve que l'empreinte des clés de worker, et la
+   validation par le central apporte la révocation et un point de contrôle unique.)
 5. **Intégrité :** le worker traitant vérifie la taille et le SHA-256 déjà portés par le job
    (`source_sha256`, `source_bytes`) avant d'exécuter ; une empreinte invalide est une erreur
    `source_integrity`, sans effet sur la source. La source n'est jamais modifiée par ce transfert.
@@ -57,9 +61,13 @@ la tâche.
 7. **Éligibilité d'un relais (précise l'ADR 0018) :** un worker est une cible possible s'il lit la
    source par montage, **ou** si le worker source est en ligne (route directe annoncée ou repli).
    La cible reste exclue si la source est inaccessible par les trois voies.
-8. **Réseau :** l'adresse du worker source vient du central, donc de confiance ; le worker traitant
-   applique malgré tout la politique réseau existante (`net_policy`) et accepte `http` ou `https`
-   seulement. Le TLS est facultatif (reverse proxy ou réseau privé), comme pour le central.
+8. **Réseau :** l'adresse du worker source vient du central, donc de confiance, et doit être en
+   `http` ou `https` sans identifiants. La politique SSRF de `net_policy` n'est **pas** appliquée : elle
+   bloque les adresses privées, alors que les workers d'un même réseau local sont précisément la
+   cible de la voie directe. Le TLS est facultatif (reverse proxy ou réseau privé), comme pour le central.
+9. **Configuration d'un worker source :** `WORKER_TRANSFER_URL` (adresse annoncée, par exemple
+   `http://nas.lan:9000`) et `WORKER_TRANSFER_PORT` (port d'écoute ; à défaut, le port de l'adresse).
+   Les deux absents : voie directe désactivée, seul le repli est utilisé.
 
 ## Hors périmètre (à traiter ensuite)
 
@@ -68,12 +76,14 @@ la tâche.
   l'original, écriture à distance) n'est pas couverte ; à vérifier avant l'implémentation et à traiter
   dans un ADR dédié si nécessaire.
 - Limitation de débit, chiffrement applicatif du flux, compression, reprise du repli par `Range`.
+- Worker intégré au central : il lit la source par la voie directe seulement (pas de repli par le
+  central, qui est lui-même).
 - Relais en cours de flux (fichier de travail déjà produit) : reste exclu (ADR 0018).
 
 ## Conséquences
 
 - Nouveau composant côté worker : serveur de transfert en lecture seule (Axum, déjà dans le binaire).
-- Migration à venir : adresse de transfert annoncée par worker.
+- Migration `0032_source_transfer` : adresse de transfert annoncée par worker et table `source_tickets`.
 - `claim` et le choix de cible (`worker_can_read_source`) tiennent compte de la voie directe et du repli.
 - Tests natifs : signature et expiration du billet, refus d'un billet d'une autre époque de bail,
   lecture avec `Range`, empreinte corrompue rejetée, bascule vers le repli, refus de tout chemin

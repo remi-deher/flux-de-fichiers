@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.57.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.56.0...v0.57.0) (2026-11-19)
+
+
+### Features
+
+* synchronisation du fuseau horaire (heure d'été/hiver, UTC, GMT) ([88ced11](https://github.com/remi-deher/flux-de-fichiers/commit/88ced11ed054c3fde6b95396edc4a1b2da007e63))
+* synchronisation du fuseau horaire (heure d'été/hiver, UTC, GMT) ([3e6c489](https://github.com/remi-deher/flux-de-fichiers/commit/3e6c489ca2857d2a9b1eb8287aafd209d08fa6cd))
+
 ## [0.56.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.55.0...v0.56.0) (2026-11-19)
 
 

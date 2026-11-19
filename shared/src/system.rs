@@ -186,6 +186,12 @@ pub struct SystemStatus {
     #[serde(default)]
     pub build_version: String,
     pub key_id: String,
+    /// Anciennes clés gardées pour déchiffrer seulement : non vide pendant une rotation.
+    #[serde(default)]
+    pub retired_key_ids: Vec<String>,
+    /// Clé active au moment du dernier kit de récupération exporté ; `None` si jamais exporté.
+    #[serde(default)]
+    pub recovery_kit_key_id: Option<String>,
     pub key_source: KeySource,
     /// Taille de la base SQLite et de son journal ; `None` pour une base en mémoire.
     pub database_bytes: Option<u64>,
@@ -243,4 +249,59 @@ pub struct HardwareStatus {
     pub gpu_devices: Vec<String>,
     /// Volume de `data_dir` ; `None` si illisible.
     pub volume: Option<VolumeSpace>,
+}
+
+/// Longueur minimale, en caractères, de la phrase de passe d'un kit de récupération.
+pub const RECOVERY_PASSPHRASE_MIN_LEN: usize = 12;
+/// Valeur du champ `format` d'un kit de récupération.
+pub const RECOVERY_KIT_FORMAT: &str = "flux-recovery-kit";
+
+/// Fonction de dérivation de la phrase de passe d'un kit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryKdfAlgorithm {
+    Argon2id,
+}
+
+/// Paramètres de dérivation inscrits dans le kit, pour qu'il reste lisible si les réglages changent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryKdf {
+    pub algorithm: RecoveryKdfAlgorithm,
+    pub memory_kib: u32,
+    pub iterations: u32,
+    pub parallelism: u32,
+    /// Sel aléatoire, en hexadécimal.
+    pub salt: String,
+}
+
+/// Kit de récupération : le trousseau de clés chiffré par une phrase de passe choisie par
+/// l'administrateur. Sans lui, une base restaurée sans `/config/secret_key` perd ses secrets.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryKit {
+    pub format: String,
+    pub version: u32,
+    /// Clé active au moment de l'export.
+    pub key_id: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub kdf: RecoveryKdf,
+    /// Nonce puis texte chiffré, en hexadécimal.
+    pub nonce: String,
+    pub ciphertext: String,
+}
+
+/// Corps de `POST /api/v1/system/secret-key/recovery-kit` : la phrase de passe du kit à créer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportRecoveryKitRequest {
+    pub passphrase: String,
+}
+
+/// Corps de `POST /api/v1/system/secret-key/restore` : un kit et sa phrase de passe.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreRecoveryKitRequest {
+    pub kit: RecoveryKit,
+    pub passphrase: String,
 }

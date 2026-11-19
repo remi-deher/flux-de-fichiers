@@ -349,3 +349,102 @@ async fn test_updates_check_is_disabled_by_default_and_can_be_toggled() -> anyho
     assert_eq!(updated["checkUpdatesEnabled"], true);
     Ok(())
 }
+
+#[tokio::test]
+async fn test_admin_rotates_the_key_online_and_a_second_rotation_waits() -> anyhow::Result<()> {
+    let (app, _dir) = app().await?;
+    let (status, headers, _) = call(
+        &app,
+        "POST",
+        "/api/v1/setup/central",
+        None,
+        Some(serde_json::json!({"name": "Central", "username": "admin-rot", "password": PASSWORD})),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    let admin = cookies_of(&headers);
+    let (_, _, before) = call(&app, "GET", "/api/v1/system/status", Some(&admin), None).await?;
+    let old_key_id = before["keyId"].as_str().unwrap_or_default().to_owned();
+    assert_eq!(before["retiredKeyIds"], serde_json::json!([]));
+
+    let rotate = "/api/v1/system/secret-key/rotate";
+    let (status, _, _) = call(&app, "POST", rotate, None, None).await?;
+    assert_ne!(status, StatusCode::OK);
+
+    let (status, _, after) = call(&app, "POST", rotate, Some(&admin), None).await?;
+    assert_eq!(status, StatusCode::OK);
+    let new_key_id = after["keyId"].as_str().unwrap_or_default();
+    assert_eq!(new_key_id.len(), KEY_ID_HEX_LEN);
+    assert_ne!(new_key_id, old_key_id);
+    // L'ancienne clé reste dans le trousseau pendant le délai de grâce.
+    assert_eq!(after["retiredKeyIds"], serde_json::json!([old_key_id]));
+
+    let (status, _, _) = call(&app, "POST", rotate, Some(&admin), None).await?;
+    assert_eq!(status, StatusCode::CONFLICT);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_admin_exports_a_recovery_kit_and_restores_it() -> anyhow::Result<()> {
+    const KIT_PASSPHRASE: &str = "phrase de passe du kit";
+    let (app, _dir) = app().await?;
+    let (status, headers, _) = call(
+        &app,
+        "POST",
+        "/api/v1/setup/central",
+        None,
+        Some(serde_json::json!({"name": "Central", "username": "admin-kit", "password": PASSWORD})),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    let admin = cookies_of(&headers);
+    let (_, _, before) = call(&app, "GET", "/api/v1/system/status", Some(&admin), None).await?;
+    assert_eq!(before["recoveryKitKeyId"], serde_json::Value::Null);
+
+    let export = "/api/v1/system/secret-key/recovery-kit";
+    let (status, _, _) = call(
+        &app,
+        "POST",
+        export,
+        Some(&admin),
+        Some(serde_json::json!({"passphrase": "courte"})),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _, kit) = call(
+        &app,
+        "POST",
+        export,
+        Some(&admin),
+        Some(serde_json::json!({"passphrase": KIT_PASSPHRASE})),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(kit["format"], "flux-recovery-kit");
+    assert_eq!(kit["keyId"], before["keyId"]);
+    let (_, _, after) = call(&app, "GET", "/api/v1/system/status", Some(&admin), None).await?;
+    assert_eq!(after["recoveryKitKeyId"], before["keyId"]);
+
+    let restore = "/api/v1/system/secret-key/restore";
+    let (status, _, _) = call(
+        &app,
+        "POST",
+        restore,
+        Some(&admin),
+        Some(serde_json::json!({"kit": kit, "passphrase": "une autre phrase longue"})),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _, restored) = call(
+        &app,
+        "POST",
+        restore,
+        Some(&admin),
+        Some(serde_json::json!({"kit": kit, "passphrase": KIT_PASSPHRASE})),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(restored["keyId"], before["keyId"]);
+    assert_eq!(restored["retiredKeyIds"], serde_json::json!([]));
+    Ok(())
+}

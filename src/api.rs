@@ -9,6 +9,7 @@ pub(crate) mod libraries;
 pub(crate) mod local;
 mod password_reset;
 pub(crate) mod plugins;
+pub(crate) mod recovery_kit;
 pub(crate) mod session;
 mod setup;
 pub(crate) mod system;
@@ -400,6 +401,15 @@ fn json_routes() -> Router<AppState> {
         )
         .route("/api/v1/system/status", get(system::status))
         .route("/api/v1/system/settings", put(system::update_settings))
+        .route("/api/v1/system/secret-key/rotate", post(system::rotate_key))
+        .route(
+            "/api/v1/system/secret-key/recovery-kit",
+            post(recovery_kit::export),
+        )
+        .route(
+            "/api/v1/system/secret-key/restore",
+            post(recovery_kit::restore),
+        )
         .route("/api/v1/system/updates", get(system::updates))
         .route("/api/v1/system/hardware", get(system::hardware))
         .route("/api/v1/system/diagnostics", post(diagnostics::diagnostics))
@@ -850,6 +860,26 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
                 ),
                 Err(error) => {
                     tracing::warn!(error = %error, "migration des en-têtes de webhook impossible")
+                }
+            }
+            if !secrets.retired_key_ids().is_empty() {
+                let external = crate::secrets::external_key_file();
+                match crate::secret_rotation::reseal_and_retire(
+                    &state.pool,
+                    &state.config.config_dir,
+                    external.as_deref(),
+                )
+                .await
+                {
+                    Ok(report) => tracing::info!(
+                        plugin_values = report.plugin_values,
+                        flow_values = report.flow_values,
+                        "rotation de clé achevée au démarrage, anciennes clés retirées"
+                    ),
+                    Err(error) => tracing::warn!(
+                        error = %error,
+                        "rechiffrement impossible : les anciennes clés restent dans le trousseau"
+                    ),
                 }
             }
             match crate::plugins::migrate_legacy_plugin_secrets(&state.pool, &secrets).await {

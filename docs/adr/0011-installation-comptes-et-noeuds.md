@@ -108,12 +108,35 @@ centrale dans le bandeau.
   et la promotion `test → main`.
 - Mot de passe oublié : fait en ligne de commande, `flux-de-fichiers reset-password <identifiant>` dans le
   conteneur (mot de passe généré, affiché une fois, sessions du compte fermées ; `src/account_admin.rs`).
-- Rotation de la clé de chiffrement : faite, `flux-de-fichiers rotate-secret` dans le conteneur
-  (`src/secret_rotation.rs`). Sauvegarde d'abord dans `/config/backups/secret-rotation-<date>-<clé>/`
-  (ancienne clé, nouvelle clé, copie cohérente de la base), puis rechiffrement de tous les secrets
-  (réglages de plugins, en-têtes de webhook) en une seule transaction : une valeur illisible annule tout.
-  Le fichier de clé n'est remplacé qu'après le commit. Refusée si `SECRET_KEY_FILE` est défini (la clé
-  appartient alors à l'orchestrateur). À lancer centrale arrêtée de préférence.
+- Rotation de la clé de chiffrement : faite, central en marche, par le bouton « Renouveler la clé de
+  chiffrement » de la page Système (`POST /api/v1/system/secret-key/rotate`, administrateur ;
+  `src/secret_rotation.rs`, `client/src/settings/key_rotation.rs`). Trois étapes :
+  1. bascule : l'ancienne clé rejoint le trousseau des clés retirées, une clé neuve devient active ;
+  2. après un délai de grâce (`RETIRED_KEY_GRACE`, 30 s) laissé aux requêtes en vol, tous les secrets
+     (réglages de plugins et du central, IA, en-têtes de webhook) sont rechiffrés en une seule
+     transaction ; une valeur illisible annule tout et garde les clés retirées ;
+  3. retrait : après validation, plus aucune valeur n'utilise de clé retirée, qui est oubliée.
+  Aucune étape ne détruit une clé encore utile : plus de sauvegarde de clés en clair dans
+  `/config/backups`. Une seule rotation à la fois par trousseau (409 sinon). Une rotation interrompue (arrêt pendant le
+  délai) s'achève au démarrage suivant. Refusée si `SECRET_KEY_FILE` est défini (la clé appartient alors à
+  l'orchestrateur). En secours, central arrêté : `flux-de-fichiers rotate-secret` fait les trois étapes
+  d'un coup. `SystemStatus.retiredKeyIds` signale une rotation en cours.
+- Trousseau de clés (`src/secrets.rs`, `src/secrets/retired_keys.rs`) : une clé active chiffre ; les clés
+  retirées, une par ligne dans `/config/secret_keys.retired` (0600), ne servent plus qu'à déchiffrer les
+  valeurs qui portent encore leur identifiant. Le déchiffrement choisit la clé d'après l'identifiant inscrit
+  dans la valeur. Aucune migration : `secret_key` (ou `SECRET_KEY_FILE`) reste la clé active ; les clés
+  retirées s'appliquent aussi avec `SECRET_KEY_FILE`.
+- Kit de récupération : fait (`src/secrets/recovery_kit.rs`, `src/api/recovery_kit.rs`,
+  `client/src/settings/recovery_kit.rs`). Page Système, « Kit de récupération de la clé » : l'administrateur
+  choisit une phrase de passe (12 caractères au moins, jamais enregistrée) et télécharge un fichier JSON
+  (`POST /api/v1/system/secret-key/recovery-kit`). Il contient le trousseau (clé active puis clés retirées)
+  chiffré par ChaCha20-Poly1305 sous une clé dérivée par Argon2id (sel aléatoire, paramètres inscrits dans
+  le kit, bornés à l'import). `/config/recovery_kit.exported` retient la clé couverte par le dernier kit :
+  la page affiche « À jour », « Jamais créé » ou « À refaire » (après un renouvellement), et la tuile
+  Chiffrement passe en alerte. Restauration, après remise en place d'une base sur une nouvelle installation :
+  « Restaurer depuis un kit » (`POST /api/v1/system/secret-key/restore`) reprend les clés du kit comme clés
+  retirées puis rechiffre tout sous la clé active, en partageant le verrou de la rotation (409 pendant une
+  rotation sur le même trousseau). Phrase de passe fausse ou kit altéré : 400, rien ne change.
 - Rôle lecteur et gestion des comptes : fait. Le rôle `viewer` porte tous les droits « voir » (vue d'ensemble,
   tâches, nœuds, bibliothèques, flux, plugins) et aucun droit d'administration. Les routes de lecture
   exigent leur droit « voir » (`ViewJobsAuth`, `ViewFlowsAuth`…, déclarés par `permission_auth!` dans
@@ -135,8 +158,8 @@ centrale dans le bandeau.
   La vue d'ensemble affiche quatre tuiles (nœuds en ligne, comptes actifs, clés d'API actives, taille de la
   base) et les points à surveiller (HTTP simple, nœud hors ligne, administrateur unique, clé de
   chiffrement). `GET /api/v1/system/status` (administrateur) fournit version, identifiant et origine de la
-  clé, taille de la base. La rotation de clé reste en ligne de commande : la page affiche la commande à
-  copier, car la faire sous le serveur en marche exposerait un instant des secrets chiffrés avec deux clés.
+  clé, taille de la base. La rotation de clé se lance depuis la page (voir plus haut) : le trousseau
+  permet que des secrets chiffrés avec deux clés coexistent sans risque pendant le rechiffrement.
   Barre repliée, le thème ne se règle pas (la déconnexion reste).
 - Pistes restantes : déploiement (à confirmer étape par étape).
 

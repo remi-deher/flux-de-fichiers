@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.51.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.50.0...v0.51.0) (2026-11-19)
+
+
+### Features
+
+* **secrets:** kit de récupération de la clé protégé par phrase de passe ([cf0d803](https://github.com/remi-deher/flux-de-fichiers/commit/cf0d803a30a2a855980a819b592e811163eed016))
+* **secrets:** rotation de clé autonome et kit de récupération ([8617ea6](https://github.com/remi-deher/flux-de-fichiers/commit/8617ea6f53b7d42841881765267eb069302735ad))
+* **secrets:** rotation de la clé de chiffrement depuis la page Système ([513bf98](https://github.com/remi-deher/flux-de-fichiers/commit/513bf9878382d270e6e4d92bd25fabf83d0ed4e5))
+* **secrets:** trousseau de clés, déchiffrement selon l'identifiant de clé ([d207ce3](https://github.com/remi-deher/flux-de-fichiers/commit/d207ce3e4beb090ceed46b365b240def69acbfea))
+
 ## [0.50.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.49.0...v0.50.0) (2026-11-19)
 
 

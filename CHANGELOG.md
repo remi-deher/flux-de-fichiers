@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.49.0...v0.50.0) (2026-11-19)
+
+
+### Features
+
+* **flows:** outils auxiliaires, fichier d'origine et entrées non média ([7dc0ebe](https://github.com/remi-deher/flux-de-fichiers/commit/7dc0ebe4da42eb263df8ea552780953725e2ea2e))
+
 ## [0.49.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.48.0...v0.49.0) (2026-11-19)
 
 

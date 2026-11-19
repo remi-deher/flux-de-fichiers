@@ -1,15 +1,10 @@
-//! Onglet Outils de la page Plugins : état d'installation et déploiement des binaires.
+//! Onglet Outils de la page Plugins : état d'installation et déploiement des binaires (grille App Store).
 
-use super::tool_detail::{ToolDetail, ToolDrawerTab};
-use super::{
-    SelectedItem, TOOLS_PATH, bump, install_with_dependencies_action, tool_status_label,
-    updated_label,
-};
+use super::metadata::{StoreCard, tool_status_tag};
+use super::{SelectedItem, TOOLS_PATH, bump, install_with_dependencies_action};
 use crate::api;
 use crate::ui::search::{matches, query};
-use crate::ui::{
-    Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
-};
+use crate::ui::{EmptyState, IconName, MetricTone, StatItem, StatStrip, Tag, TagTone};
 use forgearr_shared::plugins::{ToolStatus, ToolStatusSummary};
 use leptos::prelude::*;
 
@@ -84,22 +79,17 @@ pub fn filter_tools(
 pub fn ToolsSection(
     tools: LocalResource<Result<Vec<ToolStatusSummary>, api::ApiError>>,
     reload_tools: RwSignal<u32>,
+    reload_catalog: RwSignal<u32>,
     can_install: bool,
+    active_tool_id: Signal<Option<String>>,
+    on_open_tool: Callback<SelectedItem>,
 ) -> impl IntoView {
     let active_filter = RwSignal::new(ToolStateFilter::All);
-    let selected_tool = RwSignal::new(None::<SelectedItem>);
     let installing_id = RwSignal::new(None::<String>);
-    let drawer_open = RwSignal::new(false);
-    let drawer_tab = RwSignal::new(0_usize);
-    let drawer_title = Signal::derive(move || {
-        selected_tool
-            .get()
-            .map(|item| item.name)
-            .unwrap_or_default()
-    });
     let feedback = RwSignal::new(None::<String>);
     let install = install_with_dependencies_action(TOOLS_PATH, feedback, move || {
         bump(reload_tools);
+        bump(reload_catalog);
     });
     Effect::new(move |_| {
         if !install.pending().get() {
@@ -157,25 +147,9 @@ pub fn ToolsSection(
     });
 
     view! {
-        <StatStrip aria_label="Synthèse des outils" items=stats />
-        <Drawer
-            open=drawer_open
-            eyebrow="Outil"
-            title=drawer_title
-            tabs=ToolDrawerTab::TABS.to_vec()
-            tab=drawer_tab
-        >
-            {move || selected_tool.get().map(|item| {
-                view! {
-                    <ToolDetail
-                        tool_id=item.id
-                        tab=drawer_tab
-                        can_install=can_install
-                        reload_tools=reload_tools
-                    />
-                }
-            })}
-        </Drawer>
+        <div class="store-toolbar">
+            <StatStrip aria_label="Synthèse des outils" items=stats />
+        </div>
         {move || {
             let text = query();
             let filter = active_filter.get();
@@ -216,9 +190,9 @@ pub fn ToolsSection(
                         .into_any();
                     }
                     view! {
-                        <div class="resource-grid resource-grid--list">
+                        <div class="store-grid">
                             {shown.into_iter().map(|tool| {
-                                let (label, class) = tool_status_label(tool.status);
+                                let (status_label, status_tone, card_tone) = tool_status_tag(tool.status);
                                 let id = tool.id.clone();
                                 let open_id = id.clone();
                                 let open_name = tool.name.clone();
@@ -228,81 +202,72 @@ pub fn ToolsSection(
                                     && tool.status == ToolStatus::NotInstalled;
                                 let pending_contract = !tool.installable
                                     && tool.status == ToolStatus::NotInstalled;
-                                let tone = match tool.status {
-                                    ToolStatus::Ready => MetricTone::Success,
-                                    ToolStatus::Installing => MetricTone::Warning,
-                                    ToolStatus::NotInstalled => MetricTone::Neutral,
-                                };
-                                let badge = view! {
-                                    <div class="cluster">
-                                        <Tag label=tool.version tone=TagTone::Mono />
-                                        <span class=class>{label}</span>
-                                    </div>
-                                }
-                                .into_any();
+                                let status_badge = view! {
+                                    <Tag label=status_label tone=status_tone />
+                                }.into_any();
+                                let context_tags = view! {
+                                    <Tag label=tool.capability.as_str() tone=TagTone::Primary />
+                                    {tool.current_choice.then(|| view! {
+                                        <Tag label="Par défaut" tone=TagTone::Success />
+                                    })}
+                                    {pending_contract.then(|| view! {
+                                        <Tag label="Bientôt disponible" tone=TagTone::Warning />
+                                    })}
+                                }.into_any();
                                 let open_detail = Callback::new(move |()| {
-                                    selected_tool.set(Some(SelectedItem {
+                                    on_open_tool.run(SelectedItem {
                                         id: open_id.clone(),
                                         name: open_name.clone(),
-                                    }));
-                                    drawer_tab.set(0);
-                                    drawer_open.set(true);
+                                    });
                                 });
-                                let actions = view! {
-                                    {installable.then(|| {
-                                        let id = id.clone();
-                                        let id_label = id.clone();
-                                        view! {
-                                            <button type="button" class="btn btn-secondary btn-sm" disabled=move || install.pending().get()
-                                                on:click=move |_| {
-                                                    installing_id.set(Some(id.clone()));
-                                                    install.dispatch(id.clone());
-                                                }>
-                                                {move || if install.pending().get() && installing_id.get().as_deref() == Some(id_label.as_str()) {
-                                                    "Installation…"
-                                                } else {
-                                                    "Installer"
-                                                }}
-                                            </button>
-                                        }
-                                    })}
-                                    <button type="button" class="btn btn-secondary btn-sm"
-                                        on:click=move |_| open_detail.run(())>"Détails"</button>
-                                }
-                                .into_any();
+                                let actions = installable.then(|| {
+                                    let id_dispatch = id.clone();
+                                    let id_label = id.clone();
+                                    view! {
+                                        <button
+                                            type="button"
+                                            class="btn btn-primary btn-sm"
+                                            disabled=move || install.pending().get()
+                                            on:click=move |_| {
+                                                installing_id.set(Some(id_dispatch.clone()));
+                                                install.dispatch(id_dispatch.clone());
+                                            }
+                                        >
+                                            {move || if install.pending().get() && installing_id.get().as_deref() == Some(id_label.as_str()) {
+                                                "Installation…"
+                                            } else {
+                                                "Installer"
+                                            }}
+                                        </button>
+                                    }
+                                    .into_any()
+                                });
+                                let description = if tool.description.trim().is_empty() {
+                                    "Outil distribué exécuté sur les nœuds.".to_owned()
+                                } else {
+                                    tool.description
+                                };
                                 view! {
-                                    <ResourceCard
+                                    <StoreCard
                                         title=tool.name
-                                        subtitle=Some(tool.description)
+                                        description=description
                                         icon=IconName::Package
-                                        tone=tone
-                                        badge=Some(badge)
+                                        tone=card_tone
+                                        status_badge=Some(status_badge)
+                                        context_tags=Some(context_tags)
+                                        footer_left=format!("v{}", tool.version)
+                                        footer_actions=actions
                                         active=Some(Signal::derive(move || {
-                                            drawer_open.get()
-                                                && selected_tool
-                                                    .get()
-                                                    .is_some_and(|item| item.id == active_id)
+                                            active_tool_id.get().as_deref() == Some(active_id.as_str())
                                         }))
-                                        on_click=Some(open_detail)
-                                        footer_meta=updated_label(tool.updated_at)
-                                        footer_actions=Some(actions)
-                                    >
-                                        <div class="cluster">
-                                            <Tag label=tool.capability.as_str() tone=TagTone::Primary />
-                                            <Tag label=tool.arch tone=TagTone::Mono />
-                                            <Tag label=tool.distribution tone=TagTone::Neutral />
-                                            {tool.current_choice.then(|| view! {
-                                                <Tag label="Choix actuel" tone=TagTone::Success />
-                                            })}
-                                            {pending_contract.then(|| view! {
-                                                <Tag label="Bientôt disponible" tone=TagTone::Warning />
-                                            })}
-                                        </div>
-                                    </ResourceCard>
+                                        on_open=open_detail
+                                    />
                                 }
                             }).collect_view()}
                         </div>
-                        <p class="form-help" role="status">{move || feedback.get()}</p>
+                        {move || feedback.get().map(|msg| view! {
+                            <p class="form-help" role="status">{msg}</p>
+                        })}
                     }
                     .into_any()
                 }

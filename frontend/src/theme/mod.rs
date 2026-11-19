@@ -73,6 +73,11 @@ mod tests {
         assert!(styles.contains(".page-section {"));
         assert!(styles.contains(".resource-grid {"));
         assert!(styles.contains(".resource-card {"));
+        assert!(styles.contains(".store-grid {"));
+        assert!(styles.contains(".store-card {"));
+        assert!(styles.contains(".featured-packs {"));
+        assert!(styles.contains(".status-banner {"));
+        assert!(styles.contains(".dep-link {"));
         assert!(styles.contains(".ui-tag {"));
         assert!(styles.contains(".tab-btn-badge {"));
         assert!(styles.contains(".settings-bento-grid {"));

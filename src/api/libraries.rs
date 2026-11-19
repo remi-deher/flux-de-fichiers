@@ -316,6 +316,7 @@ async fn scan_configured_folders(
             continue;
         }
         let mut source = repository::JobSource {
+            source_key: folder.source_key.clone(),
             source_root: folder.local_path.clone(),
             source_worker_id: remote.map(|worker| worker.id),
             source_mtime_ns: None,
@@ -387,7 +388,13 @@ async fn scan_configured_folders(
                 &file.name,
                 &file.sha256,
                 file.bytes as i64,
-                source.source_worker_id.or(req.target_worker_id),
+                req.target_worker_id.or_else(|| {
+                    source
+                        .source_key
+                        .is_none()
+                        .then_some(source.source_worker_id)
+                        .flatten()
+                }),
                 req.flow_id.as_deref(),
                 req.dry_run,
             )

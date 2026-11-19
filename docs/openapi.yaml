@@ -224,6 +224,40 @@ paths:
       responses:
         '201': {description: Nouveau traitement mis en file}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/failures:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Lire la dernière étape en échec pour chaque tâche indiquée
+      parameters:
+        - {in: query, name: ids, required: true, schema: {type: string}, description: "UUID séparés par une virgule."}
+      responses:
+        '200': {description: Étapes en échec}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Retraiter un lot de tâches échouées
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids: {type: array, minItems: 1, maxItems: 100, items: {type: string, format: uuid}}
+                version: {type: [integer, 'null'], minimum: 1}
+      responses:
+        '200': {description: Nombre de traitements recréés et ignorés}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/notifications/retry:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Réessayer les notifications différées d’un traitement publié
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Nombre de notifications reprises}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/jobs/{id}/placement:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
@@ -315,6 +349,10 @@ paths:
           name: before
           description: UUID de la dernière tâche de la page précédente
           schema: {type: string, format: uuid}
+        - {in: query, name: state, schema: {type: string, enum: [active, completed, succeeded, failed]}}
+        - {in: query, name: library, schema: {type: string, format: uuid}}
+        - {in: query, name: volume, schema: {type: string}}
+        - {in: query, name: error, schema: {type: string}}
       responses:
         '200':
           description: Page, tableau vide en fin de liste ou si le curseur est inconnu
@@ -1651,6 +1689,7 @@ components:
       type: object
       required: [worker_id, local_path, access]
       properties:
+        source_key: {type: [string, 'null'], maxLength: 80, description: "Identifiant commun aux montages d’une source physique."}
         worker_id: {type: string, format: uuid, description: "UUID nul pour un dossier de la centrale."}
         local_path: {type: string, minLength: 1, maxLength: 512}
         access: {type: string, enum: [read, read_write]}

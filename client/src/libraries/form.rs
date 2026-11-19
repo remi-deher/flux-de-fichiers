@@ -44,6 +44,7 @@ pub fn LibraryForm(
     let feedback = RwSignal::new(None::<String>);
     let new_worker = RwSignal::new(Uuid::nil().to_string());
     let new_path = RwSignal::new(String::new());
+    let source_key = RwSignal::new(String::new());
     let new_access = RwSignal::new(LibraryAccess::ReadWrite);
     let detected_writable = RwSignal::new(None::<bool>);
     let browse_tick = RwSignal::new(0_u32);
@@ -117,6 +118,7 @@ pub fn LibraryForm(
         draft.update(|value| {
             value.apply_suggested_name(&path_value);
             result = value.set_or_add_worker(worker_id, &path_value, access_value_sel);
+            value.set_source_key(worker_id, &path_value, &source_key.get_untracked());
         });
         match result {
             Ok(()) => {
@@ -133,11 +135,15 @@ pub fn LibraryForm(
         let pending_worker = new_worker.get_untracked().parse::<Uuid>().ok();
         let pending_path = new_path.get_untracked();
         let pending_access = new_access.get_untracked();
+        let pending_key = source_key.get_untracked();
         let mut commit_result = Ok(());
         draft.update(|value| {
             value.apply_suggested_name(&pending_path);
             commit_result =
                 value.commit_pending_worker(pending_worker, &pending_path, pending_access);
+            if let Some(host) = pending_worker {
+                value.set_source_key(host, &pending_path, &pending_key);
+            }
         });
         if let Err(message) = commit_result {
             feedback.set(Some(message.into()));
@@ -253,10 +259,12 @@ pub fn LibraryForm(
                         let access_path = row_path.clone();
                         let remove_path = row_path.clone();
                         let row_access = entry.access;
+                        let row_key = entry.source_key.unwrap_or_default();
+                        let row_label = row_key.clone();
                         view! {
                             <li class="library-worker-row">
                                 <span class="text-strong">{name.clone()}</span>
-                                <span class="library-worker-path">{entry.local_path}</span>
+                                <span class="library-worker-path">{entry.local_path}{(!row_label.is_empty()).then(|| format!(" · Source {row_label}"))}</span>
                                 <div class="library-worker-row__controls">
                                     <select
                                         class="form-select library-worker-access-select"
@@ -275,6 +283,7 @@ pub fn LibraryForm(
                                         class="btn btn-secondary btn-sm"
                                         on:click=move |_| {
                                             new_path.set(row_path.clone());
+                                            source_key.set(row_key.clone());
                                             new_access.set(row_access);
                                             new_worker.set(id.to_string());
                                             detected_writable.set(None);
@@ -342,6 +351,13 @@ pub fn LibraryForm(
                     </p>
                 </div>
 
+                <div class="form-group">
+                    <label class="form-label" for="library-source-key">"Identifiant de source partagée"</label>
+                    <input id="library-source-key" class="form-input" maxlength="80" aria-describedby="library-source-help"
+                        prop:value=move || source_key.get()
+                        on:input=move |event| source_key.set(event_target_value(&event)) />
+                    <p id="library-source-help" class="form-help">"Saisissez le même identifiant sur les hôtes qui voient le même dossier physique. Laissez vide pour un dossier indépendant."</p>
+                </div>
                 <FolderTreePicker
                     worker_id=selected_worker_id
                     selected_path=new_path

@@ -73,6 +73,8 @@ pub enum LibraryAccess {
 /// Dossier sur un hôte. Un UUID nul identifie la centrale.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LibraryWorkerPath {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_key: Option<String>,
     pub worker_id: Uuid,
     pub local_path: String,
     pub access: LibraryAccess,
@@ -431,6 +433,8 @@ pub struct WorkerPlacement {
     pub name: String,
     pub status: PlacementStatus,
     pub gpu_not_reported: bool,
+    #[serde(default)]
+    pub source_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

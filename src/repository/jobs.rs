@@ -310,6 +310,7 @@ pub async fn insert_job_with_priority(
 /// Racine de la source, indépendamment du dossier de travail éphémère.
 #[derive(sqlx::FromRow)]
 pub struct JobSource {
+    pub source_key: Option<String>,
     pub source_root: String,
     pub source_worker_id: Option<Uuid>,
     pub source_writable: bool,
@@ -318,7 +319,7 @@ pub struct JobSource {
 
 pub async fn job_source(pool: &SqlitePool, id: Uuid) -> AppResult<Option<JobSource>> {
     Ok(sqlx::query_as(
-        "SELECT source_root, source_worker_id, source_writable, source_mtime_ns FROM jobs WHERE id=? AND source_root IS NOT NULL",
+        "SELECT source_root, source_worker_id, source_writable, source_mtime_ns, source_key FROM jobs WHERE id=? AND source_root IS NOT NULL",
     ).bind(id).fetch_optional(pool).await?)
 }
 
@@ -330,12 +331,13 @@ pub async fn known_library_file_signatures(
     let rows: Vec<(String, i64, i64)> = sqlx::query_as(
         "SELECT source_name, source_bytes, source_mtime_ns FROM jobs
          WHERE library_id=? AND source_root=? AND source_worker_id IS ?
-           AND source_mtime_ns IS NOT NULL AND source_bytes IS NOT NULL
+           AND source_mtime_ns IS NOT NULL AND source_bytes IS NOT NULL AND source_key IS ?
          ORDER BY created_at ASC, id ASC",
     )
     .bind(library)
     .bind(&source.source_root)
     .bind(source.source_worker_id)
+    .bind(&source.source_key)
     .fetch_all(pool)
     .await?;
     Ok(rows
@@ -361,11 +363,32 @@ pub async fn enqueue_library_source(
     dry_run: bool,
 ) -> AppResult<Option<Job>> {
     let mut conn = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM jobs WHERE library_id=? AND source_root=? AND source_worker_id IS ? AND source_name=? AND (source_sha256=?5 OR (status='succeeded' AND source_writable=1 AND output_sha256=?5)))",
-    ).bind(library_id).bind(&source.source_root).bind(source.source_worker_id)
-        .bind(name).bind(hash).fetch_one(&mut *conn).await?;
-    if exists {
+    let existing: Option<(Uuid, bool)> = sqlx::query_as(
+        "SELECT id, coalesce(source_sha256=?5, 0) FROM jobs WHERE library_id=?1 AND source_name=?4
+         AND ((?6 IS NOT NULL AND source_key=?6) OR (source_root=?2 AND source_worker_id IS ?3))
+         AND (source_sha256=?5 OR (status='succeeded' AND source_writable=1 AND output_sha256=?5))
+         ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .bind(library_id)
+    .bind(&source.source_root)
+    .bind(source.source_worker_id)
+    .bind(name)
+    .bind(hash)
+    .bind(&source.source_key)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some((id, exact_source)) = existing {
+        if !dry_run && source.source_key.is_some() {
+            sqlx::query("UPDATE jobs SET source_key=? WHERE id=? AND source_key IS NULL")
+                .bind(&source.source_key)
+                .bind(id)
+                .execute(&mut *conn)
+                .await?;
+            if exact_source {
+                record_source_mount(&mut conn, id, source).await?;
+            }
+            conn.commit().await?;
+        }
         return Ok(None);
     }
     let job = create_job(
@@ -456,17 +479,32 @@ pub(super) async fn create_job(
     .await?;
     if let Some(source) = source {
         sqlx::query(
-            "UPDATE jobs SET source_root=?, source_worker_id=?, source_writable=?, source_mtime_ns=? WHERE id=?",
+            "UPDATE jobs SET source_root=?, source_worker_id=?, source_writable=?, source_mtime_ns=?, source_key=? WHERE id=?",
         )
         .bind(&source.source_root)
         .bind(source.source_worker_id)
         .bind(source.source_writable)
         .bind(source.source_mtime_ns)
+        .bind(&source.source_key)
         .bind(job.id)
-        .execute(conn)
+        .execute(&mut *conn)
         .await?;
+        if source.source_key.is_some() {
+            record_source_mount(conn, job.id, source).await?;
+        }
     }
     Ok(job)
+}
+
+async fn record_source_mount(
+    conn: &mut sqlx::SqliteConnection,
+    job: Uuid,
+    source: &JobSource,
+) -> AppResult<()> {
+    sqlx::query("INSERT OR REPLACE INTO job_source_mounts (job_id, worker_id, local_path, writable) VALUES (?,?,?,?)")
+        .bind(job).bind(source.source_worker_id.unwrap_or_default()).bind(&source.source_root)
+        .bind(source.source_writable).execute(conn).await?;
+    Ok(())
 }
 
 pub async fn get_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
@@ -587,7 +625,10 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
     let next_id: Option<Uuid> = sqlx::query_scalar(
         "SELECT id FROM jobs WHERE status=?1 AND attempts < ?2
          AND (target_worker_id IS NULL OR target_worker_id=?3)
-         AND (source_worker_id IS NULL OR source_worker_id=?3)
+         AND ((source_key IS NULL AND (source_worker_id IS NULL OR source_worker_id=?3)) OR EXISTS (
+             SELECT 1 FROM verified_job_source_mounts m WHERE m.job_id=jobs.id
+                 AND (m.worker_id=?3 OR m.worker_id=zeroblob(16))
+         ))
          ORDER BY priority DESC, created_at ASC, id ASC LIMIT 1",
     )
     .bind(queued_status)
@@ -597,6 +638,21 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
     .await?;
     let job: Option<Job> = if let Some(id) = next_id {
         let lease_token = Uuid::new_v4();
+        if let Some((path, owner, read_write)) = sqlx::query_as::<_, (String, Uuid, bool)>(
+            "SELECT local_path, worker_id, writable FROM verified_job_source_mounts
+             WHERE job_id=?1 AND (worker_id=?2 OR worker_id=zeroblob(16))
+             ORDER BY worker_id=?2 DESC, local_path LIMIT 1",
+        )
+        .bind(id)
+        .bind(worker)
+        .fetch_optional(&mut *tx)
+        .await?
+        {
+            let owner = (!owner.is_nil()).then_some(owner);
+            sqlx::query("UPDATE jobs SET source_root=?1, source_worker_id=?2, source_writable=?3,
+                   source_mtime_ns=CASE WHEN source_root=?1 AND source_worker_id IS ?2 THEN source_mtime_ns END WHERE id=?4")
+                .bind(path).bind(owner).bind(read_write).bind(id).execute(&mut *tx).await?;
+        }
         sqlx::query_as!(
             Job,
             r#"UPDATE jobs SET status=?2, worker_id=?3, lease_token=?4, lease_epoch=lease_epoch+1, leased_until=datetime('now', '+' || ?5 || ' seconds'), attempts=attempts+1, error_code=NULL, updated_at=datetime('now') WHERE id=?1 RETURNING id AS "id!: Uuid", source_name, source_sha256, source_bytes, output_sha256, output_bytes, warning AS "warning: bool", target_worker_id AS "target_worker_id: Uuid", worker_id AS "worker_id: Uuid", status AS "status: JobStatus", attempts AS "attempts: i32", lease_epoch, lease_token AS "lease_token: Uuid", leased_until AS "leased_until: DateTime<Utc>", output_name, error_code AS "error_code: JobErrorCode", library_id AS "library_id: Uuid", flow_id, flow_version, priority AS "priority: i32", created_at AS "created_at: DateTime<Utc>", updated_at AS "updated_at: DateTime<Utc>""#,
@@ -1024,6 +1080,21 @@ pub async fn job_storage_stats(pool: &SqlitePool) -> AppResult<JobStorageStats> 
         })
         .collect();
 
+    let active_jobs =
+        sqlx::query_scalar("SELECT count(*) FROM jobs WHERE status IN ('queued','running')")
+            .fetch_one(pool)
+            .await?;
+    let by_volume = sqlx::query_as::<_, (Option<Uuid>, String, String, i64, i64, i64)>(
+        "SELECT library_id, coalesce(source_key, source_root, ''),
+            CASE WHEN source_key IS NOT NULL THEN 'source:'||source_key
+                 WHEN source_root IS NOT NULL THEN 'mount:'||coalesce(hex(source_worker_id),'')||':'||source_root ELSE '' END,
+             sum(source_bytes-output_bytes), sum(max(output_bytes-source_bytes, 0)), sum(output_bytes > source_bytes)
+         FROM jobs WHERE status='succeeded' AND source_bytes IS NOT NULL AND output_bytes IS NOT NULL
+         GROUP BY library_id, 3 ORDER BY 4 DESC, 2 ASC",
+    ).fetch_all(pool).await?.into_iter().map(|(library_id, volume, key, saved_bytes, grown_bytes, grown_count)| {
+        forgearr_shared::jobs::VolumeJobStats { library_id, volume, key, saved_bytes, grown_bytes, grown_count }
+    }).collect();
+
     Ok(JobStorageStats {
         total_jobs: totals.total_jobs,
         succeeded_jobs: totals.succeeded_jobs,
@@ -1033,5 +1104,32 @@ pub async fn job_storage_stats(pool: &SqlitePool) -> AppResult<JobStorageStats> 
         total_output_bytes: totals.total_output_bytes,
         saved_bytes: totals.total_source_bytes - totals.total_output_bytes,
         by_library,
+        by_volume,
+        active_jobs,
     })
+}
+
+pub async fn filtered_jobs(
+    pool: &SqlitePool,
+    before: Option<Uuid>,
+    limit: i64,
+    filter: &forgearr_shared::jobs::JobListFilter,
+) -> AppResult<Vec<Job>> {
+    use forgearr_shared::jobs::JobListState;
+    let (first, second) = match filter.state {
+        None => (None, None),
+        Some(JobListState::Active) => (Some(JobStatus::Queued), Some(JobStatus::Running)),
+        Some(JobListState::Completed) => (Some(JobStatus::Succeeded), Some(JobStatus::Canceled)),
+        Some(JobListState::Succeeded) => (Some(JobStatus::Succeeded), None),
+        Some(JobListState::Failed) => (Some(JobStatus::Failed), None),
+    };
+    Ok(sqlx::query_as::<_, Job>(
+        "SELECT * FROM jobs WHERE (?1 IS NULL OR (created_at,id) < (SELECT created_at,id FROM jobs WHERE id=?1))
+           AND (?2 IS NULL OR status IN (?2, ?3))
+           AND (?4 IS NULL OR library_id=?4)
+           AND (?5 IS NULL OR (CASE WHEN source_key IS NOT NULL THEN 'source:'||source_key WHEN source_root IS NOT NULL THEN 'mount:'||coalesce(hex(source_worker_id),'')||':'||source_root ELSE '' END)=?5)
+           AND (?6 IS NULL OR error_code=?6)
+         ORDER BY created_at DESC,id DESC LIMIT ?7",
+    ).bind(before).bind(first).bind(second).bind(filter.library).bind(&filter.volume).bind(filter.error).bind(limit)
+        .fetch_all(pool).await?)
 }

@@ -26,15 +26,35 @@ pub(crate) async fn notify_after_publication(
     worker_id: Uuid,
     output: &Path,
 ) -> AppResult<()> {
+    execute_notifications(state, job, worker_id, output, false)
+        .await
+        .map(|_| ())
+}
+
+pub(crate) async fn retry_notifications(
+    state: &AppState,
+    job: &Job,
+    output: &Path,
+) -> AppResult<usize> {
+    execute_notifications(state, job, job.worker_id.unwrap_or_default(), output, true).await
+}
+
+async fn execute_notifications(
+    state: &AppState,
+    job: &Job,
+    worker_id: Uuid,
+    output: &Path,
+    retry: bool,
+) -> AppResult<usize> {
     let (Some(flow_id), Some(version)) = (job.flow_id.as_deref(), job.flow_version) else {
-        return Ok(());
+        return Ok(0);
     };
     let flow = repository::get_flow_version(&state.pool, flow_id, version).await?;
     let Ok(graph) = serde_json::from_str::<FlowGraph>(&flow.definition) else {
-        return Ok(());
+        return Ok(0);
     };
     if !graph.nodes.iter().any(after_publication) {
-        return Ok(());
+        return Ok(0);
     }
     let logs = repository::list_job_steps(&state.pool, job.id).await?;
     let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
@@ -63,9 +83,8 @@ pub(crate) async fn notify_after_publication(
     );
     ctx.media_root = Some(root);
     ctx.status = "succeeded".to_owned();
-    for step in logs.into_iter().filter(|step| {
-        step.status == JobStepStatus::Skipped && step.message.as_deref() == Some(DEFERRED_MESSAGE)
-    }) {
+    let mut attempts = 0;
+    for step in logs {
         let Some(node) = graph
             .nodes
             .iter()
@@ -79,10 +98,27 @@ pub(crate) async fn notify_after_publication(
         let OperationRuntime::Http(runtime) = &op.runtime else {
             continue;
         };
+        if op.capability != "integration" {
+            continue;
+        }
+        let claimed = sqlx::query(
+            "UPDATE job_steps SET deferred_notification=1, notification_retry_until=datetime('now', '+30 minutes')
+             WHERE job_id=?1 AND step_index=?2
+               AND (notification_retry_until IS NULL OR notification_retry_until<=datetime('now'))
+               AND ((status='skipped' AND message=?3)
+                    OR (?4 AND deferred_notification=1 AND status IN ('failed','skipped')))",
+        ).bind(job.id).bind(step.step_index).bind(DEFERRED_MESSAGE).bind(retry)
+        .execute(&state.pool).await?.rows_affected();
+        if claimed != 1 {
+            continue;
+        }
+        attempts += 1;
         ctx.current_step.clone_from(&node.id);
         let mut config = node.config.clone();
-        if let Some(fields) = config.as_object_mut() {
-            fields.insert("fail_on_error".to_owned(), serde_json::Value::Bool(false));
+        if let Some(fields) = config.as_object_mut()
+            && let Some(param) = &runtime.fail_on_error_param
+        {
+            fields.insert(param.clone(), serde_json::Value::Bool(true));
         }
         let outcome = http_runner::execute_http_operation_with_policy(
             runtime,
@@ -105,9 +141,9 @@ pub(crate) async fn notify_after_publication(
             }
             Err(err) => (JobStepStatus::Failed, Some(err.message)),
         };
-        sqlx::query("UPDATE job_steps SET status=?, message=? WHERE job_id=? AND step_index=? AND message=?")
-            .bind(status).bind(message).bind(job.id).bind(step.step_index).bind(DEFERRED_MESSAGE)
+        sqlx::query("UPDATE job_steps SET status=?, message=?, notification_retry_until=NULL WHERE job_id=? AND step_index=?")
+            .bind(status).bind(message).bind(job.id).bind(step.step_index)
             .execute(&state.pool).await?;
     }
-    Ok(())
+    Ok(attempts)
 }

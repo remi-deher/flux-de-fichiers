@@ -664,6 +664,18 @@ async fn scans_grouped_central_and_worker_folders_and_keeps_distinct_history() -
         json_of(admin(&app, "GET", &format!("/api/v1/jobs/{job}/placement"), None).await?).await?;
     assert_eq!(placement["workers"][0]["workerId"], worker);
     assert_eq!(placement["workers"][0]["status"], "ready");
+    let filtered = admin(
+        &app,
+        "GET",
+        &format!("/api/v1/jobs?state=active&library={id}"),
+        None,
+    )
+    .await?;
+    assert_eq!(filtered.status(), StatusCode::OK);
+    assert_eq!(json_of(filtered).await?.as_array().map(Vec::len), Some(3));
+    let failures = admin(&app, "GET", "/api/v1/jobs?state=failed", None).await?;
+    assert_eq!(failures.status(), StatusCode::OK);
+    assert_eq!(json_of(failures).await?, serde_json::json!([]));
     let canceled = admin(&app, "POST", &format!("/api/v1/jobs/{job}/cancel"), None).await?;
     assert_eq!(canceled.status(), StatusCode::OK);
     save_flow(&app, "flow.history", "Nouvelle version").await?;

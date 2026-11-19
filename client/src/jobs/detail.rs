@@ -56,13 +56,32 @@ pub fn JobDetail(
     workers: Signal<HashMap<Uuid, String>>,
     flows: Signal<HashMap<String, String>>,
     can_manage: bool,
+    #[prop(optional_no_strip)] focused_step: Option<i32>,
     on_changed: Callback<Job>,
 ) -> impl IntoView {
     let feedback = RwSignal::new(None::<String>);
     let job_id = job.id;
-    let steps = LocalResource::new(move || async move {
-        let path = format!("/api/v1/jobs/{job_id}/steps");
-        api::get::<Vec<JobStepLog>>(&path).await
+    let step_reload = RwSignal::new(0_u32);
+    let notification_retry = Action::new_local(move |_: &()| async move {
+        api::post::<(), usize>(&format!("/api/v1/jobs/{job_id}/notifications/retry"), None).await
+    });
+    Effect::new(move |_| {
+        if let Some(result) = notification_retry.value().get() {
+            match result {
+                Ok(attempts) => {
+                    Toasts::notify_success(format!("{attempts} notification(s) reprise(s)."));
+                    step_reload.update(|n| *n = n.wrapping_add(1));
+                }
+                Err(error) => Toasts::notify_error(error.message()),
+            }
+        }
+    });
+    let steps = LocalResource::new(move || {
+        step_reload.track();
+        async move {
+            let path = format!("/api/v1/jobs/{job_id}/steps");
+            api::get::<Vec<JobStepLog>>(&path).await
+        }
     });
     let retry = Action::new_local(move |id: &uuid::Uuid| {
         let path = format!("/api/v1/jobs/{id}/retry");
@@ -305,6 +324,10 @@ pub fn JobDetail(
                 _ => view! {
                     <div class="inspection-panel__section">
                         <p class="inspection-panel__title">"Étapes exécutées"</p>
+                        {(can_manage && job_status == JobStatus::Succeeded).then(|| view! {
+                            <button type="button" class="btn btn-secondary btn-sm" disabled=move || notification_retry.pending().get()
+                                on:click=move |_| { notification_retry.dispatch(()); }>"Réessayer les notifications"</button>
+                        })}
                         {move || match steps.get() {
                             None => view! { <p class="text-dim text-sm">"Chargement des étapes…"</p> }.into_any(),
                             Some(Err(error)) => view! { <p class="form-error text-sm">{error.message()}</p> }.into_any(),
@@ -314,10 +337,11 @@ pub fn JobDetail(
                             Some(Ok(list)) => view! {
                                 <ol class="step-list">
                                     {list.into_iter().map(|step| view! {
-                                        <li class="step-item">
+                                        <li class="step-item" id=format!("job-step-{}", step.step_index)>
                                             <div class="step-item__head">
                                                 <span class="text-mono text-xs text-dim">{format!("#{}", step.step_index + 1)}</span>
                                                 <Tag label=step.block_kind tone=TagTone::Mono />
+                                                {(focused_step == Some(step.step_index)).then(|| view! { <Tag label="Étape liée" tone=TagTone::Primary /> })}
                                                 <StatusBadge
                                                     label=step_status_label(step.status)
                                                     variant=step_status_tone(step.status)
@@ -412,6 +436,7 @@ fn QueuePlacement(job_id: Uuid) -> impl IntoView {
                                 PlacementStatus::AtCapacity => "Capacité atteinte",
                             };
                             view! { <li>{worker.name} " · " {reason}
+                                {worker.source_path.map(|path| format!(" · {path}"))}
                                 {worker.gpu_not_reported.then_some(" · Aucun GPU signalé pour l’encodeur demandé")}
                             </li> }
                         }).collect_view()}

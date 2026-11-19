@@ -9,6 +9,7 @@ mod fields;
 mod geometry;
 mod inspector;
 mod palette;
+mod plan;
 mod pointer;
 mod presentation;
 mod quick_add;

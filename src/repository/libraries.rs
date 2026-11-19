@@ -29,6 +29,7 @@ struct LibraryRow {
 struct LibraryWorkerRow {
     library_id: Uuid,
     worker_id: Option<Uuid>,
+    source_key: Option<String>,
     local_path: String,
     access: LibraryAccess,
 }
@@ -124,8 +125,28 @@ pub fn prepare_workers(workers: Vec<LibraryWorkerPath>) -> AppResult<Vec<Library
         prepared.push(LibraryWorkerPath {
             worker_id: entry.worker_id,
             local_path: path,
+            source_key: entry
+                .source_key
+                .map(|key| {
+                    let key = key.trim();
+                    if key.len() > LIBRARY_NAME_MAX || key.chars().any(char::is_control) {
+                        return Err(AppError::Invalid);
+                    }
+                    Ok(key.to_owned())
+                })
+                .transpose()?
+                .filter(|key| !key.is_empty()),
             access: entry.access,
         });
+    }
+    let mut per_host = HashSet::new();
+    if prepared.iter().any(|folder| {
+        folder
+            .source_key
+            .as_ref()
+            .is_some_and(|key| !per_host.insert((folder.worker_id, key)))
+    }) {
+        return Err(AppError::Invalid);
     }
     Ok(prepared)
 }
@@ -186,7 +207,7 @@ async fn workers_of(
     id: Uuid,
 ) -> AppResult<Vec<LibraryWorkerPath>> {
     let rows = sqlx::query_as::<_, LibraryWorkerRow>(
-        "SELECT library_id, worker_id, local_path, access FROM library_folders WHERE library_id=?1 ORDER BY local_path",
+        "SELECT library_id, worker_id, local_path, access, source_key FROM library_folders WHERE library_id=?1 ORDER BY local_path",
     ).bind(id)
     .fetch_all(executor)
     .await?;
@@ -195,6 +216,7 @@ async fn workers_of(
         .map(|row| LibraryWorkerPath {
             worker_id: row.worker_id.unwrap_or_default(),
             local_path: row.local_path,
+            source_key: row.source_key,
             access: row.access,
         })
         .collect())
@@ -207,12 +229,13 @@ async fn insert_workers(
 ) -> AppResult<()> {
     for entry in workers {
         sqlx::query(
-            "INSERT INTO library_folders (library_id, worker_id, local_path, access) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO library_folders (library_id, worker_id, local_path, access, source_key) VALUES (?1, ?2, ?3, ?4, ?5)",
         )
         .bind(library_id)
         .bind((!entry.worker_id.is_nil()).then_some(entry.worker_id))
         .bind(&entry.local_path)
         .bind(entry.access)
+        .bind(&entry.source_key)
         .execute(&mut *conn)
         .await?;
     }
@@ -227,7 +250,7 @@ pub async fn list_libraries(pool: &SqlitePool) -> AppResult<Vec<Library>> {
     .fetch_all(pool)
     .await?;
     let worker_rows = sqlx::query_as::<_, LibraryWorkerRow>(
-        "SELECT library_id, worker_id, local_path, access FROM library_folders ORDER BY local_path",
+        "SELECT library_id, worker_id, local_path, access, source_key FROM library_folders ORDER BY local_path",
     )
     .fetch_all(pool)
     .await?;
@@ -239,6 +262,7 @@ pub async fn list_libraries(pool: &SqlitePool) -> AppResult<Vec<Library>> {
             .push(LibraryWorkerPath {
                 worker_id: entry.worker_id.unwrap_or_default(),
                 local_path: entry.local_path,
+                source_key: entry.source_key,
                 access: entry.access,
             });
     }
@@ -425,11 +449,13 @@ mod tests {
         let id = Uuid::nil();
         let workers = vec![
             LibraryWorkerPath {
+                source_key: None,
                 worker_id: id,
                 local_path: "/mnt/a".into(),
                 access: LibraryAccess::Read,
             },
             LibraryWorkerPath {
+                source_key: None,
                 worker_id: id,
                 local_path: "/mnt/b".into(),
                 access: LibraryAccess::ReadWrite,

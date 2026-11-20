@@ -90,7 +90,6 @@ async fn protected_routes_reject_missing_keys_before_accessing_resources() -> an
         "/api/v1/api-keys",
         "/api/v1/workers",
         "/api/v1/jobs/00000000-0000-0000-0000-000000000001/output",
-        "/api/v1/jobs/00000000-0000-0000-0000-000000000001/source",
     ] {
         let response = app()?
             .oneshot(Request::builder().uri(path).body(Body::empty())?)

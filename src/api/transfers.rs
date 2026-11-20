@@ -340,11 +340,14 @@ pub(crate) async fn publish_staged(
             if current.is_ok_and(|(hash, bytes)| {
                 job.source_sha256.as_deref() == Some(hash.as_str())
                     && job.source_bytes == Some(bytes as i64)
-            }) && let Err(error) = apply_library_output_policy(
+            }) && let Err(error) = crate::source_publication::apply_library_output_policy(
                 lib.output_policy,
                 &source_path,
                 &destination,
                 &spec.extension,
+                job.source_sha256.as_deref().unwrap_or_default(),
+                job.source_bytes.unwrap_or_default(),
+                s.config.max_file_bytes,
             )
             .await
             {
@@ -360,88 +363,4 @@ pub(crate) async fn publish_staged(
     }
     s.notify_job_event(JobEventType::JobSucceeded, id, JobStatus::Succeeded, None);
     Ok(())
-}
-
-async fn apply_library_output_policy(
-    policy: crate::domain::LibraryOutputPolicy,
-    source: &std::path::Path,
-    output: &std::path::Path,
-    extension: &str,
-) -> std::io::Result<()> {
-    use crate::domain::LibraryOutputPolicy;
-    if policy == LibraryOutputPolicy::OutputDir {
-        return Ok(());
-    }
-    let target = source.with_extension(extension);
-    let temp = source.with_file_name(format!(".forgearr-replace-{}.tmp", Uuid::new_v4()));
-    let metadata = tokio::fs::metadata(source).await?;
-    let result = async {
-        let mut input = tokio::fs::File::open(output).await?;
-        let mut file = tokio::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp)
-            .await?;
-        tokio::io::copy(&mut input, &mut file).await?;
-        file.set_permissions(metadata.permissions()).await?;
-        file.sync_all().await?;
-        drop(file);
-        if policy == LibraryOutputPolicy::ReplaceWithBackup {
-            let mut backup = source.as_os_str().to_owned();
-            backup.push(".bak");
-            tokio::fs::hard_link(source, std::path::PathBuf::from(backup)).await?;
-        }
-        if target == source {
-            tokio::fs::rename(&temp, &target).await?;
-        } else {
-            tokio::fs::hard_link(&temp, &target).await?;
-            tokio::fs::remove_file(source).await?;
-        }
-        Ok(())
-    }
-    .await;
-    let _ = tokio::fs::remove_file(temp).await;
-    result
-}
-
-#[cfg(test)]
-mod replacement_tests {
-    use super::*;
-    use crate::domain::LibraryOutputPolicy;
-
-    #[tokio::test]
-    async fn preserves_source_and_existing_target_on_name_collision() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir()?;
-        let source = directory.path().join("film.mp4");
-        let target = directory.path().join("film.mkv");
-        let output = directory.path().join("result.mkv");
-        std::fs::write(&source, b"source")?;
-        std::fs::write(&target, b"other")?;
-        std::fs::write(&output, b"result")?;
-        assert!(
-            apply_library_output_policy(
-                LibraryOutputPolicy::ReplaceInPlace,
-                &source,
-                &output,
-                "mkv"
-            )
-            .await
-            .is_err()
-        );
-        assert_eq!(std::fs::read(&source)?, b"source");
-        assert_eq!(std::fs::read(&target)?, b"other");
-        apply_library_output_policy(
-            LibraryOutputPolicy::ReplaceWithBackup,
-            &source,
-            &output,
-            "mp4",
-        )
-        .await?;
-        assert_eq!(std::fs::read(&source)?, b"result");
-        assert_eq!(
-            std::fs::read(directory.path().join("film.mp4.bak"))?,
-            b"source"
-        );
-        Ok(())
-    }
 }

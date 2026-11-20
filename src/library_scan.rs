@@ -69,6 +69,44 @@ pub async fn central_job_source(
     }
 }
 
+/// Racine centrale actuellement inscriptible pour la source de la tâche, si elle existe.
+pub async fn central_writable_job_source(
+    pool: &sqlx::SqlitePool,
+    fallback: &Path,
+    job: &crate::domain::Job,
+) -> AppResult<Option<PathBuf>> {
+    match central_writable_job_root(pool, fallback, job).await? {
+        Some(root) => source_path(&root, &job.source_name).await.map(Some),
+        None => Ok(None),
+    }
+}
+
+/// Racine centrale vérifiée même si le nom d'origine a disparu après un remplacement.
+pub async fn central_writable_job_root(
+    pool: &sqlx::SqlitePool,
+    fallback: &Path,
+    job: &crate::domain::Job,
+) -> AppResult<Option<PathBuf>> {
+    let source = crate::repository::job_source(pool, job.id).await?;
+    match source {
+        Some(source) if source.source_key.is_some() => {
+            let root: Option<String> = sqlx::query_scalar(
+                "SELECT local_path FROM verified_job_source_mounts WHERE job_id=?1 AND worker_id=?2 AND writable=1 LIMIT 1",
+            )
+            .bind(job.id)
+            .bind(uuid::Uuid::nil())
+            .fetch_optional(pool)
+            .await?;
+            Ok(root.map(PathBuf::from))
+        }
+        Some(source) if source.source_worker_id.is_none() && source.source_writable => {
+            Ok(Some(PathBuf::from(source.source_root)))
+        }
+        Some(_) => Ok(None),
+        None => Ok(Some(fallback.to_path_buf())),
+    }
+}
+
 pub async fn scan_folder(
     root: &Path,
     options: &FolderScanOptions,

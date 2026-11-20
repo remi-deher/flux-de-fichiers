@@ -227,6 +227,12 @@ mod tests {
             (JobErrorCode::WebhookFailed, "webhook_failed", true),
             (JobErrorCode::IntegrationFailed, "integration_failed", true),
             (JobErrorCode::SourceIntegrity, "source_integrity", true),
+            (JobErrorCode::SourceChanged, "source_changed", true),
+            (
+                JobErrorCode::SourcePublicationUncertain,
+                "source_publication_uncertain",
+                false,
+            ),
             (JobErrorCode::TransferFailed, "transfer_failed", true),
             (JobErrorCode::ProbeUnavailable, "probe_unavailable", true),
             (JobErrorCode::LeaseExpired, "lease_expired", false),

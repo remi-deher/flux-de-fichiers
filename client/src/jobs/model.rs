@@ -102,6 +102,10 @@ pub fn error_label(code: JobErrorCode) -> &'static str {
         JobErrorCode::WebhookFailed => "L'appel webhook du flux a échoué",
         JobErrorCode::IntegrationFailed => "L'intégration externe a échoué",
         JobErrorCode::SourceIntegrity => "Source altérée pendant le transfert",
+        JobErrorCode::SourceChanged => "La source a changé depuis la découverte",
+        JobErrorCode::SourcePublicationUncertain => {
+            "Résultat du remplacement incertain : vérifier la source et le résultat conservé"
+        }
         JobErrorCode::TransferFailed => "Transfert interrompu",
         JobErrorCode::ProbeUnavailable => "Sonde requise absente sur le worker",
         JobErrorCode::LeaseExpired => "Serveur déconnecté en cours de traitement",
@@ -301,6 +305,8 @@ mod tests {
             JobErrorCode::WebhookFailed,
             JobErrorCode::IntegrationFailed,
             JobErrorCode::SourceIntegrity,
+            JobErrorCode::SourceChanged,
+            JobErrorCode::SourcePublicationUncertain,
             JobErrorCode::TransferFailed,
             JobErrorCode::ProbeUnavailable,
             JobErrorCode::LeaseExpired,

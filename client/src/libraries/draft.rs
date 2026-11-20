@@ -84,11 +84,6 @@ impl LibraryDraft {
         (!warnings.is_empty()).then(|| warnings.join(" "))
     }
 
-    /// Les workers par transfert exigent le dossier de sortie dédié (ADR 0021).
-    pub fn transfer_conflicts_with_policy(&self) -> bool {
-        !self.transfer_workers.is_empty() && self.output_policy != LibraryOutputPolicy::OutputDir
-    }
-
     pub fn remove_folder(&mut self, worker_id: Uuid, path: &str) {
         self.workers
             .retain(|entry| entry.worker_id != worker_id || entry.local_path != path);
@@ -162,11 +157,6 @@ impl LibraryDraft {
         let name = self.name.trim();
         if name.is_empty() || name.chars().count() > LIBRARY_NAME_MAX {
             return Err("Le nom doit compter de 1 à 80 caractères.");
-        }
-        if self.transfer_conflicts_with_policy() {
-            return Err(
-                "Les workers par transfert exigent le dossier de sortie dédié : changez la stratégie de sortie ou retirez-les.",
-            );
         }
         let split_list = |raw: &str| -> Vec<String> {
             raw.split(',')
@@ -323,7 +313,10 @@ mod tests {
             Some(vec![worker])
         );
         draft.output_policy = LibraryOutputPolicy::ReplaceWithBackup;
-        assert!(draft.to_write().is_err(), "remplacement incompatible");
+        assert!(
+            draft.to_write().is_ok(),
+            "remplacement autorisé par transfert"
+        );
         draft.output_policy = LibraryOutputPolicy::OutputDir;
         assert!(
             draft

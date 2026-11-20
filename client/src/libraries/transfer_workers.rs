@@ -6,9 +6,6 @@ use forgearr_shared::workers::Worker;
 use leptos::prelude::*;
 use uuid::Uuid;
 
-/// Texte d'avertissement quand les workers par transfert sont incompatibles avec la stratégie de sortie.
-pub const POLICY_CONFLICT_HELP: &str = "Les workers par transfert exigent le dossier de sortie dédié : changez la stratégie de sortie ou décochez-les.";
-
 /// Résumé du mode d'un worker dans la bibliothèque en cours d'édition.
 pub fn mode_label(draft: &LibraryDraft, worker_id: Uuid) -> &'static str {
     if draft.has_direct_folder(worker_id) {
@@ -64,9 +61,6 @@ pub fn TransferWorkersSection(
             </ul>
             <div role="status">{move || route_warning().map(|message| view! {
                 <p class="form-help library-access-warning">{message}</p>
-            })}
-            {move || draft.get().transfer_conflicts_with_policy().then(|| view! {
-                <p class="form-help library-access-warning">{POLICY_CONFLICT_HELP}</p>
             })}</div>
         </div>
     }
@@ -75,7 +69,7 @@ pub fn TransferWorkersSection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use forgearr_shared::libraries::{LibraryAccess, LibraryOutputPolicy};
+    use forgearr_shared::libraries::LibraryAccess;
 
     #[test]
     fn mode_label_distinguishes_the_three_modes() {
@@ -92,7 +86,5 @@ mod tests {
         assert_eq!(mode_label(&draft, direct), "Accès direct");
         assert_eq!(mode_label(&draft, transfer), "Par transfert");
         assert_eq!(mode_label(&draft, outsider), "Aucun accès");
-        draft.output_policy = LibraryOutputPolicy::ReplaceInPlace;
-        assert!(draft.transfer_conflicts_with_policy());
     }
 }

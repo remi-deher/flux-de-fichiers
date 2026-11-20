@@ -31,6 +31,33 @@ const SOFTWARE_PROBE_REFRESH: Duration = Duration::from_secs(60);
 mod handoff;
 pub(crate) use handoff::{prune_retained, retained_handoff_path};
 
+#[derive(Clone, Copy)]
+enum PublicationRequestKind {
+    Publish,
+    Inspect,
+}
+
+impl PublicationRequestKind {
+    fn route(self) -> &'static str {
+        match self {
+            Self::Publish => "/api/v1/worker/source-publications",
+            Self::Inspect => "/api/v1/worker/source-publication-inspections",
+        }
+    }
+}
+
+fn publication_error_code(error: &serde_json::Value) -> JobErrorCode {
+    if error
+        .pointer("/error/code")
+        .and_then(serde_json::Value::as_str)
+        == Some(JobErrorCode::SourceChanged.as_str())
+    {
+        JobErrorCode::SourceChanged
+    } else {
+        JobErrorCode::TransferFailed
+    }
+}
+
 #[derive(Clone)]
 pub struct WorkerConfig {
     pub url: reqwest::Url,
@@ -359,14 +386,22 @@ impl WorkerLoop {
         let body = reqwest::Body::wrap_stream(ReaderStream::new(
             tokio::fs::File::open(&outcome.working_file).await?,
         ));
-        self.leased(reqwest::Method::PUT, claim, worker, "result")
+        let response = self
+            .leased(reqwest::Method::PUT, claim, worker, "result")
             .header("content-length", output_size)
             .header("x-remux-warning", outcome.warning.to_string())
             .header("x-output-ext", &outcome.output_spec.extension)
             .body(body)
             .send()
-            .await?
-            .error_for_status()?;
+            .await?;
+        if !response.status().is_success() {
+            let error = response
+                .json::<serde_json::Value>()
+                .await
+                .unwrap_or_default();
+            let code = publication_error_code(&error);
+            return Err(JobRunError::simple(code, code.as_str()).into());
+        }
         Ok(())
     }
     /// Récupère la source : voie directe chez le worker qui la détient (si un billet est fourni),
@@ -679,6 +714,137 @@ impl WorkerLoop {
         Ok(())
     }
 
+    /// Répond aux demandes de retour du résultat chez le détenteur de la source.
+    async fn respond_to_publication_requests(&self, worker_id: Uuid, kind: PublicationRequestKind) {
+        let pending = format!(
+            "{}/pending?worker_id={worker_id}&wait_ms={REMOTE_BROWSE_WAIT_MS}",
+            kind.route()
+        );
+        loop {
+            let tasks = tokio::select! {
+                _ = crate::api::shutdown_signal() => return,
+                result = async {
+                    self.request(reqwest::Method::GET, &pending)
+                        .timeout(REMOTE_BROWSE_HTTP_TIMEOUT).send().await?.error_for_status()?
+                        .json::<Vec<forgearr_shared::transfer::SourcePublicationTask>>().await
+                } => result,
+            };
+            let Ok(tasks) = tasks else {
+                tokio::time::sleep(REMOTE_BROWSE_RETRY_DELAY).await;
+                continue;
+            };
+            for task in tasks {
+                let runner = self.clone();
+                tokio::spawn(async move {
+                    runner.publish_source_result(task, kind).await;
+                });
+            }
+        }
+    }
+
+    async fn publish_source_result(
+        &self,
+        task: forgearr_shared::transfer::SourcePublicationTask,
+        kind: PublicationRequestKind,
+    ) {
+        use forgearr_shared::transfer::{SourcePublicationOutcome, SourcePublicationReport};
+        let prefix = format!("{}/{}", kind.route(), task.request_id);
+        let file = self
+            .config
+            .work_dir
+            .join(format!(".source-publication-{}.tmp", task.request_id));
+        let result: crate::error::AppResult<()> = async {
+            if matches!(kind, PublicationRequestKind::Inspect) {
+                let matches = crate::source_publication::published_source_matches(
+                    &crate::source_publication::PublishedSourceExpectation {
+                        root: Path::new(&task.root),
+                        source_name: &task.source_name,
+                        source_sha256: &task.source_sha256,
+                        source_bytes: task.source_bytes,
+                        result_sha256: &task.result_sha256,
+                        result_bytes: task.result_bytes,
+                        extension: &task.extension,
+                        policy: task.policy,
+                    },
+                    self.config.max_bytes,
+                )
+                .await?;
+                return if matches {
+                    Ok(())
+                } else {
+                    Err(crate::error::AppError::Invalid)
+                };
+            }
+            let response = self
+                .request(
+                    reqwest::Method::GET,
+                    &format!("{prefix}/staged?worker_id={}", task.worker_id),
+                )
+                .send()
+                .await
+                .map_err(|_| crate::error::AppError::CentralUnavailable)?
+                .error_for_status()
+                .map_err(|_| crate::error::AppError::CentralUnavailable)?;
+            worker_transfer::save_verified(
+                response,
+                &file,
+                self.config.max_bytes,
+                &task.result_sha256,
+                task.result_bytes,
+            )
+            .await
+            .map_err(|_| crate::error::AppError::Invalid)?;
+            let source = crate::library_scan::source_path(Path::new(&task.root), &task.source_name)
+                .await
+                .map_err(crate::source_publication::missing_source_is_changed)?;
+            crate::source_publication::apply_library_output_policy(
+                task.policy,
+                &source,
+                &file,
+                &task.extension,
+                &task.source_sha256,
+                task.source_bytes,
+                self.config.max_bytes,
+                async {
+                    let response = self
+                        .request(
+                            reqwest::Method::GET,
+                            &format!("{prefix}/authorize?worker_id={}", task.worker_id),
+                        )
+                        .send()
+                        .await
+                        .map_err(|_| crate::error::AppError::CentralUnavailable)?;
+                    if response.status().is_success() {
+                        Ok(())
+                    } else {
+                        Err(crate::error::AppError::CentralUnavailable)
+                    }
+                },
+            )
+            .await
+        }
+        .await;
+        let outcome = match result {
+            Ok(()) => SourcePublicationOutcome::Published,
+            Err(crate::error::AppError::SourceChanged) => SourcePublicationOutcome::SourceChanged,
+            Err(_) => SourcePublicationOutcome::Failed,
+        };
+        if matches!(kind, PublicationRequestKind::Publish) {
+            let _ = tokio::fs::remove_file(file).await;
+        }
+        let report = SourcePublicationReport {
+            request_id: task.request_id,
+            worker_id: task.worker_id,
+            outcome,
+        };
+        let _ = self
+            .request(reqwest::Method::POST, &format!("{prefix}/report"))
+            .timeout(REMOTE_BROWSE_REPORT_TIMEOUT)
+            .json(&report)
+            .send()
+            .await;
+    }
+
     /// Démarre le serveur de transfert en lecture seule si une adresse et un port sont configurés.
     fn spawn_transfer_server(&self, worker_id: Uuid) -> Option<tokio::task::JoinHandle<()>> {
         let port = self.config.transfer_port?;
@@ -747,6 +913,23 @@ impl WorkerLoop {
             tokio::spawn(async move {
                 relay_runner
                     .respond_to_source_relay_requests(worker.id)
+                    .await;
+            })
+        };
+        let source_publication_responder = {
+            let publication_runner = runner.clone();
+            tokio::spawn(async move {
+                publication_runner
+                    .respond_to_publication_requests(worker.id, PublicationRequestKind::Publish)
+                    .await;
+            })
+        };
+        let source_inspection_responder = {
+            let inspection_runner = runner.clone();
+            let worker_id = worker.id;
+            tokio::spawn(async move {
+                inspection_runner
+                    .respond_to_publication_requests(worker_id, PublicationRequestKind::Inspect)
                     .await;
             })
         };
@@ -889,10 +1072,48 @@ impl WorkerLoop {
         .await;
         browse_responder.abort();
         source_relay_responder.abort();
+        source_publication_responder.abort();
+        source_inspection_responder.abort();
         software_probe_refresher.abort();
         if let Some(server) = transfer_server {
             server.abort();
         }
         outcome
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inspections_use_a_distinct_read_only_channel() {
+        assert_ne!(
+            PublicationRequestKind::Publish.route(),
+            PublicationRequestKind::Inspect.route()
+        );
+        assert!(
+            PublicationRequestKind::Inspect
+                .route()
+                .contains("inspections")
+        );
+    }
+
+    #[test]
+    fn result_error_distinguishes_source_changes_from_other_failures() {
+        assert_eq!(
+            publication_error_code(&serde_json::json!({"error":{"code":"source_changed"}})),
+            JobErrorCode::SourceChanged
+        );
+        assert_eq!(
+            publication_error_code(
+                &serde_json::json!({"error":{"code":"lease_expired_or_conflict"}})
+            ),
+            JobErrorCode::TransferFailed
+        );
+        assert_eq!(
+            publication_error_code(&serde_json::Value::Null),
+            JobErrorCode::TransferFailed
+        );
     }
 }

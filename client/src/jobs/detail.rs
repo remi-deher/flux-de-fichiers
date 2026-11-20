@@ -114,6 +114,25 @@ pub fn JobDetail(
             }
         }
     });
+    let remove_retained = Action::new_local(move |id: &uuid::Uuid| {
+        let job_path = format!("/api/v1/jobs/{id}");
+        let output_path = format!("{job_path}/output");
+        async move {
+            api::delete(&output_path).await?;
+            api::get::<Job>(&job_path).await
+        }
+    });
+    Effect::new(move |_| {
+        if let Some(result) = remove_retained.value().get() {
+            match result {
+                Ok(job) => {
+                    Toasts::set_success(feedback, "Résultat conservé supprimé.");
+                    on_changed.run(job);
+                }
+                Err(error) => Toasts::set_error(feedback, error.message()),
+            }
+        }
+    });
     let set_priority = Action::new_local(move |priority: &i32| {
         let path = format!("/api/v1/jobs/{job_id}/priority");
         let req = UpdateJobPriorityRequest {
@@ -142,7 +161,9 @@ pub fn JobDetail(
         }
         _ => "Aucun (opération par défaut)".into(),
     });
-    let download = (job.status == JobStatus::Succeeded).then(|| {
+    let download = (job.status == JobStatus::Succeeded
+        || (job.status == JobStatus::Failed && job.output_name.is_some()))
+    .then(|| {
         let href = format!("/api/v1/jobs/{}/output", job.id);
         let name = job.output_name.clone().unwrap_or_else(|| "resultat".into());
         view! {
@@ -153,6 +174,8 @@ pub fn JobDetail(
         }
     });
     let retryable = can_manage && job.is_retryable();
+    let retained_result =
+        can_manage && job.status == JobStatus::Failed && job.output_name.is_some();
     let cancelable = can_manage && job.is_cancelable();
     let can_prioritize = can_manage && job.status == JobStatus::Queued;
     let job_priority = job.priority;
@@ -394,6 +417,12 @@ pub fn JobDetail(
                     }
                 })}
                 {download}
+                {retained_result.then(|| view! {
+                    <button type="button" class="btn btn-secondary" disabled=move || remove_retained.pending().get()
+                        on:click=move |_| { remove_retained.dispatch(job_id); }>
+                        "Supprimer le résultat conservé"
+                    </button>
+                })}
                 {retryable.then(|| view! {
                     <button
                         type="button"

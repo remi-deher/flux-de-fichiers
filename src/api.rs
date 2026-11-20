@@ -12,6 +12,7 @@ pub(crate) mod plugins;
 pub(crate) mod recovery_kit;
 pub(crate) mod session;
 mod setup;
+pub(crate) mod source_publication;
 pub(crate) mod source_relay;
 pub(crate) mod system;
 pub(crate) mod transfers;
@@ -117,6 +118,7 @@ pub struct AppState {
     pub event_history: EventHistory,
     pub browse_broker: crate::filesystem_browser::RemoteBrowseBroker,
     pub source_relay: crate::source_relay::SourceRelayBroker,
+    pub source_publication: crate::source_publication_broker::SourcePublicationBroker,
     pub pending_worker_setup: Arc<tokio::sync::Mutex<Option<installation::PendingWorkerSetup>>>,
     pub ai_runs: crate::ai::run::AiRuns,
     pub ai_health: crate::ai::health::AiHealthTracker,
@@ -139,6 +141,8 @@ impl AppState {
             event_history: EventHistory::new(),
             browse_broker: crate::filesystem_browser::RemoteBrowseBroker::new(),
             source_relay: crate::source_relay::SourceRelayBroker::new(),
+            source_publication: crate::source_publication_broker::SourcePublicationBroker::default(
+            ),
             pending_worker_setup: Arc::new(tokio::sync::Mutex::new(None)),
             ai_runs: crate::ai::run::AiRuns::new(),
             ai_health: crate::ai::health::AiHealthTracker::new(),
@@ -514,6 +518,22 @@ fn transfer_routes() -> Router<AppState> {
         .route(
             "/api/v1/worker/source-relay/{request_id}",
             put(source_relay::send),
+        )
+        .route(
+            "/api/v1/worker/source-publications/pending",
+            get(source_publication::pending),
+        )
+        .route(
+            "/api/v1/worker/source-publications/{id}/staged",
+            get(source_publication::staged),
+        )
+        .route(
+            "/api/v1/worker/source-publications/{id}/authorize",
+            get(source_publication::authorize_commit),
+        )
+        .route(
+            "/api/v1/worker/source-publications/{id}/report",
+            post(source_publication::report),
         )
         .route("/api/v1/jobs/{id}/result", put(transfers::result))
         .route(

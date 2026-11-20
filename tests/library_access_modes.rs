@@ -303,3 +303,57 @@ async fn the_worker_list_tells_which_workers_announce_a_transfer_address() -> an
     assert!(workers.iter().all(|worker| !worker.transfer_enabled));
     Ok(())
 }
+
+#[tokio::test]
+async fn publication_selects_only_current_writable_online_holders() -> anyhow::Result<()> {
+    let pool = pool().await?;
+    let reader = repository::register(&pool, "lecteur").await?;
+    let writer = repository::register(&pool, "ecrivain").await?;
+    let compute = repository::register(&pool, "calcul").await?;
+    let mut writable = folder(writer.id, "/srv/films", "nas");
+    writable.access = LibraryAccess::ReadWrite;
+    let library = repository::insert_library(
+        &pool,
+        LibraryWrite {
+            name: "Films".into(),
+            workers: vec![folder(reader.id, "/mnt/a", "nas"), writable],
+            transfer_workers: vec![compute.id],
+            ..Default::default()
+        },
+    )
+    .await?;
+    let job = library_job(
+        &pool,
+        library.id,
+        Some(reader.id),
+        "nas",
+        &[(reader.id, "/mnt/a"), (writer.id, "/srv/films")],
+    )
+    .await?;
+    let holders = repository::writable_source_holders(&pool, job, compute.id).await?;
+    assert_eq!(holders.len(), 1);
+    assert_eq!(holders[0].worker_id, writer.id);
+    sqlx::query("UPDATE workers SET last_seen=datetime('now', '-1 day') WHERE id=?1")
+        .bind(writer.id)
+        .execute(&pool)
+        .await?;
+    assert!(
+        repository::writable_source_holders(&pool, job, compute.id)
+            .await?
+            .is_empty()
+    );
+    sqlx::query("UPDATE workers SET last_seen=datetime('now') WHERE id=?1")
+        .bind(writer.id)
+        .execute(&pool)
+        .await?;
+    sqlx::query("UPDATE library_folders SET access='read' WHERE worker_id=?1")
+        .bind(writer.id)
+        .execute(&pool)
+        .await?;
+    assert!(
+        repository::writable_source_holders(&pool, job, compute.id)
+            .await?
+            .is_empty()
+    );
+    Ok(())
+}

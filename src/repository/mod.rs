@@ -57,5 +57,5 @@ pub use plugins::{
 pub use relays::{RelayOutcome, list_relays, relay_job};
 pub use source_tickets::{
     SourceHolder, attach_source_ticket, redeem_ticket, set_transfer_url, source_holders,
-    valid_transfer_url,
+    valid_transfer_url, writable_source_holders,
 };

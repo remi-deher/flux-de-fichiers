@@ -28,6 +28,7 @@ const SOURCE_CONTENT: &[u8] = b"flux-mkv-demo-bytes";
 struct Harness {
     app: axum::Router,
     pool: SqlitePool,
+    publication: forgearr::source_publication_broker::SourcePublicationBroker,
     _dirs: (tempfile::TempDir, tempfile::TempDir, tempfile::TempDir),
 }
 
@@ -153,10 +154,13 @@ async fn harness() -> anyhow::Result<Harness> {
     sqlx::migrate!().run(&pool).await?;
     common::install_keys(&pool).await?;
 
-    let app = router(AppState::new(pool.clone(), Arc::new(config)));
+    let state = AppState::new(pool.clone(), Arc::new(config));
+    let publication = state.source_publication.clone();
+    let app = router(state);
     Ok(Harness {
         app,
         pool,
+        publication,
         _dirs: (data_dir, config_dir, catalog_dir),
     })
 }
@@ -974,5 +978,138 @@ async fn the_central_relays_a_worker_held_source_without_storing_it() -> anyhow:
     let (status, body) = download.await??;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_ref(), SOURCE_CONTENT);
+    Ok(())
+}
+
+#[tokio::test]
+async fn source_publication_routes_require_the_holder_and_active_lease() -> anyhow::Result<()> {
+    use forgearr::domain::{LeaseRequest, LibraryOutputPolicy};
+    use forgearr_shared::transfer::{
+        SourcePublicationOutcome, SourcePublicationReport, SourcePublicationTask,
+    };
+    use std::time::Duration;
+
+    let h = harness().await?;
+    let holder = register_worker_with_encoders(&h, "test-worker", &[]).await?;
+    let other = register_worker_with_encoders(&h, "autre", &[]).await?;
+    let job = repository::insert_job(&h.pool, "film.mkv", None, &"aa".repeat(32), 10).await?;
+    let claim = claim_for(&h, other)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("bail absent"))?;
+    let staged = h._dirs.0.path().join("result.mkv");
+    std::fs::write(&staged, b"result")?;
+    let task = SourcePublicationTask {
+        request_id: Uuid::new_v4(),
+        worker_id: holder,
+        root: "/media".into(),
+        source_name: "film.mkv".into(),
+        source_sha256: "aa".repeat(32),
+        source_bytes: 10,
+        result_sha256: "bb".repeat(32),
+        result_bytes: 6,
+        extension: "mkv".into(),
+        policy: LibraryOutputPolicy::ReplaceWithBackup,
+    };
+    let request_id = task.request_id;
+    let lease = LeaseRequest {
+        worker_id: other,
+        lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
+        telemetry: None,
+    };
+    let broker = h.publication.clone();
+    let waiting = tokio::spawn(async move {
+        broker
+            .request(task, staged, job.id, lease, Duration::from_secs(5))
+            .await
+    });
+    let wrong = format!("/api/v1/worker/source-publications/pending?worker_id={other}");
+    assert_eq!(
+        json_call(&h.app, "GET", &wrong, Some(common::WORKER_KEY), None)
+            .await?
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let pending =
+        format!("/api/v1/worker/source-publications/pending?worker_id={holder}&wait_ms=3000");
+    let (status, tasks) =
+        json_call(&h.app, "GET", &pending, Some(common::WORKER_KEY), None).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(tasks[0]["request_id"], request_id.to_string());
+    let uri = format!("/api/v1/worker/source-publications/{request_id}/staged?worker_id={holder}");
+    let response = h
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&uri)
+                .header("authorization", format!("Bearer {}", common::WORKER_KEY))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        to_bytes(response.into_body(), JSON_LIMIT).await?.as_ref(),
+        b"result"
+    );
+    let authorize =
+        format!("/api/v1/worker/source-publications/{request_id}/authorize?worker_id={holder}");
+    assert_eq!(
+        json_call(&h.app, "GET", &authorize, Some(common::WORKER_KEY), None)
+            .await?
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    sqlx::query("UPDATE jobs SET leased_until=datetime('now', '-1 minute') WHERE id=?1")
+        .bind(claim.job_id)
+        .execute(&h.pool)
+        .await?;
+    assert_eq!(
+        json_call(&h.app, "GET", &uri, Some(common::WORKER_KEY), None)
+            .await?
+            .0,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        json_call(&h.app, "GET", &authorize, Some(common::WORKER_KEY), None)
+            .await?
+            .0,
+        StatusCode::CONFLICT
+    );
+    let report = SourcePublicationReport {
+        request_id,
+        worker_id: holder,
+        outcome: SourcePublicationOutcome::SourceChanged,
+    };
+    let uri = format!("/api/v1/worker/source-publications/{request_id}/report");
+    assert_eq!(
+        json_call(
+            &h.app,
+            "POST",
+            &uri,
+            Some(common::WORKER_KEY),
+            Some(serde_json::to_value(&report)?)
+        )
+        .await?
+        .0,
+        StatusCode::CONFLICT
+    );
+    sqlx::query("UPDATE jobs SET leased_until=datetime('now', '+2 minutes') WHERE id=?1")
+        .bind(claim.job_id)
+        .execute(&h.pool)
+        .await?;
+    assert_eq!(
+        json_call(
+            &h.app,
+            "POST",
+            &uri,
+            Some(common::WORKER_KEY),
+            Some(serde_json::to_value(report)?)
+        )
+        .await?
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(waiting.await??, SourcePublicationOutcome::SourceChanged);
     Ok(())
 }

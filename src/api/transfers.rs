@@ -348,6 +348,7 @@ pub(crate) async fn publish_staged(
                 job.source_sha256.as_deref().unwrap_or_default(),
                 job.source_bytes.unwrap_or_default(),
                 s.config.max_file_bytes,
+                async { Ok(()) },
             )
             .await
             {

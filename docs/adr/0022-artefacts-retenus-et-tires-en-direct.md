@@ -213,11 +213,16 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
      ordinaire, que son serveur de transfert valide avec la racine du central (dossier de la
      bibliothèque, ou dépôt d'entrée pour une tâche sans dossier : `redeem_central_ticket`). Sans adresse
      annoncée, le repli `GET /source` reste.
-   - 5c-ii-b — suppression de `GET /source`, de `publish_staged` et de la copie centrale du résultat :
-     le worker intégré applique lui-même les politiques de sortie du central, et les requêtes SQL qui
-     nomment `INTEGRATED_WORKER_NAME` disparaissent (accès aux dossiers du central par montages
-     ordinaires du worker intégré). Demande une décision de modèle de données (dossier sans worker =
-     dossier du worker intégré) avant d'être poussée.
+   - **5c-ii-b (fait) — plus de lecture de source par le central, plus de nom de worker en SQL** :
+     `GET /jobs/{id}/source` et le repli du worker sont supprimés : une source se lit toujours en direct
+     chez son détenteur avec le billet de la tâche, sinon la tâche échoue (`source_unreachable`). Pour les
+     sources du central, un worker distant a donc besoin que le worker intégré annonce son adresse
+     (`LOCAL_WORKER_TRANSFER_URL` et `LOCAL_WORKER_TRANSFER_PORT`). Le worker intégré est désormais celui
+     qui porte `workers.serves_central`, fixé à son démarrage quel que soit son nom : plus aucune requête
+     SQL ne nomme `INTEGRATED_WORKER_NAME`. Le modèle de données ne change pas : un dossier sans worker
+     reste « le dossier du central », servi par ce worker. Restent locaux au central (aucun octet sur le
+     réseau) : `publish_staged` et le dossier de sortie, appliqués par le worker intégré sur ses propres
+     fichiers.
 
 ## Conséquences
 

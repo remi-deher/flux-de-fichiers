@@ -663,25 +663,24 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
               OR EXISTS (SELECT 1 FROM job_relays r, workers w, json_each(w.telemetry_json, '$.capabilities.hardwareEncoders') e
                          WHERE r.job_id=jobs.id AND w.id=?3 AND r.requirement_json IS NOT NULL
                            AND json_extract(e.value, '$.codec')=json_extract(r.requirement_json, '$.codec')
-                           AND json_extract(e.value, '$.acceleration') != ?5
+                           AND json_extract(e.value, '$.acceleration') != ?4
                            AND (json_extract(r.requirement_json, '$.acceleration') IS NULL
                                 OR json_extract(e.value, '$.acceleration')=json_extract(r.requirement_json, '$.acceleration')))
               OR EXISTS (SELECT 1 FROM job_relays r, workers w, json_each(w.telemetry_json, '$.capabilities.softwareEncoders') e
                          WHERE r.job_id=jobs.id AND w.id=?3 AND r.requirement_json IS NOT NULL
                            AND e.value=json_extract(r.requirement_json, '$.codec')
                            AND (json_extract(r.requirement_json, '$.acceleration') IS NULL
-                                OR json_extract(r.requirement_json, '$.acceleration')=?5)))
+                                OR json_extract(r.requirement_json, '$.acceleration')=?4)))
          AND {access}
          AND ({readable} OR EXISTS (SELECT 1 FROM job_relays r WHERE r.job_id=jobs.id AND r.artifact_relay=1))
          ORDER BY priority DESC, created_at ASC, id ASC LIMIT 1",
-        access = super::library_access::job_access_sql("?3", "?4"),
+        access = super::library_access::job_access_sql("?3"),
         readable = super::library_access::source_readable_sql("?3", &online_seconds),
     );
     let next_id: Option<Uuid> = sqlx::query_scalar(&claimable_sql)
         .bind(queued_status)
         .bind(MAX_ATTEMPTS)
         .bind(worker)
-        .bind(forgearr_shared::workers::INTEGRATED_WORKER_NAME)
         .bind(forgearr_shared::capabilities::EncodeAcceleration::Cpu.as_str())
         .fetch_optional(&mut *tx)
         .await?;

@@ -63,20 +63,6 @@ pub(super) async fn stream_file(
     Ok(response)
 }
 
-pub async fn source(
-    State(s): State<AppState>,
-    h: HeaderMap,
-    Path(id): Path<Uuid>,
-) -> AppResult<Response> {
-    crate::auth::authorize_worker(&s.pool, &h).await?;
-    let job = repository::active(&s.pool, id, &lease(&h)?).await?;
-    match crate::library_scan::central_job_source(&s.pool, &s.config.input_dir, &job).await? {
-        Some(source) => stream_file(&source, None, "application/octet-stream").await,
-        // Source détenue par un autre worker : il se lit chez lui avec un billet (ADR 0022).
-        None => Err(AppError::SourceUnreachable),
-    }
-}
-
 /// Le worker traitant redemande un billet frais (expiré, ou lecture à reprendre par `Range`).
 /// Réponse `null` quand la source se lit autrement : le worker utilise alors le repli.
 pub async fn reissue_ticket(

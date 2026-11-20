@@ -9,8 +9,9 @@
 ///   intégré et la source est celle de la centrale, ou il est « par transfert » dans la
 ///   bibliothèque, quelle que soit la politique de sortie.
 ///
-/// `worker` et `integrated` sont des paramètres SQL (`?3`, `?4`…).
-pub fn job_access_sql(worker: &str, integrated: &str) -> String {
+/// `worker` est un paramètre SQL (`?3`…). Le worker intégré est celui qui sert les dossiers du
+/// central (`workers.serves_central`), quel que soit son nom.
+pub fn job_access_sql(worker: &str) -> String {
     format!(
         "((jobs.source_key IS NULL AND (jobs.source_worker_id IS NULL OR jobs.source_worker_id={worker})) \
           OR (jobs.source_key IS NOT NULL AND ( \
@@ -18,7 +19,7 @@ pub fn job_access_sql(worker: &str, integrated: &str) -> String {
                       WHERE m.job_id=jobs.id AND m.worker_id={worker}) \
               OR (EXISTS (SELECT 1 FROM verified_job_source_mounts m \
                           WHERE m.job_id=jobs.id AND m.worker_id=zeroblob(16)) \
-                  AND EXISTS (SELECT 1 FROM workers iw WHERE iw.id={worker} AND iw.name={integrated})) \
+                  AND EXISTS (SELECT 1 FROM workers iw WHERE iw.id={worker} AND iw.serves_central=1)) \
               OR EXISTS (SELECT 1 FROM library_transfer_workers t \
                          WHERE t.library_id=jobs.library_id AND t.worker_id={worker}))))"
     )

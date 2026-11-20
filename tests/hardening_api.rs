@@ -514,18 +514,6 @@ async fn lease_epoch_fences_all_worker_job_routes() -> anyhow::Result<()> {
         assert_eq!(st, StatusCode::CONFLICT, "{uri}");
     }
 
-    let uri = format!("/api/v1/jobs/{}/source", job.id);
-    let req = Request::builder()
-        .method("GET")
-        .uri(&uri)
-        .header("authorization", format!("Bearer {}", common::WORKER_KEY))
-        .header("x-worker-id", worker_id.to_string())
-        .header("x-lease-token", claim.lease_token.to_string())
-        .header("x-lease-epoch", stale_epoch.to_string())
-        .body(Body::empty())?;
-    let resp = h.app.clone().oneshot(req).await?;
-    assert_eq!(resp.status(), StatusCode::CONFLICT, "{uri}");
-
     Ok(())
 }
 
@@ -1386,31 +1374,6 @@ async fn a_holder_without_a_valid_transfer_url_leaves_the_task_unclaimed() -> an
     held_job(&h, owner, target).await?;
     let claim = claim_for(&h, target).await?;
     assert!(claim.is_none(), "la source ne se lit chez personne");
-    Ok(())
-}
-
-#[tokio::test]
-async fn a_worker_held_source_is_not_streamed_by_the_central() -> anyhow::Result<()> {
-    let h = harness().await?;
-    let owner =
-        register_worker_with_transfer(&h, "detenteur", "http://detenteur.lan:9000/").await?;
-    let target = register_worker_with_encoders(&h, "traitant", &[]).await?;
-    let job = relayed_job_from(&h, owner, target).await?;
-    let claim = claim_for(&h, target)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("la cible doit obtenir la tâche"))?;
-    let request = Request::builder()
-        .uri(format!("/api/v1/jobs/{}/source", job.id))
-        .header("authorization", format!("Bearer {}", common::WORKER_KEY))
-        .header("x-worker-id", target.to_string())
-        .header("x-lease-token", claim.lease_token.to_string())
-        .header("x-lease-epoch", claim.lease_epoch.to_string())
-        .body(Body::empty())?;
-    let response = h.app.clone().oneshot(request).await?;
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-    let body = to_bytes(response.into_body(), JSON_LIMIT).await?;
-    let error: serde_json::Value = serde_json::from_slice(&body)?;
-    assert_eq!(error["error"]["code"], "source_unreachable");
     Ok(())
 }
 

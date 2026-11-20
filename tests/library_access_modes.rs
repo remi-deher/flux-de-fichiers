@@ -115,6 +115,7 @@ async fn a_direct_worker_keeps_its_jobs_and_the_integrated_worker_serves_central
     let pool = pool().await?;
     let direct = repository::register(&pool, "direct").await?;
     let integrated = repository::register(&pool, INTEGRATED_WORKER_NAME).await?;
+    repository::set_serves_central(&pool, integrated.id, true).await?;
     let remote = repository::register(&pool, "distant").await?;
     let library = repository::insert_library(
         &pool,

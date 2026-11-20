@@ -60,8 +60,9 @@ async fn start_transfer_server(state: &AppState, worker_id: Uuid) {
     if let Err(error) = repository::set_transfer_url(&state.pool, worker_id, announced).await {
         tracing::warn!(error = %error, "adresse de transfert du worker intégré non enregistrée");
     }
-    let serves = announced.is_some();
-    if let Err(error) = repository::set_serves_central(&state.pool, worker_id, serves).await {
+    // Il traite toujours les dossiers du central ; l'adresse annoncée permet en plus de les lire
+    // chez lui depuis un autre worker.
+    if let Err(error) = repository::set_serves_central(&state.pool, worker_id, true).await {
         tracing::warn!(error = %error, "rôle de serveur des dossiers du central non enregistré");
     }
     if let (Some(port), Some(_)) = (port, announced) {

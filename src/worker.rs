@@ -397,45 +397,28 @@ impl WorkerLoop {
             .await?)
     }
 
-    /// Récupère la source : voie directe chez le worker qui la détient (si un billet est fourni),
-    /// puis repli par le central (ADR 0019).
+    /// Récupère la source en direct chez le worker qui la détient, avec le billet de la tâche
+    /// (ADR 0019 et 0022). Sans billet, aucun worker ne l'annonce : la tâche échoue.
     async fn download_source(
         &self,
         claim: &Claim,
         worker: Uuid,
         input: &Path,
     ) -> anyhow::Result<()> {
-        if let Some(ticket) = claim.source_ticket.clone() {
-            let direct = worker_transfer::direct_client()?;
-            match worker_transfer::download_direct_resuming(
-                &direct,
-                ticket,
-                input,
-                self.config.max_bytes,
-                &claim.source_sha256,
-                claim.source_bytes,
-                || self.reissue_ticket(claim, worker),
-            )
-            .await
-            {
-                Ok(()) => return Ok(()),
-                Err(error) => {
-                    tracing::warn!(job_id = %claim.job_id, error = %error, "voie directe indisponible, repli par le central");
-                    let _ = tokio::fs::remove_file(input).await;
-                }
-            }
-        }
-        let response = self
-            .leased(reqwest::Method::GET, claim, worker, "source")
-            .send()
-            .await?
-            .error_for_status()?;
-        worker_transfer::save_verified(
-            response,
+        let Some(ticket) = claim.source_ticket.clone() else {
+            let unreachable =
+                JobRunError::simple(JobErrorCode::TransferFailed, "source_unreachable");
+            return Err(unreachable.into());
+        };
+        let direct = worker_transfer::direct_client()?;
+        worker_transfer::download_direct_resuming(
+            &direct,
+            ticket,
             input,
             self.config.max_bytes,
             &claim.source_sha256,
             claim.source_bytes,
+            || self.reissue_ticket(claim, worker),
         )
         .await
         .map_err(|error| {

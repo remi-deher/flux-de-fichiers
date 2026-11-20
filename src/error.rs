@@ -39,8 +39,6 @@ pub enum AppError {
     CentralUnavailable,
     #[error("no reachable worker can receive the result")]
     ResultUndeliverable,
-    #[error("the source is held by a worker and must be read directly from it")]
-    SourceUnreachable,
     #[error("database failure")]
     Database(sqlx::Error),
     #[error("storage failure")]
@@ -82,7 +80,6 @@ impl IntoResponse for AppError {
             Self::RepositoryUnavailable(_) => (StatusCode::BAD_GATEWAY, "repository_unavailable"),
             Self::CentralUnavailable => (StatusCode::BAD_GATEWAY, "central_unavailable"),
             Self::ResultUndeliverable => (StatusCode::BAD_GATEWAY, "result_undeliverable"),
-            Self::SourceUnreachable => (StatusCode::BAD_GATEWAY, "source_unreachable"),
             Self::TooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "file_too_large"),
             Self::Database(_) | Self::Storage(_) | Self::Internal => {
                 tracing::error!(error = ?self, "internal failure");

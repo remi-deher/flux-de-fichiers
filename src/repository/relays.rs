@@ -72,17 +72,14 @@ async fn worker_can_process(
     worker: Uuid,
     needs_source: bool,
 ) -> AppResult<bool> {
-    let access = super::library_access::job_access_sql("?2", "?3");
+    let access = super::library_access::job_access_sql("?2");
     let sql = if needs_source {
-        let readable = super::library_access::source_readable_sql("?2", "?4");
+        let readable = super::library_access::source_readable_sql("?2", "?3");
         format!("SELECT {access} AND {readable} FROM jobs WHERE id=?1")
     } else {
         format!("SELECT {access} FROM jobs WHERE id=?1")
     };
-    let mut query = sqlx::query_scalar::<_, bool>(&sql)
-        .bind(job)
-        .bind(worker)
-        .bind(forgearr_shared::workers::INTEGRATED_WORKER_NAME);
+    let mut query = sqlx::query_scalar::<_, bool>(&sql).bind(job).bind(worker);
     if needs_source {
         query = query.bind(WORKER_ONLINE_SECONDS);
     }

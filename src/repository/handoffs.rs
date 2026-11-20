@@ -14,12 +14,9 @@ use forgearr_shared::{
     workers::WORKER_ONLINE_SECONDS,
 };
 use sqlx::SqlitePool;
-use std::path::{Component, Path};
 use uuid::Uuid;
 
 const HANDOFF_CANDIDATE_LIMIT: i64 = 200;
-/// Longueur maximale du nom d'un fichier de travail remis (limite courante des systèmes de fichiers).
-const ARTIFACT_NAME_MAX_LEN: usize = 255;
 /// Longueur maximale de l'identifiant du nœud de flux où le repreneur reprend l'exécution.
 const RESUME_NODE_ID_MAX_LEN: usize = 128;
 
@@ -47,11 +44,7 @@ struct ClaimedHandoff {
 }
 
 fn valid_artifact(artifact: &HandoffArtifact, max_bytes: u64) -> bool {
-    let mut components = Path::new(&artifact.name).components();
-    matches!(components.next(), Some(Component::Normal(_)))
-        && components.next().is_none()
-        && artifact.name.len() <= ARTIFACT_NAME_MAX_LEN
-        && !artifact.name.chars().any(char::is_control)
+    super::artifacts::valid_artifact_name(&artifact.name)
         && is_valid_sha256_hex(&artifact.sha256)
         && u64::try_from(artifact.bytes).is_ok_and(|bytes| bytes > 0 && bytes <= max_bytes)
 }

@@ -1,3 +1,4 @@
+mod artifacts;
 mod enrollment;
 mod flows;
 mod handoffs;
@@ -13,6 +14,7 @@ mod relays;
 mod source_publication_journal;
 mod source_tickets;
 
+pub use artifacts::{JobArtifact, declare_artifact, get_artifact, release_artifact};
 pub use enrollment::{
     create_enrollment_request, decide_enrollment_request, enrollment_window_status,
     list_enrollment_requests, poll_enrollment_request, purge_expired_enrollment_requests,
@@ -66,6 +68,7 @@ pub use source_publication_journal::{
     mark_source_publication_uncertain, pending_source_publications, recover_source_publications,
 };
 pub use source_tickets::{
-    SourceHolder, attach_source_ticket, redeem_ticket, reissue_source_ticket, set_transfer_url,
-    source_holders, valid_transfer_url, writable_source_holders,
+    SourceHolder, attach_source_ticket, issue_artifact_ticket, redeem_ticket,
+    reissue_source_ticket, set_transfer_url, source_holders, valid_transfer_url,
+    writable_source_holders,
 };

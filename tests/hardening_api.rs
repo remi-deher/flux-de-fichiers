@@ -1201,6 +1201,23 @@ async fn redeem_call(
     .await
 }
 
+/// Requête d'un worker qui présente sa clé et son bail.
+fn leased_request(
+    method: &str,
+    uri: String,
+    claim: &Claim,
+    key: &str,
+    worker: Uuid,
+) -> axum::http::request::Builder {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("authorization", format!("Bearer {key}"))
+        .header("x-worker-id", worker.to_string())
+        .header("x-lease-token", claim.lease_token.to_string())
+        .header("x-lease-epoch", claim.lease_epoch.to_string())
+}
+
 /// Le worker traitant redemande un billet frais avec son bail.
 async fn reissue_ticket_call(
     h: &Harness,
@@ -1208,19 +1225,29 @@ async fn reissue_ticket_call(
     key: &str,
     worker: Uuid,
 ) -> anyhow::Result<(StatusCode, Option<forgearr_shared::transfer::SourceTicket>)> {
-    let request = Request::builder()
-        .method("POST")
-        .uri(format!("/api/v1/jobs/{}/source/ticket", claim.job_id))
-        .header("authorization", format!("Bearer {key}"))
-        .header("x-worker-id", worker.to_string())
-        .header("x-lease-token", claim.lease_token.to_string())
-        .header("x-lease-epoch", claim.lease_epoch.to_string())
-        .body(Body::empty())?;
+    let uri = format!("/api/v1/jobs/{}/source/ticket", claim.job_id);
+    let request = leased_request("POST", uri, claim, key, worker).body(Body::empty())?;
     let response = h.app.clone().oneshot(request).await?;
     let status = response.status();
     let bytes = to_bytes(response.into_body(), JSON_LIMIT).await?;
     let ticket = serde_json::from_slice::<Option<forgearr_shared::transfer::SourceTicket>>(&bytes);
     Ok((status, ticket.ok().flatten()))
+}
+
+/// Le détenteur du bail déclare un artefact qu'il retient.
+async fn declare_artifact_call(
+    h: &Harness,
+    claim: &Claim,
+    key: &str,
+    worker: Uuid,
+    kind: forgearr_shared::transfer::ArtifactKind,
+    declaration: &forgearr_shared::transfer::ArtifactDeclaration,
+) -> anyhow::Result<StatusCode> {
+    let uri = format!("/api/v1/jobs/{}/artifacts/{}", claim.job_id, kind.as_str());
+    let request = leased_request("PUT", uri, claim, key, worker)
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(declaration)?))?;
+    Ok(h.app.clone().oneshot(request).await?.status())
 }
 
 #[tokio::test]
@@ -1275,6 +1302,107 @@ async fn a_fresh_ticket_can_be_reissued_with_the_lease_and_replaces_the_previous
         st.is_client_error() && ticket.is_none(),
         "bail inconnu refusé"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_lease_holder_declares_retained_artifacts_that_a_taker_can_get_tickets_for()
+-> anyhow::Result<()> {
+    use forgearr_shared::transfer::ArtifactDeclaration;
+    use forgearr_shared::transfer::ArtifactKind::{self, Result as ResultFile, Working};
+    let h = harness().await?;
+    let owner =
+        register_worker_with_transfer(&h, "detenteur", "http://detenteur.lan:9000/").await?;
+    let taker = register_worker_with_encoders(&h, "traitant", &[]).await?;
+    install_transfer_keys(&h).await?;
+    repository::insert_job(&h.pool, "film.mkv", None, &"aa".repeat(32), 10).await?;
+    let claim = claim_for(&h, owner)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("le détenteur doit obtenir la tâche"))?;
+    let job = claim.job_id;
+    let decl = ArtifactDeclaration {
+        root: "/work/retained".into(),
+        name: "working.mkv".into(),
+        sha256: "ab".repeat(32),
+        bytes: 7,
+    };
+    let issue = |kind: ArtifactKind, taker: Uuid| {
+        repository::issue_artifact_ticket(&h.pool, job, kind, taker, claim.lease_epoch)
+    };
+
+    // Sans artefact déclaré, pas de billet.
+    assert!(issue(Working, taker).await?.is_none());
+
+    // Seule la clé du worker qui détient le bail déclare, et seulement un fichier valide.
+    let status = declare_artifact_call(&h, &claim, TARGET_KEY, owner, Working, &decl).await?;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let stale = Claim {
+        lease_token: Uuid::new_v4(),
+        ..claim.clone()
+    };
+    let status = declare_artifact_call(&h, &stale, OWNER_KEY, owner, Working, &decl).await?;
+    assert!(status.is_client_error());
+    let invalid = ArtifactDeclaration {
+        name: "../working.mkv".into(),
+        ..decl.clone()
+    };
+    let status = declare_artifact_call(&h, &claim, OWNER_KEY, owner, Working, &invalid).await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let none_yet = repository::get_artifact(&h.pool, job, Working).await?;
+    assert!(none_yet.is_none());
+
+    let status = declare_artifact_call(&h, &claim, OWNER_KEY, owner, Working, &decl).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let stored = repository::get_artifact(&h.pool, job, Working)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("l'artefact doit être enregistré"))?;
+    assert_eq!(stored.holder_worker_id, owner);
+    assert_eq!(stored.lease_epoch, claim.lease_epoch);
+    assert_eq!(stored.declaration, decl);
+
+    // Le détenteur n'a pas besoin de tirer son propre fichier ; le résultat n'est pas déclaré.
+    assert!(issue(Working, owner).await?.is_none());
+    assert!(issue(ResultFile, taker).await?.is_none());
+    let ticket = issue(Working, taker)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("un billet d'artefact est attendu"))?;
+    assert_eq!(ticket.url, "http://detenteur.lan:9000");
+    let (st, grant) = redeem_call(&h, OWNER_KEY, owner, &ticket.token).await?;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(grant["root"], "/work/retained");
+    assert_eq!(grant["source_name"], "working.mkv");
+    assert_eq!(grant["bytes"], 7);
+    assert_eq!(grant["sha256"], "ab".repeat(32));
+
+    // Un billet de résultat coexiste avec celui du fichier de travail pour le même bail.
+    let result = ArtifactDeclaration {
+        name: "result.mkv".into(),
+        ..decl.clone()
+    };
+    let status = declare_artifact_call(&h, &claim, OWNER_KEY, owner, ResultFile, &result).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let result_ticket = issue(ResultFile, taker)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("un billet de résultat est attendu"))?;
+    let (st, grant) = redeem_call(&h, OWNER_KEY, owner, &result_ticket.token).await?;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(grant["source_name"], "result.mkv");
+    let (st, _) = redeem_call(&h, OWNER_KEY, owner, &ticket.token).await?;
+    assert_eq!(st, StatusCode::OK);
+
+    // Redéclarer remplace l'artefact ; le libérer le retire.
+    let renamed = ArtifactDeclaration {
+        name: "working-2.mkv".into(),
+        ..decl.clone()
+    };
+    let status = declare_artifact_call(&h, &claim, OWNER_KEY, owner, Working, &renamed).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, grant) = redeem_call(&h, OWNER_KEY, owner, &ticket.token).await?;
+    assert_eq!(grant["source_name"], "working-2.mkv");
+    assert!(repository::release_artifact(&h.pool, job, Working).await?);
+    assert!(!repository::release_artifact(&h.pool, job, Working).await?);
+    let (st, _) = redeem_call(&h, OWNER_KEY, owner, &ticket.token).await?;
+    assert_eq!(st, StatusCode::NOT_FOUND);
     Ok(())
 }
 

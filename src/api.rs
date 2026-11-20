@@ -1,4 +1,5 @@
 mod accounts;
+mod artifacts;
 pub mod auth;
 pub mod diagnostics;
 pub(crate) mod flows;
@@ -537,6 +538,10 @@ fn transfer_routes() -> Router<AppState> {
         .route(
             "/api/v1/jobs/{id}/source/ticket",
             post(transfers::reissue_ticket),
+        )
+        .route(
+            "/api/v1/jobs/{id}/artifacts/{kind}",
+            put(artifacts::declare),
         )
         .route("/api/v1/worker/transfers/redeem", post(transfers::redeem))
         .route(

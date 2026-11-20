@@ -111,6 +111,19 @@ module de secret opaque et d'empreinte ; constantes nommées pour tous les déla
   chez le détenteur de la bibliothèque ; lien à billet court ou suppression de la route, à trancher.
 - Chiffrement applicatif, compression, limitation de débit.
 
+## Plan d'implémentation par étapes
+
+Chaque étape est poussée seule et validée par la CI avant la suivante.
+
+1. **Registre d'artefacts et billets d'artefact** (fait) : table `job_artifacts` (détenteur, racine,
+   nom, SHA-256, taille), déclaration par le détenteur du bail (`PUT /api/v1/jobs/{id}/artifacts/{kind}`),
+   billets qui désignent la source ou un artefact, `redeem` qui rend la racine et le nom de l'artefact.
+   Additif : aucun flux existant ne change.
+2. Remise entre étapes par artefact, qui remplace `job_handoffs`.
+3. Retour du résultat tiré par le détenteur de la bibliothèque, point de commit idempotent.
+4. Suppression du repli par le central, de `PUT /result` et des routes de remise.
+5. Worker intégré traité comme un worker ordinaire.
+
 ## Conséquences
 
 - Installation neuve uniquement (ADR 0012) : pas de migration de données ; une migration supprime

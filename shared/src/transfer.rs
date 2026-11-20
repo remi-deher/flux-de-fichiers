@@ -8,6 +8,44 @@ use uuid::Uuid;
 /// fichier de travail, requêtes HTTP du worker.
 pub const FILE_TRANSFER_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
+/// Nature d'un artefact retenu chez un worker (ADR 0022).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactKind {
+    /// Fichier de travail remis à un autre worker en cours de flux.
+    Working,
+    /// Résultat final que le détenteur de la bibliothèque vient tirer.
+    Result,
+}
+
+impl ArtifactKind {
+    /// Forme stockée en base et utilisée dans les chemins d'API.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Working => "working",
+            Self::Result => "result",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "working" => Some(Self::Working),
+            "result" => Some(Self::Result),
+            _ => None,
+        }
+    }
+}
+
+/// Fichier retenu par un worker, que d'autres workers viennent tirer en direct : le central n'en
+/// garde que la description. `root` est le dossier du détenteur, `name` le fichier sous cette racine.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactDeclaration {
+    pub root: String,
+    pub name: String,
+    pub sha256: String,
+    pub bytes: i64,
+}
+
 /// En-tête portant le billet de transfert sur la route de lecture du worker source.
 pub const TRANSFER_TICKET_HEADER: &str = "x-transfer-ticket";
 
@@ -94,6 +132,16 @@ mod tests {
         };
         let json = serde_json::to_string(&ticket)?;
         assert_eq!(serde_json::from_str::<SourceTicket>(&json)?, ticket);
+        Ok(())
+    }
+
+    #[test]
+    fn artifact_kind_strings_match_serde_and_parse_back() -> Result<(), serde_json::Error> {
+        for kind in [ArtifactKind::Working, ArtifactKind::Result] {
+            assert_eq!(serde_json::to_string(&kind)?, format!("\"{}\"", kind.as_str()));
+            assert_eq!(ArtifactKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(ArtifactKind::parse("source"), None);
         Ok(())
     }
 

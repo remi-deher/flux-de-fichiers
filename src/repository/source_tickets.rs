@@ -1,4 +1,4 @@
-//! Billets de lecture d'une source détenue par un autre worker (ADR 0019).
+//! Billets de lecture d'une source ou d'un artefact détenu par un autre worker (ADR 0019 et 0022).
 
 use crate::{
     domain::{Claim, JobStatus, LeaseRequest},
@@ -6,7 +6,7 @@ use crate::{
     opaque_token::{new_opaque_token, sha256_hex},
 };
 use forgearr_shared::{
-    transfer::{SOURCE_TICKET_TTL_SECONDS, SourceTicket, TransferGrant},
+    transfer::{ArtifactKind, SOURCE_TICKET_TTL_SECONDS, SourceTicket, TransferGrant},
     workers::WORKER_ONLINE_SECONDS,
 };
 use sqlx::SqlitePool;
@@ -99,22 +99,13 @@ async fn source_holders_matching(
         && let Some(source) = super::job_source(pool, job_id).await?
         && (!writable || (source.source_writable && source.source_key.is_none()))
         && let Some(owner) = source.source_worker_id.filter(|owner| *owner != exclude)
+        && let Some((transfer_url, true)) = worker_reach(pool, owner).await?
     {
-        let row: Option<(Option<String>, bool)> = sqlx::query_as(
-            "SELECT transfer_url, last_seen > datetime('now', '-' || ?2 || ' seconds') \
-             FROM workers WHERE id=?1",
-        )
-        .bind(owner)
-        .bind(WORKER_ONLINE_SECONDS)
-        .fetch_optional(pool)
-        .await?;
-        if let Some((transfer_url, true)) = row {
-            holders.push(SourceHolder {
-                worker_id: owner,
-                root: source.source_root,
-                transfer_url,
-            });
-        }
+        holders.push(SourceHolder {
+            worker_id: owner,
+            root: source.source_root,
+            transfer_url,
+        });
     }
     Ok(holders)
 }
@@ -176,32 +167,98 @@ async fn issue_source_ticket(
     else {
         return Ok(None);
     };
+    let ticket = store_ticket(pool, holder, url, job_id, worker, lease_epoch, None).await?;
+    Ok(Some(ticket))
+}
+
+/// Billet pour tirer un artefact retenu chez son détenteur : `None` si l'artefact n'existe pas, si
+/// le preneur est le détenteur, ou si le détenteur n'est pas en ligne avec une adresse annoncée.
+pub async fn issue_artifact_ticket(
+    pool: &SqlitePool,
+    job_id: Uuid,
+    kind: ArtifactKind,
+    taker: Uuid,
+    lease_epoch: i64,
+) -> AppResult<Option<SourceTicket>> {
+    let Some(artifact) = super::get_artifact(pool, job_id, kind).await? else {
+        return Ok(None);
+    };
+    if artifact.holder_worker_id == taker {
+        return Ok(None);
+    }
+    let Some((Some(url), true)) = worker_reach(pool, artifact.holder_worker_id).await? else {
+        return Ok(None);
+    };
+    let ticket = store_ticket(
+        pool,
+        artifact.holder_worker_id,
+        url,
+        job_id,
+        taker,
+        lease_epoch,
+        Some(kind),
+    )
+    .await?;
+    Ok(Some(ticket))
+}
+
+/// Adresse de transfert annoncée par un worker et sa présence en ligne ; `None` s'il est inconnu.
+async fn worker_reach(
+    pool: &SqlitePool,
+    worker: Uuid,
+) -> AppResult<Option<(Option<String>, bool)>> {
+    let reach: Option<(Option<String>, bool)> = sqlx::query_as(
+        "SELECT transfer_url, last_seen > datetime('now', '-' || ?2 || ' seconds') \
+         FROM workers WHERE id=?1",
+    )
+    .bind(worker)
+    .bind(WORKER_ONLINE_SECONDS)
+    .fetch_optional(pool)
+    .await?;
+    Ok(reach)
+}
+
+/// Enregistre un billet (seule l'empreinte du secret est conservée). Il remplace les billets
+/// précédents du même preneur, du même bail et de la même cible (source ou nature d'artefact).
+async fn store_ticket(
+    pool: &SqlitePool,
+    holder: Uuid,
+    url: String,
+    job_id: Uuid,
+    taker: Uuid,
+    lease_epoch: i64,
+    artifact: Option<ArtifactKind>,
+) -> AppResult<SourceTicket> {
     let token = new_opaque_token();
+    let artifact_kind = artifact.map(ArtifactKind::as_str);
     sqlx::query("DELETE FROM source_tickets WHERE expires_at <= datetime('now')")
         .execute(pool)
         .await?;
     sqlx::query(
-        "DELETE FROM source_tickets WHERE job_id=?1 AND target_worker_id=?2 AND lease_epoch=?3",
+        "DELETE FROM source_tickets \
+         WHERE job_id=?1 AND target_worker_id=?2 AND lease_epoch=?3 AND artifact_kind IS ?4",
     )
     .bind(job_id)
-    .bind(worker)
+    .bind(taker)
     .bind(lease_epoch)
+    .bind(artifact_kind)
     .execute(pool)
     .await?;
     sqlx::query(
         "INSERT INTO source_tickets(token_hash, job_id, source_worker_id, target_worker_id, \
-             lease_epoch, expires_at) \
-         VALUES(?1, ?2, ?3, ?4, ?5, datetime('now', '+' || ?6 || ' seconds'))",
+             lease_epoch, expires_at, artifact_kind) \
+         VALUES(?1, ?2, ?3, ?4, ?5, datetime('now', '+' || ?6 || ' seconds'), ?7)",
     )
     .bind(sha256_hex(&token))
     .bind(job_id)
     .bind(holder)
-    .bind(worker)
+    .bind(taker)
     .bind(lease_epoch)
     .bind(SOURCE_TICKET_TTL_SECONDS)
+    .bind(artifact_kind)
     .execute(pool)
     .await?;
-    Ok(Some(SourceTicket { url, token }))
+    Ok(SourceTicket { url, token })
 }
 
 /// Valide un billet présenté au worker source et dit ce qu'il doit servir.
@@ -213,18 +270,31 @@ pub async fn redeem_ticket(
     token: &str,
     source_worker: Uuid,
 ) -> AppResult<TransferGrant> {
-    let row: Option<(Uuid, i64)> = sqlx::query_as(
-        "SELECT job_id, lease_epoch FROM source_tickets \
+    let row: Option<(Uuid, i64, Option<String>)> = sqlx::query_as(
+        "SELECT job_id, lease_epoch, artifact_kind FROM source_tickets \
          WHERE token_hash=?1 AND source_worker_id=?2 AND expires_at > datetime('now')",
     )
     .bind(sha256_hex(token))
     .bind(source_worker)
     .fetch_optional(pool)
     .await?;
-    let (job_id, lease_epoch) = row.ok_or(AppError::Unauthorized)?;
+    let (job_id, lease_epoch, artifact_kind) = row.ok_or(AppError::Unauthorized)?;
     let job = super::get_job(pool, job_id).await?;
     if job.status != JobStatus::Running || job.lease_epoch != lease_epoch {
         return Err(AppError::Conflict);
+    }
+    if let Some(raw_kind) = artifact_kind {
+        let kind = ArtifactKind::parse(&raw_kind).ok_or(AppError::Internal)?;
+        let artifact = super::get_artifact(pool, job_id, kind)
+            .await?
+            .filter(|artifact| artifact.holder_worker_id == source_worker)
+            .ok_or(AppError::NotFound)?;
+        return Ok(TransferGrant {
+            root: artifact.declaration.root,
+            source_name: artifact.declaration.name,
+            sha256: artifact.declaration.sha256,
+            bytes: artifact.declaration.bytes,
+        });
     }
     // Racine chez ce détenteur : son montage vérifié, sinon la racine enregistrée sur la tâche.
     let mount: Option<String> = sqlx::query_scalar(

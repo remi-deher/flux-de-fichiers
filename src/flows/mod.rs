@@ -244,6 +244,7 @@ impl<'a> FlowEngine<'a> {
 
         let mut current_working_file = source_file.to_path_buf();
         let mut is_in_place = true;
+        let mut source_modified_in_place = false;
         let mut final_warning = false;
         let mut last_output_spec: Option<OutputSpec> = None;
         let mut steps: Vec<crate::domain::JobStepEntry> = Vec::new();
@@ -354,9 +355,9 @@ impl<'a> FlowEngine<'a> {
                         }
                     }
                     PrimitiveKind::Relay => {
-                        let decided = if current_working_file != source_file || !is_in_place {
+                        let decided = if source_modified_in_place {
                             Err(
-                                "le relais n'est possible qu'avant tout traitement du fichier"
+                                "le transfert est impossible après modification de la source en place"
                                     .to_owned(),
                             )
                         } else {
@@ -413,6 +414,9 @@ impl<'a> FlowEngine<'a> {
                     .await;
                     match outcome {
                         Ok(res) => {
+                            if res.modified_in_place && current_working_file == source_file {
+                                source_modified_in_place = true;
+                            }
                             if let Some(updated_info) = res.updated_media_info {
                                 ctx.media_info = updated_info;
                             }

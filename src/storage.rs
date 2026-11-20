@@ -77,6 +77,22 @@ pub async fn fingerprint(path: &Path, limit: u64) -> AppResult<(String, u64)> {
     Ok((format!("{:x}", hash.finalize()), total))
 }
 
+/// Un fichier de travail transmis doit rester dans le dossier privé du bail.
+pub async fn verified_working_path(path: &Path, work_dir: &Path) -> AppResult<PathBuf> {
+    let root = tokio::fs::canonicalize(work_dir).await?;
+    let file = tokio::fs::canonicalize(path).await?;
+    if !file.starts_with(&root) || !tokio::fs::metadata(&file).await?.is_file() {
+        return Err(AppError::Invalid);
+    }
+    Ok(file)
+}
+
+/// Rend durable la création ou le renommage d'un fichier dans un répertoire.
+pub async fn sync_directory(path: &Path) -> AppResult<()> {
+    tokio::fs::File::open(path).await?.sync_all().await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,6 +118,36 @@ mod tests {
         std::os::unix::fs::symlink("source.mkv", dir.path().join("link.mkv"))?;
         assert!(input_path(dir.path(), "link.mkv").await.is_err());
         assert_eq!(list_inputs(dir.path(), 100).await?.len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn working_path_rejects_a_symlink_outside_the_job_directory() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let work = dir.path().join("work");
+        tokio::fs::create_dir(&work).await?;
+        let inside = work.join("working.mkv");
+        let outside = dir.path().join("outside.mkv");
+        tokio::fs::write(&inside, b"inside").await?;
+        tokio::fs::write(&outside, b"outside").await?;
+        std::os::unix::fs::symlink(&outside, work.join("link.mkv"))?;
+        assert_eq!(
+            verified_working_path(&inside, &work).await?,
+            tokio::fs::canonicalize(&inside).await?
+        );
+        assert!(
+            verified_working_path(&work.join("link.mkv"), &work)
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn syncing_an_existing_directory_succeeds() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        tokio::fs::write(dir.path().join("file"), b"data").await?;
+        sync_directory(dir.path()).await?;
         Ok(())
     }
 }

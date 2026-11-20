@@ -252,11 +252,18 @@ fn WorkerTelemetrySection(telemetry: forgearr_shared::workers::WorkerTelemetry) 
 
 /// Libellés des encodeurs matériels déclarés par un worker (ex. « H.265 · NVENC »).
 fn encoder_labels(capabilities: &forgearr_shared::capabilities::WorkerCapabilities) -> Vec<String> {
-    capabilities
+    let hardware = capabilities
         .hardware_encoders
         .iter()
-        .map(|encoder| encoder.label())
-        .collect()
+        .map(|encoder| encoder.label());
+    let software = capabilities.software_encoders.iter().map(|codec| {
+        format!(
+            "{} · {}",
+            codec.label(),
+            forgearr_shared::capabilities::EncodeAcceleration::Cpu.label()
+        )
+    });
+    hardware.chain(software).collect()
 }
 
 /// Rangée d'étiquettes ; rien n'est affiché quand la liste est vide.
@@ -1129,12 +1136,16 @@ mod tests {
         };
         let capabilities = WorkerCapabilities {
             gpu_models: Vec::new(),
+            software_encoders: vec![VideoCodec::Av1],
             hardware_encoders: vec![HardwareEncoder {
                 codec: VideoCodec::Hevc,
                 acceleration: EncodeAcceleration::Nvenc,
             }],
         };
-        assert_eq!(encoder_labels(&capabilities), ["H.265 · NVENC"]);
+        assert_eq!(
+            encoder_labels(&capabilities),
+            ["H.265 · NVENC", "AV1 · CPU"]
+        );
         assert!(encoder_labels(&WorkerCapabilities::default()).is_empty());
     }
 }

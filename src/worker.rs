@@ -28,6 +28,7 @@ const REMOTE_BROWSE_HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 const REMOTE_BROWSE_REPORT_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_BROWSE_RETRY_DELAY: Duration = Duration::from_secs(2);
 mod handoff;
+mod local_apply;
 mod result_pull;
 pub(crate) mod timing;
 use timing::{

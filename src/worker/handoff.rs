@@ -232,10 +232,10 @@ impl WorkerLoop {
         let ready = ResultReady {
             extension: extension.to_owned(),
             warning,
-            can_apply_locally: false,
+            can_apply_locally: true,
         };
         let announced = self
-            .declare_and_announce(claim, worker, &declaration, &ready)
+            .deliver_result(claim, worker, &declaration, &ready, result_file)
             .await;
         // Publié ou renvoyé au central, le fichier ne sert plus ; en cas d'échec il reste jusqu'à
         // la purge, seule copie du résultat.
@@ -245,13 +245,36 @@ impl WorkerLoop {
         announced
     }
 
+    /// Déclare le résultat, puis le livre selon la réponse du central : tiré par un autre détenteur,
+    /// appliqué ici (le worker détient la bibliothèque) ou à envoyer au central (`false`).
+    async fn deliver_result(
+        &self,
+        claim: &Claim,
+        worker: Uuid,
+        declaration: &ArtifactDeclaration,
+        ready: &ResultReady,
+        result_file: &Path,
+    ) -> anyhow::Result<bool> {
+        let announced = self
+            .declare_and_announce(claim, worker, declaration, ready)
+            .await?;
+        let Some(local) = announced.apply_locally else {
+            return Ok(announced.pulled);
+        };
+        let extension = ready.extension.as_str();
+        let applied = self
+            .apply_locally(claim, worker, &local, result_file, extension)
+            .await;
+        applied.map(|()| true)
+    }
+
     async fn declare_and_announce(
         &self,
         claim: &Claim,
         worker: Uuid,
         declaration: &ArtifactDeclaration,
         ready: &ResultReady,
-    ) -> anyhow::Result<bool> {
+    ) -> anyhow::Result<ResultReadyResponse> {
         self.leased(reqwest::Method::PUT, claim, worker, DECLARE_RESULT_ACTION)
             .timeout(REMOTE_BROWSE_HTTP_TIMEOUT)
             .json(declaration)
@@ -267,7 +290,7 @@ impl WorkerLoop {
         if !response.status().is_success() {
             return Err(publication_failure(response).await);
         }
-        Ok(response.json::<ResultReadyResponse>().await?.pulled)
+        Ok(response.json::<ResultReadyResponse>().await?)
     }
 
     /// Tire le fichier de travail chez son détenteur, le vérifie, puis confirme la réception au

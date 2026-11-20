@@ -2,6 +2,7 @@ use super::AppState;
 use crate::{
     domain::{Job, JobEventType, JobStatus, LeaseRequest},
     error::{AppError, AppResult},
+    library_scan::central_writable_job_source,
     media, repository, storage,
 };
 use axum::{
@@ -221,7 +222,13 @@ pub(crate) async fn publish_staged(
     if let Some(library_id) = job.library_id {
         let library = repository::get_library(&s.pool, library_id).await?;
         if library.output_policy != crate::domain::LibraryOutputPolicy::OutputDir {
-            // Écarter une erreur de stockage centrale avant de modifier la source distante.
+            // Seule une source que le central voit s'applique ici ; sinon un autre worker la détient
+            // et tire le résultat chez le worker qui le retient (ADR 0022).
+            let central_source = central_writable_job_source(&s.pool, &s.config.input_dir, job)
+                .await
+                .map_err(crate::source_publication::missing_source_is_changed)?
+                .ok_or(AppError::ResultUndeliverable)?;
+            // Écarter une erreur de stockage centrale avant de modifier la source.
             // La copie reste disponible si le résultat du remplacement devient incertain.
             repository::active(&s.pool, id, lease).await?;
             tokio::fs::hard_link(staging, &destination).await?;
@@ -250,40 +257,16 @@ pub(crate) async fn publish_staged(
                 return Err(error);
             }
             output_prepared = true;
-            let replacement = async {
-                let local_source = crate::library_scan::central_writable_job_source(
-                    &s.pool,
-                    &s.config.input_dir,
-                    job,
-                )
-                .await
-                .map_err(crate::source_publication::missing_source_is_changed)?;
-                if let Some(source_path) = local_source {
-                    crate::source_publication::apply_library_output_policy(
-                        library.output_policy,
-                        &source_path,
-                        staging,
-                        &spec.extension,
-                        job.source_sha256.as_deref().ok_or(AppError::Invalid)?,
-                        job.source_bytes.ok_or(AppError::Invalid)?,
-                        s.config.max_file_bytes,
-                        async { repository::active(&s.pool, id, lease).await.map(|_| ()) },
-                    )
-                    .await
-                } else {
-                    super::source_publication::publish_on_holder(
-                        s,
-                        job,
-                        lease,
-                        super::source_publication::ResultSource::Staged(staging),
-                        &hash,
-                        i64::try_from(size).map_err(|_| AppError::TooLarge)?,
-                        &spec.extension,
-                        library.output_policy,
-                    )
-                    .await
-                }
-            }
+            let replacement = crate::source_publication::apply_library_output_policy(
+                library.output_policy,
+                &central_source,
+                staging,
+                &spec.extension,
+                job.source_sha256.as_deref().ok_or(AppError::Invalid)?,
+                job.source_bytes.ok_or(AppError::Invalid)?,
+                s.config.max_file_bytes,
+                async { repository::active(&s.pool, id, lease).await.map(|_| ()) },
+            )
             .await;
             if let Err(error) = replacement {
                 // Une source modifiée a été refusée avant remplacement ; les autres erreurs

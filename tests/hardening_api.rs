@@ -1470,7 +1470,7 @@ async fn the_holder_gets_a_fresh_ticket_to_pull_the_result_from_the_worker_that_
     let broker = h.publication.clone();
     let waiting = tokio::spawn(async move {
         broker
-            .request_pulled(task, job.id, lease, Duration::from_secs(5))
+            .request(task, job.id, lease, Duration::from_secs(5))
             .await
     });
     let ticket_uri =
@@ -1543,8 +1543,6 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
     .bind(job.id)
     .execute(&h.pool)
     .await?;
-    let staged = h._dirs.0.path().join("result.mkv");
-    std::fs::write(&staged, b"result")?;
     let task = SourcePublicationTask {
         request_id: Uuid::new_v4(),
         worker_id: holder,
@@ -1568,7 +1566,7 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
     let broker = h.publication.clone();
     let waiting = tokio::spawn(async move {
         broker
-            .request(task, staged, job.id, lease, Duration::from_secs(5))
+            .request(task, job.id, lease, Duration::from_secs(5))
             .await
     });
     let wrong = format!("/api/v1/worker/source-publications/pending?worker_id={other}");
@@ -1584,22 +1582,6 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
         json_call(&h.app, "GET", &pending, Some(common::WORKER_KEY), None).await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(tasks[0]["request_id"], request_id.to_string());
-    let uri = format!("/api/v1/worker/source-publications/{request_id}/staged?worker_id={holder}");
-    let response = h
-        .app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri(&uri)
-                .header("authorization", format!("Bearer {}", common::WORKER_KEY))
-                .body(Body::empty())?,
-        )
-        .await?;
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        to_bytes(response.into_body(), JSON_LIMIT).await?.as_ref(),
-        b"result"
-    );
     let authorize =
         format!("/api/v1/worker/source-publications/{request_id}/authorize?worker_id={holder}");
     assert_eq!(
@@ -1612,12 +1594,6 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
         .bind(claim.job_id)
         .execute(&h.pool)
         .await?;
-    assert_eq!(
-        json_call(&h.app, "GET", &uri, Some(common::WORKER_KEY), None)
-            .await?
-            .0,
-        StatusCode::CONFLICT
-    );
     assert_eq!(
         json_call(&h.app, "GET", &authorize, Some(common::WORKER_KEY), None)
             .await?

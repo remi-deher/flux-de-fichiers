@@ -1,5 +1,5 @@
 //! Lecture, par le détenteur de la bibliothèque, du résultat à appliquer : chez le worker qui le
-//! retient (ADR 0022) ou, pour l'ancien envoi, chez le central.
+//! retient, avec le billet de la demande (ADR 0022).
 
 use super::{REMOTE_BROWSE_HTTP_TIMEOUT, WorkerLoop};
 use crate::{
@@ -11,18 +11,16 @@ use std::path::Path;
 use uuid::Uuid;
 
 impl WorkerLoop {
-    /// Lit le résultat de la demande dans `dest` : chez le worker qui le retient quand elle porte un
-    /// billet, sinon chez le central. Taille et empreinte annoncées sont vérifiées.
+    /// Lit le résultat de la demande dans `dest`, chez le worker qui le retient. Taille et empreinte
+    /// annoncées sont vérifiées.
     pub(super) async fn fetch_result(
         &self,
         prefix: &str,
         task: &SourcePublicationTask,
         dest: &Path,
     ) -> AppResult<()> {
-        match task.result_ticket.clone() {
-            Some(ticket) => self.pull_result(prefix, task, ticket, dest).await,
-            None => self.fetch_staged_result(prefix, task, dest).await,
-        }
+        let ticket = task.result_ticket.clone().ok_or(AppError::Invalid)?;
+        self.pull_result(prefix, task, ticket, dest).await
     }
 
     async fn pull_result(
@@ -61,30 +59,5 @@ impl WorkerLoop {
             .error_for_status()?
             .json::<Option<SourceTicket>>()
             .await?)
-    }
-
-    async fn fetch_staged_result(
-        &self,
-        prefix: &str,
-        task: &SourcePublicationTask,
-        dest: &Path,
-    ) -> AppResult<()> {
-        let path = format!("{prefix}/staged?worker_id={}", task.worker_id);
-        let response = self
-            .request(reqwest::Method::GET, &path)
-            .send()
-            .await
-            .map_err(|_| AppError::CentralUnavailable)?
-            .error_for_status()
-            .map_err(|_| AppError::CentralUnavailable)?;
-        worker_transfer::save_verified(
-            response,
-            dest,
-            self.config.max_bytes,
-            &task.result_sha256,
-            task.result_bytes,
-        )
-        .await
-        .map_err(|_| AppError::Invalid)
     }
 }

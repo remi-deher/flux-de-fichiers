@@ -32,9 +32,6 @@ async fn inspect_holders(
     let Some(source_bytes) = job.source_bytes else {
         return Ok(false);
     };
-    let output = pending
-        .has_central_copy()
-        .then(|| s.config.data_dir.join("output").join(&pending.output_name));
     for holder in repository::writable_source_holders(&s.pool, job.id, Uuid::nil()).await? {
         let task = SourcePublicationTask {
             request_id: Uuid::new_v4(),
@@ -51,18 +48,9 @@ async fn inspect_holders(
         };
         let (job_id, lease) = (job.id, lease.clone());
         let inspection = &s.source_inspection;
-        let result = match output.clone() {
-            Some(staged) => {
-                inspection
-                    .request(task, staged, job_id, lease, INSPECTION_TIMEOUT)
-                    .await
-            }
-            None => {
-                inspection
-                    .request_pulled(task, job_id, lease, INSPECTION_TIMEOUT)
-                    .await
-            }
-        };
+        let result = inspection
+            .request(task, job_id, lease, INSPECTION_TIMEOUT)
+            .await;
         if matches!(result, Ok(SourcePublicationOutcome::Published)) {
             let still_authorized =
                 repository::writable_source_holders(&s.pool, job.id, Uuid::nil())

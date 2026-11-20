@@ -7,13 +7,12 @@ use crate::{
 use forgearr_shared::transfer::{
     SourcePublicationOutcome, SourcePublicationReport, SourcePublicationTask,
 };
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, Notify, oneshot};
 use uuid::Uuid;
 
 struct Pending {
     task: SourcePublicationTask,
-    staged: Option<PathBuf>,
     job_id: Uuid,
     lease: LeaseRequest,
     dispatched: bool,
@@ -23,9 +22,6 @@ struct Pending {
 /// Contexte de bail gardé par le central et jamais envoyé au détenteur.
 #[derive(Clone)]
 pub struct PublicationAccess {
-    /// Fichier tenu par le central (ancien envoi) ; absent quand le détenteur tire le résultat chez
-    /// le worker qui le retient.
-    pub staged: Option<PathBuf>,
     pub job_id: Uuid,
     pub lease: LeaseRequest,
     pub root: String,
@@ -43,35 +39,11 @@ pub struct SourcePublicationBroker {
 }
 
 impl SourcePublicationBroker {
-    /// Enregistre la demande et attend la réponse du détenteur pendant une durée bornée.
+    /// Enregistre la demande et attend la réponse du détenteur pendant une durée bornée. Le détenteur
+    /// tire le résultat chez le worker qui le retient : le central ne tient aucun fichier.
     pub async fn request(
         &self,
         task: SourcePublicationTask,
-        staged: PathBuf,
-        job_id: Uuid,
-        lease: LeaseRequest,
-        timeout: Duration,
-    ) -> AppResult<SourcePublicationOutcome> {
-        self.request_with(task, Some(staged), job_id, lease, timeout)
-            .await
-    }
-
-    /// Comme [`Self::request`], pour un résultat que le détenteur tire chez le worker qui le
-    /// retient (le central ne tient aucun fichier).
-    pub async fn request_pulled(
-        &self,
-        task: SourcePublicationTask,
-        job_id: Uuid,
-        lease: LeaseRequest,
-        timeout: Duration,
-    ) -> AppResult<SourcePublicationOutcome> {
-        self.request_with(task, None, job_id, lease, timeout).await
-    }
-
-    async fn request_with(
-        &self,
-        task: SourcePublicationTask,
-        staged: Option<PathBuf>,
         job_id: Uuid,
         lease: LeaseRequest,
         timeout: Duration,
@@ -87,7 +59,6 @@ impl SourcePublicationBroker {
                 id,
                 Pending {
                     task,
-                    staged,
                     job_id,
                     lease,
                     dispatched: false,
@@ -134,7 +105,7 @@ impl SourcePublicationBroker {
         }
     }
 
-    /// Rend le fichier temporaire uniquement au détenteur auquel la demande a été remise.
+    /// Rend le contexte de bail uniquement au détenteur auquel la demande a été remise.
     pub async fn access_for_worker(
         &self,
         request: Uuid,
@@ -147,7 +118,6 @@ impl SourcePublicationBroker {
             .get(&request)
             .filter(|p| p.dispatched && p.task.worker_id == worker && !p.result.is_closed())
             .map(|p| PublicationAccess {
-                staged: p.staged.clone(),
                 job_id: p.job_id,
                 lease: p.lease.clone(),
                 root: p.task.root.clone(),
@@ -200,7 +170,6 @@ mod tests {
             requester
                 .request(
                     task,
-                    PathBuf::from("/staged"),
                     Uuid::new_v4(),
                     LeaseRequest {
                         worker_id: Uuid::new_v4(),
@@ -220,13 +189,7 @@ mod tests {
                 .await
                 .is_none()
         );
-        assert_eq!(
-            broker
-                .access_for_worker(request_id, holder)
-                .await
-                .map(|access| access.staged),
-            Some(Some(PathBuf::from("/staged")))
-        );
+        assert!(broker.access_for_worker(request_id, holder).await.is_some());
         let report = SourcePublicationReport {
             request_id,
             worker_id: holder,
@@ -257,7 +220,6 @@ mod tests {
             requester
                 .request(
                     task,
-                    PathBuf::from("/staged"),
                     Uuid::new_v4(),
                     LeaseRequest {
                         worker_id: Uuid::new_v4(),

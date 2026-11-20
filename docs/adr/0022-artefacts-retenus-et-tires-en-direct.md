@@ -201,8 +201,16 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
      copies comme un worker distant (`retained.rs`, partagé). Sans adresse, ou quand le résultat
      s'applique sur place (source du central, dossier de sortie), il garde `publish_staged` et refuse
      le relais.
-   - 5c — suppression de `GET /source` et de la lecture `staged`, de `publish_staged`, du courtier
-     de publication et des requêtes SQL qui nomment `INTEGRATED_WORKER_NAME`.
+   - **5c-i (fait) — plus de lecture `staged` ni de résultat tenu par le central** : la route
+     `source-publications/{id}/staged`, `ResultSource::Staged`, la lecture de repli du worker et le
+     fichier du courtier de publication sont supprimés (`SourcePublicationBroker::request` ne porte plus
+     que la demande). `publish_staged` ne sert plus que les sources que le central voit ; pour une
+     source tenue par un autre worker, sans adresse de transfert du worker intégré, il refuse avant tout
+     changement (`result_undeliverable`).
+   - 5c-ii — dossiers du central (bibliothèques et dépôt d'entrée) attribués au worker intégré comme
+     montages ordinaires : alors `GET /source`, `publish_staged`, la copie centrale du résultat et les
+     requêtes SQL qui nomment `INTEGRATED_WORKER_NAME` disparaissent. Demande une décision de modèle
+     de données (dossier sans worker = dossier du worker intégré) avant d'être poussée.
 
 ## Conséquences
 

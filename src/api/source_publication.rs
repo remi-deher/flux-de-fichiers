@@ -10,7 +10,6 @@ use axum::{
     Json,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::Response,
 };
 use forgearr_shared::transfer::{
     ArtifactKind, SourcePublicationOutcome, SourcePublicationReport, SourcePublicationTask,
@@ -23,22 +22,15 @@ use uuid::Uuid;
 const MAX_PENDING_WAIT_MS: u64 = 15_000;
 const PUBLICATION_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
-/// D'où le détenteur lit le résultat.
-pub(crate) enum ResultSource<'a> {
-    /// Fichier tenu par le central (ancien envoi).
-    Staged(&'a std::path::Path),
-    /// Fichier retenu par le worker qui l'a produit : le détenteur choisi le tire en direct avec
-    /// ce billet (ADR 0022).
-    Pulled(repository::SourceHolder, SourceTicket),
-}
-
-/// Transmet le résultat à un détenteur inscriptible, sans le déclarer réussi avant sa réponse.
+/// Transmet le résultat à un détenteur inscriptible, sans le déclarer réussi avant sa réponse : il le
+/// tire en direct chez le worker qui le retient avec ce billet (ADR 0022).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn publish_on_holder(
     s: &AppState,
     job: &Job,
     lease: &LeaseRequest,
-    source: ResultSource<'_>,
+    holder: repository::SourceHolder,
+    result_ticket: SourceTicket,
     result_hash: &str,
     result_bytes: i64,
     extension: &str,
@@ -49,20 +41,6 @@ pub(crate) async fn publish_on_holder(
     {
         return Err(AppError::Invalid);
     }
-    let holder = match &source {
-        ResultSource::Pulled(holder, _) => holder.clone(),
-        ResultSource::Staged(_) => {
-            repository::writable_source_holders(&s.pool, job.id, Uuid::nil())
-                .await?
-                .into_iter()
-                .next()
-                .ok_or(AppError::CentralUnavailable)?
-        }
-    };
-    let result_ticket = match &source {
-        ResultSource::Staged(_) => None,
-        ResultSource::Pulled(_, ticket) => Some(ticket.clone()),
-    };
     let task = SourcePublicationTask {
         request_id: Uuid::new_v4(),
         worker_id: holder.worker_id,
@@ -74,27 +52,12 @@ pub(crate) async fn publish_on_holder(
         result_bytes,
         extension: extension.to_owned(),
         policy,
-        result_ticket,
+        result_ticket: Some(result_ticket),
     };
     let broker = &s.source_publication;
-    let outcome = match source {
-        ResultSource::Staged(staged) => {
-            broker
-                .request(
-                    task,
-                    staged.to_path_buf(),
-                    job.id,
-                    lease.clone(),
-                    PUBLICATION_TIMEOUT,
-                )
-                .await?
-        }
-        ResultSource::Pulled(..) => {
-            broker
-                .request_pulled(task, job.id, lease.clone(), PUBLICATION_TIMEOUT)
-                .await?
-        }
-    };
+    let outcome = broker
+        .request(task, job.id, lease.clone(), PUBLICATION_TIMEOUT)
+        .await?;
     match outcome {
         SourcePublicationOutcome::Published => {
             repository::active(&s.pool, job.id, lease).await?;
@@ -137,23 +100,6 @@ async fn pending_for(
     crate::auth::authorize_worker_identity(&s.pool, headers, query.worker_id).await?;
     let wait = Duration::from_millis(query.wait_ms.unwrap_or(0).min(MAX_PENDING_WAIT_MS));
     Ok(Json(broker.take_for_worker(query.worker_id, wait).await))
-}
-
-pub async fn staged(
-    State(s): State<AppState>,
-    headers: HeaderMap,
-    Path(id): Path<Uuid>,
-    Query(query): Query<HolderQuery>,
-) -> AppResult<Response> {
-    crate::auth::authorize_worker_identity(&s.pool, &headers, query.worker_id).await?;
-    let access = s
-        .source_publication
-        .access_for_worker(id, query.worker_id)
-        .await
-        .ok_or(AppError::NotFound)?;
-    repository::active(&s.pool, access.job_id, &access.lease).await?;
-    let staged = access.staged.ok_or(AppError::NotFound)?;
-    super::transfers::stream_file(&staged, None, "application/octet-stream").await
 }
 
 /// Le détenteur redemande un billet pour tirer le résultat chez le worker qui le retient (billet

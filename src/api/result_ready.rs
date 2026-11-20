@@ -3,7 +3,7 @@
 
 use super::{
     AppState,
-    source_publication::{ResultSource, publish_on_holder},
+    source_publication::publish_on_holder,
     transfers,
 };
 use crate::{
@@ -286,7 +286,8 @@ pub(crate) async fn publish_pulled(
         s,
         job,
         lease,
-        ResultSource::Pulled(holder, ticket),
+        holder,
+        ticket,
         &declared.sha256,
         declared.bytes,
         &ready.extension,

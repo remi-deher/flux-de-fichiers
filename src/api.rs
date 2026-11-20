@@ -558,10 +558,6 @@ fn transfer_routes() -> Router<AppState> {
             get(source_publication::pending),
         )
         .route(
-            "/api/v1/worker/source-publications/{id}/staged",
-            get(source_publication::staged),
-        )
-        .route(
             "/api/v1/worker/source-publications/{id}/authorize",
             get(source_publication::authorize_commit),
         )

@@ -95,7 +95,7 @@ async fn the_holder_pulls_the_retained_result_and_no_central_copy_is_kept() -> a
         .access_for_worker(task.request_id, holder)
         .await
         .ok_or_else(|| anyhow::anyhow!("le détenteur doit avoir accès à sa demande"))?;
-    assert!(access.staged.is_none(), "le central ne tient aucun fichier");
+    assert_eq!(access.job_id, job.id);
 
     answer(&state, holder, &task, SourcePublicationOutcome::Published).await?;
     publishing.await??;

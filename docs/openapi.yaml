@@ -143,14 +143,6 @@ paths:
         '200':
           description: Flux restauré
         default: {$ref: '#/components/responses/Error'}
-  /api/v1/jobs/{id}/delete:
-    delete:
-      security: [{ApiKey: []}, {WebSession: []}]
-      summary: Supprimer ou annuler une tâche (DELETE /api/v1/jobs/{id})
-      responses:
-        '204':
-          description: Tâche supprimée
-        default: {$ref: '#/components/responses/Error'}
   /api/v1/libraries/{id}/files/{name}:
     post:
       security: [{ApiKey: []}, {WebSession: []}]
@@ -429,6 +421,13 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Job'}
+        default: {$ref: '#/components/responses/Error'}
+    delete:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Supprimer ou annuler une tâche
+      responses:
+        '204':
+          description: Tâche supprimée
         default: {$ref: '#/components/responses/Error'}
   /api/v1/jobs/{id}/retry:
     parameters: [{$ref: '#/components/parameters/JobId'}]

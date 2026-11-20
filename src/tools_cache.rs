@@ -1,4 +1,7 @@
-use crate::error::{AppError, AppResult};
+use crate::{
+    error::{AppError, AppResult},
+    opaque_token::{encode_hex, sha256_hex},
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -10,6 +13,8 @@ use std::{
 };
 
 const EXECUTABLE_UNIX_MODE: u32 = 0o755;
+/// Taille des lectures pour calculer la somme de contrôle d'un fichier d'outil (8 Kio).
+const FILE_HASH_BUFFER_BYTES: usize = 8192;
 const DEFAULT_SAFE_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 
 /// Empreinte attendue d'un exécutable secondaire dans une archive multi-binaires.
@@ -479,16 +484,14 @@ impl ToolCacheManager {
 
     /// Calcule la somme de contrôle SHA-256 d'un tampon d'octets.
     pub fn compute_sha256(bytes: &[u8]) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(bytes);
-        Self::hex_encode(hasher.finalize())
+        sha256_hex(bytes)
     }
 
     /// Calcule la somme de contrôle SHA-256 d'un fichier sur disque en flux.
     pub fn compute_file_sha256(path: &Path) -> std::io::Result<String> {
         let mut file = fs::File::open(path)?;
         let mut hasher = Sha256::new();
-        let mut buffer = [0u8; 8192];
+        let mut buffer = [0u8; FILE_HASH_BUFFER_BYTES];
         loop {
             let bytes_read = file.read(&mut buffer)?;
             if bytes_read == 0 {
@@ -496,15 +499,7 @@ impl ToolCacheManager {
             }
             hasher.update(&buffer[..bytes_read]);
         }
-        Ok(Self::hex_encode(hasher.finalize()))
-    }
-
-    fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
-        bytes
-            .as_ref()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>()
+        Ok(encode_hex(&hasher.finalize()))
     }
 
     /// Vérifie qu'un chemin relatif est sécurisé (pas de `..`, pas de racine `/`).

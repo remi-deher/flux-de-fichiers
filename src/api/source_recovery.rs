@@ -12,39 +12,45 @@ pub(super) async fn fingerprint_matches(path: &Path, hash: &str, bytes: i64, lim
     matches!(storage::fingerprint(path, limit).await, Ok((actual_hash, actual_bytes)) if actual_hash == hash && i64::try_from(actual_bytes).ok() == Some(bytes))
 }
 
+/// Sans copie au central, le journal seul (empreinte du résultat) sert de référence.
+pub(super) async fn central_copy_matches(
+    s: &AppState,
+    pending: &repository::PendingSourcePublication,
+) -> AppResult<bool> {
+    if !pending.has_central_copy() {
+        return Ok(true);
+    }
+    let output =
+        storage::input_path(&s.config.data_dir.join("output"), &pending.output_name).await?;
+    Ok(fingerprint_matches(
+        &output,
+        &pending.output_sha256,
+        pending.output_bytes,
+        s.config.max_file_bytes,
+    )
+    .await)
+}
+
 /// Conclut seulement si les octets en place et la sauvegarde éventuelle correspondent au journal.
 async fn replacement_matches(
     s: &AppState,
     job: &Job,
     pending: &repository::PendingSourcePublication,
 ) -> AppResult<bool> {
-    if !storage::valid_name(&pending.output_name)
-        || !crate::library_scan::valid_relative_name(&job.source_name)
-    {
+    let named = !pending.has_central_copy() || storage::valid_name(&pending.output_name);
+    if !named || !crate::library_scan::valid_relative_name(&job.source_name) {
         return Ok(false);
     }
-    let Some(extension) = Path::new(&pending.output_name)
-        .extension()
-        .and_then(|value| value.to_str())
-        .filter(|value| storage::valid_output_extension(value))
-    else {
+    let extension = pending.output_extension.as_str();
+    if !storage::valid_output_extension(extension) {
         return Ok(false);
-    };
+    }
     let Some(root) =
         crate::library_scan::central_writable_job_root(&s.pool, &s.config.input_dir, job).await?
     else {
         return Ok(false);
     };
-    let output =
-        storage::input_path(&s.config.data_dir.join("output"), &pending.output_name).await?;
-    if !fingerprint_matches(
-        &output,
-        &pending.output_sha256,
-        pending.output_bytes,
-        s.config.max_file_bytes,
-    )
-    .await
-    {
+    if !central_copy_matches(s, pending).await? {
         return Ok(false);
     }
     let (Some(source_sha256), Some(source_bytes)) =
@@ -113,11 +119,15 @@ pub(super) async fn finalize(
         async { Ok(()) },
     )
     .await?;
-    let destination = s.config.data_dir.join("output").join(&pending.output_name);
-    if let Err(error) =
+    let destination = if pending.has_central_copy() {
+        s.config.data_dir.join("output").join(&pending.output_name)
+    } else {
+        std::path::PathBuf::from(&job.source_name)
+    };
+    let notified =
         crate::flows::publication::notify_after_publication(s, job, lease.worker_id, &destination)
-            .await
-    {
+            .await;
+    if let Err(error) = notified {
         tracing::warn!(job_id=%job.id, error=%error, "notification après reprise de publication indisponible");
     }
     s.notify_job_event(
@@ -180,6 +190,16 @@ mod tests {
     use super::*;
     use crate::domain::{JobErrorCode, LibraryOutputPolicy};
 
+    async fn central_source(s: &AppState, job: &Job) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE jobs SET source_worker_id=NULL,source_key=NULL,source_writable=1 WHERE id=?1",
+        )
+        .bind(job.id)
+        .execute(&s.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn interrupted(
         s: &AppState,
         job: &Job,
@@ -187,12 +207,7 @@ mod tests {
         output_name: &str,
         output: &[u8],
     ) -> anyhow::Result<()> {
-        sqlx::query(
-            "UPDATE jobs SET source_worker_id=NULL,source_key=NULL,source_writable=1 WHERE id=?1",
-        )
-        .bind(job.id)
-        .execute(&s.pool)
-        .await?;
+        central_source(s, job).await?;
         let result = s.config.data_dir.join("output").join(output_name);
         tokio::fs::write(&result, output).await?;
         let (hash, bytes) = storage::fingerprint(&result, s.config.max_file_bytes).await?;
@@ -229,6 +244,32 @@ mod tests {
                 .await?
                 .is_empty()
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn resumes_a_pulled_replacement_without_any_central_copy() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let (state, job, lease, _) = super::super::transfers::tests::setup(dir.path()).await?;
+        central_source(&state, &job).await?;
+        let hash = crate::opaque_token::sha256_hex(b"result");
+        let output = repository::PublishedOutput {
+            name: "",
+            sha256: &hash,
+            bytes: 6,
+            warning: false,
+        };
+        let policy = LibraryOutputPolicy::ReplaceWithBackup;
+        repository::begin_pulled_publication(&state.pool, job.id, &lease, output, "mp4", policy)
+            .await?;
+        tokio::fs::rename(dir.path().join("film.mkv"), dir.path().join("film.mkv.bak")).await?;
+        tokio::fs::write(dir.path().join("film.mp4"), b"result").await?;
+        recover(&state).await?;
+        let succeeded = repository::get_job(&state.pool, job.id).await?;
+        assert_eq!(succeeded.status, JobStatus::Succeeded);
+        assert!(succeeded.output_name.is_none(), "aucune copie au central");
+        let copies = std::fs::read_dir(state.config.data_dir.join("output"))?.count();
+        assert_eq!(copies, 0);
         Ok(())
     }
 

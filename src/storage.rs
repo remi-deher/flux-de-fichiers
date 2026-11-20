@@ -5,6 +5,10 @@ use crate::{
 use std::path::{Component, Path, PathBuf};
 
 const MAX_OUTPUT_EXTENSION_LENGTH: usize = 16;
+/// Fichiers listés au plus dans un dossier d'entrée (la liste reste utilisable dans l'interface).
+const MAX_LISTED_INPUT_FILES: usize = 500;
+/// Taille des lectures pour calculer l'empreinte d'un fichier (64 Kio).
+const FINGERPRINT_BUFFER_BYTES: usize = 64 * 1024;
 
 /// Une extension ne doit jamais contenir de séparateur ou de composant de chemin.
 pub fn valid_output_extension(extension: &str) -> bool {
@@ -54,7 +58,7 @@ pub async fn list_inputs(root: &Path, max_bytes: u64) -> AppResult<Vec<MediaFile
         if bytes > 0 && bytes <= max_bytes {
             files.push(MediaFile { name, bytes });
         }
-        if files.len() >= 500 {
+        if files.len() >= MAX_LISTED_INPUT_FILES {
             break;
         }
     }
@@ -68,7 +72,7 @@ pub async fn fingerprint(path: &Path, limit: u64) -> AppResult<(String, u64)> {
     let mut file = tokio::fs::File::open(path).await?;
     let mut hash = Sha256::new();
     let mut total = 0;
-    let mut buffer = vec![0; 64 * 1024];
+    let mut buffer = vec![0; FINGERPRINT_BUFFER_BYTES];
     loop {
         let n = file.read(&mut buffer).await?;
         if n == 0 {
@@ -83,7 +87,7 @@ pub async fn fingerprint(path: &Path, limit: u64) -> AppResult<(String, u64)> {
     if total == 0 {
         return Err(AppError::Invalid);
     }
-    Ok((format!("{:x}", hash.finalize()), total))
+    Ok((crate::opaque_token::encode_hex(&hash.finalize()), total))
 }
 
 /// Un fichier de travail transmis doit rester dans le dossier privé du bail.
@@ -97,6 +101,11 @@ pub async fn verified_working_path(path: &Path, work_dir: &Path) -> AppResult<Pa
 }
 
 /// Rend durable la création ou le renommage d'un fichier dans un répertoire.
+/// Nom du fichier de sortie d'une tâche dans le dossier de sortie du central.
+pub fn output_file_name(job: uuid::Uuid, lease_token: uuid::Uuid, extension: &str) -> String {
+    format!("{job}-{lease_token}.{extension}")
+}
+
 pub async fn sync_directory(path: &Path) -> AppResult<()> {
     tokio::fs::File::open(path).await?.sync_all().await?;
     Ok(())

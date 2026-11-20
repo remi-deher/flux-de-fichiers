@@ -655,6 +655,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
     }
 
     let queued_status = JobStatus::Queued;
+    let online_seconds = forgearr_shared::workers::WORKER_ONLINE_SECONDS.to_string();
     let claimable_sql = format!(
         "SELECT id FROM jobs WHERE status=?1 AND attempts < ?2
          AND (target_worker_id IS NULL OR target_worker_id=?3)
@@ -662,23 +663,24 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
               OR EXISTS (SELECT 1 FROM job_relays r, workers w, json_each(w.telemetry_json, '$.capabilities.hardwareEncoders') e
                          WHERE r.job_id=jobs.id AND w.id=?3 AND r.requirement_json IS NOT NULL
                            AND json_extract(e.value, '$.codec')=json_extract(r.requirement_json, '$.codec')
-                           AND json_extract(e.value, '$.acceleration') != ?5
+                           AND json_extract(e.value, '$.acceleration') != ?4
                            AND (json_extract(r.requirement_json, '$.acceleration') IS NULL
                                 OR json_extract(e.value, '$.acceleration')=json_extract(r.requirement_json, '$.acceleration')))
               OR EXISTS (SELECT 1 FROM job_relays r, workers w, json_each(w.telemetry_json, '$.capabilities.softwareEncoders') e
                          WHERE r.job_id=jobs.id AND w.id=?3 AND r.requirement_json IS NOT NULL
                            AND e.value=json_extract(r.requirement_json, '$.codec')
                            AND (json_extract(r.requirement_json, '$.acceleration') IS NULL
-                                OR json_extract(r.requirement_json, '$.acceleration')=?5)))
+                                OR json_extract(r.requirement_json, '$.acceleration')=?4)))
          AND {access}
+         AND ({readable} OR EXISTS (SELECT 1 FROM job_relays r WHERE r.job_id=jobs.id AND r.artifact_relay=1))
          ORDER BY priority DESC, created_at ASC, id ASC LIMIT 1",
-        access = super::library_access::job_access_sql("?3", "?4"),
+        access = super::library_access::job_access_sql("?3"),
+        readable = super::library_access::source_readable_sql("?3", &online_seconds),
     );
     let next_id: Option<Uuid> = sqlx::query_scalar(&claimable_sql)
         .bind(queued_status)
         .bind(MAX_ATTEMPTS)
         .bind(worker)
-        .bind(forgearr_shared::workers::INTEGRATED_WORKER_NAME)
         .bind(forgearr_shared::capabilities::EncodeAcceleration::Cpu.as_str())
         .fetch_optional(&mut *tx)
         .await?;
@@ -727,9 +729,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                 (source.source_worker_id == Some(worker)).then_some(source.source_root)
             });
             let resume_node_id = super::relays::resume_node(pool, j.id).await?;
-            let handoff_input =
-                super::handoffs::acknowledged_handoff_input(pool, j.id, worker, j.lease_epoch)
-                    .await?;
+            let handoff_input = super::relays::artifact_input(pool, j.id, worker).await?;
             Ok(Some(Claim {
                 job_id: j.id,
                 lease_token: j.lease_token.ok_or(AppError::Internal)?,
@@ -797,10 +797,9 @@ pub async fn retry_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
     // Une relance manuelle après perte du repreneur doit repartir de la source :
     // sa copie intermédiaire ne peut plus être considérée comme disponible.
     let had_handoff: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM job_handoffs WHERE job_id=?1 AND state=?2)",
+        "SELECT EXISTS(SELECT 1 FROM job_relays WHERE job_id=?1 AND artifact_relay=1)",
     )
     .bind(id)
-    .bind(forgearr_shared::relay::HandoffState::Acknowledged.as_str())
     .fetch_one(&mut *tx)
     .await?;
     if had_handoff {
@@ -815,6 +814,10 @@ pub async fn retry_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
             .execute(&mut *tx)
             .await?;
         sqlx::query("DELETE FROM job_handoff_steps WHERE job_id=?1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM job_artifacts WHERE job_id=?1")
             .bind(id)
             .execute(&mut *tx)
             .await?;
@@ -911,6 +914,7 @@ pub async fn downloadable_output_name(pool: &SqlitePool, id: Uuid) -> AppResult<
     Ok(name)
 }
 
+#[derive(Clone, Copy)]
 pub struct PublishedOutput<'a> {
     pub name: &'a str,
     pub sha256: &'a str,
@@ -944,19 +948,20 @@ pub async fn publish_succeeded(
     }
     link_output.await?;
     let succeeded_status = JobStatus::Succeeded;
-    sqlx::query!(
+    // Un nom vide (résultat remplacé chez le détenteur) n'a pas de fichier au central.
+    sqlx::query(
         "UPDATE jobs \
-         SET status=?2, output_name=?3, output_sha256=?4, output_bytes=?5, warning=?6, \
+         SET status=?2, output_name=NULLIF(?3,''), output_sha256=?4, output_bytes=?5, warning=?6, \
              lease_token=NULL, lease_epoch=lease_epoch+1, leased_until=NULL, error_code=NULL, \
              updated_at=datetime('now') \
          WHERE id=?1",
-        id,
-        succeeded_status,
-        output.name,
-        output.sha256,
-        output.bytes,
-        output.warning,
     )
+    .bind(id)
+    .bind(succeeded_status)
+    .bind(output.name)
+    .bind(output.sha256)
+    .bind(output.bytes)
+    .bind(output.warning)
     .execute(&mut *tx)
     .await?;
     sqlx::query("DELETE FROM source_publication_journal WHERE job_id=?1 AND lease_epoch=?2")

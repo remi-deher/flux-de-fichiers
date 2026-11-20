@@ -12,6 +12,10 @@ use axum::{
     extract::{Path, State},
 };
 use serde_json::Value;
+use std::time::Duration;
+
+/// Délai maximal d'un test de connexion à l'adresse d'un plugin.
+const CONNECTION_TEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Liste les pièces du catalogue à exposer ; les blocs, propriété d'un plugin, n'en font pas partie.
 pub async fn catalog(
@@ -317,7 +321,7 @@ pub async fn test_connection(
     let client = match crate::net_policy::build_pinned_client(
         &parsed_url,
         &addresses,
-        std::time::Duration::from_secs(5),
+        CONNECTION_TEST_TIMEOUT,
     ) {
         Ok(client) => client,
         Err(_) => {

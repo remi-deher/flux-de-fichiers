@@ -809,7 +809,7 @@ checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "forgearr"
-version = "0.63.0"
+version = "0.63.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -844,7 +844,7 @@ dependencies = [
 
 [[package]]
 name = "forgearr-client"
-version = "0.63.0"
+version = "0.63.1"
 dependencies = [
  "chrono",
  "console_error_panic_hook",
@@ -862,7 +862,7 @@ dependencies = [
 
 [[package]]
 name = "forgearr-frontend"
-version = "0.63.0"
+version = "0.63.1"
 dependencies = [
  "forgearr-shared",
  "stylist",
@@ -870,7 +870,7 @@ dependencies = [
 
 [[package]]
 name = "forgearr-shared"
-version = "0.63.0"
+version = "0.63.1"
 dependencies = [
  "chrono",
  "chrono-tz",

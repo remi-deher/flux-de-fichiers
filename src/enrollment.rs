@@ -2,10 +2,9 @@
 //! identifiants administrateur (ADR 0011).
 
 use crate::{
-    api_keys,
     error::{AppError, AppResult},
+    opaque_token::{random_hex, sha256_hex},
 };
-use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
 use forgearr_shared::workers::{
     WorkerEnrollmentCreated, WorkerEnrollmentPollResponse, WorkerEnrollmentRequestInput,
 };
@@ -28,7 +27,6 @@ pub const ENROLLMENT_SECRET_HEADER: &str = "x-enrollment-secret";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const SECRET_BYTES: usize = 24;
-const SHA256_HEX_LEN: usize = 64;
 const RATE_WINDOW: Duration = Duration::from_secs(60);
 const MAX_REQUESTS_PER_ADDR: usize = 5;
 const MAX_TRACKED_ADDRS: usize = 1024;
@@ -94,16 +92,9 @@ pub async fn request_key(central: &reqwest::Url, request: &EnrollRequest) -> App
 
 /// Génère un secret aléatoire côté worker et son empreinte SHA-256 à envoyer au central.
 pub fn generate_secret_and_hash() -> (String, String) {
-    let mut bytes = [0_u8; SECRET_BYTES];
-    OsRng.fill_bytes(&mut bytes);
-    let secret: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    let hash = api_keys::hash_secret(&secret);
+    let secret = random_hex(SECRET_BYTES);
+    let hash = sha256_hex(&secret);
     (secret, hash)
-}
-
-/// Vérifie qu'une empreinte SHA-256 hexadécimale est syntaxiquement valide.
-pub fn is_valid_sha256_hex(raw: &str) -> bool {
-    raw.len() == SHA256_HEX_LEN && raw.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Nom de worker proposé par défaut à partir du nom d'hôte, nettoyé pour respecter les règles.

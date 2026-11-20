@@ -2,6 +2,7 @@ use super::AppState;
 use crate::{
     domain::{Job, JobEventType, JobStatus, LeaseRequest},
     error::{AppError, AppResult},
+    library_scan::central_writable_job_source,
     media, repository, storage,
 };
 use axum::{
@@ -10,8 +11,6 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use futures_util::StreamExt;
-use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
@@ -64,18 +63,18 @@ pub(super) async fn stream_file(
     Ok(response)
 }
 
-pub async fn source(
+/// Le worker traitant redemande un billet frais (expiré, ou lecture à reprendre par `Range`).
+/// Réponse `null` quand la source se lit autrement (montage du worker, ou aucun détenteur joignable).
+pub async fn reissue_ticket(
     State(s): State<AppState>,
     h: HeaderMap,
     Path(id): Path<Uuid>,
-) -> AppResult<Response> {
-    crate::auth::authorize_worker(&s.pool, &h).await?;
-    let job = repository::active(&s.pool, id, &lease(&h)?).await?;
-    match crate::library_scan::central_job_source(&s.pool, &s.config.input_dir, &job).await? {
-        Some(source) => stream_file(&source, None, "application/octet-stream").await,
-        // Source détenue par un autre worker : repli en flux par le central (ADR 0019).
-        None => super::source_relay::relay_source_from_worker(&s, &job).await,
-    }
+) -> AppResult<axum::Json<Option<forgearr_shared::transfer::SourceTicket>>> {
+    let credentials = lease(&h)?;
+    crate::auth::authorize_worker_identity(&s.pool, &h, credentials.worker_id).await?;
+    Ok(axum::Json(
+        repository::reissue_source_ticket(&s.pool, id, &credentials).await?,
+    ))
 }
 
 /// Le worker source valide un billet présenté par un worker traitant (ADR 0019).
@@ -84,7 +83,7 @@ pub async fn redeem(
     h: HeaderMap,
     axum::Json(request): axum::Json<forgearr_shared::transfer::RedeemRequest>,
 ) -> AppResult<axum::Json<forgearr_shared::transfer::TransferGrant>> {
-    crate::auth::authorize_worker(&s.pool, &h).await?;
+    crate::auth::authorize_worker_identity(&s.pool, &h, request.worker_id).await?;
     Ok(axum::Json(
         repository::redeem_ticket(&s.pool, &request.token, request.worker_id).await?,
     ))
@@ -139,102 +138,6 @@ pub async fn delete_output(
         }
     }
     Ok(StatusCode::NO_CONTENT)
-}
-
-async fn output_spec_for_job(
-    s: &AppState,
-    job: &Job,
-    requested_ext: Option<&str>,
-) -> AppResult<media::OutputSpec> {
-    let frozen_flow = match (&job.flow_id, job.flow_version) {
-        (Some(flow_id), Some(version)) => repository::get_flow_version(&s.pool, flow_id, version)
-            .await
-            .ok(),
-        _ => None,
-    };
-    let roots = crate::plugins::catalog_roots(&s.pool, &s.config).await;
-    let registry = s.catalog_cache.operations(&roots).await;
-    registry
-        .output_spec_for_flow(frozen_flow.as_ref(), requested_ext)
-        .ok_or(AppError::Invalid)
-}
-
-pub async fn result(
-    State(s): State<AppState>,
-    h: HeaderMap,
-    Path(id): Path<Uuid>,
-    body: Body,
-) -> AppResult<StatusCode> {
-    crate::auth::authorize_worker(&s.pool, &h).await?;
-    let credentials = lease(&h)?;
-    let job = repository::active(&s.pool, id, &credentials).await?;
-    let warning = match h.get("x-remux-warning").and_then(|v| v.to_str().ok()) {
-        Some("true") => true,
-        Some("false") | None => false,
-        _ => return Err(AppError::Invalid),
-    };
-    let requested_ext = match h
-        .get("x-output-ext")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.trim().to_ascii_lowercase())
-    {
-        None => None,
-        Some(ext) if storage::valid_output_extension(&ext) => Some(ext),
-        Some(_) => return Err(AppError::Invalid),
-    };
-    let spec = output_spec_for_job(&s, &job, requested_ext.as_deref()).await?;
-    let staging =
-        s.config
-            .data_dir
-            .join("staging")
-            .join(format!("{}.{}", Uuid::new_v4(), spec.extension));
-    let outcome = tokio::time::timeout(
-        std::time::Duration::from_secs(3600),
-        receive(&s, id, &credentials, &job, body, &staging, warning, &spec),
-    )
-    .await;
-    if let Err(error) = tokio::fs::remove_file(&staging).await
-        && error.kind() != std::io::ErrorKind::NotFound
-    {
-        tracing::error!("staging cleanup failed");
-    }
-    outcome.map_err(|_| AppError::Invalid)??;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn receive(
-    s: &AppState,
-    id: Uuid,
-    lease: &LeaseRequest,
-    job: &Job,
-    body: Body,
-    staging: &std::path::Path,
-    warning: bool,
-    spec: &media::OutputSpec,
-) -> AppResult<()> {
-    let mut file = tokio::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(staging)
-        .await?;
-    let mut stream = body.into_data_stream();
-    let mut total = 0u64;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| AppError::Invalid)?;
-        total += chunk.len() as u64;
-        if total > s.config.max_file_bytes {
-            return Err(AppError::TooLarge);
-        }
-        file.write_all(&chunk).await?;
-    }
-    file.sync_all().await?;
-    drop(file);
-    let source = crate::library_scan::central_job_source(&s.pool, &s.config.input_dir, job)
-        .await
-        .map_err(crate::source_publication::missing_source_is_changed)?;
-    publish_staged(s, id, lease, job, source.as_deref(), staging, warning, spec).await?;
-    Ok(())
 }
 
 async fn validate_staged_output(
@@ -299,13 +202,19 @@ pub(crate) async fn publish_staged(
             .await
             .map_err(|_| AppError::Invalid)?;
     }
-    let name = format!("{id}-{}.{}", lease.lease_token, spec.extension);
+    let name = storage::output_file_name(id, lease.lease_token, &spec.extension);
     let destination = s.config.data_dir.join("output").join(&name);
     let mut output_prepared = false;
     if let Some(library_id) = job.library_id {
         let library = repository::get_library(&s.pool, library_id).await?;
         if library.output_policy != crate::domain::LibraryOutputPolicy::OutputDir {
-            // Écarter une erreur de stockage centrale avant de modifier la source distante.
+            // Seule une source que le central voit s'applique ici ; sinon un autre worker la détient
+            // et tire le résultat chez le worker qui le retient (ADR 0022).
+            let central_source = central_writable_job_source(&s.pool, &s.config.input_dir, job)
+                .await
+                .map_err(crate::source_publication::missing_source_is_changed)?
+                .ok_or(AppError::ResultUndeliverable)?;
+            // Écarter une erreur de stockage centrale avant de modifier la source.
             // La copie reste disponible si le résultat du remplacement devient incertain.
             repository::active(&s.pool, id, lease).await?;
             tokio::fs::hard_link(staging, &destination).await?;
@@ -334,49 +243,24 @@ pub(crate) async fn publish_staged(
                 return Err(error);
             }
             output_prepared = true;
-            let replacement = async {
-                let local_source = crate::library_scan::central_writable_job_source(
-                    &s.pool,
-                    &s.config.input_dir,
-                    job,
-                )
-                .await
-                .map_err(crate::source_publication::missing_source_is_changed)?;
-                if let Some(source_path) = local_source {
-                    crate::source_publication::apply_library_output_policy(
-                        library.output_policy,
-                        &source_path,
-                        staging,
-                        &spec.extension,
-                        job.source_sha256.as_deref().ok_or(AppError::Invalid)?,
-                        job.source_bytes.ok_or(AppError::Invalid)?,
-                        s.config.max_file_bytes,
-                        async { repository::active(&s.pool, id, lease).await.map(|_| ()) },
-                    )
-                    .await
-                } else {
-                    super::source_publication::publish_on_holder(
-                        s,
-                        job,
-                        lease,
-                        staging,
-                        &hash,
-                        i64::try_from(size).map_err(|_| AppError::TooLarge)?,
-                        &spec.extension,
-                        library.output_policy,
-                    )
-                    .await
-                }
-            }
+            let replacement = crate::source_publication::apply_library_output_policy(
+                library.output_policy,
+                &central_source,
+                staging,
+                &spec.extension,
+                job.source_sha256.as_deref().ok_or(AppError::Invalid)?,
+                job.source_bytes.ok_or(AppError::Invalid)?,
+                s.config.max_file_bytes,
+                async { repository::active(&s.pool, id, lease).await.map(|_| ()) },
+            )
             .await;
             if let Err(error) = replacement {
-                // Une source modifiée a été refusée avant remplacement ; les autres erreurs
-                // peuvent être ambiguës et gardent la copie pour une éventuelle récupération.
+                // Une source modifiée a été refusée avant remplacement : la copie n'a plus d'objet ;
+                // les autres erreurs peuvent être ambiguës et gardent la copie pour une éventuelle
+                // récupération.
+                let error = abandon_publication(s, job, lease, error).await;
                 if matches!(error, AppError::SourceChanged) {
-                    repository::clear_source_publication(&s.pool, id, lease.lease_epoch).await?;
                     let _ = tokio::fs::remove_file(&destination).await;
-                } else {
-                    mark_publication_uncertain(s, id, lease.lease_epoch).await;
                 }
                 return Err(error);
             }
@@ -420,7 +304,24 @@ pub(crate) async fn publish_staged(
     Ok(())
 }
 
-async fn mark_publication_uncertain(s: &AppState, job: Uuid, epoch: i64) {
+/// Referme le journal d'un remplacement qui n'a pas abouti : une source modifiée a été refusée
+/// avant tout remplacement (le journal est retiré), toute autre issue reste incertaine.
+pub(super) async fn abandon_publication(
+    s: &AppState,
+    job: &Job,
+    lease: &LeaseRequest,
+    error: AppError,
+) -> AppError {
+    if matches!(error, AppError::SourceChanged) {
+        let cleared =
+            repository::clear_source_publication(&s.pool, job.id, lease.lease_epoch).await;
+        return cleared.err().unwrap_or(error);
+    }
+    mark_publication_uncertain(s, job.id, lease.lease_epoch).await;
+    error
+}
+
+pub(super) async fn mark_publication_uncertain(s: &AppState, job: Uuid, epoch: i64) {
     match repository::mark_source_publication_uncertain(&s.pool, job, epoch).await {
         Ok(Some(code)) => {
             s.notify_job_event(JobEventType::JobFailed, job, JobStatus::Failed, Some(code))

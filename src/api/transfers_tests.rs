@@ -2,9 +2,7 @@ use super::*;
 use crate::{
     config::Config,
     domain::{LibraryAccess, LibraryOutputPolicy, LibraryWorkerPath, LibraryWrite},
-    source_publication::apply_library_output_policy,
 };
-use forgearr_shared::transfer::{SourcePublicationOutcome, SourcePublicationReport};
 use sqlx::sqlite::SqlitePoolOptions;
 use std::{path::Path, sync::Arc, time::Duration};
 
@@ -91,88 +89,24 @@ pub(in crate::api) async fn setup(
 }
 
 #[tokio::test]
-async fn remote_replacement_waits_for_holder_and_refuses_changed_source() -> anyhow::Result<()> {
+async fn a_source_held_by_another_worker_is_refused_before_any_change() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
-    let (state, job, lease, holder) = setup(dir.path()).await?;
+    let (state, job, lease, _) = setup(dir.path()).await?;
     let staging = dir.path().join("staging.mkv");
     std::fs::write(&staging, b"result")?;
-    std::fs::write(dir.path().join("film.mkv"), b"modified")?;
-    let submit_state = state.clone();
-    let submit_job = job.clone();
-    let submit_lease = lease.clone();
-    let submit_staging = staging.clone();
-    let publishing = tokio::spawn(async move {
-        publish_staged(
-            &submit_state,
-            submit_job.id,
-            &submit_lease,
-            &submit_job,
-            None,
-            &submit_staging,
-            false,
-            &media::OutputSpec {
-                extension: "mkv".into(),
-                ..Default::default()
-            },
-        )
-        .await
-    });
-    let tasks = state
-        .source_publication
-        .take_for_worker(holder, Duration::from_secs(5))
-        .await;
-    assert_eq!(tasks.len(), 1);
-    let task = &tasks[0];
-    let source = dir.path().join(&task.source_name);
-    let replacement = apply_library_output_policy(
-        task.policy,
-        &source,
-        &staging,
-        &task.extension,
-        &task.source_sha256,
-        task.source_bytes,
-        state.config.max_file_bytes,
-        async { Ok(()) },
-    )
-    .await;
-    assert!(matches!(replacement, Err(AppError::SourceChanged)));
-    assert!(
-        state
-            .source_publication
-            .report(SourcePublicationReport {
-                request_id: task.request_id,
-                worker_id: holder,
-                outcome: SourcePublicationOutcome::SourceChanged
-            })
-            .await
-    );
-    assert!(matches!(publishing.await?, Err(AppError::SourceChanged)));
-    assert!(
-        !state
-            .config
-            .data_dir
-            .join("output")
-            .join(format!("{}-{}.mkv", job.id, lease.lease_token))
-            .exists()
-    );
-    assert_eq!(std::fs::read(source)?, b"modified");
-    assert_eq!(
-        repository::get_job(&state.pool, job.id).await?.status,
-        JobStatus::Running
-    );
-    repository::fail(
-        &state.pool,
-        job.id,
-        &lease,
-        crate::domain::JobErrorCode::SourceChanged,
-    )
-    .await?;
-    let failed = repository::get_job(&state.pool, job.id).await?;
-    assert_eq!(failed.status, JobStatus::Failed);
-    assert_eq!(
-        failed.error_code,
-        Some(crate::domain::JobErrorCode::SourceChanged)
-    );
+    let spec = media::OutputSpec {
+        extension: "mkv".into(),
+        ..Default::default()
+    };
+    let refused = publish_staged(&state, job.id, &lease, &job, None, &staging, false, &spec).await;
+    assert!(matches!(refused, Err(AppError::ResultUndeliverable)));
+    let copies = std::fs::read_dir(state.config.data_dir.join("output"))?.count();
+    assert_eq!(copies, 0, "aucune copie centrale");
+    let journal = repository::pending_source_publications(&state.pool).await?;
+    assert!(journal.is_empty());
+    assert_eq!(std::fs::read(dir.path().join("film.mkv"))?, b"original");
+    let running = repository::get_job(&state.pool, job.id).await?;
+    assert_eq!(running.status, JobStatus::Running);
     Ok(())
 }
 
@@ -209,79 +143,5 @@ async fn unavailable_output_storage_does_not_request_a_source_replacement() -> a
     );
     assert_eq!(std::fs::read(dir.path().join("film.mkv"))?, b"original");
     assert!(!dir.path().join("film.mkv.bak").exists());
-    Ok(())
-}
-
-#[tokio::test]
-async fn remote_replacement_succeeds_only_after_holder_confirms() -> anyhow::Result<()> {
-    let dir = tempfile::tempdir()?;
-    let (state, job, lease, holder) = setup(dir.path()).await?;
-    // La source choisie pour le job peut être une vue centrale en lecture seule ;
-    // un autre montage vérifié reste inscriptible chez le détenteur distant.
-    sqlx::query("UPDATE jobs SET source_worker_id=NULL,source_writable=0 WHERE id=?1")
-        .bind(job.id)
-        .execute(&state.pool)
-        .await?;
-    let staging = dir.path().join("staging.mkv");
-    std::fs::write(&staging, b"result")?;
-    let submit_state = state.clone();
-    let submit_job = job.clone();
-    let submit_lease = lease.clone();
-    let submit_staging = staging.clone();
-    let publishing = tokio::spawn(async move {
-        publish_staged(
-            &submit_state,
-            submit_job.id,
-            &submit_lease,
-            &submit_job,
-            None,
-            &submit_staging,
-            false,
-            &media::OutputSpec {
-                extension: "mkv".into(),
-                ..Default::default()
-            },
-        )
-        .await
-    });
-    let tasks = state
-        .source_publication
-        .take_for_worker(holder, Duration::from_secs(5))
-        .await;
-    assert_eq!(tasks.len(), 1);
-    assert_eq!(
-        repository::get_job(&state.pool, job.id).await?.status,
-        JobStatus::Running
-    );
-    let task = &tasks[0];
-    let source = dir.path().join(&task.source_name);
-    apply_library_output_policy(
-        task.policy,
-        &source,
-        &staging,
-        &task.extension,
-        &task.source_sha256,
-        task.source_bytes,
-        state.config.max_file_bytes,
-        async { Ok(()) },
-    )
-    .await?;
-    assert!(
-        state
-            .source_publication
-            .report(SourcePublicationReport {
-                request_id: task.request_id,
-                worker_id: holder,
-                outcome: SourcePublicationOutcome::Published
-            })
-            .await
-    );
-    publishing.await??;
-    assert_eq!(std::fs::read(source)?, b"result");
-    assert_eq!(std::fs::read(dir.path().join("film.mkv.bak"))?, b"original");
-    assert_eq!(
-        repository::get_job(&state.pool, job.id).await?.status,
-        JobStatus::Succeeded
-    );
     Ok(())
 }

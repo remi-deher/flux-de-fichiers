@@ -16,8 +16,9 @@ ce qui **reste à faire**. À mettre à jour (ou supprimer) quand l'état change
 
 ## Règles de travail à respecter
 
-- **Ni build Docker ni clippy en local** (machine faible, décision du 14 nov.) : `cargo fmt` et
-  `cargo test` ciblé seulement ; clippy, la suite complète et l'image tournent en CI
+- **Ni compilation ni test en local, sauf demande explicite** (machine faible, décision du
+  20 nov.) : ni `cargo build`/`check`/`test`, ni clippy, ni build Docker ; fmt, clippy, la suite
+  complète et l'image tournent en CI
   (`feature.yml` sur les PR vers `dev`, `test.yml` sur les PR `dev → test`, ADR 0002).
 - Flux Git ([ADR 0002](adr/0002-flux-git.md)) : push / PR feature → `dev` (merge commit), puis
   PR `dev → test` (CI, fusion auto, image `:test-<sha12>`), PR `test → main` pour une release.

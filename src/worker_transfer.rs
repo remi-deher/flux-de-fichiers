@@ -128,7 +128,7 @@ pub fn parse_range(
 }
 
 async fn serve_source(State(state): State<TransferState>, headers: HeaderMap) -> Response {
-    let Ok(_permit) = state.permits.clone().try_acquire_owned() else {
+    let Ok(permit) = state.permits.clone().try_acquire_owned() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     let Some(token) = headers
@@ -174,7 +174,11 @@ async fn serve_source(State(state): State<TransferState>, headers: HeaderMap) ->
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     let length = if total == 0 { 0 } else { end - start + 1 };
-    let mut response = Response::new(Body::from_stream(ReaderStream::new(file.take(length))));
+    let stream = futures_util::stream::unfold(
+        (ReaderStream::new(file.take(length)), permit),
+        |(mut reader, permit)| async move { reader.next().await.map(|chunk| (chunk, (reader, permit))) },
+    );
+    let mut response = Response::new(Body::from_stream(stream));
     *response.status_mut() = status;
     let headers = response.headers_mut();
     headers.insert(header::CONTENT_LENGTH, HeaderValue::from(length));
@@ -353,6 +357,30 @@ mod tests {
         let changed = state_for(dir.path(), "film.mkv", 999);
         let (status, _) = get_source(changed, Some("bon-billet"), None).await?;
         assert_eq!(status, StatusCode::CONFLICT);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn transfer_limit_holds_until_the_response_body_is_dropped() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::write(dir.path().join("film.mkv"), b"0123456789")?;
+        let state = state_for(dir.path(), "film.mkv", 10);
+        let mut responses = Vec::new();
+        for _ in 0..MAX_CONCURRENT_TRANSFERS {
+            let request = Request::builder()
+                .uri(TRANSFER_SOURCE_PATH)
+                .header(TRANSFER_TICKET_HEADER, "bon-billet")
+                .body(Body::empty())?;
+            let response = transfer_router(state.clone()).oneshot(request).await?;
+            assert_eq!(response.status(), StatusCode::OK);
+            responses.push(response);
+        }
+        let (status, _) = get_source(state.clone(), Some("bon-billet"), None).await?;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        responses.pop();
+        let (status, body) = get_source(state, Some("bon-billet"), None).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, b"0123456789");
         Ok(())
     }
 

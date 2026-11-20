@@ -440,10 +440,10 @@ impl WorkerLoop {
             } else {
                 ("transfer_failed", None)
             };
-            if let Some(steps) = steps {
-                if self.report_steps(&claim, worker, steps).await.is_err() {
-                    tracing::warn!(job_id=%claim.job_id, "step report rejected or unavailable");
-                }
+            if let Some(steps) = steps
+                && self.report_steps(&claim, worker, steps).await.is_err()
+            {
+                tracing::warn!(job_id=%claim.job_id, "step report rejected or unavailable");
             }
             tracing::warn!(job_id=%claim.job_id, error_code=code, "processing failed");
             // Do not format reqwest errors: their URLs may contain sensitive context.

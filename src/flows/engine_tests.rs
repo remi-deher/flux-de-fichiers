@@ -9,7 +9,7 @@ const INSPECT_JSON: &str = r#"{"container":{"recognized":true,"supported":true},
 /// Dernier argument = fichier de sortie, créé non vide ; progression fractionnelle sur stderr.
 const FAKE_WRITER: &str = r#"for a; do last=$a; done; printf '\000\000\000\030ftypisom\000\000\002\000' > "$last"; printf '(40/100)\r' >&2"#;
 
-fn install_fake_tool(
+pub(super) fn install_fake_tool(
     cache: &ToolCacheManager,
     tool_id: &str,
     version: &str,

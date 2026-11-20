@@ -89,6 +89,8 @@ impl TelemetryProbe {
         let (storage_total_bytes, storage_available_bytes) =
             Self::read_storage_info(&self.storage_path).unwrap_or((0, 0));
 
+        let mut capabilities = crate::hardware_probe::detected_capabilities();
+        capabilities.software_encoders = crate::software_probe::software_capabilities();
         TelemetrySnapshot {
             timestamp: Utc::now(),
             logical_cores,
@@ -99,7 +101,7 @@ impl TelemetryProbe {
             ram_used_bytes,
             gpu_detected,
             gpu_devices,
-            capabilities: crate::hardware_probe::detected_capabilities(),
+            capabilities,
             storage_total_bytes,
             storage_available_bytes,
         }

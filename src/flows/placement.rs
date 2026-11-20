@@ -80,6 +80,7 @@ mod tests {
     fn hevc_nvenc() -> WorkerCapabilities {
         WorkerCapabilities {
             gpu_models: Vec::new(),
+            software_encoders: Vec::new(),
             hardware_encoders: vec![HardwareEncoder {
                 codec: VideoCodec::Hevc,
                 acceleration: EncodeAcceleration::Nvenc,
@@ -101,6 +102,32 @@ mod tests {
             PORT_INCAPABLE
         );
         assert!(evaluate_capability(&json!({}), None).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn capability_block_can_select_a_software_encoder() -> Result<(), String> {
+        let capabilities = WorkerCapabilities {
+            software_encoders: vec![VideoCodec::Hevc],
+            ..Default::default()
+        };
+        assert_eq!(
+            evaluate_capability(
+                &json!({"codec":"hevc", "acceleration":"cpu"}),
+                Some(&capabilities)
+            )?,
+            PORT_CAPABLE
+        );
+        assert_eq!(
+            evaluate_capability(
+                &json!({"codec":"hevc", "acceleration":"nvenc"}),
+                Some(&capabilities)
+            )?,
+            PORT_INCAPABLE
+        );
+        assert!(
+            matches!(build_relay_request(&json!({"codec":"hevc", "acceleration":"cpu"}), "next")?.target, RelayTarget::Capable { requirement } if requirement.acceleration == Some(EncodeAcceleration::Cpu))
+        );
         Ok(())
     }
 

@@ -30,6 +30,7 @@ pub struct BinaryStepOutcome {
     pub updated_media_info: Option<Value>,
     pub warning: bool,
     pub is_staged_output: bool,
+    pub modified_in_place: bool,
     pub message: Option<String>,
     pub excerpt: Option<String>,
 }
@@ -246,6 +247,7 @@ pub async fn execute_binary_operation(
                 updated_media_info: Some(updated),
                 warning: false,
                 is_staged_output: false,
+                modified_in_place: false,
                 message: rt
                     .success_message
                     .clone()
@@ -270,6 +272,7 @@ pub async fn execute_binary_operation(
                     updated_media_info: None,
                     warning: false,
                     is_staged_output: false,
+                    modified_in_place: false,
                     message: Some("aucune modification demandée".to_owned()),
                     excerpt: None,
                 });
@@ -306,6 +309,7 @@ pub async fn execute_binary_operation(
                 updated_media_info: None,
                 warning: outcome.warning,
                 is_staged_output: false,
+                modified_in_place: true,
                 message: msg,
                 excerpt: outcome.excerpt,
             })
@@ -409,6 +413,7 @@ pub async fn execute_binary_operation(
                 updated_media_info: None,
                 warning: outcome.warning,
                 is_staged_output: true,
+                modified_in_place: false,
                 message: msg,
                 excerpt: outcome.excerpt,
             })

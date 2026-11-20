@@ -107,7 +107,9 @@ pub fn ensure_probe_ready(cache: &ToolCacheManager, claim: &Claim) -> Result<(),
     if !claim.operations.is_empty() {
         let registry =
             OperationRegistry::from_raw(claim.operations.clone(), claim.block_operations.clone());
-        if let Some(probe_op) = registry.primary_probe_for_file(Path::new(&claim.source_name)) {
+        if let Some(probe_op) =
+            registry.primary_probe_for_file(Path::new(claim.working_source_name()))
+        {
             if let crate::flows::OperationRuntime::Binary(bin) = &probe_op.runtime
                 && let Some(tool) = &bin.tool
             {
@@ -160,7 +162,8 @@ pub async fn execute_claim_processing(
         .map(|req| (req.tool_id.clone(), req.version.clone()))
         .collect();
 
-    let worker_capabilities = crate::hardware_probe::detected_capabilities();
+    let mut worker_capabilities = crate::hardware_probe::detected_capabilities();
+    worker_capabilities.software_encoders = crate::software_probe::software_capabilities();
     let engine = FlowEngine {
         registry,
         cache_mgr,
@@ -191,7 +194,7 @@ pub async fn execute_claim_processing(
     outcome
         .map(|res| JobExecutionResult {
             working_file: res.final_file,
-            warning: res.warning,
+            warning: res.warning || claim.prior_warning,
             output_spec: res.output_spec,
             steps: res.steps,
             relay: res.relay,
@@ -231,6 +234,8 @@ mod tests {
             media_root: None,
             local_source_root: None,
             resume_node_id: None,
+            handoff_input: None,
+            prior_warning: false,
             source_ticket: None,
         }
     }
@@ -363,6 +368,15 @@ mod tests {
                 ..
             })
         ));
+        claim.handoff_input = Some(forgearr_shared::relay::HandoffInput {
+            source_lease_epoch: 1,
+            artifact: forgearr_shared::relay::HandoffArtifact {
+                name: "converti.epub".into(),
+                sha256: "ab".repeat(32),
+                bytes: 100,
+            },
+        });
+        ensure_probe_ready(&cache, &claim)?;
         Ok(())
     }
 }

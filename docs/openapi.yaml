@@ -143,14 +143,6 @@ paths:
         '200':
           description: Flux restauré
         default: {$ref: '#/components/responses/Error'}
-  /api/v1/jobs/{id}/delete:
-    delete:
-      security: [{ApiKey: []}, {WebSession: []}]
-      summary: Supprimer ou annuler une tâche (DELETE /api/v1/jobs/{id})
-      responses:
-        '204':
-          description: Tâche supprimée
-        default: {$ref: '#/components/responses/Error'}
   /api/v1/libraries/{id}/files/{name}:
     post:
       security: [{ApiKey: []}, {WebSession: []}]
@@ -430,6 +422,13 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Job'}
         default: {$ref: '#/components/responses/Error'}
+    delete:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Supprimer ou annuler une tâche
+      responses:
+        '204':
+          description: Tâche supprimée
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/jobs/{id}/retry:
     parameters: [{$ref: '#/components/parameters/JobId'}]
     post:
@@ -549,7 +548,7 @@ paths:
   /api/v1/plugins:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Catalogue lu dans les dépôts de plugins synchronisés (enrichi de `runtime` : état opérationnel, réglages, outils manquants, blocs/composants)
+      summary: "Catalogue lu dans les dépôts de plugins synchronisés (enrichi de `runtime` : état opérationnel, réglages, outils manquants, blocs/composants)"
       responses:
         '200':
           description: Fiches du catalogue enrichies de `runtime` (`readiness`, `hasSettings`, `configured`, `missingToolsCount`, `blocksCount`, `componentsCount`) ; une fiche inconnue du central est ignorée
@@ -563,7 +562,7 @@ paths:
       summary: Détail d'un plugin, dépendances (avec `status` réel dans le cache d'outils), blocs fournis et statut des outils requis
       parameters: [{in: path, name: id, required: true, schema: {type: string}}]
       responses:
-        '200': {description: Vue détaillée du plugin (`dependencies[].status` indique `ready`, `installing` ou `not_installed`)}
+        '200': {description: "Vue détaillée du plugin (`dependencies[].status` indique `ready`, `installing` ou `not_installed`)"}
         '404': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins/repositories:

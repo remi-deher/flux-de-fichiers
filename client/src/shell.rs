@@ -638,6 +638,7 @@ mod tests {
             telemetry: None,
             max_concurrency: 1,
             schedule: None,
+            transfer_enabled: false,
         };
         let offline = Worker {
             id: uuid::Uuid::from_u128(2),
@@ -648,6 +649,7 @@ mod tests {
             telemetry: None,
             max_concurrency: 1,
             schedule: None,
+            transfer_enabled: false,
         };
         assert_eq!(workers_alert_badge(&[], now), None);
         assert_eq!(

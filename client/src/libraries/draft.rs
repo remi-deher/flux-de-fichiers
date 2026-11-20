@@ -4,6 +4,7 @@ use forgearr_shared::libraries::{
     LIBRARY_NAME_MAX, Library, LibraryAccess, LibraryOutputPolicy, LibraryWorkerPath, LibraryWrite,
     MAX_SCAN_INTERVAL_MINUTES, suggested_library_name_from_path,
 };
+use forgearr_shared::workers::Worker;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -13,6 +14,8 @@ pub struct LibraryDraft {
     pub name: String,
     pub flow_id: Option<String>,
     pub workers: Vec<LibraryWorkerPath>,
+    /// Workers sans accès direct qui traitent par transfert (ADR 0021).
+    pub transfer_workers: Vec<Uuid>,
     pub scan_interval_minutes: i32,
     pub include_extensions_text: String,
     pub exclude_patterns_text: String,
@@ -27,12 +30,69 @@ impl LibraryDraft {
             name: library.name.clone(),
             flow_id: library.flow_id.clone(),
             workers: library.workers.clone(),
+            transfer_workers: library.transfer_workers.clone(),
             scan_interval_minutes: library.scan_interval_minutes,
             include_extensions_text: library.include_extensions.join(", "),
             exclude_patterns_text: library.exclude_patterns.join(", "),
             min_file_mb: library.min_file_bytes / (1024 * 1024),
             output_policy: library.output_policy,
         }
+    }
+
+    /// Ajoute ou retire un worker « par transfert ». Un worker à accès direct ne peut pas l'être.
+    pub fn set_transfer_worker(&mut self, worker_id: Uuid, enabled: bool) {
+        self.transfer_workers.retain(|id| *id != worker_id);
+        if enabled && !self.has_direct_folder(worker_id) {
+            self.transfer_workers.push(worker_id);
+        }
+    }
+
+    pub fn has_direct_folder(&self, worker_id: Uuid) -> bool {
+        self.workers
+            .iter()
+            .any(|entry| entry.worker_id == worker_id)
+    }
+
+    /// Avertit quand les workers par transfert n'ont, comme détenteurs de la source, que des
+    /// workers sans adresse de transfert : les sources passent alors par le central (ADR 0019).
+    /// Aucun avertissement pour un dossier de la centrale, qui sert ses fichiers elle-même.
+    pub fn transfer_route_warning(&self, workers: &[Worker]) -> Option<String> {
+        if self.transfer_workers.is_empty() {
+            return None;
+        }
+        let mut holders: Vec<Uuid> = self
+            .workers
+            .iter()
+            .map(|folder| folder.worker_id)
+            .filter(|id| !id.is_nil())
+            .collect();
+        holders.sort();
+        holders.dedup();
+        if holders.is_empty()
+            || workers
+                .iter()
+                .any(|worker| worker.transfer_enabled && holders.contains(&worker.id))
+        {
+            return None;
+        }
+        let names = holders
+            .iter()
+            .map(|id| {
+                workers
+                    .iter()
+                    .find(|worker| worker.id == *id)
+                    .map_or_else(|| id.to_string(), |worker| worker.name.clone())
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(format!(
+            "Aucun worker à accès direct ({names}) n'annonce d'adresse de transfert : les sources passeront par le central, plus lentement. Définissez WORKER_TRANSFER_URL sur l'un d'eux."
+        ))
+    }
+
+    /// Les workers par transfert exigent le dossier de sortie dédié (ADR 0021).
+    pub fn transfer_conflicts_with_policy(&self) -> bool {
+        !self.transfer_workers.is_empty() && self.output_policy != LibraryOutputPolicy::OutputDir
     }
 
     pub fn remove_folder(&mut self, worker_id: Uuid, path: &str) {
@@ -65,6 +125,8 @@ impl LibraryDraft {
                 access,
             });
         }
+        // Un dossier déclaré donne l'accès direct : le worker quitte la liste « par transfert ».
+        self.transfer_workers.retain(|id| *id != worker_id);
         Ok(())
     }
 
@@ -107,6 +169,11 @@ impl LibraryDraft {
         if name.is_empty() || name.chars().count() > LIBRARY_NAME_MAX {
             return Err("Le nom doit compter de 1 à 80 caractères.");
         }
+        if self.transfer_conflicts_with_policy() {
+            return Err(
+                "Les workers par transfert exigent le dossier de sortie dédié : changez la stratégie de sortie ou retirez-les.",
+            );
+        }
         let split_list = |raw: &str| -> Vec<String> {
             raw.split(',')
                 .map(str::trim)
@@ -118,6 +185,7 @@ impl LibraryDraft {
             name: name.to_owned(),
             flow_id: self.flow_id.clone().filter(|id| !id.is_empty()),
             workers: self.workers.clone(),
+            transfer_workers: self.transfer_workers.clone(),
             scan_interval_minutes: self
                 .scan_interval_minutes
                 .clamp(0, MAX_SCAN_INTERVAL_MINUTES),
@@ -176,6 +244,78 @@ pub fn access_label(access: LibraryAccess) -> &'static str {
 mod tests {
     use super::*;
 
+    fn worker(id: u128, name: &str, announces: bool) -> Worker {
+        Worker {
+            id: Uuid::from_u128(id),
+            name: name.into(),
+            last_seen: chrono::Utc::now(),
+            version: None,
+            remote_addr: None,
+            telemetry: None,
+            max_concurrency: 1,
+            schedule: None,
+            transfer_enabled: announces,
+        }
+    }
+
+    #[test]
+    fn the_route_warning_only_appears_when_no_direct_worker_announces_a_transfer_address() {
+        let (nas, calcul) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        let workers = [worker(1, "nas", false), worker(2, "calcul", false)];
+        let mut draft = LibraryDraft::default();
+        assert!(
+            draft.transfer_route_warning(&workers).is_none(),
+            "pas de worker par transfert"
+        );
+        draft.set_transfer_worker(calcul, true);
+        assert!(
+            draft.transfer_route_warning(&workers).is_none(),
+            "dossier de la centrale seul"
+        );
+        assert!(
+            draft
+                .set_or_add_worker(nas, "/mnt/a", LibraryAccess::Read)
+                .is_ok()
+        );
+        let warning = draft.transfer_route_warning(&workers);
+        assert!(
+            warning
+                .as_deref()
+                .is_some_and(|text| text.contains("nas") && text.contains("WORKER_TRANSFER_URL"))
+        );
+        let announcing = [worker(1, "nas", true), worker(2, "calcul", false)];
+        assert!(draft.transfer_route_warning(&announcing).is_none());
+    }
+
+    #[test]
+    fn a_declared_folder_takes_the_worker_out_of_transfer_mode_and_policy_is_checked() {
+        let worker = Uuid::from_u128(7);
+        let mut draft = LibraryDraft {
+            name: "Films".into(),
+            ..LibraryDraft::default()
+        };
+        draft.set_transfer_worker(worker, true);
+        assert_eq!(draft.transfer_workers, vec![worker]);
+        assert_eq!(
+            draft.to_write().map(|write| write.transfer_workers).ok(),
+            Some(vec![worker])
+        );
+        draft.output_policy = LibraryOutputPolicy::ReplaceWithBackup;
+        assert!(draft.to_write().is_err(), "remplacement incompatible");
+        draft.output_policy = LibraryOutputPolicy::OutputDir;
+        assert!(
+            draft
+                .set_or_add_worker(worker, "/mnt/a", LibraryAccess::Read)
+                .is_ok()
+        );
+        assert!(draft.transfer_workers.is_empty(), "l'accès direct prime");
+        draft.set_transfer_worker(worker, true);
+        assert!(
+            draft.transfer_workers.is_empty(),
+            "un worker direct ne passe pas par transfert"
+        );
+    }
+
     #[test]
     fn folders_on_one_host_can_be_configured_independently() {
         let mut draft = LibraryDraft::default();
@@ -232,6 +372,7 @@ mod tests {
             name: name.into(),
             flow_id: flow_id.map(str::to_owned),
             workers,
+            transfer_workers: Vec::new(),
             scan_interval_minutes: 0,
             last_scanned_at: None,
             include_extensions: Vec::new(),

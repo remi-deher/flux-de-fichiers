@@ -49,6 +49,7 @@ impl WorkerRow {
                 .max_concurrency
                 .clamp(WORKER_MIN_CONCURRENCY, WORKER_MAX_CONCURRENCY),
             schedule,
+            transfer_enabled: false,
         }
     }
 }
@@ -218,11 +219,28 @@ pub async fn list_workers(pool: &SqlitePool) -> AppResult<Vec<Worker>> {
     )
     .fetch_all(pool)
     .await?;
-    Ok(workers.into_iter().map(WorkerRow::into_worker).collect())
+    let announcing: std::collections::HashSet<Uuid> =
+        sqlx::query_scalar("SELECT id FROM workers WHERE transfer_url IS NOT NULL")
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .collect();
+    Ok(workers
+        .into_iter()
+        .map(WorkerRow::into_worker)
+        .map(|worker| Worker {
+            transfer_enabled: announcing.contains(&worker.id),
+            ..worker
+        })
+        .collect())
 }
 
 pub async fn delete_worker(pool: &SqlitePool, id: Uuid) -> AppResult<()> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    sqlx::query("DELETE FROM library_transfer_workers WHERE worker_id=?1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("DELETE FROM library_folders WHERE worker_id=?1")
         .bind(id)
         .execute(&mut *tx)
@@ -622,7 +640,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
     }
 
     let queued_status = JobStatus::Queued;
-    let next_id: Option<Uuid> = sqlx::query_scalar(
+    let claimable_sql = format!(
         "SELECT id FROM jobs WHERE status=?1 AND attempts < ?2
          AND (target_worker_id IS NULL OR target_worker_id=?3)
          AND (NOT EXISTS (SELECT 1 FROM job_relays r WHERE r.job_id=jobs.id AND r.requirement_json IS NOT NULL)
@@ -631,19 +649,17 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                            AND json_extract(e.value, '$.codec')=json_extract(r.requirement_json, '$.codec')
                            AND (json_extract(r.requirement_json, '$.acceleration') IS NULL
                                 OR json_extract(e.value, '$.acceleration')=json_extract(r.requirement_json, '$.acceleration'))))
-         AND ((source_key IS NULL AND (source_worker_id IS NULL OR source_worker_id=?3))
-              OR EXISTS (SELECT 1 FROM job_relays WHERE job_relays.job_id=jobs.id)
-              OR EXISTS (
-             SELECT 1 FROM verified_job_source_mounts m WHERE m.job_id=jobs.id
-                 AND (m.worker_id=?3 OR m.worker_id=zeroblob(16))
-         ))
+         AND {access}
          ORDER BY priority DESC, created_at ASC, id ASC LIMIT 1",
-    )
-    .bind(queued_status)
-    .bind(MAX_ATTEMPTS)
-    .bind(worker)
-    .fetch_optional(&mut *tx)
-    .await?;
+        access = super::library_access::job_access_sql("?3", "?4"),
+    );
+    let next_id: Option<Uuid> = sqlx::query_scalar(&claimable_sql)
+        .bind(queued_status)
+        .bind(MAX_ATTEMPTS)
+        .bind(worker)
+        .bind(forgearr_shared::workers::INTEGRATED_WORKER_NAME)
+        .fetch_optional(&mut *tx)
+        .await?;
     let job: Option<Job> = if let Some(id) = next_id {
         let lease_token = Uuid::new_v4();
         if let Some((path, owner, read_write)) = sqlx::query_as::<_, (String, Uuid, bool)>(

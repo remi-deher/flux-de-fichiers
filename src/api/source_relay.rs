@@ -20,6 +20,8 @@ use serde::Deserialize;
 use std::{io, time::Duration};
 use uuid::Uuid;
 
+/// Détenteurs essayés tour à tour avant d'abandonner le repli.
+const MAX_RELAY_HOLDERS_TRIED: usize = 2;
 /// Attente longue maximale d'un worker source qui interroge ses demandes en attente.
 const MAX_PENDING_WAIT_MS: u64 = 15_000;
 
@@ -38,19 +40,28 @@ pub struct SendQuery {
 /// Relaie vers le worker traitant la source détenue par un autre worker (réponse de
 /// `GET /api/v1/jobs/{id}/source` quand le central n'a pas le fichier).
 pub async fn relay_source_from_worker(s: &AppState, job: &Job) -> AppResult<Response> {
-    let source = repository::job_source(&s.pool, job.id)
+    // Premier détenteur en ligne qui répond : tout worker à accès direct de la même source convient.
+    let mut stream = None;
+    for holder in repository::source_holders(&s.pool, job.id, Uuid::nil())
         .await?
-        .ok_or(AppError::NotFound)?;
-    let owner = source.source_worker_id.ok_or(AppError::NotFound)?;
-    let mut stream = s
-        .source_relay
-        .request(
-            owner,
-            source.source_root,
-            job.source_name.clone(),
-            SOURCE_RELAY_START_TIMEOUT,
-        )
-        .await?;
+        .into_iter()
+        .take(MAX_RELAY_HOLDERS_TRIED)
+    {
+        if let Ok(opened) = s
+            .source_relay
+            .request(
+                holder.worker_id,
+                holder.root,
+                job.source_name.clone(),
+                SOURCE_RELAY_START_TIMEOUT,
+            )
+            .await
+        {
+            stream = Some(opened);
+            break;
+        }
+    }
+    let mut stream = stream.ok_or(AppError::CentralUnavailable)?;
     let body = Body::from_stream(futures_util::stream::poll_fn(move |cx| {
         stream.poll_recv(cx)
     }));

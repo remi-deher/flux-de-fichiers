@@ -38,6 +38,7 @@ struct PreparedLibrary {
     name: String,
     flow_id: Option<String>,
     workers: Vec<LibraryWorkerPath>,
+    transfer_workers: Vec<Uuid>,
     scan_interval_minutes: i32,
     include_extensions_csv: String,
     exclude_patterns_csv: String,
@@ -151,6 +152,28 @@ pub fn prepare_workers(workers: Vec<LibraryWorkerPath>) -> AppResult<Vec<Library
     Ok(prepared)
 }
 
+/// Valide les workers « par transfert » (ADR 0021) : ni doublon, ni centrale, ni worker déjà direct,
+/// et seulement avec le dossier de sortie dédié tant que le retour du résultat n'existe pas.
+pub fn prepare_transfer_workers(
+    transfer_workers: Vec<Uuid>,
+    direct: &[LibraryWorkerPath],
+    output_policy: LibraryOutputPolicy,
+) -> AppResult<Vec<Uuid>> {
+    if transfer_workers.is_empty() {
+        return Ok(transfer_workers);
+    }
+    if output_policy != LibraryOutputPolicy::OutputDir {
+        return Err(AppError::Invalid);
+    }
+    let mut seen = HashSet::with_capacity(transfer_workers.len());
+    for id in &transfer_workers {
+        if id.is_nil() || !seen.insert(*id) || direct.iter().any(|folder| folder.worker_id == *id) {
+            return Err(AppError::Invalid);
+        }
+    }
+    Ok(transfer_workers)
+}
+
 async fn prepare(pool: &SqlitePool, write: LibraryWrite) -> AppResult<PreparedLibrary> {
     let name = normalize_library_name(&write.name)?;
     let flow_id = normalize_flow_id(write.flow_id);
@@ -167,6 +190,13 @@ async fn prepare(pool: &SqlitePool, write: LibraryWrite) -> AppResult<PreparedLi
             return Err(AppError::Invalid);
         }
     }
+    let transfer_workers =
+        prepare_transfer_workers(write.transfer_workers, &workers, write.output_policy)?;
+    for id in &transfer_workers {
+        if !super::worker_exists(pool, *id).await? {
+            return Err(AppError::Invalid);
+        }
+    }
     if !(0..=MAX_SCAN_INTERVAL_MINUTES).contains(&write.scan_interval_minutes) {
         return Err(AppError::Invalid);
     }
@@ -177,6 +207,7 @@ async fn prepare(pool: &SqlitePool, write: LibraryWrite) -> AppResult<PreparedLi
         name,
         flow_id,
         workers,
+        transfer_workers,
         scan_interval_minutes: write.scan_interval_minutes,
         include_extensions_csv,
         exclude_patterns_csv,
@@ -185,12 +216,17 @@ async fn prepare(pool: &SqlitePool, write: LibraryWrite) -> AppResult<PreparedLi
     })
 }
 
-fn assemble(row: LibraryRow, workers: Vec<LibraryWorkerPath>) -> Library {
+fn assemble(
+    row: LibraryRow,
+    workers: Vec<LibraryWorkerPath>,
+    transfer_workers: Vec<Uuid>,
+) -> Library {
     Library {
         id: row.id,
         name: row.name,
         flow_id: row.flow_id,
         workers,
+        transfer_workers,
         scan_interval_minutes: row.scan_interval_minutes.max(0),
         last_scanned_at: row.last_scanned_at,
         include_extensions: split_csv(&row.include_extensions),
@@ -220,6 +256,33 @@ async fn workers_of(
             access: row.access,
         })
         .collect())
+}
+
+async fn transfer_workers_of(
+    executor: impl sqlx::SqliteExecutor<'_>,
+    id: Uuid,
+) -> AppResult<Vec<Uuid>> {
+    Ok(sqlx::query_scalar(
+        "SELECT worker_id FROM library_transfer_workers WHERE library_id=?1 ORDER BY worker_id",
+    )
+    .bind(id)
+    .fetch_all(executor)
+    .await?)
+}
+
+async fn insert_transfer_workers(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+    library_id: Uuid,
+    transfer_workers: &[Uuid],
+) -> AppResult<()> {
+    for worker_id in transfer_workers {
+        sqlx::query("INSERT INTO library_transfer_workers (library_id, worker_id) VALUES (?1, ?2)")
+            .bind(library_id)
+            .bind(worker_id)
+            .execute(&mut *conn)
+            .await?;
+    }
+    Ok(())
 }
 
 async fn insert_workers(
@@ -254,6 +317,18 @@ pub async fn list_libraries(pool: &SqlitePool) -> AppResult<Vec<Library>> {
     )
     .fetch_all(pool)
     .await?;
+    let transfer_rows: Vec<(Uuid, Uuid)> = sqlx::query_as(
+        "SELECT library_id, worker_id FROM library_transfer_workers ORDER BY worker_id",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut transfer_by_library: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    for (library_id, worker_id) in transfer_rows {
+        transfer_by_library
+            .entry(library_id)
+            .or_default()
+            .push(worker_id);
+    }
     let mut by_library: HashMap<Uuid, Vec<LibraryWorkerPath>> = HashMap::new();
     for entry in worker_rows {
         by_library
@@ -270,7 +345,8 @@ pub async fn list_libraries(pool: &SqlitePool) -> AppResult<Vec<Library>> {
         .into_iter()
         .map(|row| {
             let workers = by_library.remove(&row.id).unwrap_or_default();
-            assemble(row, workers)
+            let transfer_workers = transfer_by_library.remove(&row.id).unwrap_or_default();
+            assemble(row, workers, transfer_workers)
         })
         .collect())
 }
@@ -285,7 +361,8 @@ pub async fn get_library(pool: &SqlitePool, id: Uuid) -> AppResult<Library> {
     .await?
     .ok_or(AppError::NotFound)?;
     let workers = workers_of(pool, id).await?;
-    Ok(assemble(row, workers))
+    let transfer_workers = transfer_workers_of(pool, id).await?;
+    Ok(assemble(row, workers, transfer_workers))
 }
 
 pub async fn insert_library(pool: &SqlitePool, write: LibraryWrite) -> AppResult<Library> {
@@ -307,8 +384,9 @@ pub async fn insert_library(pool: &SqlitePool, write: LibraryWrite) -> AppResult
     .fetch_one(&mut *tx)
     .await?;
     insert_workers(&mut tx, id, &prepared.workers).await?;
+    insert_transfer_workers(&mut tx, id, &prepared.transfer_workers).await?;
     tx.commit().await?;
-    Ok(assemble(row, prepared.workers))
+    Ok(assemble(row, prepared.workers, prepared.transfer_workers))
 }
 
 pub async fn update_library(
@@ -339,13 +417,22 @@ pub async fn update_library(
         .bind(id)
         .execute(&mut *tx)
         .await?;
+    sqlx::query("DELETE FROM library_transfer_workers WHERE library_id=?1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     insert_workers(&mut tx, id, &prepared.workers).await?;
+    insert_transfer_workers(&mut tx, id, &prepared.transfer_workers).await?;
     tx.commit().await?;
-    Ok(assemble(row, prepared.workers))
+    Ok(assemble(row, prepared.workers, prepared.transfer_workers))
 }
 
 pub async fn delete_library(pool: &SqlitePool, id: Uuid) -> AppResult<()> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    sqlx::query("DELETE FROM library_transfer_workers WHERE library_id=?1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("DELETE FROM library_folders WHERE library_id=?1")
         .bind(id)
         .execute(&mut *tx)

@@ -206,13 +206,7 @@ async fn read_only_inspections_use_a_separate_authenticated_channel() -> anyhow:
     let pending_job = job.id;
     let waiting = tokio::spawn(async move {
         broker
-            .request(
-                task,
-                "/unused".into(),
-                pending_job,
-                lease,
-                std::time::Duration::from_secs(5),
-            )
+            .request(task, pending_job, lease, std::time::Duration::from_secs(5))
             .await
     });
     let ordinary = format!(

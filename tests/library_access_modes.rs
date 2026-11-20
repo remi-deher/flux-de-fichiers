@@ -306,8 +306,7 @@ async fn the_worker_list_tells_which_workers_announce_a_transfer_address() -> an
     assert!(
         repository::find_worker_by_name(&pool, "annonce")
             .await?
-            .unwrap()
-            .transfer_enabled
+            .is_some_and(|worker| worker.transfer_enabled)
     );
     assert!(
         repository::update_worker_settings(&pool, announcing.id, 1, None)

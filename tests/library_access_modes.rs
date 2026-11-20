@@ -298,7 +298,33 @@ async fn the_worker_list_tells_which_workers_announce_a_transfer_address() -> an
     };
     assert_eq!(flag(announcing.id), Some(true));
     assert_eq!(flag(silent.id), Some(false));
+    assert!(
+        repository::get_worker(&pool, announcing.id)
+            .await?
+            .transfer_enabled
+    );
+    assert!(
+        repository::find_worker_by_name(&pool, "annonce")
+            .await?
+            .unwrap()
+            .transfer_enabled
+    );
+    assert!(
+        repository::update_worker_settings(&pool, announcing.id, 1, None)
+            .await?
+            .transfer_enabled
+    );
+    assert!(
+        repository::register(&pool, "annonce")
+            .await?
+            .transfer_enabled
+    );
     repository::set_transfer_url(&pool, announcing.id, None).await?;
+    assert!(
+        !repository::get_worker(&pool, announcing.id)
+            .await?
+            .transfer_enabled
+    );
     let workers = repository::list_workers(&pool).await?;
     assert!(workers.iter().all(|worker| !worker.transfer_enabled));
     Ok(())

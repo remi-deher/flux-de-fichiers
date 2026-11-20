@@ -131,6 +131,9 @@ pub struct AppState {
     pub ai_health: crate::ai::health::AiHealthTracker,
     pub ai_models: crate::ai::health::ModelCache,
     pub ai_diagnosis: crate::ai::diagnosis::DiagnosisStore,
+    /// Identifiant du worker intégré une fois enregistré (absent s'il est désactivé) : il détient les
+    /// sources que le central voit et reçoit leurs résultats (ADR 0022).
+    pub local_worker_id: Arc<std::sync::OnceLock<uuid::Uuid>>,
 }
 
 impl AppState {
@@ -156,6 +159,7 @@ impl AppState {
             ai_health: crate::ai::health::AiHealthTracker::new(),
             ai_models: crate::ai::health::ModelCache::new(),
             ai_diagnosis: crate::ai::diagnosis::DiagnosisStore::new(),
+            local_worker_id: Arc::new(std::sync::OnceLock::new()),
         }
     }
 

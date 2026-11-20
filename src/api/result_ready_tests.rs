@@ -1,9 +1,14 @@
 use super::*;
-use crate::{api::transfers::tests::setup, domain::JobErrorCode};
+use crate::{
+    api::transfers::tests::setup,
+    domain::JobErrorCode,
+    storage,
+    worker_transfer::{TransferState, transfer_router},
+};
 use forgearr_shared::transfer::{
     ArtifactDeclaration, SourcePublicationOutcome, SourcePublicationReport, SourcePublicationTask,
 };
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 type Publishing = tokio::task::JoinHandle<AppResult<bool>>;
 
@@ -169,7 +174,7 @@ async fn other_cases_keep_the_upload_to_the_central() -> anyhow::Result<()> {
     let (state, job, lease, holder) = setup(dir.path()).await?;
     retain_result(&state, &job, &lease).await?;
     // Le worker qui traite est lui-même le détenteur : rien à tirer.
-    let itself = pulled_policy(&state, &job, holder).await?;
+    let itself = pulled_destination(&state, &job, holder).await?;
     assert!(itself.is_none());
     // Dossier de sortie du central : l'envoi au central reste le chemin.
     sqlx::query("UPDATE libraries SET output_policy=?1")
@@ -196,5 +201,96 @@ async fn a_result_must_be_declared_by_the_lease_holder_with_a_valid_extension() 
     };
     let invalid = publish_pulled(&state, &job, &lease, &odd).await;
     assert!(matches!(invalid, Err(AppError::Invalid)));
+    Ok(())
+}
+
+/// La source est tenue par le central (inscriptible) : le worker intégré en est le détenteur.
+async fn make_source_central_held(state: &AppState, job: &Job) -> anyhow::Result<()> {
+    sqlx::query(
+        "UPDATE jobs SET source_key=NULL, source_worker_id=NULL, source_writable=1 WHERE id=?1",
+    )
+    .bind(job.id)
+    .execute(&state.pool)
+    .await?;
+    Ok(())
+}
+
+/// Serveur de transfert du worker qui retient le résultat : il valide les billets auprès du central.
+async fn serve_retained_result(state: &AppState, processor: Uuid) -> anyhow::Result<String> {
+    let pool = state.pool.clone();
+    let transfers = TransferState::new(Arc::new(move |token: String| {
+        let pool = pool.clone();
+        Box::pin(async move {
+            repository::redeem_ticket(&pool, &token, processor)
+                .await
+                .map_err(|_| axum::http::StatusCode::FORBIDDEN)
+        })
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let address = listener.local_addr()?;
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, transfer_router(transfers)).await;
+    });
+    Ok(format!("http://{address}"))
+}
+
+#[tokio::test]
+async fn central_sources_go_to_the_integrated_worker_when_active() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, _) = setup(dir.path()).await?;
+    make_source_central_held(&state, &job).await?;
+    // Sans worker intégré actif, l'envoi au central reste le chemin.
+    let without = pulled_destination(&state, &job, lease.worker_id).await?;
+    assert!(without.is_none());
+    let local = repository::register(&state.pool, "central-local").await?;
+    assert!(state.local_worker_id.set(local.id).is_ok());
+    let (policy, holder) = pulled_destination(&state, &job, lease.worker_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("le worker intégré doit être le détenteur"))?;
+    assert!(policy == LibraryOutputPolicy::ReplaceWithBackup);
+    assert_eq!(holder.worker_id, local.id);
+    assert_eq!(holder.root, dir.path().to_string_lossy());
+    // Le worker intégré qui traite lui-même n'a rien à tirer.
+    let itself = pulled_destination(&state, &job, local.id).await?;
+    assert!(itself.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_integrated_worker_applies_the_pulled_result() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, _) = setup(dir.path()).await?;
+    make_source_central_held(&state, &job).await?;
+    let local = repository::register(&state.pool, "central-local").await?;
+    assert!(state.local_worker_id.set(local.id).is_ok());
+
+    // Le worker qui traite retient le résultat et le sert.
+    let retained = dir.path().join("retained");
+    std::fs::create_dir_all(&retained)?;
+    let result_file = retained.join("result-file.mkv");
+    std::fs::write(&result_file, b"nouveau")?;
+    let (sha256, bytes) = storage::fingerprint(&result_file, state.config.max_file_bytes).await?;
+    let url = serve_retained_result(&state, lease.worker_id).await?;
+    repository::set_transfer_url(&state.pool, lease.worker_id, Some(&url)).await?;
+    let declaration = ArtifactDeclaration {
+        root: retained.to_string_lossy().into_owned(),
+        name: "result-file.mkv".into(),
+        sha256,
+        bytes: i64::try_from(bytes)?,
+    };
+    let max = state.config.max_file_bytes;
+    let kind = ArtifactKind::Result;
+    repository::declare_artifact(&state.pool, job.id, &lease, kind, &declaration, max).await?;
+
+    // Le worker intégré reçoit la demande, tire le fichier et remplace la source du central.
+    let responder = crate::local_worker::respond_to_publications(state.clone(), local.id);
+    tokio::spawn(responder);
+    assert!(publish_pulled(&state, &job, &lease, &ready_request()).await?);
+    assert_eq!(std::fs::read(dir.path().join("film.mkv"))?, b"nouveau");
+    assert_eq!(std::fs::read(dir.path().join("film.mkv.bak"))?, b"original");
+    let done = repository::get_job(&state.pool, job.id).await?;
+    assert_eq!(done.status, JobStatus::Succeeded);
+    let copies = std::fs::read_dir(state.config.data_dir.join("output"))?.count();
+    assert_eq!(copies, 0, "le central ne garde aucune copie");
     Ok(())
 }

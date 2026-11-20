@@ -27,8 +27,9 @@ const PUBLICATION_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 pub(crate) enum ResultSource<'a> {
     /// Fichier tenu par le central (ancien envoi).
     Staged(&'a std::path::Path),
-    /// Fichier retenu par le worker qui l'a produit : le détenteur le tire en direct (ADR 0022).
-    Pulled,
+    /// Fichier retenu par le worker qui l'a produit : le détenteur choisi le tire en direct
+    /// (ADR 0022).
+    Pulled(repository::SourceHolder),
 }
 
 /// Transmet le résultat à un détenteur inscriptible, sans le déclarer réussi avant sa réponse.
@@ -43,14 +44,19 @@ pub(crate) async fn publish_on_holder(
     extension: &str,
     policy: LibraryOutputPolicy,
 ) -> AppResult<()> {
-    let holder = repository::writable_source_holders(&s.pool, job.id, Uuid::nil())
-        .await?
-        .into_iter()
-        .next()
-        .ok_or(AppError::CentralUnavailable)?;
-    let result_ticket = match source {
+    let holder = match &source {
+        ResultSource::Pulled(holder) => holder.clone(),
+        ResultSource::Staged(_) => {
+            repository::writable_source_holders(&s.pool, job.id, Uuid::nil())
+                .await?
+                .into_iter()
+                .next()
+                .ok_or(AppError::CentralUnavailable)?
+        }
+    };
+    let result_ticket = match &source {
         ResultSource::Staged(_) => None,
-        ResultSource::Pulled => Some(
+        ResultSource::Pulled(_) => Some(
             repository::issue_artifact_ticket(
                 &s.pool,
                 job.id,
@@ -88,7 +94,7 @@ pub(crate) async fn publish_on_holder(
                 )
                 .await?
         }
-        ResultSource::Pulled => {
+        ResultSource::Pulled(_) => {
             broker
                 .request_pulled(task, job.id, lease.clone(), PUBLICATION_TIMEOUT)
                 .await?

@@ -148,7 +148,12 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
      par `Range` et billet ré-émissible (`POST .../source-publications/{id}/ticket`) ; la purge des
      fichiers retenus passe par `GET /api/v1/jobs/{id}/retained/{kind}`. Le détenteur qui traite lui-même
      applique encore via le central (raccourci local à venir).
-   - 3c — le worker intégré comme destination (sources tenues par le central, `OutputDir`).
+   - **3c-i (fait) — worker intégré, sources tenues par le central** : le worker intégré (identité
+     publiée dans `AppState.local_worker_id`) reçoit la demande par le courtier en mémoire, tire le
+     résultat chez le worker qui le retient (billet d'artefact, reprise par `Range`), applique la
+     politique de remplacement sur la source du central et répond ; sans worker intégré actif, l'envoi au
+     central reste le chemin.
+   - 3c-ii — dossier de sortie du central (`OutputDir`) par le worker intégré.
    - 3d — journal et reprise sans copie centrale ; `output_name` vide pour un résultat remplacé.
    - 3e — suppression de l'envoi `PUT /result`, du staging et des copies centrales ; validation
      post-traitement chez le worker qui traite.

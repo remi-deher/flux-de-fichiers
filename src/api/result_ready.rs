@@ -9,8 +9,8 @@ use super::{
 use crate::{
     domain::{Job, JobEventType, JobStatus, LeaseRequest, LibraryOutputPolicy},
     error::{AppError, AppResult},
-    library_scan::central_writable_job_source,
-    repository::{self, PublishedOutput},
+    library_scan::central_writable_job_root,
+    repository::{self, PublishedOutput, SourceHolder},
     storage,
 };
 use axum::{
@@ -21,32 +21,40 @@ use axum::{
 use forgearr_shared::transfer::{ArtifactKind, ResultReady, ResultReadyResponse};
 use uuid::Uuid;
 
-/// Politique de sortie quand le résultat revient à un détenteur distant de la source : source
-/// tenue par un autre worker que celui qui traite, inscriptible, politique de remplacement.
+/// Politique et détenteur quand le résultat revient à un détenteur de la source : le worker intégré
+/// pour une source que le central voit (s'il est actif), sinon le détenteur distant inscriptible ;
+/// dans tous les cas un autre worker que celui qui traite, avec une politique de remplacement.
 /// `None` pour les autres cas, qui gardent l'envoi au central.
-async fn pulled_policy(
+async fn pulled_destination(
     s: &AppState,
     job: &Job,
     processor: Uuid,
-) -> AppResult<Option<LibraryOutputPolicy>> {
+) -> AppResult<Option<(LibraryOutputPolicy, SourceHolder)>> {
     let Some(library_id) = job.library_id else {
         return Ok(None);
     };
     let library = repository::get_library(&s.pool, library_id).await?;
-    if library.output_policy == LibraryOutputPolicy::OutputDir {
+    let policy = library.output_policy;
+    if policy == LibraryOutputPolicy::OutputDir {
         return Ok(None);
     }
-    let local = central_writable_job_source(&s.pool, &s.config.input_dir, job)
+    let central = central_writable_job_root(&s.pool, &s.config.input_dir, job)
         .await
         .map_err(crate::source_publication::missing_source_is_changed)?;
-    if local.is_some() {
-        return Ok(None);
-    }
-    let holders = repository::writable_source_holders(&s.pool, job.id, Uuid::nil()).await?;
-    let remote = holders
-        .first()
-        .is_some_and(|holder| holder.worker_id != processor);
-    Ok(remote.then_some(library.output_policy))
+    let local = s.local_worker_id.get().copied();
+    let holder = match central {
+        Some(root) => local.map(|worker_id| SourceHolder {
+            worker_id,
+            root: root.to_string_lossy().into_owned(),
+            transfer_url: None,
+        }),
+        None => repository::writable_source_holders(&s.pool, job.id, Uuid::nil())
+            .await?
+            .into_iter()
+            .next(),
+    };
+    let remote = holder.filter(|holder| holder.worker_id != processor);
+    Ok(remote.map(|holder| (policy, holder)))
 }
 
 /// Publie le résultat que le worker retient : le détenteur de la bibliothèque le tire en direct,
@@ -69,7 +77,7 @@ pub(crate) async fn publish_pulled(
                 && artifact.lease_epoch == lease.lease_epoch
         })
         .ok_or(AppError::Invalid)?;
-    let Some(policy) = pulled_policy(s, job, lease.worker_id).await? else {
+    let Some((policy, holder)) = pulled_destination(s, job, lease.worker_id).await? else {
         // Ce cas garde l'envoi au central : le fichier retenu n'a plus d'objet.
         repository::release_artifact(&s.pool, job.id, ArtifactKind::Result).await?;
         return Ok(false);
@@ -86,7 +94,7 @@ pub(crate) async fn publish_pulled(
         s,
         job,
         lease,
-        ResultSource::Pulled,
+        ResultSource::Pulled(holder),
         &declared.sha256,
         declared.bytes,
         &ready.extension,

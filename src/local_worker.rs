@@ -1,12 +1,20 @@
 use crate::{
     api::{self, AppState},
     domain::{JobErrorCode, LeaseRequest},
+    error::{AppError, AppResult},
     job_runner::{self, JobRunError},
     repository, storage,
     worker::timing::{HEARTBEAT_INTERVAL, IDLE_POLL_INTERVAL, SOFTWARE_PROBE_REFRESH},
 };
+use forgearr_shared::transfer::{
+    ArtifactKind, SourcePublicationOutcome, SourcePublicationReport, SourcePublicationTask,
+};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
+
+/// Attente d'une demande de publication avant de redemander (le courtier réveille dès qu'une arrive).
+const PUBLICATION_WAIT: Duration = Duration::from_secs(15);
 
 async fn refresh_software_capabilities(state: &AppState) {
     let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
@@ -37,6 +45,8 @@ pub async fn run(state: AppState) {
         }
     };
     tracing::info!(worker_id=%worker.id, "local worker registered");
+    let _ = state.local_worker_id.set(worker.id);
+    tokio::spawn(respond_to_publications(state.clone(), worker.id));
     let refresh_state = state.clone();
     let refresh_worker = worker.id;
     tokio::spawn(async move {
@@ -107,6 +117,100 @@ pub async fn run(state: AppState) {
             }
         }
     }
+}
+
+/// Le worker intégré détient les sources que le central voit : il reçoit les résultats à appliquer,
+/// les tire chez le worker qui les retient et applique la politique de sortie (ADR 0022).
+pub(crate) async fn respond_to_publications(state: AppState, worker_id: Uuid) {
+    loop {
+        let tasks = tokio::select! {
+            _ = api::shutdown_signal() => return,
+            tasks = state.source_publication.take_for_worker(worker_id, PUBLICATION_WAIT) => tasks,
+        };
+        for task in tasks {
+            let state = state.clone();
+            tokio::spawn(async move { publish_local(&state, task).await });
+        }
+    }
+}
+
+async fn publish_local(state: &AppState, task: SourcePublicationTask) {
+    let outcome = match apply_pulled_result(state, &task).await {
+        Ok(()) => SourcePublicationOutcome::Published,
+        Err(AppError::SourceChanged) => SourcePublicationOutcome::SourceChanged,
+        Err(error) => {
+            tracing::warn!(error = %error, "publication locale du résultat impossible");
+            SourcePublicationOutcome::Failed
+        }
+    };
+    let report = SourcePublicationReport {
+        request_id: task.request_id,
+        worker_id: task.worker_id,
+        outcome,
+    };
+    if !state.source_publication.report(report).await {
+        tracing::warn!(request_id = %task.request_id, "réponse de publication locale refusée");
+    }
+}
+
+/// Tire le résultat chez le worker qui le retient, le vérifie, puis applique la politique de sortie
+/// sur la source du central. Le fichier tiré est temporaire.
+async fn apply_pulled_result(state: &AppState, task: &SourcePublicationTask) -> AppResult<()> {
+    let access = state
+        .source_publication
+        .access_for_worker(task.request_id, task.worker_id)
+        .await
+        .ok_or(AppError::NotFound)?;
+    let ticket = task.result_ticket.clone().ok_or(AppError::Invalid)?;
+    let name = format!(".source-publication-{}.tmp", task.request_id);
+    let file = state.config.data_dir.join("staging").join(name);
+    let max = state.config.max_file_bytes;
+    let result = async {
+        crate::worker_transfer::download_direct_resuming(
+            &crate::worker_transfer::direct_client().map_err(|_| AppError::CentralUnavailable)?,
+            ticket,
+            &file,
+            max,
+            &task.result_sha256,
+            task.result_bytes,
+            || async {
+                let kind = ArtifactKind::Result;
+                let epoch = access.lease.lease_epoch;
+                let fresh = repository::issue_artifact_ticket(
+                    &state.pool,
+                    access.job_id,
+                    kind,
+                    task.worker_id,
+                    epoch,
+                )
+                .await?;
+                anyhow::Ok(fresh)
+            },
+        )
+        .await
+        .map_err(|_| AppError::Invalid)?;
+        let root = std::path::Path::new(&task.root);
+        let source = crate::library_scan::source_path(root, &task.source_name)
+            .await
+            .map_err(crate::source_publication::missing_source_is_changed)?;
+        crate::source_publication::apply_library_output_policy(
+            task.policy,
+            &source,
+            &file,
+            &task.extension,
+            &task.source_sha256,
+            task.source_bytes,
+            max,
+            async {
+                let active = repository::active(&state.pool, access.job_id, &access.lease).await;
+                active.map(|_| ())
+            },
+        )
+        .await
+    }
+    .await;
+    let _ = tokio::fs::remove_file(&file).await;
+    result
 }
 
 async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Claim) {

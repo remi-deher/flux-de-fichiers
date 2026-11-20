@@ -153,7 +153,10 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
      résultat chez le worker qui le retient (billet d'artefact, reprise par `Range`), applique la
      politique de remplacement sur la source du central et répond ; sans worker intégré actif, l'envoi au
      central reste le chemin.
-   - 3c-ii — dossier de sortie du central (`OutputDir`) par le worker intégré.
+   - **3c-ii (fait) — dossier de sortie du central** : pour une bibliothèque `OutputDir` ou une tâche
+     sans bibliothèque, le worker intégré tire le résultat et l'installe dans `output/` sous le nom
+     `<tâche>-<bail>.<extension>` (`storage::output_file_name`), sans journal de publication : un échec
+     retire le fichier installé. Sans worker intégré actif, l'envoi au central reste le chemin.
    - 3d — journal et reprise sans copie centrale ; `output_name` vide pour un résultat remplacé.
    - 3e — suppression de l'envoi `PUT /result`, du staging et des copies centrales ; validation
      post-traitement chez le worker qui traite.

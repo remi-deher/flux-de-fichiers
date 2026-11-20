@@ -21,22 +21,29 @@ use axum::{
 use forgearr_shared::transfer::{ArtifactKind, ResultReady, ResultReadyResponse};
 use uuid::Uuid;
 
-/// Politique et détenteur quand le résultat revient à un détenteur de la source : le worker intégré
-/// pour une source que le central voit (s'il est actif), sinon le détenteur distant inscriptible ;
-/// dans tous les cas un autre worker que celui qui traite, avec une politique de remplacement.
+/// Politique et détenteur quand le résultat revient à un détenteur, toujours un autre worker que
+/// celui qui traite : pour un dossier de sortie du central (ou une tâche sans bibliothèque), le
+/// worker intégré s'il est actif ; pour une politique de remplacement, le worker intégré si le
+/// central voit la source, sinon le détenteur distant inscriptible.
 /// `None` pour les autres cas, qui gardent l'envoi au central.
 async fn pulled_destination(
     s: &AppState,
     job: &Job,
     processor: Uuid,
 ) -> AppResult<Option<(LibraryOutputPolicy, SourceHolder)>> {
-    let Some(library_id) = job.library_id else {
-        return Ok(None);
+    let policy = match job.library_id {
+        Some(library_id) => repository::get_library(&s.pool, library_id).await?.output_policy,
+        None => LibraryOutputPolicy::OutputDir,
     };
-    let library = repository::get_library(&s.pool, library_id).await?;
-    let policy = library.output_policy;
     if policy == LibraryOutputPolicy::OutputDir {
-        return Ok(None);
+        let output_root = s.config.data_dir.join("output");
+        let holder = s.local_worker_id.get().map(|worker_id| SourceHolder {
+            worker_id: *worker_id,
+            root: output_root.to_string_lossy().into_owned(),
+            transfer_url: None,
+        });
+        let remote = holder.filter(|holder| holder.worker_id != processor);
+        return Ok(remote.map(|holder| (policy, holder)));
     }
     let central = central_writable_job_root(&s.pool, &s.config.input_dir, job)
         .await
@@ -83,13 +90,17 @@ pub(crate) async fn publish_pulled(
         return Ok(false);
     };
     let declared = &artifact.declaration;
+    let in_output_dir = policy == LibraryOutputPolicy::OutputDir;
+    let output_name = storage::output_file_name(job.id, lease.lease_token, &ready.extension);
     let output = PublishedOutput {
-        name: &declared.name,
+        name: if in_output_dir { &output_name } else { &declared.name },
         sha256: &declared.sha256,
         bytes: declared.bytes,
         warning: ready.warning,
     };
-    repository::begin_source_publication(&s.pool, job.id, lease, output, policy).await?;
+    if !in_output_dir {
+        repository::begin_source_publication(&s.pool, job.id, lease, output, policy).await?;
+    }
     let published = publish_on_holder(
         s,
         job,
@@ -103,6 +114,11 @@ pub(crate) async fn publish_pulled(
     .await;
     match published {
         Ok(()) => {}
+        Err(error) if in_output_dir => {
+            let output_file = s.config.data_dir.join("output").join(&output_name);
+            let _ = tokio::fs::remove_file(output_file).await;
+            return Err(error);
+        }
         Err(AppError::SourceChanged) => {
             repository::clear_source_publication(&s.pool, job.id, lease.lease_epoch).await?;
             return Err(AppError::SourceChanged);
@@ -120,11 +136,16 @@ pub(crate) async fn publish_pulled(
     }
     repository::release_artifact(&s.pool, job.id, ArtifactKind::Result).await?;
     tracing::info!(job_id=%job.id, worker_id=%lease.worker_id, bytes=declared.bytes, "remux completed");
+    let notified_path = if in_output_dir {
+        s.config.data_dir.join("output").join(&output_name)
+    } else {
+        std::path::PathBuf::from(&declared.name)
+    };
     let notified = crate::flows::publication::notify_after_publication(
         s,
         job,
         lease.worker_id,
-        std::path::Path::new(&declared.name),
+        &notified_path,
     )
     .await;
     if let Err(error) = notified {

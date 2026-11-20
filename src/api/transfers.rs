@@ -313,7 +313,7 @@ pub(crate) async fn publish_staged(
             .await
             .map_err(|_| AppError::Invalid)?;
     }
-    let name = format!("{id}-{}.{}", lease.lease_token, spec.extension);
+    let name = storage::output_file_name(id, lease.lease_token, &spec.extension);
     let destination = s.config.data_dir.join("output").join(&name);
     let mut output_prepared = false;
     if let Some(library_id) = job.library_id {

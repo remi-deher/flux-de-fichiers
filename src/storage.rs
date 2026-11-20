@@ -101,6 +101,11 @@ pub async fn verified_working_path(path: &Path, work_dir: &Path) -> AppResult<Pa
 }
 
 /// Rend durable la création ou le renommage d'un fichier dans un répertoire.
+/// Nom du fichier de sortie d'une tâche dans le dossier de sortie du central.
+pub fn output_file_name(job: uuid::Uuid, lease_token: uuid::Uuid, extension: &str) -> String {
+    format!("{job}-{lease_token}.{extension}")
+}
+
 pub async fn sync_directory(path: &Path) -> AppResult<()> {
     tokio::fs::File::open(path).await?.sync_all().await?;
     Ok(())

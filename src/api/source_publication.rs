@@ -44,6 +44,11 @@ pub(crate) async fn publish_on_holder(
     extension: &str,
     policy: LibraryOutputPolicy,
 ) -> AppResult<()> {
+    if policy != LibraryOutputPolicy::OutputDir
+        && (job.source_sha256.is_none() || job.source_bytes.is_none())
+    {
+        return Err(AppError::Invalid);
+    }
     let holder = match &source {
         ResultSource::Pulled(holder) => holder.clone(),
         ResultSource::Staged(_) => {
@@ -73,8 +78,8 @@ pub(crate) async fn publish_on_holder(
         worker_id: holder.worker_id,
         root: holder.root,
         source_name: job.source_name.clone(),
-        source_sha256: job.source_sha256.clone().ok_or(AppError::Invalid)?,
-        source_bytes: job.source_bytes.ok_or(AppError::Invalid)?,
+        source_sha256: job.source_sha256.clone().unwrap_or_default(),
+        source_bytes: job.source_bytes.unwrap_or_default(),
         result_sha256: result_hash.to_owned(),
         result_bytes,
         extension: extension.to_owned(),

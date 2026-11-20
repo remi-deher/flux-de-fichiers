@@ -256,23 +256,32 @@ async fn central_sources_go_to_the_integrated_worker_when_active() -> anyhow::Re
     Ok(())
 }
 
-#[tokio::test]
-async fn the_integrated_worker_applies_the_pulled_result() -> anyhow::Result<()> {
-    let dir = tempfile::tempdir()?;
-    let (state, job, lease, _) = setup(dir.path()).await?;
-    make_source_central_held(&state, &job).await?;
+/// Enregistre le worker intégré et lui donne le staging du central.
+async fn activate_integrated_worker(state: &AppState) -> anyhow::Result<Uuid> {
     let local = repository::register(&state.pool, "central-local").await?;
     assert!(state.local_worker_id.set(local.id).is_ok());
     // Le central crée son dossier de staging au démarrage ; le worker intégré y tire le fichier.
     std::fs::create_dir_all(state.config.data_dir.join("staging"))?;
+    tokio::spawn(crate::local_worker::respond_to_publications(
+        state.clone(),
+        local.id,
+    ));
+    Ok(local.id)
+}
 
-    // Le worker qui traite retient le résultat et le sert.
-    let retained = dir.path().join("retained");
+/// Le worker qui traite retient le résultat « nouveau » et le sert.
+async fn retain_served_result(
+    state: &AppState,
+    job: &Job,
+    lease: &LeaseRequest,
+    dir: &std::path::Path,
+) -> anyhow::Result<()> {
+    let retained = dir.join("retained");
     std::fs::create_dir_all(&retained)?;
     let result_file = retained.join("result-file.mkv");
     std::fs::write(&result_file, b"nouveau")?;
     let (sha256, bytes) = storage::fingerprint(&result_file, state.config.max_file_bytes).await?;
-    let url = serve_retained_result(&state, lease.worker_id).await?;
+    let url = serve_retained_result(state, lease.worker_id).await?;
     repository::set_transfer_url(&state.pool, lease.worker_id, Some(&url)).await?;
     let declaration = ArtifactDeclaration {
         root: retained.to_string_lossy().into_owned(),
@@ -282,11 +291,17 @@ async fn the_integrated_worker_applies_the_pulled_result() -> anyhow::Result<()>
     };
     let max = state.config.max_file_bytes;
     let kind = ArtifactKind::Result;
-    repository::declare_artifact(&state.pool, job.id, &lease, kind, &declaration, max).await?;
+    repository::declare_artifact(&state.pool, job.id, lease, kind, &declaration, max).await?;
+    Ok(())
+}
 
-    // Le worker intégré reçoit la demande, tire le fichier et remplace la source du central.
-    let responder = crate::local_worker::respond_to_publications(state.clone(), local.id);
-    tokio::spawn(responder);
+#[tokio::test]
+async fn the_integrated_worker_applies_the_pulled_result() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, _) = setup(dir.path()).await?;
+    make_source_central_held(&state, &job).await?;
+    activate_integrated_worker(&state).await?;
+    retain_served_result(&state, &job, &lease, dir.path()).await?;
     assert!(publish_pulled(&state, &job, &lease, &ready_request()).await?);
     assert_eq!(std::fs::read(dir.path().join("film.mkv"))?, b"nouveau");
     assert_eq!(std::fs::read(dir.path().join("film.mkv.bak"))?, b"original");
@@ -294,5 +309,25 @@ async fn the_integrated_worker_applies_the_pulled_result() -> anyhow::Result<()>
     assert_eq!(done.status, JobStatus::Succeeded);
     let copies = std::fs::read_dir(state.config.data_dir.join("output"))?.count();
     assert_eq!(copies, 0, "le central ne garde aucune copie");
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_integrated_worker_installs_the_result_in_the_output_dir() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, _) = setup(dir.path()).await?;
+    sqlx::query("UPDATE libraries SET output_policy=?1")
+        .bind(LibraryOutputPolicy::OutputDir)
+        .execute(&state.pool)
+        .await?;
+    activate_integrated_worker(&state).await?;
+    retain_served_result(&state, &job, &lease, dir.path()).await?;
+    assert!(publish_pulled(&state, &job, &lease, &ready_request()).await?);
+    let name = storage::output_file_name(job.id, lease.lease_token, "mkv");
+    let output = state.config.data_dir.join("output").join(name);
+    assert_eq!(std::fs::read(output)?, b"nouveau");
+    assert_eq!(std::fs::read(dir.path().join("film.mkv"))?, b"original");
+    let done = repository::get_job(&state.pool, job.id).await?;
+    assert_eq!(done.status, JobStatus::Succeeded);
     Ok(())
 }

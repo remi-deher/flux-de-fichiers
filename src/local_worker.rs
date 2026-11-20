@@ -1,6 +1,6 @@
 use crate::{
     api::{self, AppState},
-    domain::{JobErrorCode, LeaseRequest},
+    domain::{JobErrorCode, LeaseRequest, LibraryOutputPolicy},
     error::{AppError, AppResult},
     job_runner::{self, JobRunError},
     repository, storage,
@@ -189,6 +189,9 @@ async fn apply_pulled_result(state: &AppState, task: &SourcePublicationTask) -> 
         )
         .await
         .map_err(|_| AppError::Invalid)?;
+        if task.policy == LibraryOutputPolicy::OutputDir {
+            return install_in_output_dir(state, task, &access, &file).await;
+        }
         let root = std::path::Path::new(&task.root);
         let source = crate::library_scan::source_path(root, &task.source_name)
             .await
@@ -211,6 +214,22 @@ async fn apply_pulled_result(state: &AppState, task: &SourcePublicationTask) -> 
     .await;
     let _ = tokio::fs::remove_file(&file).await;
     result
+}
+
+/// Installe le résultat tiré dans le dossier de sortie du central, sous le nom de la tâche.
+async fn install_in_output_dir(
+    state: &AppState,
+    task: &SourcePublicationTask,
+    access: &crate::source_publication_broker::PublicationAccess,
+    file: &std::path::Path,
+) -> AppResult<()> {
+    repository::active(&state.pool, access.job_id, &access.lease).await?;
+    let name =
+        crate::storage::output_file_name(access.job_id, access.lease.lease_token, &task.extension);
+    let output_dir = std::path::Path::new(&task.root);
+    tokio::fs::create_dir_all(output_dir).await?;
+    tokio::fs::hard_link(file, output_dir.join(name)).await?;
+    crate::storage::sync_directory(output_dir).await
 }
 
 async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Claim) {

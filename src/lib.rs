@@ -20,6 +20,7 @@ pub mod mail;
 pub mod mcp;
 pub mod media;
 pub mod net_policy;
+pub mod opaque_token;
 pub mod password;
 pub mod password_reset;
 pub mod plugins;

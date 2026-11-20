@@ -2,10 +2,9 @@
 //! identifiants administrateur (ADR 0011).
 
 use crate::{
-    api_keys,
     error::{AppError, AppResult},
+    opaque_token::{random_hex, sha256_hex},
 };
-use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
 use forgearr_shared::workers::{
     WorkerEnrollmentCreated, WorkerEnrollmentPollResponse, WorkerEnrollmentRequestInput,
 };
@@ -94,10 +93,8 @@ pub async fn request_key(central: &reqwest::Url, request: &EnrollRequest) -> App
 
 /// Génère un secret aléatoire côté worker et son empreinte SHA-256 à envoyer au central.
 pub fn generate_secret_and_hash() -> (String, String) {
-    let mut bytes = [0_u8; SECRET_BYTES];
-    OsRng.fill_bytes(&mut bytes);
-    let secret: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    let hash = api_keys::hash_secret(&secret);
+    let secret = random_hex(SECRET_BYTES);
+    let hash = sha256_hex(&secret);
     (secret, hash)
 }
 

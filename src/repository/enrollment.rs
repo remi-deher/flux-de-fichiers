@@ -210,7 +210,7 @@ pub async fn poll_enrollment_request(
     id: Uuid,
     secret: &str,
 ) -> AppResult<WorkerEnrollmentPollResponse> {
-    let presented_hash = api_keys::hash_secret(secret);
+    let presented_hash = crate::opaque_token::sha256_hex(secret);
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let Some(row) = sqlx::query_as!(
         EnrollmentRow,

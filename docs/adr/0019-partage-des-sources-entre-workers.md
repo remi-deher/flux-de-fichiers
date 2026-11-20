@@ -41,7 +41,7 @@ la tâche.
    L'adresse annoncée est enregistrée avec le worker (enrôlement et heartbeat).
 4. **Autorisation par billet opaque et court, validé par le central.** À l'attribution d'une tâche
    dont la source est sur un autre worker, le central remet au worker traitant un **billet** :
-   adresse du worker source et secret aléatoire (244 bits). Seule l'empreinte SHA-256 du secret est
+   adresse du worker source et secret aléatoire (256 bits, `opaque_token`). Seule l'empreinte SHA-256 du secret est
    stockée (`source_tickets`), avec le job, le worker source, le worker traitant, l'époque du bail et
    une expiration courte (10 minutes, assez pour une reprise par `Range`). Le worker source présente
    le secret au central (`POST /api/v1/worker/transfers/redeem`), qui répond seulement si le billet

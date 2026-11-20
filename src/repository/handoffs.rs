@@ -3,6 +3,7 @@
 use crate::{
     domain::{JobErrorCode, JobStatus, LeaseRequest},
     error::{AppError, AppResult},
+    opaque_token::{new_opaque_token, sha256_hex},
 };
 use forgearr_shared::{
     capabilities::CapabilityRequirement,
@@ -12,20 +13,11 @@ use forgearr_shared::{
     },
     workers::WORKER_ONLINE_SECONDS,
 };
-use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use std::path::{Component, Path};
 use uuid::Uuid;
 
 const HANDOFF_CANDIDATE_LIMIT: i64 = 200;
-
-fn receipt_hash(token: &str) -> String {
-    format!("{:x}", Sha256::digest(token.as_bytes()))
-}
-
-fn new_receipt_token() -> String {
-    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
-}
 
 #[derive(sqlx::FromRow)]
 struct PendingHandoff {
@@ -162,7 +154,7 @@ pub async fn handoff_download_artifact(
         "SELECT h.source_lease_epoch,h.artifact_name,h.artifact_sha256,h.artifact_bytes FROM job_handoffs h JOIN jobs j ON j.id=h.job_id \
          WHERE h.job_id=?1 AND h.receiver_worker_id=?2 AND h.receiver_token_hash=?3 AND h.state=?4 AND h.expires_at > datetime('now') \
          AND j.worker_id=h.from_worker_id AND j.lease_epoch=h.source_lease_epoch AND j.status=?5 AND j.leased_until > datetime('now')",
-    ).bind(job).bind(worker).bind(receipt_hash(token)).bind(HandoffState::Claimed.as_str()).bind(JobStatus::Running)
+    ).bind(job).bind(worker).bind(sha256_hex(token)).bind(HandoffState::Claimed.as_str()).bind(JobStatus::Running)
         .fetch_optional(pool).await?;
     let (epoch, name, sha256, bytes) = row.ok_or(AppError::Conflict)?;
     Ok((
@@ -269,9 +261,9 @@ pub async fn claim_handoff(pool: &SqlitePool, worker_id: Uuid) -> AppResult<Opti
         if eligible != Some(true) {
             continue;
         }
-        let token = new_receipt_token();
+        let token = new_opaque_token();
         let changed = sqlx::query("UPDATE job_handoffs SET state=?2,receiver_worker_id=?3,receiver_token_hash=?4 WHERE job_id=?1 AND state=?5 AND expires_at > datetime('now')")
-            .bind(candidate.job_id).bind(HandoffState::Claimed.as_str()).bind(worker_id).bind(receipt_hash(&token)).bind(HandoffState::Pending.as_str()).execute(&mut *tx).await?.rows_affected();
+            .bind(candidate.job_id).bind(HandoffState::Claimed.as_str()).bind(worker_id).bind(sha256_hex(&token)).bind(HandoffState::Pending.as_str()).execute(&mut *tx).await?.rows_affected();
         if changed != 1 {
             continue;
         }
@@ -320,7 +312,7 @@ pub async fn acknowledge_handoff(
 ) -> AppResult<bool> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let already: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM job_handoffs WHERE job_id=?1 AND state=?2 AND receiver_worker_id=?3 AND receiver_token_hash=?4 AND artifact_sha256=?5 AND artifact_bytes=?6)")
-        .bind(job_id).bind(HandoffState::Acknowledged.as_str()).bind(ack.worker_id).bind(receipt_hash(&ack.receipt_token)).bind(&ack.sha256).bind(ack.bytes)
+        .bind(job_id).bind(HandoffState::Acknowledged.as_str()).bind(ack.worker_id).bind(sha256_hex(&ack.receipt_token)).bind(&ack.sha256).bind(ack.bytes)
         .fetch_one(&mut *tx).await?;
     if already {
         tx.commit().await?;
@@ -330,7 +322,7 @@ pub async fn acknowledge_handoff(
         "SELECT from_worker_id,source_lease_epoch,resume_node_id,requirement_json,artifact_sha256,artifact_bytes,warning \
          FROM job_handoffs WHERE job_id=?1 AND state=?2 AND receiver_worker_id=?3 \
            AND receiver_token_hash=?4 AND expires_at > datetime('now')",
-    ).bind(job_id).bind(HandoffState::Claimed.as_str()).bind(ack.worker_id).bind(receipt_hash(&ack.receipt_token)).fetch_optional(&mut *tx).await?;
+    ).bind(job_id).bind(HandoffState::Claimed.as_str()).bind(ack.worker_id).bind(sha256_hex(&ack.receipt_token)).fetch_optional(&mut *tx).await?;
     let handoff = handoff.ok_or(AppError::Conflict)?;
     if ack.sha256 != handoff.artifact_sha256 || ack.bytes != handoff.artifact_bytes {
         return Err(AppError::Conflict);

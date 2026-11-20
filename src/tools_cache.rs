@@ -1,4 +1,7 @@
-use crate::error::{AppError, AppResult};
+use crate::{
+    error::{AppError, AppResult},
+    opaque_token::{encode_hex, sha256_hex},
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -479,9 +482,7 @@ impl ToolCacheManager {
 
     /// Calcule la somme de contrôle SHA-256 d'un tampon d'octets.
     pub fn compute_sha256(bytes: &[u8]) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(bytes);
-        Self::hex_encode(hasher.finalize())
+        sha256_hex(bytes)
     }
 
     /// Calcule la somme de contrôle SHA-256 d'un fichier sur disque en flux.
@@ -496,15 +497,7 @@ impl ToolCacheManager {
             }
             hasher.update(&buffer[..bytes_read]);
         }
-        Ok(Self::hex_encode(hasher.finalize()))
-    }
-
-    fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
-        bytes
-            .as_ref()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>()
+        Ok(encode_hex(&hasher.finalize()))
     }
 
     /// Vérifie qu'un chemin relatif est sécurisé (pas de `..`, pas de racine `/`).

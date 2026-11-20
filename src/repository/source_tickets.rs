@@ -3,27 +3,14 @@
 use crate::{
     domain::{Claim, JobStatus, LeaseRequest},
     error::{AppError, AppResult},
+    opaque_token::{new_opaque_token, sha256_hex},
 };
 use forgearr_shared::{
     transfer::{SOURCE_TICKET_TTL_SECONDS, SourceTicket, TransferGrant},
     workers::WORKER_ONLINE_SECONDS,
 };
-use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use uuid::Uuid;
-
-/// Empreinte stockée d'un secret de billet.
-fn token_hash(token: &str) -> String {
-    Sha256::digest(token.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-/// Secret opaque de 244 bits tirés de l'aléa du système.
-fn new_token() -> String {
-    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
-}
 
 /// Adresse de transfert annoncée par un worker, acceptée seulement en `http` ou `https`.
 pub fn valid_transfer_url(raw: &str) -> Option<String> {
@@ -189,7 +176,7 @@ async fn issue_source_ticket(
     else {
         return Ok(None);
     };
-    let token = new_token();
+    let token = new_opaque_token();
     sqlx::query("DELETE FROM source_tickets WHERE expires_at <= datetime('now')")
         .execute(pool)
         .await?;
@@ -206,7 +193,7 @@ async fn issue_source_ticket(
              lease_epoch, expires_at) \
          VALUES(?1, ?2, ?3, ?4, ?5, datetime('now', '+' || ?6 || ' seconds'))",
     )
-    .bind(token_hash(&token))
+    .bind(sha256_hex(&token))
     .bind(job_id)
     .bind(holder)
     .bind(worker)
@@ -230,7 +217,7 @@ pub async fn redeem_ticket(
         "SELECT job_id, lease_epoch FROM source_tickets \
          WHERE token_hash=?1 AND source_worker_id=?2 AND expires_at > datetime('now')",
     )
-    .bind(token_hash(token))
+    .bind(sha256_hex(token))
     .bind(source_worker)
     .fetch_optional(pool)
     .await?;
@@ -280,14 +267,5 @@ mod tests {
         assert!(valid_transfer_url("http://user:pass@nas").is_none());
         assert!(valid_transfer_url("http://nas?x=1").is_none());
         assert!(valid_transfer_url("pas une url").is_none());
-    }
-
-    #[test]
-    fn tokens_are_long_and_hashed_deterministically() {
-        let token = new_token();
-        assert_eq!(token.len(), 64);
-        assert_ne!(token, new_token());
-        assert_eq!(token_hash(&token), token_hash(&token));
-        assert_eq!(token_hash(&token).len(), 64);
     }
 }

@@ -8,10 +8,10 @@ use axum::{
 };
 use forgearr::{
     api::{AppState, router},
-    api_keys::hash_secret,
     config::{Config, SmtpConfig, SmtpTls},
     error::{AppError, AppResult},
     mail::{MailSender, OutgoingMail},
+    opaque_token::sha256_hex,
     password, password_reset, repository, web_session,
 };
 use forgearr_shared::Role;
@@ -111,7 +111,7 @@ async fn test_a_known_address_gets_one_mail_with_a_working_single_use_link() -> 
     let stored: Vec<String> = sqlx::query_scalar("SELECT token_hash FROM password_reset_tokens")
         .fetch_all(&pool)
         .await?;
-    assert_eq!(stored, vec![hash_secret(&token)]);
+    assert_eq!(stored, vec![sha256_hex(&token)]);
     password_reset::confirm_reset(&pool, &token, NEW_PASSWORD).await?;
     assert!(password::verify(NEW_PASSWORD.into(), stored_hash(&pool).await?).await);
     assert!(matches!(
@@ -189,7 +189,7 @@ async fn test_a_weak_password_keeps_the_token_and_an_expired_token_is_refused() 
 {
     let pool = pool_with_account().await?;
     let id = account_id(&pool).await?;
-    repository::insert_reset_token(&pool, &hash_secret("valide"), &id, 600).await?;
+    repository::insert_reset_token(&pool, &sha256_hex("valide"), &id, 600).await?;
     assert!(matches!(
         password_reset::confirm_reset(&pool, "valide", "court").await,
         Err(AppError::Invalid)
@@ -199,7 +199,7 @@ async fn test_a_weak_password_keeps_the_token_and_an_expired_token_is_refused() 
             .await
             .is_ok()
     );
-    repository::insert_reset_token(&pool, &hash_secret("expire"), &id, 0).await?;
+    repository::insert_reset_token(&pool, &sha256_hex("expire"), &id, 0).await?;
     assert!(matches!(
         password_reset::confirm_reset(&pool, "expire", NEW_PASSWORD).await,
         Err(AppError::Invalid)
@@ -217,7 +217,7 @@ async fn test_confirming_closes_every_session_and_a_disabled_account_is_refused(
     let pool = pool_with_account().await?;
     let id = account_id(&pool).await?;
     web_session::create(&pool, SESSION_TTL_SECONDS, &id).await?;
-    repository::insert_reset_token(&pool, &hash_secret("t1"), &id, 600).await?;
+    repository::insert_reset_token(&pool, &sha256_hex("t1"), &id, 600).await?;
     password_reset::confirm_reset(&pool, "t1", NEW_PASSWORD).await?;
     let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions WHERE account_id = ?1")
         .bind(&id)
@@ -228,7 +228,7 @@ async fn test_confirming_closes_every_session_and_a_disabled_account_is_refused(
         .bind(&id)
         .execute(&pool)
         .await?;
-    repository::insert_reset_token(&pool, &hash_secret("t2"), &id, 600).await?;
+    repository::insert_reset_token(&pool, &sha256_hex("t2"), &id, 600).await?;
     assert!(matches!(
         password_reset::confirm_reset(&pool, "t2", "encore-un-mot-de-passe").await,
         Err(AppError::Invalid)
@@ -407,7 +407,7 @@ async fn test_reset_route_changes_the_password_once() -> anyhow::Result<()> {
     let (app, pool) = app(true).await?;
     repository::insert_reset_token(
         &pool,
-        &hash_secret("jeton-route"),
+        &sha256_hex("jeton-route"),
         &account_id(&pool).await?,
         600,
     )

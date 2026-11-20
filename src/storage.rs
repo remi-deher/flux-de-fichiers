@@ -83,7 +83,7 @@ pub async fn fingerprint(path: &Path, limit: u64) -> AppResult<(String, u64)> {
     if total == 0 {
         return Err(AppError::Invalid);
     }
-    Ok((format!("{:x}", hash.finalize()), total))
+    Ok((crate::opaque_token::encode_hex(&hash.finalize()), total))
 }
 
 /// Un fichier de travail transmis doit rester dans le dossier privé du bail.

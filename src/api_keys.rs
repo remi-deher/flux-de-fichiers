@@ -2,11 +2,10 @@
 
 use crate::{
     error::{AppError, AppResult},
+    opaque_token::{random_hex, sha256_hex},
     repository::{self, ApiKeyRecord},
 };
-use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
 use forgearr_shared::{Permission, Role};
-use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use subtle::ConstantTimeEq;
 
@@ -20,16 +19,6 @@ const KEY_NAME_MAX_LEN: usize = 80;
 pub struct IssuedKey {
     pub record: ApiKeyRecord,
     pub raw: String,
-}
-
-fn random_hex(bytes: usize) -> String {
-    let mut buffer = vec![0u8; bytes];
-    OsRng.fill_bytes(&mut buffer);
-    buffer.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-pub fn hash_secret(secret: &str) -> String {
-    format!("{:x}", Sha256::digest(secret.as_bytes()))
 }
 
 /// Sépare une clé présentée en identifiant et secret ; `None` si le format est inconnu.
@@ -108,7 +97,7 @@ where
         executor,
         &id,
         &name,
-        &hash_secret(&secret),
+        &sha256_hex(&secret),
         role,
         validated_scopes.as_deref(),
     )
@@ -131,7 +120,7 @@ pub async fn install_known_key(
         pool,
         id,
         &validate_name(name)?,
-        &hash_secret(secret),
+        &sha256_hex(secret),
         role,
         None,
     )
@@ -146,7 +135,7 @@ pub async fn authenticate(pool: &SqlitePool, raw: &str) -> AppResult<Option<ApiK
     let Some((record, stored_hash)) = repository::find_active_api_key(pool, id).await? else {
         return Ok(None);
     };
-    let matches = hash_secret(secret).as_bytes().ct_eq(stored_hash.as_bytes());
+    let matches = sha256_hex(secret).as_bytes().ct_eq(stored_hash.as_bytes());
     if !bool::from(matches) {
         return Ok(None);
     }
@@ -173,13 +162,6 @@ mod tests {
         ] {
             assert_eq!(parse(bad), None, "{bad}");
         }
-    }
-
-    #[test]
-    fn test_hash_secret_is_stable_and_hides_the_secret() {
-        assert_eq!(hash_secret("abc"), hash_secret("abc"));
-        assert_ne!(hash_secret("abc"), hash_secret("abd"));
-        assert_eq!(hash_secret("abc").len(), 64);
     }
 
     #[test]

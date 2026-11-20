@@ -390,6 +390,7 @@ pub fn direct_client() -> reqwest::Result<reqwest::Client> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::opaque_token::sha256_hex;
     use axum::http::Request;
     use tower::ServiceExt;
 
@@ -543,14 +544,6 @@ mod tests {
             let _ = axum::serve(listener, transfer_router(state)).await;
         });
         Ok(format!("http://{address}"))
-    }
-
-    fn sha256_hex(data: &[u8]) -> String {
-        use sha2::{Digest, Sha256};
-        Sha256::digest(data)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
     }
 
     #[tokio::test]

@@ -328,7 +328,9 @@ pub async fn ready(
         }));
     }
     publish_pulled(&s, &job, &lease, &ready).await?;
-    Ok(Json(ResultReadyResponse { apply_locally: None }))
+    Ok(Json(ResultReadyResponse {
+        apply_locally: None,
+    }))
 }
 
 /// Dernière vérification du bail, juste avant que le worker ne remplace la source.

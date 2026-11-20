@@ -200,18 +200,13 @@ async fn read_only_inspections_use_a_separate_authenticated_channel() -> anyhow:
         result_bytes: 9,
         extension: "mkv".into(),
         policy: LibraryOutputPolicy::ReplaceWithBackup,
+        result_ticket: None,
     };
     let broker = h.inspection.clone();
     let pending_job = job.id;
     let waiting = tokio::spawn(async move {
         broker
-            .request(
-                task,
-                "/unused".into(),
-                pending_job,
-                lease,
-                std::time::Duration::from_secs(5),
-            )
+            .request(task, pending_job, lease, std::time::Duration::from_secs(5))
             .await
     });
     let ordinary = format!(
@@ -347,150 +342,86 @@ async fn an_uncertain_source_publication_exposes_its_retained_result() -> anyhow
 }
 
 #[tokio::test]
-async fn handoff_requires_a_verified_upload_and_the_designated_receiver() -> anyhow::Result<()> {
-    use forgearr::{api_keys::install_known_key, domain::LeaseRequest, storage};
-    use forgearr_shared::{
-        Role,
-        relay::{
-            HandoffAcknowledgement, HandoffArtifact, HandoffBegin, HandoffOffer, RelayRequest,
-            RelayTarget,
-        },
-    };
-    const RECEIVER_KEY: &str = "fdf_c0000001_0123456789abcdef0123456789abcdef0123456789abcdef";
+async fn retention_and_reception_routes_are_scoped_to_the_worker_and_its_lease()
+-> anyhow::Result<()> {
+    use forgearr_shared::transfer::ArtifactDeclaration;
+    use forgearr_shared::transfer::ArtifactKind::Working;
     let h = harness().await?;
-    std::fs::create_dir_all(h._dirs.0.path().join("staging"))?;
-    install_known_key(&h.pool, RECEIVER_KEY, "receiver", Role::Worker).await?;
-    let sender = repository::register(&h.pool, "test-worker").await?;
-    let receiver = repository::register(&h.pool, "receiver").await?;
-    let job = repository::insert_job(&h.pool, "movie.mkv", None, &"ab".repeat(32), 5).await?;
-    let claim = repository::claim(&h.pool, sender.id)
+    let owner =
+        register_worker_with_transfer(&h, "detenteur", "http://detenteur.lan:9000/").await?;
+    let taker = register_worker_with_encoders(&h, "traitant", &[]).await?;
+    install_transfer_keys(&h).await?;
+    repository::insert_job(&h.pool, "film.mkv", None, &"aa".repeat(32), 10).await?;
+    let claim = claim_for(&h, owner)
         .await?
-        .ok_or_else(|| anyhow::anyhow!("bail absent"))?;
-    let lease = LeaseRequest {
-        worker_id: sender.id,
-        lease_token: claim.lease_token,
-        lease_epoch: claim.lease_epoch,
-        telemetry: None,
+        .ok_or_else(|| anyhow::anyhow!("le détenteur doit obtenir la tâche"))?;
+    let decl = ArtifactDeclaration {
+        root: "/work".into(),
+        name: "handoff-file".into(),
+        sha256: "ab".repeat(32),
+        bytes: 7,
     };
-    let source = h._dirs.0.path().join("artifact");
-    std::fs::write(&source, b"working")?;
-    let (sha256, bytes) = storage::fingerprint(&source, 1024).await?;
-    let artifact = HandoffArtifact {
-        name: "working.mkv".into(),
-        sha256,
-        bytes: bytes as i64,
-    };
-    let begin = HandoffBegin {
-        worker_id: sender.id,
-        lease_token: lease.lease_token,
-        lease_epoch: lease.lease_epoch,
-        request: RelayRequest {
-            target: RelayTarget::Worker {
-                worker_id: receiver.id,
-            },
-            resume_node_id: "next".into(),
-        },
-        artifact: artifact.clone(),
-        warning: true,
-    };
-    let uri = format!("/api/v1/jobs/{}/handoff", job.id);
-    let (status, _) = json_call(
-        &h.app,
-        "POST",
-        &uri,
-        Some(common::WORKER_KEY),
-        Some(serde_json::to_value(&begin)?),
-    )
-    .await?;
-    assert_eq!(status, StatusCode::CREATED);
-    let claim_uri = format!("/api/v1/worker/handoffs/claim?worker_id={}", receiver.id);
-    let (status, value) = json_call(&h.app, "POST", &claim_uri, Some(RECEIVER_KEY), None).await?;
-    assert_eq!(status, StatusCode::OK);
-    assert!(value.is_null());
-    let upload = |body: &'static [u8]| {
-        Request::builder()
-            .method("PUT")
-            .uri(&uri)
-            .header("authorization", format!("Bearer {}", common::WORKER_KEY))
-            .header("x-worker-id", sender.id.to_string())
-            .header("x-lease-token", lease.lease_token.to_string())
-            .header("x-lease-epoch", lease.lease_epoch.to_string())
-            .body(Body::from(body))
-    };
-    let bad = h.app.clone().oneshot(upload(b"corrupt")?).await?;
-    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
-    let good = h.app.clone().oneshot(upload(b"working")?).await?;
-    assert_eq!(good.status(), StatusCode::NO_CONTENT);
-    let (status, _) = json_call(&h.app, "POST", &claim_uri, Some(common::WORKER_KEY), None).await?;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, value) = json_call(&h.app, "POST", &claim_uri, Some(RECEIVER_KEY), None).await?;
-    assert_eq!(status, StatusCode::OK);
-    let offer: HandoffOffer = serde_json::from_value(value)?;
-    let retained_uri = format!(
-        "/api/v1/worker/handoffs/{}/{}/retained?worker_id={}",
-        job.id, lease.lease_epoch, receiver.id
-    );
-    let (status, value) = json_call(&h.app, "GET", &retained_uri, Some(RECEIVER_KEY), None).await?;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(value, true);
-    let (status, _) =
-        json_call(&h.app, "GET", &retained_uri, Some(common::WORKER_KEY), None).await?;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let file_uri = format!("{uri}/file?worker_id={}", receiver.id);
-    let file_request = |token: &str| {
-        Request::builder()
-            .uri(&file_uri)
-            .header("authorization", format!("Bearer {RECEIVER_KEY}"))
-            .header("x-handoff-token", token)
-            .body(Body::empty())
-    };
-    assert_eq!(
-        h.app
-            .clone()
-            .oneshot(file_request("wrong")?)
-            .await?
-            .status(),
-        StatusCode::CONFLICT
-    );
-    let file = h
-        .app
-        .clone()
-        .oneshot(file_request(&offer.receipt_token)?)
-        .await?;
-    assert_eq!(file.status(), StatusCode::OK);
-    assert_eq!(
-        to_bytes(file.into_body(), JSON_LIMIT).await?.as_ref(),
-        b"working"
-    );
-    let ack = HandoffAcknowledgement {
-        worker_id: receiver.id,
-        receipt_token: offer.receipt_token,
-        sha256: artifact.sha256,
-        bytes: artifact.bytes,
-    };
-    let (status, _) = json_call(
-        &h.app,
-        "POST",
-        &format!("{uri}/ack"),
-        Some(RECEIVER_KEY),
-        Some(serde_json::to_value(&ack)?),
-    )
-    .await?;
+    let status = declare_artifact_call(&h, &claim, OWNER_KEY, owner, Working, &decl).await?;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    let (status, value) = json_call(
-        &h.app,
-        "GET",
-        &format!(
-            "{uri}?worker_id={}&lease_epoch={}",
-            sender.id, lease.lease_epoch
-        ),
-        Some(common::WORKER_KEY),
-        None,
-    )
-    .await?;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(value, "acknowledged");
+
+    // Seul le détenteur interroge la rétention de son fichier, à l'époque de son bail.
+    let job = claim.job_id;
+    let epoch = claim.lease_epoch;
+    let (st, retained) = retained_call(&h, job, OWNER_KEY, owner, epoch).await?;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(retained, true);
+    let (_, other_epoch) = retained_call(&h, job, OWNER_KEY, owner, epoch + 1).await?;
+    assert_eq!(other_epoch, false);
+    let (st, _) = retained_call(&h, job, TARGET_KEY, owner, epoch).await?;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+
+    // Le relais libère le bail ; le repreneur reçoit le fichier de travail et un billet.
+    let target = serde_json::json!({"mode": "worker", "worker_id": taker});
+    let response = relay_call(&h, &claim, owner, target).await?;
+    assert_eq!(response["relayed"], true);
+    let taken = claim_for(&h, taker)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("la cible doit obtenir la tâche"))?;
+    assert!(taken.handoff_input.is_some());
+    assert!(taken.source_ticket.is_some());
+    let (_, still) = retained_call(&h, job, OWNER_KEY, owner, epoch).await?;
+    assert_eq!(still, true);
+
+    // Seul le repreneur confirme la réception ; la confirmation est répétable.
+    let status = received_call(&h, &taken, OWNER_KEY, taker).await?;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let status = received_call(&h, &taken, TARGET_KEY, taker).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let status = received_call(&h, &taken, TARGET_KEY, taker).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, released) = retained_call(&h, job, OWNER_KEY, owner, epoch).await?;
+    assert_eq!(released, false);
     Ok(())
+}
+
+/// Le central réclame-t-il encore le fichier de travail retenu par ce worker à cette époque ?
+async fn retained_call(
+    h: &Harness,
+    job: Uuid,
+    key: &str,
+    worker: Uuid,
+    epoch: i64,
+) -> anyhow::Result<(StatusCode, serde_json::Value)> {
+    let query = format!("worker_id={worker}&lease_epoch={epoch}");
+    let uri = format!("/api/v1/jobs/{job}/retained/working?{query}");
+    json_call(&h.app, "GET", &uri, Some(key), None).await
+}
+
+/// Le repreneur confirme la réception du fichier de travail avec son bail.
+async fn received_call(
+    h: &Harness,
+    claim: &Claim,
+    key: &str,
+    worker: Uuid,
+) -> anyhow::Result<StatusCode> {
+    let uri = format!("/api/v1/jobs/{}/artifacts/working/received", claim.job_id);
+    let request = leased_request("POST", uri, claim, key, worker).body(Body::empty())?;
+    Ok(h.app.clone().oneshot(request).await?.status())
 }
 
 #[tokio::test]
@@ -581,30 +512,6 @@ async fn lease_epoch_fences_all_worker_job_routes() -> anyhow::Result<()> {
     ] {
         let (st, _) = json_call(&h.app, method, &uri, Some(common::WORKER_KEY), body).await?;
         assert_eq!(st, StatusCode::CONFLICT, "{uri}");
-    }
-
-    for (method, uri, payload) in [
-        (
-            "GET",
-            format!("/api/v1/jobs/{}/source", job.id),
-            Body::empty(),
-        ),
-        (
-            "PUT",
-            format!("/api/v1/jobs/{}/result", job.id),
-            Body::from("out"),
-        ),
-    ] {
-        let req = Request::builder()
-            .method(method)
-            .uri(&uri)
-            .header("authorization", format!("Bearer {}", common::WORKER_KEY))
-            .header("x-worker-id", worker_id.to_string())
-            .header("x-lease-token", claim.lease_token.to_string())
-            .header("x-lease-epoch", stale_epoch.to_string())
-            .body(payload)?;
-        let resp = h.app.clone().oneshot(req).await?;
-        assert_eq!(resp.status(), StatusCode::CONFLICT, "{uri}");
     }
 
     Ok(())
@@ -1109,12 +1016,8 @@ async fn register_worker_with_transfer(
 }
 
 /// Bibliothèque dont `owner` détient le dossier (accès direct) et que `target` traite par transfert,
-/// puis une tâche de cette bibliothèque relayée de `owner` vers `target`.
-async fn relayed_job_from(
-    h: &Harness,
-    owner: Uuid,
-    target: Uuid,
-) -> anyhow::Result<forgearr::domain::Job> {
+/// avec une tâche de cette bibliothèque.
+async fn held_job(h: &Harness, owner: Uuid, target: Uuid) -> anyhow::Result<forgearr::domain::Job> {
     let library = repository::insert_library(
         &h.pool,
         forgearr::domain::LibraryWrite {
@@ -1154,6 +1057,16 @@ async fn relayed_job_from(
     .bind(owner)
     .execute(&h.pool)
     .await?;
+    Ok(job)
+}
+
+/// Tâche de `held_job` prise par `owner` puis relayée vers `target`.
+async fn relayed_job_from(
+    h: &Harness,
+    owner: Uuid,
+    target: Uuid,
+) -> anyhow::Result<forgearr::domain::Job> {
+    let job = held_job(h, owner, target).await?;
     let claim = claim_for(h, owner)
         .await?
         .ok_or_else(|| anyhow::anyhow!("le détenteur doit obtenir la tâche"))?;
@@ -1170,6 +1083,240 @@ async fn relayed_job_from(
     .await?;
     assert_eq!(response["relayed"], true);
     Ok(job)
+}
+
+const OWNER_KEY: &str = "fdf_d0000001_abcdef0123456789abcdef0123456789abcdef0123456789";
+const TARGET_KEY: &str = "fdf_d0000002_89abcdef0123456789abcdef0123456789abcdef01234567";
+
+/// Clés nommées comme les workers « detenteur » et « traitant » : une clé n'agit que pour son worker.
+async fn install_transfer_keys(h: &Harness) -> anyhow::Result<()> {
+    use forgearr::api_keys::install_known_key;
+    use forgearr_shared::Role;
+    install_known_key(&h.pool, OWNER_KEY, "detenteur", Role::Worker).await?;
+    install_known_key(&h.pool, TARGET_KEY, "traitant", Role::Worker).await?;
+    Ok(())
+}
+
+/// Le worker source (ou un imposteur) présente un billet au central.
+async fn redeem_call(
+    h: &Harness,
+    key: &str,
+    worker: Uuid,
+    token: &str,
+) -> anyhow::Result<(StatusCode, serde_json::Value)> {
+    json_call(
+        &h.app,
+        "POST",
+        "/api/v1/worker/transfers/redeem",
+        Some(key),
+        Some(serde_json::json!({"token": token, "worker_id": worker})),
+    )
+    .await
+}
+
+/// Requête d'un worker qui présente sa clé et son bail.
+fn leased_request(
+    method: &str,
+    uri: String,
+    claim: &Claim,
+    key: &str,
+    worker: Uuid,
+) -> axum::http::request::Builder {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("authorization", format!("Bearer {key}"))
+        .header("x-worker-id", worker.to_string())
+        .header("x-lease-token", claim.lease_token.to_string())
+        .header("x-lease-epoch", claim.lease_epoch.to_string())
+}
+
+/// Le worker traitant redemande un billet frais avec son bail.
+async fn reissue_ticket_call(
+    h: &Harness,
+    claim: &Claim,
+    key: &str,
+    worker: Uuid,
+) -> anyhow::Result<(StatusCode, Option<forgearr_shared::transfer::SourceTicket>)> {
+    let uri = format!("/api/v1/jobs/{}/source/ticket", claim.job_id);
+    let request = leased_request("POST", uri, claim, key, worker).body(Body::empty())?;
+    let response = h.app.clone().oneshot(request).await?;
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), JSON_LIMIT).await?;
+    let ticket = serde_json::from_slice::<Option<forgearr_shared::transfer::SourceTicket>>(&bytes);
+    Ok((status, ticket.ok().flatten()))
+}
+
+/// Le détenteur du bail déclare un artefact qu'il retient.
+async fn declare_artifact_call(
+    h: &Harness,
+    claim: &Claim,
+    key: &str,
+    worker: Uuid,
+    kind: forgearr_shared::transfer::ArtifactKind,
+    declaration: &forgearr_shared::transfer::ArtifactDeclaration,
+) -> anyhow::Result<StatusCode> {
+    let uri = format!("/api/v1/jobs/{}/artifacts/{}", claim.job_id, kind.as_str());
+    let request = leased_request("PUT", uri, claim, key, worker)
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(declaration)?))?;
+    Ok(h.app.clone().oneshot(request).await?.status())
+}
+
+#[tokio::test]
+async fn a_fresh_ticket_can_be_reissued_with_the_lease_and_replaces_the_previous_one()
+-> anyhow::Result<()> {
+    let h = harness().await?;
+    let owner =
+        register_worker_with_transfer(&h, "detenteur", "http://detenteur.lan:9000/").await?;
+    let target = register_worker_with_encoders(&h, "traitant", &[]).await?;
+    relayed_job_from(&h, owner, target).await?;
+    install_transfer_keys(&h).await?;
+    let claim = claim_for(&h, target)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("la cible doit obtenir la tâche"))?;
+    let first = claim
+        .source_ticket
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("un billet est attendu"))?;
+
+    let (st, second) = reissue_ticket_call(&h, &claim, TARGET_KEY, target).await?;
+    assert_eq!(st, StatusCode::OK);
+    let second = second.ok_or_else(|| anyhow::anyhow!("un billet frais est attendu"))?;
+    assert_eq!(second.url, first.url);
+    assert_ne!(second.token, first.token);
+    let (st, _) = redeem_call(&h, OWNER_KEY, owner, &first.token).await?;
+    assert_eq!(st, StatusCode::UNAUTHORIZED, "l'ancien billet est remplacé");
+    let (st, _) = redeem_call(&h, OWNER_KEY, owner, &second.token).await?;
+    assert_eq!(st, StatusCode::OK);
+
+    // Un billet expiré se remplace aussi : la reprise d'un long transfert ne dépend pas de la durée.
+    sqlx::query("UPDATE source_tickets SET expires_at=datetime('now', '-1 minute')")
+        .execute(&h.pool)
+        .await?;
+    let (st, third) = reissue_ticket_call(&h, &claim, TARGET_KEY, target).await?;
+    assert_eq!(st, StatusCode::OK);
+    let third = third.ok_or_else(|| anyhow::anyhow!("un billet frais est attendu"))?;
+    let (st, _) = redeem_call(&h, OWNER_KEY, owner, &third.token).await?;
+    assert_eq!(st, StatusCode::OK);
+
+    let (st, _) = reissue_ticket_call(&h, &claim, OWNER_KEY, target).await?;
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "la clé d'un autre worker ne peut pas demander un billet"
+    );
+    let stale = Claim {
+        lease_token: Uuid::new_v4(),
+        ..claim
+    };
+    let (st, ticket) = reissue_ticket_call(&h, &stale, TARGET_KEY, target).await?;
+    assert!(
+        st.is_client_error() && ticket.is_none(),
+        "bail inconnu refusé"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_lease_holder_declares_retained_artifacts_that_a_taker_can_get_tickets_for()
+-> anyhow::Result<()> {
+    use forgearr_shared::transfer::ArtifactDeclaration;
+    use forgearr_shared::transfer::ArtifactKind::{self, Result as ResultFile, Working};
+    let h = harness().await?;
+    let owner =
+        register_worker_with_transfer(&h, "detenteur", "http://detenteur.lan:9000/").await?;
+    let taker = register_worker_with_encoders(&h, "traitant", &[]).await?;
+    install_transfer_keys(&h).await?;
+    repository::insert_job(&h.pool, "film.mkv", None, &"aa".repeat(32), 10).await?;
+    let claim = claim_for(&h, owner)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("le détenteur doit obtenir la tâche"))?;
+    let job = claim.job_id;
+    let decl = ArtifactDeclaration {
+        root: "/work/retained".into(),
+        name: "working.mkv".into(),
+        sha256: "ab".repeat(32),
+        bytes: 7,
+    };
+    let issue = |kind: ArtifactKind, taker: Uuid| {
+        repository::issue_artifact_ticket(&h.pool, job, kind, taker, claim.lease_epoch)
+    };
+
+    // Sans artefact déclaré, pas de billet.
+    assert!(issue(Working, taker).await?.is_none());
+
+    // Seule la clé du worker qui détient le bail déclare, et seulement un fichier valide.
+    let status = declare_artifact_call(&h, &claim, TARGET_KEY, owner, Working, &decl).await?;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let stale = Claim {
+        lease_token: Uuid::new_v4(),
+        ..claim.clone()
+    };
+    let status = declare_artifact_call(&h, &stale, OWNER_KEY, owner, Working, &decl).await?;
+    assert!(status.is_client_error());
+    let invalid = ArtifactDeclaration {
+        name: "../working.mkv".into(),
+        ..decl.clone()
+    };
+    let status = declare_artifact_call(&h, &claim, OWNER_KEY, owner, Working, &invalid).await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let none_yet = repository::get_artifact(&h.pool, job, Working).await?;
+    assert!(none_yet.is_none());
+
+    let status = declare_artifact_call(&h, &claim, OWNER_KEY, owner, Working, &decl).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let stored = repository::get_artifact(&h.pool, job, Working)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("l'artefact doit être enregistré"))?;
+    assert_eq!(stored.holder_worker_id, owner);
+    assert_eq!(stored.lease_epoch, claim.lease_epoch);
+    assert_eq!(stored.declaration, decl);
+
+    // Le détenteur n'a pas besoin de tirer son propre fichier ; le résultat n'est pas déclaré.
+    assert!(issue(Working, owner).await?.is_none());
+    assert!(issue(ResultFile, taker).await?.is_none());
+    let ticket = issue(Working, taker)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("un billet d'artefact est attendu"))?;
+    assert_eq!(ticket.url, "http://detenteur.lan:9000");
+    let (st, grant) = redeem_call(&h, OWNER_KEY, owner, &ticket.token).await?;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(grant["root"], "/work/retained");
+    assert_eq!(grant["source_name"], "working.mkv");
+    assert_eq!(grant["bytes"], 7);
+    assert_eq!(grant["sha256"], "ab".repeat(32));
+
+    // Un billet de résultat coexiste avec celui du fichier de travail pour le même bail.
+    let result = ArtifactDeclaration {
+        name: "result.mkv".into(),
+        ..decl.clone()
+    };
+    let status = declare_artifact_call(&h, &claim, OWNER_KEY, owner, ResultFile, &result).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let result_ticket = issue(ResultFile, taker)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("un billet de résultat est attendu"))?;
+    let (st, grant) = redeem_call(&h, OWNER_KEY, owner, &result_ticket.token).await?;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(grant["source_name"], "result.mkv");
+    let (st, _) = redeem_call(&h, OWNER_KEY, owner, &ticket.token).await?;
+    assert_eq!(st, StatusCode::OK);
+
+    // Redéclarer remplace l'artefact ; le libérer le retire.
+    let renamed = ArtifactDeclaration {
+        name: "working-2.mkv".into(),
+        ..decl.clone()
+    };
+    let status = declare_artifact_call(&h, &claim, OWNER_KEY, owner, Working, &renamed).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, grant) = redeem_call(&h, OWNER_KEY, owner, &ticket.token).await?;
+    assert_eq!(grant["source_name"], "working-2.mkv");
+    assert!(repository::release_artifact(&h.pool, job, Working).await?);
+    assert!(!repository::release_artifact(&h.pool, job, Working).await?);
+    let (st, _) = redeem_call(&h, OWNER_KEY, owner, &ticket.token).await?;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+    Ok(())
 }
 
 #[tokio::test]
@@ -1190,101 +1337,144 @@ async fn a_relayed_job_gets_a_ticket_that_only_the_source_worker_can_redeem() ->
         .ok_or_else(|| anyhow::anyhow!("un billet est attendu"))?;
     assert_eq!(ticket.url, "http://detenteur.lan:9000");
 
-    let redeem = |worker: Uuid, token: &str| {
-        json_call(
-            &h.app,
-            "POST",
-            "/api/v1/worker/transfers/redeem",
-            Some(common::WORKER_KEY),
-            Some(serde_json::json!({"token": token, "worker_id": worker})),
-        )
-    };
-    let (st, grant) = redeem(owner, &ticket.token).await?;
+    install_transfer_keys(&h).await?;
+    let (st, grant) = redeem_call(&h, OWNER_KEY, owner, &ticket.token).await?;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(grant["root"], "/mnt/owner");
     assert_eq!(grant["source_name"], "film.mkv");
     assert_eq!(grant["bytes"], SOURCE_CONTENT.len());
-    let (st, _) = redeem(target, &ticket.token).await?;
+    let (st, _) = redeem_call(&h, TARGET_KEY, target, &ticket.token).await?;
     assert_eq!(
         st,
         StatusCode::UNAUTHORIZED,
         "seul le worker source valide le billet"
     );
-    let (st, _) = redeem(owner, "inconnu").await?;
+    let (st, _) = redeem_call(&h, OWNER_KEY, owner, "inconnu").await?;
     assert_eq!(st, StatusCode::UNAUTHORIZED);
+    let (st, _) = redeem_call(&h, TARGET_KEY, owner, &ticket.token).await?;
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "le preneur du billet ne peut pas se faire passer pour le worker source"
+    );
+    let (st, _) = redeem_call(&h, common::WORKER_KEY, owner, &ticket.token).await?;
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "une clé de worker n'agit pas pour un autre worker"
+    );
     Ok(())
 }
 
 #[tokio::test]
-async fn a_worker_without_transfer_url_gets_no_ticket_and_an_invalid_url_is_ignored()
--> anyhow::Result<()> {
+async fn a_holder_without_a_valid_transfer_url_leaves_the_task_unclaimed() -> anyhow::Result<()> {
     let h = harness().await?;
     let owner = register_worker_with_transfer(&h, "detenteur", "ftp://nope").await?;
     let target = register_worker_with_encoders(&h, "traitant", &[]).await?;
-    relayed_job_from(&h, owner, target).await?;
-    let claim = claim_for(&h, target)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("la cible doit obtenir la tâche"))?;
-    assert!(
-        claim.source_ticket.is_none(),
-        "repli par le central seulement"
-    );
+    held_job(&h, owner, target).await?;
+    let claim = claim_for(&h, target).await?;
+    assert!(claim.is_none(), "la source ne se lit chez personne");
     Ok(())
 }
 
 #[tokio::test]
-async fn the_central_relays_a_worker_held_source_without_storing_it() -> anyhow::Result<()> {
-    let h = harness().await?;
-    let owner = register_worker_with_encoders(&h, "detenteur", &[]).await?;
-    let target = register_worker_with_encoders(&h, "traitant", &[]).await?;
-    let job = relayed_job_from(&h, owner, target).await?;
-    let claim = claim_for(&h, target)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("la cible doit obtenir la tâche"))?;
-
-    // Le worker traitant demande la source au central ; le détenteur l'envoie en parallèle.
-    let download = {
-        let app = h.app.clone();
-        let request = Request::builder()
-            .uri(format!("/api/v1/jobs/{}/source", job.id))
-            .header("authorization", format!("Bearer {}", common::WORKER_KEY))
-            .header("x-worker-id", target.to_string())
-            .header("x-lease-token", claim.lease_token.to_string())
-            .header("x-lease-epoch", claim.lease_epoch.to_string())
-            .body(Body::empty())?;
-        tokio::spawn(async move {
-            let response = app.oneshot(request).await?;
-            let status = response.status();
-            let body = to_bytes(response.into_body(), JSON_LIMIT).await?;
-            anyhow::Ok((status, body))
-        })
+async fn the_holder_gets_a_fresh_ticket_to_pull_the_result_from_the_worker_that_retains_it()
+-> anyhow::Result<()> {
+    use forgearr::domain::{LeaseRequest, LibraryOutputPolicy};
+    use forgearr_shared::transfer::{
+        ArtifactDeclaration, ArtifactKind::Result as ResultFile, SourcePublicationOutcome,
+        SourcePublicationReport, SourcePublicationTask, SourceTicket,
     };
-    let (st, tasks) = json_call(
-        &h.app,
-        "GET",
-        &format!("/api/v1/worker/source-relay/pending?worker_id={owner}&wait_ms=5000"),
-        Some(common::WORKER_KEY),
-        None,
-    )
-    .await?;
-    assert_eq!(st, StatusCode::OK);
-    assert_eq!(tasks[0]["root"], "/mnt/owner");
-    assert_eq!(tasks[0]["source_name"], "film.mkv");
-    let request_id = tasks[0]["request_id"].as_str().unwrap_or_default();
-    let send = Request::builder()
-        .method("PUT")
-        .uri(format!(
-            "/api/v1/worker/source-relay/{request_id}?worker_id={owner}"
-        ))
-        .header("authorization", format!("Bearer {}", common::WORKER_KEY))
-        .body(Body::from(SOURCE_CONTENT))?;
-    assert_eq!(
-        h.app.clone().oneshot(send).await?.status(),
-        StatusCode::NO_CONTENT
-    );
-    let (status, body) = download.await??;
+    use std::time::Duration;
+
+    let h = harness().await?;
+    let holder = register_worker_with_encoders(&h, "test-worker", &[]).await?;
+    let processor =
+        register_worker_with_transfer(&h, "detenteur", "http://detenteur.lan:9000/").await?;
+    install_transfer_keys(&h).await?;
+    let job = repository::insert_job(&h.pool, "film.mkv", None, &"aa".repeat(32), 10).await?;
+    let claim = claim_for(&h, processor)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("bail absent"))?;
+    let decl = ArtifactDeclaration {
+        root: "/work".into(),
+        name: "result-file.mkv".into(),
+        sha256: "bb".repeat(32),
+        bytes: 6,
+    };
+    let status = declare_artifact_call(&h, &claim, OWNER_KEY, processor, ResultFile, &decl).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let task = SourcePublicationTask {
+        request_id: Uuid::new_v4(),
+        worker_id: holder,
+        root: "/media".into(),
+        source_name: "film.mkv".into(),
+        source_sha256: "aa".repeat(32),
+        source_bytes: 10,
+        result_sha256: decl.sha256.clone(),
+        result_bytes: decl.bytes,
+        extension: "mkv".into(),
+        policy: LibraryOutputPolicy::ReplaceWithBackup,
+        result_ticket: None,
+    };
+    let request_id = task.request_id;
+    let lease = LeaseRequest {
+        worker_id: processor,
+        lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
+        telemetry: None,
+    };
+    let broker = h.publication.clone();
+    let waiting = tokio::spawn(async move {
+        broker
+            .request(task, job.id, lease, Duration::from_secs(5))
+            .await
+    });
+    let ticket_uri =
+        format!("/api/v1/worker/source-publications/{request_id}/ticket?worker_id={holder}");
+
+    // Tant que la demande n'a pas été remise au détenteur, personne n'obtient de billet.
+    let (status, _) =
+        json_call(&h.app, "POST", &ticket_uri, Some(common::WORKER_KEY), None).await?;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let pending =
+        format!("/api/v1/worker/source-publications/pending?worker_id={holder}&wait_ms=3000");
+    let (status, tasks) =
+        json_call(&h.app, "GET", &pending, Some(common::WORKER_KEY), None).await?;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body.as_ref(), SOURCE_CONTENT);
+    assert_eq!(tasks[0]["request_id"], request_id.to_string());
+
+    // Seul le détenteur désigné, sous la clé de son worker, obtient un billet valable chez le
+    // worker qui retient le résultat.
+    let (status, _) = json_call(&h.app, "POST", &ticket_uri, Some(OWNER_KEY), None).await?;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, body) =
+        json_call(&h.app, "POST", &ticket_uri, Some(common::WORKER_KEY), None).await?;
+    assert_eq!(status, StatusCode::OK);
+    let ticket: SourceTicket = serde_json::from_value(body)?;
+    assert_eq!(ticket.url, "http://detenteur.lan:9000");
+    let (status, grant) = redeem_call(&h, OWNER_KEY, processor, &ticket.token).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(grant["source_name"], "result-file.mkv");
+    let (status, _) = redeem_call(&h, OWNER_KEY, holder, &ticket.token).await?;
+    assert_ne!(
+        status,
+        StatusCode::OK,
+        "le billet n'est pas pour le détenteur"
+    );
+
+    // Le détenteur termine : la demande aboutit.
+    let report = SourcePublicationReport {
+        request_id,
+        worker_id: holder,
+        outcome: SourcePublicationOutcome::Published,
+    };
+    let uri = format!("/api/v1/worker/source-publications/{request_id}/report");
+    let body = serde_json::to_value(report)?;
+    let (status, _) = json_call(&h.app, "POST", &uri, Some(common::WORKER_KEY), Some(body)).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let outcome = waiting.await??;
+    assert!(matches!(outcome, SourcePublicationOutcome::Published));
     Ok(())
 }
 
@@ -1310,8 +1500,6 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
     .bind(job.id)
     .execute(&h.pool)
     .await?;
-    let staged = h._dirs.0.path().join("result.mkv");
-    std::fs::write(&staged, b"result")?;
     let task = SourcePublicationTask {
         request_id: Uuid::new_v4(),
         worker_id: holder,
@@ -1323,6 +1511,7 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
         result_bytes: 6,
         extension: "mkv".into(),
         policy: LibraryOutputPolicy::ReplaceWithBackup,
+        result_ticket: None,
     };
     let request_id = task.request_id;
     let lease = LeaseRequest {
@@ -1334,7 +1523,7 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
     let broker = h.publication.clone();
     let waiting = tokio::spawn(async move {
         broker
-            .request(task, staged, job.id, lease, Duration::from_secs(5))
+            .request(task, job.id, lease, Duration::from_secs(5))
             .await
     });
     let wrong = format!("/api/v1/worker/source-publications/pending?worker_id={other}");
@@ -1350,22 +1539,6 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
         json_call(&h.app, "GET", &pending, Some(common::WORKER_KEY), None).await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(tasks[0]["request_id"], request_id.to_string());
-    let uri = format!("/api/v1/worker/source-publications/{request_id}/staged?worker_id={holder}");
-    let response = h
-        .app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri(&uri)
-                .header("authorization", format!("Bearer {}", common::WORKER_KEY))
-                .body(Body::empty())?,
-        )
-        .await?;
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        to_bytes(response.into_body(), JSON_LIMIT).await?.as_ref(),
-        b"result"
-    );
     let authorize =
         format!("/api/v1/worker/source-publications/{request_id}/authorize?worker_id={holder}");
     assert_eq!(
@@ -1378,12 +1551,6 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
         .bind(claim.job_id)
         .execute(&h.pool)
         .await?;
-    assert_eq!(
-        json_call(&h.app, "GET", &uri, Some(common::WORKER_KEY), None)
-            .await?
-            .0,
-        StatusCode::CONFLICT
-    );
     assert_eq!(
         json_call(&h.app, "GET", &authorize, Some(common::WORKER_KEY), None)
             .await?
@@ -1516,5 +1683,75 @@ async fn cpu_in_hardware_telemetry_does_not_satisfy_a_software_requirement() -> 
         claim_for(&h, target).await?.map(|claim| claim.job_id),
         Some(job.id)
     );
+    Ok(())
+}
+
+/// Issue `published` du remplacement, telle que la route la reçoit (JSON).
+const PUBLISHED: &str = "\"published\"";
+
+/// Appel de la route de remplacement local avec le bail du worker, à l'époque donnée.
+async fn local_application_call(
+    h: &Harness,
+    uri: &str,
+    claim: &Claim,
+    worker: Uuid,
+    epoch: i64,
+    body: &str,
+) -> anyhow::Result<StatusCode> {
+    let request = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("authorization", format!("Bearer {}", common::WORKER_KEY))
+        .header("content-type", "application/json")
+        .header("x-worker-id", worker.to_string())
+        .header("x-lease-token", claim.lease_token.to_string())
+        .header("x-lease-epoch", epoch.to_string())
+        .body(Body::from(body.to_owned()))?;
+    Ok(h.app.clone().oneshot(request).await?.status())
+}
+
+#[tokio::test]
+async fn the_local_application_routes_follow_the_journal_and_the_lease() -> anyhow::Result<()> {
+    use forgearr::{domain::LeaseRequest, repository::PublishedOutput};
+    let h = harness().await?;
+    let worker = register_worker_with_encoders(&h, "test-worker", &[]).await?;
+    let job = repository::insert_job(&h.pool, "film.mkv", None, &"aa".repeat(32), 10).await?;
+    let claim = claim_for(&h, worker)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("bail absent"))?;
+    let authorize = format!("/api/v1/jobs/{}/result/authorize", job.id);
+    let applied = format!("/api/v1/jobs/{}/result/applied", job.id);
+    let epoch = claim.lease_epoch;
+
+    // Sans remplacement inscrit au journal, ni autorisation ni confirmation.
+    let status = local_application_call(&h, &authorize, &claim, worker, epoch, "").await?;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let status = local_application_call(&h, &applied, &claim, worker, epoch, PUBLISHED).await?;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let lease = LeaseRequest {
+        worker_id: worker,
+        lease_token: claim.lease_token,
+        lease_epoch: epoch,
+        telemetry: None,
+    };
+    let output = PublishedOutput {
+        name: "",
+        sha256: &"bb".repeat(32),
+        bytes: 6,
+        warning: false,
+    };
+    let policy = forgearr::domain::LibraryOutputPolicy::ReplaceWithBackup;
+    repository::begin_local_publication(&h.pool, job.id, &lease, output, "mkv", policy).await?;
+    let status = local_application_call(&h, &authorize, &claim, worker, epoch, "").await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    // Un bail d'une autre époque est refusé.
+    let status = local_application_call(&h, &authorize, &claim, worker, epoch + 1, "").await?;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let status = local_application_call(&h, &applied, &claim, worker, epoch, PUBLISHED).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let done = repository::get_job(&h.pool, job.id).await?;
+    assert_eq!(done.status, forgearr::domain::JobStatus::Succeeded);
     Ok(())
 }

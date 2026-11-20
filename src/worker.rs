@@ -6,7 +6,6 @@ use crate::{
         Register, StepsReport, Worker,
     },
     job_runner::{self, JobRunError},
-    storage,
     worker_http::{WorkerState, WorkerWeb},
     worker_settings, worker_transfer,
 };
@@ -20,16 +19,21 @@ use std::{
     },
     time::Duration,
 };
-use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
 const REMOTE_BROWSE_WAIT_MS: u64 = 10_000;
 const REMOTE_BROWSE_HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 const REMOTE_BROWSE_REPORT_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_BROWSE_RETRY_DELAY: Duration = Duration::from_secs(2);
-const SOFTWARE_PROBE_REFRESH: Duration = Duration::from_secs(60);
 mod handoff;
-pub(crate) use handoff::{prune_retained, retained_handoff_path};
+mod local_apply;
+mod result_pull;
+pub(crate) mod timing;
+use timing::{
+    CENTRAL_CONNECT_TIMEOUT, CENTRAL_REQUEST_TIMEOUT, HEARTBEAT_INTERVAL, IDLE_POLL_INTERVAL,
+    PROGRESS_REPORT_TIMEOUT, REGISTRATION_RETRY_DELAY, REREGISTRATION_EVERY_IDLE_POLLS,
+    SOFTWARE_PROBE_REFRESH, TOOL_DISTRIBUTION_TIMEOUT,
+};
 
 #[derive(Clone, Copy)]
 enum PublicationRequestKind {
@@ -58,6 +62,16 @@ fn publication_error_code(error: &serde_json::Value) -> JobErrorCode {
     }
 }
 
+/// Erreur de tâche déduite de la réponse refusée du central lors de la publication d'un résultat.
+async fn publication_failure(response: reqwest::Response) -> anyhow::Error {
+    let error = response
+        .json::<serde_json::Value>()
+        .await
+        .unwrap_or_default();
+    let code = publication_error_code(&error);
+    JobRunError::simple(code, code.as_str()).into()
+}
+
 #[derive(Clone)]
 pub struct WorkerConfig {
     pub url: reqwest::Url,
@@ -74,18 +88,7 @@ pub struct WorkerConfig {
 
 /// Lit `WORKER_TRANSFER_URL` (adresse annoncée) et `WORKER_TRANSFER_PORT` (écoute, sinon le port de l'adresse).
 fn transfer_settings() -> (Option<String>, Option<u16>) {
-    let url = env::var("WORKER_TRANSFER_URL")
-        .ok()
-        .and_then(|raw| crate::repository::valid_transfer_url(&raw));
-    let port = env::var("WORKER_TRANSFER_PORT")
-        .ok()
-        .and_then(|raw| raw.trim().parse().ok())
-        .or_else(|| {
-            url.as_deref()
-                .and_then(|raw| reqwest::Url::parse(raw).ok())
-                .and_then(|parsed| parsed.port())
-        });
-    (url, port)
+    worker_transfer::transfer_settings("WORKER_TRANSFER_URL", "WORKER_TRANSFER_PORT")
 }
 
 impl WorkerConfig {
@@ -180,12 +183,12 @@ impl WorkerLoop {
     async fn heartbeat(&self, claim: &Claim, worker: Uuid) -> anyhow::Result<()> {
         let probe = crate::telemetry::TelemetryProbe::with_storage_path(&self.config.work_dir);
         loop {
-            tokio::time::sleep(Duration::from_secs(10)).await;
+            tokio::time::sleep(HEARTBEAT_INTERVAL).await;
             self.request(
                 reqwest::Method::POST,
                 &format!("/api/v1/jobs/{}/heartbeat", claim.job_id),
             )
-            .timeout(Duration::from_secs(10))
+            .timeout(CENTRAL_REQUEST_TIMEOUT)
             .json(&LeaseRequest {
                 worker_id: worker,
                 lease_token: claim.lease_token,
@@ -221,7 +224,7 @@ impl WorkerLoop {
                 let _ = client
                     .post(format!("{base}/api/v1/jobs/{job_id}/progress"))
                     .bearer_auth(key)
-                    .timeout(Duration::from_secs(5))
+                    .timeout(PROGRESS_REPORT_TIMEOUT)
                     .json(&ProgressReport {
                         worker_id: worker,
                         lease_token,
@@ -246,7 +249,7 @@ impl WorkerLoop {
                 reqwest::Method::GET,
                 &format!("/api/v1/worker/tools/{tool_id}/distribution"),
             )
-            .timeout(Duration::from_secs(15))
+            .timeout(TOOL_DISTRIBUTION_TIMEOUT)
             .send()
             .await?
             .error_for_status()?
@@ -279,7 +282,7 @@ impl WorkerLoop {
             reqwest::Method::POST,
             &format!("/api/v1/jobs/{}/steps", claim.job_id),
         )
-        .timeout(Duration::from_secs(10))
+        .timeout(CENTRAL_REQUEST_TIMEOUT)
         .json(&StepsReport {
             worker_id: worker,
             lease_token: claim.lease_token,
@@ -317,21 +320,9 @@ impl WorkerLoop {
             claim.working_source_name(),
         ));
         if let Some(handoff) = &claim.handoff_input {
-            let retained = retained_handoff_path(
-                &self.config.work_dir,
-                claim.job_id,
-                handoff.source_lease_epoch,
-            );
-            crate::local_worker::copy_verified_source(
-                &retained,
-                &input,
-                self.config.max_bytes,
-                &handoff.artifact.sha256,
-                handoff.artifact.bytes,
-            )
-            .await
-            .map_err(|_| JobRunError::simple(JobErrorCode::SourceIntegrity, "handoff_integrity"))?;
-            tokio::fs::remove_file(retained).await?;
+            // Remise par artefact (ADR 0022) : le fichier de travail se tire chez son détenteur.
+            self.pull_handoff_input(claim, worker, handoff, &input)
+                .await?;
         } else if let Some(root) = claim.local_source_root.as_deref() {
             let source = crate::library_scan::source_path(Path::new(root), &claim.source_name)
                 .await
@@ -381,72 +372,62 @@ impl WorkerLoop {
             tracing::warn!(job_id=%claim.job_id, "step report rejected or unavailable");
         }
 
-        let (_, output_size) =
-            storage::fingerprint(&outcome.working_file, self.config.max_bytes).await?;
-        let body = reqwest::Body::wrap_stream(ReaderStream::new(
-            tokio::fs::File::open(&outcome.working_file).await?,
-        ));
-        let response = self
-            .leased(reqwest::Method::PUT, claim, worker, "result")
-            .header("content-length", output_size)
-            .header("x-remux-warning", outcome.warning.to_string())
-            .header("x-output-ext", &outcome.output_spec.extension)
-            .body(body)
-            .send()
-            .await?;
-        if !response.status().is_success() {
-            let error = response
-                .json::<serde_json::Value>()
-                .await
-                .unwrap_or_default();
-            let code = publication_error_code(&error);
-            return Err(JobRunError::simple(code, code.as_str()).into());
-        }
-        Ok(())
+        self.publish_retained_result(
+            claim,
+            worker,
+            &outcome.working_file,
+            &outcome.output_spec.extension,
+            outcome.warning,
+        )
+        .await
     }
-    /// Récupère la source : voie directe chez le worker qui la détient (si un billet est fourni),
-    /// puis repli par le central (ADR 0019).
+    /// Demande au central un billet frais pour la source de cette tâche (bail actif exigé).
+    async fn reissue_ticket(
+        &self,
+        claim: &Claim,
+        worker: Uuid,
+    ) -> anyhow::Result<Option<forgearr_shared::transfer::SourceTicket>> {
+        Ok(self
+            .leased(reqwest::Method::POST, claim, worker, "source/ticket")
+            .timeout(REMOTE_BROWSE_HTTP_TIMEOUT)
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Option<forgearr_shared::transfer::SourceTicket>>()
+            .await?)
+    }
+
+    /// Récupère la source en direct chez le worker qui la détient, avec le billet de la tâche
+    /// (ADR 0019 et 0022). Sans billet, aucun worker ne l'annonce : la tâche échoue.
     async fn download_source(
         &self,
         claim: &Claim,
         worker: Uuid,
         input: &Path,
     ) -> anyhow::Result<()> {
-        if let Some(ticket) = claim.source_ticket.as_ref() {
-            let direct = worker_transfer::direct_client()?;
-            match worker_transfer::download_direct(
-                &direct,
-                ticket,
-                input,
-                self.config.max_bytes,
-                &claim.source_sha256,
-                claim.source_bytes,
-            )
-            .await
-            {
-                Ok(()) => return Ok(()),
-                Err(error) => {
-                    tracing::warn!(job_id = %claim.job_id, error = %error, "voie directe indisponible, repli par le central");
-                    let _ = tokio::fs::remove_file(input).await;
-                }
-            }
-        }
-        let response = self
-            .leased(reqwest::Method::GET, claim, worker, "source")
-            .send()
-            .await?
-            .error_for_status()?;
-        worker_transfer::save_verified(
-            response,
+        let Some(ticket) = claim.source_ticket.clone() else {
+            let unreachable =
+                JobRunError::simple(JobErrorCode::TransferFailed, "source_unreachable");
+            return Err(unreachable.into());
+        };
+        let direct = worker_transfer::direct_client()?;
+        worker_transfer::download_direct_resuming(
+            &direct,
+            ticket,
             input,
             self.config.max_bytes,
             &claim.source_sha256,
             claim.source_bytes,
+            || self.reissue_ticket(claim, worker),
         )
         .await
         .map_err(|error| {
-            if error.to_string() == "source_integrity" {
-                JobRunError::simple(JobErrorCode::SourceIntegrity, "source_integrity").into()
+            if error.to_string() == worker_transfer::SOURCE_INTEGRITY {
+                JobRunError::simple(
+                    JobErrorCode::SourceIntegrity,
+                    worker_transfer::SOURCE_INTEGRITY,
+                )
+                .into()
             } else {
                 error
             }
@@ -487,7 +468,7 @@ impl WorkerLoop {
                     reqwest::Method::POST,
                     &format!("/api/v1/jobs/{}/failure", claim.job_id),
                 )
-                .timeout(Duration::from_secs(10))
+                .timeout(CENTRAL_REQUEST_TIMEOUT)
                 .json(&Failure {
                     worker_id: worker,
                     lease_token: claim.lease_token,
@@ -532,7 +513,7 @@ impl WorkerLoop {
     async fn prune_stale_tools_cache(&self) {
         let Ok(resp) = self
             .request(reqwest::Method::GET, "/api/v1/worker/tools")
-            .timeout(Duration::from_secs(10))
+            .timeout(CENTRAL_REQUEST_TIMEOUT)
             .send()
             .await
         else {
@@ -565,8 +546,8 @@ pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
     anyhow::ensure!(config.max_bytes > 0, "MAX_FILE_BYTES must be positive");
     tokio::fs::create_dir_all(&config.work_dir).await?;
     let mut builder = Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(3600))
+        .connect_timeout(CENTRAL_CONNECT_TIMEOUT)
+        .timeout(forgearr_shared::transfer::FILE_TRANSFER_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none());
     if let Some(ref ca) = config.ca {
         builder = builder
@@ -660,60 +641,6 @@ impl WorkerLoop {
         }
     }
 
-    /// Envoie au central, à sa demande, les sources que ce worker détient (repli, ADR 0019).
-    async fn respond_to_source_relay_requests(&self, worker_id: Uuid) {
-        let pending = format!(
-            "/api/v1/worker/source-relay/pending?worker_id={worker_id}&wait_ms={REMOTE_BROWSE_WAIT_MS}"
-        );
-        loop {
-            let tasks = tokio::select! {
-                _ = crate::api::shutdown_signal() => return,
-                result = async {
-                    self.request(reqwest::Method::GET, &pending)
-                        .timeout(REMOTE_BROWSE_HTTP_TIMEOUT)
-                        .send()
-                        .await?
-                        .error_for_status()?
-                        .json::<Vec<forgearr_shared::transfer::SourceRelayTask>>()
-                        .await
-                } => result,
-            };
-            let Ok(tasks) = tasks else {
-                tokio::time::sleep(REMOTE_BROWSE_RETRY_DELAY).await;
-                continue;
-            };
-            for task in tasks {
-                let runner = self.clone();
-                tokio::spawn(async move {
-                    if let Err(error) = runner.send_source_to_central(task).await {
-                        tracing::warn!(error = %error, "envoi de source au central interrompu");
-                    }
-                });
-            }
-        }
-    }
-
-    async fn send_source_to_central(
-        &self,
-        task: forgearr_shared::transfer::SourceRelayTask,
-    ) -> anyhow::Result<()> {
-        let path =
-            crate::library_scan::source_path(Path::new(&task.root), &task.source_name).await?;
-        let file = tokio::fs::File::open(path).await?;
-        self.request(
-            reqwest::Method::PUT,
-            &format!(
-                "/api/v1/worker/source-relay/{}?worker_id={}",
-                task.request_id, task.worker_id
-            ),
-        )
-        .body(reqwest::Body::wrap_stream(ReaderStream::new(file)))
-        .send()
-        .await?
-        .error_for_status()?;
-        Ok(())
-    }
-
     /// Répond aux demandes de retour du résultat chez le détenteur de la source.
     async fn respond_to_publication_requests(&self, worker_id: Uuid, kind: PublicationRequestKind) {
         let pending = format!(
@@ -775,25 +702,7 @@ impl WorkerLoop {
                     Err(crate::error::AppError::Invalid)
                 };
             }
-            let response = self
-                .request(
-                    reqwest::Method::GET,
-                    &format!("{prefix}/staged?worker_id={}", task.worker_id),
-                )
-                .send()
-                .await
-                .map_err(|_| crate::error::AppError::CentralUnavailable)?
-                .error_for_status()
-                .map_err(|_| crate::error::AppError::CentralUnavailable)?;
-            worker_transfer::save_verified(
-                response,
-                &file,
-                self.config.max_bytes,
-                &task.result_sha256,
-                task.result_bytes,
-            )
-            .await
-            .map_err(|_| crate::error::AppError::Invalid)?;
+            self.fetch_result(&prefix, &task, &file).await?;
             let source = crate::library_scan::source_path(Path::new(&task.root), &task.source_name)
                 .await
                 .map_err(crate::source_publication::missing_source_is_changed)?;
@@ -855,18 +764,7 @@ impl WorkerLoop {
             self.config.key.clone(),
             worker_id,
         ));
-        Some(tokio::spawn(async move {
-            let address = std::net::SocketAddr::from(([0, 0, 0, 0], port));
-            match tokio::net::TcpListener::bind(address).await {
-                Ok(listener) => {
-                    tracing::info!(%address, "serveur de transfert de sources démarré");
-                    let _ = axum::serve(listener, worker_transfer::transfer_router(state)).await;
-                }
-                Err(error) => {
-                    tracing::warn!(%address, error = %error, "serveur de transfert indisponible");
-                }
-            }
-        }))
+        Some(worker_transfer::spawn_listener(port, state))
     }
 
     /// Enregistre le worker puis réclame des tâches jusqu'à l'arrêt.
@@ -878,7 +776,7 @@ impl WorkerLoop {
             let attempt = async {
                 runner
                     .request(reqwest::Method::POST, "/api/v1/workers")
-                    .timeout(Duration::from_secs(10))
+                    .timeout(CENTRAL_REQUEST_TIMEOUT)
                     .json(&Register {
                         name: runner.config.name.clone(),
                         version: Some(crate::version::app_version().to_owned()),
@@ -895,7 +793,7 @@ impl WorkerLoop {
                 result = attempt => match result { Ok(worker) => break worker, Err(_) => tracing::warn!("registration unavailable; retrying") },
                 _ = crate::api::shutdown_signal() => return Ok(()),
             }
-            tokio::select! { _=tokio::time::sleep(Duration::from_secs(5))=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
+            tokio::select! { _=tokio::time::sleep(REGISTRATION_RETRY_DELAY)=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
         };
         tracing::info!(worker_id=%worker.id, "worker registered");
         runner.status.mark_registered();
@@ -908,14 +806,6 @@ impl WorkerLoop {
             })
         };
         let transfer_server = runner.spawn_transfer_server(worker.id);
-        let source_relay_responder = {
-            let relay_runner = runner.clone();
-            tokio::spawn(async move {
-                relay_runner
-                    .respond_to_source_relay_requests(worker.id)
-                    .await;
-            })
-        };
         let source_publication_responder = {
             let publication_runner = runner.clone();
             tokio::spawn(async move {
@@ -961,10 +851,10 @@ impl WorkerLoop {
             loop {
                 while active.try_join_next().is_some() {}
                 if idle_polls > 0
-                    && idle_polls.is_multiple_of(30)
+                    && idle_polls.is_multiple_of(REREGISTRATION_EVERY_IDLE_POLLS)
                     && let Ok(resp) = runner
                         .request(reqwest::Method::POST, "/api/v1/workers")
-                        .timeout(Duration::from_secs(10))
+                        .timeout(CENTRAL_REQUEST_TIMEOUT)
                         .json(&Register {
                             name: runner.config.name.clone(),
                             version: Some(crate::version::app_version().to_owned()),
@@ -977,20 +867,17 @@ impl WorkerLoop {
                 {
                     max_concurrency = updated.max_concurrency.max(1);
                 }
-                let telemetry = if idle_polls.is_multiple_of(30) {
+                let telemetry = if idle_polls.is_multiple_of(REREGISTRATION_EVERY_IDLE_POLLS) {
                     Some(probe.sample())
                 } else {
                     None
                 };
                 idle_polls = idle_polls.wrapping_add(1);
                 while (active.len() as i32) < max_concurrency {
-                    if let Err(error) = runner.receive_handoff(worker.id).await {
-                        tracing::warn!(error=%error, "handoff reception failed");
-                    }
                     let attempt = async {
                         let claim = runner
                             .request(reqwest::Method::POST, "/api/v1/claims")
-                            .timeout(Duration::from_secs(10))
+                            .timeout(CENTRAL_REQUEST_TIMEOUT)
                             .json(&ClaimRequest {
                                 worker_id: worker.id,
                                 telemetry: telemetry.clone(),
@@ -1026,7 +913,7 @@ impl WorkerLoop {
                                         reqwest::Method::POST,
                                         &format!("/api/v1/jobs/{}/failure", claim.job_id),
                                     )
-                                    .timeout(Duration::from_secs(10))
+                                    .timeout(CENTRAL_REQUEST_TIMEOUT)
                                     .json(&Failure {
                                         worker_id: worker.id,
                                         lease_token: claim.lease_token,
@@ -1060,7 +947,7 @@ impl WorkerLoop {
                     }
                 }
                 tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(1)) => {},
+                    _ = tokio::time::sleep(IDLE_POLL_INTERVAL) => {},
                     Some(_) = active.join_next(), if !active.is_empty() => {},
                     _ = crate::api::shutdown_signal() => {
                         active.abort_all();
@@ -1071,7 +958,6 @@ impl WorkerLoop {
         }
         .await;
         browse_responder.abort();
-        source_relay_responder.abort();
         source_publication_responder.abort();
         source_inspection_responder.abort();
         software_probe_refresher.abort();

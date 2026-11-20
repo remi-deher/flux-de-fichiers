@@ -6,7 +6,10 @@ use crate::{
 };
 use forgearr_shared::{
     capabilities::CapabilityRequirement,
-    relay::{HandoffState, JobRelayInfo, MAX_RELAYS_PER_JOB, RelayRequest, RelayTarget},
+    relay::{
+        HandoffArtifact, HandoffInput, JobRelayInfo, MAX_RELAYS_PER_JOB, RelayRequest, RelayTarget,
+    },
+    transfer::ArtifactKind,
     workers::WORKER_ONLINE_SECONDS,
 };
 use sqlx::SqlitePool;
@@ -60,21 +63,27 @@ fn decide_placement(
     }
 }
 
-/// Le worker peut-il traiter la tâche (règle de la bibliothèque, ADR 0021) et sa source est-elle
-/// joignable (central, ou un détenteur en ligne) ?
-async fn worker_can_read_source(pool: &SqlitePool, job: Uuid, worker: Uuid) -> AppResult<bool> {
-    let sql = format!(
-        "SELECT {access} AND {reachable} FROM jobs WHERE id=?1",
-        access = super::library_access::job_access_sql("?2", "?3"),
-        reachable = super::library_access::source_reachable_sql("?4"),
-    );
-    let accessible: Option<bool> = sqlx::query_scalar(&sql)
-        .bind(job)
-        .bind(worker)
-        .bind(forgearr_shared::workers::INTEGRATED_WORKER_NAME)
-        .bind(WORKER_ONLINE_SECONDS)
-        .fetch_optional(pool)
-        .await?;
+/// Le worker peut-il traiter la tâche (règle de la bibliothèque, ADR 0021) ? Avec `needs_source`, sa
+/// source doit aussi être lisible (central, montage propre, ou détenteur en ligne avec adresse de
+/// transfert) ; un relais par artefact lit le fichier de travail chez son détenteur et s'en passe.
+async fn worker_can_process(
+    pool: &SqlitePool,
+    job: Uuid,
+    worker: Uuid,
+    needs_source: bool,
+) -> AppResult<bool> {
+    let access = super::library_access::job_access_sql("?2");
+    let sql = if needs_source {
+        let readable = super::library_access::source_readable_sql("?2", "?3");
+        format!("SELECT {access} AND {readable} FROM jobs WHERE id=?1")
+    } else {
+        format!("SELECT {access} FROM jobs WHERE id=?1")
+    };
+    let mut query = sqlx::query_scalar::<_, bool>(&sql).bind(job).bind(worker);
+    if needs_source {
+        query = query.bind(WORKER_ONLINE_SECONDS);
+    }
+    let accessible: Option<bool> = query.fetch_optional(pool).await?;
     Ok(accessible.unwrap_or(false))
 }
 
@@ -83,11 +92,12 @@ pub(super) async fn choose_placement(
     job: Uuid,
     from: Uuid,
     target: &RelayTarget,
+    needs_source: bool,
 ) -> AppResult<Option<Placement>> {
     let workers = crate::repository::list_workers(pool).await?;
     let mut with_access = HashSet::new();
     for worker in workers.iter().filter(|worker| worker.id != from) {
-        if worker_can_read_source(pool, job, worker.id).await? {
+        if worker_can_process(pool, job, worker.id, needs_source).await? {
             with_access.insert(worker.id);
         }
     }
@@ -102,6 +112,7 @@ pub async fn relay_job(
     id: Uuid,
     lease: &LeaseRequest,
     request: &RelayRequest,
+    warning: bool,
 ) -> AppResult<RelayOutcome> {
     let relay_count: i64 = sqlx::query_scalar(
         "SELECT COALESCE((SELECT relay_count FROM job_relays WHERE job_id=?1), 0)",
@@ -109,10 +120,18 @@ pub async fn relay_job(
     .bind(id)
     .fetch_one(pool)
     .await?;
+    // Un fichier de travail déclaré par ce bail fait un relais par artefact (ADR 0022).
+    let kind = ArtifactKind::Working;
+    let epoch = lease.lease_epoch;
+    let artifact_relay = super::artifact_retained(pool, id, kind, lease.worker_id, epoch).await?;
+    if artifact_relay && !super::source_tickets::can_serve(pool, lease.worker_id).await? {
+        // Sans adresse de transfert, personne ne pourrait tirer le fichier de travail.
+        return Err(AppError::Invalid);
+    }
     let placement = if relay_count >= MAX_RELAYS_PER_JOB {
         None
     } else {
-        choose_placement(pool, id, lease.worker_id, &request.target).await?
+        choose_placement(pool, id, lease.worker_id, &request.target, !artifact_relay).await?
     };
 
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -128,10 +147,10 @@ pub async fn relay_job(
             let updated = sqlx::query(
                 "UPDATE jobs SET status=?5, worker_id=NULL, lease_token=NULL, \
                      lease_epoch=lease_epoch+1, leased_until=NULL, target_worker_id=?6, \
-                     attempts=MAX(attempts-1, 0), updated_at=datetime('now') \
+                     attempts=MAX(attempts-1, 0), updated_at=datetime('now'), \
+                     warning=CASE WHEN warning=1 OR ?8=1 THEN 1 ELSE 0 END \
                  WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 \
-                   AND status=?7 AND leased_until > datetime('now') \
-                   AND NOT EXISTS(SELECT 1 FROM job_handoffs WHERE job_id=?1 AND state IN (?8,?9,?10))",
+                   AND status=?7 AND leased_until > datetime('now')",
             )
             .bind(id)
             .bind(lease.worker_id)
@@ -140,26 +159,30 @@ pub async fn relay_job(
             .bind(JobStatus::Queued)
             .bind(pinned)
             .bind(JobStatus::Running)
-            .bind(HandoffState::Pending.as_str())
-            .bind(HandoffState::Claimed.as_str())
-            .bind(HandoffState::Uploading.as_str())
+            .bind(warning)
             .execute(&mut *tx)
             .await?
             .rows_affected();
             if updated != 1 {
                 return Err(AppError::Conflict);
             }
+            if artifact_relay {
+                snapshot_steps(&mut tx, id).await?;
+            }
             sqlx::query(
-                "INSERT INTO job_relays(job_id, from_worker_id, relay_count, resume_node_id, requirement_json) \
-                 VALUES(?1, ?2, 1, ?3, ?4) \
+                "INSERT INTO job_relays(job_id, from_worker_id, relay_count, resume_node_id, \
+                     requirement_json, artifact_relay) \
+                 VALUES(?1, ?2, 1, ?3, ?4, ?5) \
                  ON CONFLICT(job_id) DO UPDATE SET from_worker_id=excluded.from_worker_id, \
                      relay_count=relay_count+1, resume_node_id=excluded.resume_node_id, \
-                     requirement_json=excluded.requirement_json, relayed_at=datetime('now')",
+                     requirement_json=excluded.requirement_json, \
+                     artifact_relay=excluded.artifact_relay, relayed_at=datetime('now')",
             )
             .bind(id)
             .bind(lease.worker_id)
             .bind(&request.resume_node_id)
             .bind(requirement_json)
+            .bind(artifact_relay)
             .execute(&mut *tx)
             .await?;
             RelayOutcome::Relayed {
@@ -171,8 +194,7 @@ pub async fn relay_job(
                 "UPDATE jobs SET status=?5, error_code=?6, lease_token=NULL, \
                      lease_epoch=lease_epoch+1, leased_until=NULL, updated_at=datetime('now') \
                  WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 \
-                   AND status=?7 AND leased_until > datetime('now') \
-                   AND NOT EXISTS(SELECT 1 FROM job_handoffs WHERE job_id=?1 AND state IN (?8,?9,?10))",
+                   AND status=?7 AND leased_until > datetime('now')",
             )
             .bind(id)
             .bind(lease.worker_id)
@@ -181,14 +203,19 @@ pub async fn relay_job(
             .bind(JobStatus::Failed)
             .bind(JobErrorCode::NoCapableWorker)
             .bind(JobStatus::Running)
-            .bind(HandoffState::Pending.as_str())
-            .bind(HandoffState::Claimed.as_str())
-            .bind(HandoffState::Uploading.as_str())
             .execute(&mut *tx)
             .await?
             .rows_affected();
             if updated != 1 {
                 return Err(AppError::Conflict);
+            }
+            if artifact_relay {
+                // La tâche échoue : le fichier de travail n'a plus de repreneur.
+                sqlx::query("DELETE FROM job_artifacts WHERE job_id=?1 AND kind=?2")
+                    .bind(id)
+                    .bind(ArtifactKind::Working.as_str())
+                    .execute(&mut *tx)
+                    .await?;
             }
             RelayOutcome::Failed
         }
@@ -197,14 +224,68 @@ pub async fn relay_job(
     Ok(outcome)
 }
 
-/// Nœud de reprise d'une tâche relayée, lu au moment du bail.
+/// Nœud de reprise d'une tâche relayée, lu au moment du bail. Un relais par artefact ne reprend en
+/// cours de flux que tant que l'artefact est déclaré : sans lui (reprise après perte du repreneur),
+/// la tâche repart de la source.
 pub(super) async fn resume_node(pool: &SqlitePool, job: Uuid) -> AppResult<Option<String>> {
-    Ok(
-        sqlx::query_scalar("SELECT resume_node_id FROM job_relays WHERE job_id=?1")
-            .bind(job)
-            .fetch_optional(pool)
-            .await?,
+    let node = sqlx::query_scalar(
+        "SELECT resume_node_id FROM job_relays r WHERE r.job_id=?1 AND (r.artifact_relay=0 \
+         OR EXISTS(SELECT 1 FROM job_artifacts a WHERE a.job_id=r.job_id AND a.kind=?2))",
     )
+    .bind(job)
+    .bind(ArtifactKind::Working.as_str())
+    .fetch_optional(pool)
+    .await?;
+    Ok(node)
+}
+
+/// Fichier de travail que ce bail doit tirer chez son détenteur (relais par artefact, ADR 0022).
+pub(super) async fn artifact_input(
+    pool: &SqlitePool,
+    job: Uuid,
+    taker: Uuid,
+) -> AppResult<Option<HandoffInput>> {
+    let relayed: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM job_relays WHERE job_id=?1 AND artifact_relay=1)",
+    )
+    .bind(job)
+    .fetch_one(pool)
+    .await?;
+    if !relayed {
+        return Ok(None);
+    }
+    let Some(artifact) = super::get_artifact(pool, job, ArtifactKind::Working).await? else {
+        return Ok(None);
+    };
+    if artifact.holder_worker_id == taker {
+        return Ok(None);
+    }
+    Ok(Some(HandoffInput {
+        source_lease_epoch: artifact.lease_epoch,
+        artifact: HandoffArtifact {
+            name: artifact.declaration.name,
+            sha256: artifact.declaration.sha256,
+            bytes: artifact.declaration.bytes,
+        },
+    }))
+}
+
+/// Conserve le journal des étapes déjà exécutées : le repreneur le complète sans le perdre.
+pub(super) async fn snapshot_steps(tx: &mut sqlx::SqliteConnection, job: Uuid) -> AppResult<()> {
+    sqlx::query("DELETE FROM job_handoff_steps WHERE job_id=?1")
+        .bind(job)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "INSERT INTO job_handoff_steps(job_id, step_index, node_id, block_kind, operation_id, \
+             status, message, output_excerpt, created_at) \
+         SELECT job_id, step_index, node_id, block_kind, operation_id, status, message, \
+             output_excerpt, created_at FROM job_steps WHERE job_id=?1",
+    )
+    .bind(job)
+    .execute(&mut *tx)
+    .await?;
+    Ok(())
 }
 
 /// Marques « relayée » des tâches données (celles qui n'ont pas été relayées sont absentes).

@@ -10,10 +10,10 @@ use axum::{
     Json,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::Response,
 };
 use forgearr_shared::transfer::{
-    SourcePublicationOutcome, SourcePublicationReport, SourcePublicationTask,
+    ArtifactKind, SourcePublicationOutcome, SourcePublicationReport, SourcePublicationTask,
+    SourceTicket,
 };
 use serde::Deserialize;
 use std::time::Duration;
@@ -22,46 +22,43 @@ use uuid::Uuid;
 const MAX_PENDING_WAIT_MS: u64 = 15_000;
 const PUBLICATION_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
-/// Transmet le résultat à un détenteur inscriptible, sans le déclarer réussi avant sa réponse.
+/// Transmet le résultat à un détenteur inscriptible, sans le déclarer réussi avant sa réponse : il le
+/// tire en direct chez le worker qui le retient avec ce billet (ADR 0022).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn publish_on_holder(
     s: &AppState,
     job: &Job,
     lease: &LeaseRequest,
-    staged: &std::path::Path,
+    holder: repository::SourceHolder,
+    result_ticket: SourceTicket,
     result_hash: &str,
     result_bytes: i64,
     extension: &str,
     policy: LibraryOutputPolicy,
 ) -> AppResult<()> {
-    let holder = repository::writable_source_holders(&s.pool, job.id, Uuid::nil())
-        .await?
-        .into_iter()
-        .next()
-        .ok_or(AppError::CentralUnavailable)?;
+    if policy != LibraryOutputPolicy::OutputDir
+        && (job.source_sha256.is_none() || job.source_bytes.is_none())
+    {
+        return Err(AppError::Invalid);
+    }
     let task = SourcePublicationTask {
         request_id: Uuid::new_v4(),
         worker_id: holder.worker_id,
         root: holder.root,
         source_name: job.source_name.clone(),
-        source_sha256: job.source_sha256.clone().ok_or(AppError::Invalid)?,
-        source_bytes: job.source_bytes.ok_or(AppError::Invalid)?,
+        source_sha256: job.source_sha256.clone().unwrap_or_default(),
+        source_bytes: job.source_bytes.unwrap_or_default(),
         result_sha256: result_hash.to_owned(),
         result_bytes,
         extension: extension.to_owned(),
         policy,
+        result_ticket: Some(result_ticket),
     };
-    match s
-        .source_publication
-        .request(
-            task,
-            staged.to_path_buf(),
-            job.id,
-            lease.clone(),
-            PUBLICATION_TIMEOUT,
-        )
-        .await?
-    {
+    let broker = &s.source_publication;
+    let outcome = broker
+        .request(task, job.id, lease.clone(), PUBLICATION_TIMEOUT)
+        .await?;
+    match outcome {
         SourcePublicationOutcome::Published => {
             repository::active(&s.pool, job.id, lease).await?;
             Ok(())
@@ -76,16 +73,6 @@ pub struct HolderQuery {
     worker_id: Uuid,
     #[serde(default)]
     wait_ms: Option<u64>,
-}
-
-/// Une clé de worker n'autorise pas à agir pour un autre worker.
-async fn authorize_holder(s: &AppState, headers: &HeaderMap, worker_id: Uuid) -> AppResult<()> {
-    let principal = crate::auth::authorize_worker(&s.pool, headers).await?;
-    let worker = repository::get_worker(&s.pool, worker_id).await?;
-    if principal.name != worker.name {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
 }
 
 pub async fn pending(
@@ -110,25 +97,35 @@ async fn pending_for(
     query: HolderQuery,
     broker: &crate::source_publication_broker::SourcePublicationBroker,
 ) -> AppResult<Json<Vec<SourcePublicationTask>>> {
-    authorize_holder(s, headers, query.worker_id).await?;
+    crate::auth::authorize_worker_identity(&s.pool, headers, query.worker_id).await?;
     let wait = Duration::from_millis(query.wait_ms.unwrap_or(0).min(MAX_PENDING_WAIT_MS));
     Ok(Json(broker.take_for_worker(query.worker_id, wait).await))
 }
 
-pub async fn staged(
+/// Le détenteur redemande un billet pour tirer le résultat chez le worker qui le retient (billet
+/// expiré, lecture à reprendre par `Range`). Réservé au détenteur à qui la demande a été remise.
+pub async fn result_ticket(
     State(s): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
     Query(query): Query<HolderQuery>,
-) -> AppResult<Response> {
-    authorize_holder(&s, &headers, query.worker_id).await?;
+) -> AppResult<Json<Option<SourceTicket>>> {
+    crate::auth::authorize_worker_identity(&s.pool, &headers, query.worker_id).await?;
     let access = s
         .source_publication
         .access_for_worker(id, query.worker_id)
         .await
         .ok_or(AppError::NotFound)?;
     repository::active(&s.pool, access.job_id, &access.lease).await?;
-    super::transfers::stream_file(&access.staged, None, "application/octet-stream").await
+    let ticket = repository::issue_artifact_ticket(
+        &s.pool,
+        access.job_id,
+        ArtifactKind::Result,
+        query.worker_id,
+        access.lease.lease_epoch,
+    )
+    .await?;
+    Ok(Json(ticket))
 }
 
 /// Vérifie le bail juste avant que le détenteur ne remplace la source.
@@ -138,7 +135,7 @@ pub async fn authorize_commit(
     Path(id): Path<Uuid>,
     Query(query): Query<HolderQuery>,
 ) -> AppResult<StatusCode> {
-    authorize_holder(&s, &headers, query.worker_id).await?;
+    crate::auth::authorize_worker_identity(&s.pool, &headers, query.worker_id).await?;
     let access = s
         .source_publication
         .access_for_worker(id, query.worker_id)
@@ -180,7 +177,7 @@ async fn report_for(
     report: SourcePublicationReport,
     broker: &crate::source_publication_broker::SourcePublicationBroker,
 ) -> AppResult<StatusCode> {
-    authorize_holder(s, headers, report.worker_id).await?;
+    crate::auth::authorize_worker_identity(&s.pool, headers, report.worker_id).await?;
     if id != report.request_id {
         return Err(AppError::Invalid);
     }

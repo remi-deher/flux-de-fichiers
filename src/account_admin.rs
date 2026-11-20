@@ -6,17 +6,15 @@
 
 use crate::{
     error::{AppError, AppResult},
+    opaque_token::random_hex,
     password, repository,
 };
-use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
 use sqlx::SqlitePool;
 
 const GENERATED_PASSWORD_BYTES: usize = 12;
 
 fn generate_password() -> String {
-    let mut bytes = [0u8; GENERATED_PASSWORD_BYTES];
-    OsRng.fill_bytes(&mut bytes);
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    random_hex(GENERATED_PASSWORD_BYTES)
 }
 
 /// Remplace le mot de passe du compte `username` par un mot de passe généré, renvoyé une seule fois.

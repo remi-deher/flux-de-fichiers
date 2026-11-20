@@ -4,7 +4,9 @@ use super::{AppState, ManageWorkersAuth, ViewWorkersAuth, client_remote_addr, se
 use crate::{
     config, enrollment,
     error::{AppError, AppResult},
-    instance, repository, web_session, worker_settings,
+    instance,
+    opaque_token::is_valid_sha256_hex,
+    repository, web_session, worker_settings,
 };
 use axum::{
     Extension, Json,
@@ -107,7 +109,7 @@ pub async fn submit_enrollment_request(
     Json(request): Json<WorkerEnrollmentRequestInput>,
 ) -> AppResult<(StatusCode, Json<WorkerEnrollmentCreated>)> {
     if !worker_settings::is_valid_worker_name(&request.worker_name)
-        || !enrollment::is_valid_sha256_hex(&request.secret_hash)
+        || !is_valid_sha256_hex(&request.secret_hash)
     {
         return Err(AppError::Invalid);
     }

@@ -1,9 +1,8 @@
 //! Reconstruction atomique de `index.json` pour le catalogue local.
 
 use super::write_json_pretty;
-use crate::{error::AppResult, tools_cache::ToolCacheManager};
+use crate::{error::AppResult, opaque_token::sha256_hex, tools_cache::ToolCacheManager};
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     fs,
@@ -11,11 +10,6 @@ use std::{
 };
 
 const LOCAL_FOLDERS: &[&str] = &["scripts", "resources", "templates/blocks", "flows", "packs"];
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    digest.iter().map(|b| format!("{b:02x}")).collect()
-}
 
 fn collect_manifests(dir: &Path, out: &mut Vec<(PathBuf, Value)>) {
     let Ok(read_dir) = fs::read_dir(dir) else {

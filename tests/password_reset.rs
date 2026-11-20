@@ -62,7 +62,7 @@ async fn test_reset_closes_every_session_of_the_account() -> anyhow::Result<()> 
     let session = forgearr::web_session::create(&pool, 600, &account.id)
         .await
         .map_err(|_| anyhow::anyhow!("session"))?;
-    let token_hash = forgearr::web_session::digest(&session.token);
+    let token_hash = forgearr::opaque_token::sha256_hex(&session.token);
     let open = |pool: sqlx::SqlitePool, hash: String| async move {
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sessions WHERE token_hash = ?1")
             .bind(hash)

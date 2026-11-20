@@ -9,8 +9,9 @@
 ///   intégré et la source est celle de la centrale, ou il est « par transfert » dans la
 ///   bibliothèque, quelle que soit la politique de sortie.
 ///
-/// `worker` et `integrated` sont des paramètres SQL (`?3`, `?4`…).
-pub fn job_access_sql(worker: &str, integrated: &str) -> String {
+/// `worker` est un paramètre SQL (`?3`…). Le worker intégré est celui qui sert les dossiers du
+/// central (`workers.serves_central`), quel que soit son nom.
+pub fn job_access_sql(worker: &str) -> String {
     format!(
         "((jobs.source_key IS NULL AND (jobs.source_worker_id IS NULL OR jobs.source_worker_id={worker})) \
           OR (jobs.source_key IS NOT NULL AND ( \
@@ -18,23 +19,36 @@ pub fn job_access_sql(worker: &str, integrated: &str) -> String {
                       WHERE m.job_id=jobs.id AND m.worker_id={worker}) \
               OR (EXISTS (SELECT 1 FROM verified_job_source_mounts m \
                           WHERE m.job_id=jobs.id AND m.worker_id=zeroblob(16)) \
-                  AND EXISTS (SELECT 1 FROM workers iw WHERE iw.id={worker} AND iw.name={integrated})) \
+                  AND EXISTS (SELECT 1 FROM workers iw WHERE iw.id={worker} AND iw.serves_central=1)) \
               OR EXISTS (SELECT 1 FROM library_transfer_workers t \
                          WHERE t.library_id=jobs.library_id AND t.worker_id={worker}))))"
     )
 }
 
-/// Expression SQL booléenne : la source de la tâche est-elle joignable (central, ou au moins un
-/// détenteur en ligne) ? `online_seconds` est un paramètre SQL.
-pub fn source_reachable_sql(online_seconds: &str) -> String {
+/// Expression SQL booléenne : le worker `worker` peut-il lire la source de la tâche (ADR 0022) ?
+/// Oui s'il la monte lui-même, si un détenteur en ligne annonce une adresse de transfert où la tirer,
+/// ou, pour une source du central, s'il est le worker qui sert les dossiers du central
+/// (`serves_central`) ou que celui-ci est en ligne avec une adresse. Tant qu'aucun worker ne porte ce
+/// rôle, la source du central reste ouverte à tous. Un détenteur sans adresse ne sert personne
+/// d'autre que lui. `worker` et `online_seconds` sont des paramètres ou des constantes SQL.
+pub fn source_readable_sql(worker: &str, online_seconds: &str) -> String {
     format!(
-        "((jobs.source_key IS NULL AND jobs.source_worker_id IS NULL) \
+        "(jobs.source_worker_id={worker} \
           OR EXISTS (SELECT 1 FROM verified_job_source_mounts m \
-                     WHERE m.job_id=jobs.id AND m.worker_id=zeroblob(16)) \
+                     WHERE m.job_id=jobs.id AND m.worker_id={worker}) \
+          OR (((jobs.source_key IS NULL AND jobs.source_worker_id IS NULL) \
+               OR EXISTS (SELECT 1 FROM verified_job_source_mounts m \
+                          WHERE m.job_id=jobs.id AND m.worker_id=zeroblob(16))) \
+              AND (NOT EXISTS (SELECT 1 FROM workers c WHERE c.serves_central=1) \
+                   OR EXISTS (SELECT 1 FROM workers c WHERE c.id={worker} AND c.serves_central=1) \
+                   OR EXISTS (SELECT 1 FROM workers c WHERE c.serves_central=1 \
+                              AND c.transfer_url IS NOT NULL \
+                              AND c.last_seen > datetime('now', '-' || {online_seconds} || ' seconds')))) \
           OR EXISTS (SELECT 1 FROM verified_job_source_mounts m JOIN workers o ON o.id=m.worker_id \
-                     WHERE m.job_id=jobs.id \
+                     WHERE m.job_id=jobs.id AND o.transfer_url IS NOT NULL \
                        AND o.last_seen > datetime('now', '-' || {online_seconds} || ' seconds')) \
           OR EXISTS (SELECT 1 FROM workers o WHERE o.id=jobs.source_worker_id \
+                     AND o.transfer_url IS NOT NULL \
                      AND o.last_seen > datetime('now', '-' || {online_seconds} || ' seconds')))"
     )
 }

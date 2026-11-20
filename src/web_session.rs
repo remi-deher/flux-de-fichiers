@@ -1,10 +1,10 @@
 use crate::{
     config::Config,
     error::{AppError, AppResult},
+    opaque_token::sha256_hex,
 };
 use axum::http::{HeaderMap, header};
 use chrono::{DateTime, Duration, Utc};
-use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
@@ -35,8 +35,8 @@ pub async fn create(
 ) -> AppResult<WebSession> {
     let token = Uuid::new_v4().to_string();
     let csrf_token = Uuid::new_v4().to_string();
-    let token_hash = digest(&token);
-    let csrf_hash = digest(&csrf_token);
+    let token_hash = sha256_hex(&token);
+    let csrf_hash = sha256_hex(&csrf_token);
     let expires_at = Utc::now() + Duration::seconds(ttl_seconds);
     sqlx::query!("DELETE FROM sessions WHERE datetime(expires_at) <= datetime('now')")
         .execute(pool)
@@ -97,13 +97,13 @@ pub fn validate_origin(headers: &HeaderMap, config: &Config) -> AppResult<()> {
 /// Empreinte du jeton de session présenté dans le cookie, sans consulter de stockage.
 pub fn session_token_hash(headers: &HeaderMap) -> AppResult<String> {
     cookie(headers, SESSION_COOKIE)
-        .map(digest)
+        .map(sha256_hex)
         .ok_or(AppError::Unauthorized)
 }
 
 pub async fn from_headers(pool: &SqlitePool, headers: &HeaderMap) -> AppResult<ValidatedSession> {
     let token = cookie(headers, SESSION_COOKIE).ok_or(AppError::Unauthorized)?;
-    let token_hash = digest(token);
+    let token_hash = sha256_hex(token);
     let row = sqlx::query!(
         r#"SELECT csrf_hash AS "csrf_hash!: String", expires_at AS "expires_at: DateTime<Utc>", account_id AS "account_id!: String" FROM sessions WHERE token_hash=?1 AND csrf_hash IS NOT NULL AND account_id IS NOT NULL AND datetime(expires_at) > datetime('now')"#,
         token_hash,
@@ -135,7 +135,7 @@ pub fn validate_csrf_cookie<'a>(
     session: &ValidatedSession,
 ) -> AppResult<&'a str> {
     let cookie_token = cookie(headers, CSRF_COOKIE).ok_or(AppError::Forbidden)?;
-    let cookie_hash = digest(cookie_token);
+    let cookie_hash = sha256_hex(cookie_token);
     let cookie_matches = cookie_hash.as_bytes().ct_eq(session.csrf_hash.as_bytes());
     if bool::from(cookie_matches) {
         Ok(cookie_token)
@@ -220,8 +220,4 @@ fn single_header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
         return None;
     }
     value.to_str().ok()
-}
-
-pub fn digest(value: &str) -> String {
-    format!("{:x}", Sha256::digest(value.as_bytes()))
 }

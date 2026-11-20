@@ -443,3 +443,24 @@ async fn writable_central_mount_is_used_only_while_currently_authorized() -> any
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn a_central_source_waits_for_the_worker_that_serves_the_central() -> anyhow::Result<()> {
+    let pool = pool().await?;
+    let integrated = repository::register(&pool, "integre").await?;
+    let remote = repository::register(&pool, "distant").await?;
+    repository::set_serves_central(&pool, integrated.id, true).await?;
+    let hash = "ab".repeat(32);
+    repository::insert_job(&pool, "un.mkv", None, &hash, 10).await?;
+
+    // Sans adresse de transfert, aucun autre worker ne peut lire la source du central.
+    assert!(claim_of(&pool, remote.id).await?.is_none());
+    // Le worker qui sert le central la lit sur place.
+    assert!(claim_of(&pool, integrated.id).await?.is_some());
+
+    // Avec une adresse annoncée, un autre worker la tire chez lui.
+    repository::insert_job(&pool, "deux.mkv", None, &hash, 10).await?;
+    repository::set_transfer_url(&pool, integrated.id, Some("http://central.lan:9000")).await?;
+    assert!(claim_of(&pool, remote.id).await?.is_some());
+    Ok(())
+}

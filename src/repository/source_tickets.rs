@@ -127,8 +127,9 @@ async fn source_holders_matching(
 
 /// Remet au worker traitant un billet pour lire la source chez un détenteur en ligne.
 ///
-/// Sans effet si la source est déjà lisible (montage, central) ou si aucun détenteur n'annonce
-/// d'adresse : le worker traitant utilisera alors le repli par le central.
+/// Sans effet si la source est déjà montée par le worker, ou si aucun détenteur (worker à accès direct
+/// ou worker intégré pour le central) n'annonce d'adresse : la tâche échoue alors avec
+/// `source_unreachable`, il n'y a plus de repli par le central.
 pub async fn attach_source_ticket(
     pool: &SqlitePool,
     worker: Uuid,

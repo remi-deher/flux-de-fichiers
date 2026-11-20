@@ -64,7 +64,7 @@ pub(super) async fn stream_file(
 }
 
 /// Le worker traitant redemande un billet frais (expiré, ou lecture à reprendre par `Range`).
-/// Réponse `null` quand la source se lit autrement : le worker utilise alors le repli.
+/// Réponse `null` quand la source se lit autrement (montage du worker, ou aucun détenteur joignable).
 pub async fn reissue_ticket(
     State(s): State<AppState>,
     h: HeaderMap,
@@ -255,13 +255,12 @@ pub(crate) async fn publish_staged(
             )
             .await;
             if let Err(error) = replacement {
-                // Une source modifiée a été refusée avant remplacement ; les autres erreurs
-                // peuvent être ambiguës et gardent la copie pour une éventuelle récupération.
+                // Une source modifiée a été refusée avant remplacement : la copie n'a plus d'objet ;
+                // les autres erreurs peuvent être ambiguës et gardent la copie pour une éventuelle
+                // récupération.
+                let error = abandon_publication(s, job, lease, error).await;
                 if matches!(error, AppError::SourceChanged) {
-                    repository::clear_source_publication(&s.pool, id, lease.lease_epoch).await?;
                     let _ = tokio::fs::remove_file(&destination).await;
-                } else {
-                    mark_publication_uncertain(s, id, lease.lease_epoch).await;
                 }
                 return Err(error);
             }
@@ -303,6 +302,23 @@ pub(crate) async fn publish_staged(
     }
     s.notify_job_event(JobEventType::JobSucceeded, id, JobStatus::Succeeded, None);
     Ok(())
+}
+
+/// Referme le journal d'un remplacement qui n'a pas abouti : une source modifiée a été refusée
+/// avant tout remplacement (le journal est retiré), toute autre issue reste incertaine.
+pub(super) async fn abandon_publication(
+    s: &AppState,
+    job: &Job,
+    lease: &LeaseRequest,
+    error: AppError,
+) -> AppError {
+    if matches!(error, AppError::SourceChanged) {
+        let cleared =
+            repository::clear_source_publication(&s.pool, job.id, lease.lease_epoch).await;
+        return cleared.err().unwrap_or(error);
+    }
+    mark_publication_uncertain(s, job.id, lease.lease_epoch).await;
+    error
 }
 
 pub(super) async fn mark_publication_uncertain(s: &AppState, job: Uuid, epoch: i64) {

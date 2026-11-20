@@ -171,7 +171,7 @@ pub(crate) async fn begin_local_application(
     };
     let extension = ready.extension.as_str();
     let policy = local.policy;
-    repository::begin_pulled_publication(&s.pool, job.id, lease, output, extension, policy).await?;
+    repository::begin_local_publication(&s.pool, job.id, lease, output, extension, policy).await?;
     Ok(Some(local))
 }
 
@@ -185,6 +185,7 @@ async fn pending_application(
     pending
         .into_iter()
         .find(|p| p.job_id == job.id && p.lease_epoch == lease.lease_epoch)
+        .filter(|p| p.applied_locally)
         .ok_or(AppError::Conflict)
 }
 
@@ -208,29 +209,12 @@ pub(crate) async fn finish_local_application(
             complete_publication(s, job, lease, output, path).await
         }
         SourcePublicationOutcome::SourceChanged => {
-            Err(abandon_publication(s, job, lease, AppError::SourceChanged).await)
+            Err(transfers::abandon_publication(s, job, lease, AppError::SourceChanged).await)
         }
         SourcePublicationOutcome::Failed => {
-            Err(abandon_publication(s, job, lease, AppError::CentralUnavailable).await)
+            Err(transfers::abandon_publication(s, job, lease, AppError::CentralUnavailable).await)
         }
     }
-}
-
-/// Referme le journal d'un remplacement qui n'a pas abouti : une source modifiée a été refusée
-/// avant tout remplacement (le journal est retiré), toute autre issue reste incertaine.
-async fn abandon_publication(
-    s: &AppState,
-    job: &Job,
-    lease: &LeaseRequest,
-    error: AppError,
-) -> AppError {
-    if matches!(error, AppError::SourceChanged) {
-        let cleared =
-            repository::clear_source_publication(&s.pool, job.id, lease.lease_epoch).await;
-        return cleared.err().unwrap_or(error);
-    }
-    transfers::mark_publication_uncertain(s, job.id, lease.lease_epoch).await;
-    error
 }
 
 /// Publie le résultat que le worker retient : le détenteur de la bibliothèque le tire en direct,
@@ -297,7 +281,7 @@ pub(crate) async fn publish_pulled(
             let _ = tokio::fs::remove_file(output_file).await;
             return Err(error);
         }
-        Err(error) => return Err(abandon_publication(s, job, lease, error).await),
+        Err(error) => return Err(transfers::abandon_publication(s, job, lease, error).await),
     }
     let notified_path = if in_output_dir {
         s.config.data_dir.join("output").join(&output_name)

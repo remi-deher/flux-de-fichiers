@@ -1100,120 +1100,120 @@ paths:
                   centralUrl: {type: string, description: Worker seulement}
                   registered: {type: boolean, description: Worker seulement}
                   centralReachable: {type: boolean, description: Worker seulement}
-  /api/v1/jobs/{id}/handoff:
-    parameters:
-      - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
-    post:
-      security: [{ApiKey: []}]
-      summary: Préparer la remise du fichier de travail en conservant le bail d'origine
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [workerId, leaseToken, leaseEpoch, request, artifact]
-              properties:
-                workerId: {type: string, format: uuid}
-                leaseToken: {type: string, format: uuid}
-                leaseEpoch: {type: integer}
-                request: {type: object, description: Cible du relais et identifiant du nœud de reprise}
-                artifact: {$ref: '#/components/schemas/HandoffArtifact'}
-                warning: {type: boolean, default: false, description: Avertissement cumulé avant la remise}
-      responses:
-        '201': {description: Remise créée ; le fichier doit encore être chargé et vérifié}
-        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/artifacts/{kind}:
     put:
       security: [{ApiKey: []}]
-      summary: Déposer le fichier déclaré avant sa mise à disposition de la cible
+      summary: Déclarer un fichier retenu chez le worker (fichier de travail d'un relais, ou résultat)
       parameters:
-        - {in: header, name: x-worker-id, required: true, schema: {type: string, format: uuid}}
-        - {in: header, name: x-lease-token, required: true, schema: {type: string, format: uuid}}
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {in: path, name: kind, required: true, schema: {type: string, enum: [working, result]}}
+        - {$ref: '#/components/parameters/WorkerId'}
+        - {$ref: '#/components/parameters/LeaseToken'}
         - {in: header, name: x-lease-epoch, required: true, schema: {type: integer}}
       requestBody:
         required: true
         content:
-          application/octet-stream:
-            schema: {type: string, contentMediaType: application/octet-stream}
+          application/json:
+            schema: {$ref: '#/components/schemas/ArtifactDeclaration'}
       responses:
-        '204': {description: Copie vérifiée et disponible}
+        '204': {description: Artefact déclaré ; le preneur le tire chez ce worker avec un billet}
+        '409': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/artifacts/working/received:
+    post:
+      security: [{ApiKey: []}]
+      summary: Confirmer la réception vérifiée du fichier de travail ; son détenteur peut le purger
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/WorkerId'}
+        - {$ref: '#/components/parameters/LeaseToken'}
+        - {in: header, name: x-lease-epoch, required: true, schema: {type: integer}}
+      responses:
+        '204': {description: Réception enregistrée}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/retained/{kind}:
     get:
       security: [{ApiKey: []}]
-      summary: État de la remise pour son émetteur
+      summary: Indiquer si un fichier retenu est encore nécessaire (purge par son détenteur)
       parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {in: path, name: kind, required: true, schema: {type: string, enum: [working, result]}}
         - {in: query, name: worker_id, required: true, schema: {type: string, format: uuid}}
         - {in: query, name: lease_epoch, required: true, schema: {type: integer}}
       responses:
         '200':
-          description: État de la remise
-          content:
-            application/json:
-              schema: {type: string, enum: [uploading, pending, claimed, acknowledged, failed]}
-        default: {$ref: '#/components/responses/Error'}
-  /api/v1/worker/handoffs/{id}/{epoch}/retained:
-    get:
-      security: [{ApiKey: []}]
-      summary: Indiquer si une copie de travail du repreneur est encore nécessaire
-      parameters:
-        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
-        - {in: path, name: epoch, required: true, schema: {type: integer}}
-        - {in: query, name: worker_id, required: true, schema: {type: string, format: uuid}}
-      responses:
-        '200':
-          description: La copie doit être conservée si la réponse vaut true
+          description: Le fichier doit être conservé si la réponse vaut true
           content:
             application/json:
               schema: {type: boolean}
         default: {$ref: '#/components/responses/Error'}
-  /api/v1/worker/handoffs/claim:
+  /api/v1/jobs/{id}/result/ready:
     post:
       security: [{ApiKey: []}]
-      summary: Réserver une offre de fichier de travail pour le worker appelant
-      parameters:
-        - {in: query, name: worker_id, required: true, schema: {type: string, format: uuid}}
-      responses:
-        '200':
-          description: Offre réservée ou null si aucune remise ne convient
-          content:
-            application/json:
-              schema: {anyOf: [{$ref: '#/components/schemas/HandoffOffer'}, {type: 'null'}]}
-        default: {$ref: '#/components/responses/Error'}
-  /api/v1/jobs/{id}/handoff/file:
-    get:
-      security: [{ApiKey: []}]
-      summary: Télécharger le fichier de travail réservé
+      summary: Annoncer que le résultat déclaré est prêt ; la réponse arrive une fois le résultat appliqué
       parameters:
         - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
-        - {in: query, name: worker_id, required: true, schema: {type: string, format: uuid}}
-        - {in: header, name: x-handoff-token, required: true, schema: {type: string}}
-      responses:
-        '200':
-          description: Octets à vérifier par taille et SHA-256 avant l'accusé
-          content:
-            application/octet-stream:
-              schema: {type: string, contentMediaType: application/octet-stream}
-        default: {$ref: '#/components/responses/Error'}
-  /api/v1/jobs/{id}/handoff/ack:
-    post:
-      security: [{ApiKey: []}]
-      summary: Accuser réception du fichier vérifié et libérer le bail d'origine
-      parameters:
-        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/WorkerId'}
+        - {$ref: '#/components/parameters/LeaseToken'}
+        - {in: header, name: x-lease-epoch, required: true, schema: {type: integer}}
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [workerId, receiptToken, sha256, bytes]
+              required: [extension]
               properties:
-                workerId: {type: string, format: uuid}
-                receiptToken: {type: string}
-                sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
-                bytes: {type: integer, minimum: 1}
+                extension: {type: string}
+                warning: {type: boolean, default: false}
+                can_apply_locally: {type: boolean, default: false, description: Le worker sait appliquer lui-même le remplacement sur son montage}
       responses:
-        '204': {description: Accusé accepté ou déjà reçu ; remise idempotente}
+        '200':
+          description: Sans apply_locally, un autre détenteur a tiré et appliqué le résultat ; avec, le worker l'applique puis confirme par result/applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  apply_locally:
+                    type: object
+                    required: [policy, root]
+                    properties:
+                      policy: {type: string, enum: [replace_with_backup, replace_in_place]}
+                      root: {type: string, description: Racine du montage inscriptible de la source chez ce worker}
+        '502': {description: "result_undeliverable : aucun détenteur actif ou adresse de transfert pour recevoir le résultat"}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/result/authorize:
+    post:
+      security: [{ApiKey: []}]
+      summary: Dernière vérification du bail juste avant que le worker remplace la source
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/WorkerId'}
+        - {$ref: '#/components/parameters/LeaseToken'}
+        - {in: header, name: x-lease-epoch, required: true, schema: {type: integer}}
+      responses:
+        '204': {description: Remplacement autorisé}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/result/applied:
+    post:
+      security: [{ApiKey: []}]
+      summary: Annoncer l'issue du remplacement appliqué par le worker qui traite
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/WorkerId'}
+        - {$ref: '#/components/parameters/LeaseToken'}
+        - {in: header, name: x-lease-epoch, required: true, schema: {type: integer}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: string, enum: [published, source_changed, failed]}
+      responses:
+        '204': {description: Tâche réussie}
+        '409': {description: Source modifiée (aucun remplacement) ou bail perdu}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/worker/software-encoder-probes:
     get:
@@ -1818,6 +1818,14 @@ components:
         result_bytes: {type: integer, minimum: 1}
         extension: {type: string}
         policy: {type: string, enum: [replace_with_backup, replace_in_place]}
+    ArtifactDeclaration:
+      type: object
+      required: [root, name, sha256, bytes]
+      properties:
+        root: {type: string, description: Dossier du détenteur}
+        name: {type: string, description: Fichier sous cette racine}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        bytes: {type: integer, minimum: 1}
     HandoffArtifact:
       type: object
       required: [name, sha256, bytes]
@@ -1825,15 +1833,6 @@ components:
         name: {type: string, description: Nom du fichier de travail}
         sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
         bytes: {type: integer, minimum: 1}
-    HandoffOffer:
-      type: object
-      required: [jobId, fromWorkerId, sourceLeaseEpoch, artifact, receiptToken]
-      properties:
-        jobId: {type: string, format: uuid}
-        fromWorkerId: {type: string, format: uuid}
-        sourceLeaseEpoch: {type: integer}
-        artifact: {$ref: '#/components/schemas/HandoffArtifact'}
-        receiptToken: {type: string, description: Secret réservé au repreneur pour télécharger et accuser réception}
     ApiKey:
       type: object
       properties:

@@ -1685,3 +1685,73 @@ async fn cpu_in_hardware_telemetry_does_not_satisfy_a_software_requirement() -> 
     );
     Ok(())
 }
+
+/// Issue `published` du remplacement, telle que la route la reçoit (JSON).
+const PUBLISHED: &str = "\"published\"";
+
+/// Appel de la route de remplacement local avec le bail du worker, à l'époque donnée.
+async fn local_application_call(
+    h: &Harness,
+    uri: &str,
+    claim: &Claim,
+    worker: Uuid,
+    epoch: i64,
+    body: &str,
+) -> anyhow::Result<StatusCode> {
+    let request = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("authorization", format!("Bearer {}", common::WORKER_KEY))
+        .header("content-type", "application/json")
+        .header("x-worker-id", worker.to_string())
+        .header("x-lease-token", claim.lease_token.to_string())
+        .header("x-lease-epoch", epoch.to_string())
+        .body(Body::from(body.to_owned()))?;
+    Ok(h.app.clone().oneshot(request).await?.status())
+}
+
+#[tokio::test]
+async fn the_local_application_routes_follow_the_journal_and_the_lease() -> anyhow::Result<()> {
+    use forgearr::{domain::LeaseRequest, repository::PublishedOutput};
+    let h = harness().await?;
+    let worker = register_worker_with_encoders(&h, "test-worker", &[]).await?;
+    let job = repository::insert_job(&h.pool, "film.mkv", None, &"aa".repeat(32), 10).await?;
+    let claim = claim_for(&h, worker)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("bail absent"))?;
+    let authorize = format!("/api/v1/jobs/{}/result/authorize", job.id);
+    let applied = format!("/api/v1/jobs/{}/result/applied", job.id);
+    let epoch = claim.lease_epoch;
+
+    // Sans remplacement inscrit au journal, ni autorisation ni confirmation.
+    let status = local_application_call(&h, &authorize, &claim, worker, epoch, "").await?;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let status = local_application_call(&h, &applied, &claim, worker, epoch, PUBLISHED).await?;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let lease = LeaseRequest {
+        worker_id: worker,
+        lease_token: claim.lease_token,
+        lease_epoch: epoch,
+        telemetry: None,
+    };
+    let output = PublishedOutput {
+        name: "",
+        sha256: &"bb".repeat(32),
+        bytes: 6,
+        warning: false,
+    };
+    let policy = forgearr::domain::LibraryOutputPolicy::ReplaceWithBackup;
+    repository::begin_local_publication(&h.pool, job.id, &lease, output, "mkv", policy).await?;
+    let status = local_application_call(&h, &authorize, &claim, worker, epoch, "").await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    // Un bail d'une autre époque est refusé.
+    let status = local_application_call(&h, &authorize, &claim, worker, epoch + 1, "").await?;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let status = local_application_call(&h, &applied, &claim, worker, epoch, PUBLISHED).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let done = repository::get_job(&h.pool, job.id).await?;
+    assert_eq!(done.status, forgearr::domain::JobStatus::Succeeded);
+    Ok(())
+}

@@ -43,12 +43,14 @@ pub struct PendingSourcePublication {
     pub output_bytes: i64,
     pub output_warning: bool,
     pub output_policy: LibraryOutputPolicy,
+    /// Le worker qui traite applique lui-même le remplacement (et le confirme par `result/applied`).
+    pub applied_locally: bool,
 }
 
 pub async fn pending_source_publications(
     pool: &SqlitePool,
 ) -> AppResult<Vec<PendingSourcePublication>> {
-    Ok(sqlx::query_as("SELECT job_id,lease_epoch,output_name,output_extension,output_sha256,output_bytes,output_warning,output_policy FROM source_publication_journal WHERE state=?1 ORDER BY created_at,job_id")
+    Ok(sqlx::query_as("SELECT job_id,lease_epoch,output_name,output_extension,output_sha256,output_bytes,output_warning,output_policy,applied_locally FROM source_publication_journal WHERE state=?1 ORDER BY created_at,job_id")
         .bind(PublicationState::InProgress.as_str()).fetch_all(pool).await?)
 }
 
@@ -64,7 +66,7 @@ pub async fn begin_source_publication(
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or_default();
-    begin_publication(pool, job, lease, output, extension, policy).await
+    begin_publication(pool, job, lease, output, extension, policy, false).await
 }
 
 /// Comme [`begin_source_publication`], pour un résultat tiré par le détenteur : `output.name` est
@@ -77,7 +79,20 @@ pub async fn begin_pulled_publication(
     extension: &str,
     policy: LibraryOutputPolicy,
 ) -> AppResult<()> {
-    begin_publication(pool, job, lease, output, extension, policy).await
+    begin_publication(pool, job, lease, output, extension, policy, false).await
+}
+
+/// Comme [`begin_pulled_publication`], pour un remplacement que le worker qui traite applique
+/// lui-même sur son montage.
+pub async fn begin_local_publication(
+    pool: &SqlitePool,
+    job: Uuid,
+    lease: &LeaseRequest,
+    output: super::PublishedOutput<'_>,
+    extension: &str,
+    policy: LibraryOutputPolicy,
+) -> AppResult<()> {
+    begin_publication(pool, job, lease, output, extension, policy, true).await
 }
 
 async fn begin_publication(
@@ -87,14 +102,15 @@ async fn begin_publication(
     output: super::PublishedOutput<'_>,
     extension: &str,
     policy: LibraryOutputPolicy,
+    applied_locally: bool,
 ) -> AppResult<()> {
     if policy == LibraryOutputPolicy::OutputDir {
         return Err(AppError::Invalid);
     }
-    let rows = sqlx::query("INSERT INTO source_publication_journal(job_id,lease_epoch,output_name,output_extension,output_sha256,output_bytes,output_warning,output_policy,state) \
-        SELECT id,lease_epoch,?5,?12,?6,?7,?8,?9,?10 FROM jobs WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 AND status=?11 AND leased_until > datetime('now')")
+    let rows = sqlx::query("INSERT INTO source_publication_journal(job_id,lease_epoch,output_name,output_extension,output_sha256,output_bytes,output_warning,output_policy,state,applied_locally) \
+        SELECT id,lease_epoch,?5,?12,?6,?7,?8,?9,?10,?13 FROM jobs WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 AND status=?11 AND leased_until > datetime('now')")
         .bind(job).bind(lease.worker_id).bind(lease.lease_token).bind(lease.lease_epoch).bind(output.name).bind(output.sha256).bind(output.bytes)
-        .bind(output.warning).bind(policy).bind(PublicationState::InProgress.as_str()).bind(JobStatus::Running).bind(extension).execute(pool).await?.rows_affected();
+        .bind(output.warning).bind(policy).bind(PublicationState::InProgress.as_str()).bind(JobStatus::Running).bind(extension).bind(applied_locally).execute(pool).await?.rows_affected();
     if rows != 1 {
         return Err(AppError::Conflict);
     }

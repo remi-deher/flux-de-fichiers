@@ -582,3 +582,21 @@ async fn the_integrated_worker_retains_a_working_file_to_relay_the_task() -> any
     assert!(artifact.is_some(), "le fichier de travail reste retenu");
     Ok(())
 }
+
+#[tokio::test]
+async fn a_pulled_publication_cannot_be_concluded_by_the_processing_worker() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, holder) = setup(dir.path()).await?;
+    retain_result(&state, &job, &lease).await?;
+    let (publishing, task) = start_publication(&state, &job, &lease, holder).await?;
+    // Un autre détenteur tire et applique : le worker qui traite ne peut ni autoriser ni conclure.
+    let published = SourcePublicationOutcome::Published;
+    let early = finish_local_application(&state, &job, &lease, published).await;
+    assert!(matches!(early, Err(AppError::Conflict)));
+    let running = repository::get_job(&state.pool, job.id).await?;
+    assert_eq!(running.status, JobStatus::Running);
+
+    answer(&state, holder, &task, SourcePublicationOutcome::Published).await?;
+    publishing.await??;
+    Ok(())
+}

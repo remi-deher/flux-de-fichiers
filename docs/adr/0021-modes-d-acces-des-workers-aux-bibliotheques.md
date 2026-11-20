@@ -52,24 +52,30 @@ Défaut constaté : pour faire fonctionner le relais, `claim` a été ouvert à 
    l'un ne bloque rien.
 7. **Scan.** Seuls les workers à accès direct (et la centrale) scannent une bibliothèque ; les workers par
    transfert ne scannent jamais. Le scan reste une découverte de fichiers (ADR 0020).
-8. **Politique de sortie.** `OutputDir` (défaut) fonctionne avec les workers par
-   transfert : le résultat va au dossier de sortie du central. Les politiques `ReplaceWithBackup` et
-   `ReplaceInPlace` exigent d'écrire chez le worker qui détient la source, ce que personne ne sait faire à
-   distance. Tant que le retour du résultat n'est pas implémenté (chantier à part), l'enregistrement d'une
-   bibliothèque **refuse** de combiner une politique de remplacement avec des workers par transfert, et
-   `claim` n'attribue pas à un worker par transfert une tâche d'une bibliothèque en remplacement.
+8. **Politique de sortie.** `OutputDir` conserve le résultat dans le dossier de sortie du central.
+   `ReplaceWithBackup` et `ReplaceInPlace` sont également disponibles aux workers par transfert : le
+   résultat est remis à un détenteur inscriptible de la source, ou publié par le central si celui-ci
+   possède un montage inscriptible. Le détenteur vérifie la taille et le SHA-256 de la source et du
+   résultat ; une source modifiée provoque l'échec explicite `source_changed`. Le central attend la
+   réponse du détenteur avant de déclarer la tâche réussie. Un journal durable conserve la référence
+   du résultat pendant le remplacement. Si une interruption rend son issue incertaine, la tâche échoue
+   explicitement et le résultat reste téléchargeable ; une perte de bail conserve `lease_expired`.
+   Au redémarrage, le central peut confirmer la réussite d'après les empreintes du résultat, du fichier
+   publié et de la sauvegarde requise, seulement si le bail est encore valide. Il vérifie son propre
+   montage inscriptible ou demande un constat en lecture seule à un détenteur distant autorisé, via un
+   canal distinct de la publication. Sans preuve disponible, il conserve l'état incertain pour examen.
+   La relance est suspendue tant que cette publication n'a pas été examinée et que le résultat conservé
+   n'a pas été supprimé explicitement.
 9. **API.** `transfer_workers: Vec<Uuid>` s'ajoute à `Library` et `LibraryWrite`, avec valeur par défaut
-   (rien ne casse). Validation : workers existants, sans doublon avec les workers directs, et règle du
-   point 8.
+   (rien ne casse). Validation : workers existants, sans doublon avec les workers directs.
 10. **Interface.** Le formulaire de bibliothèque présente **une liste de workers avec un mode par worker** :
     « Accès direct » (avec ses dossiers) ou « Par transfert ». Des avertissements : aucun worker direct
-    n'annonce d'adresse de transfert (repli par le central) ; politique de remplacement incompatible avec
-    le mode par transfert. La fiche d'un worker affiche ses bibliothèques et son mode pour chacune.
+    n'annonce d'adresse de transfert (repli par le central). La fiche d'un worker affiche ses
+    bibliothèques et son mode pour chacune.
 
 ## Hors périmètre
 
-- Retour du résultat vers un dossier hébergé par un autre worker (remplacement de l'original,
-  écriture atomique, copie `.bak`, verrou contre deux traitements du même fichier) : chantier à part.
+- Verrou global empêchant des traitements concurrents sur un même fichier source : chantier à part.
 - Traitement en parallèle d'un même média (ADR 0020) et haute disponibilité.
 
 ## Conséquences
@@ -80,7 +86,7 @@ Défaut constaté : pour faire fonctionner le relais, `claim` a été ouvert à 
   l'ensemble de la bibliothèque et les workers partageant la `source_key`.
 - Client et API des bibliothèques, outils MCP de bibliothèque et fiche worker à adapter.
 - Tests natifs : worker hors bibliothèque jamais attribué ni cible, worker par transfert attribué, refus du
-  doublon direct et transfert, refus du remplacement avec workers par transfert, détenteur de secours en
+  doublon direct et transfert, remplacement avec workers par transfert, détenteur de secours en
   cas de panne d'un montage partagé, worker intégré en mode direct et par transfert.
 
 ## Retour arrière

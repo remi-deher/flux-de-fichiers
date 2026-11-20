@@ -121,6 +121,8 @@ pub enum JobErrorCode {
     WebhookFailed,
     IntegrationFailed,
     SourceIntegrity,
+    SourceChanged,
+    SourcePublicationUncertain,
     TransferFailed,
     ProbeUnavailable,
     LeaseExpired,
@@ -135,6 +137,8 @@ impl JobErrorCode {
             Self::WebhookFailed => "webhook_failed",
             Self::IntegrationFailed => "integration_failed",
             Self::SourceIntegrity => "source_integrity",
+            Self::SourceChanged => "source_changed",
+            Self::SourcePublicationUncertain => "source_publication_uncertain",
             Self::TransferFailed => "transfer_failed",
             Self::ProbeUnavailable => "probe_unavailable",
             Self::LeaseExpired => "lease_expired",
@@ -150,6 +154,7 @@ impl JobErrorCode {
                 | Self::WebhookFailed
                 | Self::IntegrationFailed
                 | Self::SourceIntegrity
+                | Self::SourceChanged
                 | Self::TransferFailed
                 | Self::ProbeUnavailable
         )
@@ -159,6 +164,7 @@ impl JobErrorCode {
     pub fn from_worker_label(label: &str) -> Self {
         match label {
             "source_integrity" => Self::SourceIntegrity,
+            "source_changed" => Self::SourceChanged,
             "operation_failed" | "remux_failed" | "encode_failed" => Self::OperationFailed,
             "webhook_failed" => Self::WebhookFailed,
             "integration_failed" => Self::IntegrationFailed,
@@ -183,6 +189,8 @@ impl FromStr for JobErrorCode {
             "webhook_failed" => Ok(Self::WebhookFailed),
             "integration_failed" => Ok(Self::IntegrationFailed),
             "source_integrity" => Ok(Self::SourceIntegrity),
+            "source_changed" => Ok(Self::SourceChanged),
+            "source_publication_uncertain" => Ok(Self::SourcePublicationUncertain),
             "transfer_failed" => Ok(Self::TransferFailed),
             "probe_unavailable" => Ok(Self::ProbeUnavailable),
             "lease_expired" => Ok(Self::LeaseExpired),
@@ -357,6 +365,7 @@ impl Job {
     pub fn is_retryable(&self) -> bool {
         self.status == JobStatus::Failed
             && self.error_code == Some(JobErrorCode::LeaseExpired)
+            && self.output_name.is_none()
             && self.attempts < MAX_ATTEMPTS
     }
 
@@ -405,6 +414,9 @@ mod tests {
         assert!(!job(JobStatus::Failed, lost, MAX_ATTEMPTS).is_retryable());
         assert!(!job(JobStatus::Failed, Some(JobErrorCode::OperationFailed), 1).is_retryable());
         assert!(!job(JobStatus::Running, None, 1).is_retryable());
+        let mut pending_result = job(JobStatus::Failed, lost, 1);
+        pending_result.output_name = Some("result.mkv".into());
+        assert!(!pending_result.is_retryable());
     }
 
     #[test]

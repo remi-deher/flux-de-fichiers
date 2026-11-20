@@ -17,6 +17,8 @@ pub enum AppError {
     NotFound,
     #[error("lease expired or conflict")]
     Conflict,
+    #[error("source changed since discovery")]
+    SourceChanged,
     #[error("installation already completed")]
     AlreadyConfigured,
     #[error("too many attempts")]
@@ -66,6 +68,7 @@ impl IntoResponse for AppError {
             Self::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             Self::NotFound => (StatusCode::NOT_FOUND, "not_found"),
             Self::Conflict => (StatusCode::CONFLICT, "lease_expired_or_conflict"),
+            Self::SourceChanged => (StatusCode::CONFLICT, "source_changed"),
             Self::AlreadyConfigured => (StatusCode::CONFLICT, "already_configured"),
             Self::RateLimited => (StatusCode::TOO_MANY_REQUESTS, "too_many_attempts"),
             Self::ChecksumMismatch { .. }

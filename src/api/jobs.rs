@@ -15,8 +15,11 @@ use axum::{
 };
 use futures_util::stream::Stream;
 use serde::Deserialize;
-use std::convert::Infallible;
+use std::{convert::Infallible, time::Duration};
 use uuid::Uuid;
+
+/// Intervalle des messages de maintien du flux d'événements, pour traverser les proxys.
+const SSE_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
 
 pub async fn files(
     State(s): State<AppState>,
@@ -124,7 +127,7 @@ pub async fn events(
         }
     });
 
-    Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15))))
+    Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(SSE_KEEP_ALIVE_INTERVAL)))
 }
 
 /// Journal ordonné des étapes exécutées pour une tâche.

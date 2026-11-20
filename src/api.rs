@@ -53,6 +53,8 @@ use tower_http::{
 const SSE_REPLAY_CAPACITY: usize = 256;
 const SSE_BROADCAST_CAPACITY: usize = 256;
 const OUTBOUND_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+/// Délai accordé aux requêtes en cours à l'arrêt du serveur TLS avant de les couper.
+const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(15);
 
 /// Tampon d'historique borné pour la reprise SSE via `Last-Event-ID`.
 #[derive(Clone)]
@@ -1017,7 +1019,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         let shutdown = handle.clone();
         let signal = tokio::spawn(async move {
             shutdown_signal().await;
-            shutdown.graceful_shutdown(Some(Duration::from_secs(15)));
+            shutdown.graceful_shutdown(Some(SHUTDOWN_GRACE_PERIOD));
         });
         let result = axum_server::bind_rustls(addr, tls)
             .handle(handle)

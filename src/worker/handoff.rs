@@ -2,14 +2,13 @@
 
 use super::{REMOTE_BROWSE_HTTP_TIMEOUT, REMOTE_BROWSE_RETRY_DELAY, WorkerLoop};
 use crate::{domain::Claim, storage, worker_transfer};
+use forgearr_shared::{relay::HANDOFF_TTL, transfer::FILE_TRANSFER_TIMEOUT};
 use std::{
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
-
-const HANDOFF_REQUEST_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 pub(crate) fn retained_handoff_path(root: &Path, job: Uuid, epoch: i64) -> PathBuf {
     root.join(format!("handoff-{job}-{epoch}"))
@@ -27,12 +26,7 @@ where
     F: Fn(Uuid, i64) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<bool>>,
 {
-    prune_retained_older_than(
-        root,
-        Duration::from_secs(forgearr_shared::relay::HANDOFF_TTL_SECONDS as u64),
-        needed,
-    )
-    .await
+    prune_retained_older_than(root, HANDOFF_TTL, needed).await
 }
 
 async fn prune_retained_older_than<F, Fut>(
@@ -133,7 +127,7 @@ impl WorkerLoop {
                     ),
                 )
                 .header("x-handoff-token", &offer.receipt_token)
-                .timeout(HANDOFF_REQUEST_TIMEOUT)
+                .timeout(FILE_TRANSFER_TIMEOUT)
                 .send()
                 .await?
                 .error_for_status()?;
@@ -153,8 +147,7 @@ impl WorkerLoop {
                 sha256: offer.artifact.sha256,
                 bytes: offer.artifact.bytes,
             };
-            let deadline = tokio::time::Instant::now()
-                + Duration::from_secs(forgearr_shared::relay::HANDOFF_TTL_SECONDS as u64);
+            let deadline = tokio::time::Instant::now() + HANDOFF_TTL;
             loop {
                 let response = self
                     .request(
@@ -226,13 +219,12 @@ impl WorkerLoop {
         let file = tokio::fs::File::open(&working_file).await?;
         self.leased(reqwest::Method::PUT, claim, worker, "handoff")
             .header("content-length", bytes)
-            .timeout(HANDOFF_REQUEST_TIMEOUT)
+            .timeout(FILE_TRANSFER_TIMEOUT)
             .body(reqwest::Body::wrap_stream(ReaderStream::new(file)))
             .send()
             .await?
             .error_for_status()?;
-        let deadline = tokio::time::Instant::now()
-            + Duration::from_secs(forgearr_shared::relay::HANDOFF_TTL_SECONDS as u64);
+        let deadline = tokio::time::Instant::now() + HANDOFF_TTL;
         loop {
             let query = format!(
                 "{path}?worker_id={worker}&lease_epoch={}",

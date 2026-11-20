@@ -1,7 +1,12 @@
 //! Transfert direct d'une source entre workers (ADR 0019).
 
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use uuid::Uuid;
+
+/// Durée maximale d'un transfert de fichier vers ou depuis le central (une heure) : résultat,
+/// fichier de travail, requêtes HTTP du worker.
+pub const FILE_TRANSFER_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// En-tête portant le billet de transfert sur la route de lecture du worker source.
 pub const TRANSFER_TICKET_HEADER: &str = "x-transfer-ticket";

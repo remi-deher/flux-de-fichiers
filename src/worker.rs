@@ -27,9 +27,14 @@ const REMOTE_BROWSE_WAIT_MS: u64 = 10_000;
 const REMOTE_BROWSE_HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 const REMOTE_BROWSE_REPORT_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_BROWSE_RETRY_DELAY: Duration = Duration::from_secs(2);
-const SOFTWARE_PROBE_REFRESH: Duration = Duration::from_secs(60);
 mod handoff;
+pub(crate) mod timing;
 pub(crate) use handoff::{prune_retained, retained_handoff_path};
+use timing::{
+    CENTRAL_CONNECT_TIMEOUT, CENTRAL_REQUEST_TIMEOUT, HEARTBEAT_INTERVAL, IDLE_POLL_INTERVAL,
+    PROGRESS_REPORT_TIMEOUT, REGISTRATION_RETRY_DELAY, REREGISTRATION_EVERY_IDLE_POLLS,
+    SOFTWARE_PROBE_REFRESH, TOOL_DISTRIBUTION_TIMEOUT,
+};
 
 #[derive(Clone, Copy)]
 enum PublicationRequestKind {
@@ -180,12 +185,12 @@ impl WorkerLoop {
     async fn heartbeat(&self, claim: &Claim, worker: Uuid) -> anyhow::Result<()> {
         let probe = crate::telemetry::TelemetryProbe::with_storage_path(&self.config.work_dir);
         loop {
-            tokio::time::sleep(Duration::from_secs(10)).await;
+            tokio::time::sleep(HEARTBEAT_INTERVAL).await;
             self.request(
                 reqwest::Method::POST,
                 &format!("/api/v1/jobs/{}/heartbeat", claim.job_id),
             )
-            .timeout(Duration::from_secs(10))
+            .timeout(CENTRAL_REQUEST_TIMEOUT)
             .json(&LeaseRequest {
                 worker_id: worker,
                 lease_token: claim.lease_token,
@@ -221,7 +226,7 @@ impl WorkerLoop {
                 let _ = client
                     .post(format!("{base}/api/v1/jobs/{job_id}/progress"))
                     .bearer_auth(key)
-                    .timeout(Duration::from_secs(5))
+                    .timeout(PROGRESS_REPORT_TIMEOUT)
                     .json(&ProgressReport {
                         worker_id: worker,
                         lease_token,
@@ -246,7 +251,7 @@ impl WorkerLoop {
                 reqwest::Method::GET,
                 &format!("/api/v1/worker/tools/{tool_id}/distribution"),
             )
-            .timeout(Duration::from_secs(15))
+            .timeout(TOOL_DISTRIBUTION_TIMEOUT)
             .send()
             .await?
             .error_for_status()?
@@ -279,7 +284,7 @@ impl WorkerLoop {
             reqwest::Method::POST,
             &format!("/api/v1/jobs/{}/steps", claim.job_id),
         )
-        .timeout(Duration::from_secs(10))
+        .timeout(CENTRAL_REQUEST_TIMEOUT)
         .json(&StepsReport {
             worker_id: worker,
             lease_token: claim.lease_token,
@@ -508,7 +513,7 @@ impl WorkerLoop {
                     reqwest::Method::POST,
                     &format!("/api/v1/jobs/{}/failure", claim.job_id),
                 )
-                .timeout(Duration::from_secs(10))
+                .timeout(CENTRAL_REQUEST_TIMEOUT)
                 .json(&Failure {
                     worker_id: worker,
                     lease_token: claim.lease_token,
@@ -553,7 +558,7 @@ impl WorkerLoop {
     async fn prune_stale_tools_cache(&self) {
         let Ok(resp) = self
             .request(reqwest::Method::GET, "/api/v1/worker/tools")
-            .timeout(Duration::from_secs(10))
+            .timeout(CENTRAL_REQUEST_TIMEOUT)
             .send()
             .await
         else {
@@ -586,8 +591,8 @@ pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
     anyhow::ensure!(config.max_bytes > 0, "MAX_FILE_BYTES must be positive");
     tokio::fs::create_dir_all(&config.work_dir).await?;
     let mut builder = Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(3600))
+        .connect_timeout(CENTRAL_CONNECT_TIMEOUT)
+        .timeout(forgearr_shared::transfer::FILE_TRANSFER_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none());
     if let Some(ref ca) = config.ca {
         builder = builder
@@ -899,7 +904,7 @@ impl WorkerLoop {
             let attempt = async {
                 runner
                     .request(reqwest::Method::POST, "/api/v1/workers")
-                    .timeout(Duration::from_secs(10))
+                    .timeout(CENTRAL_REQUEST_TIMEOUT)
                     .json(&Register {
                         name: runner.config.name.clone(),
                         version: Some(crate::version::app_version().to_owned()),
@@ -916,7 +921,7 @@ impl WorkerLoop {
                 result = attempt => match result { Ok(worker) => break worker, Err(_) => tracing::warn!("registration unavailable; retrying") },
                 _ = crate::api::shutdown_signal() => return Ok(()),
             }
-            tokio::select! { _=tokio::time::sleep(Duration::from_secs(5))=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
+            tokio::select! { _=tokio::time::sleep(REGISTRATION_RETRY_DELAY)=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
         };
         tracing::info!(worker_id=%worker.id, "worker registered");
         runner.status.mark_registered();
@@ -982,10 +987,10 @@ impl WorkerLoop {
             loop {
                 while active.try_join_next().is_some() {}
                 if idle_polls > 0
-                    && idle_polls.is_multiple_of(30)
+                    && idle_polls.is_multiple_of(REREGISTRATION_EVERY_IDLE_POLLS)
                     && let Ok(resp) = runner
                         .request(reqwest::Method::POST, "/api/v1/workers")
-                        .timeout(Duration::from_secs(10))
+                        .timeout(CENTRAL_REQUEST_TIMEOUT)
                         .json(&Register {
                             name: runner.config.name.clone(),
                             version: Some(crate::version::app_version().to_owned()),
@@ -998,7 +1003,7 @@ impl WorkerLoop {
                 {
                     max_concurrency = updated.max_concurrency.max(1);
                 }
-                let telemetry = if idle_polls.is_multiple_of(30) {
+                let telemetry = if idle_polls.is_multiple_of(REREGISTRATION_EVERY_IDLE_POLLS) {
                     Some(probe.sample())
                 } else {
                     None
@@ -1011,7 +1016,7 @@ impl WorkerLoop {
                     let attempt = async {
                         let claim = runner
                             .request(reqwest::Method::POST, "/api/v1/claims")
-                            .timeout(Duration::from_secs(10))
+                            .timeout(CENTRAL_REQUEST_TIMEOUT)
                             .json(&ClaimRequest {
                                 worker_id: worker.id,
                                 telemetry: telemetry.clone(),
@@ -1047,7 +1052,7 @@ impl WorkerLoop {
                                         reqwest::Method::POST,
                                         &format!("/api/v1/jobs/{}/failure", claim.job_id),
                                     )
-                                    .timeout(Duration::from_secs(10))
+                                    .timeout(CENTRAL_REQUEST_TIMEOUT)
                                     .json(&Failure {
                                         worker_id: worker.id,
                                         lease_token: claim.lease_token,
@@ -1081,7 +1086,7 @@ impl WorkerLoop {
                     }
                 }
                 tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(1)) => {},
+                    _ = tokio::time::sleep(IDLE_POLL_INTERVAL) => {},
                     Some(_) = active.join_next(), if !active.is_empty() => {},
                     _ = crate::api::shutdown_signal() => {
                         active.abort_all();

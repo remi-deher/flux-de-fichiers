@@ -5,6 +5,10 @@ use crate::{
 use std::path::{Component, Path, PathBuf};
 
 const MAX_OUTPUT_EXTENSION_LENGTH: usize = 16;
+/// Fichiers listés au plus dans un dossier d'entrée (la liste reste utilisable dans l'interface).
+const MAX_LISTED_INPUT_FILES: usize = 500;
+/// Taille des lectures pour calculer l'empreinte d'un fichier (64 Kio).
+const FINGERPRINT_BUFFER_BYTES: usize = 64 * 1024;
 
 /// Une extension ne doit jamais contenir de séparateur ou de composant de chemin.
 pub fn valid_output_extension(extension: &str) -> bool {
@@ -54,7 +58,7 @@ pub async fn list_inputs(root: &Path, max_bytes: u64) -> AppResult<Vec<MediaFile
         if bytes > 0 && bytes <= max_bytes {
             files.push(MediaFile { name, bytes });
         }
-        if files.len() >= 500 {
+        if files.len() >= MAX_LISTED_INPUT_FILES {
             break;
         }
     }
@@ -68,7 +72,7 @@ pub async fn fingerprint(path: &Path, limit: u64) -> AppResult<(String, u64)> {
     let mut file = tokio::fs::File::open(path).await?;
     let mut hash = Sha256::new();
     let mut total = 0;
-    let mut buffer = vec![0; 64 * 1024];
+    let mut buffer = vec![0; FINGERPRINT_BUFFER_BYTES];
     loop {
         let n = file.read(&mut buffer).await?;
         if n == 0 {

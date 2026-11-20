@@ -13,6 +13,8 @@ use std::{
 };
 
 const EXECUTABLE_UNIX_MODE: u32 = 0o755;
+/// Taille des lectures pour calculer la somme de contrôle d'un fichier d'outil (8 Kio).
+const FILE_HASH_BUFFER_BYTES: usize = 8192;
 const DEFAULT_SAFE_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 
 /// Empreinte attendue d'un exécutable secondaire dans une archive multi-binaires.
@@ -489,7 +491,7 @@ impl ToolCacheManager {
     pub fn compute_file_sha256(path: &Path) -> std::io::Result<String> {
         let mut file = fs::File::open(path)?;
         let mut hasher = Sha256::new();
-        let mut buffer = [0u8; 8192];
+        let mut buffer = [0u8; FILE_HASH_BUFFER_BYTES];
         loop {
             let bytes_read = file.read(&mut buffer)?;
             if bytes_read == 0 {

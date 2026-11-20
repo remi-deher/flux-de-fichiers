@@ -27,7 +27,6 @@ pub const ENROLLMENT_SECRET_HEADER: &str = "x-enrollment-secret";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const SECRET_BYTES: usize = 24;
-const SHA256_HEX_LEN: usize = 64;
 const RATE_WINDOW: Duration = Duration::from_secs(60);
 const MAX_REQUESTS_PER_ADDR: usize = 5;
 const MAX_TRACKED_ADDRS: usize = 1024;
@@ -96,11 +95,6 @@ pub fn generate_secret_and_hash() -> (String, String) {
     let secret = random_hex(SECRET_BYTES);
     let hash = sha256_hex(&secret);
     (secret, hash)
-}
-
-/// Vérifie qu'une empreinte SHA-256 hexadécimale est syntaxiquement valide.
-pub fn is_valid_sha256_hex(raw: &str) -> bool {
-    raw.len() == SHA256_HEX_LEN && raw.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Nom de worker proposé par défaut à partir du nom d'hôte, nettoyé pour respecter les règles.

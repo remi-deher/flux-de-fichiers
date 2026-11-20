@@ -2,6 +2,7 @@
 
 use crate::capabilities::CapabilityRequirement;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Nombre maximal de relais d'une même tâche, pour éviter qu'elle ne circule indéfiniment.
@@ -26,6 +27,8 @@ pub struct RelayRequest {
 
 /// Durée maximale d'attente de la remise d'un fichier de travail.
 pub const HANDOFF_TTL_SECONDS: i64 = 600;
+/// [`HANDOFF_TTL_SECONDS`] en durée, pour les délais côté worker.
+pub const HANDOFF_TTL: Duration = Duration::from_secs(HANDOFF_TTL_SECONDS as u64);
 
 /// Fichier de travail conservé par le worker émetteur.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

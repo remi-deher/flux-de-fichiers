@@ -7,6 +7,14 @@ use sha2::{Digest, Sha256};
 /// Taille d'un secret opaque courant (billets, jetons de réception) : 256 bits, soit 64 caractères.
 pub const OPAQUE_TOKEN_BYTES: usize = 32;
 
+/// Longueur d'une empreinte SHA-256 en caractères hexadécimaux.
+pub const SHA256_HEX_LEN: usize = 64;
+
+/// Vérifie qu'une empreinte SHA-256 hexadécimale est syntaxiquement valide.
+pub fn is_valid_sha256_hex(raw: &str) -> bool {
+    raw.len() == SHA256_HEX_LEN && raw.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 /// Encode des octets en hexadécimal minuscule.
 pub fn encode_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -49,6 +57,16 @@ mod tests {
         assert_eq!(sha256_hex(String::from("abc")), sha256_hex("abc"));
         assert_ne!(sha256_hex("abc"), sha256_hex("abd"));
         assert_eq!(sha256_hex("abc").len(), 64);
+    }
+
+    #[test]
+    fn sha256_hex_validation_accepts_only_64_hex_digits() {
+        assert!(is_valid_sha256_hex(&sha256_hex("abc")));
+        assert!(is_valid_sha256_hex(&"AB".repeat(SHA256_HEX_LEN / 2)));
+        assert!(!is_valid_sha256_hex(&"a".repeat(SHA256_HEX_LEN - 1)));
+        assert!(!is_valid_sha256_hex(&"a".repeat(SHA256_HEX_LEN + 1)));
+        assert!(!is_valid_sha256_hex(&"z".repeat(SHA256_HEX_LEN)));
+        assert!(!is_valid_sha256_hex(""));
     }
 
     #[test]

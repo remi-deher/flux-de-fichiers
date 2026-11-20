@@ -3,14 +3,11 @@ use crate::{
     domain::{JobErrorCode, JobEventType, JobStatus, LeaseRequest},
     job_runner::{self, JobRunError},
     repository, storage,
+    worker::timing::{HEARTBEAT_INTERVAL, IDLE_POLL_INTERVAL, SOFTWARE_PROBE_REFRESH},
 };
-use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
-const IDLE_POLL_INTERVAL: Duration = Duration::from_secs(1);
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
-const SOFTWARE_PROBE_REFRESH: Duration = Duration::from_secs(60);
 const RECEIVED_HANDOFF_DIRECTORY: &str = "received-handoffs";
 
 async fn refresh_software_capabilities(state: &AppState) {
@@ -438,8 +435,7 @@ async fn send_handoff(
         let _ = tokio::fs::remove_file(staged).await;
         return Err(error.into());
     }
-    let deadline = tokio::time::Instant::now()
-        + Duration::from_secs(forgearr_shared::relay::HANDOFF_TTL_SECONDS as u64);
+    let deadline = tokio::time::Instant::now() + forgearr_shared::relay::HANDOFF_TTL;
     loop {
         repository::expire_handoffs(&state.pool).await?;
         match repository::handoff_state(&state.pool, job, lease.worker_id, lease.lease_epoch)

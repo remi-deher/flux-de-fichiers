@@ -203,7 +203,7 @@ pub async fn result(
             .join("staging")
             .join(format!("{}.{}", Uuid::new_v4(), spec.extension));
     let outcome = tokio::time::timeout(
-        std::time::Duration::from_secs(3600),
+        forgearr_shared::transfer::FILE_TRANSFER_TIMEOUT,
         receive(&s, id, &credentials, &job, body, &staging, warning, &spec),
     )
     .await;

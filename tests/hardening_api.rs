@@ -187,6 +187,153 @@ async fn json_call(
 }
 
 #[tokio::test]
+async fn handoff_requires_a_verified_upload_and_the_designated_receiver() -> anyhow::Result<()> {
+    use forgearr::{api_keys::install_known_key, domain::LeaseRequest, storage};
+    use forgearr_shared::{
+        Role,
+        relay::{
+            HandoffAcknowledgement, HandoffArtifact, HandoffBegin, HandoffOffer, RelayRequest,
+            RelayTarget,
+        },
+    };
+    const RECEIVER_KEY: &str = "fdf_c0000001_0123456789abcdef0123456789abcdef0123456789abcdef";
+    let h = harness().await?;
+    std::fs::create_dir_all(h._dirs.0.path().join("staging"))?;
+    install_known_key(&h.pool, RECEIVER_KEY, "receiver", Role::Worker).await?;
+    let sender = repository::register(&h.pool, "test-worker").await?;
+    let receiver = repository::register(&h.pool, "receiver").await?;
+    let job = repository::insert_job(&h.pool, "movie.mkv", None, &"ab".repeat(32), 5).await?;
+    let claim = repository::claim(&h.pool, sender.id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("bail absent"))?;
+    let lease = LeaseRequest {
+        worker_id: sender.id,
+        lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
+        telemetry: None,
+    };
+    let source = h._dirs.0.path().join("artifact");
+    std::fs::write(&source, b"working")?;
+    let (sha256, bytes) = storage::fingerprint(&source, 1024).await?;
+    let artifact = HandoffArtifact {
+        name: "working.mkv".into(),
+        sha256,
+        bytes: bytes as i64,
+    };
+    let begin = HandoffBegin {
+        worker_id: sender.id,
+        lease_token: lease.lease_token,
+        lease_epoch: lease.lease_epoch,
+        request: RelayRequest {
+            target: RelayTarget::Worker {
+                worker_id: receiver.id,
+            },
+            resume_node_id: "next".into(),
+        },
+        artifact: artifact.clone(),
+        warning: true,
+    };
+    let uri = format!("/api/v1/jobs/{}/handoff", job.id);
+    let (status, _) = json_call(
+        &h.app,
+        "POST",
+        &uri,
+        Some(common::WORKER_KEY),
+        Some(serde_json::to_value(&begin)?),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::CREATED);
+    let claim_uri = format!("/api/v1/worker/handoffs/claim?worker_id={}", receiver.id);
+    let (status, value) = json_call(&h.app, "POST", &claim_uri, Some(RECEIVER_KEY), None).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert!(value.is_null());
+    let upload = |body: &'static [u8]| {
+        Request::builder()
+            .method("PUT")
+            .uri(&uri)
+            .header("authorization", format!("Bearer {}", common::WORKER_KEY))
+            .header("x-worker-id", sender.id.to_string())
+            .header("x-lease-token", lease.lease_token.to_string())
+            .header("x-lease-epoch", lease.lease_epoch.to_string())
+            .body(Body::from(body))
+    };
+    let bad = h.app.clone().oneshot(upload(b"corrupt")?).await?;
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+    let good = h.app.clone().oneshot(upload(b"working")?).await?;
+    assert_eq!(good.status(), StatusCode::NO_CONTENT);
+    let (status, _) = json_call(&h.app, "POST", &claim_uri, Some(common::WORKER_KEY), None).await?;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, value) = json_call(&h.app, "POST", &claim_uri, Some(RECEIVER_KEY), None).await?;
+    assert_eq!(status, StatusCode::OK);
+    let offer: HandoffOffer = serde_json::from_value(value)?;
+    let retained_uri = format!(
+        "/api/v1/worker/handoffs/{}/{}/retained?worker_id={}",
+        job.id, lease.lease_epoch, receiver.id
+    );
+    let (status, value) = json_call(&h.app, "GET", &retained_uri, Some(RECEIVER_KEY), None).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value, true);
+    let (status, _) =
+        json_call(&h.app, "GET", &retained_uri, Some(common::WORKER_KEY), None).await?;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let file_uri = format!("{uri}/file?worker_id={}", receiver.id);
+    let file_request = |token: &str| {
+        Request::builder()
+            .uri(&file_uri)
+            .header("authorization", format!("Bearer {RECEIVER_KEY}"))
+            .header("x-handoff-token", token)
+            .body(Body::empty())
+    };
+    assert_eq!(
+        h.app
+            .clone()
+            .oneshot(file_request("wrong")?)
+            .await?
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let file = h
+        .app
+        .clone()
+        .oneshot(file_request(&offer.receipt_token)?)
+        .await?;
+    assert_eq!(file.status(), StatusCode::OK);
+    assert_eq!(
+        to_bytes(file.into_body(), JSON_LIMIT).await?.as_ref(),
+        b"working"
+    );
+    let ack = HandoffAcknowledgement {
+        worker_id: receiver.id,
+        receipt_token: offer.receipt_token,
+        sha256: artifact.sha256,
+        bytes: artifact.bytes,
+    };
+    let (status, _) = json_call(
+        &h.app,
+        "POST",
+        &format!("{uri}/ack"),
+        Some(RECEIVER_KEY),
+        Some(serde_json::to_value(&ack)?),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, value) = json_call(
+        &h.app,
+        "GET",
+        &format!(
+            "{uri}?worker_id={}&lease_epoch={}",
+            sender.id, lease.lease_epoch
+        ),
+        Some(common::WORKER_KEY),
+        None,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value, "acknowledged");
+    Ok(())
+}
+
+#[tokio::test]
 async fn lease_epoch_fences_all_worker_job_routes() -> anyhow::Result<()> {
     let h = harness().await?;
 
@@ -974,5 +1121,96 @@ async fn the_central_relays_a_worker_held_source_without_storing_it() -> anyhow:
     let (status, body) = download.await??;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_ref(), SOURCE_CONTENT);
+    Ok(())
+}
+
+#[tokio::test]
+async fn software_encoder_probe_route_requires_worker_auth_and_returns_plugin_contract()
+-> anyhow::Result<()> {
+    let h = harness().await?;
+    let root = h._dirs.2.path();
+    let mut index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("index.json"))?)?;
+    index["entries"].as_array_mut().ok_or_else(|| anyhow::anyhow!("index invalide"))?.push(serde_json::json!({"id":"probe-app","type":"app","version":"1.0.0","name":"Probe","manifestPath":"apps/probe-app/manifest.json"}));
+    std::fs::create_dir_all(root.join("apps/probe-app"))?;
+    std::fs::write(root.join("index.json"), serde_json::to_vec(&index)?)?;
+    std::fs::write(
+        root.join("apps/probe-app/manifest.json"),
+        serde_json::to_vec(
+            &serde_json::json!({"schemaVersion":"1.1.0","id":"probe-app","type":"app","version":"1.0.0","name":"Probe"}),
+        )?,
+    )?;
+    std::fs::write(
+        root.join("apps/probe-app/distribution.v1.json"),
+        serde_json::to_vec(
+            &serde_json::json!({"toolId":"probe-app","toolVersion":"1.0.0","releaseStatus":"released","artifacts":[{"arch":"x86_64","archiveUrl":"https://example.org/a.tar.gz","archiveFormat":"tar.gz","archiveSha256":"a".repeat(64),"binaryRelativePath":"probe","binarySha256":"b".repeat(64)}]}),
+        )?,
+    )?;
+    let manifest_path = root.join("plugins/core/manifest.json");
+    let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path)?)?;
+    manifest["files"].as_array_mut().ok_or_else(|| anyhow::anyhow!("manifeste invalide"))?.push(serde_json::json!({"path":"probe.json","role":"capability-probe","mediaType":"application/json"}));
+    std::fs::write(manifest_path, serde_json::to_vec(&manifest)?)?;
+    std::fs::write(
+        root.join("plugins/core/probe.json"),
+        serde_json::to_vec(
+            &serde_json::json!({"schemaVersion":"1.0.0","toolId":"probe-app","args":["-encoders"],"encoders":[{"encoder":"libx265","codec":"hevc"}]}),
+        )?,
+    )?;
+    let uri = "/api/v1/worker/software-encoder-probes";
+    assert_eq!(
+        json_call(&h.app, "GET", uri, None, None).await?.0,
+        StatusCode::UNAUTHORIZED
+    );
+    let (status, probes) = json_call(&h.app, "GET", uri, Some(common::WORKER_KEY), None).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(probes[0]["toolId"], "probe-app");
+    assert_eq!(probes[0]["sha256"], "b".repeat(64));
+    assert_eq!(probes[0]["encoders"][0]["codec"], "hevc");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_relay_requiring_cpu_can_be_claimed_by_a_software_encoder() -> anyhow::Result<()> {
+    let h = harness().await?;
+    let origin = register_worker_with_encoders(&h, "origine-cpu", &[]).await?;
+    let target = register_worker_with_encoders(&h, "encodeur-cpu", &[]).await?;
+    sqlx::query("UPDATE workers SET telemetry_json=json_set(telemetry_json, '$.capabilities.softwareEncoders', json(?2)) WHERE id=?1")
+        .bind(target).bind("[\"hevc\"]").execute(&h.pool).await?;
+    let job = repository::insert_job(&h.pool, "film.mkv", None, &"bb".repeat(32), 512).await?;
+    let claim = claim_for(&h, origin)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("bail manquant"))?;
+    let response = relay_call(
+        &h,
+        &claim,
+        origin,
+        serde_json::json!({"mode":"capable","requirement":{"codec":"hevc","acceleration":"cpu"}}),
+    )
+    .await?;
+    assert_eq!(response["relayed"], true);
+    let resumed = claim_for(&h, target)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("reprise CPU manquante"))?;
+    assert_eq!(resumed.job_id, job.id);
+    Ok(())
+}
+
+#[tokio::test]
+async fn cpu_in_hardware_telemetry_does_not_satisfy_a_software_requirement() -> anyhow::Result<()> {
+    let h = harness().await?;
+    let origin = register_worker_with_encoders(&h, "origine-fausse-capacite", &[]).await?;
+    let target = register_worker_with_encoders(&h, "fausse-capacite", &[]).await?;
+    sqlx::query("UPDATE workers SET telemetry_json=json_set(telemetry_json, '$.capabilities.hardwareEncoders', json(?2)) WHERE id=?1")
+        .bind(target).bind(r#"[{"codec":"hevc","acceleration":"cpu"}]"#).execute(&h.pool).await?;
+    let job = repository::insert_job(&h.pool, "film.mkv", None, &"bb".repeat(32), 512).await?;
+    sqlx::query("INSERT INTO job_relays(job_id,from_worker_id,relay_count,resume_node_id,requirement_json) VALUES(?1,?2,1,'next',?3)")
+        .bind(job.id).bind(origin).bind(r#"{"codec":"hevc","acceleration":"cpu"}"#).execute(&h.pool).await?;
+    assert!(claim_for(&h, target).await?.is_none());
+    sqlx::query("UPDATE workers SET telemetry_json=json_set(telemetry_json, '$.capabilities.softwareEncoders', json(?2)) WHERE id=?1")
+        .bind(target).bind(r#"["hevc"]"#).execute(&h.pool).await?;
+    assert_eq!(
+        claim_for(&h, target).await?.map(|claim| claim.job_id),
+        Some(job.id)
+    );
     Ok(())
 }

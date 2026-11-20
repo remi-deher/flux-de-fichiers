@@ -88,6 +88,18 @@ pub async fn worker_tool_distribution(
     Ok(Json(plugins::read_distribution(&roots, &id)?))
 }
 
+/// Contrats de sondes logicielles déclarés par les plugins, pour les workers distants.
+pub async fn worker_software_encoder_probes(
+    State(s): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> AppResult<Json<Vec<crate::software_probe::SoftwareEncoderProbe>>> {
+    crate::auth::authorize_worker(&s.pool, &headers).await?;
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    Ok(Json(crate::software_probe::discover_software_probes(
+        &roots,
+    )))
+}
+
 /// Installe un outil du catalogue dans le cache du central (worker intégré).
 pub async fn install_tool(
     State(s): State<AppState>,

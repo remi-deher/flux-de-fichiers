@@ -1,6 +1,6 @@
 # 0020 — Blocs de transfert dans le flux : décision sur les octets détenus, transfert à tout moment
 
-Statut : proposé (19 nov. 2026), orientation validée par l'utilisateur. Généralise l'[ADR 0018](0018-relais-de-tache-par-bloc.md)
+Statut : accepté, implémentation en cours (20 nov. 2026). Généralise l'[ADR 0018](0018-relais-de-tache-par-bloc.md)
 (relais avant tout traitement) en s'appuyant sur le plan de données de l'[ADR 0019](0019-partage-des-sources-entre-workers.md).
 Le traitement en parallèle d'un même média par plusieurs nœuds fait l'objet d'un chantier à part (voir plus bas).
 
@@ -29,17 +29,16 @@ n'était permis qu'avant tout traitement.
    tâche »** (identifiant et alias `relay` conservés). Cibles : un nœud précis, ou un nœud capable. Il
    reste un bloc natif (runtime `primitive`) à une seule sortie « Reprise ». Le bloc « Capacité du
    worker » reste l'aiguillage `capable` / `incapable`.
-4. **Transfert à tout moment, avec le fichier de travail.** Quand un fichier de travail existe, le
-   nœud d'origine **le conserve** dans un dossier retenu (`handoff-<job>`) et le sert à la cible par le
-   mécanisme de l'ADR 0019 (billet, voie directe, repli par le central). Le point de reprise comprend
-   le nœud de reprise, le nom, la taille et le SHA-256 du fichier de travail, et les métadonnées. Le
-   central enregistre le tout (extension de `job_relays`).
-5. **Poignée de main de transfert** (inspirée de l'ADR 0016 d'`encoding-central`) : le nœud d'origine gèle
-   l'exécution et libère son bail et son créneau de concurrence ; le central place la tâche ; le repreneur
-   la prend, télécharge et vérifie le fichier de travail, puis **accuse réception** au central
-   (`POST /api/v1/jobs/{id}/handoff/ack`) ; l'accusé autorise le nœud d'origine à purger le dossier
-   retenu. Le repreneur **resonde** le fichier reçu avant de poursuivre, sans faire confiance aux
-   métadonnées transmises.
+4. **Transfert à tout moment, avec le fichier de travail.** Le nœud d'origine conserve son dossier
+   de travail pendant la remise. Il envoie au central une copie temporaire, limitée et vérifiée par
+   taille et SHA-256 ; la cible la télécharge avec un jeton individuel. Le central conserve le nom,
+   l'empreinte, la taille et le nœud de reprise dans `job_handoffs`.
+5. **Poignée de main de transfert** : le nœud d'origine gèle l'exécution et renouvelle son bail.
+   Le repreneur réserve l'offre, télécharge et vérifie le fichier, puis **accuse réception** au central
+   (`POST /api/v1/jobs/{id}/handoff/ack`). L'accusé libère le bail et autorise l'origine à purger son
+   dossier ; il peut être répété sans déplacer deux fois la tâche. Le repreneur **resonde** le fichier
+   reçu avant de poursuivre avec le flux figé.
+   Les avertissements et le journal des étapes déjà exécutées sont conservés à la reprise.
 6. **Pannes :** si le nœud d'origine disparaît avant l'accusé, la tâche attend sa reconnexion pendant une
    durée bornée (constante nommée), puis échoue avec `transfer_failed` ; jamais de perte silencieuse. Le
    dossier retenu a une durée de vie maximale et est purgé au démarrage s'il est périmé (la purge actuelle

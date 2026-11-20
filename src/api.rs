@@ -2,6 +2,7 @@ mod accounts;
 pub mod auth;
 pub mod diagnostics;
 pub(crate) mod flows;
+pub(crate) mod handoffs;
 pub(crate) mod installation;
 pub(crate) mod jobs;
 mod keys;
@@ -323,6 +324,10 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/tools/{id}/install", post(plugins::install_tool))
         .route("/api/v1/worker/tools", get(plugins::worker_active_tools))
         .route(
+            "/api/v1/worker/software-encoder-probes",
+            get(plugins::worker_software_encoder_probes),
+        )
+        .route(
             "/api/v1/worker/tools/{id}/distribution",
             get(plugins::worker_tool_distribution),
         )
@@ -489,6 +494,19 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/jobs/{id}/progress", post(jobs::progress))
         .route("/api/v1/jobs/{id}/failure", post(jobs::failure))
         .route("/api/v1/jobs/{id}/relay", post(jobs::relay))
+        .route(
+            "/api/v1/jobs/{id}/handoff",
+            post(handoffs::begin)
+                .get(handoffs::status)
+                .put(handoffs::upload),
+        )
+        .route("/api/v1/jobs/{id}/handoff/file", get(handoffs::download))
+        .route("/api/v1/jobs/{id}/handoff/ack", post(handoffs::acknowledge))
+        .route("/api/v1/worker/handoffs/claim", post(handoffs::claim))
+        .route(
+            "/api/v1/worker/handoffs/{id}/{epoch}/retained",
+            get(handoffs::retained),
+        )
         .layer(axum::extract::DefaultBodyLimit::max(JSON_BODY_LIMIT))
         .layer(tower_http::timeout::TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
@@ -718,7 +736,7 @@ pub(crate) async fn populate_claim_contracts(
     let catalog = crate::plugins::list_catalog(&roots);
     let registry = catalog_cache.operations(&roots).await;
     if let Some(probe_op) =
-        registry.primary_probe_for_file(std::path::Path::new(&claim.source_name))
+        registry.primary_probe_for_file(std::path::Path::new(claim.working_source_name()))
     {
         if let crate::flows::OperationRuntime::Binary(bin) = &probe_op.runtime
             && let Some(tool) = &bin.tool
@@ -947,6 +965,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     let plugin_sync = tokio::spawn(plugin_sync_loop(state.clone()));
     let lib_scans = tokio::spawn(library_scan_loop(state.clone()));
     let ai_diagnosis = tokio::spawn(crate::ai::diagnosis::run_loop(state.clone()));
+    let handoff_cleanup = tokio::spawn(handoffs::cleanup_loop(state.clone()));
     let app = router(state);
     tracing::info!(%addr, "central started");
     if let Some((cert, key)) = tls {
@@ -972,6 +991,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         .await?;
     }
     plugin_sync.abort();
+    handoff_cleanup.abort();
     lib_scans.abort();
     ai_diagnosis.abort();
     pool.close().await;

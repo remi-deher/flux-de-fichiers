@@ -4,6 +4,15 @@ use crate::{
 };
 use std::path::{Component, Path, PathBuf};
 
+const MAX_OUTPUT_EXTENSION_LENGTH: usize = 16;
+
+/// Une extension ne doit jamais contenir de séparateur ou de composant de chemin.
+pub fn valid_output_extension(extension: &str) -> bool {
+    !extension.is_empty()
+        && extension.len() <= MAX_OUTPUT_EXTENSION_LENGTH
+        && extension.bytes().all(|byte| byte.is_ascii_alphanumeric())
+}
+
 pub fn valid_name(name: &str) -> bool {
     let mut parts = Path::new(name).components();
     matches!(parts.next(), Some(Component::Normal(_)))
@@ -80,6 +89,23 @@ pub async fn fingerprint(path: &Path, limit: u64) -> AppResult<(String, u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_extension_is_a_bounded_alphanumeric_suffix() {
+        assert!(valid_output_extension("mkv"));
+        assert!(valid_output_extension("MP4"));
+        for invalid in [
+            "",
+            ".mkv",
+            "../mkv",
+            "a/b",
+            "a\\b",
+            "a b",
+            "abcdefghijklmnopq",
+        ] {
+            assert!(!valid_output_extension(invalid));
+        }
+    }
     #[test]
     fn only_flat_non_hidden_names_are_accepted() {
         for name in [

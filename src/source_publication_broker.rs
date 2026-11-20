@@ -26,6 +26,7 @@ pub struct PublicationAccess {
     pub staged: PathBuf,
     pub job_id: Uuid,
     pub lease: LeaseRequest,
+    pub root: String,
 }
 
 #[derive(Default)]
@@ -123,6 +124,7 @@ impl SourcePublicationBroker {
                 staged: p.staged.clone(),
                 job_id: p.job_id,
                 lease: p.lease.clone(),
+                root: p.task.root.clone(),
             })
     }
 

@@ -253,6 +253,11 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
                 let _ = repository::save_job_steps(&state.pool, claim.job_id, &run_err.steps).await;
             }
             run_err.code
+        } else if matches!(
+            error.downcast_ref::<crate::error::AppError>(),
+            Some(crate::error::AppError::SourceChanged)
+        ) {
+            JobErrorCode::SourceChanged
         } else if error.to_string().contains("source_integrity") {
             JobErrorCode::SourceIntegrity
         } else {

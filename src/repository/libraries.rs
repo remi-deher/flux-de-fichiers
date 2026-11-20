@@ -152,18 +152,13 @@ pub fn prepare_workers(workers: Vec<LibraryWorkerPath>) -> AppResult<Vec<Library
     Ok(prepared)
 }
 
-/// Valide les workers « par transfert » (ADR 0021) : ni doublon, ni centrale, ni worker déjà direct,
-/// et seulement avec le dossier de sortie dédié tant que le retour du résultat n'existe pas.
+/// Valide les workers « par transfert » : ni doublon, ni centrale, ni worker déjà direct.
 pub fn prepare_transfer_workers(
     transfer_workers: Vec<Uuid>,
     direct: &[LibraryWorkerPath],
-    output_policy: LibraryOutputPolicy,
 ) -> AppResult<Vec<Uuid>> {
     if transfer_workers.is_empty() {
         return Ok(transfer_workers);
-    }
-    if output_policy != LibraryOutputPolicy::OutputDir {
-        return Err(AppError::Invalid);
     }
     let mut seen = HashSet::with_capacity(transfer_workers.len());
     for id in &transfer_workers {
@@ -190,8 +185,7 @@ async fn prepare(pool: &SqlitePool, write: LibraryWrite) -> AppResult<PreparedLi
             return Err(AppError::Invalid);
         }
     }
-    let transfer_workers =
-        prepare_transfer_workers(write.transfer_workers, &workers, write.output_policy)?;
+    let transfer_workers = prepare_transfer_workers(write.transfer_workers, &workers)?;
     for id in &transfer_workers {
         if !super::worker_exists(pool, *id).await? {
             return Err(AppError::Invalid);

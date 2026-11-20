@@ -613,6 +613,8 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
     .execute(&mut *tx)
     .await?;
 
+    super::source_publication_journal::reconcile_expired_publications(&mut tx).await?;
+
     if let Some(sched) = schedule_json
         .as_deref()
         .and_then(|raw| serde_json::from_str::<WorkerSchedule>(raw).ok())
@@ -743,6 +745,15 @@ pub async fn retry_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
     if !exists {
         return Err(AppError::NotFound);
     }
+    let unresolved: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM source_publication_journal WHERE job_id=?1)",
+    )
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if unresolved {
+        return Err(AppError::Conflict);
+    }
     let queued_status = JobStatus::Queued;
     let failed_status = JobStatus::Failed;
     let lease_expired_code = JobErrorCode::LeaseExpired;
@@ -810,20 +821,17 @@ pub async fn fail(
 ) -> AppResult<()> {
     let failed_status = JobStatus::Failed;
     let running_status = JobStatus::Running;
-    let count = sqlx::query!(
+    let count = sqlx::query(
         "UPDATE jobs \
          SET status=?5, error_code=?6, lease_token=NULL, lease_epoch=lease_epoch+1, \
              leased_until=NULL, updated_at=datetime('now') \
          WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 \
-           AND status=?7 AND leased_until > datetime('now')",
-        id,
-        lease.worker_id,
-        lease.lease_token,
-        lease.lease_epoch,
-        failed_status,
-        code,
-        running_status,
+           AND status=?7 AND leased_until > datetime('now') \
+           AND NOT EXISTS(SELECT 1 FROM source_publication_journal p WHERE p.job_id=jobs.id AND p.lease_epoch=jobs.lease_epoch AND p.state=?8)",
     )
+    .bind(id).bind(lease.worker_id).bind(lease.lease_token).bind(lease.lease_epoch)
+    .bind(failed_status).bind(code).bind(running_status)
+    .bind(super::source_publication_journal::PublicationState::InProgress.as_str())
     .execute(pool)
     .await?
     .rows_affected();
@@ -843,6 +851,14 @@ pub async fn succeeded_output_name(pool: &SqlitePool, id: Uuid) -> AppResult<Opt
     .fetch_optional(pool)
     .await?;
     Ok(name.flatten())
+}
+
+/// Rend aussi le résultat préservé d'une publication dont l'issue est incertaine.
+pub async fn downloadable_output_name(pool: &SqlitePool, id: Uuid) -> AppResult<Option<String>> {
+    let name: Option<String> = sqlx::query_scalar("SELECT output_name FROM jobs j WHERE id=?1 AND output_name IS NOT NULL AND (status=?2 OR (status=?3 AND EXISTS(SELECT 1 FROM source_publication_journal p WHERE p.job_id=j.id AND p.state=?4 AND p.output_name=j.output_name)))")
+        .bind(id).bind(JobStatus::Succeeded).bind(JobStatus::Failed)
+        .bind(super::source_publication_journal::PublicationState::Uncertain.as_str()).fetch_optional(pool).await?;
+    Ok(name)
 }
 
 pub struct PublishedOutput<'a> {
@@ -893,6 +909,11 @@ pub async fn publish_succeeded(
     )
     .execute(&mut *tx)
     .await?;
+    sqlx::query("DELETE FROM source_publication_journal WHERE job_id=?1 AND lease_epoch=?2")
+        .bind(id)
+        .bind(lease.lease_epoch)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -979,6 +1000,11 @@ pub async fn clear_job_output_name(pool: &SqlitePool, id: Uuid) -> AppResult<Opt
     )
     .execute(&mut *tx)
     .await?;
+    sqlx::query("DELETE FROM source_publication_journal WHERE job_id=?1 AND state=?2")
+        .bind(id)
+        .bind(super::source_publication_journal::PublicationState::Uncertain.as_str())
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(row.output_name)
 }
@@ -994,6 +1020,12 @@ pub async fn cancel_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
     .await?;
     if !exists {
         return Err(AppError::NotFound);
+    }
+    let publication_active: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM source_publication_journal p JOIN jobs j ON j.id=p.job_id AND j.lease_epoch=p.lease_epoch WHERE p.job_id=?1 AND p.state=?2)")
+        .bind(id).bind(super::source_publication_journal::PublicationState::InProgress.as_str())
+        .fetch_one(&mut *tx).await?;
+    if publication_active {
+        return Err(AppError::Conflict);
     }
     let canceled_status = JobStatus::Canceled;
     let job = sqlx::query_as!(

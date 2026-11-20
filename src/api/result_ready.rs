@@ -240,19 +240,29 @@ async fn abandon_publication(
 /// Publie le résultat que le worker retient : le détenteur de la bibliothèque le tire en direct,
 /// applique la politique de sortie, puis le central marque la tâche réussie.
 ///
-/// `false` quand ce cas n'est pas pris en charge : le worker envoie alors le résultat au central.
+/// `ResultUndeliverable` quand aucun détenteur actif ne peut le tirer : le résultat ne passe
+/// jamais par le central.
 pub(crate) async fn publish_pulled(
     s: &AppState,
     job: &Job,
     lease: &LeaseRequest,
     ready: &ResultReady,
-) -> AppResult<bool> {
+) -> AppResult<()> {
     let declared = declared_result(s, job, lease, ready).await?;
     let Some((policy, holder)) = pulled_destination(s, job, lease.worker_id).await? else {
-        // Ce cas garde l'envoi au central : le fichier retenu n'a plus d'objet.
-        repository::release_artifact(&s.pool, job.id, ArtifactKind::Result).await?;
-        return Ok(false);
+        tracing::warn!(job_id=%job.id, "aucun détenteur actif pour recevoir le résultat");
+        return Err(AppError::ResultUndeliverable);
     };
+    let kind = ArtifactKind::Result;
+    let ticket = repository::issue_artifact_ticket(
+        &s.pool,
+        job.id,
+        kind,
+        holder.worker_id,
+        lease.lease_epoch,
+    )
+    .await?
+    .ok_or(AppError::ResultUndeliverable)?;
     let declared = &declared;
     let in_output_dir = policy == LibraryOutputPolicy::OutputDir;
     // Un résultat remplacé chez le détenteur n'a aucun fichier au central : nom vide.
@@ -276,7 +286,7 @@ pub(crate) async fn publish_pulled(
         s,
         job,
         lease,
-        ResultSource::Pulled(holder),
+        ResultSource::Pulled(holder, ticket),
         &declared.sha256,
         declared.bytes,
         &ready.extension,
@@ -297,8 +307,7 @@ pub(crate) async fn publish_pulled(
     } else {
         std::path::PathBuf::from(&job.source_name)
     };
-    complete_publication(s, job, lease, output, &notified_path).await?;
-    Ok(true)
+    complete_publication(s, job, lease, output, &notified_path).await
 }
 
 /// Le worker annonce que son résultat est prêt et retenu chez lui (bail et clé de son worker).
@@ -315,15 +324,11 @@ pub async fn ready(
         && let Some(local) = begin_local_application(&s, &job, &lease, &ready).await?
     {
         return Ok(Json(ResultReadyResponse {
-            pulled: false,
             apply_locally: Some(local),
         }));
     }
-    let pulled = publish_pulled(&s, &job, &lease, &ready).await?;
-    Ok(Json(ResultReadyResponse {
-        pulled,
-        apply_locally: None,
-    }))
+    publish_pulled(&s, &job, &lease, &ready).await?;
+    Ok(Json(ResultReadyResponse { apply_locally: None }))
 }
 
 /// Dernière vérification du bail, juste avant que le worker ne remplace la source.

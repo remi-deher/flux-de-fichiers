@@ -168,10 +168,15 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
      central ne voit pas, `result/ready` (avec `can_apply_locally`) inscrit le remplacement au journal et
      répond `apply_locally` ; le worker remplace la source (`result/authorize` juste avant, puis
      `result/applied` avec l'issue) et le central conclut. Rien ne transite par le central.
-   - 3e-iii — suppression de l'envoi `PUT /result`, du staging des envois et du repli de lecture
-     `staged` ; erreur explicite quand aucun détenteur n'est joignable (worker intégré désactivé, worker
-     sans adresse de transfert). Le worker intégré qui traite garde `publish_staged` jusqu'à l'étape 5.
-     La validation post-traitement se fait déjà chez le worker qui traite (`binary_runner`).
+   - **3e-iii (fait) — plus aucun octet de résultat vers le central** : `PUT /result` et l'envoi du
+     worker sont supprimés (route, handler, repli, documentation OpenAPI). `result/ready` ne répond plus
+     `pulled` : soit le détenteur a tiré et appliqué le résultat, soit `apply_locally`, soit l'erreur
+     explicite `result_undeliverable` (502) quand aucun détenteur actif ou aucune adresse de transfert ne
+     permet de le recevoir (worker intégré désactivé, worker qui traite sans adresse) ; le résultat reste
+     alors retenu et la tâche échoue. Un worker sans adresse peut encore appliquer lui-même. Restent
+     jusqu'aux étapes 4 et 5 : le worker intégré qui traite (`publish_staged`, staging local) et la
+     lecture `staged` pour ses résultats. La validation post-traitement se fait déjà chez le worker qui
+     traite (`binary_runner`).
 4. Suppression du repli par le central, de `PUT /result` et des routes de remise.
 5. Worker intégré traité comme un worker ordinaire.
 

@@ -10,8 +10,6 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use futures_util::StreamExt;
-use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
@@ -153,102 +151,6 @@ pub async fn delete_output(
         }
     }
     Ok(StatusCode::NO_CONTENT)
-}
-
-async fn output_spec_for_job(
-    s: &AppState,
-    job: &Job,
-    requested_ext: Option<&str>,
-) -> AppResult<media::OutputSpec> {
-    let frozen_flow = match (&job.flow_id, job.flow_version) {
-        (Some(flow_id), Some(version)) => repository::get_flow_version(&s.pool, flow_id, version)
-            .await
-            .ok(),
-        _ => None,
-    };
-    let roots = crate::plugins::catalog_roots(&s.pool, &s.config).await;
-    let registry = s.catalog_cache.operations(&roots).await;
-    registry
-        .output_spec_for_flow(frozen_flow.as_ref(), requested_ext)
-        .ok_or(AppError::Invalid)
-}
-
-pub async fn result(
-    State(s): State<AppState>,
-    h: HeaderMap,
-    Path(id): Path<Uuid>,
-    body: Body,
-) -> AppResult<StatusCode> {
-    crate::auth::authorize_worker(&s.pool, &h).await?;
-    let credentials = lease(&h)?;
-    let job = repository::active(&s.pool, id, &credentials).await?;
-    let warning = match h.get("x-remux-warning").and_then(|v| v.to_str().ok()) {
-        Some("true") => true,
-        Some("false") | None => false,
-        _ => return Err(AppError::Invalid),
-    };
-    let requested_ext = match h
-        .get("x-output-ext")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.trim().to_ascii_lowercase())
-    {
-        None => None,
-        Some(ext) if storage::valid_output_extension(&ext) => Some(ext),
-        Some(_) => return Err(AppError::Invalid),
-    };
-    let spec = output_spec_for_job(&s, &job, requested_ext.as_deref()).await?;
-    let staging =
-        s.config
-            .data_dir
-            .join("staging")
-            .join(format!("{}.{}", Uuid::new_v4(), spec.extension));
-    let outcome = tokio::time::timeout(
-        forgearr_shared::transfer::FILE_TRANSFER_TIMEOUT,
-        receive(&s, id, &credentials, &job, body, &staging, warning, &spec),
-    )
-    .await;
-    if let Err(error) = tokio::fs::remove_file(&staging).await
-        && error.kind() != std::io::ErrorKind::NotFound
-    {
-        tracing::error!("staging cleanup failed");
-    }
-    outcome.map_err(|_| AppError::Invalid)??;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn receive(
-    s: &AppState,
-    id: Uuid,
-    lease: &LeaseRequest,
-    job: &Job,
-    body: Body,
-    staging: &std::path::Path,
-    warning: bool,
-    spec: &media::OutputSpec,
-) -> AppResult<()> {
-    let mut file = tokio::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(staging)
-        .await?;
-    let mut stream = body.into_data_stream();
-    let mut total = 0u64;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| AppError::Invalid)?;
-        total += chunk.len() as u64;
-        if total > s.config.max_file_bytes {
-            return Err(AppError::TooLarge);
-        }
-        file.write_all(&chunk).await?;
-    }
-    file.sync_all().await?;
-    drop(file);
-    let source = crate::library_scan::central_job_source(&s.pool, &s.config.input_dir, job)
-        .await
-        .map_err(crate::source_publication::missing_source_is_changed)?;
-    publish_staged(s, id, lease, job, source.as_deref(), staging, warning, spec).await?;
-    Ok(())
 }
 
 async fn validate_staged_output(

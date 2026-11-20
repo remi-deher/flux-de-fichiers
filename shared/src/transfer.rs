@@ -67,12 +67,12 @@ pub struct LocalApplication {
     pub root: String,
 }
 
-/// Réponse du central : `pulled` quand le détenteur de la bibliothèque a tiré et appliqué le
-/// résultat ; `apply_locally` quand le worker doit l'appliquer lui-même puis le confirmer
-/// (`POST /api/v1/jobs/{id}/result/applied`) ; sinon il doit encore l'envoyer au central.
+/// Réponse du central : sans `apply_locally`, le détenteur de la bibliothèque a tiré et appliqué le
+/// résultat ; avec, le worker doit l'appliquer lui-même puis le confirmer
+/// (`POST /api/v1/jobs/{id}/result/applied`). Aucun cas ne renvoie le fichier au central : un
+/// résultat sans détenteur joignable est refusé (`result_undeliverable`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResultReadyResponse {
-    pub pulled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apply_locally: Option<LocalApplication>,
 }

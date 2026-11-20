@@ -203,8 +203,8 @@ impl WorkerLoop {
     }
 
     /// Retient le résultat, le déclare, puis demande au central de le faire tirer par le détenteur de
-    /// la bibliothèque (réponse après son application). `false` : ce cas n'est pas pris en charge,
-    /// le résultat doit encore être envoyé au central.
+    /// la bibliothèque, ou l'applique lui-même s'il la détient. Le résultat ne passe jamais par le
+    /// central : sans détenteur joignable, la tâche échoue.
     pub(super) async fn publish_retained_result(
         &self,
         claim: &Claim,
@@ -212,11 +212,7 @@ impl WorkerLoop {
         result_file: &Path,
         extension: &str,
         warning: bool,
-    ) -> anyhow::Result<bool> {
-        // Sans adresse de transfert, personne ne pourrait tirer le résultat chez ce worker.
-        if self.config.transfer_url.is_none() {
-            return Ok(false);
-        }
+    ) -> anyhow::Result<()> {
         let (sha256, bytes) = storage::fingerprint(result_file, self.config.max_bytes).await?;
         let kind = ArtifactKind::Result;
         let name = retained_name(kind, claim.job_id, claim.lease_epoch, result_file);
@@ -237,16 +233,16 @@ impl WorkerLoop {
         let announced = self
             .deliver_result(claim, worker, &declaration, &ready, result_file)
             .await;
-        // Publié ou renvoyé au central, le fichier ne sert plus ; en cas d'échec il reste jusqu'à
-        // la purge, seule copie du résultat.
+        // Publié, le fichier ne sert plus ; en cas d'échec il reste jusqu'à la purge, seule copie
+        // du résultat.
         if announced.is_ok() {
             let _ = tokio::fs::remove_file(&retained).await;
         }
         announced
     }
 
-    /// Déclare le résultat, puis le livre selon la réponse du central : tiré par un autre détenteur,
-    /// appliqué ici (le worker détient la bibliothèque) ou à envoyer au central (`false`).
+    /// Déclare le résultat, puis le livre selon la réponse du central : tiré par un autre détenteur
+    /// ou appliqué ici (le worker détient la bibliothèque).
     async fn deliver_result(
         &self,
         claim: &Claim,
@@ -254,18 +250,16 @@ impl WorkerLoop {
         declaration: &ArtifactDeclaration,
         ready: &ResultReady,
         result_file: &Path,
-    ) -> anyhow::Result<bool> {
+    ) -> anyhow::Result<()> {
         let announced = self
             .declare_and_announce(claim, worker, declaration, ready)
             .await?;
         let Some(local) = announced.apply_locally else {
-            return Ok(announced.pulled);
+            return Ok(());
         };
         let extension = ready.extension.as_str();
-        let applied = self
-            .apply_locally(claim, worker, &local, result_file, extension)
-            .await;
-        applied.map(|()| true)
+        self.apply_locally(claim, worker, &local, result_file, extension)
+            .await
     }
 
     async fn declare_and_announce(

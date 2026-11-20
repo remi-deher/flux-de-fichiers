@@ -6,7 +6,6 @@ use crate::{
         Register, StepsReport, Worker,
     },
     job_runner::{self, JobRunError},
-    storage,
     worker_http::{WorkerState, WorkerWeb},
     worker_settings, worker_transfer,
 };
@@ -385,35 +384,14 @@ impl WorkerLoop {
             tracing::warn!(job_id=%claim.job_id, "step report rejected or unavailable");
         }
 
-        let published = self
-            .publish_retained_result(
-                claim,
-                worker,
-                &outcome.working_file,
-                &outcome.output_spec.extension,
-                outcome.warning,
-            )
-            .await?;
-        if published {
-            return Ok(());
-        }
-        let (_, output_size) =
-            storage::fingerprint(&outcome.working_file, self.config.max_bytes).await?;
-        let body = reqwest::Body::wrap_stream(ReaderStream::new(
-            tokio::fs::File::open(&outcome.working_file).await?,
-        ));
-        let response = self
-            .leased(reqwest::Method::PUT, claim, worker, "result")
-            .header("content-length", output_size)
-            .header("x-remux-warning", outcome.warning.to_string())
-            .header("x-output-ext", &outcome.output_spec.extension)
-            .body(body)
-            .send()
-            .await?;
-        if !response.status().is_success() {
-            return Err(publication_failure(response).await);
-        }
-        Ok(())
+        self.publish_retained_result(
+            claim,
+            worker,
+            &outcome.working_file,
+            &outcome.output_spec.extension,
+            outcome.warning,
+        )
+        .await
     }
     /// Demande au central un billet frais pour la source de cette tâche (bail actif exigé).
     async fn reissue_ticket(

@@ -1763,29 +1763,6 @@ paths:
               schema: {type: string, format: binary}
         '409': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
-  /api/v1/jobs/{id}/result:
-    parameters:
-      - {$ref: '#/components/parameters/JobId'}
-      - {$ref: '#/components/parameters/WorkerId'}
-      - {$ref: '#/components/parameters/LeaseToken'}
-    put:
-      security: [{ApiKey: []}]
-      summary: Téléverser puis valider et publier le résultat atomiquement
-      parameters:
-        - in: header
-          name: x-remux-warning
-          schema: {type: boolean, default: false}
-      requestBody:
-        required: true
-        content:
-          video/x-matroska:
-            schema: {type: string, format: binary}
-      responses:
-        '204': {description: Résultat publié, bail consommé}
-        '400': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
-        '413': {$ref: '#/components/responses/Error'}
-        default: {$ref: '#/components/responses/Error'}
 components:
   securitySchemes:
     ApiKey: {type: http, scheme: bearer, description: "Clé d'API fdf_<id>_<secret> (rôle admin ou worker) ; si Authorization existe elle a priorité sur le cookie, sans repli en cas d'invalidité"}

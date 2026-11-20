@@ -233,7 +233,7 @@ pub fn is_long_running_route(path: &str) -> bool {
     let id = parts.next();
     let action = parts.next();
     id.is_some_and(|segment| !segment.is_empty())
-        && matches!(action, Some("source" | "output" | "result"))
+        && matches!(action, Some("source" | "output"))
         && parts.next().is_none()
 }
 
@@ -588,7 +588,6 @@ fn transfer_routes() -> Router<AppState> {
             "/api/v1/worker/source-publication-inspections/{id}/report",
             post(source_publication::inspection_report),
         )
-        .route("/api/v1/jobs/{id}/result", put(transfers::result))
         .route(
             "/api/v1/files/{name}",
             put(libraries::upload_file).delete(libraries::delete_file),

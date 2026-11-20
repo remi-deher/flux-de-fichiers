@@ -10,7 +10,7 @@ use forgearr_shared::transfer::{
 };
 use std::{sync::Arc, time::Duration};
 
-type Publishing = tokio::task::JoinHandle<AppResult<bool>>;
+type Publishing = tokio::task::JoinHandle<AppResult<()>>;
 
 fn ready_request() -> ResultReady {
     ResultReady {
@@ -98,7 +98,7 @@ async fn the_holder_pulls_the_retained_result_and_no_central_copy_is_kept() -> a
     assert!(access.staged.is_none(), "le central ne tient aucun fichier");
 
     answer(&state, holder, &task, SourcePublicationOutcome::Published).await?;
-    assert!(publishing.await??);
+    publishing.await??;
     let done = repository::get_job(&state.pool, job.id).await?;
     assert_eq!(done.status, JobStatus::Succeeded);
     assert!(
@@ -128,7 +128,7 @@ async fn the_ticket_is_valid_only_at_the_worker_retaining_the_result() -> anyhow
     let elsewhere = repository::redeem_ticket(&state.pool, &ticket.token, holder).await;
     assert!(matches!(elsewhere, Err(AppError::Unauthorized)));
     answer(&state, holder, &task, SourcePublicationOutcome::Published).await?;
-    assert!(publishing.await??);
+    publishing.await??;
     Ok(())
 }
 
@@ -185,21 +185,34 @@ async fn an_unanswered_publication_is_uncertain_and_never_reported_as_a_success(
 }
 
 #[tokio::test]
-async fn other_cases_keep_the_upload_to_the_central() -> anyhow::Result<()> {
+async fn without_a_reachable_holder_the_result_is_refused_and_kept() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let (state, job, lease, holder) = setup(dir.path()).await?;
     retain_result(&state, &job, &lease).await?;
     // Le worker qui traite est lui-même le détenteur : rien à tirer.
     let itself = pulled_destination(&state, &job, holder).await?;
     assert!(itself.is_none());
-    // Dossier de sortie du central : l'envoi au central reste le chemin.
+    // Dossier de sortie du central sans worker intégré actif : refus explicite.
     sqlx::query("UPDATE libraries SET output_policy=?1")
         .bind(LibraryOutputPolicy::OutputDir)
         .execute(&state.pool)
         .await?;
-    assert!(!publish_pulled(&state, &job, &lease, &ready_request()).await?);
-    let released = repository::get_artifact(&state.pool, job.id, ArtifactKind::Result).await?;
-    assert!(released.is_none(), "le fichier retenu n'a plus d'objet");
+    let refused = publish_pulled(&state, &job, &lease, &ready_request()).await;
+    assert!(matches!(refused, Err(AppError::ResultUndeliverable)));
+    let kept = repository::get_artifact(&state.pool, job.id, ArtifactKind::Result).await?;
+    assert!(kept.is_some(), "le résultat reste retenu");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_processor_without_address_is_refused_before_any_journal() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, _) = setup(dir.path()).await?;
+    retain_result(&state, &job, &lease).await?;
+    repository::set_transfer_url(&state.pool, lease.worker_id, None).await?;
+    let refused = publish_pulled(&state, &job, &lease, &ready_request()).await;
+    assert!(matches!(refused, Err(AppError::ResultUndeliverable)));
+    assert!(pending_journal(&state).await?.is_empty());
     Ok(())
 }
 
@@ -318,7 +331,7 @@ async fn the_integrated_worker_applies_the_pulled_result() -> anyhow::Result<()>
     make_source_central_held(&state, &job).await?;
     activate_integrated_worker(&state).await?;
     retain_served_result(&state, &job, &lease, dir.path()).await?;
-    assert!(publish_pulled(&state, &job, &lease, &ready_request()).await?);
+    publish_pulled(&state, &job, &lease, &ready_request()).await?;
     assert_eq!(std::fs::read(dir.path().join("film.mkv"))?, b"nouveau");
     assert_eq!(std::fs::read(dir.path().join("film.mkv.bak"))?, b"original");
     let done = repository::get_job(&state.pool, job.id).await?;
@@ -338,7 +351,7 @@ async fn the_integrated_worker_installs_the_result_in_the_output_dir() -> anyhow
         .await?;
     activate_integrated_worker(&state).await?;
     retain_served_result(&state, &job, &lease, dir.path()).await?;
-    assert!(publish_pulled(&state, &job, &lease, &ready_request()).await?);
+    publish_pulled(&state, &job, &lease, &ready_request()).await?;
     let name = storage::output_file_name(job.id, lease.lease_token, "mkv");
     let output = state.config.data_dir.join("output").join(name);
     assert_eq!(std::fs::read(output)?, b"nouveau");

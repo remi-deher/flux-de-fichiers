@@ -520,29 +520,17 @@ async fn lease_epoch_fences_all_worker_job_routes() -> anyhow::Result<()> {
         assert_eq!(st, StatusCode::CONFLICT, "{uri}");
     }
 
-    for (method, uri, payload) in [
-        (
-            "GET",
-            format!("/api/v1/jobs/{}/source", job.id),
-            Body::empty(),
-        ),
-        (
-            "PUT",
-            format!("/api/v1/jobs/{}/result", job.id),
-            Body::from("out"),
-        ),
-    ] {
-        let req = Request::builder()
-            .method(method)
-            .uri(&uri)
-            .header("authorization", format!("Bearer {}", common::WORKER_KEY))
-            .header("x-worker-id", worker_id.to_string())
-            .header("x-lease-token", claim.lease_token.to_string())
-            .header("x-lease-epoch", stale_epoch.to_string())
-            .body(payload)?;
-        let resp = h.app.clone().oneshot(req).await?;
-        assert_eq!(resp.status(), StatusCode::CONFLICT, "{uri}");
-    }
+    let uri = format!("/api/v1/jobs/{}/source", job.id);
+    let req = Request::builder()
+        .method("GET")
+        .uri(&uri)
+        .header("authorization", format!("Bearer {}", common::WORKER_KEY))
+        .header("x-worker-id", worker_id.to_string())
+        .header("x-lease-token", claim.lease_token.to_string())
+        .header("x-lease-epoch", stale_epoch.to_string())
+        .body(Body::empty())?;
+    let resp = h.app.clone().oneshot(req).await?;
+    assert_eq!(resp.status(), StatusCode::CONFLICT, "{uri}");
 
     Ok(())
 }

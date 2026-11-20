@@ -27,9 +27,9 @@ const PUBLICATION_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 pub(crate) enum ResultSource<'a> {
     /// Fichier tenu par le central (ancien envoi).
     Staged(&'a std::path::Path),
-    /// Fichier retenu par le worker qui l'a produit : le détenteur choisi le tire en direct
-    /// (ADR 0022).
-    Pulled(repository::SourceHolder),
+    /// Fichier retenu par le worker qui l'a produit : le détenteur choisi le tire en direct avec
+    /// ce billet (ADR 0022).
+    Pulled(repository::SourceHolder, SourceTicket),
 }
 
 /// Transmet le résultat à un détenteur inscriptible, sans le déclarer réussi avant sa réponse.
@@ -50,7 +50,7 @@ pub(crate) async fn publish_on_holder(
         return Err(AppError::Invalid);
     }
     let holder = match &source {
-        ResultSource::Pulled(holder) => holder.clone(),
+        ResultSource::Pulled(holder, _) => holder.clone(),
         ResultSource::Staged(_) => {
             repository::writable_source_holders(&s.pool, job.id, Uuid::nil())
                 .await?
@@ -61,17 +61,7 @@ pub(crate) async fn publish_on_holder(
     };
     let result_ticket = match &source {
         ResultSource::Staged(_) => None,
-        ResultSource::Pulled(_) => Some(
-            repository::issue_artifact_ticket(
-                &s.pool,
-                job.id,
-                ArtifactKind::Result,
-                holder.worker_id,
-                lease.lease_epoch,
-            )
-            .await?
-            .ok_or(AppError::CentralUnavailable)?,
-        ),
+        ResultSource::Pulled(_, ticket) => Some(ticket.clone()),
     };
     let task = SourcePublicationTask {
         request_id: Uuid::new_v4(),
@@ -99,7 +89,7 @@ pub(crate) async fn publish_on_holder(
                 )
                 .await?
         }
-        ResultSource::Pulled(_) => {
+        ResultSource::Pulled(..) => {
             broker
                 .request_pulled(task, job.id, lease.clone(), PUBLICATION_TIMEOUT)
                 .await?

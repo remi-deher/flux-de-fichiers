@@ -100,7 +100,10 @@ async fn the_holder_pulls_the_retained_result_and_no_central_copy_is_kept() -> a
     assert!(publishing.await??);
     let done = repository::get_job(&state.pool, job.id).await?;
     assert_eq!(done.status, JobStatus::Succeeded);
-    assert!(done.output_name.is_none(), "le résultat remplacé n'a pas de nom");
+    assert!(
+        done.output_name.is_none(),
+        "le résultat remplacé n'a pas de nom"
+    );
     let artifact = repository::get_artifact(&state.pool, job.id, ArtifactKind::Result).await?;
     assert!(artifact.is_none(), "le résultat n'a plus à être retenu");
     let copies = std::fs::read_dir(state.config.data_dir.join("output"))?.count();
@@ -166,7 +169,10 @@ async fn an_unanswered_publication_is_uncertain_and_never_reported_as_a_success(
     assert_eq!(failed.status, JobStatus::Failed);
     let code = Some(JobErrorCode::SourcePublicationUncertain);
     assert_eq!(failed.error_code, code);
-    assert!(failed.output_name.is_none(), "aucune copie à récupérer au central");
+    assert!(
+        failed.output_name.is_none(),
+        "aucune copie à récupérer au central"
+    );
     let journal: (String, String) = sqlx::query_as(
         "SELECT output_name, output_extension FROM source_publication_journal WHERE job_id=?1",
     )

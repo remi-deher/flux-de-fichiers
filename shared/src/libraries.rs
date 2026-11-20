@@ -87,6 +87,9 @@ pub struct Library {
     pub name: String,
     pub flow_id: Option<String>,
     pub workers: Vec<LibraryWorkerPath>,
+    /// Workers sans accès direct qui traitent les tâches par transfert (ADR 0021).
+    #[serde(default)]
+    pub transfer_workers: Vec<Uuid>,
     #[serde(default)]
     pub scan_interval_minutes: i32,
     #[serde(default)]
@@ -111,6 +114,8 @@ pub struct LibraryWrite {
     pub flow_id: Option<String>,
     #[serde(default)]
     pub workers: Vec<LibraryWorkerPath>,
+    #[serde(default)]
+    pub transfer_workers: Vec<Uuid>,
     #[serde(default)]
     pub scan_interval_minutes: i32,
     #[serde(default)]
@@ -338,6 +343,7 @@ mod tests {
             name: "Films".into(),
             flow_id: None,
             workers: Vec::new(),
+            transfer_workers: Vec::new(),
             scan_interval_minutes: 15,
             last_scanned_at: None,
             include_extensions: vec!["mkv".into(), ".mp4".into()],

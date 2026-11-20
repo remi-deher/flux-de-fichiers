@@ -206,6 +206,8 @@ struct LibraryWriteArgs {
     flow_id: Option<String>,
     #[serde(default)]
     workers: Vec<LibraryWorkerPath>,
+    #[serde(default, alias = "transferWorkers")]
+    transfer_workers: Vec<Uuid>,
     #[serde(default, alias = "scanIntervalMinutes")]
     scan_interval_minutes: i32,
     #[serde(default, alias = "includeExtensions")]
@@ -224,6 +226,7 @@ impl From<LibraryWriteArgs> for LibraryWrite {
             name: value.name,
             flow_id: value.flow_id,
             workers: value.workers,
+            transfer_workers: value.transfer_workers,
             scan_interval_minutes: value.scan_interval_minutes,
             include_extensions: value.include_extensions,
             exclude_patterns: value.exclude_patterns,

@@ -3,6 +3,7 @@ mod flows;
 mod identity;
 mod jobs;
 mod libraries;
+mod library_access;
 pub(crate) mod library_history;
 mod mcp_audit;
 mod password_reset;
@@ -39,7 +40,7 @@ pub use jobs::{
 pub use libraries::{
     delete_library, due_scheduled_libraries, get_library, insert_library,
     library_worker_local_path, library_worker_local_path_for_job, list_libraries,
-    touch_library_scanned, update_library,
+    prepare_transfer_workers, touch_library_scanned, update_library,
 };
 pub use mcp_audit::{
     DEFAULT_AUDIT_LIMIT, MAX_AUDIT_LIMIT, NewMcpAuditEntry, list_mcp_audit, record_mcp_audit,
@@ -55,5 +56,6 @@ pub use plugins::{
 };
 pub use relays::{RelayOutcome, list_relays, relay_job};
 pub use source_tickets::{
-    attach_source_ticket, redeem_ticket, set_transfer_url, valid_transfer_url,
+    SourceHolder, attach_source_ticket, redeem_ticket, set_transfer_url, source_holders,
+    valid_transfer_url,
 };

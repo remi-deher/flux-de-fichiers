@@ -108,6 +108,9 @@ pub struct Worker {
     pub max_concurrency: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<WorkerSchedule>,
+    /// Le worker annonce une adresse de transfert de sources (ADR 0019) : la voie directe est possible.
+    #[serde(default)]
+    pub transfer_enabled: bool,
 }
 
 impl Worker {
@@ -281,6 +284,7 @@ mod tests {
             telemetry: None,
             max_concurrency: 1,
             schedule: None,
+            transfer_enabled: false,
         };
         assert!(worker(10).is_online(now));
         assert!(!worker(WORKER_ONLINE_SECONDS).is_online(now));
@@ -298,6 +302,7 @@ mod tests {
             telemetry: None,
             max_concurrency: 1,
             schedule: None,
+            transfer_enabled: false,
         };
         assert_eq!(worker(0).liveness(now), Liveness::Online);
         assert_eq!(

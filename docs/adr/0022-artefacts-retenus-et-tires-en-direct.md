@@ -1,0 +1,131 @@
+# 0022 — Artefacts retenus et tirés en direct : le central ne transporte aucun octet
+
+Statut : proposé (20 nov. 2026), principe validé par l'utilisateur en session. Remplace le repli par
+le central de l'[ADR 0019](0019-partage-des-sources-entre-workers.md) (point 6) et la remise via le
+central de l'[ADR 0020](0020-blocs-de-transfert-dans-le-flux.md) (points 4 à 6). Précise l'[ADR 0021](0021-modes-d-acces-des-workers-aux-bibliotheques.md).
+
+## Contexte
+
+Le transfert de fichiers entre workers repose aujourd'hui sur quatre mécanismes distincts :
+billet et serveur de transfert (voie directe), courtier de repli par le central, remise avec
+téléversement vers le central (`job_handoffs`), et publication du résultat par le central
+(`PUT /result`, courtier de publication). Chacun a ses états, ses jetons, ses délais et ses pannes.
+L'audit du 20 nov. 2026 y relève, entre autres : un TTL de 600 s qui couvre toute la remise, une
+offre réservée jamais ré-offerte, un staging central sans quota, et du code de jeton dupliqué.
+
+Décision utilisateur : les workers s'échangent les fichiers directement ; le central n'en
+transporte aucun.
+
+## Décision
+
+1. **Plan de données entre workers uniquement.** Le central ne garde que les métadonnées, les baux,
+   les billets et l'orchestration. Disparaissent : le courtier de repli (`source_relay`), le
+   téléversement et le téléchargement de remise, le staging central, `PUT /result` et le courtier de
+   publication.
+2. **Un artefact** est un fichier décrit par un nom, une taille, un SHA-256 et un **détenteur**
+   (le worker qui l'a sur son disque). Il reste chez son détenteur, servi en lecture seule par le
+   serveur de transfert de l'ADR 0019 (`Range`, billet). La même mécanique sert la source, un fichier
+   de travail et un résultat. Le billet désigne un artefact, un détenteur, un preneur et une époque
+   de bail ; sa validation par le central est inchangée.
+3. **Le preneur tire toujours.** Aucun worker n'écrit sur le disque d'un autre. Un worker qui reçoit
+   un artefact le tire chez son détenteur, vérifie taille et SHA-256, puis agit.
+4. **Détenteur de la bibliothèque (`library_holder`).** Le job porte, du début à la fin, le worker
+   qui détient la bibliothèque. C'est la destination du résultat, quel que soit le nombre de
+   workers traversés.
+
+## Cycle d'une tâche transférée
+
+1. A (détenteur de la bibliothèque) détient le fichier, sonde les octets et exécute les premiers
+   blocs du flux (ADR 0020, point 1).
+2. Le bloc de transfert demande une capacité (par exemple H.265). Le central choisit B et remet la
+   tâche en file avec `resume_node_id`, l'artefact d'entrée (A détient) et l'exigence de capacité.
+3. B prend la tâche par le `claim` normal, tire l'artefact chez A avec un billet, le vérifie et
+   exécute le flux à partir de `resume_node_id`.
+4. B retient le résultat comme artefact et annonce au central : nom, taille, SHA-256, avertissements.
+5. A tire le résultat chez B, le vérifie, applique la politique de sortie de la bibliothèque
+   (point commit, ci-dessous), puis informe le central. Le central passe le job en `Succeeded` et B
+   purge son résultat.
+
+Si A est lui-même capable, ou si B monte la même source et la même sortie (ADR 0021), aucun
+transfert n'a lieu.
+
+## Remise entre étapes
+
+Elle devient la même opération, répétable : le worker courant (B) retient son fichier de travail
+comme artefact, la tâche est remise en file avec `resume_node_id`, l'artefact d'entrée et
+l'exigence ; le repreneur (C) la prend par le `claim` normal et tire l'artefact chez B. Le résultat
+final revient toujours à A (point 4). Le détenteur purge l'artefact dès que le repreneur l'a vérifié.
+Conséquences sur le modèle :
+
+- plus de table `job_handoffs`, ni de `claim_handoff`, de jeton de réception ou de `/handoff/ack` :
+  l'état tient dans le job (artefact d'entrée, détenteur, étape de reprise) ;
+- les étapes restent dans `job_steps` : plus de copie `job_handoff_steps` ;
+- les bornes de l'ADR 0020 point 9 restent (nombre maximal de remises, cible différente de l'origine,
+  `no_capable_worker`) ; le refus après opération en place (point 7) aussi.
+
+## Point de commit : l'application de la politique de sortie par A
+
+Ordre imposé chez A : (1) vérifier taille et SHA-256 du résultat tiré ; (2) vérifier que la source
+n'a pas changé (`SourceChanged` sinon, sans rien remplacer) ; (3) appliquer la politique de sortie ;
+(4) informer le central ; (5) le central confirme, B purge.
+
+L'étape 3 est **idempotente** : si l'accusé se perd après le remplacement de l'original, la
+répétition ne retraite pas le fichier. L'état « publication incertaine » existant reste le garde-fou
+quand le résultat du remplacement n'est pas connu.
+
+## Pannes
+
+| Panne | Effet |
+| --- | --- |
+| B tombe avant la fin du flux | Bail expiré, tâche remise en file ; l'original de A est intact. |
+| B tombe avant que A ait tiré le résultat | A n'a rien remplacé ; la tâche repart de l'original (échec borné `transfer_failed` si plus aucune cible). |
+| A tombe avant le point de commit | B conserve le résultat jusqu'à une durée de vie maximale (constante nommée), A le tire à sa reconnexion. |
+| Détenteur d'un fichier de travail disparu (remise B vers C) | Les fichiers retenus survivent au redémarrage (dossier du worker) ; passé la durée bornée, la tâche repart de la source d'origine chez A. |
+| Accusé perdu après remplacement | Répétition idempotente (point commit). |
+
+## Joignabilité
+
+Un worker qui retient un artefact doit annoncer une adresse de transfert (ADR 0019). Sans adresse,
+un worker ne peut traiter que ce qu'il lit et écrit par montage (ADR 0021). La règle d'éligibilité
+d'une cible devient : montage de la source et de la sortie, **ou** adresse joignable. Elle remplace
+le repli par le central.
+
+## Worker intégré
+
+Le worker hébergé par le central est un worker ordinaire dans le même conteneur : enrôlé comme les
+autres, avec son dossier de travail et son propre serveur de transfert. Plus aucune requête SQL ne
+nomme `INTEGRATED_WORKER_NAME` ; ses accès aux bibliothèques du central passent par les modes
+d'accès de l'ADR 0021. Le central ne sert plus de fichier lui-même.
+
+## Corrections de l'audit incluses
+
+Contrôle d'identité du worker sur `redeem` ; permis de transfert pris après validation du billet ;
+billet ré-émissible si le téléchargement démarre tard ; reprise par `Range` côté preneur ; un seul
+module de secret opaque et d'empreinte ; constantes nommées pour tous les délais.
+
+## Hors périmètre
+
+- Traitement en parallèle d'un même média (ADR 0020) : l'artefact en est la brique, rien n'est
+  construit ici.
+- Téléchargement d'une sortie depuis l'interface (`GET /api/v1/jobs/{id}/output`) : la sortie vit
+  chez le détenteur de la bibliothèque ; lien à billet court ou suppression de la route, à trancher.
+- Chiffrement applicatif, compression, limitation de débit.
+
+## Conséquences
+
+- Installation neuve uniquement (ADR 0012) : pas de migration de données ; une migration supprime
+  `job_handoffs`, `job_handoff_steps` et les colonnes devenues inutiles, et ajoute l'artefact d'entrée
+  et le `library_holder` au job.
+- Code supprimé : `source_relay.rs`, `source_publication_broker.rs`, `api/handoffs.rs`
+  (téléversement, téléchargement, accusé, nettoyage), `PUT /result`, cas particuliers du worker
+  intégré. Code réutilisé : serveur de transfert, billets, `save_verified`, politique de sortie.
+- Tests natifs : billet pour un artefact de travail et pour un résultat ; reprise par `Range` ;
+  idempotence du point de commit ; B qui tombe avant et après le tirage ; remise B vers C avec retour
+  chez A ; refus d'un billet d'une autre époque ; worker sans adresse exclu des cibles non montées ;
+  worker intégré sans cas particulier.
+
+## Retour arrière
+
+Aucun code n'est modifié par cet ADR. Tant que l'implémentation n'est pas faite, les ADR 0019 et 0020
+restent la référence ; un retour arrière après implémentation suppose de rétablir le courtier de
+repli et la remise via le central.

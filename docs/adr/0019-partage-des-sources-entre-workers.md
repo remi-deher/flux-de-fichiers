@@ -1,6 +1,7 @@
 # 0019 — Partage des sources entre workers : HTTP direct, repli par le central
 
-Statut : implémenté (19 nov. 2026), transport validé par l'utilisateur (HTTP direct avec repli par le
+Statut : implémenté (19 nov. 2026) ; le repli par le central (point 6) est remplacé par l'[ADR 0022](0022-artefacts-retenus-et-tires-en-direct.md)
+(proposé, 20 nov. 2026). Transport validé par l'utilisateur (HTTP direct avec repli par le
 central ; WebDAV écarté). Complète l'[ADR 0018](0018-relais-de-tache-par-bloc.md), qui relaie une
 tâche vers un autre worker mais ne sait pas encore lui faire parvenir une source locale.
 

@@ -8,7 +8,7 @@ use crate::{
 use forgearr_shared::transfer::{
     ArtifactDeclaration, SourcePublicationOutcome, SourcePublicationReport, SourcePublicationTask,
 };
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 type Publishing = tokio::task::JoinHandle<AppResult<()>>;
 
@@ -246,15 +246,8 @@ async fn make_source_central_held(state: &AppState, job: &Job) -> anyhow::Result
 
 /// Serveur de transfert du worker qui retient le résultat : il valide les billets auprès du central.
 async fn serve_retained_result(state: &AppState, processor: Uuid) -> anyhow::Result<String> {
-    let pool = state.pool.clone();
-    let transfers = TransferState::new(Arc::new(move |token: String| {
-        let pool = pool.clone();
-        Box::pin(async move {
-            repository::redeem_ticket(&pool, &token, processor)
-                .await
-                .map_err(|_| axum::http::StatusCode::FORBIDDEN)
-        })
-    }));
+    let redeemer = crate::local_worker::local_redeemer(state.pool.clone(), processor);
+    let transfers = TransferState::new(redeemer);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?;
     tokio::spawn(async move {
@@ -338,6 +331,16 @@ async fn the_integrated_worker_applies_the_pulled_result() -> anyhow::Result<()>
     assert_eq!(done.status, JobStatus::Succeeded);
     let copies = std::fs::read_dir(state.config.data_dir.join("output"))?.count();
     assert_eq!(copies, 0, "le central ne garde aucune copie");
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_local_redeemer_refuses_an_unknown_ticket() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, _, lease, _) = setup(dir.path()).await?;
+    let redeemer = crate::local_worker::local_redeemer(state.pool.clone(), lease.worker_id);
+    let refused = redeemer("inconnu".to_owned()).await;
+    assert_eq!(refused.err(), Some(axum::http::StatusCode::FORBIDDEN));
     Ok(())
 }
 

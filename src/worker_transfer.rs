@@ -57,6 +57,38 @@ impl TransferState {
     }
 }
 
+/// Lit l'adresse annoncée (`url_var`) et le port d'écoute (`port_var`, sinon le port de l'adresse).
+pub fn transfer_settings(url_var: &str, port_var: &str) -> (Option<String>, Option<u16>) {
+    let url = std::env::var(url_var)
+        .ok()
+        .and_then(|raw| crate::repository::valid_transfer_url(&raw));
+    let port = std::env::var(port_var)
+        .ok()
+        .and_then(|raw| raw.trim().parse().ok())
+        .or_else(|| {
+            url.as_deref()
+                .and_then(|raw| reqwest::Url::parse(raw).ok())
+                .and_then(|parsed| parsed.port())
+        });
+    (url, port)
+}
+
+/// Démarre le serveur de transfert en lecture seule sur `port` (toutes interfaces).
+pub fn spawn_listener(port: u16, state: TransferState) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let address = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+        match tokio::net::TcpListener::bind(address).await {
+            Ok(listener) => {
+                tracing::info!(%address, "serveur de transfert de sources démarré");
+                let _ = axum::serve(listener, transfer_router(state)).await;
+            }
+            Err(error) => {
+                tracing::warn!(%address, error = %error, "serveur de transfert indisponible");
+            }
+        }
+    })
+}
+
 /// Redeemer de production : interroge le central avec la clé du worker.
 pub fn central_redeemer(
     client: reqwest::Client,

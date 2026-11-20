@@ -5,6 +5,7 @@ use crate::{
     job_runner::{self, JobRunError},
     repository, storage,
     worker::timing::{HEARTBEAT_INTERVAL, IDLE_POLL_INTERVAL, SOFTWARE_PROBE_REFRESH},
+    worker_transfer::TransferState,
 };
 use forgearr_shared::transfer::{
     ArtifactKind, SourcePublicationOutcome, SourcePublicationReport, SourcePublicationTask,
@@ -12,6 +13,11 @@ use forgearr_shared::transfer::{
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
+
+/// Variables d'environnement du serveur de transfert du worker intégré : adresse annoncée aux autres
+/// workers et port d'écoute (comme `WORKER_TRANSFER_URL` et `WORKER_TRANSFER_PORT` d'un worker distant).
+const LOCAL_TRANSFER_URL_VAR: &str = "LOCAL_WORKER_TRANSFER_URL";
+const LOCAL_TRANSFER_PORT_VAR: &str = "LOCAL_WORKER_TRANSFER_PORT";
 
 /// Attente d'une demande de publication avant de redemander (le courtier réveille dès qu'une arrive).
 const PUBLICATION_WAIT: Duration = Duration::from_secs(15);
@@ -21,6 +27,37 @@ async fn refresh_software_capabilities(state: &AppState) {
     let probes = crate::software_probe::discover_software_probes(&roots);
     let cache = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
     crate::software_probe::refresh_software_capabilities(&cache, &probes).await;
+}
+
+/// Validation des billets présentés au serveur de transfert du worker intégré : directement auprès
+/// de la base du central, sans appel réseau.
+pub(crate) fn local_redeemer(
+    pool: sqlx::SqlitePool,
+    worker_id: Uuid,
+) -> crate::worker_transfer::Redeemer {
+    std::sync::Arc::new(move |token: String| {
+        let pool = pool.clone();
+        Box::pin(async move {
+            repository::redeem_ticket(&pool, &token, worker_id)
+                .await
+                .map_err(|_| axum::http::StatusCode::FORBIDDEN)
+        })
+    })
+}
+
+/// Annonce l'adresse de transfert du worker intégré et sert ses fichiers retenus, comme un worker
+/// ordinaire ; sans adresse ni port, il n'annonce rien.
+async fn start_transfer_server(state: &AppState, worker_id: Uuid) {
+    let (url, port) =
+        crate::worker_transfer::transfer_settings(LOCAL_TRANSFER_URL_VAR, LOCAL_TRANSFER_PORT_VAR);
+    let announced = url.as_deref().filter(|_| port.is_some());
+    if let Err(error) = repository::set_transfer_url(&state.pool, worker_id, announced).await {
+        tracing::warn!(error = %error, "adresse de transfert du worker intégré non enregistrée");
+    }
+    if let (Some(port), Some(_)) = (port, announced) {
+        let redeemer = local_redeemer(state.pool.clone(), worker_id);
+        crate::worker_transfer::spawn_listener(port, TransferState::new(redeemer));
+    }
 }
 
 pub async fn run(state: AppState) {
@@ -46,6 +83,7 @@ pub async fn run(state: AppState) {
     };
     tracing::info!(worker_id=%worker.id, "local worker registered");
     let _ = state.local_worker_id.set(worker.id);
+    start_transfer_server(&state, worker.id).await;
     tokio::spawn(respond_to_publications(state.clone(), worker.id));
     let refresh_state = state.clone();
     let refresh_worker = worker.id;

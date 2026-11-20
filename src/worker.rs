@@ -88,18 +88,7 @@ pub struct WorkerConfig {
 
 /// Lit `WORKER_TRANSFER_URL` (adresse annoncée) et `WORKER_TRANSFER_PORT` (écoute, sinon le port de l'adresse).
 fn transfer_settings() -> (Option<String>, Option<u16>) {
-    let url = env::var("WORKER_TRANSFER_URL")
-        .ok()
-        .and_then(|raw| crate::repository::valid_transfer_url(&raw));
-    let port = env::var("WORKER_TRANSFER_PORT")
-        .ok()
-        .and_then(|raw| raw.trim().parse().ok())
-        .or_else(|| {
-            url.as_deref()
-                .and_then(|raw| reqwest::Url::parse(raw).ok())
-                .and_then(|parsed| parsed.port())
-        });
-    (url, port)
+    worker_transfer::transfer_settings("WORKER_TRANSFER_URL", "WORKER_TRANSFER_PORT")
 }
 
 impl WorkerConfig {
@@ -792,18 +781,7 @@ impl WorkerLoop {
             self.config.key.clone(),
             worker_id,
         ));
-        Some(tokio::spawn(async move {
-            let address = std::net::SocketAddr::from(([0, 0, 0, 0], port));
-            match tokio::net::TcpListener::bind(address).await {
-                Ok(listener) => {
-                    tracing::info!(%address, "serveur de transfert de sources démarré");
-                    let _ = axum::serve(listener, worker_transfer::transfer_router(state)).await;
-                }
-                Err(error) => {
-                    tracing::warn!(%address, error = %error, "serveur de transfert indisponible");
-                }
-            }
-        }))
+        Some(worker_transfer::spawn_listener(port, state))
     }
 
     /// Enregistre le worker puis réclame des tâches jusqu'à l'arrêt.

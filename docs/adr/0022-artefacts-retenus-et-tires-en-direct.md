@@ -188,7 +188,17 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
      central, montée par lui, ou tenue par un détenteur en ligne qui annonce une adresse de transfert.
      Un relais par artefact s'en passe (il lit le fichier de travail chez son détenteur). Un détenteur
      sans adresse ne sert donc plus personne d'autre que lui.
-5. Worker intégré traité comme un worker ordinaire.
+5. Worker intégré traité comme un worker ordinaire, en pushes courts :
+   - **5a (fait) — serveur de transfert du worker intégré** : `LOCAL_WORKER_TRANSFER_URL` et
+     `LOCAL_WORKER_TRANSFER_PORT` (comme `WORKER_TRANSFER_URL` et `WORKER_TRANSFER_PORT` d'un worker
+     distant) font annoncer son adresse et servir ses fichiers retenus ; les billets sont validés
+     directement dans la base (`local_redeemer`). Sans ces variables il n'annonce rien (comportement
+     inchangé). L'écoute et la lecture des variables sont communes avec le worker distant
+     (`worker_transfer::spawn_listener`, `transfer_settings`).
+   - 5b — le worker intégré retient ses résultats et fichiers de travail (relais, `publish_pulled`
+     en direct) au lieu de `publish_staged` et du refus de relais.
+   - 5c — suppression de `GET /source` et de la lecture `staged`, de `publish_staged`, du courtier
+     de publication et des requêtes SQL qui nomment `INTEGRATED_WORKER_NAME`.
 
 ## Conséquences
 

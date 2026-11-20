@@ -121,7 +121,7 @@ pub async fn attach_source_ticket(
 ) -> AppResult<()> {
     if claim.handoff_input.is_some() {
         // Remise par artefact (ADR 0022) : le billet désigne le fichier de travail chez son
-        // détenteur. Sans artefact (ancienne remise), aucun billet n'est émis.
+        // détenteur, et non la source.
         let ticket = issue_artifact_ticket(
             pool,
             claim.job_id,

@@ -2,7 +2,7 @@
 //! et le repreneur le tire en direct, sans passage par le central.
 
 use forgearr::{
-    domain::{Claim, JobStatus, JobStepEntry, JobStepStatus, LeaseRequest},
+    domain::{Claim, JobErrorCode, JobStatus, JobStepEntry, JobStepStatus, LeaseRequest},
     error::AppError,
     repository::{self, RelayOutcome},
 };
@@ -215,5 +215,30 @@ async fn no_eligible_receiver_fails_the_job_and_releases_the_artifact() -> anyho
     assert_eq!(failed.status, JobStatus::Failed);
     let gone = repository::get_artifact(&pool, job, ArtifactKind::Working).await?;
     assert!(gone.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_finished_job_no_longer_needs_its_retained_file() -> anyhow::Result<()> {
+    let pool = pool().await?;
+    let (job, origin, origin_lease) = origin_with_artifact(&pool, true).await?;
+    let epoch = origin_lease.lease_epoch;
+    let receiver = repository::register(&pool, "repreneur").await?;
+    let request = to_worker(receiver.id);
+    repository::relay_job(&pool, job, &origin_lease, &request, false).await?;
+    let waiting = repository::artifact_retained(&pool, job, origin, epoch).await?;
+    assert!(waiting, "tâche en attente : le fichier reste réclamé");
+    let other_epoch = repository::artifact_retained(&pool, job, origin, epoch + 1).await?;
+    assert!(!other_epoch);
+    let other_worker = repository::artifact_retained(&pool, job, receiver.id, epoch).await?;
+    assert!(!other_worker);
+
+    let claim = repository::claim(&pool, receiver.id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("reprise absente"))?;
+    let taker_lease = lease_of(receiver.id, &claim);
+    repository::fail(&pool, job, &taker_lease, JobErrorCode::TransferFailed).await?;
+    let finished = repository::artifact_retained(&pool, job, origin, epoch).await?;
+    assert!(!finished, "tâche échouée : le détenteur peut purger");
     Ok(())
 }

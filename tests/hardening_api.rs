@@ -347,150 +347,86 @@ async fn an_uncertain_source_publication_exposes_its_retained_result() -> anyhow
 }
 
 #[tokio::test]
-async fn handoff_requires_a_verified_upload_and_the_designated_receiver() -> anyhow::Result<()> {
-    use forgearr::{api_keys::install_known_key, domain::LeaseRequest, storage};
-    use forgearr_shared::{
-        Role,
-        relay::{
-            HandoffAcknowledgement, HandoffArtifact, HandoffBegin, HandoffOffer, RelayRequest,
-            RelayTarget,
-        },
-    };
-    const RECEIVER_KEY: &str = "fdf_c0000001_0123456789abcdef0123456789abcdef0123456789abcdef";
+async fn retention_and_reception_routes_are_scoped_to_the_worker_and_its_lease()
+-> anyhow::Result<()> {
+    use forgearr_shared::transfer::ArtifactDeclaration;
+    use forgearr_shared::transfer::ArtifactKind::Working;
     let h = harness().await?;
-    std::fs::create_dir_all(h._dirs.0.path().join("staging"))?;
-    install_known_key(&h.pool, RECEIVER_KEY, "receiver", Role::Worker).await?;
-    let sender = repository::register(&h.pool, "test-worker").await?;
-    let receiver = repository::register(&h.pool, "receiver").await?;
-    let job = repository::insert_job(&h.pool, "movie.mkv", None, &"ab".repeat(32), 5).await?;
-    let claim = repository::claim(&h.pool, sender.id)
+    let owner =
+        register_worker_with_transfer(&h, "detenteur", "http://detenteur.lan:9000/").await?;
+    let taker = register_worker_with_encoders(&h, "traitant", &[]).await?;
+    install_transfer_keys(&h).await?;
+    repository::insert_job(&h.pool, "film.mkv", None, &"aa".repeat(32), 10).await?;
+    let claim = claim_for(&h, owner)
         .await?
-        .ok_or_else(|| anyhow::anyhow!("bail absent"))?;
-    let lease = LeaseRequest {
-        worker_id: sender.id,
-        lease_token: claim.lease_token,
-        lease_epoch: claim.lease_epoch,
-        telemetry: None,
+        .ok_or_else(|| anyhow::anyhow!("le détenteur doit obtenir la tâche"))?;
+    let decl = ArtifactDeclaration {
+        root: "/work".into(),
+        name: "handoff-file".into(),
+        sha256: "ab".repeat(32),
+        bytes: 7,
     };
-    let source = h._dirs.0.path().join("artifact");
-    std::fs::write(&source, b"working")?;
-    let (sha256, bytes) = storage::fingerprint(&source, 1024).await?;
-    let artifact = HandoffArtifact {
-        name: "working.mkv".into(),
-        sha256,
-        bytes: bytes as i64,
-    };
-    let begin = HandoffBegin {
-        worker_id: sender.id,
-        lease_token: lease.lease_token,
-        lease_epoch: lease.lease_epoch,
-        request: RelayRequest {
-            target: RelayTarget::Worker {
-                worker_id: receiver.id,
-            },
-            resume_node_id: "next".into(),
-        },
-        artifact: artifact.clone(),
-        warning: true,
-    };
-    let uri = format!("/api/v1/jobs/{}/handoff", job.id);
-    let (status, _) = json_call(
-        &h.app,
-        "POST",
-        &uri,
-        Some(common::WORKER_KEY),
-        Some(serde_json::to_value(&begin)?),
-    )
-    .await?;
-    assert_eq!(status, StatusCode::CREATED);
-    let claim_uri = format!("/api/v1/worker/handoffs/claim?worker_id={}", receiver.id);
-    let (status, value) = json_call(&h.app, "POST", &claim_uri, Some(RECEIVER_KEY), None).await?;
-    assert_eq!(status, StatusCode::OK);
-    assert!(value.is_null());
-    let upload = |body: &'static [u8]| {
-        Request::builder()
-            .method("PUT")
-            .uri(&uri)
-            .header("authorization", format!("Bearer {}", common::WORKER_KEY))
-            .header("x-worker-id", sender.id.to_string())
-            .header("x-lease-token", lease.lease_token.to_string())
-            .header("x-lease-epoch", lease.lease_epoch.to_string())
-            .body(Body::from(body))
-    };
-    let bad = h.app.clone().oneshot(upload(b"corrupt")?).await?;
-    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
-    let good = h.app.clone().oneshot(upload(b"working")?).await?;
-    assert_eq!(good.status(), StatusCode::NO_CONTENT);
-    let (status, _) = json_call(&h.app, "POST", &claim_uri, Some(common::WORKER_KEY), None).await?;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, value) = json_call(&h.app, "POST", &claim_uri, Some(RECEIVER_KEY), None).await?;
-    assert_eq!(status, StatusCode::OK);
-    let offer: HandoffOffer = serde_json::from_value(value)?;
-    let retained_uri = format!(
-        "/api/v1/worker/handoffs/{}/{}/retained?worker_id={}",
-        job.id, lease.lease_epoch, receiver.id
-    );
-    let (status, value) = json_call(&h.app, "GET", &retained_uri, Some(RECEIVER_KEY), None).await?;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(value, true);
-    let (status, _) =
-        json_call(&h.app, "GET", &retained_uri, Some(common::WORKER_KEY), None).await?;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let file_uri = format!("{uri}/file?worker_id={}", receiver.id);
-    let file_request = |token: &str| {
-        Request::builder()
-            .uri(&file_uri)
-            .header("authorization", format!("Bearer {RECEIVER_KEY}"))
-            .header("x-handoff-token", token)
-            .body(Body::empty())
-    };
-    assert_eq!(
-        h.app
-            .clone()
-            .oneshot(file_request("wrong")?)
-            .await?
-            .status(),
-        StatusCode::CONFLICT
-    );
-    let file = h
-        .app
-        .clone()
-        .oneshot(file_request(&offer.receipt_token)?)
-        .await?;
-    assert_eq!(file.status(), StatusCode::OK);
-    assert_eq!(
-        to_bytes(file.into_body(), JSON_LIMIT).await?.as_ref(),
-        b"working"
-    );
-    let ack = HandoffAcknowledgement {
-        worker_id: receiver.id,
-        receipt_token: offer.receipt_token,
-        sha256: artifact.sha256,
-        bytes: artifact.bytes,
-    };
-    let (status, _) = json_call(
-        &h.app,
-        "POST",
-        &format!("{uri}/ack"),
-        Some(RECEIVER_KEY),
-        Some(serde_json::to_value(&ack)?),
-    )
-    .await?;
+    let status = declare_artifact_call(&h, &claim, OWNER_KEY, owner, Working, &decl).await?;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    let (status, value) = json_call(
-        &h.app,
-        "GET",
-        &format!(
-            "{uri}?worker_id={}&lease_epoch={}",
-            sender.id, lease.lease_epoch
-        ),
-        Some(common::WORKER_KEY),
-        None,
-    )
-    .await?;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(value, "acknowledged");
+
+    // Seul le détenteur interroge la rétention de son fichier, à l'époque de son bail.
+    let job = claim.job_id;
+    let epoch = claim.lease_epoch;
+    let (st, retained) = retained_call(&h, job, OWNER_KEY, owner, epoch).await?;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(retained, true);
+    let (_, other_epoch) = retained_call(&h, job, OWNER_KEY, owner, epoch + 1).await?;
+    assert_eq!(other_epoch, false);
+    let (st, _) = retained_call(&h, job, TARGET_KEY, owner, epoch).await?;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+
+    // Le relais libère le bail ; le repreneur reçoit le fichier de travail et un billet.
+    let target = serde_json::json!({"mode": "worker", "worker_id": taker});
+    let response = relay_call(&h, &claim, owner, target).await?;
+    assert_eq!(response["relayed"], true);
+    let taken = claim_for(&h, taker)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("la cible doit obtenir la tâche"))?;
+    assert!(taken.handoff_input.is_some());
+    assert!(taken.source_ticket.is_some());
+    let (_, still) = retained_call(&h, job, OWNER_KEY, owner, epoch).await?;
+    assert_eq!(still, true);
+
+    // Seul le repreneur confirme la réception ; la confirmation est répétable.
+    let status = received_call(&h, &taken, OWNER_KEY, taker).await?;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let status = received_call(&h, &taken, TARGET_KEY, taker).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let status = received_call(&h, &taken, TARGET_KEY, taker).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, released) = retained_call(&h, job, OWNER_KEY, owner, epoch).await?;
+    assert_eq!(released, false);
     Ok(())
+}
+
+/// Le central réclame-t-il encore le fichier de travail retenu par ce worker à cette époque ?
+async fn retained_call(
+    h: &Harness,
+    job: Uuid,
+    key: &str,
+    worker: Uuid,
+    epoch: i64,
+) -> anyhow::Result<(StatusCode, serde_json::Value)> {
+    let query = format!("worker_id={worker}&lease_epoch={epoch}");
+    let uri = format!("/api/v1/jobs/{job}/artifacts/working/retained?{query}");
+    json_call(&h.app, "GET", &uri, Some(key), None).await
+}
+
+/// Le repreneur confirme la réception du fichier de travail avec son bail.
+async fn received_call(
+    h: &Harness,
+    claim: &Claim,
+    key: &str,
+    worker: Uuid,
+) -> anyhow::Result<StatusCode> {
+    let uri = format!("/api/v1/jobs/{}/artifacts/working/received", claim.job_id);
+    let request = leased_request("POST", uri, claim, key, worker).body(Body::empty())?;
+    Ok(h.app.clone().oneshot(request).await?.status())
 }
 
 #[tokio::test]

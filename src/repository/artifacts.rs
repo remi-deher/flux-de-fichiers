@@ -2,7 +2,7 @@
 //! octets restent chez le détenteur et sont tirés en direct par le preneur.
 
 use crate::{
-    domain::LeaseRequest,
+    domain::{JobStatus, LeaseRequest},
     error::{AppError, AppResult},
     opaque_token::is_valid_sha256_hex,
 };
@@ -107,17 +107,28 @@ pub async fn get_artifact(
 }
 
 /// Ce worker doit-il encore retenir son fichier de travail pour ce job (artefact déclaré à cette
-/// époque de bail) ? Une fois la réponse `false`, il peut purger sa copie.
+/// époque de bail, tâche encore en attente ou en cours) ? Une fois la réponse `false` (réception
+/// confirmée, tâche terminée ou échouée), il peut purger sa copie.
 pub async fn artifact_retained(
     pool: &SqlitePool,
     job_id: Uuid,
     worker: Uuid,
     lease_epoch: i64,
 ) -> AppResult<bool> {
-    let artifact = get_artifact(pool, job_id, ArtifactKind::Working).await?;
-    Ok(artifact.is_some_and(|artifact| {
-        artifact.holder_worker_id == worker && artifact.lease_epoch == lease_epoch
-    }))
+    let retained: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM job_artifacts a JOIN jobs j ON j.id=a.job_id \
+         WHERE a.job_id=?1 AND a.kind=?2 AND a.holder_worker_id=?3 AND a.lease_epoch=?4 \
+           AND j.status IN (?5, ?6))",
+    )
+    .bind(job_id)
+    .bind(ArtifactKind::Working.as_str())
+    .bind(worker)
+    .bind(lease_epoch)
+    .bind(JobStatus::Queued)
+    .bind(JobStatus::Running)
+    .fetch_one(pool)
+    .await?;
+    Ok(retained)
 }
 
 /// Le repreneur a tiré et vérifié le fichier de travail : l'artefact n'a plus d'objet et son

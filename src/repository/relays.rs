@@ -7,8 +7,7 @@ use crate::{
 use forgearr_shared::{
     capabilities::CapabilityRequirement,
     relay::{
-        HandoffArtifact, HandoffInput, HandoffState, JobRelayInfo, MAX_RELAYS_PER_JOB,
-        RelayRequest, RelayTarget,
+        HandoffArtifact, HandoffInput, JobRelayInfo, MAX_RELAYS_PER_JOB, RelayRequest, RelayTarget,
     },
     transfer::ArtifactKind,
     workers::WORKER_ONLINE_SECONDS,
@@ -151,10 +150,9 @@ pub async fn relay_job(
                 "UPDATE jobs SET status=?5, worker_id=NULL, lease_token=NULL, \
                      lease_epoch=lease_epoch+1, leased_until=NULL, target_worker_id=?6, \
                      attempts=MAX(attempts-1, 0), updated_at=datetime('now'), \
-                     warning=CASE WHEN warning=1 OR ?11=1 THEN 1 ELSE 0 END \
+                     warning=CASE WHEN warning=1 OR ?8=1 THEN 1 ELSE 0 END \
                  WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 \
-                   AND status=?7 AND leased_until > datetime('now') \
-                   AND NOT EXISTS(SELECT 1 FROM job_handoffs WHERE job_id=?1 AND state IN (?8,?9,?10))",
+                   AND status=?7 AND leased_until > datetime('now')",
             )
             .bind(id)
             .bind(lease.worker_id)
@@ -163,9 +161,6 @@ pub async fn relay_job(
             .bind(JobStatus::Queued)
             .bind(pinned)
             .bind(JobStatus::Running)
-            .bind(HandoffState::Pending.as_str())
-            .bind(HandoffState::Claimed.as_str())
-            .bind(HandoffState::Uploading.as_str())
             .bind(warning)
             .execute(&mut *tx)
             .await?
@@ -201,8 +196,7 @@ pub async fn relay_job(
                 "UPDATE jobs SET status=?5, error_code=?6, lease_token=NULL, \
                      lease_epoch=lease_epoch+1, leased_until=NULL, updated_at=datetime('now') \
                  WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 \
-                   AND status=?7 AND leased_until > datetime('now') \
-                   AND NOT EXISTS(SELECT 1 FROM job_handoffs WHERE job_id=?1 AND state IN (?8,?9,?10))",
+                   AND status=?7 AND leased_until > datetime('now')",
             )
             .bind(id)
             .bind(lease.worker_id)
@@ -211,9 +205,6 @@ pub async fn relay_job(
             .bind(JobStatus::Failed)
             .bind(JobErrorCode::NoCapableWorker)
             .bind(JobStatus::Running)
-            .bind(HandoffState::Pending.as_str())
-            .bind(HandoffState::Claimed.as_str())
-            .bind(HandoffState::Uploading.as_str())
             .execute(&mut *tx)
             .await?
             .rows_affected();

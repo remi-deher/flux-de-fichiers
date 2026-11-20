@@ -131,7 +131,9 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
      réception ; le détenteur purge les copies que `GET .../artifacts/working/retained` ne réclame plus.
      Limite transitoire : le worker intégré reçoit mais ne relaie pas encore, faute de serveur de
      transfert (étape 5).
-   - 2b-ii — suppression de `job_handoffs`, de ses routes, de son code central et de ses tests.
+   - **2b-ii (fait) — suppression de l'ancien flux** : table `job_handoffs` (migration 0038), routes
+     `/handoff*` et `/worker/handoffs/*`, code central (téléversement, staging, accusé, nettoyage) et tests
+     associés. `GET .../artifacts/working/retained` ne réclame plus le fichier d'une tâche terminée.
 3. Retour du résultat tiré par le détenteur de la bibliothèque, point de commit idempotent.
 4. Suppression du repli par le central, de `PUT /result` et des routes de remise.
 5. Worker intégré traité comme un worker ordinaire.

@@ -1,7 +1,6 @@
 mod artifacts;
 mod enrollment;
 mod flows;
-mod handoffs;
 mod identity;
 mod jobs;
 mod libraries;
@@ -27,10 +26,6 @@ pub use enrollment::{
 pub use flows::{
     DEFINITION_STORES, DefinitionStore, default_flow, delete_flow, get_flow, get_flow_version,
     list_flow_versions, list_flows, save_flow,
-};
-pub use handoffs::{
-    acknowledge_handoff, begin_handoff, claim_handoff, expire_handoffs, finish_handoff_upload,
-    handoff_download_artifact, handoff_state, handoff_upload_artifact, retained_handoff_needed,
 };
 pub use identity::{
     Account, ApiKeyRecord, INSTANCE_NAME_KEY, account_count, create_account, create_first_account,

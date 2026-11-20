@@ -727,13 +727,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                 (source.source_worker_id == Some(worker)).then_some(source.source_root)
             });
             let resume_node_id = super::relays::resume_node(pool, j.id).await?;
-            let acknowledged =
-                super::handoffs::acknowledged_handoff_input(pool, j.id, worker, j.lease_epoch)
-                    .await?;
-            let handoff_input = match acknowledged {
-                Some(input) => Some(input),
-                None => super::relays::artifact_input(pool, j.id, worker).await?,
-            };
+            let handoff_input = super::relays::artifact_input(pool, j.id, worker).await?;
             Ok(Some(Claim {
                 job_id: j.id,
                 lease_token: j.lease_token.ok_or(AppError::Internal)?,
@@ -801,10 +795,9 @@ pub async fn retry_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
     // Une relance manuelle après perte du repreneur doit repartir de la source :
     // sa copie intermédiaire ne peut plus être considérée comme disponible.
     let had_handoff: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM job_handoffs WHERE job_id=?1 AND state=?2)",
+        "SELECT EXISTS(SELECT 1 FROM job_relays WHERE job_id=?1 AND artifact_relay=1)",
     )
     .bind(id)
-    .bind(forgearr_shared::relay::HandoffState::Acknowledged.as_str())
     .fetch_one(&mut *tx)
     .await?;
     if had_handoff {
@@ -819,6 +812,10 @@ pub async fn retry_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
             .execute(&mut *tx)
             .await?;
         sqlx::query("DELETE FROM job_handoff_steps WHERE job_id=?1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM job_artifacts WHERE job_id=?1")
             .bind(id)
             .execute(&mut *tx)
             .await?;

@@ -128,7 +128,13 @@ async fn a_changed_source_refuses_the_publication_and_keeps_the_result() -> anyh
     let (state, job, lease, holder) = setup(dir.path()).await?;
     retain_result(&state, &job, &lease).await?;
     let (publishing, task) = start_publication(&state, &job, &lease, holder).await?;
-    answer(&state, holder, &task, SourcePublicationOutcome::SourceChanged).await?;
+    answer(
+        &state,
+        holder,
+        &task,
+        SourcePublicationOutcome::SourceChanged,
+    )
+    .await?;
     assert!(matches!(publishing.await?, Err(AppError::SourceChanged)));
     let running = repository::get_job(&state.pool, job.id).await?;
     assert_eq!(running.status, JobStatus::Running);
@@ -177,8 +183,8 @@ async fn other_cases_keep_the_upload_to_the_central() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn a_result_must_be_declared_by_the_lease_holder_with_a_valid_extension()
--> anyhow::Result<()> {
+async fn a_result_must_be_declared_by_the_lease_holder_with_a_valid_extension() -> anyhow::Result<()>
+{
     let dir = tempfile::tempdir()?;
     let (state, job, lease, _) = setup(dir.path()).await?;
     let undeclared = publish_pulled(&state, &job, &lease, &ready_request()).await;

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.63.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.63.0...v0.63.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* respecter la limite des transferts pendant le flux ([d74439b](https://github.com/remi-deher/flux-de-fichiers/commit/d74439bd659a5c4901621f16ff46305e04026f7d))
+
 ## [0.63.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.62.0...v0.63.0) (2026-11-20)
 
 

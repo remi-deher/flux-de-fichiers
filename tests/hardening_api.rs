@@ -1219,8 +1219,7 @@ async fn reissue_ticket_call(
     let response = h.app.clone().oneshot(request).await?;
     let status = response.status();
     let bytes = to_bytes(response.into_body(), JSON_LIMIT).await?;
-    let ticket =
-        serde_json::from_slice::<Option<forgearr_shared::transfer::SourceTicket>>(&bytes);
+    let ticket = serde_json::from_slice::<Option<forgearr_shared::transfer::SourceTicket>>(&bytes);
     Ok((status, ticket.ok().flatten()))
 }
 
@@ -1272,7 +1271,10 @@ async fn a_fresh_ticket_can_be_reissued_with_the_lease_and_replaces_the_previous
         ..claim
     };
     let (st, ticket) = reissue_ticket_call(&h, &stale, TARGET_KEY, target).await?;
-    assert!(st.is_client_error() && ticket.is_none(), "bail inconnu refusé");
+    assert!(
+        st.is_client_error() && ticket.is_none(),
+        "bail inconnu refusé"
+    );
     Ok(())
 }
 
@@ -1295,26 +1297,26 @@ async fn a_relayed_job_gets_a_ticket_that_only_the_source_worker_can_redeem() ->
     assert_eq!(ticket.url, "http://detenteur.lan:9000");
 
     install_transfer_keys(&h).await?;
-    let (st, grant) = redeem_call(&h,OWNER_KEY, owner, &ticket.token).await?;
+    let (st, grant) = redeem_call(&h, OWNER_KEY, owner, &ticket.token).await?;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(grant["root"], "/mnt/owner");
     assert_eq!(grant["source_name"], "film.mkv");
     assert_eq!(grant["bytes"], SOURCE_CONTENT.len());
-    let (st, _) = redeem_call(&h,TARGET_KEY, target, &ticket.token).await?;
+    let (st, _) = redeem_call(&h, TARGET_KEY, target, &ticket.token).await?;
     assert_eq!(
         st,
         StatusCode::UNAUTHORIZED,
         "seul le worker source valide le billet"
     );
-    let (st, _) = redeem_call(&h,OWNER_KEY, owner, "inconnu").await?;
+    let (st, _) = redeem_call(&h, OWNER_KEY, owner, "inconnu").await?;
     assert_eq!(st, StatusCode::UNAUTHORIZED);
-    let (st, _) = redeem_call(&h,TARGET_KEY, owner, &ticket.token).await?;
+    let (st, _) = redeem_call(&h, TARGET_KEY, owner, &ticket.token).await?;
     assert_eq!(
         st,
         StatusCode::FORBIDDEN,
         "le preneur du billet ne peut pas se faire passer pour le worker source"
     );
-    let (st, _) = redeem_call(&h,common::WORKER_KEY, owner, &ticket.token).await?;
+    let (st, _) = redeem_call(&h, common::WORKER_KEY, owner, &ticket.token).await?;
     assert_eq!(
         st,
         StatusCode::FORBIDDEN,

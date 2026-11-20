@@ -4,7 +4,9 @@ use super::{AppState, ManageWorkersAuth, ViewWorkersAuth, client_remote_addr, se
 use crate::{
     config, enrollment,
     error::{AppError, AppResult},
-    instance, opaque_token::is_valid_sha256_hex, repository, web_session, worker_settings,
+    instance,
+    opaque_token::is_valid_sha256_hex,
+    repository, web_session, worker_settings,
 };
 use axum::{
     Extension, Json,

@@ -544,6 +544,14 @@ fn transfer_routes() -> Router<AppState> {
         )
         .route("/api/v1/jobs/{id}/result/ready", post(result_ready::ready))
         .route(
+            "/api/v1/jobs/{id}/result/authorize",
+            post(result_ready::authorize_application),
+        )
+        .route(
+            "/api/v1/jobs/{id}/result/applied",
+            post(result_ready::applied),
+        )
+        .route(
             "/api/v1/worker/source-publications/{id}/ticket",
             post(source_publication::result_ticket),
         )

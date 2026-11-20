@@ -16,6 +16,7 @@ fn ready_request() -> ResultReady {
     ResultReady {
         extension: "mkv".into(),
         warning: false,
+        can_apply_locally: false,
     }
 }
 
@@ -212,7 +213,7 @@ async fn a_result_must_be_declared_by_the_lease_holder_with_a_valid_extension() 
     retain_result(&state, &job, &lease).await?;
     let odd = ResultReady {
         extension: "m/v".into(),
-        warning: false,
+        ..ready_request()
     };
     let invalid = publish_pulled(&state, &job, &lease, &odd).await;
     assert!(matches!(invalid, Err(AppError::Invalid)));
@@ -344,5 +345,96 @@ async fn the_integrated_worker_installs_the_result_in_the_output_dir() -> anyhow
     assert_eq!(std::fs::read(dir.path().join("film.mkv"))?, b"original");
     let done = repository::get_job(&state.pool, job.id).await?;
     assert_eq!(done.status, JobStatus::Succeeded);
+    Ok(())
+}
+
+/// Le détenteur de la source traite lui-même la tâche : il retient son résultat et l'annonce.
+async fn processing_holder(
+    state: &AppState,
+    job: &Job,
+    lease: &LeaseRequest,
+    holder: Uuid,
+) -> anyhow::Result<LeaseRequest> {
+    sqlx::query("UPDATE jobs SET worker_id=?2 WHERE id=?1")
+        .bind(job.id)
+        .bind(holder)
+        .execute(&state.pool)
+        .await?;
+    let own = LeaseRequest {
+        worker_id: holder,
+        ..lease.clone()
+    };
+    retain_result(state, job, &own).await?;
+    Ok(own)
+}
+
+async fn pending_journal(state: &AppState) -> anyhow::Result<Vec<(String, String)>> {
+    let pending = repository::pending_source_publications(&state.pool).await?;
+    let entries = pending
+        .into_iter()
+        .map(|p| (p.output_name, p.output_extension))
+        .collect();
+    Ok(entries)
+}
+
+#[tokio::test]
+async fn a_holding_worker_applies_the_result_itself_and_confirms() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, holder) = setup(dir.path()).await?;
+    let own = processing_holder(&state, &job, &lease, holder).await?;
+    let local = begin_local_application(&state, &job, &own, &ready_request())
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("le détenteur doit appliquer lui-même"))?;
+    assert!(local.policy == LibraryOutputPolicy::ReplaceWithBackup);
+    assert_eq!(local.root, dir.path().to_string_lossy());
+    assert_eq!(pending_journal(&state).await?, [(String::new(), "mkv".to_owned())]);
+
+    let published = SourcePublicationOutcome::Published;
+    finish_local_application(&state, &job, &own, published).await?;
+    let done = repository::get_job(&state.pool, job.id).await?;
+    assert_eq!(done.status, JobStatus::Succeeded);
+    assert!(done.output_name.is_none(), "aucune copie au central");
+    assert!(pending_journal(&state).await?.is_empty());
+    let artifact = repository::get_artifact(&state.pool, job.id, ArtifactKind::Result).await?;
+    assert!(artifact.is_none(), "le résultat n'a plus à être retenu");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_changed_source_or_a_failure_closes_the_local_application() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, holder) = setup(dir.path()).await?;
+    let own = processing_holder(&state, &job, &lease, holder).await?;
+    begin_local_application(&state, &job, &own, &ready_request()).await?;
+    let changed = SourcePublicationOutcome::SourceChanged;
+    let refused = finish_local_application(&state, &job, &own, changed).await;
+    assert!(matches!(refused, Err(AppError::SourceChanged)));
+    assert!(pending_journal(&state).await?.is_empty());
+    let running = repository::get_job(&state.pool, job.id).await?;
+    assert_eq!(running.status, JobStatus::Running);
+
+    begin_local_application(&state, &job, &own, &ready_request()).await?;
+    let failed = SourcePublicationOutcome::Failed;
+    let unknown = finish_local_application(&state, &job, &own, failed).await;
+    assert!(unknown.is_err());
+    let uncertain = repository::get_job(&state.pool, job.id).await?;
+    assert_eq!(uncertain.status, JobStatus::Failed);
+    let code = Some(JobErrorCode::SourcePublicationUncertain);
+    assert_eq!(uncertain.error_code, code);
+    Ok(())
+}
+
+#[tokio::test]
+async fn only_the_holder_applies_locally_after_the_journal() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, _) = setup(dir.path()).await?;
+    retain_result(&state, &job, &lease).await?;
+    // Le worker qui traite ne détient pas la source : un autre détenteur la tire.
+    let elsewhere = begin_local_application(&state, &job, &lease, &ready_request()).await?;
+    assert!(elsewhere.is_none());
+    // Sans inscription au journal, aucune confirmation n'est acceptée.
+    let published = SourcePublicationOutcome::Published;
+    let early = finish_local_application(&state, &job, &lease, published).await;
+    assert!(matches!(early, Err(AppError::Conflict)));
     Ok(())
 }

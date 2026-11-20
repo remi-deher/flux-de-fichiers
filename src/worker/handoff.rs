@@ -232,6 +232,7 @@ impl WorkerLoop {
         let ready = ResultReady {
             extension: extension.to_owned(),
             warning,
+            can_apply_locally: false,
         };
         let announced = self
             .declare_and_announce(claim, worker, &declaration, &ready)

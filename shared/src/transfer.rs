@@ -54,13 +54,27 @@ pub struct ResultReady {
     /// Avertissement accumulé par le flux.
     #[serde(default)]
     pub warning: bool,
+    /// Le worker sait appliquer lui-même la politique de sortie quand il détient la bibliothèque.
+    #[serde(default)]
+    pub can_apply_locally: bool,
+}
+
+/// Remplacement que le worker détenteur de la bibliothèque applique lui-même, sur son montage.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalApplication {
+    pub policy: crate::libraries::LibraryOutputPolicy,
+    /// Racine du montage inscriptible de la source chez ce worker.
+    pub root: String,
 }
 
 /// Réponse du central : `pulled` quand le détenteur de la bibliothèque a tiré et appliqué le
-/// résultat ; sinon le worker doit encore l'envoyer au central.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// résultat ; `apply_locally` quand le worker doit l'appliquer lui-même puis le confirmer
+/// (`POST /api/v1/jobs/{id}/result/applied`) ; sinon il doit encore l'envoyer au central.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResultReadyResponse {
     pub pulled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apply_locally: Option<LocalApplication>,
 }
 
 /// En-tête portant le billet de transfert sur la route de lecture du worker source.

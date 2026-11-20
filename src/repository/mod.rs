@@ -62,8 +62,9 @@ pub use plugins::{
 };
 pub use relays::{RelayOutcome, list_relays, relay_job};
 pub use source_publication_journal::{
-    PendingSourcePublication, begin_source_publication, clear_source_publication,
-    mark_source_publication_uncertain, pending_source_publications, recover_source_publications,
+    PendingSourcePublication, begin_pulled_publication, begin_source_publication,
+    clear_source_publication, mark_source_publication_uncertain, pending_source_publications,
+    recover_source_publications,
 };
 pub use source_tickets::{
     SourceHolder, attach_source_ticket, issue_artifact_ticket, redeem_ticket,

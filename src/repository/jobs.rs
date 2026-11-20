@@ -946,19 +946,20 @@ pub async fn publish_succeeded(
     }
     link_output.await?;
     let succeeded_status = JobStatus::Succeeded;
-    sqlx::query!(
+    // Un nom vide (résultat remplacé chez le détenteur) n'a pas de fichier au central.
+    sqlx::query(
         "UPDATE jobs \
-         SET status=?2, output_name=?3, output_sha256=?4, output_bytes=?5, warning=?6, \
+         SET status=?2, output_name=NULLIF(?3,''), output_sha256=?4, output_bytes=?5, warning=?6, \
              lease_token=NULL, lease_epoch=lease_epoch+1, leased_until=NULL, error_code=NULL, \
              updated_at=datetime('now') \
          WHERE id=?1",
-        id,
-        succeeded_status,
-        output.name,
-        output.sha256,
-        output.bytes,
-        output.warning,
     )
+    .bind(id)
+    .bind(succeeded_status)
+    .bind(output.name)
+    .bind(output.sha256)
+    .bind(output.bytes)
+    .bind(output.warning)
     .execute(&mut *tx)
     .await?;
     sqlx::query("DELETE FROM source_publication_journal WHERE job_id=?1 AND lease_epoch=?2")

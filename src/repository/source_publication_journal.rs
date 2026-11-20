@@ -15,6 +15,13 @@ pub(super) enum PublicationState {
     Uncertain,
 }
 
+impl PendingSourcePublication {
+    /// Le central garde-t-il le fichier de sortie ?
+    pub fn has_central_copy(&self) -> bool {
+        !self.output_name.is_empty()
+    }
+}
+
 impl PublicationState {
     pub(super) const fn as_str(self) -> &'static str {
         match self {
@@ -29,7 +36,9 @@ impl PublicationState {
 pub struct PendingSourcePublication {
     pub job_id: Uuid,
     pub lease_epoch: i64,
+    /// Vide quand le résultat a été tiré et remplacé sans copie au central (ADR 0022).
     pub output_name: String,
+    pub output_extension: String,
     pub output_sha256: String,
     pub output_bytes: i64,
     pub output_warning: bool,
@@ -39,11 +48,11 @@ pub struct PendingSourcePublication {
 pub async fn pending_source_publications(
     pool: &SqlitePool,
 ) -> AppResult<Vec<PendingSourcePublication>> {
-    Ok(sqlx::query_as("SELECT job_id,lease_epoch,output_name,output_sha256,output_bytes,output_warning,output_policy FROM source_publication_journal WHERE state=?1 ORDER BY created_at,job_id")
+    Ok(sqlx::query_as("SELECT job_id,lease_epoch,output_name,output_extension,output_sha256,output_bytes,output_warning,output_policy FROM source_publication_journal WHERE state=?1 ORDER BY created_at,job_id")
         .bind(PublicationState::InProgress.as_str()).fetch_all(pool).await?)
 }
 
-/// Inscrit le résultat préparé uniquement si le bail reste actif.
+/// Inscrit le résultat préparé (copie au central) uniquement si le bail reste actif.
 pub async fn begin_source_publication(
     pool: &SqlitePool,
     job: Uuid,
@@ -51,13 +60,41 @@ pub async fn begin_source_publication(
     output: super::PublishedOutput<'_>,
     policy: LibraryOutputPolicy,
 ) -> AppResult<()> {
+    let extension = std::path::Path::new(output.name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    begin_publication(pool, job, lease, output, extension, policy).await
+}
+
+/// Comme [`begin_source_publication`], pour un résultat tiré par le détenteur : `output.name` est
+/// vide, l'extension est déclarée à part.
+pub async fn begin_pulled_publication(
+    pool: &SqlitePool,
+    job: Uuid,
+    lease: &LeaseRequest,
+    output: super::PublishedOutput<'_>,
+    extension: &str,
+    policy: LibraryOutputPolicy,
+) -> AppResult<()> {
+    begin_publication(pool, job, lease, output, extension, policy).await
+}
+
+async fn begin_publication(
+    pool: &SqlitePool,
+    job: Uuid,
+    lease: &LeaseRequest,
+    output: super::PublishedOutput<'_>,
+    extension: &str,
+    policy: LibraryOutputPolicy,
+) -> AppResult<()> {
     if policy == LibraryOutputPolicy::OutputDir {
         return Err(AppError::Invalid);
     }
-    let rows = sqlx::query("INSERT INTO source_publication_journal(job_id,lease_epoch,output_name,output_sha256,output_bytes,output_warning,output_policy,state) \
-        SELECT id,lease_epoch,?5,?6,?7,?8,?9,?10 FROM jobs WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 AND status=?11 AND leased_until > datetime('now')")
+    let rows = sqlx::query("INSERT INTO source_publication_journal(job_id,lease_epoch,output_name,output_extension,output_sha256,output_bytes,output_warning,output_policy,state) \
+        SELECT id,lease_epoch,?5,?12,?6,?7,?8,?9,?10 FROM jobs WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 AND status=?11 AND leased_until > datetime('now')")
         .bind(job).bind(lease.worker_id).bind(lease.lease_token).bind(lease.lease_epoch).bind(output.name).bind(output.sha256).bind(output.bytes)
-        .bind(output.warning).bind(policy).bind(PublicationState::InProgress.as_str()).bind(JobStatus::Running).execute(pool).await?.rows_affected();
+        .bind(output.warning).bind(policy).bind(PublicationState::InProgress.as_str()).bind(JobStatus::Running).bind(extension).execute(pool).await?.rows_affected();
     if rows != 1 {
         return Err(AppError::Conflict);
     }
@@ -86,7 +123,7 @@ pub async fn mark_source_publication_uncertain(
 ) -> AppResult<Option<JobErrorCode>> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let code: Option<JobErrorCode> = sqlx::query_scalar("UPDATE jobs SET status=?3, error_code=CASE WHEN leased_until <= datetime('now') THEN ?4 ELSE ?5 END, \
-        output_name=(SELECT output_name FROM source_publication_journal WHERE job_id=?1 AND lease_epoch=?2), \
+        output_name=NULLIF((SELECT output_name FROM source_publication_journal WHERE job_id=?1 AND lease_epoch=?2),''), \
         output_sha256=(SELECT output_sha256 FROM source_publication_journal WHERE job_id=?1 AND lease_epoch=?2), \
         output_bytes=(SELECT output_bytes FROM source_publication_journal WHERE job_id=?1 AND lease_epoch=?2), \
         warning=(SELECT output_warning FROM source_publication_journal WHERE job_id=?1 AND lease_epoch=?2), \
@@ -97,7 +134,7 @@ pub async fn mark_source_publication_uncertain(
     // Le balayage des baux peut avoir constaté l'expiration avant ce rapport.
     // Dans ce cas, conserver son code et rattacher le résultat au même epoch expiré.
     sqlx::query("UPDATE jobs SET \
-        output_name=(SELECT output_name FROM source_publication_journal WHERE job_id=?1 AND lease_epoch=?2), \
+        output_name=NULLIF((SELECT output_name FROM source_publication_journal WHERE job_id=?1 AND lease_epoch=?2),''), \
         output_sha256=(SELECT output_sha256 FROM source_publication_journal WHERE job_id=?1 AND lease_epoch=?2), \
         output_bytes=(SELECT output_bytes FROM source_publication_journal WHERE job_id=?1 AND lease_epoch=?2), \
         warning=(SELECT output_warning FROM source_publication_journal WHERE job_id=?1 AND lease_epoch=?2) \
@@ -135,7 +172,7 @@ pub(super) async fn reconcile_expired_publications(
     conn: &mut sqlx::SqliteConnection,
 ) -> AppResult<()> {
     sqlx::query("UPDATE jobs SET \
-        output_name=(SELECT p.output_name FROM source_publication_journal p WHERE p.job_id=jobs.id AND p.lease_epoch+1=jobs.lease_epoch AND p.state=?1), \
+        output_name=NULLIF((SELECT p.output_name FROM source_publication_journal p WHERE p.job_id=jobs.id AND p.lease_epoch+1=jobs.lease_epoch AND p.state=?1),''), \
         output_sha256=(SELECT p.output_sha256 FROM source_publication_journal p WHERE p.job_id=jobs.id AND p.lease_epoch+1=jobs.lease_epoch AND p.state=?1), \
         output_bytes=(SELECT p.output_bytes FROM source_publication_journal p WHERE p.job_id=jobs.id AND p.lease_epoch+1=jobs.lease_epoch AND p.state=?1), \
         warning=(SELECT p.output_warning FROM source_publication_journal p WHERE p.job_id=jobs.id AND p.lease_epoch+1=jobs.lease_epoch AND p.state=?1) \

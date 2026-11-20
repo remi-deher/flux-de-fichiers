@@ -157,7 +157,12 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
      sans bibliothèque, le worker intégré tire le résultat et l'installe dans `output/` sous le nom
      `<tâche>-<bail>.<extension>` (`storage::output_file_name`), sans journal de publication : un échec
      retire le fichier installé. Sans worker intégré actif, l'envoi au central reste le chemin.
-   - 3d — journal et reprise sans copie centrale ; `output_name` vide pour un résultat remplacé.
+   - **3d (fait) — journal et reprise sans copie centrale** : pour un résultat remplacé chez le
+     détenteur, le journal garde l'empreinte, la taille et l'extension (migration 0039,
+     `begin_pulled_publication`) et `output_name` reste vide, de même que celui de la tâche ; la reprise
+     après redémarrage prouve le remplacement avec ces seules données (source du central, ou inspection
+     en lecture seule chez un détenteur distant) sans relire de copie centrale. Le fichier retenu chez le
+     worker qui traite n'est pas encore purgé quand la publication reste incertaine (étape 3e).
    - 3e — suppression de l'envoi `PUT /result`, du staging et des copies centrales ; validation
      post-traitement chez le worker qui traite.
 4. Suppression du repli par le central, de `PUT /result` et des routes de remise.

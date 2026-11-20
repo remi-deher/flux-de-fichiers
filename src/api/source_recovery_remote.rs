@@ -8,7 +8,7 @@ use crate::{
 };
 use forgearr_shared::transfer::{SourcePublicationOutcome, SourcePublicationTask};
 use futures_util::{StreamExt, stream};
-use std::{path::Path, time::Duration};
+use std::time::Duration;
 use uuid::Uuid;
 
 const INSPECTION_TIMEOUT: Duration = Duration::from_secs(15);
@@ -16,41 +16,25 @@ const RETRY_DELAY: Duration = Duration::from_secs(2);
 const MAX_RECOVERY_DURATION: Duration = Duration::from_secs(120);
 const MAX_RECOVERY_CONCURRENCY: usize = 8;
 
-async fn prepared_result_matches(
-    s: &AppState,
-    pending: &repository::PendingSourcePublication,
-) -> AppResult<bool> {
-    let output =
-        storage::input_path(&s.config.data_dir.join("output"), &pending.output_name).await?;
-    Ok(source_recovery::fingerprint_matches(
-        &output,
-        &pending.output_sha256,
-        pending.output_bytes,
-        s.config.max_file_bytes,
-    )
-    .await)
-}
-
 async fn inspect_holders(
     s: &AppState,
     job: &Job,
     lease: &LeaseRequest,
     pending: &repository::PendingSourcePublication,
 ) -> AppResult<bool> {
-    let Some(extension) = Path::new(&pending.output_name)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .filter(|ext| storage::valid_output_extension(ext))
-    else {
+    let extension = pending.output_extension.as_str();
+    if !storage::valid_output_extension(extension) {
         return Ok(false);
-    };
+    }
     let Some(source_sha256) = job.source_sha256.as_ref() else {
         return Ok(false);
     };
     let Some(source_bytes) = job.source_bytes else {
         return Ok(false);
     };
-    let output = s.config.data_dir.join("output").join(&pending.output_name);
+    let output = pending
+        .has_central_copy()
+        .then(|| s.config.data_dir.join("output").join(&pending.output_name));
     for holder in repository::writable_source_holders(&s.pool, job.id, Uuid::nil()).await? {
         let task = SourcePublicationTask {
             request_id: Uuid::new_v4(),
@@ -65,16 +49,20 @@ async fn inspect_holders(
             policy: pending.output_policy,
             result_ticket: None,
         };
-        let result = s
-            .source_inspection
-            .request(
-                task,
-                output.clone(),
-                job.id,
-                lease.clone(),
-                INSPECTION_TIMEOUT,
-            )
-            .await;
+        let (job_id, lease) = (job.id, lease.clone());
+        let inspection = &s.source_inspection;
+        let result = match output.clone() {
+            Some(staged) => {
+                inspection
+                    .request(task, staged, job_id, lease, INSPECTION_TIMEOUT)
+                    .await
+            }
+            None => {
+                inspection
+                    .request_pulled(task, job_id, lease, INSPECTION_TIMEOUT)
+                    .await
+            }
+        };
         if matches!(result, Ok(SourcePublicationOutcome::Published)) {
             let still_authorized =
                 repository::writable_source_holders(&s.pool, job.id, Uuid::nil())
@@ -83,7 +71,7 @@ async fn inspect_holders(
                     .any(|current| {
                         current.worker_id == holder.worker_id && current.root == holder.root
                     });
-            if still_authorized && prepared_result_matches(s, pending).await? {
+            if still_authorized && source_recovery::central_copy_matches(s, pending).await? {
                 return Ok(true);
             }
         }
@@ -101,7 +89,7 @@ async fn try_recover(
     };
     if job.status != JobStatus::Running
         || job.lease_epoch != pending.lease_epoch
-        || !storage::valid_name(&pending.output_name)
+        || (pending.has_central_copy() && !storage::valid_name(&pending.output_name))
     {
         return Ok(false);
     }
@@ -111,7 +99,7 @@ async fn try_recover(
         lease_epoch: pending.lease_epoch,
         telemetry: None,
     };
-    if !prepared_result_matches(s, pending).await? {
+    if !source_recovery::central_copy_matches(s, pending).await? {
         return Ok(false);
     }
     if repository::job_source(&s.pool, job.id)

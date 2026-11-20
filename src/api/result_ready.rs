@@ -32,7 +32,11 @@ async fn pulled_destination(
     processor: Uuid,
 ) -> AppResult<Option<(LibraryOutputPolicy, SourceHolder)>> {
     let policy = match job.library_id {
-        Some(library_id) => repository::get_library(&s.pool, library_id).await?.output_policy,
+        Some(library_id) => {
+            repository::get_library(&s.pool, library_id)
+                .await?
+                .output_policy
+        }
         None => LibraryOutputPolicy::OutputDir,
     };
     if policy == LibraryOutputPolicy::OutputDir {
@@ -91,15 +95,22 @@ pub(crate) async fn publish_pulled(
     };
     let declared = &artifact.declaration;
     let in_output_dir = policy == LibraryOutputPolicy::OutputDir;
-    let output_name = storage::output_file_name(job.id, lease.lease_token, &ready.extension);
+    // Un résultat remplacé chez le détenteur n'a aucun fichier au central : nom vide.
+    let output_name = if in_output_dir {
+        storage::output_file_name(job.id, lease.lease_token, &ready.extension)
+    } else {
+        String::new()
+    };
     let output = PublishedOutput {
-        name: if in_output_dir { &output_name } else { &declared.name },
+        name: &output_name,
         sha256: &declared.sha256,
         bytes: declared.bytes,
         warning: ready.warning,
     };
     if !in_output_dir {
-        repository::begin_source_publication(&s.pool, job.id, lease, output, policy).await?;
+        let extension = ready.extension.as_str();
+        repository::begin_pulled_publication(&s.pool, job.id, lease, output, extension, policy)
+            .await?;
     }
     let published = publish_on_holder(
         s,
@@ -139,7 +150,7 @@ pub(crate) async fn publish_pulled(
     let notified_path = if in_output_dir {
         s.config.data_dir.join("output").join(&output_name)
     } else {
-        std::path::PathBuf::from(&declared.name)
+        std::path::PathBuf::from(&job.source_name)
     };
     let notified = crate::flows::publication::notify_after_publication(
         s,

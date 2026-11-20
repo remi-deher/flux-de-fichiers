@@ -70,6 +70,8 @@ pub(crate) async fn publish_pulled(
         })
         .ok_or(AppError::Invalid)?;
     let Some(policy) = pulled_policy(s, job, lease.worker_id).await? else {
+        // Ce cas garde l'envoi au central : le fichier retenu n'a plus d'objet.
+        repository::release_artifact(&s.pool, job.id, ArtifactKind::Result).await?;
         return Ok(false);
     };
     let declared = &artifact.declaration;

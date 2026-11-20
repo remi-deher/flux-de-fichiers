@@ -52,12 +52,12 @@ pub async fn received(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Le détenteur doit-il encore retenir son fichier de travail ? Il purge sa copie quand la réponse
-/// est `false` (réception confirmée, tâche échouée ou reprise depuis la source).
+/// Le détenteur doit-il encore retenir ce fichier ? Il purge sa copie quand la réponse est `false`
+/// (réception confirmée, résultat publié, tâche terminée, échouée ou reprise depuis la source).
 pub async fn retained(
     State(s): State<AppState>,
     headers: HeaderMap,
-    Path(job): Path<Uuid>,
+    Path((job, kind)): Path<(Uuid, ArtifactKind)>,
     Query(query): Query<RetainedQuery>,
 ) -> AppResult<Json<bool>> {
     let RetainedQuery {
@@ -65,6 +65,6 @@ pub async fn retained(
         lease_epoch,
     } = query;
     crate::auth::authorize_worker_identity(&s.pool, &headers, worker_id).await?;
-    let retained = repository::artifact_retained(&s.pool, job, worker_id, lease_epoch).await?;
-    Ok(Json(retained))
+    let keep = repository::artifact_retained(&s.pool, job, kind, worker_id, lease_epoch).await?;
+    Ok(Json(keep))
 }

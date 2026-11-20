@@ -106,12 +106,13 @@ pub async fn get_artifact(
     }))
 }
 
-/// Ce worker doit-il encore retenir son fichier de travail pour ce job (artefact déclaré à cette
-/// époque de bail, tâche encore en attente ou en cours) ? Une fois la réponse `false` (réception
+/// Ce worker doit-il encore retenir ce fichier (artefact déclaré à cette époque de bail, tâche
+/// encore en attente ou en cours) ? Une fois la réponse `false` (réception
 /// confirmée, tâche terminée ou échouée), il peut purger sa copie.
 pub async fn artifact_retained(
     pool: &SqlitePool,
     job_id: Uuid,
+    kind: ArtifactKind,
     worker: Uuid,
     lease_epoch: i64,
 ) -> AppResult<bool> {
@@ -121,7 +122,7 @@ pub async fn artifact_retained(
            AND j.status IN (?5, ?6))",
     )
     .bind(job_id)
-    .bind(ArtifactKind::Working.as_str())
+    .bind(kind.as_str())
     .bind(worker)
     .bind(lease_epoch)
     .bind(JobStatus::Queued)

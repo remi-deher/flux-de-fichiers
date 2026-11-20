@@ -414,7 +414,7 @@ async fn retained_call(
     epoch: i64,
 ) -> anyhow::Result<(StatusCode, serde_json::Value)> {
     let query = format!("worker_id={worker}&lease_epoch={epoch}");
-    let uri = format!("/api/v1/jobs/{job}/artifacts/working/retained?{query}");
+    let uri = format!("/api/v1/jobs/{job}/retained/working?{query}");
     json_call(&h.app, "GET", &uri, Some(key), None).await
 }
 
@@ -1460,6 +1460,103 @@ async fn the_central_relays_a_worker_held_source_without_storing_it() -> anyhow:
     let (status, body) = download.await??;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_ref(), SOURCE_CONTENT);
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_holder_gets_a_fresh_ticket_to_pull_the_result_from_the_worker_that_retains_it()
+-> anyhow::Result<()> {
+    use forgearr::domain::{LeaseRequest, LibraryOutputPolicy};
+    use forgearr_shared::transfer::{
+        ArtifactDeclaration, ArtifactKind::Result as ResultFile, SourcePublicationOutcome,
+        SourcePublicationReport, SourcePublicationTask, SourceTicket,
+    };
+    use std::time::Duration;
+
+    let h = harness().await?;
+    let holder = register_worker_with_encoders(&h, "test-worker", &[]).await?;
+    let processor =
+        register_worker_with_transfer(&h, "detenteur", "http://detenteur.lan:9000/").await?;
+    install_transfer_keys(&h).await?;
+    let job = repository::insert_job(&h.pool, "film.mkv", None, &"aa".repeat(32), 10).await?;
+    let claim = claim_for(&h, processor)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("bail absent"))?;
+    let decl = ArtifactDeclaration {
+        root: "/work".into(),
+        name: "result-file.mkv".into(),
+        sha256: "bb".repeat(32),
+        bytes: 6,
+    };
+    let status = declare_artifact_call(&h, &claim, OWNER_KEY, processor, ResultFile, &decl).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let task = SourcePublicationTask {
+        request_id: Uuid::new_v4(),
+        worker_id: holder,
+        root: "/media".into(),
+        source_name: "film.mkv".into(),
+        source_sha256: "aa".repeat(32),
+        source_bytes: 10,
+        result_sha256: decl.sha256.clone(),
+        result_bytes: decl.bytes,
+        extension: "mkv".into(),
+        policy: LibraryOutputPolicy::ReplaceWithBackup,
+        result_ticket: None,
+    };
+    let request_id = task.request_id;
+    let lease = LeaseRequest {
+        worker_id: processor,
+        lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
+        telemetry: None,
+    };
+    let broker = h.publication.clone();
+    let waiting = tokio::spawn(async move {
+        broker
+            .request_pulled(task, job.id, lease, Duration::from_secs(5))
+            .await
+    });
+    let ticket_uri =
+        format!("/api/v1/worker/source-publications/{request_id}/ticket?worker_id={holder}");
+
+    // Tant que la demande n'a pas été remise au détenteur, personne n'obtient de billet.
+    let (status, _) = json_call(&h.app, "POST", &ticket_uri, Some(common::WORKER_KEY), None).await?;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let pending =
+        format!("/api/v1/worker/source-publications/pending?worker_id={holder}&wait_ms=3000");
+    let (status, tasks) =
+        json_call(&h.app, "GET", &pending, Some(common::WORKER_KEY), None).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(tasks[0]["request_id"], request_id.to_string());
+
+    // Seul le détenteur désigné, sous la clé de son worker, obtient un billet valable chez le
+    // worker qui retient le résultat.
+    let (status, _) = json_call(&h.app, "POST", &ticket_uri, Some(OWNER_KEY), None).await?;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, body) =
+        json_call(&h.app, "POST", &ticket_uri, Some(common::WORKER_KEY), None).await?;
+    assert_eq!(status, StatusCode::OK);
+    let ticket: SourceTicket = serde_json::from_value(body)?;
+    assert_eq!(ticket.url, "http://detenteur.lan:9000");
+    let (status, grant) = redeem_call(&h, OWNER_KEY, processor, &ticket.token).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(grant["source_name"], "result-file.mkv");
+    let (status, _) = redeem_call(&h, OWNER_KEY, holder, &ticket.token).await?;
+    assert_ne!(status, StatusCode::OK, "le billet n'est pas pour le détenteur");
+
+    // Le détenteur termine : la demande aboutit.
+    let report = SourcePublicationReport {
+        request_id,
+        worker_id: holder,
+        outcome: SourcePublicationOutcome::Published,
+    };
+    let uri = format!("/api/v1/worker/source-publications/{request_id}/report");
+    let body = serde_json::to_value(report)?;
+    let (status, _) =
+        json_call(&h.app, "POST", &uri, Some(common::WORKER_KEY), Some(body)).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let outcome = waiting.await??;
+    assert!(matches!(outcome, SourcePublicationOutcome::Published));
     Ok(())
 }
 

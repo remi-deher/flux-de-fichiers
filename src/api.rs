@@ -535,10 +535,14 @@ fn transfer_routes() -> Router<AppState> {
             post(artifacts::received),
         )
         .route(
-            "/api/v1/jobs/{id}/artifacts/working/retained",
+            "/api/v1/jobs/{id}/retained/{kind}",
             get(artifacts::retained),
         )
         .route("/api/v1/jobs/{id}/result/ready", post(result_ready::ready))
+        .route(
+            "/api/v1/worker/source-publications/{id}/ticket",
+            post(source_publication::result_ticket),
+        )
         .route("/api/v1/worker/transfers/redeem", post(transfers::redeem))
         .route(
             "/api/v1/worker/source-relay/pending",

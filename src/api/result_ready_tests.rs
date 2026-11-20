@@ -177,8 +177,8 @@ async fn other_cases_keep_the_upload_to_the_central() -> anyhow::Result<()> {
         .execute(&state.pool)
         .await?;
     assert!(!publish_pulled(&state, &job, &lease, &ready_request()).await?);
-    let still = repository::get_artifact(&state.pool, job.id, ArtifactKind::Result).await?;
-    assert!(still.is_some());
+    let released = repository::get_artifact(&state.pool, job.id, ArtifactKind::Result).await?;
+    assert!(released.is_none(), "le fichier retenu n'a plus d'objet");
     Ok(())
 }
 

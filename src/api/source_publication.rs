@@ -14,6 +14,7 @@ use axum::{
 };
 use forgearr_shared::transfer::{
     ArtifactKind, SourcePublicationOutcome, SourcePublicationReport, SourcePublicationTask,
+    SourceTicket,
 };
 use serde::Deserialize;
 use std::time::Duration;
@@ -152,6 +153,32 @@ pub async fn staged(
     repository::active(&s.pool, access.job_id, &access.lease).await?;
     let staged = access.staged.ok_or(AppError::NotFound)?;
     super::transfers::stream_file(&staged, None, "application/octet-stream").await
+}
+
+/// Le détenteur redemande un billet pour tirer le résultat chez le worker qui le retient (billet
+/// expiré, lecture à reprendre par `Range`). Réservé au détenteur à qui la demande a été remise.
+pub async fn result_ticket(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(query): Query<HolderQuery>,
+) -> AppResult<Json<Option<SourceTicket>>> {
+    crate::auth::authorize_worker_identity(&s.pool, &headers, query.worker_id).await?;
+    let access = s
+        .source_publication
+        .access_for_worker(id, query.worker_id)
+        .await
+        .ok_or(AppError::NotFound)?;
+    repository::active(&s.pool, access.job_id, &access.lease).await?;
+    let ticket = repository::issue_artifact_ticket(
+        &s.pool,
+        access.job_id,
+        ArtifactKind::Result,
+        query.worker_id,
+        access.lease.lease_epoch,
+    )
+    .await?;
+    Ok(Json(ticket))
 }
 
 /// Vérifie le bail juste avant que le détenteur ne remplace la source.

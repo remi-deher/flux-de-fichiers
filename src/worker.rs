@@ -28,6 +28,7 @@ const REMOTE_BROWSE_HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 const REMOTE_BROWSE_REPORT_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_BROWSE_RETRY_DELAY: Duration = Duration::from_secs(2);
 mod handoff;
+mod result_pull;
 pub(crate) mod timing;
 use timing::{
     CENTRAL_CONNECT_TIMEOUT, CENTRAL_REQUEST_TIMEOUT, HEARTBEAT_INTERVAL, IDLE_POLL_INTERVAL,
@@ -60,6 +61,16 @@ fn publication_error_code(error: &serde_json::Value) -> JobErrorCode {
     } else {
         JobErrorCode::TransferFailed
     }
+}
+
+/// Erreur de tâche déduite de la réponse refusée du central lors de la publication d'un résultat.
+async fn publication_failure(response: reqwest::Response) -> anyhow::Error {
+    let error = response
+        .json::<serde_json::Value>()
+        .await
+        .unwrap_or_default();
+    let code = publication_error_code(&error);
+    JobRunError::simple(code, code.as_str()).into()
 }
 
 #[derive(Clone)]
@@ -373,6 +384,18 @@ impl WorkerLoop {
             tracing::warn!(job_id=%claim.job_id, "step report rejected or unavailable");
         }
 
+        let published = self
+            .publish_retained_result(
+                claim,
+                worker,
+                &outcome.working_file,
+                &outcome.output_spec.extension,
+                outcome.warning,
+            )
+            .await?;
+        if published {
+            return Ok(());
+        }
         let (_, output_size) =
             storage::fingerprint(&outcome.working_file, self.config.max_bytes).await?;
         let body = reqwest::Body::wrap_stream(ReaderStream::new(
@@ -387,12 +410,7 @@ impl WorkerLoop {
             .send()
             .await?;
         if !response.status().is_success() {
-            let error = response
-                .json::<serde_json::Value>()
-                .await
-                .unwrap_or_default();
-            let code = publication_error_code(&error);
-            return Err(JobRunError::simple(code, code.as_str()).into());
+            return Err(publication_failure(response).await);
         }
         Ok(())
     }
@@ -788,25 +806,7 @@ impl WorkerLoop {
                     Err(crate::error::AppError::Invalid)
                 };
             }
-            let response = self
-                .request(
-                    reqwest::Method::GET,
-                    &format!("{prefix}/staged?worker_id={}", task.worker_id),
-                )
-                .send()
-                .await
-                .map_err(|_| crate::error::AppError::CentralUnavailable)?
-                .error_for_status()
-                .map_err(|_| crate::error::AppError::CentralUnavailable)?;
-            worker_transfer::save_verified(
-                response,
-                &file,
-                self.config.max_bytes,
-                &task.result_sha256,
-                task.result_bytes,
-            )
-            .await
-            .map_err(|_| crate::error::AppError::Invalid)?;
+            self.fetch_result(&prefix, &task, &file).await?;
             let source = crate::library_scan::source_path(Path::new(&task.root), &task.source_name)
                 .await
                 .map_err(crate::source_publication::missing_source_is_changed)?;

@@ -1,7 +1,8 @@
-//! Fichier de travail retenu chez le worker qui le produit et tiré en direct par le repreneur
-//! (ADR 0022) : le central ne garde que sa description.
+//! Fichiers retenus chez le worker qui les produit et tirés en direct par un autre worker
+//! (ADR 0022) : fichier de travail d'un relais, résultat d'une tâche. Le central ne garde que leur
+//! description.
 
-use super::{REMOTE_BROWSE_HTTP_TIMEOUT, WorkerLoop};
+use super::{REMOTE_BROWSE_HTTP_TIMEOUT, WorkerLoop, publication_failure};
 use crate::{
     domain::{Claim, JobErrorCode},
     job_runner::JobRunError,
@@ -9,7 +10,9 @@ use crate::{
 };
 use forgearr_shared::{
     relay::{HANDOFF_TTL, HandoffInput, RelayReport, RelayRequest, RelayResponse},
-    transfer::ArtifactDeclaration,
+    transfer::{
+        ArtifactDeclaration, ArtifactKind, FILE_TRANSFER_TIMEOUT, ResultReady, ResultReadyResponse,
+    },
 };
 use std::{
     path::{Path, PathBuf},
@@ -17,33 +20,47 @@ use std::{
 };
 use uuid::Uuid;
 
-const RETAINED_PREFIX: &str = "handoff-";
 /// Actions du protocole de bail pour déclarer le fichier de travail et confirmer sa réception.
 const DECLARE_ACTION: &str = "artifacts/working";
 const RECEIVED_ACTION: &str = "artifacts/working/received";
+/// Action du protocole de bail pour déclarer le résultat retenu, puis l'annoncer au central.
+const DECLARE_RESULT_ACTION: &str = "artifacts/result";
+const RESULT_READY_ACTION: &str = "result/ready";
 
-/// Nom du fichier retenu : `handoff-<tâche>-<époque>` suivi de l'extension du fichier de travail,
-/// que les sondes et les blocs du flux lisent.
-fn retained_handoff_name(job: Uuid, epoch: i64, working_file: &Path) -> String {
-    let base = format!("{RETAINED_PREFIX}{job}-{epoch}");
-    let extension = working_file.extension().and_then(|ext| ext.to_str());
+/// Préfixe du nom d'un fichier retenu, selon sa nature.
+const fn retained_prefix(kind: ArtifactKind) -> &'static str {
+    match kind {
+        ArtifactKind::Working => "handoff-",
+        ArtifactKind::Result => "result-",
+    }
+}
+
+/// Nom du fichier retenu : préfixe de sa nature, `<tâche>-<époque>`, puis l'extension du fichier
+/// d'origine, que les sondes et les blocs du flux lisent.
+fn retained_name(kind: ArtifactKind, job: Uuid, epoch: i64, file: &Path) -> String {
+    let base = format!("{}{job}-{epoch}", retained_prefix(kind));
+    let extension = file.extension().and_then(|ext| ext.to_str());
     match extension.filter(|ext| storage::valid_output_extension(ext)) {
         Some(extension) => format!("{base}.{extension}"),
         None => base,
     }
 }
 
-fn retained_identity(name: &str) -> Option<(Uuid, i64)> {
-    let stem = name.strip_prefix(RETAINED_PREFIX)?.split('.').next()?;
-    let (job, epoch) = stem.rsplit_once('-')?;
-    let epoch = epoch.parse::<i64>().ok()?;
-    (epoch >= 0).then_some((Uuid::parse_str(job).ok()?, epoch))
+fn retained_identity(name: &str) -> Option<(ArtifactKind, Uuid, i64)> {
+    [ArtifactKind::Working, ArtifactKind::Result]
+        .into_iter()
+        .find_map(|kind| {
+            let stem = name.strip_prefix(retained_prefix(kind))?.split('.').next()?;
+            let (job, epoch) = stem.rsplit_once('-')?;
+            let epoch = epoch.parse::<i64>().ok().filter(|epoch| *epoch >= 0)?;
+            Some((kind, Uuid::parse_str(job).ok()?, epoch))
+        })
 }
 
 /// Ne retire une copie ancienne qu'après confirmation de son inutilité par le central.
 async fn prune_retained<F, Fut>(root: &Path, needed: F) -> anyhow::Result<()>
 where
-    F: Fn(Uuid, i64) -> Fut,
+    F: Fn(ArtifactKind, Uuid, i64) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<bool>>,
 {
     prune_retained_older_than(root, HANDOFF_TTL, needed).await
@@ -55,7 +72,7 @@ async fn prune_retained_older_than<F, Fut>(
     needed: F,
 ) -> anyhow::Result<()>
 where
-    F: Fn(Uuid, i64) -> Fut,
+    F: Fn(ArtifactKind, Uuid, i64) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<bool>>,
 {
     let mut entries = match tokio::fs::read_dir(root).await {
@@ -70,7 +87,7 @@ where
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
         };
-        let Some((job, epoch)) = retained_identity(&name) else {
+        let Some((kind, job, epoch)) = retained_identity(&name) else {
             continue;
         };
         let modified = entry.metadata().await?.modified()?;
@@ -81,7 +98,7 @@ where
         {
             continue;
         }
-        if !needed(job, epoch).await? {
+        if !needed(kind, job, epoch).await? {
             match tokio::fs::remove_file(entry.path()).await {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -95,11 +112,11 @@ where
 }
 
 impl WorkerLoop {
-    /// Purge les fichiers de travail que le central ne réclame plus.
+    /// Purge les fichiers retenus que le central ne réclame plus.
     pub(super) async fn prune_handoffs(&self, worker: Uuid) -> anyhow::Result<()> {
-        prune_retained(&self.config.work_dir, |job, epoch| async move {
+        prune_retained(&self.config.work_dir, |kind, job, epoch| async move {
             let query = format!("worker_id={worker}&lease_epoch={epoch}");
-            let path = format!("/api/v1/jobs/{job}/artifacts/working/retained?{query}");
+            let path = format!("/api/v1/jobs/{job}/retained/{}?{query}", kind.as_str());
             Ok(self
                 .request(reqwest::Method::GET, &path)
                 .timeout(REMOTE_BROWSE_HTTP_TIMEOUT)
@@ -125,7 +142,8 @@ impl WorkerLoop {
     ) -> anyhow::Result<()> {
         let working_file = storage::verified_working_path(working_file, work_dir).await?;
         let (sha256, bytes) = storage::fingerprint(&working_file, self.config.max_bytes).await?;
-        let name = retained_handoff_name(claim.job_id, claim.lease_epoch, &working_file);
+        let kind = ArtifactKind::Working;
+        let name = retained_name(kind, claim.job_id, claim.lease_epoch, &working_file);
         let retained: PathBuf = self.config.work_dir.join(&name);
         tokio::fs::hard_link(&working_file, &retained).await?;
         storage::sync_directory(&self.config.work_dir).await?;
@@ -181,6 +199,73 @@ impl WorkerLoop {
         Ok(())
     }
 
+    /// Retient le résultat, le déclare, puis demande au central de le faire tirer par le détenteur de
+    /// la bibliothèque (réponse après son application). `false` : ce cas n'est pas pris en charge,
+    /// le résultat doit encore être envoyé au central.
+    pub(super) async fn publish_retained_result(
+        &self,
+        claim: &Claim,
+        worker: Uuid,
+        result_file: &Path,
+        extension: &str,
+        warning: bool,
+    ) -> anyhow::Result<bool> {
+        // Sans adresse de transfert, personne ne pourrait tirer le résultat chez ce worker.
+        if self.config.transfer_url.is_none() {
+            return Ok(false);
+        }
+        let (sha256, bytes) = storage::fingerprint(result_file, self.config.max_bytes).await?;
+        let kind = ArtifactKind::Result;
+        let name = retained_name(kind, claim.job_id, claim.lease_epoch, result_file);
+        let retained = self.config.work_dir.join(&name);
+        tokio::fs::hard_link(result_file, &retained).await?;
+        storage::sync_directory(&self.config.work_dir).await?;
+        let declaration = ArtifactDeclaration {
+            root: self.config.work_dir.to_string_lossy().into_owned(),
+            name,
+            sha256,
+            bytes: i64::try_from(bytes)?,
+        };
+        let ready = ResultReady {
+            extension: extension.to_owned(),
+            warning,
+        };
+        let announced = self
+            .declare_and_announce(claim, worker, &declaration, &ready)
+            .await;
+        // Publié ou renvoyé au central, le fichier ne sert plus ; en cas d'échec il reste jusqu'à
+        // la purge, seule copie du résultat.
+        if announced.is_ok() {
+            let _ = tokio::fs::remove_file(&retained).await;
+        }
+        announced
+    }
+
+    async fn declare_and_announce(
+        &self,
+        claim: &Claim,
+        worker: Uuid,
+        declaration: &ArtifactDeclaration,
+        ready: &ResultReady,
+    ) -> anyhow::Result<bool> {
+        self.leased(reqwest::Method::PUT, claim, worker, DECLARE_RESULT_ACTION)
+            .timeout(REMOTE_BROWSE_HTTP_TIMEOUT)
+            .json(declaration)
+            .send()
+            .await?
+            .error_for_status()?;
+        let response = self
+            .leased(reqwest::Method::POST, claim, worker, RESULT_READY_ACTION)
+            .timeout(FILE_TRANSFER_TIMEOUT)
+            .json(ready)
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            return Err(publication_failure(response).await);
+        }
+        Ok(response.json::<ResultReadyResponse>().await?.pulled)
+    }
+
     /// Tire le fichier de travail chez son détenteur, le vérifie, puis confirme la réception au
     /// central : le détenteur peut alors purger sa copie.
     pub(super) async fn pull_handoff_input(
@@ -226,39 +311,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn retained_names_are_scoped_to_job_and_lease_and_keep_the_extension() {
+    fn retained_names_are_scoped_to_kind_job_and_lease_and_keep_the_extension() {
         let job = Uuid::nil();
+        let work = ArtifactKind::Working;
         let with_extension = Path::new("out.mkv");
         assert_eq!(
-            retained_handoff_name(job, 7, with_extension),
+            retained_name(work, job, 7, with_extension),
             format!("handoff-{job}-7.mkv")
         );
         assert_eq!(
-            retained_handoff_name(job, 7, Path::new("out")),
+            retained_name(ArtifactKind::Result, job, 7, with_extension),
+            format!("result-{job}-7.mkv")
+        );
+        assert_eq!(
+            retained_name(work, job, 7, Path::new("out")),
             format!("handoff-{job}-7")
         );
         assert_ne!(
-            retained_handoff_name(job, 7, with_extension),
-            retained_handoff_name(job, 8, with_extension)
+            retained_name(work, job, 7, with_extension),
+            retained_name(work, job, 8, with_extension)
         );
         // Une extension qui n'en est pas une n'entre pas dans le nom.
         let odd = Path::new("out.m v");
-        assert_eq!(
-            retained_handoff_name(job, 7, odd),
-            format!("handoff-{job}-7")
-        );
+        assert_eq!(retained_name(work, job, 7, odd), format!("handoff-{job}-7"));
     }
 
     #[test]
-    fn retained_names_give_back_their_job_and_lease() {
+    fn retained_names_give_back_their_kind_job_and_lease() {
         let job = Uuid::nil();
+        let work = ArtifactKind::Working;
         assert_eq!(
             retained_identity(&format!("handoff-{job}-7")),
-            Some((job, 7))
+            Some((work, job, 7))
         );
         assert_eq!(
             retained_identity(&format!("handoff-{job}-7.mkv")),
-            Some((job, 7))
+            Some((work, job, 7))
+        );
+        assert_eq!(
+            retained_identity(&format!("result-{job}-9.mkv")),
+            Some((ArtifactKind::Result, job, 9))
         );
         assert!(retained_identity("handoff-not-a-uuid-7").is_none());
         assert!(retained_identity(&format!("handoff-{job}--1")).is_none());
@@ -268,20 +360,21 @@ mod tests {
     #[tokio::test]
     async fn cleanup_preserves_needed_or_uncertain_files() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
-        let name = retained_handoff_name(Uuid::new_v4(), 1, Path::new("w.mkv"));
+        let kind = ArtifactKind::Result;
+        let name = retained_name(kind, Uuid::new_v4(), 1, Path::new("w.mkv"));
         let retained = dir.path().join(name);
         tokio::fs::write(&retained, b"data").await?;
-        prune_retained_older_than(dir.path(), Duration::ZERO, |_, _| async { Ok(true) }).await?;
+        prune_retained_older_than(dir.path(), Duration::ZERO, |_, _, _| async { Ok(true) }).await?;
         assert!(retained.exists());
         assert!(
-            prune_retained_older_than(dir.path(), Duration::ZERO, |_, _| async {
+            prune_retained_older_than(dir.path(), Duration::ZERO, |_, _, _| async {
                 Err(anyhow::anyhow!("offline"))
             })
             .await
             .is_err()
         );
         assert!(retained.exists());
-        prune_retained_older_than(dir.path(), Duration::ZERO, |_, _| async { Ok(false) }).await?;
+        prune_retained_older_than(dir.path(), Duration::ZERO, |_, _, _| async { Ok(false) }).await?;
         assert!(!retained.exists());
         Ok(())
     }

@@ -226,11 +226,12 @@ async fn a_finished_job_no_longer_needs_its_retained_file() -> anyhow::Result<()
     let receiver = repository::register(&pool, "repreneur").await?;
     let request = to_worker(receiver.id);
     repository::relay_job(&pool, job, &origin_lease, &request, false).await?;
-    let waiting = repository::artifact_retained(&pool, job, origin, epoch).await?;
+    let kind = ArtifactKind::Working;
+    let waiting = repository::artifact_retained(&pool, job, kind, origin, epoch).await?;
     assert!(waiting, "tâche en attente : le fichier reste réclamé");
-    let other_epoch = repository::artifact_retained(&pool, job, origin, epoch + 1).await?;
+    let other_epoch = repository::artifact_retained(&pool, job, kind, origin, epoch + 1).await?;
     assert!(!other_epoch);
-    let other_worker = repository::artifact_retained(&pool, job, receiver.id, epoch).await?;
+    let other_worker = repository::artifact_retained(&pool, job, kind, receiver.id, epoch).await?;
     assert!(!other_worker);
 
     let claim = repository::claim(&pool, receiver.id)
@@ -238,7 +239,7 @@ async fn a_finished_job_no_longer_needs_its_retained_file() -> anyhow::Result<()
         .ok_or_else(|| anyhow::anyhow!("reprise absente"))?;
     let taker_lease = lease_of(receiver.id, &claim);
     repository::fail(&pool, job, &taker_lease, JobErrorCode::TransferFailed).await?;
-    let finished = repository::artifact_retained(&pool, job, origin, epoch).await?;
+    let finished = repository::artifact_retained(&pool, job, kind, origin, epoch).await?;
     assert!(!finished, "tâche échouée : le détenteur peut purger");
     Ok(())
 }

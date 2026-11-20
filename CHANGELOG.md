@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.63.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.62.0...v0.63.0) (2026-11-20)
+
+
+### Features
+
+* retour vérifié du résultat vers la source ([3c46600](https://github.com/remi-deher/flux-de-fichiers/commit/3c466007a0ba5b3a574df146fd6d76896d06ce51))
+
 ## [0.62.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.61.0...v0.62.0) (2026-11-20)
 
 

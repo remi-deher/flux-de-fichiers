@@ -655,6 +655,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
     }
 
     let queued_status = JobStatus::Queued;
+    let online_seconds = forgearr_shared::workers::WORKER_ONLINE_SECONDS.to_string();
     let claimable_sql = format!(
         "SELECT id FROM jobs WHERE status=?1 AND attempts < ?2
          AND (target_worker_id IS NULL OR target_worker_id=?3)
@@ -671,8 +672,10 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                            AND (json_extract(r.requirement_json, '$.acceleration') IS NULL
                                 OR json_extract(r.requirement_json, '$.acceleration')=?5)))
          AND {access}
+         AND ({readable} OR EXISTS (SELECT 1 FROM job_relays r WHERE r.job_id=jobs.id AND r.artifact_relay=1))
          ORDER BY priority DESC, created_at ASC, id ASC LIMIT 1",
         access = super::library_access::job_access_sql("?3", "?4"),
+        readable = super::library_access::source_readable_sql("?3", &online_seconds),
     );
     let next_id: Option<Uuid> = sqlx::query_scalar(&claimable_sql)
         .bind(queued_status)

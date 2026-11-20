@@ -64,8 +64,8 @@ fn decide_placement(
 }
 
 /// Le worker peut-il traiter la tâche (règle de la bibliothèque, ADR 0021) ? Avec `needs_source`, sa
-/// source doit aussi être joignable (central, ou un détenteur en ligne) ; un relais par artefact
-/// lit le fichier de travail chez son détenteur et s'en passe.
+/// source doit aussi être lisible (central, montage propre, ou détenteur en ligne avec adresse de
+/// transfert) ; un relais par artefact lit le fichier de travail chez son détenteur et s'en passe.
 async fn worker_can_process(
     pool: &SqlitePool,
     job: Uuid,
@@ -74,8 +74,8 @@ async fn worker_can_process(
 ) -> AppResult<bool> {
     let access = super::library_access::job_access_sql("?2", "?3");
     let sql = if needs_source {
-        let reachable = super::library_access::source_reachable_sql("?4");
-        format!("SELECT {access} AND {reachable} FROM jobs WHERE id=?1")
+        let readable = super::library_access::source_readable_sql("?2", "?4");
+        format!("SELECT {access} AND {readable} FROM jobs WHERE id=?1")
     } else {
         format!("SELECT {access} FROM jobs WHERE id=?1")
     };

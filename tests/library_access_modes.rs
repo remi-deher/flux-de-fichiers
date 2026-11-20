@@ -97,6 +97,11 @@ async fn only_direct_and_transfer_workers_take_library_jobs() -> anyhow::Result<
         claim_of(&pool, outsider.id).await?.is_none(),
         "aucun accès : jamais attribué"
     );
+    assert!(
+        claim_of(&pool, transfer.id).await?.is_none(),
+        "le détenteur sans adresse de transfert ne sert personne"
+    );
+    repository::set_transfer_url(&pool, direct.id, Some("http://nas.lan:9000")).await?;
     let claim = claim_of(&pool, transfer.id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("le worker par transfert doit obtenir la tâche neuve"))?;
@@ -222,6 +227,7 @@ async fn transfer_workers_take_jobs_of_replace_libraries() -> anyhow::Result<()>
         &[(direct.id, "/mnt/a")],
     )
     .await?;
+    repository::set_transfer_url(&pool, direct.id, Some("http://nas.lan:9000")).await?;
     // Politique changée hors de l'API : l'accès par transfert reste valable.
     sqlx::query("UPDATE libraries SET output_policy='replace_in_place' WHERE id=?1")
         .bind(library.id)

@@ -183,8 +183,11 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
      supprimés. `GET /jobs/{id}/source` ne sert plus que les sources que le central voit lui-même ; une
      source détenue par un autre worker répond `source_unreachable` (502) et se lit chez lui avec un
      billet.
-   - 4b — règle d'éligibilité à la prise d'une tâche (montage de la source, ou détenteur avec adresse de
-     transfert), pour qu'un worker qui ne peut pas lire la source ne la prenne pas.
+   - **4b (fait) — règle d'éligibilité à la prise d'une tâche** : `claim` et le choix de cible d'un
+     relais exigent que la source soit lisible par le worker (`source_readable_sql`) : vue par le
+     central, montée par lui, ou tenue par un détenteur en ligne qui annonce une adresse de transfert.
+     Un relais par artefact s'en passe (il lit le fichier de travail chez son détenteur). Un détenteur
+     sans adresse ne sert donc plus personne d'autre que lui.
 5. Worker intégré traité comme un worker ordinaire.
 
 ## Conséquences

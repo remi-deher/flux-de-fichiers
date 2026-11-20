@@ -1034,8 +1034,8 @@ async fn register_worker_with_transfer(
 }
 
 /// Bibliothèque dont `owner` détient le dossier (accès direct) et que `target` traite par transfert,
-/// puis une tâche de cette bibliothèque relayée de `owner` vers `target`.
-async fn relayed_job_from(
+/// avec une tâche de cette bibliothèque.
+async fn held_job(
     h: &Harness,
     owner: Uuid,
     target: Uuid,
@@ -1079,6 +1079,16 @@ async fn relayed_job_from(
     .bind(owner)
     .execute(&h.pool)
     .await?;
+    Ok(job)
+}
+
+/// Tâche de `held_job` prise par `owner` puis relayée vers `target`.
+async fn relayed_job_from(
+    h: &Harness,
+    owner: Uuid,
+    target: Uuid,
+) -> anyhow::Result<forgearr::domain::Job> {
+    let job = held_job(h, owner, target).await?;
     let claim = claim_for(h, owner)
         .await?
         .ok_or_else(|| anyhow::anyhow!("le détenteur doit obtenir la tâche"))?;
@@ -1379,23 +1389,21 @@ async fn a_relayed_job_gets_a_ticket_that_only_the_source_worker_can_redeem() ->
 }
 
 #[tokio::test]
-async fn a_worker_without_transfer_url_gets_no_ticket_and_an_invalid_url_is_ignored()
--> anyhow::Result<()> {
+async fn a_holder_without_a_valid_transfer_url_leaves_the_task_unclaimed() -> anyhow::Result<()> {
     let h = harness().await?;
     let owner = register_worker_with_transfer(&h, "detenteur", "ftp://nope").await?;
     let target = register_worker_with_encoders(&h, "traitant", &[]).await?;
-    relayed_job_from(&h, owner, target).await?;
-    let claim = claim_for(&h, target)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("la cible doit obtenir la tâche"))?;
-    assert!(claim.source_ticket.is_none(), "adresse invalide");
+    held_job(&h, owner, target).await?;
+    let claim = claim_for(&h, target).await?;
+    assert!(claim.is_none(), "la source ne se lit chez personne");
     Ok(())
 }
 
 #[tokio::test]
 async fn a_worker_held_source_is_not_streamed_by_the_central() -> anyhow::Result<()> {
     let h = harness().await?;
-    let owner = register_worker_with_encoders(&h, "detenteur", &[]).await?;
+    let owner =
+        register_worker_with_transfer(&h, "detenteur", "http://detenteur.lan:9000/").await?;
     let target = register_worker_with_encoders(&h, "traitant", &[]).await?;
     let job = relayed_job_from(&h, owner, target).await?;
     let claim = claim_for(&h, target)

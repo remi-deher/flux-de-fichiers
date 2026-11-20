@@ -252,11 +252,18 @@ fn WorkerTelemetrySection(telemetry: forgearr_shared::workers::WorkerTelemetry) 
 
 /// Libellés des encodeurs matériels déclarés par un worker (ex. « H.265 · NVENC »).
 fn encoder_labels(capabilities: &forgearr_shared::capabilities::WorkerCapabilities) -> Vec<String> {
-    capabilities
+    let hardware = capabilities
         .hardware_encoders
         .iter()
-        .map(|encoder| encoder.label())
-        .collect()
+        .map(|encoder| encoder.label());
+    let software = capabilities.software_encoders.iter().map(|codec| {
+        format!(
+            "{} · {}",
+            codec.label(),
+            forgearr_shared::capabilities::EncodeAcceleration::Cpu.label()
+        )
+    });
+    hardware.chain(software).collect()
 }
 
 /// Rangée d'étiquettes ; rien n'est affiché quand la liste est vide.
@@ -451,11 +458,9 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
         reload.track();
         async move {
             if can_libraries {
-                api::get::<Vec<Library>>(LIBRARIES_PATH)
-                    .await
-                    .unwrap_or_default()
+                api::get::<Vec<Library>>(LIBRARIES_PATH).await
             } else {
-                Vec::new()
+                Ok(Vec::new())
             }
         }
     });
@@ -651,7 +656,9 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
     let grid = move || {
         let text = query();
         let online_filter = presence();
-        let libs = libraries.get().unwrap_or_default();
+        let libraries_result = libraries.get();
+        let libraries_failed = libraries_result.as_ref().is_some_and(Result::is_err);
+        let libs = libraries_result.and_then(Result::ok);
         let jobs_list = jobs.get().unwrap_or_default();
         match workers.get() {
             None => view! {
@@ -716,13 +723,15 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                             } else {
                                 "Nœud distant"
                             };
-                            let mounted_libs =
-                                worker_libraries(&libs, id, worker.is_integrated()).len();
+                            let mounted_libs = libs.as_ref().map(|libraries|
+                                worker_libraries(libraries, id, worker.is_integrated()).len());
                             let active_jobs = active_jobs_for(id, &jobs_list);
                             let libs_label = match mounted_libs {
-                                0 => "0 bibliothèque".to_owned(),
-                                1 => "1 bibliothèque".to_owned(),
-                                count => format!("{count} bibliothèques"),
+                                Some(0) => "0 bibliothèque".to_owned(),
+                                Some(1) => "1 bibliothèque".to_owned(),
+                                Some(count) => format!("{count} bibliothèques"),
+                                None if libraries_failed => "Bibliothèques indisponibles".to_owned(),
+                                None => "Chargement des bibliothèques".to_owned(),
                             };
                             let jobs_label = match active_jobs {
                                 0 => "Inactif".to_owned(),
@@ -781,11 +790,11 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                                         {worker.schedule.as_ref().filter(|s| s.enabled).map(|s| view! {
                                             <Tag label=format!("{:02}h–{:02}h", s.start_hour, s.end_hour) tone=TagTone::Mono />
                                         })}
-                                        <Tag
+                                        {can_libraries.then(|| view! { <Tag
                                             label=libs_label
-                                            tone={if mounted_libs > 0 { TagTone::Success } else { TagTone::Warning }}
+                                            tone={if mounted_libs.is_some_and(|count| count > 0) { TagTone::Success } else { TagTone::Warning }}
                                             icon=Some(IconName::Libraries)
-                                        />
+                                        /> })}
                                         <Tag
                                             label=jobs_label
                                             tone={if active_jobs > 0 { TagTone::Primary } else { TagTone::Neutral }}
@@ -921,8 +930,11 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
             <Drawer open=detail_open eyebrow="Worker" title=title>
                 {move || selected_worker.get().map(|worker| view! {
                     <WorkerDetail worker=worker can_manage=can_manage
-                        libraries=can_libraries.then(|| libraries.get().unwrap_or_default())
+                        libraries=libraries.get().and_then(Result::ok).filter(|_| can_libraries)
                         on_removed=on_removed />
+                })}
+                {move || (can_libraries && libraries.get().is_some_and(|result| result.is_err())).then(|| view! {
+                    <p class="form-help" role="status">"Impossible de charger les bibliothèques de ce worker."</p>
                 })}
             </Drawer>
             <Drawer open=enroll_open eyebrow="Infrastructure" title="Ajouter un worker">
@@ -1129,12 +1141,16 @@ mod tests {
         };
         let capabilities = WorkerCapabilities {
             gpu_models: Vec::new(),
+            software_encoders: vec![VideoCodec::Av1],
             hardware_encoders: vec![HardwareEncoder {
                 codec: VideoCodec::Hevc,
                 acceleration: EncodeAcceleration::Nvenc,
             }],
         };
-        assert_eq!(encoder_labels(&capabilities), ["H.265 · NVENC"]);
+        assert_eq!(
+            encoder_labels(&capabilities),
+            ["H.265 · NVENC", "AV1 · CPU"]
+        );
         assert!(encoder_labels(&WorkerCapabilities::default()).is_empty());
     }
 }

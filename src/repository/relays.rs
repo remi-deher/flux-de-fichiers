@@ -6,7 +6,7 @@ use crate::{
 };
 use forgearr_shared::{
     capabilities::CapabilityRequirement,
-    relay::{JobRelayInfo, MAX_RELAYS_PER_JOB, RelayRequest, RelayTarget},
+    relay::{HandoffState, JobRelayInfo, MAX_RELAYS_PER_JOB, RelayRequest, RelayTarget},
     workers::WORKER_ONLINE_SECONDS,
 };
 use sqlx::SqlitePool;
@@ -25,7 +25,7 @@ pub enum RelayOutcome {
 
 /// Où attend la tâche relayée.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Placement {
+pub(super) enum Placement {
     /// Dans la file d'un worker désigné : elle l'attend, même hors ligne.
     Pinned(Uuid),
     /// Offerte à tout worker satisfaisant l'exigence : le premier qui la réclame la prend.
@@ -78,6 +78,22 @@ async fn worker_can_read_source(pool: &SqlitePool, job: Uuid, worker: Uuid) -> A
     Ok(accessible.unwrap_or(false))
 }
 
+pub(super) async fn choose_placement(
+    pool: &SqlitePool,
+    job: Uuid,
+    from: Uuid,
+    target: &RelayTarget,
+) -> AppResult<Option<Placement>> {
+    let workers = crate::repository::list_workers(pool).await?;
+    let mut with_access = HashSet::new();
+    for worker in workers.iter().filter(|worker| worker.id != from) {
+        if worker_can_read_source(pool, job, worker.id).await? {
+            with_access.insert(worker.id);
+        }
+    }
+    Ok(decide_placement(&workers, from, target, &with_access))
+}
+
 /// Relaie une tâche : décide du placement, libère le bail et remet la tâche en file.
 ///
 /// Sans cible éligible ou au-delà de `MAX_RELAYS_PER_JOB`, la tâche échoue (`no_capable_worker`).
@@ -96,14 +112,7 @@ pub async fn relay_job(
     let placement = if relay_count >= MAX_RELAYS_PER_JOB {
         None
     } else {
-        let workers = crate::repository::list_workers(pool).await?;
-        let mut with_access = HashSet::new();
-        for worker in workers.iter().filter(|worker| worker.id != lease.worker_id) {
-            if worker_can_read_source(pool, id, worker.id).await? {
-                with_access.insert(worker.id);
-            }
-        }
-        decide_placement(&workers, lease.worker_id, &request.target, &with_access)
+        choose_placement(pool, id, lease.worker_id, &request.target).await?
     };
 
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -121,7 +130,8 @@ pub async fn relay_job(
                      lease_epoch=lease_epoch+1, leased_until=NULL, target_worker_id=?6, \
                      attempts=MAX(attempts-1, 0), updated_at=datetime('now') \
                  WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 \
-                   AND status=?7 AND leased_until > datetime('now')",
+                   AND status=?7 AND leased_until > datetime('now') \
+                   AND NOT EXISTS(SELECT 1 FROM job_handoffs WHERE job_id=?1 AND state IN (?8,?9,?10))",
             )
             .bind(id)
             .bind(lease.worker_id)
@@ -130,6 +140,9 @@ pub async fn relay_job(
             .bind(JobStatus::Queued)
             .bind(pinned)
             .bind(JobStatus::Running)
+            .bind(HandoffState::Pending.as_str())
+            .bind(HandoffState::Claimed.as_str())
+            .bind(HandoffState::Uploading.as_str())
             .execute(&mut *tx)
             .await?
             .rows_affected();
@@ -158,7 +171,8 @@ pub async fn relay_job(
                 "UPDATE jobs SET status=?5, error_code=?6, lease_token=NULL, \
                      lease_epoch=lease_epoch+1, leased_until=NULL, updated_at=datetime('now') \
                  WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 \
-                   AND status=?7 AND leased_until > datetime('now')",
+                   AND status=?7 AND leased_until > datetime('now') \
+                   AND NOT EXISTS(SELECT 1 FROM job_handoffs WHERE job_id=?1 AND state IN (?8,?9,?10))",
             )
             .bind(id)
             .bind(lease.worker_id)
@@ -167,6 +181,9 @@ pub async fn relay_job(
             .bind(JobStatus::Failed)
             .bind(JobErrorCode::NoCapableWorker)
             .bind(JobStatus::Running)
+            .bind(HandoffState::Pending.as_str())
+            .bind(HandoffState::Claimed.as_str())
+            .bind(HandoffState::Uploading.as_str())
             .execute(&mut *tx)
             .await?
             .rows_affected();
@@ -231,6 +248,7 @@ mod tests {
     fn worker(name: &str, hevc: bool) -> Worker {
         let capabilities = WorkerCapabilities {
             gpu_models: Vec::new(),
+            software_encoders: Vec::new(),
             hardware_encoders: if hevc {
                 vec![HardwareEncoder {
                     codec: VideoCodec::Hevc,

@@ -62,12 +62,12 @@ pub fn TransferWorkersSection(
                     }).collect_view().into_any()
                 }}
             </ul>
-            {move || route_warning().map(|message| view! {
+            <div role="status">{move || route_warning().map(|message| view! {
                 <p class="form-help library-access-warning">{message}</p>
             })}
             {move || draft.get().transfer_conflicts_with_policy().then(|| view! {
                 <p class="form-help library-access-warning">{POLICY_CONFLICT_HELP}</p>
-            })}
+            })}</div>
         </div>
     }
 }

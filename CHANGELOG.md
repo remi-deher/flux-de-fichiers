@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.61.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.60.0...v0.61.0) (2026-11-20)
+
+
+### Features
+
+* **libraries:** modes d'accès des workers, direct, par transfert, aucun ([f48b7db](https://github.com/remi-deher/flux-de-fichiers/commit/f48b7dbd1f5e350c60f6c1e4be8fb7a7e751bbba))
+
 ## [0.60.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.59.0...v0.60.0) (2026-11-19)
 
 

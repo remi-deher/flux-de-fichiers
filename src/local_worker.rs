@@ -33,15 +33,18 @@ async fn refresh_software_capabilities(state: &AppState) {
 }
 
 /// Validation des billets présentés au serveur de transfert du worker intégré : directement auprès
-/// de la base du central, sans appel réseau.
+/// de la base du central, sans appel réseau. Il sert aussi les dossiers du central, dont le dépôt
+/// d'entrée `input_dir`.
 pub(crate) fn local_redeemer(
     pool: sqlx::SqlitePool,
     worker_id: Uuid,
+    input_dir: std::path::PathBuf,
 ) -> crate::worker_transfer::Redeemer {
     std::sync::Arc::new(move |token: String| {
         let pool = pool.clone();
+        let input_dir = input_dir.clone();
         Box::pin(async move {
-            repository::redeem_ticket(&pool, &token, worker_id)
+            repository::redeem_central_ticket(&pool, &token, worker_id, &input_dir)
                 .await
                 .map_err(|_| axum::http::StatusCode::FORBIDDEN)
         })
@@ -57,8 +60,13 @@ async fn start_transfer_server(state: &AppState, worker_id: Uuid) {
     if let Err(error) = repository::set_transfer_url(&state.pool, worker_id, announced).await {
         tracing::warn!(error = %error, "adresse de transfert du worker intégré non enregistrée");
     }
+    let serves = announced.is_some();
+    if let Err(error) = repository::set_serves_central(&state.pool, worker_id, serves).await {
+        tracing::warn!(error = %error, "rôle de serveur des dossiers du central non enregistré");
+    }
     if let (Some(port), Some(_)) = (port, announced) {
-        let redeemer = local_redeemer(state.pool.clone(), worker_id);
+        let input_dir = state.config.input_dir.clone();
+        let redeemer = local_redeemer(state.pool.clone(), worker_id, input_dir);
         crate::worker_transfer::spawn_listener(port, TransferState::new(redeemer));
     }
 }

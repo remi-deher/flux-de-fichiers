@@ -10,6 +10,7 @@ use forgearr_shared::{
     workers::WORKER_ONLINE_SECONDS,
 };
 use sqlx::SqlitePool;
+use std::path::Path;
 use uuid::Uuid;
 
 /// Adresse de transfert annoncée par un worker, acceptée seulement en `http` ou `https`.
@@ -35,6 +36,20 @@ pub async fn set_transfer_url(
         .bind(transfer_url)
         .execute(pool)
         .await?;
+    Ok(())
+}
+
+/// Désigne (ou non) le worker qui sert les dossiers du central à la place du central : un seul à la
+/// fois porte ce rôle.
+pub async fn set_serves_central(pool: &SqlitePool, worker: Uuid, serves: bool) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE workers SET serves_central=CASE WHEN id=?1 THEN ?2 ELSE 0 END \
+         WHERE id=?1 OR serves_central=1",
+    )
+    .bind(worker)
+    .bind(serves)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -173,11 +188,13 @@ async fn issue_source_ticket(
     job_id: Uuid,
     lease_epoch: i64,
 ) -> AppResult<Option<SourceTicket>> {
-    let Some(source) = super::job_source(pool, job_id).await? else {
-        return Ok(None);
+    let source = super::job_source(pool, job_id).await?;
+    // Source du central (aucun worker propriétaire) : le worker intégré la sert.
+    let Some(source) = source.filter(|source| source.source_worker_id.is_some()) else {
+        return issue_central_ticket(pool, worker, job_id, lease_epoch).await;
     };
-    // Source du central (aucun worker propriétaire) ou déjà montée par ce worker : rien à transférer.
-    if source.source_worker_id.is_none_or(|owner| owner == worker) {
+    // Déjà montée par ce worker : rien à transférer.
+    if source.source_worker_id == Some(worker) {
         return Ok(None);
     }
     let holder = source_holders(pool, job_id, worker)
@@ -193,6 +210,30 @@ async fn issue_source_ticket(
         return Ok(None);
     };
     let ticket = store_ticket(pool, holder, url, job_id, worker, lease_epoch, None).await?;
+    Ok(Some(ticket))
+}
+
+/// Billet pour lire une source du central chez le worker intégré, s'il annonce une adresse ;
+/// `None` sinon, ou si le preneur est ce worker.
+async fn issue_central_ticket(
+    pool: &SqlitePool,
+    taker: Uuid,
+    job_id: Uuid,
+    lease_epoch: i64,
+) -> AppResult<Option<SourceTicket>> {
+    let holder: Option<(Uuid, String)> = sqlx::query_as(
+        "SELECT id, transfer_url FROM workers \
+         WHERE serves_central=1 AND id != ?1 AND transfer_url IS NOT NULL \
+           AND last_seen > datetime('now', '-' || ?2 || ' seconds')",
+    )
+    .bind(taker)
+    .bind(WORKER_ONLINE_SECONDS)
+    .fetch_optional(pool)
+    .await?;
+    let Some((holder, url)) = holder else {
+        return Ok(None);
+    };
+    let ticket = store_ticket(pool, holder, url, job_id, taker, lease_epoch, None).await?;
     Ok(Some(ticket))
 }
 
@@ -303,6 +344,26 @@ pub async fn redeem_ticket(
     token: &str,
     source_worker: Uuid,
 ) -> AppResult<TransferGrant> {
+    redeem(pool, token, source_worker, None).await
+}
+
+/// Variante du worker intégré : il sert aussi les dossiers du central, dont le dépôt d'entrée
+/// `input_dir` pour les tâches sans dossier configuré.
+pub async fn redeem_central_ticket(
+    pool: &SqlitePool,
+    token: &str,
+    source_worker: Uuid,
+    input_dir: &Path,
+) -> AppResult<TransferGrant> {
+    redeem(pool, token, source_worker, Some(input_dir)).await
+}
+
+async fn redeem(
+    pool: &SqlitePool,
+    token: &str,
+    source_worker: Uuid,
+    input_dir: Option<&Path>,
+) -> AppResult<TransferGrant> {
     let row: Option<(Uuid, i64, Option<String>)> = sqlx::query_as(
         "SELECT job_id, lease_epoch, artifact_kind FROM source_tickets \
          WHERE token_hash=?1 AND source_worker_id=?2 AND expires_at > datetime('now')",
@@ -329,30 +390,39 @@ pub async fn redeem_ticket(
             bytes: artifact.declaration.bytes,
         });
     }
-    // Racine chez ce détenteur : son montage vérifié, sinon la racine enregistrée sur la tâche.
-    let mount: Option<String> = sqlx::query_scalar(
-        "SELECT local_path FROM verified_job_source_mounts WHERE job_id=?1 AND worker_id=?2",
-    )
-    .bind(job_id)
-    .bind(source_worker)
-    .fetch_optional(pool)
-    .await?;
-    let root = match mount {
-        Some(root) => root,
-        None => {
-            let source = super::job_source(pool, job_id)
-                .await?
-                .filter(|source| source.source_worker_id == Some(source_worker))
-                .ok_or(AppError::NotFound)?;
-            source.source_root
-        }
-    };
+    let root = source_root(pool, job_id, source_worker, input_dir).await?;
     Ok(TransferGrant {
         root,
         source_name: job.source_name,
         sha256: job.source_sha256.ok_or(AppError::Internal)?,
         bytes: job.source_bytes.ok_or(AppError::Internal)?,
     })
+}
+
+/// Racine de la source chez ce détenteur : son montage vérifié, sinon la racine enregistrée sur la
+/// tâche ; pour le worker intégré (`input_dir` fourni), celle du central.
+async fn source_root(
+    pool: &SqlitePool,
+    job_id: Uuid,
+    worker: Uuid,
+    input_dir: Option<&Path>,
+) -> AppResult<String> {
+    let mount: Option<String> = sqlx::query_scalar(
+        "SELECT local_path FROM verified_job_source_mounts WHERE job_id=?1 AND worker_id=?2",
+    )
+    .bind(job_id)
+    .bind(worker)
+    .fetch_optional(pool)
+    .await?;
+    if let Some(root) = mount {
+        return Ok(root);
+    }
+    match (super::job_source(pool, job_id).await?, input_dir) {
+        (Some(source), _) if source.source_worker_id == Some(worker) => Ok(source.source_root),
+        (Some(source), Some(_)) if source.source_worker_id.is_none() => Ok(source.source_root),
+        (None, Some(dir)) => Ok(dir.to_string_lossy().into_owned()),
+        _ => Err(AppError::NotFound),
+    }
 }
 
 #[cfg(test)]

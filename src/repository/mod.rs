@@ -67,7 +67,7 @@ pub use source_publication_journal::{
     recover_source_publications,
 };
 pub use source_tickets::{
-    SourceHolder, attach_source_ticket, can_serve, issue_artifact_ticket, redeem_ticket,
-    reissue_source_ticket, set_transfer_url, source_holders, valid_transfer_url,
-    writable_source_holders,
+    SourceHolder, attach_source_ticket, can_serve, issue_artifact_ticket, redeem_central_ticket,
+    redeem_ticket, reissue_source_ticket, set_serves_central, set_transfer_url, source_holders,
+    valid_transfer_url, writable_source_holders,
 };

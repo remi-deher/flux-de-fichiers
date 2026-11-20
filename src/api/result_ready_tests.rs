@@ -246,7 +246,8 @@ async fn make_source_central_held(state: &AppState, job: &Job) -> anyhow::Result
 
 /// Serveur de transfert du worker qui retient le résultat : il valide les billets auprès du central.
 async fn serve_retained_result(state: &AppState, processor: Uuid) -> anyhow::Result<String> {
-    let redeemer = crate::local_worker::local_redeemer(state.pool.clone(), processor);
+    let input_dir = state.config.input_dir.clone();
+    let redeemer = crate::local_worker::local_redeemer(state.pool.clone(), processor, input_dir);
     let transfers = TransferState::new(redeemer);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?;
@@ -338,7 +339,9 @@ async fn the_integrated_worker_applies_the_pulled_result() -> anyhow::Result<()>
 async fn the_local_redeemer_refuses_an_unknown_ticket() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let (state, _, lease, _) = setup(dir.path()).await?;
-    let redeemer = crate::local_worker::local_redeemer(state.pool.clone(), lease.worker_id);
+    let input_dir = state.config.input_dir.clone();
+    let pool = state.pool.clone();
+    let redeemer = crate::local_worker::local_redeemer(pool, lease.worker_id, input_dir);
     let refused = redeemer("inconnu".to_owned()).await;
     assert_eq!(refused.err(), Some(axum::http::StatusCode::FORBIDDEN));
     Ok(())

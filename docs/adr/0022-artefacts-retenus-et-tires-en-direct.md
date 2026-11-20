@@ -207,10 +207,17 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
      que la demande). `publish_staged` ne sert plus que les sources que le central voit ; pour une
      source tenue par un autre worker, sans adresse de transfert du worker intégré, il refuse avant tout
      changement (`result_undeliverable`).
-   - 5c-ii — dossiers du central (bibliothèques et dépôt d'entrée) attribués au worker intégré comme
-     montages ordinaires : alors `GET /source`, `publish_staged`, la copie centrale du résultat et les
-     requêtes SQL qui nomment `INTEGRATED_WORKER_NAME` disparaissent. Demande une décision de modèle
-     de données (dossier sans worker = dossier du worker intégré) avant d'être poussée.
+   - **5c-ii-a (fait) — les sources du central se lisent chez le worker intégré** : un worker
+     (le worker intégré quand il annonce une adresse, colonne `workers.serves_central`, migration 0040) sert
+     les dossiers du central ; `claim` lui désigne comme détenteur d'une source du central un billet
+     ordinaire, que son serveur de transfert valide avec la racine du central (dossier de la
+     bibliothèque, ou dépôt d'entrée pour une tâche sans dossier : `redeem_central_ticket`). Sans adresse
+     annoncée, le repli `GET /source` reste.
+   - 5c-ii-b — suppression de `GET /source`, de `publish_staged` et de la copie centrale du résultat :
+     le worker intégré applique lui-même les politiques de sortie du central, et les requêtes SQL qui
+     nomment `INTEGRATED_WORKER_NAME` disparaissent (accès aux dossiers du central par montages
+     ordinaires du worker intégré). Demande une décision de modèle de données (dossier sans worker =
+     dossier du worker intégré) avant d'être poussée.
 
 ## Conséquences
 

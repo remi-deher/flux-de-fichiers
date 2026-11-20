@@ -56,9 +56,7 @@ fn lease_of(worker: Uuid, claim: &Claim) -> LeaseRequest {
 
 fn to_worker(worker: Uuid) -> RelayRequest {
     RelayRequest {
-        target: RelayTarget::Worker {
-            worker_id: worker,
-        },
+        target: RelayTarget::Worker { worker_id: worker },
         resume_node_id: "next".into(),
     }
 }

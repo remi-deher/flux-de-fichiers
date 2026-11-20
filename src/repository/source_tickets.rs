@@ -229,7 +229,10 @@ pub async fn issue_artifact_ticket(
 
 /// Le worker annonce-t-il une adresse de transfert, donc peut-il servir des fichiers ?
 pub(super) async fn can_serve(pool: &SqlitePool, worker: Uuid) -> AppResult<bool> {
-    Ok(matches!(worker_reach(pool, worker).await?, Some((Some(_), _))))
+    Ok(matches!(
+        worker_reach(pool, worker).await?,
+        Some((Some(_), _))
+    ))
 }
 
 /// Adresse de transfert annoncée par un worker et sa présence en ligne ; `None` s'il est inconnu.

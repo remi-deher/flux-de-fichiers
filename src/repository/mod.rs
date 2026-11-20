@@ -15,7 +15,8 @@ mod source_publication_journal;
 mod source_tickets;
 
 pub use artifacts::{
-    JobArtifact, confirm_artifact_received, declare_artifact, get_artifact, release_artifact,
+    JobArtifact, artifact_retained, confirm_artifact_received, declare_artifact, get_artifact,
+    release_artifact,
 };
 pub use enrollment::{
     create_enrollment_request, decide_enrollment_request, enrollment_window_status,

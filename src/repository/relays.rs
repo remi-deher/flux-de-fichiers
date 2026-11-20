@@ -125,7 +125,8 @@ pub async fn relay_job(
     .fetch_one(pool)
     .await?;
     // Un fichier de travail déclaré par ce bail fait un relais par artefact (ADR 0022).
-    let artifact_relay = super::artifacts::holds_working_artifact(pool, id, lease).await?;
+    let epoch = lease.lease_epoch;
+    let artifact_relay = super::artifact_retained(pool, id, lease.worker_id, epoch).await?;
     if artifact_relay && !super::source_tickets::can_serve(pool, lease.worker_id).await? {
         // Sans adresse de transfert, personne ne pourrait tirer le fichier de travail.
         return Err(AppError::Invalid);

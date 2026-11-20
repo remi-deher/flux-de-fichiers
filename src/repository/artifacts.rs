@@ -106,15 +106,17 @@ pub async fn get_artifact(
     }))
 }
 
-/// Ce bail a-t-il déclaré un fichier de travail pour ce job ?
-pub(super) async fn holds_working_artifact(
+/// Ce worker doit-il encore retenir son fichier de travail pour ce job (artefact déclaré à cette
+/// époque de bail) ? Une fois la réponse `false`, il peut purger sa copie.
+pub async fn artifact_retained(
     pool: &SqlitePool,
     job_id: Uuid,
-    lease: &LeaseRequest,
+    worker: Uuid,
+    lease_epoch: i64,
 ) -> AppResult<bool> {
     let artifact = get_artifact(pool, job_id, ArtifactKind::Working).await?;
     Ok(artifact.is_some_and(|artifact| {
-        artifact.holder_worker_id == lease.worker_id && artifact.lease_epoch == lease.lease_epoch
+        artifact.holder_worker_id == worker && artifact.lease_epoch == lease_epoch
     }))
 }
 

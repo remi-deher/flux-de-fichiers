@@ -29,7 +29,6 @@ const REMOTE_BROWSE_REPORT_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_BROWSE_RETRY_DELAY: Duration = Duration::from_secs(2);
 mod handoff;
 pub(crate) mod timing;
-pub(crate) use handoff::{prune_retained, retained_handoff_path};
 use timing::{
     CENTRAL_CONNECT_TIMEOUT, CENTRAL_REQUEST_TIMEOUT, HEARTBEAT_INTERVAL, IDLE_POLL_INTERVAL,
     PROGRESS_REPORT_TIMEOUT, REGISTRATION_RETRY_DELAY, REREGISTRATION_EVERY_IDLE_POLLS,
@@ -322,21 +321,9 @@ impl WorkerLoop {
             claim.working_source_name(),
         ));
         if let Some(handoff) = &claim.handoff_input {
-            let retained = retained_handoff_path(
-                &self.config.work_dir,
-                claim.job_id,
-                handoff.source_lease_epoch,
-            );
-            crate::local_worker::copy_verified_source(
-                &retained,
-                &input,
-                self.config.max_bytes,
-                &handoff.artifact.sha256,
-                handoff.artifact.bytes,
-            )
-            .await
-            .map_err(|_| JobRunError::simple(JobErrorCode::SourceIntegrity, "handoff_integrity"))?;
-            tokio::fs::remove_file(retained).await?;
+            // Remise par artefact (ADR 0022) : le fichier de travail se tire chez son détenteur.
+            self.pull_handoff_input(claim, worker, handoff, &input)
+                .await?;
         } else if let Some(root) = claim.local_source_root.as_deref() {
             let source = crate::library_scan::source_path(Path::new(root), &claim.source_name)
                 .await
@@ -1010,9 +997,6 @@ impl WorkerLoop {
                 };
                 idle_polls = idle_polls.wrapping_add(1);
                 while (active.len() as i32) < max_concurrency {
-                    if let Err(error) = runner.receive_handoff(worker.id).await {
-                        tracing::warn!(error=%error, "handoff reception failed");
-                    }
                     let attempt = async {
                         let claim = runner
                             .request(reqwest::Method::POST, "/api/v1/claims")

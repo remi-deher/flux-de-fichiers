@@ -125,8 +125,13 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
      la source) ; le `claim` du repreneur porte le fichier de travail et un billet d'artefact ;
      `POST /api/v1/jobs/{id}/artifacts/working/received` libère l'artefact ; sans artefact, une reprise
      repart de la source. L'ancien flux `job_handoffs` reste en place.
-   - 2b — côté worker : le worker distant et le worker intégré passent au nouveau flux, suppression de
-     `job_handoffs` et de ses routes.
+   - **2b-i (fait) — côté worker** : le worker distant retient son fichier de travail (nom
+     `handoff-<tâche>-<époque>` avec l'extension d'origine), le déclare, relaie la tâche et libère son
+     bail ; le repreneur (worker distant ou intégré) le tire en direct, le vérifie et confirme la
+     réception ; le détenteur purge les copies que `GET .../artifacts/working/retained` ne réclame plus.
+     Limite transitoire : le worker intégré reçoit mais ne relaie pas encore, faute de serveur de
+     transfert (étape 5).
+   - 2b-ii — suppression de `job_handoffs`, de ses routes, de son code central et de ses tests.
 3. Retour du résultat tiré par le détenteur de la bibliothèque, point de commit idempotent.
 4. Suppression du repli par le central, de `PUT /result` et des routes de remise.
 5. Worker intégré traité comme un worker ordinaire.

@@ -163,8 +163,15 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
      après redémarrage prouve le remplacement avec ces seules données (source du central, ou inspection
      en lecture seule chez un détenteur distant) sans relire de copie centrale. Le fichier retenu chez le
      worker qui traite n'est pas encore purgé quand la publication reste incertaine (étape 3e).
-   - 3e — suppression de l'envoi `PUT /result`, du staging et des copies centrales ; validation
-     post-traitement chez le worker qui traite.
+   - **3e-i et 3e-ii (faits) — le détenteur qui traite applique lui-même** : quand le worker qui
+     traite détient, sur son montage, la source d'une bibliothèque à politique de remplacement que le
+     central ne voit pas, `result/ready` (avec `can_apply_locally`) inscrit le remplacement au journal et
+     répond `apply_locally` ; le worker remplace la source (`result/authorize` juste avant, puis
+     `result/applied` avec l'issue) et le central conclut. Rien ne transite par le central.
+   - 3e-iii — suppression de l'envoi `PUT /result`, du staging des envois et du repli de lecture
+     `staged` ; erreur explicite quand aucun détenteur n'est joignable (worker intégré désactivé, worker
+     sans adresse de transfert). Le worker intégré qui traite garde `publish_staged` jusqu'à l'étape 5.
+     La validation post-traitement se fait déjà chez le worker qui traite (`binary_runner`).
 4. Suppression du repli par le central, de `PUT /result` et des routes de remise.
 5. Worker intégré traité comme un worker ordinaire.
 

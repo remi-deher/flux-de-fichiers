@@ -1,11 +1,7 @@
 //! Publication d'un résultat retenu chez le worker qui l'a produit (ADR 0022) : le détenteur de la
 //! bibliothèque le tire en direct, le central n'en tient aucune copie.
 
-use super::{
-    AppState,
-    source_publication::publish_on_holder,
-    transfers,
-};
+use super::{AppState, source_publication::publish_on_holder, transfers};
 use crate::{
     domain::{Job, JobEventType, JobStatus, LeaseRequest, LibraryOutputPolicy},
     error::{AppError, AppResult},

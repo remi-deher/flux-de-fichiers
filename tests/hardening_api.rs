@@ -1035,11 +1035,7 @@ async fn register_worker_with_transfer(
 
 /// Bibliothèque dont `owner` détient le dossier (accès direct) et que `target` traite par transfert,
 /// avec une tâche de cette bibliothèque.
-async fn held_job(
-    h: &Harness,
-    owner: Uuid,
-    target: Uuid,
-) -> anyhow::Result<forgearr::domain::Job> {
+async fn held_job(h: &Harness, owner: Uuid, target: Uuid) -> anyhow::Result<forgearr::domain::Job> {
     let library = repository::insert_library(
         &h.pool,
         forgearr::domain::LibraryWrite {

@@ -13,6 +13,9 @@ pub(crate) mod plugins;
 pub(crate) mod recovery_kit;
 pub(crate) mod session;
 mod setup;
+pub(crate) mod source_publication;
+pub(crate) mod source_recovery;
+pub(crate) mod source_recovery_remote;
 pub(crate) mod source_relay;
 pub(crate) mod system;
 pub(crate) mod transfers;
@@ -118,6 +121,8 @@ pub struct AppState {
     pub event_history: EventHistory,
     pub browse_broker: crate::filesystem_browser::RemoteBrowseBroker,
     pub source_relay: crate::source_relay::SourceRelayBroker,
+    pub source_publication: crate::source_publication_broker::SourcePublicationBroker,
+    pub source_inspection: crate::source_publication_broker::SourcePublicationBroker,
     pub pending_worker_setup: Arc<tokio::sync::Mutex<Option<installation::PendingWorkerSetup>>>,
     pub ai_runs: crate::ai::run::AiRuns,
     pub ai_health: crate::ai::health::AiHealthTracker,
@@ -140,6 +145,9 @@ impl AppState {
             event_history: EventHistory::new(),
             browse_broker: crate::filesystem_browser::RemoteBrowseBroker::new(),
             source_relay: crate::source_relay::SourceRelayBroker::new(),
+            source_publication: crate::source_publication_broker::SourcePublicationBroker::default(
+            ),
+            source_inspection: crate::source_publication_broker::SourcePublicationBroker::default(),
             pending_worker_setup: Arc::new(tokio::sync::Mutex::new(None)),
             ai_runs: crate::ai::run::AiRuns::new(),
             ai_health: crate::ai::health::AiHealthTracker::new(),
@@ -533,6 +541,30 @@ fn transfer_routes() -> Router<AppState> {
             "/api/v1/worker/source-relay/{request_id}",
             put(source_relay::send),
         )
+        .route(
+            "/api/v1/worker/source-publications/pending",
+            get(source_publication::pending),
+        )
+        .route(
+            "/api/v1/worker/source-publications/{id}/staged",
+            get(source_publication::staged),
+        )
+        .route(
+            "/api/v1/worker/source-publications/{id}/authorize",
+            get(source_publication::authorize_commit),
+        )
+        .route(
+            "/api/v1/worker/source-publications/{id}/report",
+            post(source_publication::report),
+        )
+        .route(
+            "/api/v1/worker/source-publication-inspections/pending",
+            get(source_publication::inspection_pending),
+        )
+        .route(
+            "/api/v1/worker/source-publication-inspections/{id}/report",
+            post(source_publication::inspection_report),
+        )
         .route("/api/v1/jobs/{id}/result", put(transfers::result))
         .route(
             "/api/v1/files/{name}",
@@ -906,6 +938,8 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     let addr = config.bind;
     let tls = config.tls.clone();
     let state = AppState::new(pool.clone(), Arc::new(config));
+    source_recovery::recover(&state).await?;
+    let pending_publications = repository::pending_source_publications(&state.pool).await?;
     if state.config.local_worker {
         tokio::spawn(crate::local_worker::run(state.clone()));
     }
@@ -966,6 +1000,10 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     let plugin_sync = tokio::spawn(plugin_sync_loop(state.clone()));
     let lib_scans = tokio::spawn(library_scan_loop(state.clone()));
     let ai_diagnosis = tokio::spawn(crate::ai::diagnosis::run_loop(state.clone()));
+    let source_recovery = tokio::spawn(source_recovery_remote::recover(
+        state.clone(),
+        pending_publications,
+    ));
     let handoff_cleanup = tokio::spawn(handoffs::cleanup_loop(state.clone()));
     let app = router(state);
     tracing::info!(%addr, "central started");
@@ -995,6 +1033,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     handoff_cleanup.abort();
     lib_scans.abort();
     ai_diagnosis.abort();
+    source_recovery.abort();
     pool.close().await;
     Ok(())
 }

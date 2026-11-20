@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.62.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.61.0...v0.62.0) (2026-11-20)
+
+
+### Features
+
+* transferer le fichier de travail en cours de flux ([0197ca7](https://github.com/remi-deher/flux-de-fichiers/commit/0197ca7565b25253ec59c404862ef7365171a920))
+* transférer le fichier de travail en cours de flux ([83a2b33](https://github.com/remi-deher/flux-de-fichiers/commit/83a2b334009e87d12f9b92ce65bac4eb26be9551))
+
+
+### Bug Fixes
+
+* clarifier les avertissements des sources workers ([95a1798](https://github.com/remi-deher/flux-de-fichiers/commit/95a17982e51ff660188a3adbca9a487278327e2a))
+* fiabiliser les modes et avertissements des workers ([690768a](https://github.com/remi-deher/flux-de-fichiers/commit/690768acd3be6062ad473ab88847cb3729e42eec))
+* réduire le if imbriqué du rapport d'étapes (clippy) ([872e572](https://github.com/remi-deher/flux-de-fichiers/commit/872e572dcf6e92c6c8787a9ba9731ddc703ff9d6))
+* renseigner etat transfert pour chaque worker ([3c2ba83](https://github.com/remi-deher/flux-de-fichiers/commit/3c2ba8346113144fd1ecbc1703b27ff9f7762fc2))
+
 ## [0.61.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.60.0...v0.61.0) (2026-11-20)
 
 

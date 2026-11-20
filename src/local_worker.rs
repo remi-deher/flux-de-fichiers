@@ -379,6 +379,11 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
                 .await;
             }
             run_err.code
+        } else if matches!(
+            error.downcast_ref::<crate::error::AppError>(),
+            Some(crate::error::AppError::SourceChanged)
+        ) {
+            JobErrorCode::SourceChanged
         } else if error.to_string().contains("source_integrity") {
             JobErrorCode::SourceIntegrity
         } else {

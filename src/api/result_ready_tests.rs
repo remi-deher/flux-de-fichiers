@@ -387,7 +387,10 @@ async fn a_holding_worker_applies_the_result_itself_and_confirms() -> anyhow::Re
         .ok_or_else(|| anyhow::anyhow!("le détenteur doit appliquer lui-même"))?;
     assert!(local.policy == LibraryOutputPolicy::ReplaceWithBackup);
     assert_eq!(local.root, dir.path().to_string_lossy());
-    assert_eq!(pending_journal(&state).await?, [(String::new(), "mkv".to_owned())]);
+    assert_eq!(
+        pending_journal(&state).await?,
+        [(String::new(), "mkv".to_owned())]
+    );
 
     let published = SourcePublicationOutcome::Published;
     finish_local_application(&state, &job, &own, published).await?;

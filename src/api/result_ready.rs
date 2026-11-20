@@ -175,8 +175,7 @@ pub(crate) async fn begin_local_application(
     };
     let extension = ready.extension.as_str();
     let policy = local.policy;
-    repository::begin_pulled_publication(&s.pool, job.id, lease, output, extension, policy)
-        .await?;
+    repository::begin_pulled_publication(&s.pool, job.id, lease, output, extension, policy).await?;
     Ok(Some(local))
 }
 

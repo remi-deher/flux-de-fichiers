@@ -256,13 +256,19 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
                 .await?;
             }
             (None, Some(ticket)) => {
-                crate::worker_transfer::download_direct(
+                crate::worker_transfer::download_direct_resuming(
                     &crate::worker_transfer::direct_client()?,
-                    ticket,
+                    ticket.clone(),
                     &source_snapshot,
                     state.config.max_file_bytes,
                     &claim.source_sha256,
                     claim.source_bytes,
+                    || async {
+                        anyhow::Ok(
+                            repository::reissue_source_ticket(&state.pool, claim.job_id, &lease)
+                                .await?,
+                        )
+                    },
                 )
                 .await?;
             }

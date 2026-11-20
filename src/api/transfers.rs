@@ -78,6 +78,20 @@ pub async fn source(
     }
 }
 
+/// Le worker traitant redemande un billet frais (expiré, ou lecture à reprendre par `Range`).
+/// Réponse `null` quand la source se lit autrement : le worker utilise alors le repli.
+pub async fn reissue_ticket(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> AppResult<axum::Json<Option<forgearr_shared::transfer::SourceTicket>>> {
+    let credentials = lease(&h)?;
+    crate::auth::authorize_worker_identity(&s.pool, &h, credentials.worker_id).await?;
+    Ok(axum::Json(
+        repository::reissue_source_ticket(&s.pool, id, &credentials).await?,
+    ))
+}
+
 /// Le worker source valide un billet présenté par un worker traitant (ADR 0019).
 pub async fn redeem(
     State(s): State<AppState>,

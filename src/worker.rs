@@ -404,6 +404,22 @@ impl WorkerLoop {
         }
         Ok(())
     }
+    /// Demande au central un billet frais pour la source de cette tâche (bail actif exigé).
+    async fn reissue_ticket(
+        &self,
+        claim: &Claim,
+        worker: Uuid,
+    ) -> anyhow::Result<Option<forgearr_shared::transfer::SourceTicket>> {
+        Ok(self
+            .leased(reqwest::Method::POST, claim, worker, "source/ticket")
+            .timeout(REMOTE_BROWSE_HTTP_TIMEOUT)
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Option<forgearr_shared::transfer::SourceTicket>>()
+            .await?)
+    }
+
     /// Récupère la source : voie directe chez le worker qui la détient (si un billet est fourni),
     /// puis repli par le central (ADR 0019).
     async fn download_source(
@@ -412,15 +428,16 @@ impl WorkerLoop {
         worker: Uuid,
         input: &Path,
     ) -> anyhow::Result<()> {
-        if let Some(ticket) = claim.source_ticket.as_ref() {
+        if let Some(ticket) = claim.source_ticket.clone() {
             let direct = worker_transfer::direct_client()?;
-            match worker_transfer::download_direct(
+            match worker_transfer::download_direct_resuming(
                 &direct,
                 ticket,
                 input,
                 self.config.max_bytes,
                 &claim.source_sha256,
                 claim.source_bytes,
+                || self.reissue_ticket(claim, worker),
             )
             .await
             {
@@ -445,8 +462,12 @@ impl WorkerLoop {
         )
         .await
         .map_err(|error| {
-            if error.to_string() == "source_integrity" {
-                JobRunError::simple(JobErrorCode::SourceIntegrity, "source_integrity").into()
+            if error.to_string() == worker_transfer::SOURCE_INTEGRITY {
+                JobRunError::simple(
+                    JobErrorCode::SourceIntegrity,
+                    worker_transfer::SOURCE_INTEGRITY,
+                )
+                .into()
             } else {
                 error
             }

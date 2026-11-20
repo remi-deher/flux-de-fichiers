@@ -28,6 +28,14 @@ pub const TRANSFER_SOURCE_PATH: &str = "/transfer/source";
 const MAX_CONCURRENT_TRANSFERS: usize = 4;
 /// Délai de connexion à la voie directe avant de basculer sur le repli par le central.
 const DIRECT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Durée maximale d'une lecture directe, pour les très gros fichiers (6 heures).
+const DIRECT_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(6 * 60 * 60);
+/// Reprises d'une lecture directe interrompue, chacune avec un billet frais, avant le repli.
+const DIRECT_RESUME_ATTEMPTS: u32 = 3;
+/// Pause avant chaque reprise.
+const DIRECT_RESUME_DELAY: Duration = Duration::from_secs(2);
+/// Erreur d'un fichier reçu dont la taille ou l'empreinte ne correspond pas : jamais reprise.
+pub const SOURCE_INTEGRITY: &str = "source_integrity";
 const REDEEM_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Valide un billet auprès du central ; `Err` porte le statut HTTP à renvoyer.
@@ -201,6 +209,56 @@ async fn serve_source(State(state): State<TransferState>, headers: HeaderMap) ->
     response
 }
 
+/// Écrit le corps de la réponse dans `dest`. `resume_from == 0` crée le fichier (création
+/// exclusive) ; sinon les octets sont ajoutés à la fin d'un fichier partiel de cette taille.
+async fn write_body(
+    response: reqwest::Response,
+    dest: &Path,
+    resume_from: u64,
+    max_bytes: u64,
+) -> anyhow::Result<()> {
+    let mut options = tokio::fs::OpenOptions::new();
+    if resume_from == 0 {
+        options.write(true).create_new(true);
+    } else {
+        options.append(true);
+    }
+    let mut file = options.open(dest).await?;
+    let mut chunks = response.bytes_stream();
+    let mut total = resume_from;
+    let streamed = async {
+        while let Some(chunk) = chunks.next().await {
+            let chunk = chunk?;
+            total += chunk.len() as u64;
+            anyhow::ensure!(total <= max_bytes, SOURCE_INTEGRITY);
+            file.write_all(&chunk).await?;
+        }
+        anyhow::Ok(())
+    }
+    .await;
+    // Même interrompu, le préfixe reçu doit être sur disque pour pouvoir reprendre.
+    let flushed = file.flush().await;
+    streamed?;
+    flushed?;
+    file.sync_all().await?;
+    Ok(())
+}
+
+/// Vérifie taille et SHA-256 du fichier reçu (`source_integrity` sinon).
+async fn verify_received(
+    dest: &Path,
+    max_bytes: u64,
+    expected_sha256: &str,
+    expected_bytes: i64,
+) -> anyhow::Result<()> {
+    let (hash, bytes) = storage::fingerprint(dest, max_bytes).await?;
+    anyhow::ensure!(
+        hash == expected_sha256 && bytes as i64 == expected_bytes,
+        SOURCE_INTEGRITY
+    );
+    Ok(())
+}
+
 /// Écrit la réponse dans `dest` (création exclusive) puis vérifie taille et SHA-256.
 ///
 /// Partagé par la voie directe et la voie du central : une source altérée ou trop grosse est
@@ -212,30 +270,30 @@ pub async fn save_verified(
     expected_sha256: &str,
     expected_bytes: i64,
 ) -> anyhow::Result<()> {
-    let mut chunks = response.bytes_stream();
-    let mut file = tokio::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(dest)
-        .await?;
-    let mut total: u64 = 0;
-    while let Some(chunk) = chunks.next().await {
-        let chunk = chunk?;
-        total += chunk.len() as u64;
-        anyhow::ensure!(total <= max_bytes, "source_integrity");
-        file.write_all(&chunk).await?;
+    write_body(response, dest, 0, max_bytes).await?;
+    verify_received(dest, max_bytes, expected_sha256, expected_bytes).await
+}
+
+/// Premier octet d'un en-tête `Content-Range: bytes début-fin/total`.
+fn content_range_start(headers: &HeaderMap) -> Option<u64> {
+    let value = headers.get(header::CONTENT_RANGE)?.to_str().ok()?;
+    let range = value.strip_prefix("bytes ")?;
+    range.split_once('-')?.0.trim().parse().ok()
+}
+
+/// Taille déjà reçue d'un téléchargement interrompu (0 sans fichier).
+async fn received_len(dest: &Path) -> anyhow::Result<u64> {
+    match tokio::fs::metadata(dest).await {
+        Ok(metadata) => Ok(metadata.len()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(error.into()),
     }
-    file.sync_all().await?;
-    drop(file);
-    let (hash, bytes) = storage::fingerprint(dest, max_bytes).await?;
-    anyhow::ensure!(
-        hash == expected_sha256 && bytes as i64 == expected_bytes,
-        "source_integrity"
-    );
-    Ok(())
 }
 
 /// Lit la source directement chez le worker qui la détient (voie directe, ADR 0019).
+///
+/// Reprend un fichier partiel déjà présent dans `dest` par `Range` (taille et SHA-256 vérifiés sur
+/// le fichier entier à la fin). Si le serveur ignore `Range`, le fichier est recommencé.
 pub async fn download_direct(
     client: &reqwest::Client,
     ticket: &SourceTicket,
@@ -244,14 +302,82 @@ pub async fn download_direct(
     expected_sha256: &str,
     expected_bytes: i64,
 ) -> anyhow::Result<()> {
-    let response = client
+    let expected = u64::try_from(expected_bytes)?;
+    let mut received = received_len(dest).await?;
+    if received > expected {
+        tokio::fs::remove_file(dest).await?;
+        received = 0;
+    }
+    if received > 0 && received == expected {
+        return verify_received(dest, max_bytes, expected_sha256, expected_bytes).await;
+    }
+    let mut request = client
         .get(format!("{}{TRANSFER_SOURCE_PATH}", ticket.url))
         .header(TRANSFER_TICKET_HEADER, &ticket.token)
-        .timeout(Duration::from_secs(60 * 60 * 6))
-        .send()
-        .await?
-        .error_for_status()?;
-    save_verified(response, dest, max_bytes, expected_sha256, expected_bytes).await
+        .timeout(DIRECT_DOWNLOAD_TIMEOUT);
+    if received > 0 {
+        request = request.header(header::RANGE, format!("bytes={received}-"));
+    }
+    let response = request.send().await?.error_for_status()?;
+    let offset = match (received, response.status()) {
+        (0, _) => 0,
+        (_, StatusCode::PARTIAL_CONTENT) => {
+            anyhow::ensure!(
+                content_range_start(response.headers()) == Some(received),
+                "range_mismatch"
+            );
+            received
+        }
+        // Le serveur renvoie le fichier entier : on repart de zéro plutôt que de le concaténer.
+        _ => {
+            tokio::fs::remove_file(dest).await?;
+            0
+        }
+    };
+    write_body(response, dest, offset, max_bytes).await?;
+    verify_received(dest, max_bytes, expected_sha256, expected_bytes).await
+}
+
+/// Lecture directe avec reprise : après une interruption ou un billet expiré, `reissue` demande un
+/// billet frais au central et le téléchargement reprend par `Range` là où le fichier partiel
+/// s'arrête. `Ok(None)` (la source se lit autrement) ou trop de reprises rendent l'erreur ; une
+/// source altérée (`source_integrity`) n'est jamais reprise.
+pub async fn download_direct_resuming<Reissue, Pending>(
+    client: &reqwest::Client,
+    mut ticket: SourceTicket,
+    dest: &Path,
+    max_bytes: u64,
+    expected_sha256: &str,
+    expected_bytes: i64,
+    mut reissue: Reissue,
+) -> anyhow::Result<()>
+where
+    Reissue: FnMut() -> Pending,
+    Pending: Future<Output = anyhow::Result<Option<SourceTicket>>>,
+{
+    let mut resumes = 0;
+    loop {
+        let error = match download_direct(
+            client,
+            &ticket,
+            dest,
+            max_bytes,
+            expected_sha256,
+            expected_bytes,
+        )
+        .await
+        {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+        resumes += 1;
+        if resumes > DIRECT_RESUME_ATTEMPTS || error.to_string() == SOURCE_INTEGRITY {
+            return Err(error);
+        }
+        tracing::warn!(error = %error, resumes, "voie directe interrompue, reprise avec un billet frais");
+        tokio::time::sleep(DIRECT_RESUME_DELAY).await;
+        ticket = reissue().await?.ok_or(error)?;
+    }
 }
 
 /// Client dédié à la voie directe : connexion courte pour basculer vite sur le repli.
@@ -495,6 +621,186 @@ mod tests {
                 .await
                 .is_err()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn content_range_start_reads_the_first_byte_only_from_a_byte_range() {
+        let headers = |value: &'static str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::CONTENT_RANGE, HeaderValue::from_static(value));
+            headers
+        };
+        assert_eq!(content_range_start(&headers("bytes 4-9/10")), Some(4));
+        assert_eq!(content_range_start(&headers("bytes */10")), None);
+        assert_eq!(content_range_start(&headers("items 4-9/10")), None);
+        assert_eq!(content_range_start(&HeaderMap::new()), None);
+    }
+
+    /// Fichier partiel déjà reçu, puis téléchargement direct du fichier `0123456789`.
+    async fn resume_from(partial: &[u8]) -> anyhow::Result<(anyhow::Result<()>, Vec<u8>)> {
+        let source_dir = tempfile::tempdir()?;
+        let work_dir = tempfile::tempdir()?;
+        std::fs::write(source_dir.path().join("film.mkv"), b"0123456789")?;
+        let url = spawn_server(state_for(source_dir.path(), "film.mkv", 10)).await?;
+        let ticket = SourceTicket {
+            url,
+            token: "bon-billet".into(),
+        };
+        let dest = work_dir.path().join("partiel.mkv");
+        std::fs::write(&dest, partial)?;
+        let result = download_direct(
+            &direct_client()?,
+            &ticket,
+            &dest,
+            1 << 20,
+            &sha256_hex(b"0123456789"),
+            10,
+        )
+        .await;
+        Ok((result, std::fs::read(&dest).unwrap_or_default()))
+    }
+
+    #[tokio::test]
+    async fn an_interrupted_download_resumes_with_a_range_request() -> anyhow::Result<()> {
+        let (result, content) = resume_from(b"0123").await?;
+        result?;
+        assert_eq!(content, b"0123456789");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_partial_file_longer_than_the_source_restarts_from_zero() -> anyhow::Result<()> {
+        let (result, content) = resume_from(b"0123456789-et-plus-encore").await?;
+        result?;
+        assert_eq!(content, b"0123456789");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_corrupted_partial_file_is_rejected_by_the_final_hash() -> anyhow::Result<()> {
+        let (result, _) = resume_from(b"XXXX").await?;
+        let error = result.err().map(|error| error.to_string());
+        assert_eq!(error.as_deref(), Some("source_integrity"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_complete_partial_file_is_verified_without_any_request() -> anyhow::Result<()> {
+        let work_dir = tempfile::tempdir()?;
+        let dest = work_dir.path().join("complet.mkv");
+        std::fs::write(&dest, b"0123456789")?;
+        let ticket = SourceTicket {
+            url: "http://127.0.0.1:1".into(),
+            token: "inutile".into(),
+        };
+        download_direct(
+            &direct_client()?,
+            &ticket,
+            &dest,
+            1 << 20,
+            &sha256_hex(b"0123456789"),
+            10,
+        )
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_server_that_ignores_range_makes_the_download_restart() -> anyhow::Result<()> {
+        let whole_file = get(|| async { "0123456789" });
+        let app = Router::new().route(TRANSFER_SOURCE_PATH, whole_file);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let url = format!("http://{}", listener.local_addr()?);
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        let work_dir = tempfile::tempdir()?;
+        let dest = work_dir.path().join("partiel.mkv");
+        std::fs::write(&dest, b"0123")?;
+        let ticket = SourceTicket {
+            url,
+            token: "peu-importe".into(),
+        };
+        download_direct(
+            &direct_client()?,
+            &ticket,
+            &dest,
+            1 << 20,
+            &sha256_hex(b"0123456789"),
+            10,
+        )
+        .await?;
+        assert_eq!(
+            std::fs::read(&dest)?,
+            b"0123456789",
+            "jamais de concaténation d'un corps complet sur un partiel"
+        );
+        Ok(())
+    }
+
+    /// Reprise avec un fournisseur de billets factice qui compte ses appels.
+    async fn resume_with_reissued(
+        first_token: &str,
+        reissued_token: Option<&str>,
+        expected_sha256: &str,
+    ) -> anyhow::Result<(anyhow::Result<()>, usize)> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let source_dir = tempfile::tempdir()?;
+        let work_dir = tempfile::tempdir()?;
+        std::fs::write(source_dir.path().join("film.mkv"), b"0123456789")?;
+        let url = spawn_server(state_for(source_dir.path(), "film.mkv", 10)).await?;
+        let ticket = |token: &str| SourceTicket {
+            url: url.clone(),
+            token: token.into(),
+        };
+        let first = ticket(first_token);
+        let reissued = reissued_token.map(ticket);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let result = download_direct_resuming(
+            &direct_client()?,
+            first,
+            &work_dir.path().join("reprise.mkv"),
+            1 << 20,
+            expected_sha256,
+            10,
+            move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let reissued = reissued.clone();
+                async move { anyhow::Ok(reissued) }
+            },
+        )
+        .await;
+        Ok((result, calls.load(Ordering::SeqCst)))
+    }
+
+    #[tokio::test]
+    async fn an_expired_ticket_is_replaced_by_a_fresh_one_and_the_download_completes()
+    -> anyhow::Result<()> {
+        let (result, reissues) =
+            resume_with_reissued("perime", Some("bon-billet"), &sha256_hex(b"0123456789")).await?;
+        result?;
+        assert_eq!(reissues, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_download_gives_up_when_the_central_has_no_fresh_ticket() -> anyhow::Result<()> {
+        let (result, reissues) =
+            resume_with_reissued("perime", None, &sha256_hex(b"0123456789")).await?;
+        assert!(result.is_err());
+        assert_eq!(reissues, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_altered_source_is_never_resumed() -> anyhow::Result<()> {
+        let (result, reissues) =
+            resume_with_reissued("bon-billet", None, &sha256_hex(b"autre")).await?;
+        let error = result.err().map(|error| error.to_string());
+        assert_eq!(error.as_deref(), Some(SOURCE_INTEGRITY));
+        assert_eq!(reissues, 0, "aucun nouveau billet pour une source altérée");
         Ok(())
     }
 

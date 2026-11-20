@@ -1,7 +1,7 @@
 //! Billets de lecture d'une source détenue par un autre worker (ADR 0019).
 
 use crate::{
-    domain::{Claim, JobStatus},
+    domain::{Claim, JobStatus, LeaseRequest},
     error::{AppError, AppResult},
 };
 use forgearr_shared::{
@@ -144,14 +144,40 @@ pub async fn attach_source_ticket(
     if claim.local_source_root.is_some() {
         return Ok(());
     }
-    let Some(source) = super::job_source(pool, claim.job_id).await? else {
-        return Ok(());
+    let ticket = issue_source_ticket(pool, worker, claim.job_id, claim.lease_epoch).await?;
+    claim.source_ticket = ticket;
+    Ok(())
+}
+
+/// Remet un billet frais au worker traitant dont le bail est actif : le billet précédent a expiré
+/// ou la lecture a été interrompue et doit reprendre (`Range`). Le nouveau billet remplace les
+/// précédents du même bail ; un transfert déjà en cours n'est pas coupé (le billet n'est validé
+/// qu'au début de chaque requête).
+pub async fn reissue_source_ticket(
+    pool: &SqlitePool,
+    job_id: Uuid,
+    lease: &LeaseRequest,
+) -> AppResult<Option<SourceTicket>> {
+    super::active(pool, job_id, lease).await?;
+    issue_source_ticket(pool, lease.worker_id, job_id, lease.lease_epoch).await
+}
+
+/// Billet pour lire la source chez un détenteur en ligne ; `None` si la source est déjà lisible
+/// (central, montage) ou si aucun détenteur n'annonce d'adresse.
+async fn issue_source_ticket(
+    pool: &SqlitePool,
+    worker: Uuid,
+    job_id: Uuid,
+    lease_epoch: i64,
+) -> AppResult<Option<SourceTicket>> {
+    let Some(source) = super::job_source(pool, job_id).await? else {
+        return Ok(None);
     };
     // Source du central (aucun worker propriétaire) ou déjà montée par ce worker : rien à transférer.
     if source.source_worker_id.is_none_or(|owner| owner == worker) {
-        return Ok(());
+        return Ok(None);
     }
-    let holder = source_holders(pool, claim.job_id, worker)
+    let holder = source_holders(pool, job_id, worker)
         .await?
         .into_iter()
         .find(|holder| holder.transfer_url.is_some());
@@ -161,27 +187,34 @@ pub async fn attach_source_ticket(
         ..
     }) = holder
     else {
-        return Ok(());
+        return Ok(None);
     };
     let token = new_token();
     sqlx::query("DELETE FROM source_tickets WHERE expires_at <= datetime('now')")
         .execute(pool)
         .await?;
     sqlx::query(
+        "DELETE FROM source_tickets WHERE job_id=?1 AND target_worker_id=?2 AND lease_epoch=?3",
+    )
+    .bind(job_id)
+    .bind(worker)
+    .bind(lease_epoch)
+    .execute(pool)
+    .await?;
+    sqlx::query(
         "INSERT INTO source_tickets(token_hash, job_id, source_worker_id, target_worker_id, \
              lease_epoch, expires_at) \
          VALUES(?1, ?2, ?3, ?4, ?5, datetime('now', '+' || ?6 || ' seconds'))",
     )
     .bind(token_hash(&token))
-    .bind(claim.job_id)
+    .bind(job_id)
     .bind(holder)
     .bind(worker)
-    .bind(claim.lease_epoch)
+    .bind(lease_epoch)
     .bind(SOURCE_TICKET_TTL_SECONDS)
     .execute(pool)
     .await?;
-    claim.source_ticket = Some(SourceTicket { url, token });
-    Ok(())
+    Ok(Some(SourceTicket { url, token }))
 }
 
 /// Valide un billet présenté au worker source et dit ce qu'il doit servir.

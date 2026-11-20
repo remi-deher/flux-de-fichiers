@@ -66,6 +66,6 @@ pub use source_publication_journal::{
     mark_source_publication_uncertain, pending_source_publications, recover_source_publications,
 };
 pub use source_tickets::{
-    SourceHolder, attach_source_ticket, redeem_ticket, set_transfer_url, source_holders,
-    valid_transfer_url, writable_source_holders,
+    SourceHolder, attach_source_ticket, redeem_ticket, reissue_source_ticket, set_transfer_url,
+    source_holders, valid_transfer_url, writable_source_holders,
 };

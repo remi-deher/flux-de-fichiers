@@ -532,6 +532,10 @@ fn transfer_routes() -> Router<AppState> {
             get(transfers::output).delete(transfers::delete_output),
         )
         .route("/api/v1/jobs/{id}/source", get(transfers::source))
+        .route(
+            "/api/v1/jobs/{id}/source/ticket",
+            post(transfers::reissue_ticket),
+        )
         .route("/api/v1/worker/transfers/redeem", post(transfers::redeem))
         .route(
             "/api/v1/worker/source-relay/pending",

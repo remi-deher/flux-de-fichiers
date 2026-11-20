@@ -941,6 +941,10 @@ async fn register_worker_with_transfer(
     )
     .await?;
     assert_eq!(st, StatusCode::OK);
+    assert_eq!(
+        worker["transfer_enabled"],
+        forgearr::repository::valid_transfer_url(transfer_url).is_some()
+    );
     Ok(Uuid::parse_str(worker["id"].as_str().unwrap_or_default())?)
 }
 

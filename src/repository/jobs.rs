@@ -54,6 +54,16 @@ impl WorkerRow {
     }
 }
 
+async fn worker_with_transfer(pool: &SqlitePool, row: WorkerRow) -> AppResult<Worker> {
+    let mut worker = row.into_worker();
+    worker.transfer_enabled =
+        sqlx::query_scalar::<_, bool>("SELECT transfer_url IS NOT NULL FROM workers WHERE id=?1")
+            .bind(worker.id)
+            .fetch_one(pool)
+            .await?;
+    Ok(worker)
+}
+
 fn serialize_telemetry(snapshot: Option<&TelemetrySnapshot>) -> Option<String> {
     snapshot
         .map(TelemetrySnapshot::to_worker_telemetry)
@@ -85,7 +95,7 @@ pub async fn register_with_metadata(
     )
     .fetch_one(pool)
     .await?;
-    Ok(row.into_worker())
+    worker_with_transfer(pool, row).await
 }
 
 /// Met à jour la concurrence maximale et la fenêtre horaire d'un worker.
@@ -120,7 +130,7 @@ pub async fn update_worker_settings(
     .fetch_optional(pool)
     .await?
     .ok_or(AppError::NotFound)?;
-    Ok(row.into_worker())
+    worker_with_transfer(pool, row).await
 }
 
 pub async fn register(pool: &SqlitePool, name: &str) -> AppResult<Worker> {
@@ -168,7 +178,7 @@ pub async fn get_worker(pool: &SqlitePool, id: Uuid) -> AppResult<Worker> {
     .fetch_optional(pool)
     .await?
     .ok_or(AppError::NotFound)?;
-    Ok(row.into_worker())
+    worker_with_transfer(pool, row).await
 }
 
 pub async fn find_worker_by_name(pool: &SqlitePool, name: &str) -> AppResult<Option<Worker>> {
@@ -179,7 +189,10 @@ pub async fn find_worker_by_name(pool: &SqlitePool, name: &str) -> AppResult<Opt
     )
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(WorkerRow::into_worker))
+    match row {
+        Some(row) => Ok(Some(worker_with_transfer(pool, row).await?)),
+        None => Ok(None),
+    }
 }
 
 /// Tâches traitées par ce worker, les plus récentes d'abord.

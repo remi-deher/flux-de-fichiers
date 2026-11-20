@@ -708,7 +708,7 @@ async fn register(
         return Err(crate::error::AppError::Invalid);
     }
     let remote_addr = client_remote_addr(&h, connect_info);
-    let worker = repository::register_with_metadata(
+    let mut worker = repository::register_with_metadata(
         &s.pool,
         &r.name,
         r.version.as_deref(),
@@ -722,6 +722,7 @@ async fn register(
         .as_deref()
         .and_then(repository::valid_transfer_url);
     repository::set_transfer_url(&s.pool, worker.id, transfer_url.as_deref()).await?;
+    worker.transfer_enabled = transfer_url.is_some();
     Ok(axum::Json(worker))
 }
 /// Enrichit un bail (`Claim`) avec les contrats d'opérations, outils requis et réglages nécessaires.

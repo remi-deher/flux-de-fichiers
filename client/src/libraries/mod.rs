@@ -7,6 +7,7 @@ mod history;
 mod packs;
 mod resources;
 mod scripts;
+mod transfer_workers;
 
 use crate::flows::FlowsSection;
 use crate::route::encode_segment;
@@ -268,6 +269,7 @@ fn MediaLibrariesSection(
                             let draft = LibraryDraft::editing(&library);
                             let id = library.id;
                             let worker_count = library.workers.len();
+                            let transfer_count = library.transfer_workers.len();
                             let extra_workers = worker_count.saturating_sub(PREVIEW_WORKER_PATHS);
                             let paths_preview: Vec<(String, &'static str)> = library
                                 .workers
@@ -349,6 +351,9 @@ fn MediaLibrariesSection(
                                                 })}
                                             }.into_any()
                                         }}
+                                        {(transfer_count > 0).then(|| view! {
+                                            <Tag label=format!("{transfer_count} worker(s) par transfert") tone=TagTone::Primary />
+                                        })}
                                     </div>
                                 </ResourceCard>
                             }

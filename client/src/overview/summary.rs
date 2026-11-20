@@ -95,6 +95,7 @@ mod tests {
             telemetry: None,
             max_concurrency: 1,
             schedule: None,
+            transfer_enabled: false,
         }
     }
 
@@ -111,6 +112,7 @@ mod tests {
             name: "Films".into(),
             flow_id: None,
             workers: Vec::new(),
+            transfer_workers: Vec::new(),
             scan_interval_minutes: 0,
             last_scanned_at: None,
             include_extensions: Vec::new(),

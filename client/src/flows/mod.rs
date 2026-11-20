@@ -1367,6 +1367,7 @@ mod tests {
             name: name.into(),
             flow_id: flow_id.map(str::to_owned),
             workers: Vec::new(),
+            transfer_workers: Vec::new(),
             scan_interval_minutes: 0,
             last_scanned_at: None,
             include_extensions: Vec::new(),

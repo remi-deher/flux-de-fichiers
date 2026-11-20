@@ -797,25 +797,52 @@ async fn register_worker_with_transfer(
     Ok(Uuid::parse_str(worker["id"].as_str().unwrap_or_default())?)
 }
 
-/// Crée une tâche dont la source est détenue (montée) par `owner`, puis la fait relayer vers `target`.
+/// Bibliothèque dont `owner` détient le dossier (accès direct) et que `target` traite par transfert,
+/// puis une tâche de cette bibliothèque relayée de `owner` vers `target`.
 async fn relayed_job_from(
     h: &Harness,
     owner: Uuid,
     target: Uuid,
 ) -> anyhow::Result<forgearr::domain::Job> {
-    let job = repository::insert_job(
+    let library = repository::insert_library(
+        &h.pool,
+        forgearr::domain::LibraryWrite {
+            name: format!("Films {owner}"),
+            workers: vec![forgearr::domain::LibraryWorkerPath {
+                source_key: Some("nas".into()),
+                worker_id: owner,
+                local_path: "/mnt/owner".into(),
+                access: forgearr::domain::LibraryAccess::Read,
+            }],
+            transfer_workers: vec![target],
+            ..Default::default()
+        },
+    )
+    .await?;
+    let job = repository::insert_job_with_options(
         &h.pool,
         "film.mkv",
         None,
         &"ee".repeat(32),
         SOURCE_CONTENT.len() as i64,
+        Some(library.id),
+        None,
     )
     .await?;
-    sqlx::query("UPDATE jobs SET source_root='/mnt/owner', source_worker_id=?1 WHERE id=?2")
-        .bind(owner)
-        .bind(job.id)
-        .execute(&h.pool)
-        .await?;
+    sqlx::query(
+        "UPDATE jobs SET source_key='nas', source_root='/mnt/owner', source_worker_id=?1 WHERE id=?2",
+    )
+    .bind(owner)
+    .bind(job.id)
+    .execute(&h.pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO job_source_mounts(job_id, worker_id, local_path, writable) VALUES(?1, ?2, '/mnt/owner', 0)",
+    )
+    .bind(job.id)
+    .bind(owner)
+    .execute(&h.pool)
+    .await?;
     let claim = claim_for(h, owner)
         .await?
         .ok_or_else(|| anyhow::anyhow!("le détenteur doit obtenir la tâche"))?;

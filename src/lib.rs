@@ -13,7 +13,7 @@ pub mod flows;
 pub mod hardware_probe;
 pub mod instance;
 pub mod job_runner;
-mod library_scan;
+pub mod library_scan;
 pub mod local_worker;
 pub mod logs;
 pub mod mail;

@@ -138,7 +138,10 @@ mod tests {
     #[test]
     fn artifact_kind_strings_match_serde_and_parse_back() -> Result<(), serde_json::Error> {
         for kind in [ArtifactKind::Working, ArtifactKind::Result] {
-            assert_eq!(serde_json::to_string(&kind)?, format!("\"{}\"", kind.as_str()));
+            assert_eq!(
+                serde_json::to_string(&kind)?,
+                format!("\"{}\"", kind.as_str())
+            );
             assert_eq!(ArtifactKind::parse(kind.as_str()), Some(kind));
         }
         assert_eq!(ArtifactKind::parse("source"), None);

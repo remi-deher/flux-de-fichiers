@@ -113,6 +113,9 @@ pub struct RelayReport {
     #[serde(default)]
     pub lease_epoch: i64,
     pub request: RelayRequest,
+    /// Avertissement accumulé par le worker avant le relais.
+    #[serde(default)]
+    pub warning: bool,
 }
 
 /// Marque « relayée » d'une tâche, pour l'interface.

@@ -727,9 +727,13 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                 (source.source_worker_id == Some(worker)).then_some(source.source_root)
             });
             let resume_node_id = super::relays::resume_node(pool, j.id).await?;
-            let handoff_input =
+            let acknowledged =
                 super::handoffs::acknowledged_handoff_input(pool, j.id, worker, j.lease_epoch)
                     .await?;
+            let handoff_input = match acknowledged {
+                Some(input) => Some(input),
+                None => super::relays::artifact_input(pool, j.id, worker).await?,
+            };
             Ok(Some(Claim {
                 job_id: j.id,
                 lease_token: j.lease_token.ok_or(AppError::Internal)?,

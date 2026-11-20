@@ -14,7 +14,9 @@ mod relays;
 mod source_publication_journal;
 mod source_tickets;
 
-pub use artifacts::{JobArtifact, declare_artifact, get_artifact, release_artifact};
+pub use artifacts::{
+    JobArtifact, confirm_artifact_received, declare_artifact, get_artifact, release_artifact,
+};
 pub use enrollment::{
     create_enrollment_request, decide_enrollment_request, enrollment_window_status,
     list_enrollment_requests, poll_enrollment_request, purge_expired_enrollment_requests,

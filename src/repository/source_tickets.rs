@@ -119,6 +119,20 @@ pub async fn attach_source_ticket(
     worker: Uuid,
     claim: &mut Claim,
 ) -> AppResult<()> {
+    if claim.handoff_input.is_some() {
+        // Remise par artefact (ADR 0022) : le billet désigne le fichier de travail chez son
+        // détenteur. Sans artefact (ancienne remise), aucun billet n'est émis.
+        let ticket = issue_artifact_ticket(
+            pool,
+            claim.job_id,
+            ArtifactKind::Working,
+            worker,
+            claim.lease_epoch,
+        )
+        .await?;
+        claim.source_ticket = ticket;
+        return Ok(());
+    }
     if claim.local_source_root.is_some() {
         return Ok(());
     }
@@ -137,6 +151,17 @@ pub async fn reissue_source_ticket(
     lease: &LeaseRequest,
 ) -> AppResult<Option<SourceTicket>> {
     super::active(pool, job_id, lease).await?;
+    let input = super::relays::artifact_input(pool, job_id, lease.worker_id).await?;
+    if input.is_some() {
+        return issue_artifact_ticket(
+            pool,
+            job_id,
+            ArtifactKind::Working,
+            lease.worker_id,
+            lease.lease_epoch,
+        )
+        .await;
+    }
     issue_source_ticket(pool, lease.worker_id, job_id, lease.lease_epoch).await
 }
 
@@ -200,6 +225,11 @@ pub async fn issue_artifact_ticket(
     )
     .await?;
     Ok(Some(ticket))
+}
+
+/// Le worker annonce-t-il une adresse de transfert, donc peut-il servir des fichiers ?
+pub(super) async fn can_serve(pool: &SqlitePool, worker: Uuid) -> AppResult<bool> {
+    Ok(matches!(worker_reach(pool, worker).await?, Some((Some(_), _))))
 }
 
 /// Adresse de transfert annoncée par un worker et sa présence en ligne ; `None` s'il est inconnu.

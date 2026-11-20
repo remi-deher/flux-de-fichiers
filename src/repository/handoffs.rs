@@ -68,7 +68,7 @@ pub async fn begin_handoff(
     }
     super::active(pool, job, lease).await?;
     let Some(placement) =
-        super::relays::choose_placement(pool, job, lease.worker_id, &request.target).await?
+        super::relays::choose_placement(pool, job, lease.worker_id, &request.target, true).await?
     else {
         return Ok(false);
     };
@@ -330,12 +330,7 @@ pub async fn acknowledge_handoff(
     if changed != 1 {
         return Err(AppError::Conflict);
     }
-    sqlx::query("DELETE FROM job_handoff_steps WHERE job_id=?1")
-        .bind(job_id)
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("INSERT INTO job_handoff_steps(job_id,step_index,node_id,block_kind,operation_id,status,message,output_excerpt,created_at) SELECT job_id,step_index,node_id,block_kind,operation_id,status,message,output_excerpt,created_at FROM job_steps WHERE job_id=?1")
-        .bind(job_id).execute(&mut *tx).await?;
+    super::relays::snapshot_steps(&mut tx, job_id).await?;
     sqlx::query("INSERT INTO job_relays(job_id,from_worker_id,relay_count,resume_node_id,requirement_json) VALUES(?1,?2,1,?3,?4) \
         ON CONFLICT(job_id) DO UPDATE SET from_worker_id=excluded.from_worker_id,relay_count=relay_count+1, \
         resume_node_id=excluded.resume_node_id,requirement_json=excluded.requirement_json,relayed_at=datetime('now')")

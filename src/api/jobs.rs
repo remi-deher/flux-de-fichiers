@@ -361,7 +361,7 @@ pub async fn relay(
         lease_epoch: report.lease_epoch,
         telemetry: None,
     };
-    let response = match repository::relay_job(&s.pool, id, &lease, &report.request).await? {
+    let response = match repository::relay_job(&s.pool, id, &lease, &report.request, report.warning).await? {
         repository::RelayOutcome::Relayed { target_worker_id } => {
             s.notify_job_event(JobEventType::JobRelayed, id, JobStatus::Queued, None);
             forgearr_shared::relay::RelayResponse {

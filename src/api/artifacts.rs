@@ -31,3 +31,16 @@ pub async fn declare(
     .await?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// Le repreneur confirme avoir tiré et vérifié le fichier de travail : son détenteur peut le
+/// purger. La confirmation est répétable.
+pub async fn received(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Path(job): Path<Uuid>,
+) -> AppResult<StatusCode> {
+    let lease = super::transfers::lease(&headers)?;
+    crate::auth::authorize_worker_identity(&s.pool, &headers, lease.worker_id).await?;
+    repository::confirm_artifact_received(&s.pool, job, &lease).await?;
+    Ok(StatusCode::NO_CONTENT)
+}

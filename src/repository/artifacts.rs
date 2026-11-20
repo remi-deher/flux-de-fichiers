@@ -106,6 +106,33 @@ pub async fn get_artifact(
     }))
 }
 
+/// Ce bail a-t-il déclaré un fichier de travail pour ce job ?
+pub(super) async fn holds_working_artifact(
+    pool: &SqlitePool,
+    job_id: Uuid,
+    lease: &LeaseRequest,
+) -> AppResult<bool> {
+    let artifact = get_artifact(pool, job_id, ArtifactKind::Working).await?;
+    Ok(artifact.is_some_and(|artifact| {
+        artifact.holder_worker_id == lease.worker_id && artifact.lease_epoch == lease.lease_epoch
+    }))
+}
+
+/// Le repreneur a tiré et vérifié le fichier de travail : l'artefact n'a plus d'objet et son
+/// détenteur peut le purger. `false` si ce bail n'avait rien à confirmer (confirmation répétée).
+pub async fn confirm_artifact_received(
+    pool: &SqlitePool,
+    job_id: Uuid,
+    lease: &LeaseRequest,
+) -> AppResult<bool> {
+    super::active(pool, job_id, lease).await?;
+    let input = super::relays::artifact_input(pool, job_id, lease.worker_id).await?;
+    if input.is_none() {
+        return Ok(false);
+    }
+    release_artifact(pool, job_id, ArtifactKind::Working).await
+}
+
 /// Oublie l'artefact (le détenteur peut alors purger son fichier) ; `false` s'il n'existait pas.
 pub async fn release_artifact(
     pool: &SqlitePool,

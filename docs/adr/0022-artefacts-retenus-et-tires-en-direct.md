@@ -119,7 +119,14 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
    nom, SHA-256, taille), déclaration par le détenteur du bail (`PUT /api/v1/jobs/{id}/artifacts/{kind}`),
    billets qui désignent la source ou un artefact, `redeem` qui rend la racine et le nom de l'artefact.
    Additif : aucun flux existant ne change.
-2. Remise entre étapes par artefact, qui remplace `job_handoffs`.
+2. Remise entre étapes par artefact, qui remplace `job_handoffs`, en deux pushes :
+   - **2a (fait) — côté central** : `relay_job` relaie un fichier de travail déclaré (le bail est libéré
+     tout de suite, les étapes et l'avertissement sont conservés, le repreneur n'a pas besoin de joindre
+     la source) ; le `claim` du repreneur porte le fichier de travail et un billet d'artefact ;
+     `POST /api/v1/jobs/{id}/artifacts/working/received` libère l'artefact ; sans artefact, une reprise
+     repart de la source. L'ancien flux `job_handoffs` reste en place.
+   - 2b — côté worker : le worker distant et le worker intégré passent au nouveau flux, suppression de
+     `job_handoffs` et de ses routes.
 3. Retour du résultat tiré par le détenteur de la bibliothèque, point de commit idempotent.
 4. Suppression du repli par le central, de `PUT /result` et des routes de remise.
 5. Worker intégré traité comme un worker ordinaire.

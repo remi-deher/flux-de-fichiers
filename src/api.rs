@@ -543,6 +543,10 @@ fn transfer_routes() -> Router<AppState> {
             "/api/v1/jobs/{id}/artifacts/{kind}",
             put(artifacts::declare),
         )
+        .route(
+            "/api/v1/jobs/{id}/artifacts/working/received",
+            post(artifacts::received),
+        )
         .route("/api/v1/worker/transfers/redeem", post(transfers::redeem))
         .route(
             "/api/v1/worker/source-relay/pending",

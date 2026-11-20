@@ -59,9 +59,9 @@ pub fn TransferWorkersSection(
                     }).collect_view().into_any()
                 }}
             </ul>
-            {move || route_warning().map(|message| view! {
+            <div role="status">{move || route_warning().map(|message| view! {
                 <p class="form-help library-access-warning">{message}</p>
-            })}
+            })}</div>
         </div>
     }
 }

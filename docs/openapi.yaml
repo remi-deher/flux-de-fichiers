@@ -1100,6 +1100,152 @@ paths:
                   centralUrl: {type: string, description: Worker seulement}
                   registered: {type: boolean, description: Worker seulement}
                   centralReachable: {type: boolean, description: Worker seulement}
+  /api/v1/jobs/{id}/handoff:
+    parameters:
+      - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+    post:
+      security: [{ApiKey: []}]
+      summary: Préparer la remise du fichier de travail en conservant le bail d'origine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workerId, leaseToken, leaseEpoch, request, artifact]
+              properties:
+                workerId: {type: string, format: uuid}
+                leaseToken: {type: string, format: uuid}
+                leaseEpoch: {type: integer}
+                request: {type: object, description: Cible du relais et identifiant du nœud de reprise}
+                artifact: {$ref: '#/components/schemas/HandoffArtifact'}
+                warning: {type: boolean, default: false, description: Avertissement cumulé avant la remise}
+      responses:
+        '201': {description: Remise créée ; le fichier doit encore être chargé et vérifié}
+        default: {$ref: '#/components/responses/Error'}
+    put:
+      security: [{ApiKey: []}]
+      summary: Déposer le fichier déclaré avant sa mise à disposition de la cible
+      parameters:
+        - {in: header, name: x-worker-id, required: true, schema: {type: string, format: uuid}}
+        - {in: header, name: x-lease-token, required: true, schema: {type: string, format: uuid}}
+        - {in: header, name: x-lease-epoch, required: true, schema: {type: integer}}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, contentMediaType: application/octet-stream}
+      responses:
+        '204': {description: Copie vérifiée et disponible}
+        default: {$ref: '#/components/responses/Error'}
+    get:
+      security: [{ApiKey: []}]
+      summary: État de la remise pour son émetteur
+      parameters:
+        - {in: query, name: worker_id, required: true, schema: {type: string, format: uuid}}
+        - {in: query, name: lease_epoch, required: true, schema: {type: integer}}
+      responses:
+        '200':
+          description: État de la remise
+          content:
+            application/json:
+              schema: {type: string, enum: [uploading, pending, claimed, acknowledged, failed]}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/worker/handoffs/{id}/{epoch}/retained:
+    get:
+      security: [{ApiKey: []}]
+      summary: Indiquer si une copie de travail du repreneur est encore nécessaire
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {in: path, name: epoch, required: true, schema: {type: integer}}
+        - {in: query, name: worker_id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: La copie doit être conservée si la réponse vaut true
+          content:
+            application/json:
+              schema: {type: boolean}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/worker/handoffs/claim:
+    post:
+      security: [{ApiKey: []}]
+      summary: Réserver une offre de fichier de travail pour le worker appelant
+      parameters:
+        - {in: query, name: worker_id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Offre réservée ou null si aucune remise ne convient
+          content:
+            application/json:
+              schema: {anyOf: [{$ref: '#/components/schemas/HandoffOffer'}, {type: 'null'}]}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/handoff/file:
+    get:
+      security: [{ApiKey: []}]
+      summary: Télécharger le fichier de travail réservé
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {in: query, name: worker_id, required: true, schema: {type: string, format: uuid}}
+        - {in: header, name: x-handoff-token, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Octets à vérifier par taille et SHA-256 avant l'accusé
+          content:
+            application/octet-stream:
+              schema: {type: string, contentMediaType: application/octet-stream}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/handoff/ack:
+    post:
+      security: [{ApiKey: []}]
+      summary: Accuser réception du fichier vérifié et libérer le bail d'origine
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workerId, receiptToken, sha256, bytes]
+              properties:
+                workerId: {type: string, format: uuid}
+                receiptToken: {type: string}
+                sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+                bytes: {type: integer, minimum: 1}
+      responses:
+        '204': {description: Accusé accepté ou déjà reçu ; remise idempotente}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/worker/software-encoder-probes:
+    get:
+      security: [{ApiKey: []}]
+      summary: Contrats de sondes d'encodeurs logiciels fournis par les plugins
+      description: Le worker vérifie l'empreinte du binaire installé dans son cache avant d'exécuter la sonde.
+      responses:
+        '200':
+          description: Sondes et artefacts disponibles par architecture
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [toolId, toolVersion, arch, executable, sha256, args, encoders]
+                  properties:
+                    toolId: {type: string}
+                    toolVersion: {type: string}
+                    arch: {type: string}
+                    executable: {type: string}
+                    sha256: {type: string}
+                    args: {type: array, items: {type: string}}
+                    encoders:
+                      type: array
+                      items:
+                        type: object
+                        required: [encoder, codec]
+                        properties:
+                          encoder: {type: string}
+                          codec: {type: string, enum: [h264, hevc, av1]}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/worker/overview:
     get:
       security: [{ApiKey: []}]
@@ -1711,6 +1857,22 @@ components:
         result_bytes: {type: integer, minimum: 1}
         extension: {type: string}
         policy: {type: string, enum: [replace_with_backup, replace_in_place]}
+    HandoffArtifact:
+      type: object
+      required: [name, sha256, bytes]
+      properties:
+        name: {type: string, description: Nom du fichier de travail}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        bytes: {type: integer, minimum: 1}
+    HandoffOffer:
+      type: object
+      required: [jobId, fromWorkerId, sourceLeaseEpoch, artifact, receiptToken]
+      properties:
+        jobId: {type: string, format: uuid}
+        fromWorkerId: {type: string, format: uuid}
+        sourceLeaseEpoch: {type: integer}
+        artifact: {$ref: '#/components/schemas/HandoffArtifact'}
+        receiptToken: {type: string, description: Secret réservé au repreneur pour télécharger et accuser réception}
     ApiKey:
       type: object
       properties:
@@ -1799,6 +1961,15 @@ components:
         source_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
         source_bytes: {type: integer, minimum: 1}
         local_source_root: {type: string, description: "Dossier local au worker pour une source sur son montage."}
+        resume_node_id: {type: string, description: Identifiant du nœud où reprendre le flux figé.}
+        prior_warning: {type: boolean, default: false, description: Avertissement accumulé avant la remise.}
+        handoff_input:
+          type: object
+          description: Fichier de travail vérifié et conservé par le repreneur.
+          required: [sourceLeaseEpoch, artifact]
+          properties:
+            sourceLeaseEpoch: {type: integer}
+            artifact: {$ref: '#/components/schemas/HandoffArtifact'}
     Job:
       type: object
       required: [id, source_name, status, attempts, warning, created_at, updated_at]

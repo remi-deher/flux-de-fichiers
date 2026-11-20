@@ -27,6 +27,9 @@ const REMOTE_BROWSE_WAIT_MS: u64 = 10_000;
 const REMOTE_BROWSE_HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 const REMOTE_BROWSE_REPORT_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_BROWSE_RETRY_DELAY: Duration = Duration::from_secs(2);
+const SOFTWARE_PROBE_REFRESH: Duration = Duration::from_secs(60);
+mod handoff;
+pub(crate) use handoff::{prune_retained, retained_handoff_path};
 
 #[derive(Clone, Copy)]
 enum PublicationRequestKind {
@@ -129,6 +132,31 @@ struct WorkerLoop {
     status: Arc<WorkerState>,
 }
 impl WorkerLoop {
+    async fn refresh_software_capabilities(&self) {
+        let probes = self
+            .request(
+                reqwest::Method::GET,
+                "/api/v1/worker/software-encoder-probes",
+            )
+            .timeout(REMOTE_BROWSE_HTTP_TIMEOUT)
+            .send()
+            .await;
+        let Ok(response) = probes else {
+            return;
+        };
+        let Ok(response) = response.error_for_status() else {
+            return;
+        };
+        let Ok(probes) = response
+            .json::<Vec<crate::software_probe::SoftwareEncoderProbe>>()
+            .await
+        else {
+            return;
+        };
+        let cache = crate::tools_cache::ToolCacheManager::new(&self.config.tools_cache_dir);
+        crate::software_probe::refresh_software_capabilities(&cache, &probes).await;
+    }
+
     fn request(&self, method: reqwest::Method, path: &str) -> RequestBuilder {
         self.client
             .request(
@@ -238,27 +266,30 @@ impl WorkerLoop {
         Ok(())
     }
 
-    async fn report_steps(&self, claim: &Claim, worker: Uuid, steps: &[JobStepEntry]) {
+    async fn report_steps(
+        &self,
+        claim: &Claim,
+        worker: Uuid,
+        steps: &[JobStepEntry],
+    ) -> anyhow::Result<()> {
         if steps.is_empty() {
-            return;
+            return Ok(());
         }
-        let report = self
-            .request(
-                reqwest::Method::POST,
-                &format!("/api/v1/jobs/{}/steps", claim.job_id),
-            )
-            .timeout(Duration::from_secs(10))
-            .json(&StepsReport {
-                worker_id: worker,
-                lease_token: claim.lease_token,
-                lease_epoch: claim.lease_epoch,
-                steps: steps.to_vec(),
-            })
-            .send()
-            .await;
-        if !matches!(report, Ok(r) if r.status().is_success()) {
-            tracing::warn!(job_id = %claim.job_id, "step report rejected or unavailable");
-        }
+        self.request(
+            reqwest::Method::POST,
+            &format!("/api/v1/jobs/{}/steps", claim.job_id),
+        )
+        .timeout(Duration::from_secs(10))
+        .json(&StepsReport {
+            worker_id: worker,
+            lease_token: claim.lease_token,
+            lease_epoch: claim.lease_epoch,
+            steps: steps.to_vec(),
+        })
+        .send()
+        .await?
+        .error_for_status()?;
+        Ok(())
     }
 
     async fn process(
@@ -279,12 +310,29 @@ impl WorkerLoop {
                 tracing::warn!(tool = %req.tool_id, version = %req.version, error = %error, "installation de l'outil impossible");
             }
         }
+        self.refresh_software_capabilities().await;
         job_runner::ensure_probe_ready(&cache_mgr, claim)?;
 
         let input = dir.join(forgearr_shared::jobs::source_working_filename(
-            &claim.source_name,
+            claim.working_source_name(),
         ));
-        if let Some(root) = claim.local_source_root.as_deref() {
+        if let Some(handoff) = &claim.handoff_input {
+            let retained = retained_handoff_path(
+                &self.config.work_dir,
+                claim.job_id,
+                handoff.source_lease_epoch,
+            );
+            crate::local_worker::copy_verified_source(
+                &retained,
+                &input,
+                self.config.max_bytes,
+                &handoff.artifact.sha256,
+                handoff.artifact.bytes,
+            )
+            .await
+            .map_err(|_| JobRunError::simple(JobErrorCode::SourceIntegrity, "handoff_integrity"))?;
+            tokio::fs::remove_file(retained).await?;
+        } else if let Some(root) = claim.local_source_root.as_deref() {
             let source = crate::library_scan::source_path(Path::new(root), &claim.source_name)
                 .await
                 .map_err(|_| {
@@ -315,10 +363,22 @@ impl WorkerLoop {
             progress_cb,
         )
         .await?;
-        self.report_steps(claim, worker, &outcome.steps).await;
+        let step_report = self.report_steps(claim, worker, &outcome.steps).await;
         if let Some(request) = outcome.relay {
-            self.relay_job(claim, worker, request).await?;
+            step_report?;
+            self.send_handoff(
+                claim,
+                worker,
+                request,
+                &outcome.working_file,
+                dir,
+                outcome.warning,
+            )
+            .await?;
             return Ok(());
+        }
+        if step_report.is_err() {
+            tracing::warn!(job_id=%claim.job_id, "step report rejected or unavailable");
         }
 
         let (_, output_size) =
@@ -344,34 +404,6 @@ impl WorkerLoop {
         }
         Ok(())
     }
-    /// Confie la tâche au central, qui la place dans la file du worker cible (ADR 0018).
-    async fn relay_job(
-        &self,
-        claim: &Claim,
-        worker: Uuid,
-        request: forgearr_shared::relay::RelayRequest,
-    ) -> anyhow::Result<()> {
-        let response = self
-            .request(
-                reqwest::Method::POST,
-                &format!("/api/v1/jobs/{}/relay", claim.job_id),
-            )
-            .timeout(Duration::from_secs(10))
-            .json(&forgearr_shared::relay::RelayReport {
-                worker_id: worker,
-                lease_token: claim.lease_token,
-                lease_epoch: claim.lease_epoch,
-                request,
-            })
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<forgearr_shared::relay::RelayResponse>()
-            .await?;
-        tracing::info!(job_id = %claim.job_id, relayed = response.relayed, "relais rapporté au central");
-        Ok(())
-    }
-
     /// Récupère la source : voie directe chez le worker qui la détient (si un billet est fourni),
     /// puis repli par le central (ADR 0019).
     async fn download_source(
@@ -443,8 +475,10 @@ impl WorkerLoop {
             } else {
                 ("transfer_failed", None)
             };
-            if let Some(steps) = steps {
-                self.report_steps(&claim, worker, steps).await;
+            if let Some(steps) = steps
+                && self.report_steps(&claim, worker, steps).await.is_err()
+            {
+                tracing::warn!(job_id=%claim.job_id, "step report rejected or unavailable");
             }
             tracing::warn!(job_id=%claim.job_id, error_code=code, "processing failed");
             // Do not format reqwest errors: their URLs may contain sensitive context.
@@ -838,6 +872,7 @@ impl WorkerLoop {
     /// Enregistre le worker puis réclame des tâches jusqu'à l'arrêt.
     async fn work(&self) -> anyhow::Result<()> {
         let runner = self;
+        runner.refresh_software_capabilities().await;
         let probe = crate::telemetry::TelemetryProbe::with_storage_path(&runner.config.work_dir);
         let worker = loop {
             let attempt = async {
@@ -898,6 +933,26 @@ impl WorkerLoop {
                     .await;
             })
         };
+        let software_probe_refresher = {
+            let probe_runner = runner.clone();
+            let probe_worker_id = worker.id;
+            tokio::spawn(async move {
+                if let Err(error) = probe_runner.prune_handoffs(probe_worker_id).await {
+                    tracing::warn!(error=%error, "retained handoff cleanup unavailable");
+                }
+                loop {
+                    tokio::select! {
+                        _ = crate::api::shutdown_signal() => return,
+                        _ = tokio::time::sleep(SOFTWARE_PROBE_REFRESH) => {
+                            probe_runner.refresh_software_capabilities().await;
+                            if let Err(error) = probe_runner.prune_handoffs(probe_worker_id).await {
+                                tracing::warn!(error=%error, "retained handoff cleanup unavailable");
+                            }
+                        },
+                    }
+                }
+            })
+        };
         let outcome: anyhow::Result<()> = async {
             let mut was_disconnected = false;
             let mut idle_polls: u32 = 0;
@@ -929,6 +984,9 @@ impl WorkerLoop {
                 };
                 idle_polls = idle_polls.wrapping_add(1);
                 while (active.len() as i32) < max_concurrency {
+                    if let Err(error) = runner.receive_handoff(worker.id).await {
+                        tracing::warn!(error=%error, "handoff reception failed");
+                    }
                     let attempt = async {
                         let claim = runner
                             .request(reqwest::Method::POST, "/api/v1/claims")
@@ -1016,6 +1074,7 @@ impl WorkerLoop {
         source_relay_responder.abort();
         source_publication_responder.abort();
         source_inspection_responder.abort();
+        software_probe_refresher.abort();
         if let Some(server) = transfer_server {
             server.abort();
         }

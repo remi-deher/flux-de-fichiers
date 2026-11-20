@@ -1,7 +1,7 @@
 //! Bibliothèques d'un worker et son mode d'accès pour chacune (ADR 0021).
 
 use crate::ui::{Tag, TagTone};
-use forgearr_shared::libraries::Library;
+use forgearr_shared::libraries::{Library, has_unshared_remote_sources};
 use leptos::prelude::*;
 use uuid::Uuid;
 
@@ -35,6 +35,7 @@ impl LibraryMode {
 pub struct WorkerLibrary {
     pub name: String,
     pub mode: LibraryMode,
+    pub unshared_sources: bool,
 }
 
 /// Bibliothèques où le worker a un mode, avec ce mode. Le worker intégré a l'accès direct aux
@@ -60,6 +61,8 @@ pub fn worker_libraries(
             Some(WorkerLibrary {
                 name: library.name.clone(),
                 mode,
+                unshared_sources: mode == LibraryMode::Transfer
+                    && has_unshared_remote_sources(&library.workers),
             })
         })
         .collect()
@@ -81,6 +84,9 @@ pub fn WorkerLibrariesSection(libraries: Vec<WorkerLibrary>) -> impl IntoView {
                             <li class="library-worker-row">
                                 <span class="text-strong">{library.name}</span>
                                 <Tag label=library.mode.label() tone=library.mode.tone() />
+                                {library.unshared_sources.then(|| view! {
+                                    <Tag label="Sources non partagées" tone=TagTone::Warning />
+                                })}
                             </li>
                         }).collect_view()}
                     </ul>
@@ -136,11 +142,13 @@ mod tests {
             vec![
                 WorkerLibrary {
                     name: "Films".into(),
-                    mode: LibraryMode::Direct
+                    mode: LibraryMode::Direct,
+                    unshared_sources: false,
                 },
                 WorkerLibrary {
                     name: "Séries".into(),
-                    mode: LibraryMode::Transfer
+                    mode: LibraryMode::Transfer,
+                    unshared_sources: true,
                 },
             ]
         );

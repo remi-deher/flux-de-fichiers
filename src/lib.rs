@@ -27,6 +27,7 @@ pub mod repository;
 pub mod runtime_settings;
 pub mod secret_rotation;
 pub mod secrets;
+pub mod software_probe;
 pub mod source_publication;
 pub mod source_publication_broker;
 pub mod source_relay;

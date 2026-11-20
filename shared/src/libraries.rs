@@ -80,6 +80,17 @@ pub struct LibraryWorkerPath {
     pub access: LibraryAccess,
 }
 
+/// Un dossier distant sans identifiant reste attribué à son détenteur, sans transfert.
+pub fn has_unshared_remote_sources(folders: &[LibraryWorkerPath]) -> bool {
+    folders.iter().any(|folder| {
+        !folder.worker_id.is_nil()
+            && folder
+                .source_key
+                .as_deref()
+                .is_none_or(|key| key.trim().is_empty())
+    })
+}
+
 /// Bibliothèque déclarée : un nom, un flux, des workers, et règles d'automatisation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Library {
@@ -306,6 +317,23 @@ pub fn suggested_library_name_from_path(path: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unshared_remote_sources_exclude_central_and_accept_named_sources() {
+        let mut folder = LibraryWorkerPath {
+            source_key: None,
+            worker_id: Uuid::nil(),
+            local_path: "/films".into(),
+            access: LibraryAccess::Read,
+        };
+        assert!(!has_unshared_remote_sources(&[folder.clone()]));
+        folder.worker_id = Uuid::from_u128(1);
+        assert!(has_unshared_remote_sources(&[folder.clone()]));
+        folder.source_key = Some("  ".into());
+        assert!(has_unshared_remote_sources(&[folder.clone()]));
+        folder.source_key = Some("films".into());
+        assert!(!has_unshared_remote_sources(&[folder]));
+    }
 
     #[test]
     fn media_extensions_match_case_insensitively() {

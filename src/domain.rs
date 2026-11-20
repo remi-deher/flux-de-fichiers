@@ -101,9 +101,26 @@ pub struct Claim {
     /// Nœud du flux où reprendre une tâche relayée par un autre worker (ADR 0018).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_node_id: Option<String>,
+    /// Copie de travail reçue avant ce bail, si celui-ci suit une remise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff_input: Option<forgearr_shared::relay::HandoffInput>,
+    /// Avertissement accumulé avant un éventuel transfert.
+    #[serde(default)]
+    pub prior_warning: bool,
     /// Billet pour lire la source chez le worker qui la détient (ADR 0019).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_ticket: Option<forgearr_shared::transfer::SourceTicket>,
+}
+
+impl Claim {
+    /// Le fichier à sonder peut être le résultat intermédiaire d'un worker précédent.
+    pub fn working_source_name(&self) -> &str {
+        self.handoff_input
+            .as_ref()
+            .map_or(self.source_name.as_str(), |input| {
+                input.artifact.name.as_str()
+            })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -294,6 +311,8 @@ mod tests {
             media_root: None,
             local_source_root: None,
             resume_node_id: None,
+            handoff_input: None,
+            prior_warning: false,
             source_ticket: None,
         };
         let encoded = serde_json::to_value(&with_flow)?;

@@ -15,7 +15,7 @@ use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
-fn lease(h: &HeaderMap) -> AppResult<LeaseRequest> {
+pub(super) fn lease(h: &HeaderMap) -> AppResult<LeaseRequest> {
     let uuid = |key: &str| {
         h.get(key)
             .and_then(|v| v.to_str().ok())

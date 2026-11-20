@@ -1,6 +1,8 @@
 //! Tests du moteur pour les blocs « Capacité du worker » et « Relayer la tâche » (ADR 0018).
 
-use super::engine_tests::{base_registry, flow_record, install_fake_probe, recording_progress};
+use super::engine_tests::{
+    base_registry, flow_record, install_fake_probe, install_fake_tool, recording_progress,
+};
 use super::*;
 use forgearr_shared::{
     capabilities::{EncodeAcceleration, HardwareEncoder, VideoCodec},
@@ -59,6 +61,7 @@ fn relay_flow() -> FlowRecord {
 fn hevc_capabilities() -> WorkerCapabilities {
     WorkerCapabilities {
         gpu_models: Vec::new(),
+        software_encoders: Vec::new(),
         hardware_encoders: vec![HardwareEncoder {
             codec: VideoCodec::Hevc,
             acceleration: EncodeAcceleration::Nvenc,
@@ -74,6 +77,16 @@ async fn run(
     let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
     let cache = ToolCacheManager::new(dir.path().join("cache"));
     install_fake_probe(&cache).map_err(|e| e.to_string())?;
+    install_fake_tool(
+        &cache,
+        "mp4box",
+        "1.0.0",
+        "MP4Box",
+        r#"for a; do last=$a; done; printf '\000\000\000\030ftypisom\000\000\002\000' > "$last""#,
+    )
+    .map_err(|e| e.to_string())?;
+    install_fake_tool(&cache, "mkvtoolnix", "1.0.0", "mkvpropedit", "exit 0")
+        .map_err(|e| e.to_string())?;
     let source = dir.path().join("in.mkv");
     std::fs::write(&source, "x").map_err(|e| e.to_string())?;
     let work = dir.path().join("work");
@@ -97,6 +110,57 @@ async fn run(
     .execute_flow(Uuid::new_v4(), flow, &source, &work, progress)
     .await
     .map_err(|e| e.message)
+}
+
+fn relay_after(block: &str, config: serde_json::Value) -> FlowRecord {
+    flow_record(json!({
+        "nodes": [
+            {"id":"in", "type":"file-input", "name":"in"},
+            {"id":"edit", "type":block, "name":"edit", "config":config},
+            {"id":"relay", "type":"relay", "name":"relay", "config":{"mode":"capable", "codec":"hevc"}},
+            {"id":"out", "type":"file-output", "name":"out"}
+        ],
+        "connections": [
+            {"from":"in", "to":"edit"}, {"from":"edit", "to":"relay"}, {"from":"relay", "to":"out"}
+        ]
+    }))
+}
+
+#[tokio::test]
+async fn relay_accepts_a_staged_working_file_after_processing() -> TestResult {
+    let outcome = run(&relay_after("video.remux-mp4", json!({})), None, None).await?;
+    assert!(outcome.relay.is_some());
+    assert!(outcome.final_file.ends_with("remuxed.mp4"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn relay_refuses_a_source_modified_in_place() -> TestResult {
+    let error = run(
+        &relay_after(
+            "block.video.mkvpropedit",
+            json!({"default_audio_lang":"fra"}),
+        ),
+        None,
+        None,
+    )
+    .await
+    .err()
+    .ok_or("le transfert doit échouer")?;
+    assert!(error.contains("modification de la source en place"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn relay_accepts_an_in_place_operation_that_had_no_changes() -> TestResult {
+    let outcome = run(
+        &relay_after("block.video.mkvpropedit", json!({})),
+        None,
+        None,
+    )
+    .await?;
+    assert!(outcome.relay.is_some());
+    Ok(())
 }
 
 #[tokio::test]

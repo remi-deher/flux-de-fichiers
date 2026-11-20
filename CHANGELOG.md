@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.64.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.63.1...v0.64.0) (2026-11-20)
+
+
+### Features
+
+* **transfert:** billet ré-émissible et reprise du téléchargement direct par Range ([5a8283d](https://github.com/remi-deher/flux-de-fichiers/commit/5a8283d650d3374a5284b6eb82d3321f355d4856))
+* **transfert:** le worker intégré détient les sources du central (ADR 0022, étape 3c-i) ([f2ade59](https://github.com/remi-deher/flux-de-fichiers/commit/f2ade5933e6340d7374b3ae98f939503f0e5db8c))
+* **transfert:** registre d'artefacts retenus et billets d'artefact (ADR 0022, étape 1) ([2bd73bf](https://github.com/remi-deher/flux-de-fichiers/commit/2bd73bf8944374db0534209bb24b93ccc161e520))
+* **transfert:** relais par artefact côté central (ADR 0022, étape 2a) ([1d99c8f](https://github.com/remi-deher/flux-de-fichiers/commit/1d99c8f6cff00fc643b124d3f7c173919a5eb3dc))
+* **transfert:** résultat retenu tiré par le détenteur, côté central (ADR 0022, étape 3a) ([97d46df](https://github.com/remi-deher/flux-de-fichiers/commit/97d46df922021b41c65bfcc6947635a435d82893))
+* **transfert:** workers au relais par artefact (ADR 0022, étape 2b-i) ([f24b190](https://github.com/remi-deher/flux-de-fichiers/commit/f24b19043ffababebc081668e8d3e0246752653d))
+* **transfert:** workers au résultat retenu et tiré (ADR 0022, étape 3b) ([0a644bd](https://github.com/remi-deher/flux-de-fichiers/commit/0a644bd1e22dbfd0c3da734a514b5387343a72bb))
+
+
+### Bug Fixes
+
+* **transfert:** lier redeem à l'identité du worker et protéger les permis ([17c7a71](https://github.com/remi-deher/flux-de-fichiers/commit/17c7a713c587e2d5adb05b856272a924da030343))
+
 ## [0.63.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.63.0...v0.63.1) (2026-11-20)
 
 

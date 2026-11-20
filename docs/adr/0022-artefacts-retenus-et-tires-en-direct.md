@@ -134,7 +134,20 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
    - **2b-ii (fait) — suppression de l'ancien flux** : table `job_handoffs` (migration 0038), routes
      `/handoff*` et `/worker/handoffs/*`, code central (téléversement, staging, accusé, nettoyage) et tests
      associés. `GET .../artifacts/working/retained` ne réclame plus le fichier d'une tâche terminée.
-3. Retour du résultat tiré par le détenteur de la bibliothèque, point de commit idempotent.
+3. Retour du résultat tiré par le détenteur de la bibliothèque, sans copie centrale (décision
+   utilisateur du 20 nov. 2026 : le worker intégré est le détenteur des bibliothèques à dossier de
+   sortie du central), en pushes courts :
+   - **3a (fait) — côté central, détenteur distant** : `POST /api/v1/jobs/{id}/result/ready` publie un
+     résultat retenu chez le worker qui traite ; le détenteur de la source tire le fichier avec un
+     billet d'artefact (`SourcePublicationTask.result_ticket`), applique la politique, puis la tâche
+     réussit sans fichier au central. Les autres cas répondent `pulled: false` et gardent l'envoi au
+     central.
+   - 3b — workers : le worker qui traite retient son résultat, le déclare et appelle `result/ready` ;
+     le détenteur distant tire chez lui ; le détenteur qui traite lui-même applique en local.
+   - 3c — le worker intégré comme destination (sources tenues par le central, `OutputDir`).
+   - 3d — journal et reprise sans copie centrale ; `output_name` vide pour un résultat remplacé.
+   - 3e — suppression de l'envoi `PUT /result`, du staging et des copies centrales ; validation
+     post-traitement chez le worker qui traite.
 4. Suppression du repli par le central, de `PUT /result` et des routes de remise.
 5. Worker intégré traité comme un worker ordinaire.
 

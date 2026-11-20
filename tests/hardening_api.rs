@@ -200,6 +200,7 @@ async fn read_only_inspections_use_a_separate_authenticated_channel() -> anyhow:
         result_bytes: 9,
         extension: "mkv".into(),
         policy: LibraryOutputPolicy::ReplaceWithBackup,
+        result_ticket: None,
     };
     let broker = h.inspection.clone();
     let pending_job = job.id;
@@ -1497,6 +1498,7 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
         result_bytes: 6,
         extension: "mkv".into(),
         policy: LibraryOutputPolicy::ReplaceWithBackup,
+        result_ticket: None,
     };
     let request_id = task.request_id;
     let lease = LeaseRequest {

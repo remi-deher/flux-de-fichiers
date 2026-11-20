@@ -373,7 +373,7 @@ pub(crate) async fn publish_staged(
                         s,
                         job,
                         lease,
-                        staging,
+                        super::source_publication::ResultSource::Staged(staging),
                         &hash,
                         i64::try_from(size).map_err(|_| AppError::TooLarge)?,
                         &spec.extension,
@@ -434,7 +434,7 @@ pub(crate) async fn publish_staged(
     Ok(())
 }
 
-async fn mark_publication_uncertain(s: &AppState, job: Uuid, epoch: i64) {
+pub(super) async fn mark_publication_uncertain(s: &AppState, job: Uuid, epoch: i64) {
     match repository::mark_source_publication_uncertain(&s.pool, job, epoch).await {
         Ok(Some(code)) => {
             s.notify_job_event(JobEventType::JobFailed, job, JobStatus::Failed, Some(code))

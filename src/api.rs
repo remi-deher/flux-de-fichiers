@@ -11,6 +11,7 @@ pub(crate) mod local;
 mod password_reset;
 pub(crate) mod plugins;
 pub(crate) mod recovery_kit;
+mod result_ready;
 pub(crate) mod session;
 mod setup;
 pub(crate) mod source_publication;
@@ -537,6 +538,7 @@ fn transfer_routes() -> Router<AppState> {
             "/api/v1/jobs/{id}/artifacts/working/retained",
             get(artifacts::retained),
         )
+        .route("/api/v1/jobs/{id}/result/ready", post(result_ready::ready))
         .route("/api/v1/worker/transfers/redeem", post(transfers::redeem))
         .route(
             "/api/v1/worker/source-relay/pending",

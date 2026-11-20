@@ -63,6 +63,7 @@ async fn inspect_holders(
             result_bytes: pending.output_bytes,
             extension: extension.to_owned(),
             policy: pending.output_policy,
+            result_ticket: None,
         };
         let result = s
             .source_inspection

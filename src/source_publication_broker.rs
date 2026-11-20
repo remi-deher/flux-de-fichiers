@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 struct Pending {
     task: SourcePublicationTask,
-    staged: PathBuf,
+    staged: Option<PathBuf>,
     job_id: Uuid,
     lease: LeaseRequest,
     dispatched: bool,
@@ -23,7 +23,9 @@ struct Pending {
 /// Contexte de bail gardé par le central et jamais envoyé au détenteur.
 #[derive(Clone)]
 pub struct PublicationAccess {
-    pub staged: PathBuf,
+    /// Fichier tenu par le central (ancien envoi) ; absent quand le détenteur tire le résultat chez
+    /// le worker qui le retient.
+    pub staged: Option<PathBuf>,
     pub job_id: Uuid,
     pub lease: LeaseRequest,
     pub root: String,
@@ -46,6 +48,30 @@ impl SourcePublicationBroker {
         &self,
         task: SourcePublicationTask,
         staged: PathBuf,
+        job_id: Uuid,
+        lease: LeaseRequest,
+        timeout: Duration,
+    ) -> AppResult<SourcePublicationOutcome> {
+        self.request_with(task, Some(staged), job_id, lease, timeout)
+            .await
+    }
+
+    /// Comme [`Self::request`], pour un résultat que le détenteur tire chez le worker qui le
+    /// retient (le central ne tient aucun fichier).
+    pub async fn request_pulled(
+        &self,
+        task: SourcePublicationTask,
+        job_id: Uuid,
+        lease: LeaseRequest,
+        timeout: Duration,
+    ) -> AppResult<SourcePublicationOutcome> {
+        self.request_with(task, None, job_id, lease, timeout).await
+    }
+
+    async fn request_with(
+        &self,
+        task: SourcePublicationTask,
+        staged: Option<PathBuf>,
         job_id: Uuid,
         lease: LeaseRequest,
         timeout: Duration,
@@ -159,6 +185,7 @@ mod tests {
             result_bytes: 9,
             extension: "mkv".into(),
             policy: LibraryOutputPolicy::ReplaceWithBackup,
+            result_ticket: None,
         }
     }
 
@@ -198,7 +225,7 @@ mod tests {
                 .access_for_worker(request_id, holder)
                 .await
                 .map(|access| access.staged),
-            Some(PathBuf::from("/staged"))
+            Some(Some(PathBuf::from("/staged")))
         );
         let report = SourcePublicationReport {
             request_id,

@@ -13,7 +13,7 @@ use axum::{
     response::Response,
 };
 use forgearr_shared::transfer::{
-    SourcePublicationOutcome, SourcePublicationReport, SourcePublicationTask,
+    ArtifactKind, SourcePublicationOutcome, SourcePublicationReport, SourcePublicationTask,
 };
 use serde::Deserialize;
 use std::time::Duration;
@@ -22,13 +22,21 @@ use uuid::Uuid;
 const MAX_PENDING_WAIT_MS: u64 = 15_000;
 const PUBLICATION_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
+/// D'où le détenteur lit le résultat.
+pub(crate) enum ResultSource<'a> {
+    /// Fichier tenu par le central (ancien envoi).
+    Staged(&'a std::path::Path),
+    /// Fichier retenu par le worker qui l'a produit : le détenteur le tire en direct (ADR 0022).
+    Pulled,
+}
+
 /// Transmet le résultat à un détenteur inscriptible, sans le déclarer réussi avant sa réponse.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn publish_on_holder(
     s: &AppState,
     job: &Job,
     lease: &LeaseRequest,
-    staged: &std::path::Path,
+    source: ResultSource<'_>,
     result_hash: &str,
     result_bytes: i64,
     extension: &str,
@@ -39,6 +47,20 @@ pub(crate) async fn publish_on_holder(
         .into_iter()
         .next()
         .ok_or(AppError::CentralUnavailable)?;
+    let result_ticket = match source {
+        ResultSource::Staged(_) => None,
+        ResultSource::Pulled => Some(
+            repository::issue_artifact_ticket(
+                &s.pool,
+                job.id,
+                ArtifactKind::Result,
+                holder.worker_id,
+                lease.lease_epoch,
+            )
+            .await?
+            .ok_or(AppError::CentralUnavailable)?,
+        ),
+    };
     let task = SourcePublicationTask {
         request_id: Uuid::new_v4(),
         worker_id: holder.worker_id,
@@ -50,18 +72,28 @@ pub(crate) async fn publish_on_holder(
         result_bytes,
         extension: extension.to_owned(),
         policy,
+        result_ticket,
     };
-    match s
-        .source_publication
-        .request(
-            task,
-            staged.to_path_buf(),
-            job.id,
-            lease.clone(),
-            PUBLICATION_TIMEOUT,
-        )
-        .await?
-    {
+    let broker = &s.source_publication;
+    let outcome = match source {
+        ResultSource::Staged(staged) => {
+            broker
+                .request(
+                    task,
+                    staged.to_path_buf(),
+                    job.id,
+                    lease.clone(),
+                    PUBLICATION_TIMEOUT,
+                )
+                .await?
+        }
+        ResultSource::Pulled => {
+            broker
+                .request_pulled(task, job.id, lease.clone(), PUBLICATION_TIMEOUT)
+                .await?
+        }
+    };
+    match outcome {
         SourcePublicationOutcome::Published => {
             repository::active(&s.pool, job.id, lease).await?;
             Ok(())
@@ -118,7 +150,8 @@ pub async fn staged(
         .await
         .ok_or(AppError::NotFound)?;
     repository::active(&s.pool, access.job_id, &access.lease).await?;
-    super::transfers::stream_file(&access.staged, None, "application/octet-stream").await
+    let staged = access.staged.ok_or(AppError::NotFound)?;
+    super::transfers::stream_file(&staged, None, "application/octet-stream").await
 }
 
 /// Vérifie le bail juste avant que le détenteur ne remplace la source.

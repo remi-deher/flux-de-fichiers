@@ -46,6 +46,23 @@ pub struct ArtifactDeclaration {
     pub bytes: i64,
 }
 
+/// Un worker annonce que son résultat est prêt et retenu chez lui (ADR 0022).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResultReady {
+    /// Extension du fichier de sortie (conteneur).
+    pub extension: String,
+    /// Avertissement accumulé par le flux.
+    #[serde(default)]
+    pub warning: bool,
+}
+
+/// Réponse du central : `pulled` quand le détenteur de la bibliothèque a tiré et appliqué le
+/// résultat ; sinon le worker doit encore l'envoyer au central.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResultReadyResponse {
+    pub pulled: bool,
+}
+
 /// En-tête portant le billet de transfert sur la route de lecture du worker source.
 pub const TRANSFER_TICKET_HEADER: &str = "x-transfer-ticket";
 
@@ -101,6 +118,10 @@ pub struct SourcePublicationTask {
     pub result_bytes: i64,
     pub extension: String,
     pub policy: crate::libraries::LibraryOutputPolicy,
+    /// Billet pour tirer le résultat chez le worker qui le retient ; absent quand le détenteur le
+    /// lit chez le central (ancien envoi).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_ticket: Option<SourceTicket>,
 }
 
 /// Résultat explicite du remplacement chez le détenteur.

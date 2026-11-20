@@ -912,6 +912,7 @@ pub async fn downloadable_output_name(pool: &SqlitePool, id: Uuid) -> AppResult<
     Ok(name)
 }
 
+#[derive(Clone, Copy)]
 pub struct PublishedOutput<'a> {
     pub name: &'a str,
     pub sha256: &'a str,

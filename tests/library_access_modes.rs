@@ -175,13 +175,21 @@ async fn transfer_mode_is_validated_when_saving_a_library() -> anyhow::Result<()
             .await
             .is_ok()
     );
+    assert!(
+        save(vec![other.id], LibraryOutputPolicy::ReplaceInPlace)
+            .await
+            .is_ok()
+    );
+    assert!(
+        save(vec![other.id], LibraryOutputPolicy::ReplaceWithBackup)
+            .await
+            .is_ok()
+    );
     for (transfer, policy) in [
         (vec![direct.id], LibraryOutputPolicy::OutputDir),
         (vec![other.id, other.id], LibraryOutputPolicy::OutputDir),
         (vec![Uuid::nil()], LibraryOutputPolicy::OutputDir),
         (vec![Uuid::new_v4()], LibraryOutputPolicy::OutputDir),
-        (vec![other.id], LibraryOutputPolicy::ReplaceInPlace),
-        (vec![other.id], LibraryOutputPolicy::ReplaceWithBackup),
     ] {
         assert!(
             matches!(save(transfer.clone(), policy).await, Err(AppError::Invalid)),
@@ -192,8 +200,7 @@ async fn transfer_mode_is_validated_when_saving_a_library() -> anyhow::Result<()
 }
 
 #[tokio::test]
-async fn transfer_workers_do_not_take_jobs_of_replace_libraries_saved_before() -> anyhow::Result<()>
-{
+async fn transfer_workers_take_jobs_of_replace_libraries() -> anyhow::Result<()> {
     let pool = pool().await?;
     let direct = repository::register(&pool, "direct").await?;
     let transfer = repository::register(&pool, "transfert").await?;
@@ -215,13 +222,12 @@ async fn transfer_workers_do_not_take_jobs_of_replace_libraries_saved_before() -
         &[(direct.id, "/mnt/a")],
     )
     .await?;
-    // Politique changée hors de l'API : le claim reste prudent.
+    // Politique changée hors de l'API : l'accès par transfert reste valable.
     sqlx::query("UPDATE libraries SET output_policy='replace_in_place' WHERE id=?1")
         .bind(library.id)
         .execute(&pool)
         .await?;
-    assert!(claim_of(&pool, transfer.id).await?.is_none());
-    assert!(claim_of(&pool, direct.id).await?.is_some());
+    assert!(claim_of(&pool, transfer.id).await?.is_some());
     Ok(())
 }
 
@@ -272,15 +278,12 @@ fn transfer_worker_rules_are_checked_without_a_database() {
     use forgearr::repository::prepare_transfer_workers;
     let direct = [folder(Uuid::from_u128(1), "/mnt/a", "nas")];
     let other = Uuid::from_u128(2);
-    assert!(prepare_transfer_workers(vec![], &direct, LibraryOutputPolicy::ReplaceInPlace).is_ok());
+    assert!(prepare_transfer_workers(vec![], &direct).is_ok());
     assert_eq!(
-        prepare_transfer_workers(vec![other], &direct, LibraryOutputPolicy::OutputDir).ok(),
+        prepare_transfer_workers(vec![other], &direct).ok(),
         Some(vec![other])
     );
-    assert!(
-        prepare_transfer_workers(vec![other], &direct, LibraryOutputPolicy::ReplaceInPlace)
-            .is_err()
-    );
+    assert!(prepare_transfer_workers(vec![direct[0].worker_id], &direct).is_err());
 }
 
 #[tokio::test]
@@ -298,8 +301,138 @@ async fn the_worker_list_tells_which_workers_announce_a_transfer_address() -> an
     };
     assert_eq!(flag(announcing.id), Some(true));
     assert_eq!(flag(silent.id), Some(false));
+    assert!(
+        repository::get_worker(&pool, announcing.id)
+            .await?
+            .transfer_enabled
+    );
+    assert!(
+        repository::find_worker_by_name(&pool, "annonce")
+            .await?
+            .is_some_and(|worker| worker.transfer_enabled)
+    );
+    assert!(
+        repository::update_worker_settings(&pool, announcing.id, 1, None)
+            .await?
+            .transfer_enabled
+    );
+    assert!(
+        repository::register(&pool, "annonce")
+            .await?
+            .transfer_enabled
+    );
     repository::set_transfer_url(&pool, announcing.id, None).await?;
+    assert!(
+        !repository::get_worker(&pool, announcing.id)
+            .await?
+            .transfer_enabled
+    );
     let workers = repository::list_workers(&pool).await?;
     assert!(workers.iter().all(|worker| !worker.transfer_enabled));
+    Ok(())
+}
+
+#[tokio::test]
+async fn publication_selects_only_current_writable_online_holders() -> anyhow::Result<()> {
+    let pool = pool().await?;
+    let reader = repository::register(&pool, "lecteur").await?;
+    let writer = repository::register(&pool, "ecrivain").await?;
+    let compute = repository::register(&pool, "calcul").await?;
+    let mut writable = folder(writer.id, "/srv/films", "nas");
+    writable.access = LibraryAccess::ReadWrite;
+    let library = repository::insert_library(
+        &pool,
+        LibraryWrite {
+            name: "Films".into(),
+            workers: vec![folder(reader.id, "/mnt/a", "nas"), writable],
+            transfer_workers: vec![compute.id],
+            ..Default::default()
+        },
+    )
+    .await?;
+    let job = library_job(
+        &pool,
+        library.id,
+        Some(reader.id),
+        "nas",
+        &[(reader.id, "/mnt/a"), (writer.id, "/srv/films")],
+    )
+    .await?;
+    let holders = repository::writable_source_holders(&pool, job, compute.id).await?;
+    assert_eq!(holders.len(), 1);
+    assert_eq!(holders[0].worker_id, writer.id);
+    sqlx::query("UPDATE workers SET last_seen=datetime('now', '-1 day') WHERE id=?1")
+        .bind(writer.id)
+        .execute(&pool)
+        .await?;
+    assert!(
+        repository::writable_source_holders(&pool, job, compute.id)
+            .await?
+            .is_empty()
+    );
+    sqlx::query("UPDATE workers SET last_seen=datetime('now') WHERE id=?1")
+        .bind(writer.id)
+        .execute(&pool)
+        .await?;
+    sqlx::query("UPDATE library_folders SET access='read' WHERE worker_id=?1")
+        .bind(writer.id)
+        .execute(&pool)
+        .await?;
+    assert!(
+        repository::writable_source_holders(&pool, job, compute.id)
+            .await?
+            .is_empty()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn writable_central_mount_is_used_only_while_currently_authorized() -> anyhow::Result<()> {
+    let pool = pool().await?;
+    let holder = repository::register(&pool, "distant").await?;
+    let directory = tempfile::tempdir()?;
+    std::fs::write(directory.path().join("film.mkv"), b"source")?;
+    let root = directory.path().to_string_lossy().into_owned();
+    let mut central = folder(Uuid::nil(), &root, "nas");
+    central.access = LibraryAccess::ReadWrite;
+    let library = repository::insert_library(
+        &pool,
+        LibraryWrite {
+            name: "Montage partagé".into(),
+            workers: vec![central, folder(holder.id, "/remote", "nas")],
+            ..Default::default()
+        },
+    )
+    .await?;
+    let id = library_job(
+        &pool,
+        library.id,
+        Some(holder.id),
+        "nas",
+        &[(holder.id, "/remote"), (Uuid::nil(), &root)],
+    )
+    .await?;
+    let job = repository::get_job(&pool, id).await?;
+    let expected = std::fs::canonicalize(directory.path().join("film.mkv"))?;
+    assert_eq!(
+        forgearr::library_scan::central_writable_job_source(&pool, directory.path(), &job).await?,
+        Some(expected)
+    );
+    std::fs::remove_file(directory.path().join("film.mkv"))?;
+    assert_eq!(
+        forgearr::library_scan::central_writable_job_root(&pool, directory.path(), &job).await?,
+        Some(directory.path().to_path_buf())
+    );
+    sqlx::query(
+        "UPDATE library_folders SET access='read' WHERE library_id=?1 AND worker_id IS NULL",
+    )
+    .bind(library.id)
+    .execute(&pool)
+    .await?;
+    assert!(
+        forgearr::library_scan::central_writable_job_source(&pool, directory.path(), &job)
+            .await?
+            .is_none()
+    );
     Ok(())
 }

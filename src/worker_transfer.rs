@@ -223,7 +223,7 @@ pub async fn save_verified(
         anyhow::ensure!(total <= max_bytes, "source_integrity");
         file.write_all(&chunk).await?;
     }
-    file.flush().await?;
+    file.sync_all().await?;
     drop(file);
     let (hash, bytes) = storage::fingerprint(dest, max_bytes).await?;
     anyhow::ensure!(

@@ -68,16 +68,36 @@ pub async fn source_holders(
     job_id: Uuid,
     exclude: Uuid,
 ) -> AppResult<Vec<SourceHolder>> {
+    source_holders_matching(pool, job_id, exclude, false).await
+}
+
+/// Détenteurs en ligne dont le montage autorise l'écriture pour cette source.
+pub async fn writable_source_holders(
+    pool: &SqlitePool,
+    job_id: Uuid,
+    exclude: Uuid,
+) -> AppResult<Vec<SourceHolder>> {
+    source_holders_matching(pool, job_id, exclude, true).await
+}
+
+async fn source_holders_matching(
+    pool: &SqlitePool,
+    job_id: Uuid,
+    exclude: Uuid,
+    writable: bool,
+) -> AppResult<Vec<SourceHolder>> {
     let rows: Vec<(Uuid, String, Option<String>)> = sqlx::query_as(
         "SELECT m.worker_id, m.local_path, w.transfer_url \
          FROM verified_job_source_mounts m JOIN workers w ON w.id = m.worker_id \
          WHERE m.job_id=?1 AND m.worker_id != ?2 \
+           AND (?4 = 0 OR m.writable = 1) \
            AND w.last_seen > datetime('now', '-' || ?3 || ' seconds') \
          ORDER BY (w.transfer_url IS NULL), w.last_seen DESC",
     )
     .bind(job_id)
     .bind(exclude)
     .bind(WORKER_ONLINE_SECONDS)
+    .bind(writable)
     .fetch_all(pool)
     .await?;
     let mut holders: Vec<SourceHolder> = rows
@@ -90,6 +110,7 @@ pub async fn source_holders(
         .collect();
     if holders.is_empty()
         && let Some(source) = super::job_source(pool, job_id).await?
+        && (!writable || (source.source_writable && source.source_key.is_none()))
         && let Some(owner) = source.source_worker_id.filter(|owner| *owner != exclude)
     {
         let row: Option<(Option<String>, bool)> = sqlx::query_as(

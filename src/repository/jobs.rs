@@ -54,6 +54,16 @@ impl WorkerRow {
     }
 }
 
+async fn worker_with_transfer(pool: &SqlitePool, row: WorkerRow) -> AppResult<Worker> {
+    let mut worker = row.into_worker();
+    worker.transfer_enabled =
+        sqlx::query_scalar::<_, bool>("SELECT transfer_url IS NOT NULL FROM workers WHERE id=?1")
+            .bind(worker.id)
+            .fetch_one(pool)
+            .await?;
+    Ok(worker)
+}
+
 fn serialize_telemetry(snapshot: Option<&TelemetrySnapshot>) -> Option<String> {
     snapshot
         .map(TelemetrySnapshot::to_worker_telemetry)
@@ -85,7 +95,7 @@ pub async fn register_with_metadata(
     )
     .fetch_one(pool)
     .await?;
-    Ok(row.into_worker())
+    worker_with_transfer(pool, row).await
 }
 
 /// Met à jour la concurrence maximale et la fenêtre horaire d'un worker.
@@ -120,7 +130,7 @@ pub async fn update_worker_settings(
     .fetch_optional(pool)
     .await?
     .ok_or(AppError::NotFound)?;
-    Ok(row.into_worker())
+    worker_with_transfer(pool, row).await
 }
 
 pub async fn register(pool: &SqlitePool, name: &str) -> AppResult<Worker> {
@@ -168,7 +178,7 @@ pub async fn get_worker(pool: &SqlitePool, id: Uuid) -> AppResult<Worker> {
     .fetch_optional(pool)
     .await?
     .ok_or(AppError::NotFound)?;
-    Ok(row.into_worker())
+    worker_with_transfer(pool, row).await
 }
 
 pub async fn find_worker_by_name(pool: &SqlitePool, name: &str) -> AppResult<Option<Worker>> {
@@ -179,7 +189,10 @@ pub async fn find_worker_by_name(pool: &SqlitePool, name: &str) -> AppResult<Opt
     )
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(WorkerRow::into_worker))
+    match row {
+        Some(row) => Ok(Some(worker_with_transfer(pool, row).await?)),
+        None => Ok(None),
+    }
 }
 
 /// Tâches traitées par ce worker, les plus récentes d'abord.
@@ -613,6 +626,8 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
     .execute(&mut *tx)
     .await?;
 
+    super::source_publication_journal::reconcile_expired_publications(&mut tx).await?;
+
     if let Some(sched) = schedule_json
         .as_deref()
         .and_then(|raw| serde_json::from_str::<WorkerSchedule>(raw).ok())
@@ -647,8 +662,14 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
               OR EXISTS (SELECT 1 FROM job_relays r, workers w, json_each(w.telemetry_json, '$.capabilities.hardwareEncoders') e
                          WHERE r.job_id=jobs.id AND w.id=?3 AND r.requirement_json IS NOT NULL
                            AND json_extract(e.value, '$.codec')=json_extract(r.requirement_json, '$.codec')
+                           AND json_extract(e.value, '$.acceleration') != ?5
                            AND (json_extract(r.requirement_json, '$.acceleration') IS NULL
-                                OR json_extract(e.value, '$.acceleration')=json_extract(r.requirement_json, '$.acceleration'))))
+                                OR json_extract(e.value, '$.acceleration')=json_extract(r.requirement_json, '$.acceleration')))
+              OR EXISTS (SELECT 1 FROM job_relays r, workers w, json_each(w.telemetry_json, '$.capabilities.softwareEncoders') e
+                         WHERE r.job_id=jobs.id AND w.id=?3 AND r.requirement_json IS NOT NULL
+                           AND e.value=json_extract(r.requirement_json, '$.codec')
+                           AND (json_extract(r.requirement_json, '$.acceleration') IS NULL
+                                OR json_extract(r.requirement_json, '$.acceleration')=?5)))
          AND {access}
          ORDER BY priority DESC, created_at ASC, id ASC LIMIT 1",
         access = super::library_access::job_access_sql("?3", "?4"),
@@ -658,6 +679,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
         .bind(MAX_ATTEMPTS)
         .bind(worker)
         .bind(forgearr_shared::workers::INTEGRATED_WORKER_NAME)
+        .bind(forgearr_shared::capabilities::EncodeAcceleration::Cpu.as_str())
         .fetch_optional(&mut *tx)
         .await?;
     let job: Option<Job> = if let Some(id) = next_id {
@@ -705,6 +727,9 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                 (source.source_worker_id == Some(worker)).then_some(source.source_root)
             });
             let resume_node_id = super::relays::resume_node(pool, j.id).await?;
+            let handoff_input =
+                super::handoffs::acknowledged_handoff_input(pool, j.id, worker, j.lease_epoch)
+                    .await?;
             Ok(Some(Claim {
                 job_id: j.id,
                 lease_token: j.lease_token.ok_or(AppError::Internal)?,
@@ -725,6 +750,8 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                 media_root: None,
                 local_source_root,
                 resume_node_id,
+                handoff_input,
+                prior_warning: j.warning,
                 source_ticket: None,
             }))
         }
@@ -743,6 +770,15 @@ pub async fn retry_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
     if !exists {
         return Err(AppError::NotFound);
     }
+    let unresolved: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM source_publication_journal WHERE job_id=?1)",
+    )
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if unresolved {
+        return Err(AppError::Conflict);
+    }
     let queued_status = JobStatus::Queued;
     let failed_status = JobStatus::Failed;
     let lease_expired_code = JobErrorCode::LeaseExpired;
@@ -757,7 +793,32 @@ pub async fn retry_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
     )
     .fetch_optional(&mut *tx)
     .await?;
-    let job = job.ok_or(AppError::Conflict)?;
+    let mut job = job.ok_or(AppError::Conflict)?;
+    // Une relance manuelle après perte du repreneur doit repartir de la source :
+    // sa copie intermédiaire ne peut plus être considérée comme disponible.
+    let had_handoff: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM job_handoffs WHERE job_id=?1 AND state=?2)",
+    )
+    .bind(id)
+    .bind(forgearr_shared::relay::HandoffState::Acknowledged.as_str())
+    .fetch_one(&mut *tx)
+    .await?;
+    if had_handoff {
+        sqlx::query("UPDATE jobs SET target_worker_id=NULL,warning=0 WHERE id=?1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        job.target_worker_id = None;
+        job.warning = false;
+        sqlx::query("DELETE FROM job_relays WHERE job_id=?1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM job_handoff_steps WHERE job_id=?1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
     tx.commit().await?;
     Ok(job)
 }
@@ -810,20 +871,17 @@ pub async fn fail(
 ) -> AppResult<()> {
     let failed_status = JobStatus::Failed;
     let running_status = JobStatus::Running;
-    let count = sqlx::query!(
+    let count = sqlx::query(
         "UPDATE jobs \
          SET status=?5, error_code=?6, lease_token=NULL, lease_epoch=lease_epoch+1, \
              leased_until=NULL, updated_at=datetime('now') \
          WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 \
-           AND status=?7 AND leased_until > datetime('now')",
-        id,
-        lease.worker_id,
-        lease.lease_token,
-        lease.lease_epoch,
-        failed_status,
-        code,
-        running_status,
+           AND status=?7 AND leased_until > datetime('now') \
+           AND NOT EXISTS(SELECT 1 FROM source_publication_journal p WHERE p.job_id=jobs.id AND p.lease_epoch=jobs.lease_epoch AND p.state=?8)",
     )
+    .bind(id).bind(lease.worker_id).bind(lease.lease_token).bind(lease.lease_epoch)
+    .bind(failed_status).bind(code).bind(running_status)
+    .bind(super::source_publication_journal::PublicationState::InProgress.as_str())
     .execute(pool)
     .await?
     .rows_affected();
@@ -843,6 +901,14 @@ pub async fn succeeded_output_name(pool: &SqlitePool, id: Uuid) -> AppResult<Opt
     .fetch_optional(pool)
     .await?;
     Ok(name.flatten())
+}
+
+/// Rend aussi le résultat préservé d'une publication dont l'issue est incertaine.
+pub async fn downloadable_output_name(pool: &SqlitePool, id: Uuid) -> AppResult<Option<String>> {
+    let name: Option<String> = sqlx::query_scalar("SELECT output_name FROM jobs j WHERE id=?1 AND output_name IS NOT NULL AND (status=?2 OR (status=?3 AND EXISTS(SELECT 1 FROM source_publication_journal p WHERE p.job_id=j.id AND p.state=?4 AND p.output_name=j.output_name)))")
+        .bind(id).bind(JobStatus::Succeeded).bind(JobStatus::Failed)
+        .bind(super::source_publication_journal::PublicationState::Uncertain.as_str()).fetch_optional(pool).await?;
+    Ok(name)
 }
 
 pub struct PublishedOutput<'a> {
@@ -893,6 +959,11 @@ pub async fn publish_succeeded(
     )
     .execute(&mut *tx)
     .await?;
+    sqlx::query("DELETE FROM source_publication_journal WHERE job_id=?1 AND lease_epoch=?2")
+        .bind(id)
+        .bind(lease.lease_epoch)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -903,7 +974,34 @@ pub async fn save_job_steps(
     job_id: Uuid,
     steps: &[JobStepEntry],
 ) -> AppResult<()> {
+    save_job_steps_inner(pool, job_id, None, steps).await
+}
+
+/// Vérifie le bail dans la transaction qui remplace le journal du segment courant.
+pub async fn save_job_steps_for_lease(
+    pool: &SqlitePool,
+    job_id: Uuid,
+    lease: &LeaseRequest,
+    steps: &[JobStepEntry],
+) -> AppResult<()> {
+    save_job_steps_inner(pool, job_id, Some(lease), steps).await
+}
+
+async fn save_job_steps_inner(
+    pool: &SqlitePool,
+    job_id: Uuid,
+    lease: Option<&LeaseRequest>,
+    steps: &[JobStepEntry],
+) -> AppResult<()> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    if let Some(lease) = lease {
+        let active: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM jobs WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 AND status=?5 AND leased_until > datetime('now'))")
+            .bind(job_id).bind(lease.worker_id).bind(lease.lease_token).bind(lease.lease_epoch).bind(JobStatus::Running)
+            .fetch_one(&mut *tx).await?;
+        if !active {
+            return Err(AppError::Conflict);
+        }
+    }
     let exists = sqlx::query_scalar!(
         r#"SELECT EXISTS(SELECT 1 FROM jobs WHERE id=?1) AS "exists!: bool""#,
         job_id,
@@ -916,13 +1014,24 @@ pub async fn save_job_steps(
     sqlx::query!("DELETE FROM job_steps WHERE job_id=?1", job_id)
         .execute(&mut *tx)
         .await?;
+    sqlx::query("INSERT INTO job_steps(job_id,step_index,node_id,block_kind,operation_id,status,message,output_excerpt,created_at) SELECT job_id,step_index,node_id,block_kind,operation_id,status,message,output_excerpt,created_at FROM job_handoff_steps WHERE job_id=?1")
+        .bind(job_id).execute(&mut *tx).await?;
+    let prefix: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(step_index), 0) FROM job_handoff_steps WHERE job_id=?1",
+    )
+    .bind(job_id)
+    .fetch_one(&mut *tx)
+    .await?;
     for step in steps {
+        let step_index = i64::from(step.step_index)
+            .checked_add(prefix)
+            .ok_or(AppError::Invalid)?;
         sqlx::query!(
             "INSERT INTO job_steps (job_id, step_index, node_id, block_kind, operation_id, \
                                     status, message, output_excerpt) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             job_id,
-            step.step_index,
+            step_index,
             step.node_id,
             step.block_kind,
             step.operation_id,
@@ -979,6 +1088,11 @@ pub async fn clear_job_output_name(pool: &SqlitePool, id: Uuid) -> AppResult<Opt
     )
     .execute(&mut *tx)
     .await?;
+    sqlx::query("DELETE FROM source_publication_journal WHERE job_id=?1 AND state=?2")
+        .bind(id)
+        .bind(super::source_publication_journal::PublicationState::Uncertain.as_str())
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(row.output_name)
 }
@@ -994,6 +1108,12 @@ pub async fn cancel_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
     .await?;
     if !exists {
         return Err(AppError::NotFound);
+    }
+    let publication_active: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM source_publication_journal p JOIN jobs j ON j.id=p.job_id AND j.lease_epoch=p.lease_epoch WHERE p.job_id=?1 AND p.state=?2)")
+        .bind(id).bind(super::source_publication_journal::PublicationState::InProgress.as_str())
+        .fetch_one(&mut *tx).await?;
+    if publication_active {
+        return Err(AppError::Conflict);
     }
     let canceled_status = JobStatus::Canceled;
     let job = sqlx::query_as!(

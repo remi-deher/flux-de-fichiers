@@ -1,5 +1,6 @@
 mod enrollment;
 mod flows;
+mod handoffs;
 mod identity;
 mod jobs;
 mod libraries;
@@ -9,6 +10,7 @@ mod mcp_audit;
 mod password_reset;
 mod plugins;
 mod relays;
+mod source_publication_journal;
 mod source_tickets;
 
 pub use enrollment::{
@@ -21,6 +23,10 @@ pub use flows::{
     DEFINITION_STORES, DefinitionStore, default_flow, delete_flow, get_flow, get_flow_version,
     list_flow_versions, list_flows, save_flow,
 };
+pub use handoffs::{
+    acknowledge_handoff, begin_handoff, claim_handoff, expire_handoffs, finish_handoff_upload,
+    handoff_download_artifact, handoff_state, handoff_upload_artifact, retained_handoff_needed,
+};
 pub use identity::{
     Account, ApiKeyRecord, INSTANCE_NAME_KEY, account_count, create_account, create_first_account,
     find_account_by_email, find_account_by_username, find_active_api_key, get_account, get_setting,
@@ -29,13 +35,13 @@ pub use identity::{
 };
 pub use jobs::{
     JobSource, PublishedOutput, active, batch_jobs, cancel_job, claim, clear_job_output_name,
-    count_jobs_for_worker, delete_job, delete_worker, enqueue_library_source, fail, filtered_jobs,
-    find_worker_by_name, get_job, get_worker, has_library_file_job, heartbeat, insert_job,
-    insert_job_with_options, insert_job_with_priority, job_source, job_storage_stats,
-    known_library_file_signatures, list_job_steps, list_jobs, list_jobs_for_worker, list_workers,
-    ping, publish_succeeded, register, register_with_metadata, retry_job, save_job_steps,
-    succeeded_output_name, touch_worker_telemetry, update_job_priority, update_worker_settings,
-    worker_exists,
+    count_jobs_for_worker, delete_job, delete_worker, downloadable_output_name,
+    enqueue_library_source, fail, filtered_jobs, find_worker_by_name, get_job, get_worker,
+    has_library_file_job, heartbeat, insert_job, insert_job_with_options, insert_job_with_priority,
+    job_source, job_storage_stats, known_library_file_signatures, list_job_steps, list_jobs,
+    list_jobs_for_worker, list_workers, ping, publish_succeeded, register, register_with_metadata,
+    retry_job, save_job_steps, save_job_steps_for_lease, succeeded_output_name,
+    touch_worker_telemetry, update_job_priority, update_worker_settings, worker_exists,
 };
 pub use libraries::{
     delete_library, due_scheduled_libraries, get_library, insert_library,
@@ -55,7 +61,11 @@ pub use plugins::{
     toggle_plugin_repository, touch_plugin_repository_sync, verify_or_pin_release,
 };
 pub use relays::{RelayOutcome, list_relays, relay_job};
+pub use source_publication_journal::{
+    PendingSourcePublication, begin_source_publication, clear_source_publication,
+    mark_source_publication_uncertain, pending_source_publications, recover_source_publications,
+};
 pub use source_tickets::{
     SourceHolder, attach_source_ticket, redeem_ticket, set_transfer_url, source_holders,
-    valid_transfer_url,
+    valid_transfer_url, writable_source_holders,
 };

@@ -2,7 +2,7 @@
 
 use forgearr_shared::libraries::{
     LIBRARY_NAME_MAX, Library, LibraryAccess, LibraryOutputPolicy, LibraryWorkerPath, LibraryWrite,
-    MAX_SCAN_INTERVAL_MINUTES, suggested_library_name_from_path,
+    MAX_SCAN_INTERVAL_MINUTES, has_unshared_remote_sources, suggested_library_name_from_path,
 };
 use forgearr_shared::workers::Worker;
 use uuid::Uuid;
@@ -53,46 +53,35 @@ impl LibraryDraft {
             .any(|entry| entry.worker_id == worker_id)
     }
 
-    /// Avertit quand les workers par transfert n'ont, comme détenteurs de la source, que des
-    /// workers sans adresse de transfert : les sources passent alors par le central (ADR 0019).
-    /// Aucun avertissement pour un dossier de la centrale, qui sert ses fichiers elle-même.
+    /// Signale les sources inaccessibles par transfert ou servies par le central (ADR 0019).
     pub fn transfer_route_warning(&self, workers: &[Worker]) -> Option<String> {
         if self.transfer_workers.is_empty() {
             return None;
         }
-        let mut holders: Vec<Uuid> = self
+        let unshared = has_unshared_remote_sources(&self.workers);
+        let fallback = self
             .workers
             .iter()
-            .map(|folder| folder.worker_id)
-            .filter(|id| !id.is_nil())
-            .collect();
-        holders.sort();
-        holders.dedup();
-        if holders.is_empty()
-            || workers
-                .iter()
-                .any(|worker| worker.transfer_enabled && holders.contains(&worker.id))
-        {
-            return None;
+            .filter(|folder| !folder.worker_id.is_nil())
+            .filter_map(|folder| folder.source_key.as_deref().map(str::trim))
+            .filter(|key| !key.is_empty())
+            .any(|key| {
+                !self.workers.iter().any(|holder| {
+                    holder.source_key.as_deref().map(str::trim) == Some(key)
+                        && (holder.worker_id.is_nil()
+                            || workers.iter().any(|worker| {
+                                worker.id == holder.worker_id && worker.transfer_enabled
+                            }))
+                })
+            });
+        let mut warnings = Vec::new();
+        if unshared {
+            warnings.push("Les dossiers distants sans identifiant de source partagée ne sont pas attribués aux workers par transfert. Ajoutez un identifiant pour chacun.");
         }
-        let names = holders
-            .iter()
-            .map(|id| {
-                workers
-                    .iter()
-                    .find(|worker| worker.id == *id)
-                    .map_or_else(|| id.to_string(), |worker| worker.name.clone())
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        Some(format!(
-            "Aucun worker à accès direct ({names}) n'annonce d'adresse de transfert : les sources passeront par le central, plus lentement. Définissez WORKER_TRANSFER_URL sur l'un d'eux."
-        ))
-    }
-
-    /// Les workers par transfert exigent le dossier de sortie dédié (ADR 0021).
-    pub fn transfer_conflicts_with_policy(&self) -> bool {
-        !self.transfer_workers.is_empty() && self.output_policy != LibraryOutputPolicy::OutputDir
+        if fallback {
+            warnings.push("Certaines sources passeront par le central : aucun de leurs détenteurs n'annonce d'adresse de transfert. Définissez WORKER_TRANSFER_URL sur un détenteur de chaque source concernée.");
+        }
+        (!warnings.is_empty()).then(|| warnings.join(" "))
     }
 
     pub fn remove_folder(&mut self, worker_id: Uuid, path: &str) {
@@ -168,11 +157,6 @@ impl LibraryDraft {
         let name = self.name.trim();
         if name.is_empty() || name.chars().count() > LIBRARY_NAME_MAX {
             return Err("Le nom doit compter de 1 à 80 caractères.");
-        }
-        if self.transfer_conflicts_with_policy() {
-            return Err(
-                "Les workers par transfert exigent le dossier de sortie dédié : changez la stratégie de sortie ou retirez-les.",
-            );
         }
         let split_list = |raw: &str| -> Vec<String> {
             raw.split(',')
@@ -277,13 +261,41 @@ mod tests {
                 .set_or_add_worker(nas, "/mnt/a", LibraryAccess::Read)
                 .is_ok()
         );
+        assert!(
+            draft
+                .transfer_route_warning(&workers)
+                .is_some_and(|text| text.contains("sans identifiant"))
+        );
+        draft.workers[0].source_key = Some("films".into());
         let warning = draft.transfer_route_warning(&workers);
         assert!(
             warning
                 .as_deref()
-                .is_some_and(|text| text.contains("nas") && text.contains("WORKER_TRANSFER_URL"))
+                .is_some_and(|text| text.contains("WORKER_TRANSFER_URL"))
         );
         let announcing = [worker(1, "nas", true), worker(2, "calcul", false)];
+        assert!(draft.transfer_route_warning(&announcing).is_none());
+        let other = Uuid::from_u128(3);
+        assert!(
+            draft
+                .set_or_add_worker(other, "/mnt/b", LibraryAccess::Read)
+                .is_ok()
+        );
+        draft.workers[1].source_key = Some("series".into());
+        assert!(
+            draft
+                .transfer_route_warning(&announcing)
+                .is_some_and(|text| text.contains("central"))
+        );
+        assert!(
+            draft
+                .set_or_add_worker(Uuid::nil(), "/central", LibraryAccess::Read)
+                .is_ok()
+        );
+        draft.set_source_key(Uuid::nil(), "/central", "series");
+        assert!(draft.transfer_route_warning(&announcing).is_none());
+        draft.remove_folder(Uuid::nil(), "/central");
+        draft.workers[1].source_key = Some("films".into());
         assert!(draft.transfer_route_warning(&announcing).is_none());
     }
 
@@ -301,7 +313,10 @@ mod tests {
             Some(vec![worker])
         );
         draft.output_policy = LibraryOutputPolicy::ReplaceWithBackup;
-        assert!(draft.to_write().is_err(), "remplacement incompatible");
+        assert!(
+            draft.to_write().is_ok(),
+            "remplacement autorisé par transfert"
+        );
         draft.output_policy = LibraryOutputPolicy::OutputDir;
         assert!(
             draft

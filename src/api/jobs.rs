@@ -144,18 +144,13 @@ pub async fn report_steps(
     Json(r): Json<StepsReport>,
 ) -> AppResult<StatusCode> {
     crate::auth::authorize_worker(&s.pool, &h).await?;
-    repository::active(
-        &s.pool,
-        id,
-        &LeaseRequest {
-            worker_id: r.worker_id,
-            lease_token: r.lease_token,
-            lease_epoch: r.lease_epoch,
-            telemetry: None,
-        },
-    )
-    .await?;
-    repository::save_job_steps(&s.pool, id, &r.steps).await?;
+    let lease = LeaseRequest {
+        worker_id: r.worker_id,
+        lease_token: r.lease_token,
+        lease_epoch: r.lease_epoch,
+        telemetry: None,
+    };
+    repository::save_job_steps_for_lease(&s.pool, id, &lease, &r.steps).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -45,6 +45,38 @@ pub struct SourceRelayTask {
     pub source_name: String,
 }
 
+/// Publication du résultat sur un dossier détenu par un worker à accès direct.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourcePublicationTask {
+    pub request_id: Uuid,
+    pub worker_id: Uuid,
+    pub root: String,
+    pub source_name: String,
+    pub source_sha256: String,
+    pub source_bytes: i64,
+    pub result_sha256: String,
+    pub result_bytes: i64,
+    pub extension: String,
+    pub policy: crate::libraries::LibraryOutputPolicy,
+}
+
+/// Résultat explicite du remplacement chez le détenteur.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourcePublicationOutcome {
+    Published,
+    SourceChanged,
+    Failed,
+}
+
+/// Réponse du détenteur à une demande de publication.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourcePublicationReport {
+    pub request_id: Uuid,
+    pub worker_id: Uuid,
+    pub outcome: SourcePublicationOutcome,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,6 +89,22 @@ mod tests {
         };
         let json = serde_json::to_string(&ticket)?;
         assert_eq!(serde_json::from_str::<SourceTicket>(&json)?, ticket);
+        Ok(())
+    }
+
+    #[test]
+    fn publication_report_roundtrips_with_typed_outcomes() -> Result<(), serde_json::Error> {
+        let report = SourcePublicationReport {
+            request_id: Uuid::from_u128(1),
+            worker_id: Uuid::from_u128(2),
+            outcome: SourcePublicationOutcome::SourceChanged,
+        };
+        let json = serde_json::to_string(&report)?;
+        assert!(json.contains("source_changed"));
+        assert_eq!(
+            serde_json::from_str::<SourcePublicationReport>(&json)?,
+            report
+        );
         Ok(())
     }
 }

@@ -1,7 +1,4 @@
-//! Capacités matérielles d'un worker (ADR 0018) : codecs encodables par un accélérateur détecté.
-//!
-//! Elles décrivent le **matériel** uniquement. L'encodage logiciel dépend de l'outil FFmpeg
-//! fourni par les plugins (ADR 0012) et n'est pas déduit ici.
+//! Capacités matérielles et logicielles d'un worker (ADR 0018 et 0020).
 
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +28,8 @@ impl VideoCodec {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EncodeAcceleration {
+    /// Encodeur logiciel fourni par une application de plugin.
+    Cpu,
     /// NVIDIA NVENC.
     Nvenc,
     /// VA-API (Intel et AMD sous Linux).
@@ -38,8 +37,17 @@ pub enum EncodeAcceleration {
 }
 
 impl EncodeAcceleration {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cpu => "cpu",
+            Self::Nvenc => "nvenc",
+            Self::Vaapi => "vaapi",
+        }
+    }
+
     pub const fn label(self) -> &'static str {
         match self {
+            Self::Cpu => "CPU",
             Self::Nvenc => "NVENC",
             Self::Vaapi => "VA-API",
         }
@@ -71,20 +79,27 @@ pub struct WorkerCapabilities {
     /// Encodeurs matériels utilisables, triés et sans doublon.
     #[serde(default)]
     pub hardware_encoders: Vec<HardwareEncoder>,
+    /// Codecs pris en charge par les encodeurs logiciels fournis par les plugins.
+    #[serde(default)]
+    pub software_encoders: Vec<VideoCodec>,
 }
 
 impl WorkerCapabilities {
     /// Indique si le worker sait encoder `codec` avec un accélérateur matériel.
     pub fn can_encode_in_hardware(&self, codec: VideoCodec) -> bool {
-        self.hardware_encoders
-            .iter()
-            .any(|encoder| encoder.codec == codec)
+        self.hardware_encoders.iter().any(|encoder| {
+            encoder.codec == codec && encoder.acceleration != EncodeAcceleration::Cpu
+        })
     }
 
     /// Trie et dédoublonne les encodeurs pour un rendu et une comparaison stables.
     pub fn normalize(&mut self) {
+        self.hardware_encoders
+            .retain(|encoder| encoder.acceleration != EncodeAcceleration::Cpu);
         self.hardware_encoders.sort();
         self.hardware_encoders.dedup();
+        self.software_encoders.sort();
+        self.software_encoders.dedup();
         self.gpu_models.sort();
         self.gpu_models.dedup();
     }
@@ -100,14 +115,20 @@ pub struct CapabilityRequirement {
 }
 
 impl WorkerCapabilities {
-    /// Indique si les encodeurs matériels déclarés satisfont l'exigence.
+    /// Indique si les encodeurs déclarés satisfont l'exigence.
     pub fn satisfies(&self, requirement: &CapabilityRequirement) -> bool {
-        self.hardware_encoders.iter().any(|encoder| {
-            encoder.codec == requirement.codec
-                && requirement
-                    .acceleration
-                    .is_none_or(|acceleration| acceleration == encoder.acceleration)
-        })
+        let software = requirement
+            .acceleration
+            .is_none_or(|acceleration| acceleration == EncodeAcceleration::Cpu)
+            && self.software_encoders.contains(&requirement.codec);
+        software
+            || self.hardware_encoders.iter().any(|encoder| {
+                encoder.codec == requirement.codec
+                    && encoder.acceleration != EncodeAcceleration::Cpu
+                    && requirement
+                        .acceleration
+                        .is_none_or(|acceleration| acceleration == encoder.acceleration)
+            })
     }
 }
 
@@ -160,10 +181,15 @@ mod tests {
         let mut capabilities = WorkerCapabilities {
             gpu_models: vec!["B".into(), "A".into(), "A".into()],
             hardware_encoders: vec![nvenc_hevc, vaapi_h264, nvenc_hevc],
+            software_encoders: vec![VideoCodec::Av1, VideoCodec::H264, VideoCodec::Av1],
         };
         capabilities.normalize();
         assert_eq!(capabilities.hardware_encoders, [vaapi_h264, nvenc_hevc]);
         assert_eq!(capabilities.gpu_models, ["A", "B"]);
+        assert_eq!(
+            capabilities.software_encoders,
+            [VideoCodec::H264, VideoCodec::Av1]
+        );
         assert!(capabilities.can_encode_in_hardware(VideoCodec::Hevc));
         assert!(!capabilities.can_encode_in_hardware(VideoCodec::Av1));
     }
@@ -176,6 +202,7 @@ mod tests {
                 codec: VideoCodec::Hevc,
                 acceleration: EncodeAcceleration::Vaapi,
             }],
+            software_encoders: vec![VideoCodec::Av1],
         };
         let any = CapabilityRequirement {
             codec: VideoCodec::Hevc,
@@ -191,6 +218,41 @@ mod tests {
         };
         assert!(capabilities.satisfies(&any));
         assert!(!capabilities.satisfies(&nvenc));
-        assert!(!capabilities.satisfies(&av1));
+        assert!(capabilities.satisfies(&av1));
+        assert!(capabilities.satisfies(&CapabilityRequirement {
+            acceleration: Some(EncodeAcceleration::Cpu),
+            ..av1
+        }));
+        assert!(!capabilities.satisfies(&CapabilityRequirement {
+            acceleration: Some(EncodeAcceleration::Vaapi),
+            ..av1
+        }));
+        assert!(!capabilities.satisfies(&CapabilityRequirement {
+            acceleration: Some(EncodeAcceleration::Cpu),
+            ..any
+        }));
+    }
+
+    #[test]
+    fn cpu_entry_in_the_hardware_list_does_not_prove_a_software_encoder() {
+        let mut capabilities = WorkerCapabilities {
+            hardware_encoders: vec![HardwareEncoder {
+                codec: VideoCodec::Hevc,
+                acceleration: EncodeAcceleration::Cpu,
+            }],
+            ..Default::default()
+        };
+        let requirement = CapabilityRequirement {
+            codec: VideoCodec::Hevc,
+            acceleration: Some(EncodeAcceleration::Cpu),
+        };
+        assert!(!capabilities.can_encode_in_hardware(VideoCodec::Hevc));
+        assert!(!capabilities.satisfies(&requirement));
+        assert!(!capabilities.satisfies(&CapabilityRequirement {
+            acceleration: None,
+            ..requirement
+        }));
+        capabilities.normalize();
+        assert!(capabilities.hardware_encoders.is_empty());
     }
 }

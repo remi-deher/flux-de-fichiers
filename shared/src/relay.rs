@@ -24,6 +24,84 @@ pub struct RelayRequest {
     pub resume_node_id: String,
 }
 
+/// Durée maximale d'attente de la remise d'un fichier de travail.
+pub const HANDOFF_TTL_SECONDS: i64 = 600;
+
+/// Fichier de travail conservé par le worker émetteur.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HandoffArtifact {
+    pub name: String,
+    pub sha256: String,
+    pub bytes: i64,
+}
+
+/// Fichier précédemment vérifié que le repreneur doit utiliser pour ce bail.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HandoffInput {
+    pub source_lease_epoch: i64,
+    pub artifact: HandoffArtifact,
+}
+
+/// Étape de la remise conservée par le central.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HandoffState {
+    Uploading,
+    Pending,
+    Claimed,
+    Acknowledged,
+    Failed,
+}
+
+impl HandoffState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Uploading => "uploading",
+            Self::Pending => "pending",
+            Self::Claimed => "claimed",
+            Self::Acknowledged => "acknowledged",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// Offre temporaire remise au repreneur avant que le bail d'origine ne soit libéré.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HandoffOffer {
+    pub job_id: Uuid,
+    pub from_worker_id: Uuid,
+    pub source_lease_epoch: i64,
+    pub artifact: HandoffArtifact,
+    pub receipt_token: String,
+}
+
+/// Accusé de réception d'un fichier déjà téléchargé et vérifié par le repreneur.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HandoffAcknowledgement {
+    pub worker_id: Uuid,
+    pub receipt_token: String,
+    pub sha256: String,
+    pub bytes: i64,
+}
+
+/// Demande initiale accompagnée du bail qui reste détenu par l'émetteur.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HandoffBegin {
+    pub worker_id: Uuid,
+    pub lease_token: Uuid,
+    pub lease_epoch: i64,
+    pub request: RelayRequest,
+    pub artifact: HandoffArtifact,
+    /// Avertissement accumulé par les étapes déjà exécutées.
+    #[serde(default)]
+    pub warning: bool,
+}
+
 /// Relais rapporté par un worker, avec les preuves de son bail.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RelayReport {
@@ -79,6 +157,21 @@ mod tests {
             r#"{"mode":"worker","worker_id":"00000000-0000-0000-0000-000000000001"}"#,
         )?;
         assert!(matches!(worker, RelayTarget::Worker { .. }));
+        Ok(())
+    }
+
+    #[test]
+    fn handoff_warning_defaults_to_false_for_older_senders() -> Result<(), serde_json::Error> {
+        let mut value = serde_json::json!({
+            "workerId": Uuid::nil(), "leaseToken": Uuid::nil(), "leaseEpoch": 1,
+            "request": {"target": {"mode":"worker", "worker_id": Uuid::nil()}, "resumeNodeId":"next"},
+            "artifact": {"name":"file.mkv", "sha256":"a".repeat(64), "bytes":5}
+        });
+        let begin: HandoffBegin = serde_json::from_value(value.clone())?;
+        assert!(!begin.warning);
+        value["warning"] = serde_json::json!(true);
+        let begin: HandoffBegin = serde_json::from_value(value)?;
+        assert!(begin.warning);
         Ok(())
     }
 }

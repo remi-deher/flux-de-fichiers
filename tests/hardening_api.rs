@@ -1520,7 +1520,8 @@ async fn the_holder_gets_a_fresh_ticket_to_pull_the_result_from_the_worker_that_
         format!("/api/v1/worker/source-publications/{request_id}/ticket?worker_id={holder}");
 
     // Tant que la demande n'a pas été remise au détenteur, personne n'obtient de billet.
-    let (status, _) = json_call(&h.app, "POST", &ticket_uri, Some(common::WORKER_KEY), None).await?;
+    let (status, _) =
+        json_call(&h.app, "POST", &ticket_uri, Some(common::WORKER_KEY), None).await?;
     assert_eq!(status, StatusCode::NOT_FOUND);
     let pending =
         format!("/api/v1/worker/source-publications/pending?worker_id={holder}&wait_ms=3000");
@@ -1542,7 +1543,11 @@ async fn the_holder_gets_a_fresh_ticket_to_pull_the_result_from_the_worker_that_
     assert_eq!(status, StatusCode::OK);
     assert_eq!(grant["source_name"], "result-file.mkv");
     let (status, _) = redeem_call(&h, OWNER_KEY, holder, &ticket.token).await?;
-    assert_ne!(status, StatusCode::OK, "le billet n'est pas pour le détenteur");
+    assert_ne!(
+        status,
+        StatusCode::OK,
+        "le billet n'est pas pour le détenteur"
+    );
 
     // Le détenteur termine : la demande aboutit.
     let report = SourcePublicationReport {
@@ -1552,8 +1557,7 @@ async fn the_holder_gets_a_fresh_ticket_to_pull_the_result_from_the_worker_that_
     };
     let uri = format!("/api/v1/worker/source-publications/{request_id}/report");
     let body = serde_json::to_value(report)?;
-    let (status, _) =
-        json_call(&h.app, "POST", &uri, Some(common::WORKER_KEY), Some(body)).await?;
+    let (status, _) = json_call(&h.app, "POST", &uri, Some(common::WORKER_KEY), Some(body)).await?;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let outcome = waiting.await??;
     assert!(matches!(outcome, SourcePublicationOutcome::Published));

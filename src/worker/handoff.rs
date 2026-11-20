@@ -50,7 +50,10 @@ fn retained_identity(name: &str) -> Option<(ArtifactKind, Uuid, i64)> {
     [ArtifactKind::Working, ArtifactKind::Result]
         .into_iter()
         .find_map(|kind| {
-            let stem = name.strip_prefix(retained_prefix(kind))?.split('.').next()?;
+            let stem = name
+                .strip_prefix(retained_prefix(kind))?
+                .split('.')
+                .next()?;
             let (job, epoch) = stem.rsplit_once('-')?;
             let epoch = epoch.parse::<i64>().ok().filter(|epoch| *epoch >= 0)?;
             Some((kind, Uuid::parse_str(job).ok()?, epoch))
@@ -374,7 +377,8 @@ mod tests {
             .is_err()
         );
         assert!(retained.exists());
-        prune_retained_older_than(dir.path(), Duration::ZERO, |_, _, _| async { Ok(false) }).await?;
+        prune_retained_older_than(dir.path(), Duration::ZERO, |_, _, _| async { Ok(false) })
+            .await?;
         assert!(!retained.exists());
         Ok(())
     }

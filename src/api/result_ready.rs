@@ -29,7 +29,7 @@ use uuid::Uuid;
 /// worker intégré s'il est actif ; pour une politique de remplacement, le worker intégré si le
 /// central voit la source, sinon le détenteur distant inscriptible.
 /// `None` pour les autres cas, qui gardent l'envoi au central.
-async fn pulled_destination(
+pub(crate) async fn pulled_destination(
     s: &AppState,
     job: &Job,
     processor: Uuid,

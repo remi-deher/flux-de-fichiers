@@ -11,7 +11,7 @@ pub(crate) mod local;
 mod password_reset;
 pub(crate) mod plugins;
 pub(crate) mod recovery_kit;
-mod result_ready;
+pub(crate) mod result_ready;
 pub(crate) mod session;
 mod setup;
 pub(crate) mod source_publication;

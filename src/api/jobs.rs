@@ -361,29 +361,36 @@ pub async fn relay(
         lease_epoch: report.lease_epoch,
         telemetry: None,
     };
-    let response =
-        match repository::relay_job(&s.pool, id, &lease, &report.request, report.warning).await? {
-            repository::RelayOutcome::Relayed { target_worker_id } => {
-                s.notify_job_event(JobEventType::JobRelayed, id, JobStatus::Queued, None);
-                forgearr_shared::relay::RelayResponse {
-                    relayed: true,
-                    target_worker_id,
-                }
-            }
-            repository::RelayOutcome::Failed => {
-                s.notify_job_event(
-                    JobEventType::JobFailed,
-                    id,
-                    JobStatus::Failed,
-                    Some(JobErrorCode::NoCapableWorker),
-                );
-                forgearr_shared::relay::RelayResponse {
-                    relayed: false,
-                    target_worker_id: None,
-                }
-            }
-        };
+    let response = relay_task(&s, id, &lease, &report.request, report.warning).await?;
     Ok(Json(response))
+}
+
+/// Remet la tâche en file selon la demande de relais et notifie ; partagé avec le worker intégré.
+pub(crate) async fn relay_task(
+    s: &AppState,
+    id: Uuid,
+    lease: &LeaseRequest,
+    request: &forgearr_shared::relay::RelayRequest,
+    warning: bool,
+) -> AppResult<forgearr_shared::relay::RelayResponse> {
+    let outcome = repository::relay_job(&s.pool, id, lease, request, warning).await?;
+    Ok(match outcome {
+        repository::RelayOutcome::Relayed { target_worker_id } => {
+            s.notify_job_event(JobEventType::JobRelayed, id, JobStatus::Queued, None);
+            forgearr_shared::relay::RelayResponse {
+                relayed: true,
+                target_worker_id,
+            }
+        }
+        repository::RelayOutcome::Failed => {
+            let code = Some(JobErrorCode::NoCapableWorker);
+            s.notify_job_event(JobEventType::JobFailed, id, JobStatus::Failed, code);
+            forgearr_shared::relay::RelayResponse {
+                relayed: false,
+                target_worker_id: None,
+            }
+        }
+    })
 }
 
 pub async fn system_config(

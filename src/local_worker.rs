@@ -8,11 +8,14 @@ use crate::{
     worker_transfer::TransferState,
 };
 use forgearr_shared::transfer::{
-    ArtifactKind, SourcePublicationOutcome, SourcePublicationReport, SourcePublicationTask,
+    ArtifactKind, ResultReady, SourcePublicationOutcome, SourcePublicationReport,
+    SourcePublicationTask,
 };
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
+
+pub(crate) mod retention;
 
 /// Variables d'environnement du serveur de transfert du worker intégré : adresse annoncée aux autres
 /// workers et port d'écoute (comme `WORKER_TRANSFER_URL` et `WORKER_TRANSFER_PORT` d'un worker distant).
@@ -84,6 +87,7 @@ pub async fn run(state: AppState) {
     tracing::info!(worker_id=%worker.id, "local worker registered");
     let _ = state.local_worker_id.set(worker.id);
     start_transfer_server(&state, worker.id).await;
+    retention::prune(&state, worker.id).await;
     tokio::spawn(respond_to_publications(state.clone(), worker.id));
     let refresh_state = state.clone();
     let refresh_worker = worker.id;
@@ -95,6 +99,7 @@ pub async fn run(state: AppState) {
                 _ = api::shutdown_signal() => return,
                 _ = tokio::time::sleep(SOFTWARE_PROBE_REFRESH) => {
                     refresh_software_capabilities(&refresh_state).await;
+                    retention::prune(&refresh_state, refresh_worker).await;
                     let snapshot = probe.sample();
                     if let Err(error) = repository::touch_worker_telemetry(&refresh_state.pool, refresh_worker, None, Some(&snapshot)).await {
                         tracing::warn!(worker_id=%refresh_worker, error=%error, "local capability telemetry update failed");
@@ -429,16 +434,34 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
             Ok(())
         };
 
-        if execution.relay.is_some() {
+        if let Some(request) = &execution.relay {
             step_report?;
-            // Le worker intégré ne sert pas encore de fichiers (ADR 0022, étape 5) : il ne peut pas
-            // retenir un fichier de travail pour un repreneur.
-            anyhow::bail!("local worker cannot retain working files yet");
+            let working = (execution.working_file.as_path(), work_dir.as_path());
+            retention::relay_working_file(
+                state,
+                claim.job_id,
+                &lease,
+                request,
+                working,
+                execution.warning,
+            )
+            .await?;
+            return anyhow::Ok(());
         }
         if let Err(error) = step_report {
             tracing::warn!(job_id = %claim.job_id, error = %error, "failed to persist job steps");
         }
 
+        // Un autre worker détient la bibliothèque : il tire le résultat chez ce worker (ADR 0022).
+        let ready = ResultReady {
+            extension: execution.output_spec.extension.clone(),
+            warning: execution.warning,
+            can_apply_locally: false,
+        };
+        let working_file = execution.working_file.as_path();
+        if retention::publish_retained(state, &job, &lease, working_file, &ready).await? {
+            return anyhow::Ok(());
+        }
         crate::api::transfers::publish_staged(
             state,
             claim.job_id,

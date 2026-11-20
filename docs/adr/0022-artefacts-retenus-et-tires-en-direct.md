@@ -195,8 +195,12 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
      directement dans la base (`local_redeemer`). Sans ces variables il n'annonce rien (comportement
      inchangé). L'écoute et la lecture des variables sont communes avec le worker distant
      (`worker_transfer::spawn_listener`, `transfer_settings`).
-   - 5b — le worker intégré retient ses résultats et fichiers de travail (relais, `publish_pulled`
-     en direct) au lieu de `publish_staged` et du refus de relais.
+   - **5b (fait) — le worker intégré retient et relaie** : avec une adresse annoncée, il retient son
+     fichier de travail (relais par artefact, `api::jobs::relay_task` partagé avec la route) et son
+     résultat quand un autre worker détient la bibliothèque (`publish_pulled` en direct) ; il purge ses
+     copies comme un worker distant (`retained.rs`, partagé). Sans adresse, ou quand le résultat
+     s'applique sur place (source du central, dossier de sortie), il garde `publish_staged` et refuse
+     le relais.
    - 5c — suppression de `GET /source` et de la lecture `staged`, de `publish_staged`, du courtier
      de publication et des requêtes SQL qui nomment `INTEGRATED_WORKER_NAME`.
 

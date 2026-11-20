@@ -457,3 +457,125 @@ async fn only_the_holder_applies_locally_after_the_journal() -> anyhow::Result<(
     assert!(matches!(early, Err(AppError::Conflict)));
     Ok(())
 }
+
+/// Le worker intégré traite la tâche à la place du worker de calcul, avec ou sans adresse annoncée.
+async fn integrated_processor(
+    state: &AppState,
+    job: &Job,
+    lease: &LeaseRequest,
+    url: Option<&str>,
+) -> anyhow::Result<LeaseRequest> {
+    let local = repository::register(&state.pool, "central-local").await?;
+    repository::set_transfer_url(&state.pool, local.id, url).await?;
+    sqlx::query("UPDATE jobs SET worker_id=?2 WHERE id=?1")
+        .bind(job.id)
+        .bind(local.id)
+        .execute(&state.pool)
+        .await?;
+    Ok(LeaseRequest {
+        worker_id: local.id,
+        ..lease.clone()
+    })
+}
+
+fn work_file(dir: &std::path::Path) -> anyhow::Result<std::path::PathBuf> {
+    let work = dir.join("work");
+    std::fs::create_dir_all(&work)?;
+    let file = work.join("out.mkv");
+    std::fs::write(&file, b"nouveau")?;
+    Ok(file)
+}
+
+#[tokio::test]
+async fn the_integrated_worker_retains_its_result_for_a_remote_holder() -> anyhow::Result<()> {
+    use crate::local_worker::retention::publish_retained;
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, holder) = setup(dir.path()).await?;
+    let url = Some("http://central.lan:9000");
+    let own = integrated_processor(&state, &job, &lease, url).await?;
+    let file = work_file(dir.path())?;
+    let (task_state, task_job, task_lease) = (state.clone(), job.clone(), own.clone());
+    let publishing = tokio::spawn(async move {
+        let ready = ready_request();
+        publish_retained(&task_state, &task_job, &task_lease, &file, &ready).await
+    });
+    let mut tasks = state
+        .source_publication
+        .take_for_worker(holder, Duration::from_secs(5))
+        .await;
+    anyhow::ensure!(tasks.len() == 1, "une demande est attendue");
+    let task = tasks.remove(0);
+    let ticket = task.result_ticket.clone();
+    assert_eq!(
+        ticket.map(|t| t.url).as_deref(),
+        Some("http://central.lan:9000")
+    );
+    let kind = ArtifactKind::Result;
+    let artifact = repository::get_artifact(&state.pool, job.id, kind).await?;
+    let retained_dir = state.config.data_dir.join("retained");
+    let root = artifact.map(|a| a.declaration.root);
+    assert_eq!(
+        root.as_deref(),
+        Some(retained_dir.to_string_lossy().as_ref())
+    );
+
+    answer(&state, holder, &task, SourcePublicationOutcome::Published).await?;
+    assert!(publishing.await??);
+    let done = repository::get_job(&state.pool, job.id).await?;
+    assert_eq!(done.status, JobStatus::Succeeded);
+    let copies = std::fs::read_dir(&retained_dir)?.count();
+    assert_eq!(copies, 0, "copie purgée");
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_integrated_worker_publishes_itself_when_nobody_can_pull() -> anyhow::Result<()> {
+    use crate::local_worker::retention::publish_retained;
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, _) = setup(dir.path()).await?;
+    let file = work_file(dir.path())?;
+    // Sans adresse de transfert : personne ne pourrait tirer le résultat chez lui.
+    let silent = integrated_processor(&state, &job, &lease, None).await?;
+    let ready = ready_request();
+    assert!(!publish_retained(&state, &job, &silent, &file, &ready).await?);
+    // Source du central : le résultat s'applique sur place.
+    let url = Some("http://central.lan:9000");
+    repository::set_transfer_url(&state.pool, silent.worker_id, url).await?;
+    make_source_central_held(&state, &job).await?;
+    assert!(state.local_worker_id.set(silent.worker_id).is_ok());
+    assert!(!publish_retained(&state, &job, &silent, &file, &ready).await?);
+    let kind = ArtifactKind::Result;
+    let artifact = repository::get_artifact(&state.pool, job.id, kind).await?;
+    assert!(artifact.is_none(), "rien de retenu");
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_integrated_worker_retains_a_working_file_to_relay_the_task() -> anyhow::Result<()> {
+    use crate::local_worker::retention::relay_working_file;
+    use forgearr_shared::relay::{RelayRequest, RelayTarget};
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, holder) = setup(dir.path()).await?;
+    let file = work_file(dir.path())?;
+    let work_dir = dir.path().join("work");
+    let request = RelayRequest {
+        target: RelayTarget::Worker { worker_id: holder },
+        resume_node_id: "n2".into(),
+    };
+    // Sans adresse de transfert, personne ne pourrait tirer le fichier de travail.
+    let silent = integrated_processor(&state, &job, &lease, None).await?;
+    let working = (file.as_path(), work_dir.as_path());
+    let refused = relay_working_file(&state, job.id, &silent, &request, working, false).await;
+    assert!(refused.is_err());
+
+    let url = Some("http://central.lan:9000");
+    repository::set_transfer_url(&state.pool, silent.worker_id, url).await?;
+    relay_working_file(&state, job.id, &silent, &request, working, false).await?;
+    let queued = repository::get_job(&state.pool, job.id).await?;
+    assert_eq!(queued.status, JobStatus::Queued);
+    assert_eq!(queued.target_worker_id, Some(holder));
+    let kind = ArtifactKind::Working;
+    let artifact = repository::get_artifact(&state.pool, job.id, kind).await?;
+    assert!(artifact.is_some(), "le fichier de travail reste retenu");
+    Ok(())
+}

@@ -37,6 +37,8 @@ pub enum AppError {
     RepositoryUnavailable(String),
     #[error("central unavailable")]
     CentralUnavailable,
+    #[error("no reachable worker can receive the result")]
+    ResultUndeliverable,
     #[error("database failure")]
     Database(sqlx::Error),
     #[error("storage failure")]
@@ -77,6 +79,7 @@ impl IntoResponse for AppError {
             | Self::InvalidManifest(_) => (StatusCode::BAD_REQUEST, "invalid_tool_artifact"),
             Self::RepositoryUnavailable(_) => (StatusCode::BAD_GATEWAY, "repository_unavailable"),
             Self::CentralUnavailable => (StatusCode::BAD_GATEWAY, "central_unavailable"),
+            Self::ResultUndeliverable => (StatusCode::BAD_GATEWAY, "result_undeliverable"),
             Self::TooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "file_too_large"),
             Self::Database(_) | Self::Storage(_) | Self::Internal => {
                 tracing::error!(error = ?self, "internal failure");

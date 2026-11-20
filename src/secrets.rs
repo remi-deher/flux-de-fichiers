@@ -7,7 +7,10 @@ pub mod recovery_kit;
 mod retired_keys;
 pub use retired_keys::{clear_retired_keys, retire_key, retired_keys_path};
 
-use crate::error::{AppError, AppResult};
+use crate::{
+    error::{AppError, AppResult},
+    opaque_token::{encode_hex, sha256_hex},
+};
 use chacha20poly1305::{
     ChaCha20Poly1305, Key, KeyInit, Nonce,
     aead::{Aead, AeadCore, OsRng, Payload},
@@ -33,10 +36,6 @@ const HEX_RADIX: u32 = 16;
 /// chiffré en hexadécimal (`enc:v2:<id de clé>:<hex>`).
 pub const ENCRYPTED_PREFIX: &str = "enc:";
 const FORMAT_VERSION: &str = "v2";
-
-fn encode_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
 
 fn decode_hex(text: &str) -> Option<Vec<u8>> {
     if !text.len().is_multiple_of(2) {
@@ -92,11 +91,7 @@ pub struct SecretBox {
 }
 
 fn key_id_of(key_bytes: &[u8]) -> String {
-    let digest: String = Sha256::digest(key_bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    digest[..KEY_ID_HEX_LEN].to_owned()
+    sha256_hex(key_bytes)[..KEY_ID_HEX_LEN].to_owned()
 }
 
 impl SecretBox {

@@ -262,7 +262,7 @@ fn distribution_path(root: &Path, name: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sha2::{Digest, Sha256};
+    use crate::opaque_token::sha256_hex;
 
     fn archive_with(binary_name: &str, content: &[u8]) -> anyhow::Result<Vec<u8>> {
         let mut builder = tar::Builder::new(Vec::new());
@@ -275,13 +275,6 @@ mod tests {
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         std::io::Write::write_all(&mut encoder, &tar_bytes)?;
         Ok(encoder.finish()?)
-    }
-
-    fn hex(bytes: &[u8]) -> String {
-        Sha256::digest(bytes)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
     }
 
     async fn serve_archive(bytes: Vec<u8>) -> anyhow::Result<std::net::SocketAddr> {
@@ -333,7 +326,7 @@ mod tests {
             allow_private_hosts: true,
             ..SyncPolicy::default()
         };
-        let contract = distribution(address, hex(&archive));
+        let contract = distribution(address, sha256_hex(&archive));
 
         let binary = install_from_distribution(&cache, &contract, &policy).await?;
         assert!(binary.is_file());
@@ -469,7 +462,7 @@ mod tests {
             allow_private_hosts: true,
             ..SyncPolicy::default()
         };
-        let mut contract = distribution(address, hex(&archive));
+        let mut contract = distribution(address, sha256_hex(&archive));
         contract.tool_id = "suivi".into();
 
         let watcher = tokio::spawn(async {
@@ -524,7 +517,7 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let root = dir.path().join("repo");
         std::fs::create_dir_all(root.join("apps/demo"))?;
-        let sha = hex(&archive);
+        let sha = sha256_hex(&archive);
         std::fs::write(
             distribution_path(&root, "demo"),
             serde_json::json!({

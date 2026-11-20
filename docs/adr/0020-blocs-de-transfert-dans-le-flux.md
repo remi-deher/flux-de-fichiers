@@ -1,6 +1,7 @@
 # 0020 — Blocs de transfert dans le flux : décision sur les octets détenus, transfert à tout moment
 
-Statut : accepté, implémentation en cours (20 nov. 2026). Généralise l'[ADR 0018](0018-relais-de-tache-par-bloc.md)
+Statut : accepté, implémentation en cours (20 nov. 2026) ; les points 4 à 6 (remise via le central)
+sont remplacés par l'[ADR 0022](0022-artefacts-retenus-et-tires-en-direct.md) (proposé ; ancien flux supprimé). Généralise l'[ADR 0018](0018-relais-de-tache-par-bloc.md)
 (relais avant tout traitement) en s'appuyant sur le plan de données de l'[ADR 0019](0019-partage-des-sources-entre-workers.md).
 Le traitement en parallèle d'un même média par plusieurs nœuds fait l'objet d'un chantier à part (voir plus bas).
 

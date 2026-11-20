@@ -90,7 +90,6 @@ async fn protected_routes_reject_missing_keys_before_accessing_resources() -> an
         "/api/v1/api-keys",
         "/api/v1/workers",
         "/api/v1/jobs/00000000-0000-0000-0000-000000000001/output",
-        "/api/v1/jobs/00000000-0000-0000-0000-000000000001/source",
     ] {
         let response = app()?
             .oneshot(Request::builder().uri(path).body(Body::empty())?)
@@ -239,9 +238,8 @@ async fn authorization_header_takes_priority_over_web_session_cookie() -> anyhow
 fn csrf_requires_matching_cookie_header_and_server_verifier() -> anyhow::Result<()> {
     use chrono::Utc;
     use forgearr::web_session::{self, ValidatedSession};
-    use sha2::{Digest, Sha256};
     let token = "csrf-token-for-test";
-    let csrf_hash = format!("{:x}", Sha256::digest(token.as_bytes()));
+    let csrf_hash = forgearr::opaque_token::sha256_hex(token);
     let session = ValidatedSession {
         token_hash: "opaque-session-hash".into(),
         csrf_hash,

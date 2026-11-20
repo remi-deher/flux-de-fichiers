@@ -167,7 +167,7 @@ async fn write_input_stream(
         Ok(UploadedMediaFile {
             name: name.to_owned(),
             bytes: total,
-            sha256: format!("{:x}", hash.finalize()),
+            sha256: crate::opaque_token::encode_hex(&hash.finalize()),
         })
     }
     .await;

@@ -14,6 +14,7 @@ use std::{
     sync::{LazyLock, Mutex},
     time::{Duration, Instant},
 };
+use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrincipalKind {
@@ -111,6 +112,21 @@ pub async fn authenticate(
 pub async fn authorize_worker(pool: &SqlitePool, headers: &HeaderMap) -> AppResult<Principal> {
     let principal = authenticate_bearer(pool, headers).await?;
     require(&principal, Permission::WorkerProtocol)?;
+    Ok(principal)
+}
+
+/// Comme [`authorize_worker`], et la clé doit appartenir au worker visé : une clé de worker
+/// n'autorise pas à agir pour un autre worker.
+pub async fn authorize_worker_identity(
+    pool: &SqlitePool,
+    headers: &HeaderMap,
+    worker_id: Uuid,
+) -> AppResult<Principal> {
+    let principal = authorize_worker(pool, headers).await?;
+    let worker = repository::get_worker(pool, worker_id).await?;
+    if principal.name != worker.name {
+        return Err(AppError::Forbidden);
+    }
     Ok(principal)
 }
 

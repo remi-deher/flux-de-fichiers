@@ -263,6 +263,8 @@ async fn the_integrated_worker_applies_the_pulled_result() -> anyhow::Result<()>
     make_source_central_held(&state, &job).await?;
     let local = repository::register(&state.pool, "central-local").await?;
     assert!(state.local_worker_id.set(local.id).is_ok());
+    // Le central crée son dossier de staging au démarrage ; le worker intégré y tire le fichier.
+    std::fs::create_dir_all(state.config.data_dir.join("staging"))?;
 
     // Le worker qui traite retient le résultat et le sert.
     let retained = dir.path().join("retained");

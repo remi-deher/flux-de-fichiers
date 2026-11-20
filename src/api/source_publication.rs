@@ -78,16 +78,6 @@ pub struct HolderQuery {
     wait_ms: Option<u64>,
 }
 
-/// Une clé de worker n'autorise pas à agir pour un autre worker.
-async fn authorize_holder(s: &AppState, headers: &HeaderMap, worker_id: Uuid) -> AppResult<()> {
-    let principal = crate::auth::authorize_worker(&s.pool, headers).await?;
-    let worker = repository::get_worker(&s.pool, worker_id).await?;
-    if principal.name != worker.name {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
-}
-
 pub async fn pending(
     State(s): State<AppState>,
     headers: HeaderMap,
@@ -110,7 +100,7 @@ async fn pending_for(
     query: HolderQuery,
     broker: &crate::source_publication_broker::SourcePublicationBroker,
 ) -> AppResult<Json<Vec<SourcePublicationTask>>> {
-    authorize_holder(s, headers, query.worker_id).await?;
+    crate::auth::authorize_worker_identity(&s.pool, headers,query.worker_id).await?;
     let wait = Duration::from_millis(query.wait_ms.unwrap_or(0).min(MAX_PENDING_WAIT_MS));
     Ok(Json(broker.take_for_worker(query.worker_id, wait).await))
 }
@@ -121,7 +111,7 @@ pub async fn staged(
     Path(id): Path<Uuid>,
     Query(query): Query<HolderQuery>,
 ) -> AppResult<Response> {
-    authorize_holder(&s, &headers, query.worker_id).await?;
+    crate::auth::authorize_worker_identity(&s.pool, &headers,query.worker_id).await?;
     let access = s
         .source_publication
         .access_for_worker(id, query.worker_id)
@@ -138,7 +128,7 @@ pub async fn authorize_commit(
     Path(id): Path<Uuid>,
     Query(query): Query<HolderQuery>,
 ) -> AppResult<StatusCode> {
-    authorize_holder(&s, &headers, query.worker_id).await?;
+    crate::auth::authorize_worker_identity(&s.pool, &headers,query.worker_id).await?;
     let access = s
         .source_publication
         .access_for_worker(id, query.worker_id)
@@ -180,7 +170,7 @@ async fn report_for(
     report: SourcePublicationReport,
     broker: &crate::source_publication_broker::SourcePublicationBroker,
 ) -> AppResult<StatusCode> {
-    authorize_holder(s, headers, report.worker_id).await?;
+    crate::auth::authorize_worker_identity(&s.pool, headers,report.worker_id).await?;
     if id != report.request_id {
         return Err(AppError::Invalid);
     }

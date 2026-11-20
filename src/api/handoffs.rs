@@ -35,15 +35,6 @@ pub struct StateQuery {
     lease_epoch: i64,
 }
 
-async fn authorize(s: &AppState, headers: &HeaderMap, worker_id: Uuid) -> AppResult<()> {
-    let principal = crate::auth::authorize_worker(&s.pool, headers).await?;
-    let worker = repository::get_worker(&s.pool, worker_id).await?;
-    if principal.name != worker.name {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
-}
-
 pub(crate) fn artifact_path(s: &AppState, job: Uuid, epoch: i64) -> std::path::PathBuf {
     s.config
         .data_dir
@@ -95,7 +86,7 @@ pub async fn begin(
     Path(job): Path<Uuid>,
     Json(begin): Json<HandoffBegin>,
 ) -> AppResult<StatusCode> {
-    authorize(&s, &headers, begin.worker_id).await?;
+    crate::auth::authorize_worker_identity(&s.pool, &headers,begin.worker_id).await?;
     let lease = LeaseRequest {
         worker_id: begin.worker_id,
         lease_token: begin.lease_token,
@@ -152,7 +143,7 @@ pub async fn upload(
     body: Body,
 ) -> AppResult<StatusCode> {
     let lease = super::transfers::lease(&headers)?;
-    authorize(&s, &headers, lease.worker_id).await?;
+    crate::auth::authorize_worker_identity(&s.pool, &headers,lease.worker_id).await?;
     let artifact = repository::handoff_upload_artifact(&s.pool, job, &lease).await?;
     let temporary = s
         .config
@@ -202,7 +193,7 @@ pub async fn claim(
     headers: HeaderMap,
     Query(query): Query<WorkerQuery>,
 ) -> AppResult<Json<Option<HandoffOffer>>> {
-    authorize(&s, &headers, query.worker_id).await?;
+    crate::auth::authorize_worker_identity(&s.pool, &headers,query.worker_id).await?;
     Ok(Json(
         repository::claim_handoff(&s.pool, query.worker_id).await?,
     ))
@@ -214,7 +205,7 @@ pub async fn download(
     Path(job): Path<Uuid>,
     Query(query): Query<WorkerQuery>,
 ) -> AppResult<Response> {
-    authorize(&s, &headers, query.worker_id).await?;
+    crate::auth::authorize_worker_identity(&s.pool, &headers,query.worker_id).await?;
     let token = headers
         .get("x-handoff-token")
         .and_then(|v| v.to_str().ok())
@@ -235,7 +226,7 @@ pub async fn status(
     Path(job): Path<Uuid>,
     Query(query): Query<StateQuery>,
 ) -> AppResult<Json<HandoffState>> {
-    authorize(&s, &headers, query.worker_id).await?;
+    crate::auth::authorize_worker_identity(&s.pool, &headers,query.worker_id).await?;
     repository::expire_handoffs(&s.pool).await?;
     Ok(Json(
         repository::handoff_state(&s.pool, job, query.worker_id, query.lease_epoch).await?,
@@ -249,7 +240,7 @@ pub async fn retained(
     Path((job, epoch)): Path<(Uuid, i64)>,
     Query(query): Query<WorkerQuery>,
 ) -> AppResult<Json<bool>> {
-    authorize(&s, &headers, query.worker_id).await?;
+    crate::auth::authorize_worker_identity(&s.pool, &headers,query.worker_id).await?;
     Ok(Json(
         repository::retained_handoff_needed(&s.pool, job, query.worker_id, epoch).await?,
     ))
@@ -261,7 +252,7 @@ pub async fn acknowledge(
     Path(job): Path<Uuid>,
     Json(ack): Json<HandoffAcknowledgement>,
 ) -> AppResult<StatusCode> {
-    authorize(&s, &headers, ack.worker_id).await?;
+    crate::auth::authorize_worker_identity(&s.pool, &headers,ack.worker_id).await?;
     let epoch =
         repository::handoff_download_artifact(&s.pool, job, ack.worker_id, &ack.receipt_token)
             .await

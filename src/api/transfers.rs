@@ -84,7 +84,7 @@ pub async fn redeem(
     h: HeaderMap,
     axum::Json(request): axum::Json<forgearr_shared::transfer::RedeemRequest>,
 ) -> AppResult<axum::Json<forgearr_shared::transfer::TransferGrant>> {
-    crate::auth::authorize_worker(&s.pool, &h).await?;
+    crate::auth::authorize_worker_identity(&s.pool, &h, request.worker_id).await?;
     Ok(axum::Json(
         repository::redeem_ticket(&s.pool, &request.token, request.worker_id).await?,
     ))

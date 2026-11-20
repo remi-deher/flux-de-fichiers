@@ -128,9 +128,6 @@ pub fn parse_range(
 }
 
 async fn serve_source(State(state): State<TransferState>, headers: HeaderMap) -> Response {
-    let Ok(permit) = state.permits.clone().try_acquire_owned() else {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
-    };
     let Some(token) = headers
         .get(TRANSFER_TICKET_HEADER)
         .and_then(|value| value.to_str().ok())
@@ -140,6 +137,11 @@ async fn serve_source(State(state): State<TransferState>, headers: HeaderMap) ->
     let grant = match (state.redeemer)(token.to_owned()).await {
         Ok(grant) => grant,
         Err(status) => return status.into_response(),
+    };
+    // Le permis n'est pris qu'après validation du billet : des requêtes sans billet valide ne
+    // doivent pas épuiser les transferts simultanés des vrais preneurs.
+    let Ok(permit) = state.permits.clone().try_acquire_owned() else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     let path = match library_scan::source_path(Path::new(&grant.root), &grant.source_name).await {
         Ok(path) => path,
@@ -381,6 +383,29 @@ mod tests {
         let (status, body) = get_source(state, Some("bon-billet"), None).await?;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body, b"0123456789");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn invalid_tickets_never_consume_a_transfer_permit() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::write(dir.path().join("film.mkv"), b"0123456789")?;
+        let state = state_for(dir.path(), "film.mkv", 10);
+        let _held = state
+            .permits
+            .clone()
+            .acquire_many_owned(u32::try_from(MAX_CONCURRENT_TRANSFERS)?)
+            .await?;
+        let (status, _) = get_source(state.clone(), None, None).await?;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "sans billet, jamais 503");
+        let (status, _) = get_source(state.clone(), Some("mauvais"), None).await?;
+        assert_eq!(status, StatusCode::FORBIDDEN, "mauvais billet, jamais 503");
+        let (status, _) = get_source(state, Some("bon-billet"), None).await?;
+        assert_eq!(
+            status,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "seul un billet valide subit la limite"
+        );
         Ok(())
     }
 

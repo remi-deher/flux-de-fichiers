@@ -1175,6 +1175,10 @@ async fn relayed_job_from(
 #[tokio::test]
 async fn a_relayed_job_gets_a_ticket_that_only_the_source_worker_can_redeem() -> anyhow::Result<()>
 {
+    use forgearr::api_keys::install_known_key;
+    use forgearr_shared::Role;
+    const OWNER_KEY: &str = "fdf_d0000001_abcdef0123456789abcdef0123456789abcdef0123456789";
+    const TARGET_KEY: &str = "fdf_d0000002_89abcdef0123456789abcdef0123456789abcdef01234567";
     let h = harness().await?;
     let owner =
         register_worker_with_transfer(&h, "detenteur", "http://detenteur.lan:9000/").await?;
@@ -1190,28 +1194,43 @@ async fn a_relayed_job_gets_a_ticket_that_only_the_source_worker_can_redeem() ->
         .ok_or_else(|| anyhow::anyhow!("un billet est attendu"))?;
     assert_eq!(ticket.url, "http://detenteur.lan:9000");
 
-    let redeem = |worker: Uuid, token: &str| {
+    // Chaque worker présente sa propre clé : le nom de la clé est celui du worker.
+    install_known_key(&h.pool, OWNER_KEY, "detenteur", Role::Worker).await?;
+    install_known_key(&h.pool, TARGET_KEY, "traitant", Role::Worker).await?;
+    let redeem = |key: &'static str, worker: Uuid, token: &str| {
         json_call(
             &h.app,
             "POST",
             "/api/v1/worker/transfers/redeem",
-            Some(common::WORKER_KEY),
+            Some(key),
             Some(serde_json::json!({"token": token, "worker_id": worker})),
         )
     };
-    let (st, grant) = redeem(owner, &ticket.token).await?;
+    let (st, grant) = redeem(OWNER_KEY, owner, &ticket.token).await?;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(grant["root"], "/mnt/owner");
     assert_eq!(grant["source_name"], "film.mkv");
     assert_eq!(grant["bytes"], SOURCE_CONTENT.len());
-    let (st, _) = redeem(target, &ticket.token).await?;
+    let (st, _) = redeem(TARGET_KEY, target, &ticket.token).await?;
     assert_eq!(
         st,
         StatusCode::UNAUTHORIZED,
         "seul le worker source valide le billet"
     );
-    let (st, _) = redeem(owner, "inconnu").await?;
+    let (st, _) = redeem(OWNER_KEY, owner, "inconnu").await?;
     assert_eq!(st, StatusCode::UNAUTHORIZED);
+    let (st, _) = redeem(TARGET_KEY, owner, &ticket.token).await?;
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "le preneur du billet ne peut pas se faire passer pour le worker source"
+    );
+    let (st, _) = redeem(common::WORKER_KEY, owner, &ticket.token).await?;
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "une clé de worker n'agit pas pour un autre worker"
+    );
     Ok(())
 }
 

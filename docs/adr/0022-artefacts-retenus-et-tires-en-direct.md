@@ -177,7 +177,14 @@ Chaque étape est poussée seule et validée par la CI avant la suivante.
      jusqu'aux étapes 4 et 5 : le worker intégré qui traite (`publish_staged`, staging local) et la
      lecture `staged` pour ses résultats. La validation post-traitement se fait déjà chez le worker qui
      traite (`binary_runner`).
-4. Suppression du repli par le central, de `PUT /result` et des routes de remise.
+4. Suppression du repli par le central, de `PUT /result` et des routes de remise, en pushes courts :
+   - **4a (fait) — plus de lecture de source en flux par le central** : le courtier `source_relay`,
+     ses routes `/worker/source-relay/*`, la réponse du worker détenteur et `SourceRelayTask` sont
+     supprimés. `GET /jobs/{id}/source` ne sert plus que les sources que le central voit lui-même ; une
+     source détenue par un autre worker répond `source_unreachable` (502) et se lit chez lui avec un
+     billet.
+   - 4b — règle d'éligibilité à la prise d'une tâche (montage de la source, ou détenteur avec adresse de
+     transfert), pour qu'un worker qui ne peut pas lire la source ne la prenne pas.
 5. Worker intégré traité comme un worker ordinaire.
 
 ## Conséquences

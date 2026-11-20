@@ -19,7 +19,6 @@ use std::{
     },
     time::Duration,
 };
-use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
 const REMOTE_BROWSE_WAIT_MS: u64 = 10_000;
@@ -670,60 +669,6 @@ impl WorkerLoop {
         }
     }
 
-    /// Envoie au central, à sa demande, les sources que ce worker détient (repli, ADR 0019).
-    async fn respond_to_source_relay_requests(&self, worker_id: Uuid) {
-        let pending = format!(
-            "/api/v1/worker/source-relay/pending?worker_id={worker_id}&wait_ms={REMOTE_BROWSE_WAIT_MS}"
-        );
-        loop {
-            let tasks = tokio::select! {
-                _ = crate::api::shutdown_signal() => return,
-                result = async {
-                    self.request(reqwest::Method::GET, &pending)
-                        .timeout(REMOTE_BROWSE_HTTP_TIMEOUT)
-                        .send()
-                        .await?
-                        .error_for_status()?
-                        .json::<Vec<forgearr_shared::transfer::SourceRelayTask>>()
-                        .await
-                } => result,
-            };
-            let Ok(tasks) = tasks else {
-                tokio::time::sleep(REMOTE_BROWSE_RETRY_DELAY).await;
-                continue;
-            };
-            for task in tasks {
-                let runner = self.clone();
-                tokio::spawn(async move {
-                    if let Err(error) = runner.send_source_to_central(task).await {
-                        tracing::warn!(error = %error, "envoi de source au central interrompu");
-                    }
-                });
-            }
-        }
-    }
-
-    async fn send_source_to_central(
-        &self,
-        task: forgearr_shared::transfer::SourceRelayTask,
-    ) -> anyhow::Result<()> {
-        let path =
-            crate::library_scan::source_path(Path::new(&task.root), &task.source_name).await?;
-        let file = tokio::fs::File::open(path).await?;
-        self.request(
-            reqwest::Method::PUT,
-            &format!(
-                "/api/v1/worker/source-relay/{}?worker_id={}",
-                task.request_id, task.worker_id
-            ),
-        )
-        .body(reqwest::Body::wrap_stream(ReaderStream::new(file)))
-        .send()
-        .await?
-        .error_for_status()?;
-        Ok(())
-    }
-
     /// Répond aux demandes de retour du résultat chez le détenteur de la source.
     async fn respond_to_publication_requests(&self, worker_id: Uuid, kind: PublicationRequestKind) {
         let pending = format!(
@@ -900,14 +845,6 @@ impl WorkerLoop {
             })
         };
         let transfer_server = runner.spawn_transfer_server(worker.id);
-        let source_relay_responder = {
-            let relay_runner = runner.clone();
-            tokio::spawn(async move {
-                relay_runner
-                    .respond_to_source_relay_requests(worker.id)
-                    .await;
-            })
-        };
         let source_publication_responder = {
             let publication_runner = runner.clone();
             tokio::spawn(async move {
@@ -1060,7 +997,6 @@ impl WorkerLoop {
         }
         .await;
         browse_responder.abort();
-        source_relay_responder.abort();
         source_publication_responder.abort();
         source_inspection_responder.abort();
         software_probe_refresher.abort();

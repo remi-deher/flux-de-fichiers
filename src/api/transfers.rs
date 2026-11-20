@@ -71,8 +71,8 @@ pub async fn source(
     let job = repository::active(&s.pool, id, &lease(&h)?).await?;
     match crate::library_scan::central_job_source(&s.pool, &s.config.input_dir, &job).await? {
         Some(source) => stream_file(&source, None, "application/octet-stream").await,
-        // Source détenue par un autre worker : repli en flux par le central (ADR 0019).
-        None => super::source_relay::relay_source_from_worker(&s, &job).await,
+        // Source détenue par un autre worker : il se lit chez lui avec un billet (ADR 0022).
+        None => Err(AppError::SourceUnreachable),
     }
 }
 

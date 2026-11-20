@@ -110,15 +110,6 @@ pub struct TransferGrant {
     pub bytes: i64,
 }
 
-/// Demande du central à un worker source : « envoie-moi ce fichier » (repli, ADR 0019).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SourceRelayTask {
-    pub request_id: Uuid,
-    pub worker_id: Uuid,
-    pub root: String,
-    pub source_name: String,
-}
-
 /// Publication du résultat sur un dossier détenu par un worker à accès direct.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourcePublicationTask {

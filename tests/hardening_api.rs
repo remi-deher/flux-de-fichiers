@@ -1388,15 +1388,12 @@ async fn a_worker_without_transfer_url_gets_no_ticket_and_an_invalid_url_is_igno
     let claim = claim_for(&h, target)
         .await?
         .ok_or_else(|| anyhow::anyhow!("la cible doit obtenir la tâche"))?;
-    assert!(
-        claim.source_ticket.is_none(),
-        "repli par le central seulement"
-    );
+    assert!(claim.source_ticket.is_none(), "adresse invalide");
     Ok(())
 }
 
 #[tokio::test]
-async fn the_central_relays_a_worker_held_source_without_storing_it() -> anyhow::Result<()> {
+async fn a_worker_held_source_is_not_streamed_by_the_central() -> anyhow::Result<()> {
     let h = harness().await?;
     let owner = register_worker_with_encoders(&h, "detenteur", &[]).await?;
     let target = register_worker_with_encoders(&h, "traitant", &[]).await?;
@@ -1404,50 +1401,18 @@ async fn the_central_relays_a_worker_held_source_without_storing_it() -> anyhow:
     let claim = claim_for(&h, target)
         .await?
         .ok_or_else(|| anyhow::anyhow!("la cible doit obtenir la tâche"))?;
-
-    // Le worker traitant demande la source au central ; le détenteur l'envoie en parallèle.
-    let download = {
-        let app = h.app.clone();
-        let request = Request::builder()
-            .uri(format!("/api/v1/jobs/{}/source", job.id))
-            .header("authorization", format!("Bearer {}", common::WORKER_KEY))
-            .header("x-worker-id", target.to_string())
-            .header("x-lease-token", claim.lease_token.to_string())
-            .header("x-lease-epoch", claim.lease_epoch.to_string())
-            .body(Body::empty())?;
-        tokio::spawn(async move {
-            let response = app.oneshot(request).await?;
-            let status = response.status();
-            let body = to_bytes(response.into_body(), JSON_LIMIT).await?;
-            anyhow::Ok((status, body))
-        })
-    };
-    let (st, tasks) = json_call(
-        &h.app,
-        "GET",
-        &format!("/api/v1/worker/source-relay/pending?worker_id={owner}&wait_ms=5000"),
-        Some(common::WORKER_KEY),
-        None,
-    )
-    .await?;
-    assert_eq!(st, StatusCode::OK);
-    assert_eq!(tasks[0]["root"], "/mnt/owner");
-    assert_eq!(tasks[0]["source_name"], "film.mkv");
-    let request_id = tasks[0]["request_id"].as_str().unwrap_or_default();
-    let send = Request::builder()
-        .method("PUT")
-        .uri(format!(
-            "/api/v1/worker/source-relay/{request_id}?worker_id={owner}"
-        ))
+    let request = Request::builder()
+        .uri(format!("/api/v1/jobs/{}/source", job.id))
         .header("authorization", format!("Bearer {}", common::WORKER_KEY))
-        .body(Body::from(SOURCE_CONTENT))?;
-    assert_eq!(
-        h.app.clone().oneshot(send).await?.status(),
-        StatusCode::NO_CONTENT
-    );
-    let (status, body) = download.await??;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body.as_ref(), SOURCE_CONTENT);
+        .header("x-worker-id", target.to_string())
+        .header("x-lease-token", claim.lease_token.to_string())
+        .header("x-lease-epoch", claim.lease_epoch.to_string())
+        .body(Body::empty())?;
+    let response = h.app.clone().oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body = to_bytes(response.into_body(), JSON_LIMIT).await?;
+    let error: serde_json::Value = serde_json::from_slice(&body)?;
+    assert_eq!(error["error"]["code"], "source_unreachable");
     Ok(())
 }
 

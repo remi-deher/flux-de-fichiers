@@ -17,7 +17,6 @@ mod setup;
 pub(crate) mod source_publication;
 pub(crate) mod source_recovery;
 pub(crate) mod source_recovery_remote;
-pub(crate) mod source_relay;
 pub(crate) mod system;
 pub(crate) mod transfers;
 mod worker_view;
@@ -123,7 +122,6 @@ pub struct AppState {
     pub catalog_cache: crate::plugins::CatalogCache,
     pub event_history: EventHistory,
     pub browse_broker: crate::filesystem_browser::RemoteBrowseBroker,
-    pub source_relay: crate::source_relay::SourceRelayBroker,
     pub source_publication: crate::source_publication_broker::SourcePublicationBroker,
     pub source_inspection: crate::source_publication_broker::SourcePublicationBroker,
     pub pending_worker_setup: Arc<tokio::sync::Mutex<Option<installation::PendingWorkerSetup>>>,
@@ -150,7 +148,6 @@ impl AppState {
             catalog_cache: crate::plugins::CatalogCache::new(),
             event_history: EventHistory::new(),
             browse_broker: crate::filesystem_browser::RemoteBrowseBroker::new(),
-            source_relay: crate::source_relay::SourceRelayBroker::new(),
             source_publication: crate::source_publication_broker::SourcePublicationBroker::default(
             ),
             source_inspection: crate::source_publication_broker::SourcePublicationBroker::default(),
@@ -556,14 +553,6 @@ fn transfer_routes() -> Router<AppState> {
             post(source_publication::result_ticket),
         )
         .route("/api/v1/worker/transfers/redeem", post(transfers::redeem))
-        .route(
-            "/api/v1/worker/source-relay/pending",
-            get(source_relay::pending),
-        )
-        .route(
-            "/api/v1/worker/source-relay/{request_id}",
-            put(source_relay::send),
-        )
         .route(
             "/api/v1/worker/source-publications/pending",
             get(source_publication::pending),

@@ -31,7 +31,6 @@ pub mod secrets;
 pub mod software_probe;
 pub mod source_publication;
 pub mod source_publication_broker;
-pub mod source_relay;
 pub mod storage;
 pub mod telemetry;
 pub mod tool_run;

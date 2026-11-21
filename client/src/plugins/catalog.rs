@@ -276,6 +276,7 @@ fn CatalogGridSection(
             <div class="store-grid">
                 {entries.into_iter().map(|entry| {
                     let active_id = entry.id.clone();
+                    let plugin_icon = entry.has_icon.then(|| entry.id.clone());
                     let desc = card_description(&entry);
                     let badge_label = section_badge_label(entry.entry_type);
                     let runtime = entry.runtime.clone().unwrap_or_default();
@@ -348,6 +349,7 @@ fn CatalogGridSection(
                             title=entry.name
                             description=desc
                             icon=icon
+                            plugin_icon=plugin_icon
                             tone=tone
                             status_badge=Some(status_badge)
                             context_tags=Some(context_tags)
@@ -645,6 +647,7 @@ mod tests {
             distribution: None,
             category: None,
             subcategory: None,
+            has_icon: false,
             tags: Vec::new(),
             owner: None,
             sha256: None,

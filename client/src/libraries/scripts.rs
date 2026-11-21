@@ -1,5 +1,6 @@
 //! Onglet Scripts de la Librairie : écrire, éditer et supprimer des scripts locaux (`stdio` JSON).
 
+use super::requirements_editor::{RequirementsEditor, requirement_rows_from, rows_to_requirements};
 use super::variables_editor::{VariablesEditor, rows_from, rows_to_variables};
 use super::{LOCAL_SCRIPTS_PATH, LocalDeleteButton, bump, use_local_delete};
 use crate::api;
@@ -9,6 +10,7 @@ use crate::ui::{
     Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
     Toasts,
 };
+use forgearr_shared::exposed_variables::ScriptRequirement;
 use forgearr_shared::local::{
     LocalLibrarySnapshot, LocalScriptSummary, ScriptInterpreter, UpsertLocalScriptRequest,
 };
@@ -88,6 +90,8 @@ struct ScriptDraft {
     category: Option<PluginCategory>,
     tags: String,
     variables: Vec<ScriptVariable>,
+    requires: Vec<ScriptRequirement>,
+    dependencies_unverified: bool,
 }
 
 impl ScriptDraft {
@@ -103,6 +107,8 @@ impl ScriptDraft {
             category: None,
             tags: String::new(),
             variables: Vec::new(),
+            requires: Vec::new(),
+            dependencies_unverified: false,
         }
     }
 
@@ -117,6 +123,8 @@ impl ScriptDraft {
             category: s.category.filter(|c| c.shows_badge()),
             tags: s.tags.join(", "),
             variables: s.variables.clone(),
+            requires: s.requires.clone(),
+            dependencies_unverified: s.dependencies_unverified,
         }
     }
 }
@@ -290,6 +298,8 @@ pub fn ScriptsSection(
                 let category = RwSignal::new(draft.category);
                 let tags = RwSignal::new(draft.tags);
                 let variable_rows = RwSignal::new(rows_from(draft.variables));
+                let requirement_rows = RwSignal::new(requirement_rows_from(draft.requires));
+                let dependencies_unverified = RwSignal::new(draft.dependencies_unverified);
                 let read_only = !can_manage;
                 view! {
                     <form class="inspection-panel" on:submit=move |ev| {
@@ -306,7 +316,16 @@ pub fn ScriptsSection(
                                 return;
                             }
                         };
+                        let requires = match rows_to_requirements(&requirement_rows.get_untracked()) {
+                            Ok(requires) => requires,
+                            Err(message) => {
+                                Toasts::set_error(feedback, message);
+                                return;
+                            }
+                        };
                         save.dispatch(UpsertLocalScriptRequest {
+                            requires,
+                            dependencies_unverified: dependencies_unverified.get_untracked(),
                             variables,
                             id: id.clone(),
                             name: name.get_untracked(),
@@ -385,6 +404,11 @@ pub fn ScriptsSection(
                             <p class="form-help">"Le script reçoit workingFile, workDir, mediaInfo et config sur stdin."</p>
                         </div>
                         <VariablesEditor rows=variable_rows read_only=read_only />
+                        <RequirementsEditor
+                            rows=requirement_rows
+                            unverified=dependencies_unverified
+                            read_only=read_only
+                        />
                         {can_manage.then(|| view! {
                             <div class="inspection-drawer__actions">
                                 <button type="submit" class="btn btn-primary" disabled=move || save.pending().get()>

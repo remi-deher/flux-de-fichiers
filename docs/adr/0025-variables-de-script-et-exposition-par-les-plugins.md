@@ -122,6 +122,9 @@ réimplémenter ce travail.
 - Dépréciation : `deprecated` et `replacedBy` sont validés comme le reste de `exposes` (au chargement et à la
   synchronisation). La CI du dépôt de plugins n'autorise le retrait d'une variable que si elle était déjà
   dépréciée dans la version de la base, ou avec une montée de version majeure du contrat.
-- Reportés : la résolution et la saisie des secrets dans le flux et la saisie de `requires` dans
-  l'éditeur de scripts locaux.
+- Dépendances d'un script local : `POST /api/v1/local/scripts` accepte `requires` et `dependenciesUnverified`
+  (validés avec les mêmes règles que le catalogue, 400 sinon) et les écrit dans l'opération du script ; l'éditeur
+  de scripts locaux les propose avec un choix parmi les variables exposées du catalogue
+  (`GET /api/v1/plugins/exposed-variables`) ou une saisie manuelle, et la case « intégrer sans dépendance ».
+- Reportés : la résolution et la saisie des secrets dans le flux.
 - Les scripts existants, sans `variables`, restent valides (liste vide par défaut).

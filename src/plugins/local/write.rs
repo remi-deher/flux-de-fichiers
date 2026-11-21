@@ -102,6 +102,8 @@ pub fn save_local_script(
     }
     forgearr_shared::script_variables::validate_variables(&req.variables)
         .map_err(|err| AppError::InvalidManifest(err.to_string()))?;
+    forgearr_shared::exposed_variables::validate_requirements(&req.requires)
+        .map_err(|err| AppError::InvalidManifest(err.to_string()))?;
     let (slug, is_update) = resolve_slug(req.id.as_deref(), "script.", name)?;
     let id = format!("script.{slug}");
     let entrypoint = match req
@@ -141,6 +143,13 @@ pub fn save_local_script(
     if !req.variables.is_empty() {
         runtime["variables"] = serde_json::to_value(&req.variables)
             .map_err(|err| AppError::InvalidManifest(err.to_string()))?;
+    }
+    if !req.requires.is_empty() {
+        runtime["requires"] = serde_json::to_value(&req.requires)
+            .map_err(|err| AppError::InvalidManifest(err.to_string()))?;
+    }
+    if req.dependencies_unverified {
+        runtime["dependenciesUnverified"] = json!(true);
     }
     let operation_json = json!({
         "schemaVersion": "1.1.0",
@@ -208,6 +217,8 @@ pub fn save_local_script(
         category: req.category,
         tags: req.tags,
         variables: req.variables,
+        requires: req.requires,
+        dependencies_unverified: req.dependencies_unverified,
     })
 }
 

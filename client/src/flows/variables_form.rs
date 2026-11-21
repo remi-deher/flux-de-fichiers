@@ -175,7 +175,7 @@ fn SecretField(
     let typed = RwSignal::new(String::new());
     let stored = {
         let (node_id, name) = (node_id.clone(), name.clone());
-        move || is_secret_stored(current_secret(editor, &node_id, &name).as_ref())
+        Signal::derive(move || is_secret_stored(current_secret(editor, &node_id, &name).as_ref()))
     };
     let commit = {
         let (node_id, name) = (node_id.clone(), name.clone());
@@ -188,11 +188,11 @@ fn SecretField(
     view! {
         <input id=field_id class="form-input" type="password" autocomplete="new-password"
             disabled=read_only
-            placeholder=move || if stored() { SECRET_STORED_HINT } else { SECRET_EMPTY_HINT }
+            placeholder=move || if stored.get() { SECRET_STORED_HINT } else { SECRET_EMPTY_HINT }
             prop:value=move || typed.get()
             on:input=move |event| typed.set(event_target_value(&event))
             on:change=move |event| commit(event_target_value(&event)) />
-        {move || stored().then(|| view! {
+        {move || stored.get().then(|| view! {
             <button type="button" class="btn btn-secondary btn-sm" disabled=read_only
                 on:click=clear.clone()>{SECRET_CLEAR_LABEL}</button>
         })}

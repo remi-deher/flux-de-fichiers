@@ -586,7 +586,7 @@ paths:
   /api/v1/plugins/{id}:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Détail d'un plugin, dépendances (avec `status` réel dans le cache d'outils), blocs fournis et statut des outils requis
+      summary: Détail d'un plugin, dépendances (avec `status` réel dans le cache d'outils), blocs fournis, statut des outils requis et variables exposées aux scripts (`exposures`, absent si le plugin n'en expose pas)
       parameters: [{in: path, name: id, required: true, schema: {type: string}}]
       responses:
         '200': {description: "Vue détaillée du plugin (`dependencies[].status` indique `ready`, `installing` ou `not_installed`)"}
@@ -666,6 +666,17 @@ paths:
       responses:
         '200': {description: Bilan (entrées, fichiers, fiches ignorées)}
         '502': {description: Dépôt injoignable ou refusé, l'ancienne copie est conservée}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/plugins/exposed-variables:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: >-
+        Variables exposées aux scripts par les plugins du catalogue (ADR 0025) : pour chaque exposition,
+        le plugin fournisseur (`provider`), son contrat (`exposes` : espace de noms, version, variables et
+        chemin lu dans `mediaInfo`), `active` (le moteur lit cette exposition : à espace de noms égal, la
+        première l'emporte) et `conflictsWith` (autres plugins qui déclarent le même espace de noms)
+      responses:
+        '200': {description: Expositions, triées par identifiant d'opération}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins/{id}/settings:
     get:

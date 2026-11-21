@@ -350,6 +350,9 @@ pub struct PluginDetailView {
     pub has_settings: bool,
     #[serde(default)]
     pub blocks: Vec<OwnedBlockSpec>,
+    /// Variables que ce plugin expose aux scripts (ADR 0025).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exposures: Vec<crate::exposed_variables::ExposedNamespaceView>,
     #[serde(
         default,
         deserialize_with = "vocab::deserialize_optional_date",

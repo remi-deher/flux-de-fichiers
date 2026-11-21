@@ -381,3 +381,127 @@ async fn flow_validation_reports_invalid_variable_references_in_its_errors() -> 
     }));
     Ok(())
 }
+
+/// Écrit dans `dir` un plugin dont l'opération expose `namespace` ; renvoie son entrée d'index.
+fn write_exposing_plugin(dir: &Path, plugin_id: &str, namespace: &str) -> anyhow::Result<Value> {
+    let plugin_dir = dir.join("plugins").join(plugin_id);
+    std::fs::create_dir_all(plugin_dir.join("operations"))?;
+    std::fs::write(
+        plugin_dir.join("manifest.json"),
+        json!({
+            "schemaVersion": "1.1.0", "id": plugin_id, "type": "plugin", "version": "1.0.0",
+            "name": plugin_id,
+            "files": [{"path": "operations/probe.json", "role": "operation"}]
+        })
+        .to_string(),
+    )?;
+    std::fs::write(
+        plugin_dir.join("operations/probe.json"),
+        json!({
+            "schemaVersion": "1.1.0", "id": format!("operation.{plugin_id}.probe"), "version": "1.0.0",
+            "name": "Sonde", "providerId": plugin_id, "providerKind": "plugin",
+            "capability": "probe", "status": "validated",
+            "runtime": {"kind": "primitive", "primitive": "entry"},
+            "exposes": {
+                "namespace": namespace, "contractVersion": "1.0.0",
+                "variables": [{"name": "video.codec", "label": "Codec vidéo", "path": "video.codec"}]
+            }
+        })
+        .to_string(),
+    )?;
+    Ok(json!({
+        "id": plugin_id, "type": "plugin", "version": "1.0.0", "name": plugin_id,
+        "manifestPath": format!("plugins/{plugin_id}/manifest.json")
+    }))
+}
+
+fn write_catalogue(dir: &Path, entries: Vec<Value>) -> anyhow::Result<()> {
+    std::fs::write(
+        dir.join("index.json"),
+        json!({"schemaVersion": "1.0.0", "entries": entries}).to_string(),
+    )?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn exposed_variables_list_every_exposure_with_the_state_of_its_namespace()
+-> anyhow::Result<()> {
+    let app = test_app().await?;
+    let dir = app.plugins_dir.path();
+    write_catalogue(
+        dir,
+        vec![
+            write_exposing_plugin(dir, "alpha", "mediainfo")?,
+            write_exposing_plugin(dir, "beta", "mediainfo")?,
+            write_exposing_plugin(dir, "gamma", "autre")?,
+        ],
+    )?;
+
+    let (status, body) = send(
+        &app,
+        authorized("GET", "/api/v1/plugins/exposed-variables", None)?,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    let views = body.as_array().cloned().unwrap_or_default();
+    assert_eq!(views.len(), 3);
+    let view_of = |provider: &str| {
+        views
+            .iter()
+            .find(|view| view["provider"] == json!(provider))
+    };
+    let alpha = view_of("alpha").ok_or_else(|| anyhow::anyhow!("alpha absent"))?;
+    let beta = view_of("beta").ok_or_else(|| anyhow::anyhow!("beta absent"))?;
+    let gamma = view_of("gamma").ok_or_else(|| anyhow::anyhow!("gamma absent"))?;
+    assert_eq!(alpha["active"], json!(true));
+    assert_eq!(alpha["conflictsWith"], json!(["beta"]));
+    assert_eq!(beta["active"], json!(false));
+    assert_eq!(beta["conflictsWith"], json!(["alpha"]));
+    assert_eq!(gamma["conflictsWith"], json!([]));
+    assert_eq!(alpha["exposes"]["namespace"], json!("mediainfo"));
+    assert_eq!(
+        alpha["exposes"]["variables"][0]["path"],
+        json!("video.codec")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_plugin_sheet_carries_its_own_exposures_and_a_plain_plugin_has_none() -> anyhow::Result<()>
+{
+    let app = test_app().await?;
+    let dir = app.plugins_dir.path();
+    let plain_dir = dir.join("plugins/simple");
+    std::fs::create_dir_all(&plain_dir)?;
+    std::fs::write(
+        plain_dir.join("manifest.json"),
+        json!({"schemaVersion": "1.1.0", "id": "simple", "type": "plugin", "version": "1.0.0", "name": "Simple"})
+            .to_string(),
+    )?;
+    write_catalogue(
+        dir,
+        vec![
+            write_exposing_plugin(dir, "alpha", "mediainfo")?,
+            json!({"id": "simple", "type": "plugin", "version": "1.0.0", "name": "Simple",
+                   "manifestPath": "plugins/simple/manifest.json"}),
+        ],
+    )?;
+
+    let (status, alpha) = send(&app, authorized("GET", "/api/v1/plugins/alpha", None)?).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(alpha["exposures"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        alpha["exposures"][0]["exposes"]["namespace"],
+        json!("mediainfo")
+    );
+    assert_eq!(alpha["exposures"][0]["provider"], json!("alpha"));
+
+    let (_, simple) = send(&app, authorized("GET", "/api/v1/plugins/simple", None)?).await?;
+    assert!(simple.get("exposures").is_none(), "{simple}");
+
+    let anonymous = Request::builder()
+        .uri("/api/v1/plugins/exposed-variables")
+        .body(Body::empty())?;
+    assert_eq!(send(&app, anonymous).await?.0, StatusCode::UNAUTHORIZED);
+    Ok(())
+}

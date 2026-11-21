@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.70.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.69.0...v0.70.0) (2026-11-21)
+
+
+### Features
+
+* **scripts:** aperçu coloré des scripts de dépôt et variables de script (ADR 0025) ([c1d7fc3](https://github.com/remi-deher/flux-de-fichiers/commit/c1d7fc376231027a83087086009ac9ae78951ca0))
+
+
+### Bug Fixes
+
+* **clippy:** code mort et slices clonés signalés par la CI ([4de72bd](https://github.com/remi-deher/flux-de-fichiers/commit/4de72bdb186fc0ef2880b3c6f7caab7e0d62c7c8))
+
 ## [0.69.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.68.0...v0.69.0) (2026-11-21)
 
 

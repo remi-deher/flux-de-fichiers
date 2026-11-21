@@ -728,7 +728,11 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
             let local_source_root = job_source(pool, j.id).await?.and_then(|source| {
                 (source.source_worker_id == Some(worker)).then_some(source.source_root)
             });
-            let resume_node_id = super::relays::resume_node(pool, j.id).await?;
+            let (resume_node_id, resumed_outputs) = super::relays::resume_point(pool, j.id)
+                .await?
+                .map_or((None, Default::default()), |(node, outputs)| {
+                    (Some(node), outputs)
+                });
             let handoff_input = super::relays::artifact_input(pool, j.id, worker).await?;
             Ok(Some(Claim {
                 job_id: j.id,
@@ -750,6 +754,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                 media_root: None,
                 local_source_root,
                 resume_node_id,
+                resumed_outputs,
                 handoff_input,
                 prior_warning: j.warning,
                 source_ticket: None,

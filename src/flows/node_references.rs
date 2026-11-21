@@ -3,7 +3,8 @@
 use super::{
     OperationRegistry, OperationRuntime, ScriptRuntime,
     variables::{
-        NodeOutput, VariableContext, as_text, exposed_value, references_in, resolve_node_config,
+        NODE_OUTPUT_FIELDS, NodeOutput, VariableContext, as_text, exposed_value,
+        mask_secrets_for_preview, references_in, resolve_node_config, split_node_reference,
     },
 };
 use forgearr_shared::{
@@ -20,11 +21,6 @@ use std::path::Path;
 const SAMPLE_WORKING_FILE: &str = "/travail/fichier.mkv";
 const SAMPLE_SOURCE_FILE: &str = "/source/fichier.mkv";
 const SAMPLE_WORK_DIR: &str = "/travail";
-const NODE_OUTPUT_FIELDS: [(&str, &str); 3] = [
-    ("message", "message"),
-    ("nextPort", "port de sortie"),
-    ("workingFile", "fichier courant"),
-];
 const MAX_SAMPLE_PATHS: usize = 80;
 const MAX_SAMPLE_DEPTH: usize = 5;
 const MAX_SAMPLE_ARRAY_ITEMS: usize = 3;
@@ -250,13 +246,11 @@ fn reference_problem(
             parts.next().map(|_| "cette valeur n'a pas de sous-champ")
         }
         Some("mediaInfo") => None,
-        Some("nodes") => match (parts.next(), parts.next(), parts.next()) {
-            (Some(id), Some(field), None)
-                if NODE_OUTPUT_FIELDS.iter().any(|(name, _)| *name == field) =>
-            {
+        Some("nodes") => match split_node_reference(reference) {
+            Some((id, _)) => {
                 (!upstream.contains(id)).then_some("ce nœud ne s'exécute pas avant celui-ci")
             }
-            _ => Some("forme attendue : nodes.<id>.message, nextPort ou workingFile"),
+            None => Some("forme attendue : nodes.<id>.message, nextPort ou workingFile"),
         },
         _ => (!plugin_references.contains(reference)).then_some("variable inconnue"),
     }
@@ -410,7 +404,9 @@ pub fn node_variables_view(
         &outputs,
         &registry.exposures_for_requirements(&runtime.requires),
     );
-    let (resolved, error) = match resolve_node_config(&runtime.variables, &node.config, &context) {
+    let preview_config = mask_secrets_for_preview(&runtime.variables, &node.config);
+    let (resolved, error) = match resolve_node_config(&runtime.variables, &preview_config, &context)
+    {
         Ok(config) => (Some(config), None),
         Err(err) => (None, Some(err.to_string())),
     };

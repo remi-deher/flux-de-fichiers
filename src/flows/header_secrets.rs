@@ -1,25 +1,68 @@
-//! En-têtes HTTP : chiffrés dans la définition d'un flux, jamais renvoyés en clair par l'API.
+//! Secrets d'un flux : chiffrés dans la définition, jamais renvoyés en clair par l'API.
 //!
-//! Un en-tête (par exemple `Authorization`) est un secret. À l'enregistrement, les valeurs en clair
-//! sont chiffrées ; une valeur laissée vide conserve celle déjà enregistrée pour le même bloc.
-//! L'API renvoie les noms d'en-têtes avec une valeur vide ; le moteur déchiffre à l'exécution.
+//! Deux objets de `config` portent des secrets : `custom_headers` (en-têtes d'un webhook, par
+//! exemple `Authorization`) et `secrets` (variables de type secret d'un script, ADR 0025). À
+//! l'enregistrement, les valeurs en clair sont chiffrées ; une valeur laissée vide conserve celle
+//! déjà enregistrée pour le même bloc ; une valeur `null` retire l'entrée. L'API renvoie les noms
+//! avec une valeur vide ; le moteur déchiffre à l'exécution.
 
 use crate::{
     error::{AppError, AppResult},
     repository::DEFINITION_STORES,
     secrets::{SecretBox, is_encrypted},
 };
+use forgearr_shared::script_variables::{HEADERS_CONFIG_KEY, SECRETS_CONFIG_KEY};
 use serde_json::{Map, Value};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 
-const HEADERS_KEY: &str = "custom_headers";
+/// Objet de `config` dont toutes les valeurs sont des secrets.
+struct SecretObject {
+    key: &'static str,
+    /// Préfixe du nom d'un secret dans ses données associées et dans l'enveloppe d'un bail.
+    prefix: &'static str,
+    /// Une valeur vide sans valeur enregistrée retire l'entrée (un secret absent n'existe pas).
+    drop_empty: bool,
+}
 
-/// En-têtes d'un bloc s'il déclare un objet `config.custom_headers`.
-fn headers_of(node: &mut Value) -> Option<&mut Map<String, Value>> {
-    node.get_mut("config")?
-        .get_mut(HEADERS_KEY)?
-        .as_object_mut()
+static SECRET_OBJECTS: [SecretObject; 2] = [
+    SecretObject {
+        key: HEADERS_CONFIG_KEY,
+        prefix: "",
+        drop_empty: false,
+    },
+    SecretObject {
+        key: SECRETS_CONFIG_KEY,
+        prefix: "secret:",
+        drop_empty: true,
+    },
+];
+
+/// Objets secrets d'un bloc, avec leur description.
+fn secret_maps(node: &mut Value) -> Vec<(&'static SecretObject, &mut Map<String, Value>)> {
+    let Some(config) = node.get_mut("config").and_then(Value::as_object_mut) else {
+        return Vec::new();
+    };
+    config
+        .iter_mut()
+        .filter_map(|(key, value)| {
+            let object = SECRET_OBJECTS
+                .iter()
+                .find(|object| object.key == key.as_str())?;
+            Some((object, value.as_object_mut()?))
+        })
+        .collect()
+}
+
+/// Secrets d'un bloc : nom de l'emplacement (préfixe compris) et valeur.
+fn slots_of(node: &mut Value) -> Vec<(String, &mut Value)> {
+    secret_maps(node)
+        .into_iter()
+        .flat_map(|(object, map)| {
+            map.iter_mut()
+                .map(move |(name, value)| (format!("{}{name}", object.prefix), value))
+        })
+        .collect()
 }
 
 fn nodes_of(definition: &mut Value) -> Vec<&mut Value> {
@@ -37,41 +80,40 @@ fn node_id(node: &Value) -> String {
         .to_owned()
 }
 
-/// Données associées d'un en-tête : il ne se déchiffre que pour ce flux, ce bloc et cet en-tête.
-fn header_aad(flow_id: &str, node_id: &str, header: &str) -> String {
-    format!("flow:{flow_id}:{node_id}:{header}")
+/// Données associées d'un secret : il ne se déchiffre que pour ce flux, ce bloc et cet emplacement.
+fn header_aad(flow_id: &str, node_id: &str, slot: &str) -> String {
+    format!("flow:{flow_id}:{node_id}:{slot}")
 }
 
-/// La définition déclare-t-elle des en-têtes de webhook ?
-pub fn has_webhook_headers(definition: &str) -> bool {
+/// La définition déclare-t-elle des secrets (en-têtes de webhook ou variables de script) ?
+pub fn has_flow_secrets(definition: &str) -> bool {
     let Ok(mut value) = serde_json::from_str::<Value>(definition) else {
         return false;
     };
     nodes_of(&mut value)
         .into_iter()
-        .any(|node| headers_of(node).is_some_and(|headers| !headers.is_empty()))
+        .any(|node| !slots_of(node).is_empty())
 }
 
-/// Valeurs déjà enregistrées, par bloc puis par nom d'en-tête.
-fn existing_headers(existing: Option<&str>) -> HashMap<(String, String), String> {
+/// Valeurs déjà enregistrées, par bloc puis par emplacement.
+fn existing_secrets(existing: Option<&str>) -> HashMap<(String, String), String> {
     let mut known = HashMap::new();
     let Some(Ok(mut value)) = existing.map(serde_json::from_str::<Value>) else {
         return known;
     };
     for node in nodes_of(&mut value) {
         let id = node_id(node);
-        if let Some(headers) = headers_of(node) {
-            for (name, header_value) in headers.iter() {
-                if let Some(text) = header_value.as_str() {
-                    known.insert((id.clone(), name.clone()), text.to_owned());
-                }
+        for (slot, secret) in slots_of(node) {
+            if let Some(text) = secret.as_str() {
+                known.insert((id.clone(), slot), text.to_owned());
             }
         }
     }
     known
 }
 
-/// Chiffre les en-têtes en clair d'une définition ; un en-tête laissé vide reprend sa valeur enregistrée.
+/// Chiffre les secrets en clair d'une définition ; un secret laissé vide reprend sa valeur
+/// enregistrée, un secret `null` est retiré.
 pub fn seal_definition(
     secrets: &SecretBox,
     flow_id: &str,
@@ -81,39 +123,43 @@ pub fn seal_definition(
     let Ok(mut definition) = serde_json::from_str::<Value>(incoming) else {
         return Ok(incoming.to_owned());
     };
-    let known = existing_headers(existing);
+    let known = existing_secrets(existing);
     for node in nodes_of(&mut definition) {
         let id = node_id(node);
-        let Some(headers) = headers_of(node) else {
-            continue;
-        };
-        for (name, value) in headers.iter_mut() {
-            match value.as_str() {
-                Some("") => {
-                    if let Some(previous) = known.get(&(id.clone(), name.clone())) {
-                        *value = Value::String(previous.clone());
+        for (object, map) in secret_maps(node) {
+            map.retain(|_, value| !value.is_null());
+            let mut dropped = Vec::new();
+            for (name, value) in map.iter_mut() {
+                let slot = format!("{}{name}", object.prefix);
+                match value.as_str() {
+                    Some("") => match known.get(&(id.clone(), slot)) {
+                        Some(previous) => *value = Value::String(previous.clone()),
+                        None if object.drop_empty => dropped.push(name.clone()),
+                        None => {}
+                    },
+                    Some(text) if !is_encrypted(text) => {
+                        *value =
+                            Value::String(secrets.encrypt(text, &header_aad(flow_id, &id, &slot))?);
                     }
+                    _ => {}
                 }
-                Some(text) if !is_encrypted(text) => {
-                    *value = Value::String(secrets.encrypt(text, &header_aad(flow_id, &id, name))?);
-                }
-                _ => {}
+            }
+            for name in dropped {
+                map.remove(&name);
             }
         }
     }
     serde_json::to_string(&definition).map_err(|_| AppError::Invalid)
 }
 
-/// Définition destinée à l'API : les noms d'en-têtes restent, leurs valeurs sont vidées.
+/// Définition destinée à l'API : les noms de secrets restent, leurs valeurs sont vidées.
 pub fn mask_definition(definition: &str) -> String {
     let Ok(mut value) = serde_json::from_str::<Value>(definition) else {
         return definition.to_owned();
     };
     for node in nodes_of(&mut value) {
-        if let Some(headers) = headers_of(node) {
-            for header_value in headers.values_mut() {
-                *header_value = Value::String(String::new());
-            }
+        for (_, secret) in slots_of(node) {
+            *secret = Value::String(String::new());
         }
     }
     serde_json::to_string(&value).unwrap_or_else(|_| definition.to_owned())
@@ -134,7 +180,7 @@ pub fn decrypt_headers(
     Ok(())
 }
 
-/// Déchiffre tous les en-têtes webhook d'une définition pour qu'un worker distant
+/// Déchiffre tous les secrets d'une définition pour qu'un worker distant
 /// puisse exécuter le flux sans la clé du central.
 pub fn decrypt_definition_headers(
     secrets: &SecretBox,
@@ -146,20 +192,18 @@ pub fn decrypt_definition_headers(
     };
     for node in nodes_of(&mut value) {
         let id = node_id(node);
-        let Some(headers) = headers_of(node) else {
-            continue;
-        };
-        for (name, header_value) in headers.iter_mut() {
-            let Some(text) = header_value.as_str().filter(|text| is_encrypted(text)) else {
+        for (slot, secret) in slots_of(node) {
+            let Some(text) = secret.as_str().filter(|text| is_encrypted(text)) else {
                 continue;
             };
-            *header_value = Value::String(secrets.decrypt(text, &header_aad(flow_id, &id, name))?);
+            *secret = Value::String(secrets.decrypt(text, &header_aad(flow_id, &id, &slot))?);
         }
     }
     Ok(serde_json::to_string(&value).unwrap_or_else(|_| definition.to_owned()))
 }
 
-/// Extrait les en-têtes webhook en clair d'une définition et renvoie la définition masquée associée.
+/// Extrait les secrets en clair d'une définition (par bloc puis par emplacement) et renvoie la
+/// définition masquée associée.
 pub fn extract_and_mask_definition_headers(
     definition: &str,
 ) -> (String, HashMap<String, HashMap<String, String>>) {
@@ -169,54 +213,48 @@ pub fn extract_and_mask_definition_headers(
     };
     for node in nodes_of(&mut value) {
         let id = node_id(node);
-        let Some(headers) = headers_of(node) else {
-            continue;
-        };
-        let mut by_header = HashMap::new();
-        for (name, header_value) in headers.iter_mut() {
-            if let Some(text) = header_value.as_str()
+        let mut by_slot = HashMap::new();
+        for (slot, secret) in slots_of(node) {
+            if let Some(text) = secret.as_str()
                 && !text.is_empty()
             {
-                by_header.insert(name.clone(), text.to_owned());
+                by_slot.insert(slot, text.to_owned());
             }
-            *header_value = Value::String(String::new());
+            *secret = Value::String(String::new());
         }
-        if !by_header.is_empty() {
-            extracted.insert(id, by_header);
+        if !by_slot.is_empty() {
+            extracted.insert(id, by_slot);
         }
     }
     let masked = serde_json::to_string(&value).unwrap_or_else(|_| definition.to_owned());
     (masked, extracted)
 }
 
-/// Réinjecte des en-têtes webhook déchiffrés dans une définition de flux avant exécution.
+/// Réinjecte des secrets déchiffrés dans une définition de flux avant exécution.
 pub fn inject_definition_headers(
     definition: &str,
-    headers_by_node: &HashMap<String, HashMap<String, String>>,
+    secrets_by_node: &HashMap<String, HashMap<String, String>>,
 ) -> String {
-    if headers_by_node.is_empty() {
+    if secrets_by_node.is_empty() {
         return definition.to_owned();
     }
     let Ok(mut value) = serde_json::from_str::<Value>(definition) else {
         return definition.to_owned();
     };
     for node in nodes_of(&mut value) {
-        let id = node_id(node);
-        let Some(node_headers) = headers_by_node.get(&id) else {
+        let Some(node_secrets) = secrets_by_node.get(&node_id(node)) else {
             continue;
         };
-        if let Some(headers) = headers_of(node) {
-            for (name, clear_val) in node_headers {
-                if headers.contains_key(name) {
-                    headers.insert(name.clone(), Value::String(clear_val.clone()));
-                }
+        for (slot, secret) in slots_of(node) {
+            if let Some(clear) = node_secrets.get(&slot) {
+                *secret = Value::String(clear.clone());
             }
         }
     }
     serde_json::to_string(&value).unwrap_or_else(|_| definition.to_owned())
 }
 
-/// Re-chiffre avec la nouvelle clé les en-têtes d'une définition de flux ; `None` s'il n'y en a pas.
+/// Re-chiffre avec la nouvelle clé les secrets d'une définition de flux ; `None` s'il n'y en a pas.
 /// Renvoie la définition réécrite et le nombre de valeurs changées.
 pub fn rotate_definition(
     old: &SecretBox,
@@ -230,16 +268,13 @@ pub fn rotate_definition(
     let mut rotated = 0;
     for node in nodes_of(&mut value) {
         let id = node_id(node);
-        let Some(headers) = headers_of(node) else {
-            continue;
-        };
-        for (name, header_value) in headers.iter_mut() {
-            let Some(text) = header_value.as_str().filter(|text| is_encrypted(text)) else {
+        for (slot, secret) in slots_of(node) {
+            let Some(text) = secret.as_str().filter(|text| is_encrypted(text)) else {
                 continue;
             };
-            let aad = header_aad(flow_id, &id, name);
+            let aad = header_aad(flow_id, &id, &slot);
             let plaintext = old.decrypt(text, &aad)?;
-            *header_value = Value::String(new.encrypt(&plaintext, &aad)?);
+            *secret = Value::String(new.encrypt(&plaintext, &aad)?);
             rotated += 1;
         }
     }
@@ -256,7 +291,7 @@ pub async fn migrate_flow_secrets(pool: &SqlitePool, secrets: &SecretBox) -> App
     for store in DEFINITION_STORES {
         let rows = store.fetch_definitions(pool).await?;
         for (id, rowid, definition) in rows {
-            if !has_webhook_headers(&definition) {
+            if !has_flow_secrets(&definition) {
                 continue;
             }
             let sealed = seal_definition(secrets, &id, &definition, None)?;
@@ -375,11 +410,11 @@ mod tests {
             seal_definition(&secrets, FLOW, "pas du json", None)?,
             "pas du json"
         );
-        assert!(!has_webhook_headers("pas du json"));
-        assert!(!has_webhook_headers(
+        assert!(!has_flow_secrets("pas du json"));
+        assert!(!has_flow_secrets(
             &json!({"nodes": [{"id": "a", "type": "file-input"}]}).to_string()
         ));
-        assert!(has_webhook_headers(&definition("x")));
+        assert!(has_flow_secrets(&definition("x")));
         Ok(())
     }
 
@@ -410,6 +445,99 @@ mod tests {
             decrypt_definition_headers(&secrets, FLOW, "pas du json")?,
             "pas du json"
         );
+        Ok(())
+    }
+
+    fn script_definition(token: Value) -> String {
+        json!({
+            "nodes": [
+                {"id": "s1", "type": "script", "name": "Script", "config": {
+                    "crf": 20,
+                    "secrets": {"token": token}
+                }}
+            ],
+            "connections": []
+        })
+        .to_string()
+    }
+
+    fn token_of(definition: &str) -> Value {
+        serde_json::from_str::<Value>(definition)
+            .map(|value| value["nodes"][0]["config"]["secrets"]["token"].clone())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn test_script_secrets_are_sealed_masked_and_decrypted_like_headers() -> anyhow::Result<()> {
+        let (_dir, secrets) = secrets()?;
+        assert!(has_flow_secrets(&script_definition(json!("t0k"))));
+        let sealed = seal_definition(&secrets, FLOW, &script_definition(json!("t0k")), None)?;
+        let stored = token_of(&sealed);
+        assert!(stored.as_str().is_some_and(is_encrypted));
+        assert!(!sealed.contains("t0k"));
+        assert!(sealed.contains("\"crf\":20"));
+
+        assert_eq!(token_of(&mask_definition(&sealed)), json!(""));
+        let clear = decrypt_definition_headers(&secrets, FLOW, &sealed)?;
+        assert_eq!(token_of(&clear), json!("t0k"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_script_secret_is_bound_to_its_flow_node_and_name() -> anyhow::Result<()> {
+        let (_dir, secrets) = secrets()?;
+        let sealed = seal_definition(&secrets, FLOW, &script_definition(json!("t0k")), None)?;
+        assert!(decrypt_definition_headers(&secrets, "autre.flux", &sealed).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_empty_script_secret_keeps_the_stored_value_and_null_removes_it() -> anyhow::Result<()> {
+        let (_dir, secrets) = secrets()?;
+        let stored = seal_definition(&secrets, FLOW, &script_definition(json!("t0k")), None)?;
+
+        let kept = seal_definition(&secrets, FLOW, &script_definition(json!("")), Some(&stored))?;
+        assert_eq!(token_of(&kept), token_of(&stored));
+
+        let removed = seal_definition(
+            &secrets,
+            FLOW,
+            &script_definition(json!(null)),
+            Some(&stored),
+        )?;
+        assert!(token_of(&removed).is_null());
+        assert!(!has_flow_secrets(&removed));
+
+        let never_set = seal_definition(&secrets, FLOW, &script_definition(json!("")), None)?;
+        assert!(token_of(&never_set).is_null());
+        Ok(())
+    }
+
+    #[test]
+    fn test_script_secrets_travel_in_the_lease_envelope_and_come_back() -> anyhow::Result<()> {
+        let (_dir, secrets) = secrets()?;
+        let sealed = seal_definition(&secrets, FLOW, &script_definition(json!("t0k")), None)?;
+        let clear = decrypt_definition_headers(&secrets, FLOW, &sealed)?;
+        let (masked, extracted) = extract_and_mask_definition_headers(&clear);
+        assert!(!masked.contains("t0k"));
+        assert_eq!(extracted["s1"]["secret:token"], "t0k");
+        assert_eq!(
+            token_of(&inject_definition_headers(&masked, &extracted)),
+            json!("t0k")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_rotation_rewrites_script_secrets_with_the_new_key() -> anyhow::Result<()> {
+        let (_old_dir, old) = secrets()?;
+        let (_new_dir, new) = secrets()?;
+        let sealed = seal_definition(&old, FLOW, &script_definition(json!("t0k")), None)?;
+        let (rewritten, count) = rotate_definition(&old, &new, FLOW, &sealed)?
+            .ok_or_else(|| anyhow::anyhow!("rien à re-chiffrer"))?;
+        assert_eq!(count, 1);
+        let clear = decrypt_definition_headers(&new, FLOW, &rewritten)?;
+        assert_eq!(token_of(&clear), json!("t0k"));
         Ok(())
     }
 

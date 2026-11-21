@@ -154,6 +154,12 @@ pub async fn report_steps(
         telemetry: None,
     };
     repository::save_job_steps_for_lease(&s.pool, id, &lease, &r.steps).await?;
+    if let Some(media_info) = &r.media_info
+        && let Err(error) =
+            repository::save_flow_media_sample(&s.pool, id, &lease, media_info).await
+    {
+        tracing::warn!(job_id = %id, %error, "échantillon de métadonnées non retenu");
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

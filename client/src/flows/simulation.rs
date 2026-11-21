@@ -5,8 +5,9 @@
 
 use super::presentation::{node_summary, output_presentation};
 use super::state::Editor;
+use crate::api;
 use crate::ui::{Icon, IconName, Tag, TagTone};
-use forgearr_shared::flow_analysis::simulate_flow_with;
+use forgearr_shared::flow_analysis::{FlowMediaSample, simulate_flow_with};
 pub use forgearr_shared::flow_analysis::{
     SimulationInput, SimulationPreset, SimulationReport, SimulationStatus,
 };
@@ -14,6 +15,13 @@ use forgearr_shared::flows::{FlowGraph, OwnedBlockSpec};
 use leptos::prelude::*;
 
 const JSON_EDITOR_ROWS: u32 = 6;
+const NO_SAMPLE_MESSAGE: &str = "Aucune métadonnée de job réel pour ce flux : elles sont retenues après la première tâche exécutée.";
+const SAMPLE_UNAVAILABLE_MESSAGE: &str = "Métadonnées du dernier job indisponibles.";
+
+/// Chemin du dernier échantillon de métadonnées d'un flux enregistré.
+fn media_sample_path(flow_id: &str) -> String {
+    format!("/api/v1/flows/{flow_id}/media-sample")
+}
 
 trait SimulationStatusTone {
     fn tone(self) -> TagTone;
@@ -77,6 +85,32 @@ pub fn FlowSimulationPanel(editor: Editor) -> impl IntoView {
         });
     };
 
+    let sample_note = RwSignal::new(None::<String>);
+    let load_sample = move |_| {
+        let Some(flow_id) = editor.flow_id.get_untracked() else {
+            sample_note.set(Some(
+                "Enregistrez le flux pour charger les métadonnées d'un job.".into(),
+            ));
+            return;
+        };
+        leptos::task::spawn_local(async move {
+            match api::get::<FlowMediaSample>(&media_sample_path(&flow_id)).await {
+                Ok(sample) => {
+                    editor.sim_input.set(sample.to_simulation_input());
+                    editor.sim_step.set(None);
+                    sample_note.set(Some(format!(
+                        "Métadonnées de « {} » (tâche du {}).",
+                        sample.source_name, sample.recorded_at
+                    )));
+                }
+                Err(error) if error.code() == Some("not_found") => {
+                    sample_note.set(Some(NO_SAMPLE_MESSAGE.into()));
+                }
+                Err(_) => sample_note.set(Some(SAMPLE_UNAVAILABLE_MESSAGE.into())),
+            }
+        });
+    };
+
     view! {
         <div class="flow-dock-pane flow-sim-pane" aria-label="Simulateur de flux">
             <div class="flow-inspector__shell">
@@ -104,7 +138,12 @@ pub fn FlowSimulationPanel(editor: Editor) -> impl IntoView {
                                     {preset.label()}
                                 </button>
                             }).collect_view()}
+                            <button type="button" class="btn btn-secondary btn-sm"
+                                on:click=load_sample>
+                                "Dernier job réel"
+                            </button>
                         </div>
+                        {move || sample_note.get().map(|note| view! { <p class="form-help">{note}</p> })}
                         <div class="flow-sim__fields">
                             <div class="form-group">
                                 <label for="sim-file-name" class="form-label">"Nom du fichier"</label>
@@ -412,5 +451,13 @@ mod tests {
 
         let empty = simulate_flow(&FlowGraph::default(), &catalog, &SimulationInput::default());
         assert_eq!(empty.status, SimulationStatus::NoEntry);
+    }
+
+    #[test]
+    fn the_sample_path_targets_the_flow_media_sample_route() {
+        assert_eq!(
+            media_sample_path("flow.test"),
+            "/api/v1/flows/flow.test/media-sample"
+        );
     }
 }

@@ -289,6 +289,7 @@ fn json_routes() -> Router<AppState> {
             post(flows::node_variables)
                 .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
         )
+        .route("/api/v1/flows/{id}/media-sample", get(flows::media_sample))
         .route("/api/v1/flows/{id}/versions", get(flows::list_versions))
         .route(
             "/api/v1/flows/{id}/versions/{version}",

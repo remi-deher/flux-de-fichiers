@@ -136,6 +136,11 @@ async fn test_repositories_lifecycle_and_official_protection() -> anyhow::Result
     let sync_res = app.clone().oneshot(sync_req).await?;
     // Adresse privée : refusée par défaut, sans aucun accès réseau.
     assert_eq!(sync_res.status(), StatusCode::BAD_GATEWAY);
+    let sync_body = to_bytes(sync_res.into_body(), 1024 * 4).await?;
+    let sync_json: serde_json::Value = serde_json::from_slice(&sync_body)?;
+    assert_eq!(sync_json["error"]["code"], "repository_unavailable");
+    let cause = &sync_json["error"]["message"];
+    assert!(cause.as_str().is_some_and(|text| !text.is_empty()));
 
     // 5. Protéger le dépôt officiel contre la suppression
     let del_official_req = Request::builder()

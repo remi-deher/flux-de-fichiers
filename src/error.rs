@@ -5,6 +5,9 @@ use axum::{
 };
 use serde_json::json;
 
+/// Longueur maximale (en caractères) de la cause d'une indisponibilité exposée à l'administrateur.
+const DETAIL_MAX_CHARS: usize = 300;
+
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error("invalid input")]
@@ -86,7 +89,13 @@ impl IntoResponse for AppError {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal_error")
             }
         };
-        let mut response = (status, Json(json!({"error": {"code": code}}))).into_response();
+        let mut error = json!({"code": code});
+        if let Self::RepositoryUnavailable(detail) = &self {
+            let message = bounded_detail(detail);
+            tracing::warn!(code, %message, "dépôt ou outil indisponible");
+            error["message"] = json!(message);
+        }
+        let mut response = (status, Json(json!({"error": error}))).into_response();
         if status == StatusCode::UNAUTHORIZED {
             response.headers_mut().insert(
                 "www-authenticate",
@@ -97,4 +106,66 @@ impl IntoResponse for AppError {
     }
 }
 
+/// Cause sur une seule ligne et bornée : les caractères de contrôle deviennent des espaces.
+fn bounded_detail(detail: &str) -> String {
+    detail
+        .chars()
+        .map(visible_character)
+        .take(DETAIL_MAX_CHARS)
+        .collect()
+}
+
+fn visible_character(character: char) -> char {
+    if character.is_control() {
+        ' '
+    } else {
+        character
+    }
+}
+
 pub type AppResult<T> = Result<T, AppError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    const BODY_LIMIT_BYTES: usize = 4096;
+
+    async fn answer(error: AppError) -> (StatusCode, serde_json::Value) {
+        let response = error.into_response();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), BODY_LIMIT_BYTES)
+            .await
+            .unwrap_or_default();
+        let body = serde_json::from_slice(&bytes).unwrap_or_default();
+        (status, body)
+    }
+
+    #[tokio::test]
+    async fn repository_unavailable_explains_its_cause_on_one_line() {
+        let detail = "réponse HTTP 429\npour https://x.test/index.json";
+        let (status, body) = answer(AppError::RepositoryUnavailable(detail.into())).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(body["error"]["code"], "repository_unavailable");
+        let expected = "réponse HTTP 429 pour https://x.test/index.json";
+        assert_eq!(body["error"]["message"], expected);
+    }
+
+    #[tokio::test]
+    async fn the_cause_of_an_unavailable_repository_is_bounded() {
+        let long = "é".repeat(DETAIL_MAX_CHARS * 2);
+        let (_, body) = answer(AppError::RepositoryUnavailable(long)).await;
+        let message = body["error"]["message"].as_str().unwrap_or_default();
+        assert_eq!(message.chars().count(), DETAIL_MAX_CHARS);
+    }
+
+    #[tokio::test]
+    async fn other_errors_keep_exposing_only_their_code() {
+        for error in [AppError::NotFound, AppError::Internal] {
+            let (_, body) = answer(error).await;
+            assert!(body["error"].get("message").is_none());
+            assert!(body["error"]["code"].is_string());
+        }
+    }
+}

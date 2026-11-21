@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.77.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.76.0...v0.77.0) (2026-11-21)
+
+
+### Features
+
+* **catalogue:** aperçu du code d'un script et ajout à la librairie depuis son tiroir ([25e27e4](https://github.com/remi-deher/flux-de-fichiers/commit/25e27e4729e619eb4a42ccbb91a67abe84be89b8))
+* **catalogue:** aperçu du code d'un script et ajout à la librairie depuis son tiroir ([cef20f7](https://github.com/remi-deher/flux-de-fichiers/commit/cef20f74999168966da45e40f453daf90682fda7))
+
 ## [0.76.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.75.0...v0.76.0) (2026-11-21)
 
 

@@ -254,6 +254,8 @@ pub fn ScriptBlockInspector(
                                         return;
                                     }
                                     save_script.dispatch(UpsertLocalScriptRequest {
+                                        requires: Vec::new(),
+                                        dependencies_unverified: false,
                                         variables: Vec::new(),
                                         id: None,
                                         name: name_val,
@@ -339,6 +341,8 @@ pub fn ScriptBlockInspector(
                                         return;
                                     }
                                     save_script.dispatch(UpsertLocalScriptRequest {
+                                        requires: Vec::new(),
+                                        dependencies_unverified: false,
                                         variables: Vec::new(),
                                         id: None,
                                         name: name_val,

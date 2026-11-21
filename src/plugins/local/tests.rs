@@ -3,6 +3,7 @@ use crate::flows::OperationRegistry;
 use crate::plugins::{CatalogItemType, load_catalog, vocab::PluginCategory};
 use forgearr_shared::{
     base64,
+    exposed_variables::ScriptRequirement,
     local::{
         CreateBlockTemplateRequest, CreateFlowTemplateRequest, CreateLocalPackRequest,
         ScriptInterpreter, UploadLocalResourceRequest, UpsertLocalScriptRequest,
@@ -20,6 +21,8 @@ fn local_script_upload_templates_and_pack_roundtrip_without_github() -> anyhow::
     let script = save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            requires: Vec::new(),
+            dependencies_unverified: false,
             variables: Vec::new(),
             id: None,
             name: "Tag MKV".into(),
@@ -145,6 +148,8 @@ fn duplicate_creation_without_id_returns_conflict_and_updates_clean_old_files() 
     let created = save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            requires: Vec::new(),
+            dependencies_unverified: false,
             variables: Vec::new(),
             id: None,
             name: "Nettoyeur".into(),
@@ -161,6 +166,8 @@ fn duplicate_creation_without_id_returns_conflict_and_updates_clean_old_files() 
     let dup = save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            requires: Vec::new(),
+            dependencies_unverified: false,
             variables: Vec::new(),
             id: None,
             name: "Nettoyeur!".into(),
@@ -177,6 +184,8 @@ fn duplicate_creation_without_id_returns_conflict_and_updates_clean_old_files() 
     let updated = save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            requires: Vec::new(),
+            dependencies_unverified: false,
             variables: Vec::new(),
             id: Some(created.id),
             name: "Nettoyeur Python".into(),
@@ -241,6 +250,8 @@ fn validation_rejects_mismatched_prefix_invalid_graph_and_invalid_pack_dep() -> 
     let bad_prefix = save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            requires: Vec::new(),
+            dependencies_unverified: false,
             variables: Vec::new(),
             id: Some("pack.local.wrong".into()),
             name: "Wrong".into(),
@@ -294,6 +305,8 @@ fn validation_rejects_mismatched_prefix_invalid_graph_and_invalid_pack_dep() -> 
 
 fn variable_script_request(variables: Vec<ScriptVariable>) -> UpsertLocalScriptRequest {
     UpsertLocalScriptRequest {
+        requires: Vec::new(),
+        dependencies_unverified: false,
         variables,
         id: None,
         name: "Encodeur".into(),
@@ -349,5 +362,73 @@ fn script_with_an_invalid_variable_schema_is_refused_and_writes_nothing() -> any
     let refused = save_local_script(&local_dir, variable_script_request(vec![bad]));
     assert!(matches!(refused, Err(AppError::InvalidManifest(_))));
     assert!(!local_dir.join("scripts/encodeur").exists());
+    Ok(())
+}
+
+fn requirement(variable: &str, provider: &str) -> ScriptRequirement {
+    ScriptRequirement {
+        variable: variable.into(),
+        provider: provider.into(),
+        contract_major: 1,
+        repository: None,
+    }
+}
+
+#[test]
+fn script_requirements_round_trip_through_the_manifest_and_the_snapshot() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let local_dir = dir.path().join("local");
+    let mut request = variable_script_request(Vec::new());
+    request.requires = vec![requirement("mediainfo.video.codec", "app.mediainfo")];
+    request.dependencies_unverified = true;
+
+    let saved = save_local_script(&local_dir, request)?;
+    assert_eq!(
+        saved.requires,
+        vec![requirement("mediainfo.video.codec", "app.mediainfo")]
+    );
+    assert!(saved.dependencies_unverified);
+
+    let snapshot = build_local_snapshot(std::slice::from_ref(&local_dir), &local_dir);
+    assert_eq!(snapshot.scripts[0].requires, saved.requires);
+    assert!(snapshot.scripts[0].dependencies_unverified);
+
+    let operation: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
+        local_dir.join("scripts/encodeur/operations/run.json"),
+    )?)?;
+    assert_eq!(
+        operation["runtime"]["requires"][0]["provider"],
+        json!("app.mediainfo")
+    );
+    assert_eq!(operation["runtime"]["dependenciesUnverified"], json!(true));
+
+    let plain_dir = dir.path().join("plain");
+    save_local_script(&plain_dir, variable_script_request(Vec::new()))?;
+    let plain: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
+        plain_dir.join("scripts/encodeur/operations/run.json"),
+    )?)?;
+    assert!(plain["runtime"].get("requires").is_none());
+    assert!(plain["runtime"].get("dependenciesUnverified").is_none());
+    Ok(())
+}
+
+#[test]
+fn invalid_or_ambiguous_requirements_are_refused_and_write_nothing() -> anyhow::Result<()> {
+    let bad_sets = [
+        vec![requirement("codec", "app.mediainfo")],
+        vec![
+            requirement("mediainfo.video.codec", "app.mediainfo"),
+            requirement("mediainfo.audio.codec", "app.fork"),
+        ],
+    ];
+    for requires in bad_sets {
+        let dir = tempfile::tempdir()?;
+        let local_dir = dir.path().join("local");
+        let mut request = variable_script_request(Vec::new());
+        request.requires = requires;
+        let refused = save_local_script(&local_dir, request);
+        assert!(matches!(refused, Err(AppError::InvalidManifest(_))));
+        assert!(!local_dir.join("scripts/encodeur").exists());
+    }
     Ok(())
 }

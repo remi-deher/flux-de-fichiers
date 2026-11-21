@@ -521,6 +521,8 @@ async fn local_script_executes_end_to_end_across_registry_routing_and_claim_payl
     save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            requires: Vec::new(),
+            dependencies_unverified: false,
             variables: Vec::new(),
             id: None,
             name: "Router".into(),
@@ -540,6 +542,8 @@ async fn local_script_executes_end_to_end_across_registry_routing_and_claim_payl
     save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            requires: Vec::new(),
+            dependencies_unverified: false,
             variables: Vec::new(),
             id: None,
             name: "Skipper".into(),
@@ -561,6 +565,8 @@ async fn local_script_executes_end_to_end_across_registry_routing_and_claim_payl
     save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            requires: Vec::new(),
+            dependencies_unverified: false,
             variables: Vec::new(),
             id: None,
             name: "Unused".into(),
@@ -661,6 +667,8 @@ async fn local_script_stop_pipeline_halts_execution_before_output()
     save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            requires: Vec::new(),
+            dependencies_unverified: false,
             variables: Vec::new(),
             id: None,
             name: "Halt".into(),
@@ -732,6 +740,8 @@ async fn unified_script_block_supports_inline_library_ref_and_strict_next_port()
     save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            requires: Vec::new(),
+            dependencies_unverified: false,
             variables: Vec::new(),
             id: None,
             name: "Lib Branch".into(),
@@ -1062,6 +1072,8 @@ async fn script_variables_are_resolved_from_defaults_flow_values_and_previous_no
     save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            requires: Vec::new(),
+            dependencies_unverified: false,
             variables: Vec::new(),
             id: None,
             name: "Marker".into(),
@@ -1081,6 +1093,8 @@ async fn script_variables_are_resolved_from_defaults_flow_values_and_previous_no
     save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            requires: Vec::new(),
+            dependencies_unverified: false,
             variables: vec![
                 ScriptVariable {
                     name: "crf".into(),
@@ -1161,6 +1175,8 @@ async fn a_required_variable_without_value_fails_the_step_with_a_clear_message()
     save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            requires: Vec::new(),
+            dependencies_unverified: false,
             variables: vec![ScriptVariable {
                 name: "cible".into(),
                 kind: VariableKind::Text,

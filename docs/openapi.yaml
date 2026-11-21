@@ -2032,6 +2032,23 @@ components:
         category: {type: [string, 'null'], enum: [media, data, io, other, null]}
         tags: {type: array, items: {type: string}}
         variables: {type: array, items: {$ref: '#/components/schemas/ScriptVariable'}}
+        requires: {type: array, items: {$ref: '#/components/schemas/ScriptRequirement'}}
+        dependenciesUnverified: {type: boolean}
+    ScriptRequirement:
+      type: object
+      description: Variable exposée par un plugin que le script consomme (ADR 0025) ; dépendance dure par défaut
+      required: [variable, provider]
+      properties:
+        variable: {type: string, description: 'Référence complète : espace.nom'}
+        provider: {type: string, description: Identifiant du plugin fournisseur dans le catalogue}
+        contractMajor: {type: integer, minimum: 0, default: 1}
+        repository:
+          type: object
+          description: Dépôt qui publie le fournisseur, jamais ajouté automatiquement
+          required: [id, indexUrl]
+          properties:
+            id: {type: string}
+            indexUrl: {type: string, format: uri}
     ScriptVariable:
       type: object
       description: Variable d'un script déclarée dans `runtime.variables` (ADR 0025)
@@ -2059,6 +2076,8 @@ components:
         category: {type: [string, 'null'], enum: [media, data, io, other, null]}
         tags: {type: array, items: {type: string}}
         variables: {type: array, items: {$ref: '#/components/schemas/ScriptVariable'}, description: Schéma validé à l'écriture ; `400` s'il est invalide}
+        requires: {type: array, items: {$ref: '#/components/schemas/ScriptRequirement'}, description: Dépendances validées à l'écriture (références espace.nom uniques, un fournisseur et une version majeure par espace de noms) ; `400` si elles sont invalides}
+        dependenciesUnverified: {type: boolean, description: Script intégré sans ses dépendances ; elles ne sont ni contrôlées ni installées}
     LocalResourceSummary:
       type: object
       required: [id, slug, name, entryType, filename, sizeBytes]

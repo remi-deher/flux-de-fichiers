@@ -18,6 +18,7 @@ pub mod stat_strip;
 pub mod status_badge;
 pub mod toast;
 pub mod topbar_action;
+pub mod variables_table;
 
 pub use brand_mark::BrandMark;
 pub use command_palette::{CommandPalette, CommandPaletteState};
@@ -34,3 +35,4 @@ pub use section_header::SectionHeader;
 pub use stat_strip::{StatItem, StatStrip};
 pub use status_badge::StatusBadge;
 pub use toast::{ToastViewport, Toasts};
+pub use variables_table::VariablesTable;

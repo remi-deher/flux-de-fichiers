@@ -450,6 +450,23 @@ pub async fn repository_detail(
     Ok(Json(detail))
 }
 
+/// Code d'un script d'un dépôt, en lecture seule, pour le prévisualiser avant installation.
+pub async fn repository_script(
+    State(s): State<AppState>,
+    Path((id, entry_id)): Path<(String, String)>,
+    _auth: ViewPluginsAuth,
+) -> AppResult<Json<forgearr_shared::highlight::ScriptPreviewView>> {
+    let repos_dir = s.config.plugin_repos_dir();
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let registry = s.catalog_cache.operations(&roots).await;
+    let script = tokio::task::spawn_blocking(move || {
+        plugins::read_repository_script_preview(&repos_dir, &id, &entry_id, &registry)
+    })
+    .await
+    .map_err(|_| AppError::Internal)?;
+    script.map(Json).ok_or(AppError::NotFound)
+}
+
 /// Ajoute un nouveau dépôt tiers de plugins ou flux.
 pub async fn add_repository(
     State(s): State<AppState>,

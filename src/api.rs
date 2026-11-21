@@ -284,6 +284,11 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/flows", get(flows::list_flows))
         .route("/api/v1/flows/blocks", get(flows::list_blocks))
         .route("/api/v1/flows/validate", post(flows::validate_flow))
+        .route(
+            "/api/v1/flows/node-variables",
+            post(flows::node_variables)
+                .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
+        )
         .route("/api/v1/flows/{id}/versions", get(flows::list_versions))
         .route(
             "/api/v1/flows/{id}/versions/{version}",
@@ -318,6 +323,10 @@ fn json_routes() -> Router<AppState> {
         .route(
             "/api/v1/plugins/repositories/{id}",
             get(plugins::repository_detail).delete(plugins::delete_repository),
+        )
+        .route(
+            "/api/v1/plugins/repositories/{id}/scripts/{entry_id}",
+            get(plugins::repository_script),
         )
         .route(
             "/api/v1/plugins/repositories/{id}/sync",

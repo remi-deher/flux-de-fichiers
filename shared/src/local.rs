@@ -2,6 +2,7 @@
 
 use crate::plugins::vocab::{CatalogItemType, PluginCategory};
 use crate::plugins::{CatalogEntry, PackComponent};
+use crate::script_variables::ScriptVariable;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -88,6 +89,9 @@ pub struct LocalScriptSummary {
     pub category: Option<PluginCategory>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Variables déclarées dans le manifeste du script (ADR 0025).
+    #[serde(default)]
+    pub variables: Vec<ScriptVariable>,
 }
 
 /// Création ou mise à jour d'un script local (`POST /api/v1/local/scripts`).
@@ -107,6 +111,8 @@ pub struct UpsertLocalScriptRequest {
     pub category: Option<PluginCategory>,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub variables: Vec<ScriptVariable>,
 }
 
 /// Fichier ressource local (image, sous-titre, son, police, modèle…).

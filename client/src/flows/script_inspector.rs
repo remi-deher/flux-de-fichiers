@@ -2,6 +2,7 @@
 //! choix d'un script de la librairie, création rapide, code inline et routage conditionnel.
 
 use super::state::Editor;
+use super::variables_form::ScriptVariablesPanel;
 use crate::api;
 use crate::libraries::starter_script_code;
 use crate::ui::Toasts;
@@ -14,7 +15,7 @@ use serde_json::{Map, Value, json};
 
 pub const UNIFIED_SCRIPT_KIND: &str = "scripts.run";
 
-fn update_node_config(
+pub(super) fn update_node_config(
     editor: Editor,
     node_id: &str,
     apply: impl FnOnce(&mut Map<String, Value>) + 'static,
@@ -133,6 +134,7 @@ pub fn ScriptBlockInspector(
     let nid_select = node_id.clone();
     let nid_interp = node_id.clone();
     let nid_code = node_id.clone();
+    let nid_vars = node_id.clone();
     let nid_route = node_id;
 
     view! {
@@ -170,6 +172,7 @@ pub fn ScriptBlockInspector(
                     .map(|s| s.scripts)
                     .unwrap_or_default();
                 let nid_select = nid_select.clone();
+                let nid_vars = nid_vars.clone();
                 view! {
                     <div class="form-group">
                         <label for="script-block-ref" class="form-label">"Script sélectionné"</label>
@@ -193,6 +196,9 @@ pub fn ScriptBlockInspector(
                             }).collect_view()}
                         </select>
                     </div>
+                    {move || (!script_id.get().is_empty()).then(|| view! {
+                        <ScriptVariablesPanel editor=editor node_id=nid_vars.clone() can_manage=can_manage />
+                    })}
                     {can_manage.then(|| view! {
                         <div class="form-group">
                             <button
@@ -248,6 +254,7 @@ pub fn ScriptBlockInspector(
                                         return;
                                     }
                                     save_script.dispatch(UpsertLocalScriptRequest {
+                                        variables: Vec::new(),
                                         id: None,
                                         name: name_val,
                                         description: None,
@@ -332,6 +339,7 @@ pub fn ScriptBlockInspector(
                                         return;
                                     }
                                     save_script.dispatch(UpsertLocalScriptRequest {
+                                        variables: Vec::new(),
                                         id: None,
                                         name: name_val,
                                         description: None,

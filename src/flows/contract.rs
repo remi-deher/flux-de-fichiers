@@ -625,6 +625,44 @@ impl OperationRegistry {
             .collect()
     }
 
+    /// Expositions que désignent les dépendances d'un script : pour chacune, celle du plugin fournisseur
+    /// qui fournit la variable dans la version majeure visée. Un espace de noms contesté entre plusieurs
+    /// plugins se résout ainsi par la dépendance du script et non par l'ordre des opérations.
+    pub fn exposures_bound_by(&self, requirements: &[ScriptRequirement]) -> Vec<&ExposedVariables> {
+        let claims = self.exposure_claims();
+        let mut bound: Vec<&ExposedVariables> = Vec::new();
+        for requirement in requirements {
+            let found = claims
+                .iter()
+                .find(|claim| claim.0 == requirement.provider && claim.1.provides(requirement))
+                .map(|claim| claim.1);
+            if let Some(exposed) = found
+                && !bound.iter().any(|known| std::ptr::eq(*known, exposed))
+            {
+                bound.push(exposed);
+            }
+        }
+        bound
+    }
+
+    /// Expositions lues par un script : celles de ses dépendances, puis la première exposition de chaque
+    /// autre espace de noms (script sans `requires`, ou référence à un espace qu'il ne déclare pas).
+    pub fn exposures_for_requirements(
+        &self,
+        requirements: &[ScriptRequirement],
+    ) -> Vec<&ExposedVariables> {
+        let mut chosen = self.exposures_bound_by(requirements);
+        for fallback in self.exposed_variables() {
+            if !chosen
+                .iter()
+                .any(|known| known.namespace == fallback.namespace)
+            {
+                chosen.push(fallback);
+            }
+        }
+        chosen
+    }
+
     /// Comme `exposed_variables`, limité aux opérations retenues par `keep`.
     pub fn exposed_variables_where(
         &self,
@@ -1757,5 +1795,90 @@ mod tests {
             ))
             .is_ok()
         );
+    }
+
+    #[test]
+    fn a_script_dependency_picks_its_provider_even_when_another_plugin_shares_the_namespace()
+    -> Result<(), ContractError> {
+        let mut reg = OperationRegistry::new();
+        reg.register_json(provider_operation(
+            "operation.a.probe",
+            "alpha",
+            "mediainfo",
+            "1.0.0",
+        ))?;
+        reg.register_json(provider_operation(
+            "operation.b.probe",
+            "beta",
+            "mediainfo",
+            "1.5.0",
+        ))?;
+        reg.register_json(provider_operation(
+            "operation.c.probe",
+            "gamma",
+            "mediainfo",
+            "2.0.0",
+        ))?;
+        let requirement = |provider: &str, major: u32| ScriptRequirement {
+            variable: "mediainfo.video.codec".into(),
+            provider: provider.into(),
+            contract_major: major,
+            repository: None,
+        };
+
+        let beta = [requirement("beta", 1)];
+        let bound = reg.exposures_bound_by(&beta);
+        assert_eq!(bound.len(), 1);
+        assert_eq!(bound[0].contract_version, "1.5.0");
+        let read = reg.exposures_for_requirements(&beta);
+        assert_eq!(
+            read.len(),
+            1,
+            "l'espace déjà lié n'est pas repris par le repli"
+        );
+        assert_eq!(read[0].contract_version, "1.5.0");
+
+        let gamma = [requirement("gamma", 2)];
+        assert_eq!(reg.exposures_bound_by(&gamma)[0].contract_version, "2.0.0");
+
+        let none = reg.exposures_for_requirements(&[]);
+        assert_eq!(none.len(), 1);
+        assert_eq!(
+            none[0].contract_version, "1.0.0",
+            "sans dépendance, la première l'emporte"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_unmatched_dependency_binds_nothing_and_falls_back_to_the_first_exposure()
+    -> Result<(), ContractError> {
+        let mut reg = OperationRegistry::new();
+        reg.register_json(provider_operation(
+            "operation.a.probe",
+            "alpha",
+            "mediainfo",
+            "1.0.0",
+        ))?;
+        let unmatched = |provider: &str, major: u32| {
+            [ScriptRequirement {
+                variable: "mediainfo.video.codec".into(),
+                provider: provider.into(),
+                contract_major: major,
+                repository: None,
+            }]
+        };
+        for requirements in [unmatched("alpha", 2), unmatched("inconnu", 1)] {
+            assert!(reg.exposures_bound_by(&requirements).is_empty());
+            assert_eq!(reg.exposures_for_requirements(&requirements).len(), 1);
+        }
+        let unknown_variable = [ScriptRequirement {
+            variable: "mediainfo.audio.absente".into(),
+            provider: "alpha".into(),
+            contract_major: 1,
+            repository: None,
+        }];
+        assert!(reg.exposures_bound_by(&unknown_variable).is_empty());
+        Ok(())
     }
 }

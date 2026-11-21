@@ -184,9 +184,27 @@ pub fn reference_suggestions(
         }
     }
     let providers = upstream_operation_ids(graph, node_id, registry);
-    for exposed in registry.exposed_variables_where(|op| {
+    let requires = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == node_id)
+        .and_then(|node| script_runtime_for_node(registry, node))
+        .map(|runtime| runtime.requires)
+        .unwrap_or_default();
+    // Les expositions que désigne le script d'abord, puis celles des sondes et des plugins en amont
+    // pour les espaces de noms qu'il ne lie pas.
+    let mut exposures = registry.exposures_bound_by(&requires);
+    for fallback in registry.exposed_variables_where(|op| {
         OperationRegistry::is_probe(op) || providers.contains(op.id.as_str())
     }) {
+        if !exposures
+            .iter()
+            .any(|known| known.namespace == fallback.namespace)
+        {
+            exposures.push(fallback);
+        }
+    }
+    for exposed in exposures {
         for variable in &exposed.variables {
             let sample = exposed_value(sample_media, &variable.path).map(as_text);
             let label = if variable.label.trim().is_empty() {
@@ -241,21 +259,21 @@ fn reference_problem(
 /// Références invalides dans les variables déclarées des nœuds script du graphe ; vide si tout est valable.
 /// Seules les clés du schéma sont examinées : le code en ligne et les autres clés ne le sont jamais.
 pub fn check_references(graph: &FlowGraph, registry: &OperationRegistry) -> Vec<String> {
-    let plugin_references: HashSet<String> = registry
-        .exposed_variables()
-        .iter()
-        .flat_map(|exposed| {
-            exposed
-                .variables
-                .iter()
-                .map(|variable| exposed.reference(variable))
-        })
-        .collect();
     let mut problems = Vec::new();
     for node in &graph.nodes {
         let Some(runtime) = script_runtime_for_node(registry, node) else {
             continue;
         };
+        let plugin_references: HashSet<String> = registry
+            .exposures_for_requirements(&runtime.requires)
+            .iter()
+            .flat_map(|exposed| {
+                exposed
+                    .variables
+                    .iter()
+                    .map(|variable| exposed.reference(variable))
+            })
+            .collect();
         let upstream_ids = upstream_node_ids(graph, &node.id);
         let upstream: HashSet<&str> = upstream_ids.iter().map(String::as_str).collect();
         for variable in &runtime.variables {
@@ -320,7 +338,7 @@ pub fn node_variables_view(
         Path::new(SAMPLE_WORK_DIR),
         &sample_media,
         &outputs,
-        &registry.exposed_variables(),
+        &registry.exposures_for_requirements(&runtime.requires),
     );
     let (resolved, error) = match resolve_node_config(&runtime.variables, &node.config, &context) {
         Ok(config) => (Some(config), None),
@@ -504,6 +522,85 @@ mod tests {
             node_variables_view(&not_a_script, &reg),
             NodeVariablesView::default()
         );
+        Ok(())
+    }
+
+    fn provider_with_path(op_id: &str, provider: &str, path: &str) -> Value {
+        json!({
+            "schemaVersion": "1.1.0", "id": op_id, "version": "1.0.0", "name": "Fournisseur",
+            "providerId": provider, "providerKind": "plugin", "capability": "probe", "status": "validated",
+            "runtime": {"kind": "primitive", "primitive": "entry"},
+            "exposes": {"namespace": "mediainfo", "contractVersion": "1.0.0",
+                        "variables": [{"name": "video.codec", "path": path}]}
+        })
+    }
+
+    fn codec_script(op_id: &str, requires: Value) -> Value {
+        json!({
+            "schemaVersion": "1.1.0", "id": op_id, "version": "1.0.0", "name": "Script",
+            "providerId": "script.x", "providerKind": "script", "capability": "script", "status": "validated",
+            "runtime": {"kind": "script", "interpreter": "sh", "code": "true",
+                        "variables": [{"name": "codec", "type": "text"}], "requires": requires}
+        })
+    }
+
+    #[test]
+    fn two_plugins_sharing_a_namespace_are_told_apart_by_the_script_dependency()
+    -> anyhow::Result<()> {
+        let mut reg = OperationRegistry::new();
+        reg.register_json(provider_with_path("operation.a.probe", "alpha", "a.codec"))?;
+        reg.register_json(provider_with_path("operation.b.probe", "beta", "b.codec"))?;
+        reg.register_json(codec_script(
+            "operation.script.dep",
+            json!([{"variable": "mediainfo.video.codec", "provider": "beta"}]),
+        ))?;
+        reg.register_json(codec_script("operation.script.free", json!([])))?;
+        reg.register_block_mapping("block.script.dep", "operation.script.dep");
+        reg.register_block_mapping("block.script.free", "operation.script.free");
+        let graph: FlowGraph = serde_json::from_value(json!({
+            "nodes": [
+                {"id": "dep", "type": "block.script.dep", "name": "Dépendant",
+                 "config": {"codec": "{{mediainfo.video.codec}}"}},
+                {"id": "free", "type": "block.script.free", "name": "Libre",
+                 "config": {"codec": "{{mediainfo.video.codec}}"}}
+            ],
+            "connections": []
+        }))?;
+        let media = json!({"a": {"codec": "VIDEO-A"}, "b": {"codec": "VIDEO-B"}});
+        let preview = |node_id: &str| {
+            node_variables_view(
+                &NodeVariablesRequest {
+                    graph: graph.clone(),
+                    node_id: node_id.into(),
+                    media_info: media.clone(),
+                },
+                &reg,
+            )
+        };
+
+        let bound = preview("dep");
+        assert_eq!(bound.error, None);
+        assert_eq!(
+            bound.resolved.map(|config| config["codec"].clone()),
+            Some(json!("VIDEO-B"))
+        );
+        let sample = bound
+            .references
+            .iter()
+            .find(|reference| reference.reference == "mediainfo.video.codec")
+            .and_then(|reference| reference.sample.clone());
+        assert_eq!(
+            sample.as_deref(),
+            Some("VIDEO-B"),
+            "le sélecteur propose l'exposition liée"
+        );
+
+        let unbound = preview("free");
+        assert_eq!(
+            unbound.resolved.map(|config| config["codec"].clone()),
+            Some(json!("VIDEO-A"))
+        );
+        assert!(check_references(&graph, &reg).is_empty());
         Ok(())
     }
 }

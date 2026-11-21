@@ -44,8 +44,12 @@ fn restart_login() {
 pub enum ApiError {
     /// Pas de session : il faut se connecter.
     Unauthorized,
-    /// Refus ou erreur du central, avec son code d'erreur stable.
-    Rejected { status: u16, code: String },
+    /// Refus ou erreur du central : code d'erreur stable et, s'il en donne une, la cause.
+    Rejected {
+        status: u16,
+        code: String,
+        detail: Option<String>,
+    },
     /// Central injoignable ou réponse illisible.
     Network,
 }
@@ -69,6 +73,11 @@ impl ApiError {
             Self::Rejected { status: 429, .. } => {
                 "Trop de demandes ou quota quotidien atteint : réessayez plus tard.".into()
             }
+            Self::Rejected {
+                code,
+                detail: Some(detail),
+                ..
+            } => format!("Refusé par le central ({code}) : {detail}."),
             Self::Rejected { code, .. } => format!("Refusé par le central ({code})."),
             Self::Network => "Central injoignable ou réponse illisible.".into(),
         }
@@ -83,6 +92,8 @@ struct ErrorBody {
 #[derive(serde::Deserialize)]
 struct ErrorDetail {
     code: String,
+    #[serde(default)]
+    message: Option<String>,
 }
 
 async fn checked(response: Response) -> Result<Response, ApiError> {
@@ -93,12 +104,16 @@ async fn checked(response: Response) -> Result<Response, ApiError> {
         200..=299 => Ok(response),
         401 => Err(ApiError::Unauthorized),
         status => {
-            let code = response
-                .json::<ErrorBody>()
-                .await
-                .map(|body| body.error.code)
-                .unwrap_or_else(|_| "unknown".into());
-            Err(ApiError::Rejected { status, code })
+            let body = response.json::<ErrorBody>().await;
+            let (code, detail) = match body {
+                Ok(body) => (body.error.code, body.error.message),
+                Err(_) => ("unknown".into(), None),
+            };
+            Err(ApiError::Rejected {
+                status,
+                code,
+                detail,
+            })
         }
     }
 }
@@ -220,18 +235,54 @@ mod tests {
         let conflict = ApiError::Rejected {
             status: 409,
             code: "conflict".into(),
+            detail: None,
         };
         assert!(conflict.message().contains("conflit"));
         let other = ApiError::Rejected {
             status: 422,
             code: "invalid_input".into(),
+            detail: None,
         };
         assert!(other.message().contains("invalid_input"));
         let limited = ApiError::Rejected {
             status: 429,
             code: "too_many_attempts".into(),
+            detail: None,
         };
         assert!(limited.message().contains("quota"));
+    }
+
+    #[test]
+    fn a_rejection_shows_the_cause_the_central_gives() {
+        let unavailable = ApiError::Rejected {
+            status: 502,
+            code: "repository_unavailable".into(),
+            detail: Some("réponse HTTP 429 pour https://x.test/index.json".into()),
+        };
+        let message = unavailable.message();
+        assert!(message.contains("repository_unavailable"));
+        assert!(message.contains("réponse HTTP 429"));
+        let bare = ApiError::Rejected {
+            status: 502,
+            code: "repository_unavailable".into(),
+            detail: None,
+        };
+        assert_eq!(
+            bare.message(),
+            "Refusé par le central (repository_unavailable)."
+        );
+    }
+
+    #[test]
+    fn error_bodies_may_carry_a_cause_or_not() -> Result<(), serde_json::Error> {
+        let with_cause = r#"{"error":{"code":"repository_unavailable","message":"coupé"}}"#;
+        let body: ErrorBody = serde_json::from_str(with_cause)?;
+        assert_eq!(body.error.message.as_deref(), Some("coupé"));
+        let without = r#"{"error":{"code":"not_found"}}"#;
+        let body: ErrorBody = serde_json::from_str(without)?;
+        assert_eq!(body.error.code, "not_found");
+        assert_eq!(body.error.message, None);
+        Ok(())
     }
 
     #[test]

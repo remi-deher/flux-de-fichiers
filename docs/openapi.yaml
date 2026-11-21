@@ -1802,6 +1802,9 @@ components:
                 required: [code]
                 properties:
                   code: {type: string}
+                  message:
+                    type: string
+                    description: Cause d'une indisponibilité de dépôt (`repository_unavailable`), sur une ligne, 300 caractères au plus.
   schemas:
     SourcePublicationTask:
       type: object

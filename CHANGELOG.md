@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.69.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.68.0...v0.69.0) (2026-11-21)
+
+
+### Features
+
+* **plugins:** la cause d'une synchronisation en échec devient visible ([4b0916d](https://github.com/remi-deher/flux-de-fichiers/commit/4b0916dc4e7dc90eb79e49821042b6a109b56cd8))
+* **plugins:** rendre visible la cause d'une synchronisation en échec ([f16cf6a](https://github.com/remi-deher/flux-de-fichiers/commit/f16cf6a085c2a927f5aac895360969cac307c499))
+
 ## [0.68.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.67.0...v0.68.0) (2026-11-21)
 
 

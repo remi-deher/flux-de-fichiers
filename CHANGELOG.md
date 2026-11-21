@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.74.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.73.0...v0.74.0) (2026-11-21)
+
+
+### Features
+
+* **plugins:** dépréciation d'une variable exposée (ADR 0025) ([7d27278](https://github.com/remi-deher/flux-de-fichiers/commit/7d272786826433e84ad7086bf48d017a6097d10c))
+
 ## [0.73.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.72.0...v0.73.0) (2026-11-21)
 
 

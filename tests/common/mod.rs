@@ -17,7 +17,10 @@ pub const TEST_PAGE: &str = "<!doctype html><title>Forgearr</title>";
 pub fn static_dir_with_page() -> anyhow::Result<tempfile::TempDir> {
     let dir = tempfile::tempdir()?;
     std::fs::write(dir.path().join("index.html"), TEST_PAGE)?;
-    std::fs::copy("frontend/dist/forgearr.svg", dir.path().join("forgearr.svg"))?;
+    std::fs::copy(
+        "frontend/dist/forgearr.svg",
+        dir.path().join("forgearr.svg"),
+    )?;
     Ok(dir)
 }
 

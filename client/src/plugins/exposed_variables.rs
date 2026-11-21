@@ -29,13 +29,15 @@ pub fn conflict_notice(view: &ExposedNamespaceView) -> Option<(String, String)> 
     Some(if view.active {
         (
             format!("Espace de noms « {namespace} » partagé"),
-            format!("Aussi déclaré par : {others}. Cette exposition est celle que le moteur lit."),
+            format!(
+                "Aussi déclaré par : {others}. Un script lit l'exposition que désigne sa dépendance (`requires`) ; sans dépendance, c'est celle-ci."
+            ),
         )
     } else {
         (
             format!("Espace de noms « {namespace} » déjà pris"),
             format!(
-                "Le moteur lit l'exposition de : {others}. Ces variables ne sont pas utilisées."
+                "Sans dépendance explicite, les scripts lisent l'exposition de : {others}. Ces variables ne sont lues que par un script qui les désigne dans `requires`."
             ),
         )
     })
@@ -150,12 +152,12 @@ mod tests {
         let active = conflict_notice(&view(true, &["beta"]));
         assert!(active.is_some_and(|(title, text)| title.contains("partagé")
             && text.contains("beta")
-            && text.contains("celle que le moteur lit")));
+            && text.contains("`requires`")));
         let shadowed = conflict_notice(&view(false, &["beta", "gamma"]));
         assert!(
             shadowed.is_some_and(|(title, text)| title.contains("déjà pris")
                 && text.contains("beta, gamma")
-                && text.contains("ne sont pas utilisées"))
+                && text.contains("`requires`"))
         );
     }
 }

@@ -544,7 +544,9 @@ impl<'a> FlowEngine<'a> {
                         work_dir,
                         &ctx.media_info,
                         &node_outputs,
-                        &self.registry.exposed_variables(),
+                        &self
+                            .registry
+                            .exposures_for_requirements(&effective_rt.requires),
                     );
                     let script_config = match variables::resolve_node_config(
                         &effective_rt.variables,

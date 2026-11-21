@@ -75,7 +75,8 @@ pub struct ExposedNamespaceView {
     /// Identifiant du plugin qui déclare cette exposition.
     pub provider: String,
     pub exposes: ExposedVariables,
-    /// Cette exposition est celle que le moteur lit : à espace de noms égal, la première l'emporte.
+    /// Cette exposition est lue par les scripts sans dépendance explicite : à espace de noms égal, la
+    /// première l'emporte. Un script qui la désigne dans `requires` la lit quel que soit cet état.
     pub active: bool,
     /// Autres plugins qui déclarent le même espace de noms.
     #[serde(default)]
@@ -132,6 +133,8 @@ pub enum ExposeError {
     TooManyRequirements,
     InvalidReference(String),
     DuplicateRequirement(String),
+    /// Un même espace de noms lié à deux fournisseurs ou à deux versions majeures du contrat.
+    AmbiguousNamespace(String),
     InvalidProvider(String),
     InvalidRepository(String),
 }
@@ -176,6 +179,10 @@ impl fmt::Display for ExposeError {
             Self::DuplicateRequirement(reference) => {
                 write!(f, "dépendance « {reference} » déclarée deux fois")
             }
+            Self::AmbiguousNamespace(namespace) => write!(
+                f,
+                "l'espace de noms « {namespace} » est lié à deux fournisseurs ou à deux versions de contrat différents"
+            ),
             Self::InvalidProvider(provider) => write!(f, "fournisseur invalide « {provider} »"),
             Self::InvalidRepository(id) => write!(f, "dépôt de dépendance invalide « {id} »"),
         }
@@ -324,6 +331,15 @@ pub fn validate_requirements(requirements: &[ScriptRequirement]) -> Result<(), E
         }
         if !is_safe_id(&requirement.provider) {
             return Err(ExposeError::InvalidProvider(requirement.provider.clone()));
+        }
+        let namespace = requirement.variable.split('.').next().unwrap_or_default();
+        let binds_another_contract = requirements[..index].iter().any(|other| {
+            other.variable.split('.').next().unwrap_or_default() == namespace
+                && (other.provider != requirement.provider
+                    || other.contract_major != requirement.contract_major)
+        });
+        if binds_another_contract {
+            return Err(ExposeError::AmbiguousNamespace(namespace.to_owned()));
         }
         if let Some(repository) = &requirement.repository
             && (!is_safe_id(&repository.id) || !index_url_is_valid(&repository.index_url))
@@ -612,6 +628,42 @@ mod tests {
         assert_eq!(
             validate_requirements(&many),
             Err(ExposeError::TooManyRequirements)
+        );
+    }
+
+    #[test]
+    fn one_namespace_cannot_be_bound_to_two_providers_or_two_contract_versions() {
+        let from = |variable: &str, provider: &str, major: u32| ScriptRequirement {
+            variable: variable.into(),
+            provider: provider.into(),
+            contract_major: major,
+            repository: None,
+        };
+        let same = [
+            from("mediainfo.video.codec", "app.mediainfo", 1),
+            from("mediainfo.audio.codec", "app.mediainfo", 1),
+        ];
+        assert_eq!(validate_requirements(&same), Ok(()));
+        let other_namespaces = [
+            from("mediainfo.video.codec", "app.mediainfo", 1),
+            from("exiftool.camera", "app.exiftool", 1),
+        ];
+        assert_eq!(validate_requirements(&other_namespaces), Ok(()));
+        let two_providers = [
+            from("mediainfo.video.codec", "app.mediainfo", 1),
+            from("mediainfo.audio.codec", "app.fork", 1),
+        ];
+        assert_eq!(
+            validate_requirements(&two_providers),
+            Err(ExposeError::AmbiguousNamespace("mediainfo".into()))
+        );
+        let two_majors = [
+            from("mediainfo.video.codec", "app.mediainfo", 1),
+            from("mediainfo.audio.codec", "app.mediainfo", 2),
+        ];
+        assert_eq!(
+            validate_requirements(&two_majors),
+            Err(ExposeError::AmbiguousNamespace("mediainfo".into()))
         );
     }
 }

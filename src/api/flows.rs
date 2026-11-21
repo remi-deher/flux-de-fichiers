@@ -114,7 +114,11 @@ pub async fn save_flow(
                 configured.insert(plugin_id);
             }
         }
-        let warnings = registry.flow_readiness_warnings(&flow, &cache_mgr, &configured);
+        let mut warnings = registry.flow_readiness_warnings(&flow, &cache_mgr, &configured);
+        warnings.extend(crate::flows::reference_warnings(
+            &forgearr_shared::flows::FlowGraph::parse(&payload.definition),
+            &registry,
+        ));
         if !warnings.is_empty() {
             tracing::warn!(flow_id = %id, warnings = ?warnings, "dépendances ou réglages manquants lors de l'enregistrement du flux");
             if let Ok(val) = axum::http::HeaderValue::from_str(&warnings.join(" | ")) {
@@ -250,6 +254,7 @@ pub async fn validate_flow(
     }
     let registry = s.catalog_cache.operations(&roots).await;
     errors.extend(crate::flows::check_references(&graph, &registry));
+    warnings.extend(crate::flows::reference_warnings(&graph, &registry));
     Ok(Json(FlowValidationReport {
         valid: errors.is_empty(),
         node_count: graph.nodes.len(),

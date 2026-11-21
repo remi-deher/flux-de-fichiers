@@ -46,7 +46,9 @@ pub use lease_secrets::{
     decrypt_plugin_settings_value, load_flow_plugin_configs, seal_claim_secrets_for_worker,
     unseal_claim_secrets_for_worker,
 };
-pub use node_references::{check_references, node_variables_view, upstream_node_ids};
+pub use node_references::{
+    check_references, node_variables_view, reference_warnings, upstream_node_ids,
+};
 
 const MAX_FLOW_STEPS: usize = 32;
 

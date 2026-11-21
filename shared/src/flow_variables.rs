@@ -65,6 +65,9 @@ pub struct NodeVariablesView {
     /// Pourquoi la résolution échoue (référence sans valeur, variable requise, valeur hors bornes…).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Avertissements sans effet sur l'exécution, par exemple une référence à une variable exposée dépréciée.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 #[cfg(test)]
@@ -97,7 +100,9 @@ mod tests {
         assert!(request.media_info.is_null());
         let view = NodeVariablesView::default();
         let json = serde_json::to_string(&view)?;
-        assert!(!json.contains("resolved") && !json.contains("error"));
+        assert!(
+            !json.contains("resolved") && !json.contains("error") && !json.contains("warnings")
+        );
         Ok(())
     }
 }

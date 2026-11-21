@@ -633,7 +633,10 @@ mod tests {
             &[],
         );
         assert!(context.lookup("nodes.a.message").is_none());
-        assert!(context.lookup("nodes.a.workingFile").is_some());
+        assert!(
+            context.lookup("nodes.a.workingFile").is_none(),
+            "un fichier vide (nœud antérieur à un relais) n'a pas de valeur"
+        );
         assert!(context.lookup("nodes.absent.message").is_none());
     }
 

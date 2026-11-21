@@ -1066,6 +1066,8 @@ mod tests {
         Ok(())
     }
 
+    const ICON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg"/>"#;
+
     type Fetched = (String, Result<Option<String>, SyncError>);
 
     fn fetched(path: &str, body: Option<&str>) -> Fetched {
@@ -1103,7 +1105,7 @@ mod tests {
     #[test]
     fn collect_icons_keeps_safe_svg_and_reports_the_rest() -> anyhow::Result<()> {
         let results = vec![
-            fetched("plugins/a/icon.svg", Some("<svg/>")),
+            fetched("plugins/a/icon.svg", Some(ICON)),
             fetched("plugins/b/icon.svg", Some("<svg onload=\"x\"/>")),
             fetched("plugins/c/icon.svg", None),
             failed("plugins/d/icon.svg"),
@@ -1123,12 +1125,12 @@ mod tests {
     #[test]
     fn immutable_mode_requires_and_checks_the_icon_digest() -> anyhow::Result<()> {
         let path = "plugins/a/icon.svg";
-        let digest = ToolCacheManager::compute_sha256("<svg/>".as_bytes());
+        let digest = ToolCacheManager::compute_sha256(ICON.as_bytes());
         let valid = HashMap::from([(path.to_owned(), digest)]);
         let mut files = Vec::new();
         let mut skipped = Vec::new();
         collect_icons(
-            vec![fetched(path, Some("<svg/>"))],
+            vec![fetched(path, Some(ICON))],
             &valid,
             true,
             &mut files,
@@ -1137,7 +1139,7 @@ mod tests {
         assert_eq!(files.len(), 1);
 
         let missing = collect_icons(
-            vec![fetched(path, Some("<svg/>"))],
+            vec![fetched(path, Some(ICON))],
             &HashMap::new(),
             true,
             &mut files,
@@ -1147,7 +1149,7 @@ mod tests {
 
         let wrong = HashMap::from([(path.to_owned(), "0".repeat(64))]);
         let mismatch = collect_icons(
-            vec![fetched(path, Some("<svg/>"))],
+            vec![fetched(path, Some(ICON))],
             &wrong,
             true,
             &mut files,

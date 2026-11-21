@@ -65,6 +65,7 @@ const FORBIDDEN_VALUE_CHARACTERS: [char; 5] = [':', '&', '<', '>', '\\'];
 pub enum SvgIssue {
     TooLarge,
     Malformed,
+    MissingNamespace,
     RootNotSvg,
     NestedRoot,
     TrailingContent,
@@ -81,6 +82,7 @@ impl fmt::Display for SvgIssue {
         match self {
             Self::TooLarge => write!(formatter, "plus de {MAX_ICON_BYTES} octets"),
             Self::Malformed => formatter.write_str("SVG mal formé"),
+            Self::MissingNamespace => formatter.write_str("espace de noms SVG manquant"),
             Self::RootNotSvg => formatter.write_str("l'élément racine n'est pas svg"),
             Self::NestedRoot => formatter.write_str("svg imbriqué"),
             Self::TrailingContent => formatter.write_str("contenu après l'élément racine"),
@@ -106,6 +108,7 @@ pub fn check_svg_icon(svg: &str) -> Result<(), SvgIssue> {
     let mut open: Vec<&str> = Vec::new();
     let mut seen_root = false;
     let mut closed_root = false;
+    let mut has_namespace = false;
     while let Some(start) = rest.find('<') {
         if !rest[..start].trim().is_empty() {
             return Err(SvgIssue::TextContent);
@@ -131,7 +134,8 @@ pub fn check_svg_icon(svg: &str) -> Result<(), SvgIssue> {
         let body = tag.strip_suffix('/').unwrap_or(tag);
         let (name, attributes) = split_tag(body);
         check_element(name, seen_root)?;
-        check_attributes(attributes, !seen_root)?;
+        let declares_namespace = check_attributes(attributes, !seen_root)?;
+        has_namespace |= declares_namespace;
         seen_root = true;
         if self_closing {
             closed_root = open.is_empty();
@@ -147,6 +151,9 @@ pub fn check_svg_icon(svg: &str) -> Result<(), SvgIssue> {
     }
     if !open.is_empty() || !closed_root {
         return Err(SvgIssue::Unbalanced);
+    }
+    if !has_namespace {
+        return Err(SvgIssue::MissingNamespace);
     }
     Ok(())
 }
@@ -178,11 +185,13 @@ fn check_element(name: &str, root_seen: bool) -> Result<(), SvgIssue> {
 }
 
 /// Lit des attributs `nom="valeur"` (guillemets obligatoires) et les valide un à un.
-fn check_attributes(mut input: &str, is_root: bool) -> Result<(), SvgIssue> {
+/// Renvoie `true` si l'élément déclare l'espace de noms SVG (`xmlns`, valide sur la racine).
+fn check_attributes(mut input: &str, is_root: bool) -> Result<bool, SvgIssue> {
+    let mut declares_namespace = false;
     loop {
         input = input.trim_start();
         if input.is_empty() {
-            return Ok(());
+            return Ok(declares_namespace);
         }
         let equals = input.find('=').ok_or(SvgIssue::Malformed)?;
         let name = input[..equals].trim();
@@ -200,6 +209,7 @@ fn check_attributes(mut input: &str, is_root: bool) -> Result<(), SvgIssue> {
             return Err(SvgIssue::Malformed);
         }
         check_attribute(name, value, is_root)?;
+        declares_namespace |= name == NAMESPACE_ATTRIBUTE;
     }
 }
 
@@ -275,10 +285,23 @@ mod tests {
   </g>
 </svg>"#;
 
+    const MINIMAL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg"/>"#;
+
+    #[test]
+    fn an_icon_without_the_svg_namespace_is_refused() {
+        assert_eq!(
+            check_svg_icon("<svg viewBox=\"0 0 8 8\"/>"),
+            Err(SvgIssue::MissingNamespace)
+        );
+        assert_eq!(check_svg_icon("<svg/>"), Err(SvgIssue::MissingNamespace));
+    }
+
     #[test]
     fn a_drawing_only_svg_is_accepted() {
         assert_eq!(check_svg_icon(VALID), Ok(()));
-        assert_eq!(check_svg_icon("<svg viewBox='0 0 8 8'/>"), Ok(()));
+        assert_eq!(check_svg_icon(MINIMAL), Ok(()));
+        let single_quotes = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'/>";
+        assert_eq!(check_svg_icon(single_quotes), Ok(()));
     }
 
     #[test]
@@ -375,11 +398,10 @@ mod tests {
     #[test]
     fn an_oversized_icon_is_refused() {
         let padding = " ".repeat(MAX_ICON_BYTES);
-        assert_eq!(
-            check_svg_icon(&format!("<svg/>{padding}")),
-            Err(SvgIssue::TooLarge)
-        );
-        let at_limit = format!("<svg/>{}", " ".repeat(MAX_ICON_BYTES - "<svg/>".len()));
+        let too_large = format!("{MINIMAL}{padding}");
+        assert_eq!(check_svg_icon(&too_large), Err(SvgIssue::TooLarge));
+        let filler = " ".repeat(MAX_ICON_BYTES - MINIMAL.len());
+        let at_limit = format!("{MINIMAL}{filler}");
         assert_eq!(check_svg_icon(&at_limit), Ok(()));
     }
 

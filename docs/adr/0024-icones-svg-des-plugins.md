@@ -15,7 +15,8 @@ embarquer du script, des styles ou des références externes.
 1. **Le dépôt de plugins porte l'icône.** Le manifeste déclare `icon` : un chemin relatif au
    dossier du manifeste, terminé par `.svg` (par exemple `icon.svg`).
 2. **Liste blanche stricte.** Un SVG n'est retenu que s'il pèse 16 Kio au plus et ne contient
-   qu'un élément racine `svg` (espace de noms SVG exact), des éléments de dessin (`g`, `path`,
+   qu'un élément racine `svg` (qui déclare l'espace de noms SVG exact : sans `xmlns`, un SVG ne
+   s'affiche pas comme image autonome), des éléments de dessin (`g`, `path`,
    `circle`, `ellipse`, `rect`, `line`, `polyline`, `polygon`) et des attributs de géométrie, de
    remplissage et de trait. Sont refusés : tout texte, commentaire, déclaration ou instruction,
    `style`, `href`, gestionnaires d'événements, `use`, `image`, `foreignObject`, `script`, et toute

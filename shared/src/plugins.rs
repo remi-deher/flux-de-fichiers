@@ -292,6 +292,9 @@ pub struct DependencyInstallResult {
     pub installed_tools: Vec<String>,
     pub failed_tools: Vec<(String, String)>,
     pub missing_dependencies: Vec<String>,
+    /// Dépôts désignés par des scripts pour fournir une dépendance absente : à ajouter explicitement.
+    #[serde(default)]
+    pub suggested_repositories: Vec<crate::exposed_variables::RepositoryPointer>,
 }
 
 /// Dépendance déclarée dans le manifeste d'un plugin.

@@ -599,4 +599,13 @@ pub const PLUGINS_CSS: &str = r#"
     align-items: flex-start;
   }
 }
+
+/* --- Coloration syntaxique des aperçus de code --- */
+.tok-comment { color: var(--text-dim); font-style: italic; }
+.tok-string { color: var(--success); }
+.tok-number { color: var(--warning); }
+.tok-keyword { color: var(--primary); font-weight: 600; }
+.tok-function { color: var(--info); }
+.tok-variable { color: var(--accent); }
+.tok-operator { color: var(--text-dim); }
 "#;

@@ -20,6 +20,7 @@ mod readiness;
 mod secret_settings;
 mod settings;
 mod sources;
+mod subcategory;
 mod sync;
 
 pub use blocks::{flow_block_catalog, plugin_default_config};
@@ -316,24 +317,30 @@ pub fn exposed_catalog(roots: &[PathBuf]) -> Vec<CatalogEntry> {
         .collect()
 }
 
-/// Complète l'entrée d'index avec son manifeste : catégorie, étiquettes et description.
+/// Complète l'entrée d'index avec son manifeste : catégorie, sous-catégorie, étiquettes et description.
 fn apply_document_metadata(root: &Path, entry: &mut CatalogEntry) {
-    let Ok(content) = std::fs::read_to_string(root.join(&entry.manifest_path)) else {
-        return;
-    };
-    let Ok(value) = serde_json::from_str::<Value>(&content) else {
-        return;
-    };
-    let labels = vocab::labels_from_document(&value);
-    if labels.category_declared {
-        entry.category = labels.category;
+    let document = std::fs::read_to_string(root.join(&entry.manifest_path))
+        .ok()
+        .and_then(|content| serde_json::from_str::<Value>(&content).ok());
+    let labels = document.as_ref().map(vocab::labels_from_document);
+    if let Some(labels) = &labels {
+        if labels.category_declared {
+            entry.category = labels.category;
+        }
+        if labels.tags_declared {
+            entry.tags = labels.tags.clone();
+        }
     }
-    if labels.tags_declared {
-        entry.tags = labels.tags;
-    }
+    subcategory::resolve_entry_subcategory(
+        entry,
+        labels
+            .as_ref()
+            .and_then(|labels| labels.subcategory.as_deref()),
+    );
     if entry.description.is_none() {
-        entry.description = value
-            .get("description")
+        entry.description = document
+            .as_ref()
+            .and_then(|value| value.get("description"))
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|text| !text.is_empty())
@@ -515,6 +522,7 @@ pub fn build_repository_detail(
             release_version: None,
             entries_count: 0,
             skipped_count: 0,
+            warnings: Vec::new(),
             entries: Vec::new(),
         };
     };
@@ -527,12 +535,16 @@ pub fn build_repository_detail(
             release_version: None,
             entries_count: 0,
             skipped_count: 0,
+            warnings: Vec::new(),
             entries: Vec::new(),
         };
     };
     match parse_index_tolerant(&content) {
         Ok(parsed) => {
             let entries_count = parsed.index.entries.len();
+            let warnings = subcategory::repository_warnings(&parsed.index.entries, |entry| {
+                std::fs::read_to_string(dir.join(&entry.manifest_path)).ok()
+            });
             let entries = parsed
                 .index
                 .entries
@@ -546,6 +558,7 @@ pub fn build_repository_detail(
                 release_version: parsed.index.release_version,
                 entries_count,
                 skipped_count: parsed.skipped.len(),
+                warnings,
                 entries,
             }
         }
@@ -556,6 +569,7 @@ pub fn build_repository_detail(
             release_version: None,
             entries_count: 0,
             skipped_count: 0,
+            warnings: Vec::new(),
             entries: Vec::new(),
         },
     }
@@ -711,6 +725,7 @@ mod tests {
             current_choice: None,
             distribution: None,
             category: None,
+            subcategory: None,
             tags: Vec::new(),
             owner: None,
             sha256: None,
@@ -791,6 +806,64 @@ mod tests {
         let proposed = resolved_plugin_fields(std::slice::from_ref(&root), "plugin.demo", &fresh);
         assert_eq!(proposed[0].value, "http://example.test");
         assert_eq!(fresh, json!({}));
+
+        std::fs::remove_dir_all(&root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn listed_catalog_keeps_only_official_subcategories_under_their_category() -> anyhow::Result<()>
+    {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/plugin-subcategory-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("plugins"))?;
+        let plugins = [
+            ("plex", r#""category": "media", "subcategory": "media-servers""#),
+            ("jellyfin", r#""category": "media", "subcategory": "Media Servers""#),
+            ("custom", r#""category": "media", "subcategory": "studio""#),
+            ("webhook", r#""category": "io", "subcategory": "media-servers""#),
+            ("bare", r#""category": "media""#),
+        ];
+        let mut index_entries = Vec::new();
+        for (name, labels) in plugins {
+            index_entries.push(format!(
+                r#"{{"id": "plugin.{name}", "type": "plugin", "version": "1.0.0", "name": "{name}", "manifestPath": "plugins/{name}.json"}}"#
+            ));
+            std::fs::write(
+                root.join(format!("plugins/{name}.json")),
+                format!(
+                    r#"{{"schemaVersion": "1.1.0", "id": "plugin.{name}", "type": "plugin", "version": "1.0.0", "name": "{name}", {labels}}}"#
+                ),
+            )?;
+        }
+        std::fs::write(
+            root.join("index.json"),
+            format!(
+                r#"{{"schemaVersion": "1.0.0", "entries": [{}]}}"#,
+                index_entries.join(",")
+            ),
+        )?;
+
+        let entries = list_catalog(std::slice::from_ref(&root));
+        let subcategory_of = |name: &str| {
+            entries
+                .iter()
+                .find(|entry| entry.id == format!("plugin.{name}"))
+                .and_then(|entry| entry.subcategory.as_ref().map(ToString::to_string))
+        };
+        assert_eq!(subcategory_of("plex").as_deref(), Some("media-servers"));
+        assert_eq!(subcategory_of("jellyfin"), None);
+        assert_eq!(subcategory_of("custom"), None);
+        assert_eq!(subcategory_of("webhook"), None);
+        assert_eq!(subcategory_of("bare"), None);
+        assert_eq!(entries.len(), 5);
+
+        let listed = serde_json::to_value(&entries)?;
+        let serialized: Vec<bool> = listed
+            .as_array()
+            .map(|items| items.iter().map(|item| item.get("subcategory").is_some()).collect())
+            .unwrap_or_default();
+        assert_eq!(serialized.iter().filter(|present| **present).count(), 1);
 
         std::fs::remove_dir_all(&root)?;
         Ok(())
@@ -942,6 +1015,7 @@ mod tests {
             current_choice: None,
             distribution: None,
             category: None,
+            subcategory: None,
             tags: vec!["arr".into()],
             owner: None,
             sha256: None,

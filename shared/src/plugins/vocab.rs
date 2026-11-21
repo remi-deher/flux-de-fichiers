@@ -284,6 +284,8 @@ pub const CATALOG_DATE_FORMAT: &str = "%Y-%m-%d";
 pub struct DocumentLabels {
     pub category: Option<PluginCategory>,
     pub category_declared: bool,
+    /// Sous-catégorie telle que déclarée, non validée (voir `subcategory`).
+    pub subcategory: Option<String>,
     pub tags: Vec<String>,
     pub tags_declared: bool,
 }
@@ -294,6 +296,10 @@ pub fn labels_from_document(value: &Value) -> DocumentLabels {
         .get("category")
         .and_then(Value::as_str)
         .map(PluginCategory::from_label);
+    let subcategory = value
+        .get("subcategory")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     let (tags_declared, tags) = match value.get("tags") {
         Some(Value::Array(items)) => (
             true,
@@ -308,6 +314,7 @@ pub fn labels_from_document(value: &Value) -> DocumentLabels {
     DocumentLabels {
         category,
         category_declared,
+        subcategory,
         tags,
         tags_declared,
     }

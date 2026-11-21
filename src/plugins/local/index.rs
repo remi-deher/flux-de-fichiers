@@ -169,6 +169,7 @@ pub fn rebuild_local_index(local_dir: &Path) -> AppResult<()> {
             entry.insert("sha256".into(), Value::String(sha));
         }
         copy_optional_field(&mut entry, &value, "category");
+        copy_optional_field(&mut entry, &value, "subcategory");
         copy_optional_field(&mut entry, &value, "capability");
         if let Some(tags) = value.get("tags").and_then(Value::as_array) {
             entry.insert("tags".into(), Value::Array(tags.clone()));

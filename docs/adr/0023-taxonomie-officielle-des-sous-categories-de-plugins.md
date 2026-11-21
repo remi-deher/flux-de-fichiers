@@ -1,6 +1,6 @@
 # 0023 — Taxonomie officielle des sous-catégories de plugins
 
-Statut : proposé (21 nov. 2026), orientation validée par l'utilisateur ; implémentation à venir.
+Statut : accepté par l'utilisateur (21 nov. 2026) ; implémenté.
 
 ## Contexte
 
@@ -20,14 +20,16 @@ terme n'importe qui pourra créer un dépôt, et le catalogue se remplirait de v
 1. **Le vocabulaire appartient à Flux, pas aux dépôts.** Un dépôt *référence* une
    sous-catégorie par son identifiant ; il ne peut ni en créer une ni en fournir le libellé.
 2. **Registre officiel versionné.** Un fichier de données unique,
-   `taxonomy/plugin-subcategories.v1.json`, versionné dans le dépôt Forgearr et embarqué à la
-   compilation. Il est désérialisé en types Serde stricts au démarrage ; un registre invalide
-   fait échouer le démarrage et le test qui le charge. Ce fichier est du vocabulaire de Flux,
+   `shared/src/plugins/subcategories.v1.json`, versionné dans le dépôt Forgearr et embarqué à la
+   compilation (le central et le client partagent le même). Il est désérialisé en types Serde
+   stricts (champs inconnus refusés, version, identifiants uniques et libellés `fr` et `en`
+   vérifiés) ; un registre invalide fait échouer le test de CI qui le charge. À l'exécution, un
+   registre illisible équivaut à un registre vide : tout plugin retombe sur sa catégorie. Ce fichier est du vocabulaire de Flux,
    au même titre que l'enum `PluginCategory`, et non du contenu de catalogue : l'ADR 0010
    (« rien n'est embarqué dans le binaire ») ne s'y applique pas.
 3. **Forme du registre.** Un champ `version` (entier) et une liste d'entrées :
    `id`, `category` (catégorie parente, valeur de `PluginCategory`), `labels` (une chaîne par
-   langue, avec au moins `fr` et `en`), `order` (entier). Exemple :
+   langue, avec au moins `fr` et `en`), `order` (entier, tri croissant commun à toutes les catégories). Exemple :
    `{ "id": "media-servers", "category": "media", "labels": { "fr": "Serveurs média",
    "en": "Media servers" }, "order": 10 }`.
 4. **Identifiant.** Type `SubcategoryId` (newtype validé) : minuscules, chiffres et tirets,
@@ -40,7 +42,7 @@ terme n'importe qui pourra créer un dépôt, et le catalogue se remplirait de v
    que `PluginCategory::from_label`.
 7. **Comportement 2 — avertissement pour l'auteur du dépôt.** Le repli est journalisé
    localement (dépôt, plugin, valeur reçue, cause) et signalé dans l'écran de gestion du dépôt,
-   pour que l'auteur sache quoi corriger. Un avertissement par plugin et par synchronisation.
+   pour que l'auteur sache quoi corriger. Un avertissement par plugin et par synchronisation (`SyncReport.warnings`, `RepositoryDetailView.warnings`).
 8. **Pas d'espace de sous-catégories propre à un dépôt.** Une sous-catégorie non officielle
    n'est jamais affichée à côté des officielles. Cette option est écartée tant qu'aucun besoin
    réel n'existe ; la rouvrir demande un nouvel ADR.
@@ -49,9 +51,14 @@ terme n'importe qui pourra créer un dépôt, et le catalogue se remplirait de v
    jamais renommé ni réutilisé pour un autre sens ; un identifiant retiré fait retomber les
    plugins qui le citent dans le repli du point 6. Un changement de forme du fichier crée un
    `v2`.
-10. **API et interface.** Le catalogue expose la sous-catégorie résolue (identifiant et libellé
-    dans la langue de l'utilisateur, repli sur `en`). L'interface regroupe sur deux niveaux ;
-    sans sous-catégorie, le plugin apparaît directement sous la catégorie.
+10. **API et interface.** Le catalogue expose l'identifiant de la sous-catégorie retenue
+    (`CatalogEntry.subcategory`, absent en cas de repli). Le client en tire le libellé du registre
+    partagé (langue de l'interface, repli sur `en`) et regroupe sur deux niveaux, dans l'ordre du
+    registre ; sans sous-catégorie, le plugin apparaît dans la grille de sa section.
+11. **Catégorie du plugin obligatoire.** Une sous-catégorie n'est retenue que si le plugin
+    déclare aussi la catégorie parente (manifeste, sinon index) ; sans catégorie déclarée, c'est
+    un repli avec avertissement. La valeur du manifeste l'emporte sur celle de l'index, et les
+    deux sont revalidées.
 
 ## Conséquences
 

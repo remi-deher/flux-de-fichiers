@@ -331,6 +331,7 @@ mod tests {
             current_choice: None,
             distribution: None,
             category: None,
+            subcategory: None,
             tags: Vec::new(),
             owner: None,
             sha256: None,

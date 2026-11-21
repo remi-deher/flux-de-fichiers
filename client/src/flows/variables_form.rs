@@ -8,16 +8,19 @@ use forgearr_shared::flow_variables::{
     NodeVariablesRequest, NodeVariablesView, ReferenceSource, ReferenceSuggestion,
 };
 use forgearr_shared::script_variables::{
-    ScriptVariable, VariableKind, default_from_text, default_to_text,
+    SECRETS_CONFIG_KEY, ScriptVariable, VariableKind, default_from_text, default_to_text,
 };
 use leptos::prelude::*;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 const NODE_VARIABLES_PATH: &str = "/api/v1/flows/node-variables";
 const REFERENCE_OPEN: &str = "{{";
 const REFERENCE_CLOSE: &str = "}}";
 const BOOLEAN_TRUE: &str = "true";
 const BOOLEAN_FALSE: &str = "false";
+const SECRET_STORED_HINT: &str = "Secret enregistré — laisser vide pour le conserver";
+const SECRET_EMPTY_HINT: &str = "Aucun secret enregistré";
+const SECRET_CLEAR_LABEL: &str = "Effacer le secret";
 
 /// Valeur à enregistrer dans la config du nœud d'après le texte saisi ; `None` retire la clé
 /// (le défaut du schéma s'applique). Un texte qui contient une référence reste du texte.
@@ -32,6 +35,25 @@ pub fn value_from_input(kind: VariableKind, raw: &str) -> Option<Value> {
         _ => None,
     };
     Some(typed.unwrap_or_else(|| Value::String(raw.to_owned())))
+}
+
+/// Le flux porte-t-il une valeur pour ce secret ? (enregistrée, donc masquée par l'API, ou saisie)
+pub fn is_secret_stored(value: Option<&Value>) -> bool {
+    value.is_some_and(|value| !value.is_null())
+}
+
+/// Range un secret saisi dans `config.secrets` ; une saisie vide ne change rien (le secret
+/// enregistré est conservé), `Value::Null` demande son effacement à l'enregistrement.
+pub fn apply_secret(config: &mut Map<String, Value>, name: &str, value: Value) {
+    if value.as_str().is_some_and(str::is_empty) {
+        return;
+    }
+    let secrets = config
+        .entry(SECRETS_CONFIG_KEY)
+        .or_insert_with(|| Value::Object(Map::new()));
+    if let Some(object) = secrets.as_object_mut() {
+        object.insert(name.to_owned(), value);
+    }
 }
 
 /// Texte affiché dans le champ pour la valeur enregistrée.
@@ -89,6 +111,21 @@ fn set_variable(editor: Editor, node_id: &str, name: &str, value: Option<Value>)
     });
 }
 
+fn set_secret(editor: Editor, node_id: &str, name: &str, value: Value) {
+    let name = name.to_owned();
+    update_node_config(editor, node_id, move |map| apply_secret(map, &name, value));
+}
+
+fn current_secret(editor: Editor, node_id: &str, name: &str) -> Option<Value> {
+    editor.graph.with(|graph| {
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == node_id)
+            .and_then(|node| node.config.get(SECRETS_CONFIG_KEY)?.get(name).cloned())
+    })
+}
+
 fn current_value(editor: Editor, node_id: &str, name: &str) -> Option<Value> {
     editor.graph.with(|graph| {
         graph
@@ -123,6 +160,42 @@ fn ReferencePicker(
                 </optgroup>
             }).collect_view()}
         </select>
+    }
+}
+
+/// Champ d'un secret : jamais pré-rempli, la valeur saisie n'est pas réaffichée.
+#[component]
+fn SecretField(
+    editor: Editor,
+    node_id: String,
+    name: String,
+    field_id: String,
+    read_only: bool,
+) -> impl IntoView {
+    let typed = RwSignal::new(String::new());
+    let stored = {
+        let (node_id, name) = (node_id.clone(), name.clone());
+        Signal::derive(move || is_secret_stored(current_secret(editor, &node_id, &name).as_ref()))
+    };
+    let commit = {
+        let (node_id, name) = (node_id.clone(), name.clone());
+        move |raw: String| {
+            set_secret(editor, &node_id, &name, Value::String(raw));
+            typed.set(String::new());
+        }
+    };
+    let clear = move |_| set_secret(editor, &node_id, &name, Value::Null);
+    view! {
+        <input id=field_id class="form-input" type="password" autocomplete="new-password"
+            disabled=read_only
+            placeholder=move || if stored.get() { SECRET_STORED_HINT } else { SECRET_EMPTY_HINT }
+            prop:value=move || typed.get()
+            on:input=move |event| typed.set(event_target_value(&event))
+            on:change=move |event| commit(event_target_value(&event)) />
+        {move || stored.get().then(|| view! {
+            <button type="button" class="btn btn-secondary btn-sm" disabled=read_only
+                on:click=clear.clone()>{SECRET_CLEAR_LABEL}</button>
+        })}
     }
 }
 
@@ -176,8 +249,8 @@ fn VariableField(
             .into_any()
         }
         VariableKind::Secret => view! {
-            <input id=field_id.clone() class="form-input" disabled=true
-                placeholder="Saisie des secrets non prise en charge dans le flux" />
+            <SecretField editor=editor node_id=node_id.clone() name=name.clone()
+                field_id=field_id.clone() read_only=read_only />
         }
         .into_any(),
         VariableKind::Multiline => {
@@ -417,6 +490,27 @@ mod tests {
         assert_eq!(input_text(Some(&json!("fr"))), "fr");
         assert_eq!(input_text(Some(&json!(true))), "true");
         assert_eq!(input_text(None), "");
+    }
+
+    #[test]
+    fn a_secret_is_stored_under_secrets_and_an_empty_input_keeps_the_saved_one() {
+        let mut config = Map::new();
+        apply_secret(&mut config, "token", json!(""));
+        assert!(config.is_empty());
+        apply_secret(&mut config, "token", json!("t0k"));
+        assert_eq!(config[SECRETS_CONFIG_KEY]["token"], json!("t0k"));
+        apply_secret(&mut config, "token", json!(""));
+        assert_eq!(config[SECRETS_CONFIG_KEY]["token"], json!("t0k"));
+        apply_secret(&mut config, "token", Value::Null);
+        assert!(config[SECRETS_CONFIG_KEY]["token"].is_null());
+    }
+
+    #[test]
+    fn a_secret_counts_as_stored_unless_absent_or_cleared() {
+        assert!(is_secret_stored(Some(&json!(""))));
+        assert!(is_secret_stored(Some(&json!("t0k"))));
+        assert!(!is_secret_stored(Some(&Value::Null)));
+        assert!(!is_secret_stored(None));
     }
 
     #[test]

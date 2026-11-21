@@ -39,7 +39,8 @@ installée dans le cache du nœud (ADR 0004, 0007).
    chiffrées dans la définition du flux (même clé, même format que les secrets de plugins).
    L'API renvoie les noms d'en-têtes avec une valeur vide ; une valeur laissée vide conserve
    celle du même bloc ; le moteur déchiffre juste avant l'appel HTTP. Les flux existants sont
-   migrés au démarrage.
+   migrés au démarrage. Depuis l'ADR 0025, `config.secrets` d'un nœud (variables de script de type
+   secret) suit les mêmes règles.
 8. **Blocs Sonarr et Radarr** : types de nœud `sonarr-rescan`, `sonarr-rename`, `radarr-rescan`,
    `radarr-rename`. Ils utilisent les réglages du plugin (URL, clé d'API déchiffrée,
    correspondance de chemins). Le fichier visé est le média source (`INPUT_DIR/<source>`),

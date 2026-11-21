@@ -274,6 +274,7 @@ impl WorkerLoop {
         claim: &Claim,
         worker: Uuid,
         steps: &[JobStepEntry],
+        media_info: Option<&serde_json::Value>,
     ) -> anyhow::Result<()> {
         if steps.is_empty() {
             return Ok(());
@@ -288,6 +289,7 @@ impl WorkerLoop {
             lease_token: claim.lease_token,
             lease_epoch: claim.lease_epoch,
             steps: steps.to_vec(),
+            media_info: media_info.cloned(),
         })
         .send()
         .await?
@@ -354,7 +356,9 @@ impl WorkerLoop {
             progress_cb,
         )
         .await?;
-        let step_report = self.report_steps(claim, worker, &outcome.steps).await;
+        let step_report = self
+            .report_steps(claim, worker, &outcome.steps, Some(&outcome.media_info))
+            .await;
         if let Some(request) = outcome.relay {
             step_report?;
             self.send_handoff(
@@ -457,7 +461,10 @@ impl WorkerLoop {
                 ("transfer_failed", None)
             };
             if let Some(steps) = steps
-                && self.report_steps(&claim, worker, steps).await.is_err()
+                && self
+                    .report_steps(&claim, worker, steps, None)
+                    .await
+                    .is_err()
             {
                 tracing::warn!(job_id=%claim.job_id, "step report rejected or unavailable");
             }

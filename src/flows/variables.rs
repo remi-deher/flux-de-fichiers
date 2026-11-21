@@ -4,10 +4,14 @@
 //! schéma comblent les clés absentes, les références `{{…}}` sont remplacées, puis chaque valeur
 //! est contrôlée selon son type. Le code du script et les autres clés du nœud restent intacts.
 
+use crate::secrets::is_encrypted;
 use forgearr_shared::{
     exposed_variables::ExposedVariables,
     flows::extract_json_values,
-    script_variables::{ScriptVariable, VariableKind, default_from_text},
+    relay::{MAX_RELAYED_MESSAGE_CHARS, RelayedNodeOutput},
+    script_variables::{
+        SECRET_PLACEHOLDER, SECRETS_CONFIG_KEY, ScriptVariable, VariableKind, default_from_text,
+    },
 };
 use serde_json::{Map, Number, Value};
 use std::{collections::HashMap, path::Path};
@@ -27,6 +31,29 @@ pub struct NodeOutput {
     pub message: Option<String>,
     pub next_port: Option<String>,
     pub working_file: String,
+}
+
+impl From<&RelayedNodeOutput> for NodeOutput {
+    /// Le fichier de travail d'un nœud exécuté avant le relais appartient au worker précédent : vide.
+    fn from(relayed: &RelayedNodeOutput) -> Self {
+        Self {
+            message: relayed.message.clone(),
+            next_port: relayed.next_port.clone(),
+            working_file: String::new(),
+        }
+    }
+}
+
+impl From<&NodeOutput> for RelayedNodeOutput {
+    fn from(output: &NodeOutput) -> Self {
+        Self {
+            message: output
+                .message
+                .as_ref()
+                .map(|text| text.chars().take(MAX_RELAYED_MESSAGE_CHARS).collect()),
+            next_port: output.next_port.clone(),
+        }
+    }
 }
 
 /// Valeurs accessibles par les références d'un nœud, construites une fois par étape.
@@ -54,7 +81,8 @@ impl VariableContext {
                     serde_json::json!({
                         "message": output.message,
                         "nextPort": output.next_port,
-                        "workingFile": output.working_file,
+                        "workingFile": (!output.working_file.is_empty())
+                            .then_some(&output.working_file),
                     }),
                 )
             })
@@ -84,8 +112,32 @@ impl VariableContext {
 
     /// Valeur désignée par un chemin pointé ; `null` compte comme absente.
     fn lookup(&self, path: &str) -> Option<&Value> {
-        lookup_in(&self.root, path)
+        let Some((node_id, field)) = split_node_reference(path) else {
+            return lookup_in(&self.root, path);
+        };
+        let value = self.root.get(ROOT_NODES)?.get(node_id)?.get(field)?;
+        (!value.is_null()).then_some(value)
     }
+}
+
+/// Champs qu'un nœud exécuté expose, avec leur libellé.
+pub(super) const NODE_OUTPUT_FIELDS: [(&str, &str); 3] = [
+    ("message", "message"),
+    ("nextPort", "port de sortie"),
+    ("workingFile", "fichier courant"),
+];
+
+/// Sépare `nodes.<id>.<champ>` : le champ est le dernier segment, l'identifiant tout ce qui précède,
+/// points compris (un nœud peut s'appeler `encodage.v2`).
+pub(super) fn split_node_reference(path: &str) -> Option<(&str, &str)> {
+    let (node_id, field) = path
+        .strip_prefix(ROOT_NODES)?
+        .strip_prefix('.')?
+        .rsplit_once('.')?;
+    NODE_OUTPUT_FIELDS
+        .iter()
+        .any(|(name, _)| *name == field)
+        .then_some((node_id, field))
 }
 
 /// Références `{{chemin}}` d'un texte, dans l'ordre.
@@ -167,6 +219,8 @@ pub enum VariableError {
     OutOfRange(String),
     #[error("variable « {0} » : valeur absente des options du choix")]
     NotAnOption(String),
+    #[error("variable « {0} » : le secret n'a pas été déchiffré avant l'exécution")]
+    SecretNotDecrypted(String),
 }
 
 /// Fragment d'un texte : littéral, ou référence `{{chemin}}`.
@@ -322,6 +376,56 @@ fn coerce(variable: &ScriptVariable, value: Value) -> Result<Value, VariableErro
     }
 }
 
+/// Un secret est une valeur littérale : jamais de référence `{{…}}`, jamais de valeur par défaut.
+fn resolve_secret(
+    variable: &ScriptVariable,
+    stored: Option<&Value>,
+) -> Result<Option<Value>, VariableError> {
+    match stored
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+    {
+        Some(text) if is_encrypted(text) => {
+            Err(VariableError::SecretNotDecrypted(variable.name.clone()))
+        }
+        Some(text) => Ok(Some(Value::String(text.to_owned()))),
+        None if variable.required => Err(VariableError::MissingRequired(variable.name.clone())),
+        None => Ok(None),
+    }
+}
+
+/// Valeurs en clair des variables secrètes d'une `config` résolue (pour les masquer des sorties).
+pub fn secret_values(variables: &[ScriptVariable], resolved_config: &Value) -> Vec<String> {
+    variables
+        .iter()
+        .filter(|variable| variable.kind == VariableKind::Secret)
+        .filter_map(|variable| resolved_config.get(&variable.name)?.as_str())
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Copie de la `config` d'un nœud où chaque secret saisi ou enregistré est remplacé par un
+/// marqueur : un aperçu ne montre jamais la valeur d'un secret.
+pub fn mask_secrets_for_preview(variables: &[ScriptVariable], node_config: &Value) -> Value {
+    let mut config = node_config.clone();
+    let Some(stored) = config
+        .get_mut(SECRETS_CONFIG_KEY)
+        .and_then(Value::as_object_mut)
+    else {
+        return config;
+    };
+    for variable in variables
+        .iter()
+        .filter(|variable| variable.kind == VariableKind::Secret)
+    {
+        if let Some(value) = stored.get_mut(&variable.name) {
+            *value = Value::String(SECRET_PLACEHOLDER.to_owned());
+        }
+    }
+    config
+}
+
 fn is_blank(value: &Value) -> bool {
     matches!(value, Value::String(text) if text.trim().is_empty())
 }
@@ -360,7 +464,8 @@ fn finish(variable: &ScriptVariable, value: Option<Value>) -> Result<Option<Valu
     }
 }
 
-/// Config du nœud avec les variables déclarées résolues et contrôlées.
+/// Config du nœud avec les variables déclarées résolues et contrôlées. Les secrets viennent de
+/// `config.secrets` (valeurs littérales) et sont rangés sous le nom de leur variable.
 ///
 /// Les clés non déclarées (code en ligne, `interpreter`, `scriptId`…) sont conservées telles quelles.
 pub fn resolve_node_config(
@@ -372,7 +477,18 @@ pub fn resolve_node_config(
         return Ok(node_config.clone());
     }
     let mut config = node_config.as_object().cloned().unwrap_or_default();
+    let stored_secrets = config.remove(SECRETS_CONFIG_KEY);
     for variable in variables {
+        if variable.kind == VariableKind::Secret {
+            let stored = stored_secrets
+                .as_ref()
+                .and_then(|map| map.get(&variable.name));
+            match resolve_secret(variable, stored)? {
+                Some(value) => config.insert(variable.name.clone(), value),
+                None => config.remove(&variable.name),
+            };
+            continue;
+        }
         let provided = config.get(&variable.name).filter(|value| !value.is_null());
         match resolve_variable(variable, provided, context)? {
             Some(value) => {
@@ -541,7 +657,10 @@ mod tests {
             &[],
         );
         assert!(context.lookup("nodes.a.message").is_none());
-        assert!(context.lookup("nodes.a.workingFile").is_some());
+        assert!(
+            context.lookup("nodes.a.workingFile").is_none(),
+            "un fichier vide (nœud antérieur à un relais) n'a pas de valeur"
+        );
         assert!(context.lookup("nodes.absent.message").is_none());
     }
 
@@ -825,5 +944,165 @@ mod tests {
             Some(&json!("x")),
             "chemin pointé à indices"
         );
+    }
+
+    fn secret(name: &str, required: bool) -> ScriptVariable {
+        ScriptVariable {
+            required,
+            ..variable(name, VariableKind::Secret)
+        }
+    }
+
+    #[test]
+    fn a_secret_is_read_literally_from_the_secrets_object_and_never_resolved() {
+        let config = resolve(
+            &[secret("jeton", true)],
+            json!({"secrets": {"jeton": "{{workingFile}}"}, "jeton": "ignoré", "autre": 1}),
+        );
+        assert_eq!(
+            config,
+            Ok(json!({"jeton": "{{workingFile}}", "autre": 1})),
+            "littéral, hors `secrets`, clé de premier niveau écrasée"
+        );
+    }
+
+    #[test]
+    fn a_missing_secret_fails_when_required_and_is_omitted_otherwise() {
+        assert_eq!(
+            resolve(&[secret("jeton", true)], json!({"secrets": {"jeton": ""}})),
+            Err(VariableError::MissingRequired("jeton".into()))
+        );
+        assert_eq!(
+            resolve(&[secret("jeton", false)], json!({"jeton": "fuite"})),
+            Ok(json!({}))
+        );
+    }
+
+    #[test]
+    fn a_secret_still_encrypted_is_refused_instead_of_reaching_the_script() {
+        assert_eq!(
+            resolve(
+                &[secret("jeton", false)],
+                json!({"secrets": {"jeton": "enc:1:abc:def"}})
+            ),
+            Err(VariableError::SecretNotDecrypted("jeton".into()))
+        );
+    }
+
+    #[test]
+    fn secret_values_lists_only_the_non_empty_secrets_of_a_resolved_config() {
+        let variables = [
+            secret("jeton", false),
+            secret("vide", false),
+            variable("cible", VariableKind::Text),
+        ];
+        let resolved = json!({"jeton": "t0k", "vide": "", "cible": "visible"});
+        assert_eq!(secret_values(&variables, &resolved), vec!["t0k".to_owned()]);
+    }
+
+    #[test]
+    fn the_preview_config_replaces_every_secret_by_a_placeholder() {
+        let variables = [secret("jeton", true), secret("autre", false)];
+        let masked = mask_secrets_for_preview(
+            &variables,
+            &json!({"secrets": {"jeton": "t0k", "autre": ""}, "cible": "x"}),
+        );
+        assert_eq!(
+            masked,
+            json!({"secrets": {"jeton": SECRET_PLACEHOLDER, "autre": SECRET_PLACEHOLDER}, "cible": "x"})
+        );
+        let untouched = json!({"cible": "x"});
+        assert_eq!(mask_secrets_for_preview(&variables, &untouched), untouched);
+    }
+
+    #[test]
+    fn a_relayed_output_keeps_its_message_and_port_but_not_the_previous_workers_file() {
+        let relayed = RelayedNodeOutput {
+            message: Some("analysé".into()),
+            next_port: Some("hevc".into()),
+        };
+        let restored = NodeOutput::from(&relayed);
+        assert_eq!(restored.message.as_deref(), Some("analysé"));
+        assert_eq!(restored.next_port.as_deref(), Some("hevc"));
+        assert!(restored.working_file.is_empty());
+
+        let mut nodes = HashMap::new();
+        nodes.insert("probe".to_owned(), restored);
+        let context = VariableContext::new(
+            Path::new("/work/film.mkv"),
+            Path::new("/in/source.mkv"),
+            Path::new("/work"),
+            &json!({}),
+            &nodes,
+            &[],
+        );
+        let config = resolve_node_config(
+            &[
+                variable("a", VariableKind::Text),
+                variable("b", VariableKind::Text),
+            ],
+            &json!({"a": "{{nodes.probe.message}}", "b": "{{nodes.probe.workingFile}}"}),
+            &context,
+        );
+        assert_eq!(
+            config,
+            Err(VariableError::MissingReference {
+                variable: "b".into(),
+                reference: "nodes.probe.workingFile".into()
+            }),
+            "le fichier d'un nœud antérieur au relais n'a pas de valeur"
+        );
+    }
+
+    #[test]
+    fn a_node_output_sent_with_a_relay_is_bounded_in_length() {
+        let long = "é".repeat(MAX_RELAYED_MESSAGE_CHARS + 50);
+        let relayed = RelayedNodeOutput::from(&NodeOutput {
+            message: Some(long),
+            next_port: None,
+            working_file: "/work/x".into(),
+        });
+        assert_eq!(
+            relayed.message.map(|text| text.chars().count()),
+            Some(MAX_RELAYED_MESSAGE_CHARS)
+        );
+        assert_eq!(relayed.next_port, None);
+    }
+
+    #[test]
+    fn a_node_id_may_contain_dots() {
+        assert_eq!(
+            split_node_reference("nodes.encodage.v2.message"),
+            Some(("encodage.v2", "message"))
+        );
+        assert_eq!(split_node_reference("nodes.a.autre"), None);
+        assert_eq!(split_node_reference("nodes.message"), None);
+        assert_eq!(split_node_reference("mediaInfo.a.message"), None);
+
+        let nodes = HashMap::from([(
+            "encodage.v2".to_owned(),
+            NodeOutput {
+                message: Some("fini".into()),
+                next_port: None,
+                working_file: "/w/x.mkv".into(),
+            },
+        )]);
+        let context = VariableContext::new(
+            Path::new("f"),
+            Path::new("s"),
+            Path::new("w"),
+            &json!({}),
+            &nodes,
+            &[],
+        );
+        assert_eq!(
+            context.lookup("nodes.encodage.v2.message"),
+            Some(&json!("fini"))
+        );
+        assert_eq!(
+            context.lookup("nodes.encodage.v2.workingFile"),
+            Some(&json!("/w/x.mkv"))
+        );
+        assert!(context.lookup("nodes.encodage.v2.nextPort").is_none());
     }
 }

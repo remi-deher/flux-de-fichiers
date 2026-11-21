@@ -443,6 +443,17 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
             Ok(())
         };
 
+        if let Err(error) = repository::save_flow_media_sample(
+            &state.pool,
+            claim.job_id,
+            &lease,
+            &execution.media_info,
+        )
+        .await
+        {
+            tracing::warn!(job_id = %claim.job_id, %error, "échantillon de métadonnées non retenu");
+        }
+
         if let Some(request) = &execution.relay {
             step_report?;
             let working = (execution.working_file.as_path(), work_dir.as_path());

@@ -1,5 +1,6 @@
 mod artifacts;
 mod enrollment;
+mod flow_samples;
 mod flows;
 mod identity;
 mod jobs;
@@ -23,6 +24,7 @@ pub use enrollment::{
     set_enrollment_window,
 };
 
+pub use flow_samples::{latest_flow_media_sample, save_flow_media_sample};
 pub use flows::{
     DEFINITION_STORES, DefinitionStore, default_flow, delete_flow, get_flow, get_flow_version,
     list_flow_versions, list_flows, save_flow,

@@ -1,4 +1,7 @@
-//! Coloration syntaxique des scripts avec les grammaires embarquées de syntect.
+//! Coloration syntaxique des scripts avec les grammaires embarquées de syntect ; PowerShell, qu'elles
+//! n'embarquent pas, a son propre analyseur (`powershell`).
+
+mod powershell;
 
 use forgearr_shared::highlight::{CodeToken, TokenKind};
 use std::sync::LazyLock;
@@ -21,6 +24,9 @@ const SCOPE_RULES: &[(&str, TokenKind)] = &[
     ("variable.function", TokenKind::Function),
     ("variable", TokenKind::Variable),
 ];
+
+/// Extension des scripts PowerShell, colorés par l'analyseur maison.
+const POWERSHELL_EXTENSION: &str = "ps1";
 
 static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
 
@@ -98,6 +104,9 @@ fn highlight_with(
 /// Découpe `code` en lignes de jetons selon l'extension du langage ; texte brut si le langage
 /// n'a pas de grammaire embarquée ou si l'analyse échoue.
 pub fn highlight_code(code: &str, extension: &str) -> Vec<Vec<CodeToken>> {
+    if extension == POWERSHELL_EXTENSION {
+        return powershell::highlight_powershell(code);
+    }
     highlight_with(&SYNTAXES, extension, code).unwrap_or_else(|| plain_lines(code))
 }
 
@@ -164,9 +173,13 @@ mod tests {
     }
 
     #[test]
-    fn powershell_never_loses_text_whether_or_not_a_grammar_is_embedded() {
-        let code = "$x = 1\nWrite-Output $x\n";
-        assert_eq!(rebuild(&highlight_code(code, "ps1")), code.trim_end());
+    fn powershell_has_its_own_highlighter() {
+        let code = "# note\n$x = 1\nWrite-Output $x\n";
+        let lines = highlight_code(code, "ps1");
+        assert!(has_token(&lines, "# note", TokenKind::Comment));
+        assert!(has_token(&lines, "$x", TokenKind::Variable));
+        assert!(has_token(&lines, "Write-Output", TokenKind::Function));
+        assert_eq!(rebuild(&lines), code.trim_end());
     }
 
     #[test]

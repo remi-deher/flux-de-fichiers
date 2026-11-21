@@ -2,11 +2,27 @@
 
 use crate::capabilities::CapabilityRequirement;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 use uuid::Uuid;
 
 /// Nombre maximal de relais d'une même tâche, pour éviter qu'elle ne circule indéfiniment.
 pub const MAX_RELAYS_PER_JOB: i64 = 3;
+
+/// Longueur maximale (en caractères) du message d'un nœud transmis au worker repreneur.
+pub const MAX_RELAYED_MESSAGE_CHARS: usize = 2000;
+/// Taille maximale des sorties de nœuds transmises avec un relais, une fois sérialisées.
+pub const MAX_RELAYED_OUTPUTS_BYTES: usize = 256 * 1024;
+
+/// Ce qu'un nœud déjà exécuté expose aux suivants (`{{nodes.<id>.message|nextPort}}`), transmis au
+/// worker repreneur. Le fichier de travail d'un nœud appartient au worker émetteur : il n'est pas transmis.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelayedNodeOutput {
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub next_port: Option<String>,
+}
 
 /// Cible d'un relais : un worker capable (choisi par le central) ou un worker précis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,6 +39,9 @@ pub struct RelayRequest {
     pub target: RelayTarget,
     /// Nœud du flux où le worker repreneur reprend l'exécution.
     pub resume_node_id: String,
+    /// Sorties des nœuds exécutés avant le relais, pour que `{{nodes.<id>.…}}` reste lisible à la reprise.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub node_outputs: HashMap<String, RelayedNodeOutput>,
 }
 
 /// Garde d'âge d'un fichier de travail retenu : avant ce délai, son détenteur ne demande pas au

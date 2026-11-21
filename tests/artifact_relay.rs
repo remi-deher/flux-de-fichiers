@@ -7,7 +7,9 @@ use forgearr::{
     repository::{self, RelayOutcome},
 };
 use forgearr_shared::{
-    relay::{HandoffArtifact, RelayRequest, RelayTarget},
+    relay::{
+        HandoffArtifact, MAX_RELAYED_OUTPUTS_BYTES, RelayRequest, RelayTarget, RelayedNodeOutput,
+    },
     transfer::{ArtifactDeclaration, ArtifactKind},
 };
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
@@ -58,6 +60,7 @@ fn to_worker(worker: Uuid) -> RelayRequest {
     RelayRequest {
         target: RelayTarget::Worker { worker_id: worker },
         resume_node_id: "next".into(),
+        node_outputs: Default::default(),
     }
 }
 
@@ -241,5 +244,63 @@ async fn a_finished_job_no_longer_needs_its_retained_file() -> anyhow::Result<()
     repository::fail(&pool, job, &taker_lease, JobErrorCode::TransferFailed).await?;
     let finished = repository::artifact_retained(&pool, job, kind, origin, epoch).await?;
     assert!(!finished, "tâche échouée : le détenteur peut purger");
+    Ok(())
+}
+
+fn output_with_message(message: String) -> RelayedNodeOutput {
+    RelayedNodeOutput {
+        message: Some(message),
+        next_port: Some("hevc".into()),
+    }
+}
+
+#[tokio::test]
+async fn the_outputs_of_executed_nodes_follow_the_relayed_job_to_its_receiver() -> anyhow::Result<()>
+{
+    let pool = pool().await?;
+    let (job, _origin, origin_lease) = origin_with_artifact(&pool, true).await?;
+    let receiver = repository::register(&pool, "repreneur").await?;
+    let mut request = to_worker(receiver.id);
+    request
+        .node_outputs
+        .insert("probe".into(), output_with_message("analysé".into()));
+    repository::relay_job(&pool, job, &origin_lease, &request, false).await?;
+
+    let claim = repository::claim(&pool, receiver.id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("reprise absente"))?;
+    assert_eq!(claim.resumed_outputs, request.node_outputs);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_relay_without_outputs_leaves_the_taker_with_none() -> anyhow::Result<()> {
+    let pool = pool().await?;
+    let (job, _origin, origin_lease) = origin_with_artifact(&pool, true).await?;
+    let receiver = repository::register(&pool, "repreneur").await?;
+    repository::relay_job(&pool, job, &origin_lease, &to_worker(receiver.id), false).await?;
+    let claim = repository::claim(&pool, receiver.id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("reprise absente"))?;
+    assert!(claim.resumed_outputs.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn oversized_node_outputs_are_refused_before_the_job_changes_state() -> anyhow::Result<()> {
+    let pool = pool().await?;
+    let (job, _origin, origin_lease) = origin_with_artifact(&pool, true).await?;
+    let receiver = repository::register(&pool, "repreneur").await?;
+    let mut request = to_worker(receiver.id);
+    request.node_outputs.insert(
+        "gros".into(),
+        output_with_message("x".repeat(MAX_RELAYED_OUTPUTS_BYTES)),
+    );
+    let refused = repository::relay_job(&pool, job, &origin_lease, &request, false).await;
+    assert!(matches!(refused, Err(AppError::Invalid)));
+    assert_eq!(
+        repository::get_job(&pool, job).await?.status,
+        JobStatus::Running
+    );
     Ok(())
 }

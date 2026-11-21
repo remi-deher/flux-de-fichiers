@@ -238,6 +238,7 @@ mod tests {
             media_root: None,
             local_source_root: None,
             resume_node_id: None,
+            resumed_outputs: HashMap::new(),
             handoff_input: None,
             prior_warning: false,
             source_ticket: None,

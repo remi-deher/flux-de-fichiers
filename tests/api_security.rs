@@ -13,6 +13,10 @@ use std::sync::Arc;
 use tower::ServiceExt;
 
 fn app() -> anyhow::Result<axum::Router> {
+    app_serving("frontend/dist".into())
+}
+
+fn app_serving(static_dir: std::path::PathBuf) -> anyhow::Result<axum::Router> {
     let config = Config {
         bind: "127.0.0.1:3000".parse()?,
         database_url: "sqlite::memory:".into(),
@@ -21,7 +25,7 @@ fn app() -> anyhow::Result<axum::Router> {
         config_dir: "var/config".into(),
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
-        static_dir: "frontend/dist".into(),
+        static_dir,
         max_file_bytes: 1024,
         local_worker: false,
         web_origin: None,
@@ -312,8 +316,9 @@ async fn malformed_identifiers_and_unknown_routes_have_safe_json_errors() -> any
         assert_eq!(body["error"]["code"], "invalid_request");
     }
 
-    // SPA fallback: non-API route returns 200 OK when frontend dist/index.html is present
-    let response = app()?
+    // SPA fallback: non-API route returns 200 OK when the static dir holds an index.html
+    let page = common::static_dir_with_page()?;
+    let response = app_serving(page.path().to_path_buf())?
         .oneshot(Request::builder().uri("/unknown").body(Body::empty())?)
         .await?;
     assert_eq!(response.status(), StatusCode::OK);

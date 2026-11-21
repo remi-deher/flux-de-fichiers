@@ -70,6 +70,7 @@ mod tests {
             distribution: None,
             category,
             subcategory: None,
+            has_icon: false,
             tags: Vec::new(),
             owner: None,
             sha256: None,

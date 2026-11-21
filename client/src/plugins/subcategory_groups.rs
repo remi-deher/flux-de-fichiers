@@ -63,6 +63,7 @@ mod tests {
             distribution: None,
             category: None,
             subcategory: subcategory.and_then(|raw| SubcategoryId::parse(raw).ok()),
+            has_icon: false,
             tags: Vec::new(),
             owner: None,
             sha256: None,

@@ -224,6 +224,16 @@ pub const PLUGINS_CSS: &str = r#"
   flex-shrink: 0;
 }
 
+/* Icône SVG d'un plugin : masque d'image qui reprend la couleur du texte (ADR 0024). */
+.plugin-icon {
+  display: inline-block;
+  width: 1.25rem;
+  height: 1.25rem;
+  background-color: currentColor;
+  -webkit-mask: var(--plugin-icon-url) center / contain no-repeat;
+  mask: var(--plugin-icon-url) center / contain no-repeat;
+}
+
 .store-card[data-tone="success"] .store-card__icon {
   background: var(--success-bg);
   color: var(--success);

@@ -449,6 +449,7 @@ pub fn save_local_pack(local_dir: &Path, req: CreateLocalPackRequest) -> AppResu
         distribution: None,
         category: None,
         subcategory: None,
+        has_icon: false,
         tags: Vec::new(),
         owner: None,
         sha256: None,

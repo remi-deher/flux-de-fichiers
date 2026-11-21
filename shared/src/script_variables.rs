@@ -11,6 +11,15 @@ pub const MAX_VARIABLE_NAME_LEN: usize = 64;
 /// Nombre maximal d'options d'une variable de type choix.
 pub const MAX_CHOICE_OPTIONS: usize = 64;
 
+/// Clé de `config` d'un nœud qui porte les valeurs des variables secrètes (chiffrées au repos).
+pub const SECRETS_CONFIG_KEY: &str = "secrets";
+/// Autre objet de `config` chiffré au repos (en-têtes d'un webhook) : son nom n'est pas une variable.
+pub const HEADERS_CONFIG_KEY: &str = "custom_headers";
+/// Noms de `config` réservés : une variable ne peut pas les porter.
+pub const RESERVED_VARIABLE_NAMES: [&str; 2] = [SECRETS_CONFIG_KEY, HEADERS_CONFIG_KEY];
+/// Valeur affichée à la place d'un secret déjà enregistré (jamais sa valeur).
+pub const SECRET_PLACEHOLDER: &str = "••••••••";
+
 /// Forme d'une variable : décide du champ de saisie et du type de la valeur dans `config`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -107,6 +116,7 @@ pub struct InvalidDefaultText;
 pub enum VariableSchemaError {
     TooMany,
     InvalidName(String),
+    ReservedName(String),
     DuplicateName(String),
     InvalidDefault(String),
     SecretWithDefault(String),
@@ -122,6 +132,12 @@ impl fmt::Display for VariableSchemaError {
                 f,
                 "nom de variable invalide « {name} » (minuscules, chiffres et _, commence par une lettre, {MAX_VARIABLE_NAME_LEN} caractères au plus)"
             ),
+            Self::ReservedName(name) => {
+                write!(
+                    f,
+                    "le nom « {name} » est réservé à la configuration du nœud"
+                )
+            }
             Self::DuplicateName(name) => write!(f, "variable « {name} » déclarée deux fois"),
             Self::InvalidDefault(name) => {
                 write!(
@@ -214,6 +230,9 @@ pub fn validate_variables(variables: &[ScriptVariable]) -> Result<(), VariableSc
         let name = variable.name.clone();
         if !is_valid_name(&variable.name) {
             return Err(VariableSchemaError::InvalidName(name));
+        }
+        if RESERVED_VARIABLE_NAMES.contains(&variable.name.as_str()) {
+            return Err(VariableSchemaError::ReservedName(name));
         }
         if variables[..index]
             .iter()
@@ -322,6 +341,16 @@ mod tests {
             assert!(!kind.label().is_empty());
         }
         assert_eq!(VariableKind::from_tag("inconnu"), None);
+    }
+
+    #[test]
+    fn rejects_names_reserved_for_the_node_configuration() {
+        for reserved in RESERVED_VARIABLE_NAMES {
+            assert_eq!(
+                validate_variables(&[variable(reserved, VariableKind::Text)]),
+                Err(VariableSchemaError::ReservedName(reserved.to_owned()))
+            );
+        }
     }
 
     #[test]

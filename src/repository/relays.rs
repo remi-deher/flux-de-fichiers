@@ -7,13 +7,14 @@ use crate::{
 use forgearr_shared::{
     capabilities::CapabilityRequirement,
     relay::{
-        HandoffArtifact, HandoffInput, JobRelayInfo, MAX_RELAYS_PER_JOB, RelayRequest, RelayTarget,
+        HandoffArtifact, HandoffInput, JobRelayInfo, MAX_RELAYED_OUTPUTS_BYTES, MAX_RELAYS_PER_JOB,
+        RelayRequest, RelayTarget, RelayedNodeOutput,
     },
     transfer::ArtifactKind,
     workers::WORKER_ONLINE_SECONDS,
 };
 use sqlx::SqlitePool;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 /// Issue d'une demande de relais côté central.
@@ -128,6 +129,7 @@ pub async fn relay_job(
         // Sans adresse de transfert, personne ne pourrait tirer le fichier de travail.
         return Err(AppError::Invalid);
     }
+    let node_outputs_json = serialize_node_outputs(&request.node_outputs)?;
     let placement = if relay_count >= MAX_RELAYS_PER_JOB {
         None
     } else {
@@ -171,18 +173,20 @@ pub async fn relay_job(
             }
             sqlx::query(
                 "INSERT INTO job_relays(job_id, from_worker_id, relay_count, resume_node_id, \
-                     requirement_json, artifact_relay) \
-                 VALUES(?1, ?2, 1, ?3, ?4, ?5) \
+                     requirement_json, artifact_relay, node_outputs_json) \
+                 VALUES(?1, ?2, 1, ?3, ?4, ?5, ?6) \
                  ON CONFLICT(job_id) DO UPDATE SET from_worker_id=excluded.from_worker_id, \
                      relay_count=relay_count+1, resume_node_id=excluded.resume_node_id, \
                      requirement_json=excluded.requirement_json, \
-                     artifact_relay=excluded.artifact_relay, relayed_at=datetime('now')",
+                     artifact_relay=excluded.artifact_relay, \
+                     node_outputs_json=excluded.node_outputs_json, relayed_at=datetime('now')",
             )
             .bind(id)
             .bind(lease.worker_id)
             .bind(&request.resume_node_id)
             .bind(requirement_json)
             .bind(artifact_relay)
+            .bind(node_outputs_json)
             .execute(&mut *tx)
             .await?;
             RelayOutcome::Relayed {
@@ -224,19 +228,42 @@ pub async fn relay_job(
     Ok(outcome)
 }
 
-/// Nœud de reprise d'une tâche relayée, lu au moment du bail. Un relais par artefact ne reprend en
-/// cours de flux que tant que l'artefact est déclaré : sans lui (reprise après perte du repreneur),
-/// la tâche repart de la source.
-pub(super) async fn resume_node(pool: &SqlitePool, job: Uuid) -> AppResult<Option<String>> {
-    let node = sqlx::query_scalar(
-        "SELECT resume_node_id FROM job_relays r WHERE r.job_id=?1 AND (r.artifact_relay=0 \
+/// Sorties des nœuds à stocker avec le relais ; `None` s'il n'y en a pas, refus si elles dépassent la borne.
+fn serialize_node_outputs(
+    outputs: &HashMap<String, RelayedNodeOutput>,
+) -> AppResult<Option<String>> {
+    if outputs.is_empty() {
+        return Ok(None);
+    }
+    let json = serde_json::to_string(outputs).map_err(|_| AppError::Invalid)?;
+    if json.len() > MAX_RELAYED_OUTPUTS_BYTES {
+        return Err(AppError::Invalid);
+    }
+    Ok(Some(json))
+}
+
+/// Point de reprise d'une tâche relayée, lu au moment du bail : nœud où reprendre et sorties des
+/// nœuds déjà exécutés. Un relais par artefact ne reprend en cours de flux que tant que l'artefact
+/// est déclaré : sans lui (reprise après perte du repreneur), la tâche repart de la source.
+pub(super) async fn resume_point(
+    pool: &SqlitePool,
+    job: Uuid,
+) -> AppResult<Option<(String, HashMap<String, RelayedNodeOutput>)>> {
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT resume_node_id, node_outputs_json FROM job_relays r WHERE r.job_id=?1 \
+         AND (r.artifact_relay=0 \
          OR EXISTS(SELECT 1 FROM job_artifacts a WHERE a.job_id=r.job_id AND a.kind=?2))",
     )
     .bind(job)
     .bind(ArtifactKind::Working.as_str())
     .fetch_optional(pool)
     .await?;
-    Ok(node)
+    Ok(row.map(|(node, outputs)| {
+        let outputs = outputs
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default();
+        (node, outputs)
+    }))
 }
 
 /// Fichier de travail que ce bail doit tirer chez son détenteur (relais par artefact, ADR 0022).

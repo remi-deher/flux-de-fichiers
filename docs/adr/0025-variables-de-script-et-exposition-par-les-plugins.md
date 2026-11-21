@@ -1,6 +1,6 @@
 # 0025 — Variables de script, exposition par les plugins et dépendances
 
-Statut : accepté par l'utilisateur (21 nov. 2026) ; phases A à D implémentées.
+Statut : accepté par l'utilisateur (21 nov. 2026) ; phases A à D et lots 4 et 5 implémentés.
 
 ## Contexte
 
@@ -88,8 +88,9 @@ réimplémenter ce travail.
   déclarées sont traitées : le code en ligne et les autres clés du nœud ne sont jamais modifiés.
   Un `{{…}}` dont le contenu n'est pas un chemin valide reste littéral. Une référence sans valeur
   retombe sur le défaut de la variable, sinon l'étape échoue en nommant la variable.
-- Les sorties des nœuds (`nodes.<id>.…`) ne viennent que des étapes exécutées par ce worker : après
-  un relais de tâche (ADR 0018), un nœud exécuté avant le relais n'a plus de sortie.
+- Les sorties des nœuds (`nodes.<id>.…`) viennent des étapes exécutées avant le nœud courant. Après
+  un relais de tâche (ADR 0018), elles sont transmises au worker repreneur (voir « Sorties de nœuds
+  et relais » plus bas).
 - Phase C : `exposes` (contrat d'opération), `requires` et `dependenciesUnverified` (opération du
   script), validés à la synchronisation et au chargement ; le moteur expose chaque espace de noms
   dans les références et contrôle les dépendances avant le script ; l'aperçu d'un script de dépôt
@@ -126,5 +127,29 @@ réimplémenter ce travail.
   (validés avec les mêmes règles que le catalogue, 400 sinon) et les écrit dans l'opération du script ; l'éditeur
   de scripts locaux les propose avec un choix parmi les variables exposées du catalogue
   (`GET /api/v1/plugins/exposed-variables`) ou une saisie manuelle, et la case « intégrer sans dépendance ».
-- Reportés : la résolution et la saisie des secrets dans le flux.
+- Secrets dans le flux (lot 4) : la valeur d'une variable `secret` n'est pas dans la clé du nœud mais
+  dans `config.secrets.<nom>`, objet traité comme `config.custom_headers` des webhooks : chiffrée à
+  l'enregistrement (`flow:<flux>:<nœud>:secret:<nom>` comme données associées, même clé et même format
+  que les secrets de plugins), renvoyée par l'API avec une valeur vide (le nom seul indique qu'elle existe),
+  conservée si elle est laissée vide, retirée si elle vaut `null`, re-chiffrée à la rotation de la clé,
+  déchiffrée par le central au bail puis scellée pour le worker dans l'enveloppe du bail
+  (`LeaseSecretsEnvelope.flow_headers`, emplacement `secret:<nom>`). Le chiffrement ne consulte aucun
+  registre : il suit l'emplacement (`secrets`, `custom_headers`), jamais le schéma du script ; les noms
+  `secrets` et `custom_headers` sont donc réservés et refusés pour une variable. Les flux existants
+  n'ont aucun `secrets` : rien à migrer.
+- Résolution d'un secret : valeur littérale, jamais de référence `{{…}}` ni de valeur par défaut ; le
+  moteur la place sous le nom de la variable dans `config` (la clé `secrets` n'est pas transmise au
+  script) et refuse un secret encore chiffré. Une variable `required` sans secret échoue l'étape. Le
+  script reçoit le secret en clair dans `config` (contrat inchangé) mais le moteur retire sa valeur
+  du message, de l'extrait de journal et des lignes de progression du script (remplacée par `••••••••`).
+- Aperçu : `POST /api/v1/flows/node-variables` remplace tout secret présent dans `config.secrets`
+  (enregistré ou saisi) par `••••••••` et le considère comme fourni ; il ne renvoie jamais la valeur. L'éditeur
+  affiche un champ mot de passe jamais pré-rempli, « secret enregistré » et un bouton « Effacer ».
+- Sorties de nœuds et relais (lot 5) : `RelayRequest.nodeOutputs` (message et port de sortie de chaque
+  nœud exécuté, 2000 caractères de message au plus, 256 Kio au total sinon 400) est stocké avec le
+  relais (`job_relays.node_outputs_json`, migration 0042) et renvoyé dans le claim du repreneur
+  (`resumedOutputs`) ; le moteur les restaure avant de reprendre au nœud désigné. Le fichier de travail d'un
+  nœud antérieur appartient au worker émetteur : `nodes.<id>.workingFile` n'a plus de valeur après un relais
+  (la référence échoue avec son message habituel, sauf défaut de la variable). La reprise sans artefact
+  (la tâche repart de la source) ne restaure rien, comme elle ne reprend pas le nœud.
 - Les scripts existants, sans `variables`, restent valides (liste vide par défaut).

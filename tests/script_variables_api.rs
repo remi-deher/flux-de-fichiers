@@ -32,6 +32,7 @@ const SAMPLE_WORKING_FILE: &str = "/travail/fichier.mkv";
 /// Application de test : ses dossiers temporaires restent vivants tant que la valeur existe.
 struct TestApp {
     router: axum::Router,
+    pool: sqlx::SqlitePool,
     config_dir: tempfile::TempDir,
     plugins_dir: tempfile::TempDir,
 }
@@ -62,7 +63,8 @@ async fn test_app() -> anyhow::Result<TestApp> {
     sqlx::migrate!().run(&pool).await?;
     common::install_keys(&pool).await?;
     Ok(TestApp {
-        router: router(AppState::new(pool, Arc::new(config))),
+        router: router(AppState::new(pool.clone(), Arc::new(config))),
+        pool,
         config_dir,
         plugins_dir,
     })
@@ -79,15 +81,23 @@ fn variable(name: &str, kind: VariableKind, default: Option<Value>) -> ScriptVar
 
 /// Écrit le script « Encodeur » (variables `crf` et `cible`) dans `dir` et renvoie son identifiant.
 fn save_encoder_script(dir: &Path) -> anyhow::Result<String> {
+    save_script_with(
+        dir,
+        vec![
+            variable("crf", VariableKind::Number, Some(json!(DEFAULT_CRF))),
+            variable("cible", VariableKind::Text, None),
+        ],
+    )
+}
+
+/// Écrit le script « Encodeur » avec les variables données.
+fn save_script_with(dir: &Path, variables: Vec<ScriptVariable>) -> anyhow::Result<String> {
     let saved = save_local_script(
         dir,
         UpsertLocalScriptRequest {
             requires: Vec::new(),
             dependencies_unverified: false,
-            variables: vec![
-                variable("crf", VariableKind::Number, Some(json!(DEFAULT_CRF))),
-                variable("cible", VariableKind::Text, None),
-            ],
+            variables,
             id: None,
             name: "Encodeur".into(),
             description: None,
@@ -685,5 +695,124 @@ async fn a_local_script_keeps_its_requirements_and_the_unverified_flag() -> anyh
     )
     .await?;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+    Ok(())
+}
+
+const SECRET_VALUE: &str = "jeton-tres-secret";
+const SECRET_FLOW_ID: &str = "flow.secret";
+
+fn save_secret_script(dir: &Path) -> anyhow::Result<String> {
+    let mut token = variable("jeton", VariableKind::Secret, None);
+    token.required = true;
+    save_script_with(
+        dir,
+        vec![token, variable("cible", VariableKind::Text, None)],
+    )
+}
+
+async fn stored_secret_definition(app: &TestApp) -> anyhow::Result<String> {
+    Ok(
+        sqlx::query_scalar("SELECT definition FROM flows WHERE id = ?1")
+            .bind(SECRET_FLOW_ID)
+            .fetch_one(&app.pool)
+            .await?,
+    )
+}
+
+async fn save_secret_flow(app: &TestApp, config: Value) -> anyhow::Result<Value> {
+    let (status, body) = send(
+        app,
+        authorized(
+            "PUT",
+            &format!("/api/v1/flows/{SECRET_FLOW_ID}"),
+            Some(&flow_payload(&encoder_graph(config))),
+        )?,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    Ok(body)
+}
+
+#[tokio::test]
+async fn a_script_secret_is_encrypted_at_rest_masked_by_the_api_and_kept_when_left_empty()
+-> anyhow::Result<()> {
+    let app = test_app().await?;
+    save_secret_script(app.plugins_dir.path())?;
+
+    let saved = save_secret_flow(&app, json!({"secrets": {"jeton": SECRET_VALUE}})).await?;
+    let returned = saved["definition"].as_str().unwrap_or_default();
+    assert!(!returned.contains(SECRET_VALUE));
+    assert!(returned.contains("jeton"));
+
+    let stored = stored_secret_definition(&app).await?;
+    assert!(!stored.contains(SECRET_VALUE));
+    assert!(stored.contains("enc:"));
+
+    save_secret_flow(&app, json!({"secrets": {"jeton": ""}, "cible": "x"})).await?;
+    assert_eq!(
+        stored_secret_definition(&app)
+            .await?
+            .matches("enc:")
+            .count(),
+        1,
+        "une saisie vide conserve le secret enregistré"
+    );
+
+    let (status, body) = send(
+        &app,
+        authorized("GET", &format!("/api/v1/flows/{SECRET_FLOW_ID}"), None)?,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!body.to_string().contains(SECRET_VALUE));
+
+    save_secret_flow(&app, json!({"secrets": {"jeton": null}})).await?;
+    assert!(!stored_secret_definition(&app).await?.contains("enc:"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_node_preview_never_shows_a_secret_and_counts_a_stored_one_as_given()
+-> anyhow::Result<()> {
+    let app = test_app().await?;
+    save_secret_script(app.plugins_dir.path())?;
+    let preview =
+        |config: Value| json!({"graph": encoder_graph(config), "nodeId": "enc", "mediaInfo": null});
+
+    for config in [
+        json!({"secrets": {"jeton": SECRET_VALUE}}),
+        json!({"secrets": {"jeton": ""}}),
+    ] {
+        let (status, body) = send(
+            &app,
+            authorized(
+                "POST",
+                "/api/v1/flows/node-variables",
+                Some(&preview(config)),
+            )?,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!body.to_string().contains(SECRET_VALUE));
+        assert!(body.get("error").is_none(), "{body}");
+        assert_eq!(body["resolved"]["jeton"], json!("••••••••"));
+        assert!(body["resolved"].get("secrets").is_none());
+    }
+
+    let (_, body) = send(
+        &app,
+        authorized(
+            "POST",
+            "/api/v1/flows/node-variables",
+            Some(&preview(json!({}))),
+        )?,
+    )
+    .await?;
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("jeton")),
+        "{body}"
+    );
     Ok(())
 }

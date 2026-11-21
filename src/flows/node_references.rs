@@ -3,7 +3,8 @@
 use super::{
     OperationRegistry, OperationRuntime, ScriptRuntime,
     variables::{
-        NodeOutput, VariableContext, as_text, exposed_value, references_in, resolve_node_config,
+        NodeOutput, VariableContext, as_text, exposed_value, mask_secrets_for_preview,
+        references_in, resolve_node_config,
     },
 };
 use forgearr_shared::{
@@ -410,7 +411,9 @@ pub fn node_variables_view(
         &outputs,
         &registry.exposures_for_requirements(&runtime.requires),
     );
-    let (resolved, error) = match resolve_node_config(&runtime.variables, &node.config, &context) {
+    let preview_config = mask_secrets_for_preview(&runtime.variables, &node.config);
+    let (resolved, error) = match resolve_node_config(&runtime.variables, &preview_config, &context)
+    {
         Ok(config) => (Some(config), None),
         Err(err) => (None, Some(err.to_string())),
     };

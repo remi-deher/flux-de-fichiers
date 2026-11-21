@@ -137,7 +137,7 @@ paths:
         Variables du script d'un nœud (ADR 0025) : schéma, références `{{…}}` disponibles à cet endroit
         du graphe (flux, métadonnées d'exemple, nœuds en amont, plugins qui s'exécutent avant) et
         `config` résolue avec des valeurs d'exemple. Le graphe peut ne pas être enregistré. `warnings` liste les
-        références à des variables exposées dépréciées (absent s'il n'y en a pas).
+        références à des variables exposées dépréciées (absent s'il n'y en a pas). Les secrets présents dans `config.secrets` n'y apparaissent jamais (remplacés par `••••••••`).
       requestBody:
         required: true
         content:
@@ -1980,6 +1980,14 @@ components:
         source_bytes: {type: integer, minimum: 1}
         local_source_root: {type: string, description: "Dossier local au worker pour une source sur son montage."}
         resume_node_id: {type: string, description: Identifiant du nœud où reprendre le flux figé.}
+        resumed_outputs:
+          type: object
+          description: "Sorties des nœuds exécutés avant le relais (`message`, `nextPort`), lues par `{{nodes.<id>.…}}` à la reprise (ADR 0025)."
+          additionalProperties:
+            type: object
+            properties:
+              message: {type: string, nullable: true}
+              nextPort: {type: string, nullable: true}
         prior_warning: {type: boolean, default: false, description: Avertissement accumulé avant la remise.}
         handoff_input:
           type: object

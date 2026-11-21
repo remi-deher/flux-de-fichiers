@@ -80,7 +80,7 @@ pub async fn save_flow(
         return Err(AppError::Invalid);
     }
     let mut payload = payload;
-    if crate::flows::has_webhook_headers(&payload.definition) {
+    if crate::flows::has_flow_secrets(&payload.definition) {
         let existing = repository::get_flow(&s.pool, &id)
             .await
             .ok()

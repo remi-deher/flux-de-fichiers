@@ -176,6 +176,7 @@ pub async fn execute_claim_processing(
         allow_private_integrations: claim.allow_private_integrations,
         worker_capabilities: Some(&worker_capabilities),
         resume_node_id: claim.resume_node_id.as_deref(),
+        resumed_outputs: &claim.resumed_outputs,
     };
 
     let outcome = match claim.frozen_flow.as_ref() {
@@ -234,6 +235,7 @@ mod tests {
             media_root: None,
             local_source_root: None,
             resume_node_id: None,
+            resumed_outputs: HashMap::new(),
             handoff_input: None,
             prior_warning: false,
             source_ticket: None,

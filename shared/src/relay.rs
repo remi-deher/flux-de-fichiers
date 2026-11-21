@@ -2,6 +2,7 @@
 
 use crate::capabilities::CapabilityRequirement;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use std::{collections::HashMap, time::Duration};
 use uuid::Uuid;
 
@@ -39,6 +40,9 @@ pub struct RelayRequest {
     pub target: RelayTarget,
     /// Nœud du flux où le worker repreneur reprend l'exécution.
     pub resume_node_id: String,
+    /// Variables personnalisées du flux (`vars.*`) restaurées chez le repreneur.
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub variables: Map<String, Value>,
     /// Sorties des nœuds exécutés avant le relais, pour que `{{nodes.<id>.…}}` reste lisible à la reprise.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub node_outputs: HashMap<String, RelayedNodeOutput>,
@@ -134,9 +138,32 @@ mod tests {
         });
         let report: RelayReport = serde_json::from_value(value.clone())?;
         assert!(!report.warning);
+        assert!(
+            report.request.variables.is_empty(),
+            "variables absentes des anciens workers"
+        );
         value["warning"] = serde_json::json!(true);
         let report: RelayReport = serde_json::from_value(value)?;
         assert!(report.warning);
+        Ok(())
+    }
+
+    #[test]
+    fn relay_request_carries_flow_variables() -> Result<(), serde_json::Error> {
+        let mut request = RelayRequest {
+            target: RelayTarget::Worker {
+                worker_id: Uuid::nil(),
+            },
+            resume_node_id: "next".into(),
+            variables: Map::new(),
+            node_outputs: HashMap::new(),
+        };
+        assert!(serde_json::to_value(&request)?.get("variables").is_none());
+        request
+            .variables
+            .insert("codec".into(), Value::String("hevc".into()));
+        let decoded: RelayRequest = serde_json::from_value(serde_json::to_value(&request)?)?;
+        assert_eq!(decoded, request);
         Ok(())
     }
 }

@@ -44,6 +44,7 @@ fn step(node: &str, index: i32) -> JobStepEntry {
         status: JobStepStatus::Succeeded,
         message: None,
         output_excerpt: None,
+        variables: None,
     }
 }
 
@@ -60,6 +61,7 @@ fn to_worker(worker: Uuid) -> RelayRequest {
     RelayRequest {
         target: RelayTarget::Worker { worker_id: worker },
         resume_node_id: "next".into(),
+        variables: Default::default(),
         node_outputs: Default::default(),
     }
 }

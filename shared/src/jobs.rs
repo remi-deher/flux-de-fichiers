@@ -7,6 +7,10 @@ use std::path::Path;
 use std::str::FromStr;
 use uuid::Uuid;
 
+mod resource;
+
+pub use resource::{JobResourceClass, JobResourceInfo};
+
 /// Nombre maximal de tentatives d'une tâche, relances manuelles comprises.
 pub const MAX_ATTEMPTS: i32 = 3;
 const MAX_WORKING_EXT_LEN: usize = 16;
@@ -288,6 +292,13 @@ pub struct JobEvent {
 pub const JOB_PRIORITY_MIN: i32 = -100;
 pub const JOB_PRIORITY_MAX: i32 = 100;
 
+/// Priorité d'une bibliothèque qui n'en déclare pas, et donc des tâches créées sans priorité.
+pub const LIBRARY_DEFAULT_JOB_PRIORITY: i32 = 0;
+
+pub const fn default_library_job_priority() -> i32 {
+    LIBRARY_DEFAULT_JOB_PRIORITY
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct NewJob {
     pub source_name: String,
@@ -296,8 +307,9 @@ pub struct NewJob {
     pub library_id: Option<Uuid>,
     #[serde(default)]
     pub flow_id: Option<String>,
+    /// Absente : priorité par défaut de la bibliothèque, sinon `LIBRARY_DEFAULT_JOB_PRIORITY`.
     #[serde(default)]
-    pub priority: i32,
+    pub priority: Option<i32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -378,6 +390,19 @@ impl Job {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_job_priority_is_optional_and_keeps_explicit_values() -> Result<(), serde_json::Error> {
+        let inherited: NewJob =
+            serde_json::from_str(r#"{"source_name":"a.mkv","target_worker_id":null}"#)?;
+        assert_eq!(inherited.priority, None);
+        let explicit: NewJob = serde_json::from_str(
+            r#"{"source_name":"a.mkv","target_worker_id":null,"priority":5}"#,
+        )?;
+        assert_eq!(explicit.priority, Some(5));
+        assert_eq!(default_library_job_priority(), LIBRARY_DEFAULT_JOB_PRIORITY);
+        Ok(())
+    }
 
     fn job(status: JobStatus, error_code: Option<JobErrorCode>, attempts: i32) -> Job {
         let now = DateTime::<Utc>::UNIX_EPOCH;

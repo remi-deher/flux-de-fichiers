@@ -1,12 +1,13 @@
 //! Exécuteur partagé d'un bail de tâche entre worker local et worker distant.
 
 use crate::{
-    domain::{Claim, JobErrorCode, JobStepEntry, ToolRequirement},
-    flows::{FlowEngine, FlowProgressCallback, OperationRegistry},
+    domain::{Claim, FlowRecord, JobErrorCode, JobStepEntry, JobStepStatus, ToolRequirement},
+    flows::{FailureInfo, FlowEngine, FlowProgressCallback, FlowRunInfo, OperationRegistry},
     media::OutputSpec,
     plugins::{self, ProbeContract},
     tools_cache::ToolCacheManager,
 };
+use forgearr_shared::flows::{LinkedFlowRole, first_linked};
 use std::{
     collections::HashMap,
     fmt,
@@ -178,36 +179,136 @@ pub async fn execute_claim_processing(
         allow_private_integrations: claim.allow_private_integrations,
         worker_capabilities: Some(&worker_capabilities),
         resume_node_id: claim.resume_node_id.as_deref(),
+        run_info: FlowRunInfo {
+            library_id: claim.library_id,
+            library_name: claim.library_name.as_deref(),
+            worker_name: claim.worker_name.as_deref(),
+            resume_variables: Some(&claim.resume_variables),
+            linked_flows: &claim.linked_flows,
+            failure: None,
+        },
         resumed_outputs: &claim.resumed_outputs,
     };
 
     let outcome = match claim.frozen_flow.as_ref() {
         Some(flow) => {
             engine
-                .execute_flow(claim.job_id, flow, source_snapshot, work_dir, progress_cb)
+                .execute_flow(
+                    claim.job_id,
+                    flow,
+                    source_snapshot,
+                    work_dir,
+                    progress_cb.clone(),
+                )
                 .await
         }
         None => {
             engine
-                .execute_default(source_snapshot, work_dir, progress_cb)
+                .execute_default(source_snapshot, work_dir, progress_cb.clone())
                 .await
         }
     };
 
-    outcome
-        .map(|res| JobExecutionResult {
+    match outcome {
+        Ok(res) => Ok(JobExecutionResult {
             working_file: res.final_file,
             warning: res.warning || claim.prior_warning,
             output_spec: res.output_spec,
             steps: res.steps,
             media_info: res.media_info,
             relay: res.relay,
-        })
-        .map_err(|error| JobRunError {
-            code: error.code,
-            message: error.message,
-            steps: error.steps,
-        })
+        }),
+        Err(error) => {
+            let mut failed = JobRunError {
+                code: error.code,
+                message: error.message,
+                steps: error.steps,
+            };
+            if let Some(failure_flow) = first_linked(&claim.linked_flows, LinkedFlowRole::Failure) {
+                let no_resumed_outputs = HashMap::new();
+                let failure_engine = FlowEngine {
+                    resume_node_id: None,
+                    resumed_outputs: &no_resumed_outputs,
+                    run_info: FlowRunInfo {
+                        resume_variables: None,
+                        failure: Some(FailureInfo {
+                            code: failed.code.as_str(),
+                            message: &failed.message,
+                        }),
+                        ..engine.run_info
+                    },
+                    ..engine
+                };
+                let failure_outcome = failure_engine
+                    .execute_flow(
+                        claim.job_id,
+                        failure_flow,
+                        source_snapshot,
+                        work_dir,
+                        progress_cb,
+                    )
+                    .await
+                    .map(|res| res.steps)
+                    .map_err(|err| (err.message, err.steps));
+                append_failure_flow_steps(&mut failed.steps, failure_flow, failure_outcome);
+            }
+            Err(failed)
+        }
+    }
+}
+
+/// Nœud du journal qui résume l'exécution du flux d'échec.
+pub const FAILURE_FLOW_STEP_NODE: &str = "failure-flow";
+
+/// Ajoute au journal de la tâche les étapes du flux d'échec et une étape de synthèse.
+/// Un échec du flux d'échec est seulement journalisé : aucun autre flux n'est déclenché.
+fn append_failure_flow_steps(
+    steps: &mut Vec<JobStepEntry>,
+    failure_flow: &FlowRecord,
+    outcome: Result<Vec<JobStepEntry>, (String, Vec<JobStepEntry>)>,
+) {
+    let mut next_index = steps.iter().map(|step| step.step_index).max().unwrap_or(0);
+    let (status, message, flow_steps) = match outcome {
+        Ok(flow_steps) => (
+            JobStepStatus::Succeeded,
+            format!(
+                "flux d'échec « {} » (v{}) exécuté",
+                failure_flow.id, failure_flow.version
+            ),
+            flow_steps,
+        ),
+        Err((message, flow_steps)) => {
+            tracing::warn!(
+                flow_id = %failure_flow.id,
+                error = %message,
+                "le flux d'échec a lui-même échoué"
+            );
+            (
+                JobStepStatus::Failed,
+                format!(
+                    "flux d'échec « {} » (v{}) en échec : {message}",
+                    failure_flow.id, failure_flow.version
+                ),
+                flow_steps,
+            )
+        }
+    };
+    next_index += 1;
+    steps.push(JobStepEntry {
+        step_index: next_index,
+        node_id: FAILURE_FLOW_STEP_NODE.to_owned(),
+        block_kind: FAILURE_FLOW_STEP_NODE.to_owned(),
+        operation_id: None,
+        status,
+        message: Some(message),
+        output_excerpt: None,
+        variables: None,
+    });
+    for mut step in flow_steps {
+        next_index += 1;
+        step.step_index = next_index;
+        steps.push(step);
+    }
 }
 
 #[cfg(test)]
@@ -242,6 +343,10 @@ mod tests {
             handoff_input: None,
             prior_warning: false,
             source_ticket: None,
+            library_name: None,
+            worker_name: None,
+            resume_variables: serde_json::Map::new(),
+            linked_flows: Vec::new(),
         }
     }
 
@@ -383,5 +488,66 @@ mod tests {
         });
         ensure_probe_ready(&cache, &claim)?;
         Ok(())
+    }
+
+    fn step(index: i32, node: &str, status: JobStepStatus) -> JobStepEntry {
+        JobStepEntry {
+            step_index: index,
+            node_id: node.into(),
+            block_kind: node.into(),
+            operation_id: None,
+            status,
+            message: None,
+            output_excerpt: None,
+            variables: None,
+        }
+    }
+
+    fn failure_flow() -> FlowRecord {
+        FlowRecord {
+            id: "flow.echec".into(),
+            name: "Échec".into(),
+            description: None,
+            file_mask: "*".into(),
+            version: 2,
+            is_default: false,
+            definition: "{}".into(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn failure_flow_steps_follow_the_failed_steps() {
+        let mut steps = vec![
+            step(1, "in", JobStepStatus::Succeeded),
+            step(2, "encode", JobStepStatus::Failed),
+        ];
+        let flow_steps = vec![step(1, "in", JobStepStatus::Succeeded)];
+        append_failure_flow_steps(&mut steps, &failure_flow(), Ok(flow_steps));
+        let indexes: Vec<i32> = steps.iter().map(|entry| entry.step_index).collect();
+        assert_eq!(indexes, vec![1, 2, 3, 4]);
+        assert_eq!(steps[2].node_id, FAILURE_FLOW_STEP_NODE);
+        assert_eq!(steps[2].status, JobStepStatus::Succeeded);
+        assert_eq!(
+            steps[2].message.as_deref(),
+            Some("flux d'échec « flow.echec » (v2) exécuté")
+        );
+    }
+
+    #[test]
+    fn a_failing_failure_flow_is_only_logged() {
+        let mut steps = vec![step(1, "encode", JobStepStatus::Failed)];
+        let flow_steps = vec![step(1, "hook", JobStepStatus::Failed)];
+        let outcome = Err(("webhook refusé".to_owned(), flow_steps));
+        append_failure_flow_steps(&mut steps, &failure_flow(), outcome);
+        assert_eq!(steps.len(), 3);
+        assert_eq!(steps[1].status, JobStepStatus::Failed);
+        assert!(
+            steps[1]
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("webhook refusé"))
+        );
     }
 }

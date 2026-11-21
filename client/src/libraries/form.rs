@@ -6,6 +6,7 @@ use crate::api;
 use crate::plugins::{FlowMiniPreview, preview_from_definition_json};
 use crate::ui::FolderTreePicker;
 use forgearr_shared::flows::FlowRecord;
+use forgearr_shared::jobs::{JOB_PRIORITY_MAX, JOB_PRIORITY_MIN};
 use forgearr_shared::libraries::{Library, LibraryAccess, LibraryOutputPolicy, LibraryWrite};
 use forgearr_shared::workers::Worker;
 use leptos::prelude::*;
@@ -250,6 +251,18 @@ pub fn LibraryForm(
                                 value.min_file_mb = mb;
                             }
                         }) />
+                </div>
+                <div class="form-group">
+                    <label for="library-default-priority" class="form-label">"Priorité par défaut des tâches"</label>
+                    <input id="library-default-priority" type="number" class="form-input"
+                        min=JOB_PRIORITY_MIN max=JOB_PRIORITY_MAX
+                        prop:value=move || draft.get().default_priority.to_string()
+                        on:input=move |event| draft.update(|value| {
+                            if let Ok(priority) = event_target_value(&event).parse::<i32>() {
+                                value.default_priority = priority;
+                            }
+                        }) />
+                    <p class="form-help">"Plus haute = réclamée avant les tâches plus anciennes. Modifiable ensuite tâche par tâche."</p>
                 </div>
             </div>
 

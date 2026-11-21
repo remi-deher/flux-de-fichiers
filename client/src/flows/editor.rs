@@ -1,6 +1,7 @@
 //! Atelier d'édition de flux : barre de commande, palette, canevas, inspecteur, réglages et validation.
 
 use super::canvas::GraphCanvas;
+use super::flow_choice::FailureFlowSettings;
 use super::inspector::NodeInspector;
 use super::palette::Palette;
 use super::presentation::{DiagnosticLevel, FlowDiagnostic, diagnose_graph};
@@ -399,6 +400,9 @@ fn FlowSettingsPane(
                                 />
                                 <span>"Utiliser comme flux par défaut"</span>
                             </label>
+
+                            <FailureFlowSettings editor=editor flow_id=record.id.clone()
+                                can_manage=can_manage />
 
                             {(!record.id.is_empty() && record.version > 0).then(|| view! {
                                 <div class="flow-inspector__section">

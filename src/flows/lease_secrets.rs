@@ -23,6 +23,14 @@ struct LeaseSecretsEnvelope {
     plugin_configs: HashMap<String, Value>,
     #[serde(default)]
     flow_headers: HashMap<String, HashMap<String, String>>,
+    /// En-têtes des flux liés (ADR 0026), par clé [`linked_key`].
+    #[serde(default)]
+    linked_flow_headers: HashMap<String, HashMap<String, HashMap<String, String>>>,
+}
+
+/// Clé d'un flux lié dans l'enveloppe : rôle et identifiant.
+fn linked_key(linked: &forgearr_shared::flows::LinkedFlow) -> String {
+    format!("{}:{}", linked.role.as_str(), linked.flow.id)
 }
 
 fn lease_aad(job_id: Uuid, lease_epoch: i64) -> String {
@@ -40,13 +48,22 @@ pub fn seal_claim_secrets_for_worker(claim: &mut Claim, worker_bearer_key: &str)
     } else {
         HashMap::new()
     };
-    if plugin_configs.is_empty() && flow_headers.is_empty() {
+    let mut linked_flow_headers = HashMap::new();
+    for linked in &mut claim.linked_flows {
+        let (masked, headers) = extract_and_mask_definition_headers(&linked.flow.definition);
+        linked.flow.definition = masked;
+        if !headers.is_empty() {
+            linked_flow_headers.insert(linked_key(linked), headers);
+        }
+    }
+    if plugin_configs.is_empty() && flow_headers.is_empty() && linked_flow_headers.is_empty() {
         claim.sealed_secrets = None;
         return Ok(());
     }
     let payload = LeaseSecretsEnvelope {
         plugin_configs,
         flow_headers,
+        linked_flow_headers,
     };
     let json = serde_json::to_string(&payload).map_err(|_| AppError::Internal)?;
     let box_for_lease =
@@ -72,6 +89,11 @@ pub fn unseal_claim_secrets_for_worker(
     claim.plugin_configs = payload.plugin_configs;
     if let Some(ref mut flow) = claim.frozen_flow {
         flow.definition = inject_definition_headers(&flow.definition, &payload.flow_headers);
+    }
+    for linked in &mut claim.linked_flows {
+        if let Some(headers) = payload.linked_flow_headers.get(&linked_key(linked)) {
+            linked.flow.definition = inject_definition_headers(&linked.flow.definition, headers);
+        }
     }
     Ok(())
 }
@@ -242,10 +264,30 @@ mod tests {
             handoff_input: None,
             prior_warning: false,
             source_ticket: None,
+            library_name: None,
+            worker_name: None,
+            resume_variables: serde_json::Map::new(),
+            linked_flows: Vec::new(),
         };
+
+        let mut failure_flow = claim
+            .frozen_flow
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("flow attendu"))?;
+        failure_flow.id = "flow.echec".into();
+        claim.linked_flows.push(forgearr_shared::flows::LinkedFlow {
+            role: forgearr_shared::flows::LinkedFlowRole::Failure,
+            flow: failure_flow,
+        });
 
         let worker_key = "fdf_01020304_0123456789abcdef0123456789abcdef0123456789abcdef";
         seal_claim_secrets_for_worker(&mut claim, worker_key)?;
+        assert!(
+            !claim.linked_flows[0]
+                .flow
+                .definition
+                .contains("Bearer secret-token")
+        );
         assert!(claim.plugin_configs.is_empty());
         assert!(claim.sealed_secrets.is_some());
         let wire_def = &claim
@@ -274,6 +316,12 @@ mod tests {
             .ok_or_else(|| anyhow::anyhow!("flow attendu"))?
             .definition;
         assert!(clear_def.contains("Bearer secret-token"));
+        assert!(
+            claim.linked_flows[0]
+                .flow
+                .definition
+                .contains("Bearer secret-token")
+        );
         Ok(())
     }
 }

@@ -113,6 +113,9 @@ pub struct Library {
     pub min_file_bytes: u64,
     #[serde(default)]
     pub output_policy: LibraryOutputPolicy,
+    /// Priorité des tâches créées sans priorité explicite (`JOB_PRIORITY_MIN..=JOB_PRIORITY_MAX`).
+    #[serde(default = "crate::jobs::default_library_job_priority")]
+    pub default_priority: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -137,6 +140,9 @@ pub struct LibraryWrite {
     pub min_file_bytes: u64,
     #[serde(default)]
     pub output_policy: LibraryOutputPolicy,
+    /// Priorité des tâches créées sans priorité explicite (`JOB_PRIORITY_MIN..=JOB_PRIORITY_MAX`).
+    #[serde(default = "crate::jobs::default_library_job_priority")]
+    pub default_priority: i32,
 }
 
 /// Raccourci vers une racine ou un point de montage détecté sur un worker.
@@ -378,6 +384,7 @@ mod tests {
             exclude_patterns: vec!["*sample*".into(), "trailer".into()],
             min_file_bytes: 1_000,
             output_policy: LibraryOutputPolicy::OutputDir,
+            default_priority: crate::jobs::LIBRARY_DEFAULT_JOB_PRIORITY,
             created_at: now,
             updated_at: now,
         };

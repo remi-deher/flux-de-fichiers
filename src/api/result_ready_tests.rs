@@ -564,6 +564,7 @@ async fn the_integrated_worker_retains_a_working_file_to_relay_the_task() -> any
     let request = RelayRequest {
         target: RelayTarget::Worker { worker_id: holder },
         resume_node_id: "n2".into(),
+        variables: Default::default(),
         node_outputs: Default::default(),
     };
     // Sans adresse de transfert, personne ne pourrait tirer le fichier de travail.

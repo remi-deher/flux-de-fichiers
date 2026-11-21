@@ -123,6 +123,7 @@ mod tests {
             exclude_patterns: Vec::new(),
             min_file_bytes: 0,
             output_policy: LibraryOutputPolicy::OutputDir,
+            default_priority: forgearr_shared::jobs::LIBRARY_DEFAULT_JOB_PRIORITY,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

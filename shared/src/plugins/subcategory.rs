@@ -294,6 +294,27 @@ mod tests {
     }
 
     #[test]
+    fn embedded_registry_lists_the_official_families_in_a_strict_global_order() {
+        let registry = SubcategoryRegistry::embedded();
+        let expected = [
+            ("media-servers", PluginCategory::Media),
+            ("media-managers", PluginCategory::Media),
+            ("media-encoding", PluginCategory::Media),
+            ("media-subtitles", PluginCategory::Media),
+            ("notifications", PluginCategory::Io),
+        ];
+        let actual: Vec<(&str, PluginCategory)> = registry
+            .subcategories
+            .iter()
+            .map(|def| (def.id.as_str(), def.category))
+            .collect();
+        assert_eq!(actual, expected);
+        let orders: Vec<u32> = registry.subcategories.iter().map(|d| d.order).collect();
+        let ascending = orders.windows(2).all(|pair| pair[0] < pair[1]);
+        assert!(ascending, "{orders:?}");
+    }
+
+    #[test]
     fn label_falls_back_to_english_then_to_the_identifier() -> Result<(), String> {
         let registry = SubcategoryRegistry::parse(VALID_REGISTRY)?;
         let def = registry

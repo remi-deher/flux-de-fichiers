@@ -2,11 +2,12 @@
 
 use super::flow_preview::FlowDiagram;
 use super::metadata::{CommonInfoRows, MetaRow, StatusBanner, StoreTone};
+use super::script_preview::{ScriptPreview, catalog_script_import_path, catalog_script_path};
 use super::{card_description, section_badge_label};
 use crate::route::{Route, use_router};
 use crate::ui::{Tag, TagTone};
 use forgearr_shared::plugins::CatalogEntry;
-use forgearr_shared::plugins::vocab::CatalogSection;
+use forgearr_shared::plugins::vocab::{CatalogItemType, CatalogSection};
 use leptos::prelude::*;
 
 fn usage_hint(entry: &CatalogEntry) -> &'static str {
@@ -20,7 +21,7 @@ fn usage_hint(entry: &CatalogEntry) -> &'static str {
 }
 
 #[component]
-pub fn CatalogItemDetail(entry: CatalogEntry) -> impl IntoView {
+pub fn CatalogItemDetail(entry: CatalogEntry, can_manage: bool) -> impl IntoView {
     let router = use_router();
     let badge = section_badge_label(entry.entry_type);
     let description = card_description(&entry);
@@ -53,6 +54,15 @@ pub fn CatalogItemDetail(entry: CatalogEntry) -> impl IntoView {
         .into_any()
     });
 
+    let script_preview = (entry.entry_type == CatalogItemType::Script).then(|| {
+        view! {
+            <ScriptPreview
+                path=catalog_script_path(&entry.id)
+                import_path=can_manage.then(|| catalog_script_import_path(&entry.id))
+            />
+        }
+    });
+
     let flow_preview = entry
         .runtime
         .as_ref()
@@ -67,6 +77,7 @@ pub fn CatalogItemDetail(entry: CatalogEntry) -> impl IntoView {
                 action=flow_action
             />
             <p class="text-sm">{description}</p>
+            {script_preview}
             {flow_preview.map(|preview| view! {
                 <FlowDiagram preview=preview />
             })}

@@ -72,7 +72,9 @@ pub use forgearr_shared::plugins::{
     PluginSettingsView, RepositoryDetailView, ToolArtifactSummary, ToolDetailView, ToolStatus,
     ToolStatusSummary,
 };
-pub use script_preview::read_repository_script_preview;
+pub use script_preview::{
+    catalog_script_import, read_catalog_script_preview, read_repository_script_preview,
+};
 pub use script_requirements::{
     ScriptRequirements, operation_declaration_issue, read_script_requirements, requirement_statuses,
 };

@@ -334,6 +334,14 @@ fn json_routes() -> Router<AppState> {
             get(plugins::repository_script),
         )
         .route(
+            "/api/v1/plugins/scripts/{entry_id}",
+            get(plugins::catalog_script),
+        )
+        .route(
+            "/api/v1/plugins/scripts/{entry_id}/import",
+            post(plugins::import_catalog_script),
+        )
+        .route(
             "/api/v1/plugins/repositories/{id}/sync",
             post(plugins::sync_repository),
         )

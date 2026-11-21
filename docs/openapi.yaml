@@ -130,6 +130,30 @@ paths:
         '200':
           description: Rapport de validation (valid, errors, warnings)
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/plugins/scripts/{entry_id}:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: >-
+        Code d'un script du catalogue (tous dépôts confondus, le premier dépôt qui porte l'identifiant l'emporte),
+        en lecture seule : métadonnées, variables, lignes de jetons colorés et état de ses dépendances. Affiché dans
+        le tiroir de l'entrée du catalogue.
+      parameters:
+        - {name: entry_id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Aperçu du script.}
+        '404': {description: Script inconnu.}
+  /api/v1/plugins/scripts/{entry_id}/import:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: >-
+        Copie un script du catalogue dans la librairie locale (« ma collection ») sous un identifiant neuf, avec son
+        code, ses variables et ses dépendances. 409 si le script est déjà local ou si un script local porte déjà ce nom.
+      parameters:
+        - {name: entry_id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Script local créé.}
+        '404': {description: Script inconnu.}
+        '409': {description: Déjà dans la librairie locale.}
   /api/v1/flows/{id}/media-sample:
     get:
       security: [{ApiKey: []}, {WebSession: []}]

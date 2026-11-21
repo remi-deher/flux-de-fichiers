@@ -46,6 +46,14 @@ pub(in crate::plugins) fn read_local_script(
         .get("variables")
         .and_then(|raw| serde_json::from_value(raw.clone()).ok())
         .unwrap_or_default();
+    let requires = runtime
+        .get("requires")
+        .and_then(|raw| serde_json::from_value(raw.clone()).ok())
+        .unwrap_or_default();
+    let dependencies_unverified = runtime
+        .get("dependenciesUnverified")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let slug = entry
         .id
         .strip_prefix("script.")
@@ -62,6 +70,8 @@ pub(in crate::plugins) fn read_local_script(
         category: entry.category,
         tags: entry.tags.clone(),
         variables,
+        requires,
+        dependencies_unverified,
     })
 }
 

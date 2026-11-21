@@ -1,5 +1,6 @@
 //! Déclaration des variables d'un script local : lignes éditables converties vers le schéma (ADR 0025).
 
+use super::rows::{KeyedRow, edit_row, next_key, read_row, remove_row, row_keys};
 use forgearr_shared::script_variables::{
     InvalidDefaultText, ScriptVariable, VariableKind, default_from_text, default_to_text,
     validate_variables,
@@ -16,6 +17,12 @@ pub struct VariableRow {
     options_text: String,
     min_text: String,
     max_text: String,
+}
+
+impl KeyedRow for VariableRow {
+    fn key(&self) -> u32 {
+        self.key
+    }
 }
 
 fn number_text(number: Option<&Number>) -> String {
@@ -87,22 +94,6 @@ pub fn rows_to_variables(rows: &[VariableRow]) -> Result<Vec<ScriptVariable>, St
         .collect::<Result<Vec<_>, _>>()?;
     validate_variables(&variables).map_err(|err| err.to_string())?;
     Ok(variables)
-}
-
-fn read_row<T>(
-    rows: RwSignal<Vec<VariableRow>>,
-    key: u32,
-    read: impl Fn(&VariableRow) -> T,
-) -> Option<T> {
-    rows.with(|all| all.iter().find(|row| row.key == key).map(read))
-}
-
-fn edit_row(rows: RwSignal<Vec<VariableRow>>, key: u32, edit: impl FnOnce(&mut VariableRow)) {
-    rows.update(|all| {
-        if let Some(row) = all.iter_mut().find(|row| row.key == key) {
-            edit(row);
-        }
-    });
 }
 
 #[component]
@@ -183,7 +174,7 @@ fn VariableRowEditor(rows: RwSignal<Vec<VariableRow>>, key: u32, read_only: bool
             </label>
             {(!read_only).then(|| view! {
                 <button type="button" class="btn btn-danger-quiet btn-sm"
-                    on:click=move |_| rows.update(|all| all.retain(|row| row.key != key))>
+                    on:click=move |_| remove_row(rows, key)>
                     "Retirer la variable"
                 </button>
             })}
@@ -196,11 +187,7 @@ fn VariableRowEditor(rows: RwSignal<Vec<VariableRow>>, key: u32, read_only: bool
 pub fn VariablesEditor(rows: RwSignal<Vec<VariableRow>>, read_only: bool) -> impl IntoView {
     let add = move |_| {
         rows.update(|all| {
-            let key = all
-                .iter()
-                .map(|row| row.key)
-                .max()
-                .map_or(0, |last| last + 1);
+            let key = next_key(all);
             all.push(VariableRow {
                 key,
                 ..VariableRow::default()
@@ -212,7 +199,7 @@ pub fn VariablesEditor(rows: RwSignal<Vec<VariableRow>>, read_only: bool) -> imp
             <span class="form-label">"Variables réglables dans le flux"</span>
             <p class="form-help">"Le script les lit dans « config » sur stdin."</p>
             <For
-                each=move || rows.with(|all| all.iter().map(|row| row.key).collect::<Vec<_>>())
+                each=move || row_keys(rows)
                 key=|key| *key
                 children=move |key| view! { <VariableRowEditor rows=rows key=key read_only=read_only /> }
             />

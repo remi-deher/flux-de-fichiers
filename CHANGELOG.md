@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.71.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.70.0...v0.71.0) (2026-11-21)
+
+
+### Features
+
+* **flows:** chemins à sélecteur pour les variables exposées (ADR 0025) ([6f393fb](https://github.com/remi-deher/flux-de-fichiers/commit/6f393fb66172201183fb5840cf60d71fc4e5f694))
+* **flows:** chemins à sélecteur pour les variables exposées et tests des routes (ADR 0025) ([6b82899](https://github.com/remi-deher/flux-de-fichiers/commit/6b82899a68574959ce90f3252c358e31852e58cc))
+
 ## [0.70.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.69.0...v0.70.0) (2026-11-21)
 
 

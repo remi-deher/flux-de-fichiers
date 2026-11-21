@@ -76,6 +76,8 @@ pub struct SyncReport {
     pub entries: usize,
     pub files: usize,
     pub skipped: Vec<String>,
+    /// Sous-catégories déclarées mais non retenues (ADR 0023) ; le plugin reste dans sa catégorie.
+    pub warnings: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_version: Option<String>,
     #[serde(default)]
@@ -480,10 +482,20 @@ async fn prepare_sync(
             &mut skipped,
         )?;
     }
+    let warnings = super::subcategory::repository_warnings(&parsed.index.entries, |entry| {
+        manifest_docs
+            .iter()
+            .find(|(relative, _)| *relative == entry.manifest_path)
+            .map(|(_, content)| content.clone())
+    });
+    for warning in &warnings {
+        tracing::warn!(repository = %repository.id, %warning, "sous-catégorie non retenue");
+    }
     let report = SyncReport {
         entries: parsed.index.entries.len(),
         files: files.len(),
         skipped,
+        warnings,
         release_version,
         index_sha256,
     };
@@ -580,6 +592,7 @@ mod tests {
             current_choice: None,
             distribution: None,
             category: None,
+            subcategory: None,
             tags: Vec::new(),
             owner: None,
             sha256: None,

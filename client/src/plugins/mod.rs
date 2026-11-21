@@ -9,6 +9,7 @@ mod plugin_detail;
 mod repo_detail;
 mod repos;
 mod settings;
+mod subcategory_groups;
 mod tool_detail;
 mod tools;
 
@@ -469,6 +470,7 @@ mod tests {
             current_choice: None,
             distribution: None,
             category: None,
+            subcategory: None,
             tags: Vec::new(),
             owner: None,
             sha256: None,

@@ -82,8 +82,19 @@ impl VariableContext {
     }
 }
 
+/// Références `{{chemin}}` d'un texte, dans l'ordre.
+pub(super) fn references_in(text: &str) -> Vec<&str> {
+    parse_template(text)
+        .into_iter()
+        .filter_map(|segment| match segment {
+            Segment::Reference(path) => Some(path),
+            Segment::Text(_) => None,
+        })
+        .collect()
+}
+
 /// Parcourt `root` selon un chemin pointé (clés d'objet, indices de tableau) ; `null` compte comme absente.
-fn lookup_in<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
+pub(super) fn lookup_in<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
     let mut current = root;
     for segment in path.split('.') {
         current = match current {
@@ -183,7 +194,7 @@ fn parse_template(text: &str) -> Vec<Segment<'_>> {
     segments
 }
 
-fn as_text(value: &Value) -> String {
+pub(super) fn as_text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
         other => other.to_string(),

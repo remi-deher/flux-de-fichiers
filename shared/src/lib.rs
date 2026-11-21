@@ -12,6 +12,7 @@ pub mod capabilities;
 pub mod diagnostics;
 pub mod exposed_variables;
 pub mod flow_analysis;
+pub mod flow_variables;
 pub mod flows;
 pub mod format;
 pub mod highlight;

@@ -112,7 +112,10 @@ paths:
   /api/v1/flows/validate:
     post:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Valider la structure d'un graphe de flux avant sauvegarde
+      summary: >-
+        Valider la structure d'un graphe de flux avant sauvegarde ; les références `{{…}}` des
+        variables déclarées des nœuds script (inconnues, ou vers un nœud qui ne précède pas) sont
+        aussi signalées dans `errors` (ADR 0025)
       requestBody:
         required: true
         content:
@@ -125,6 +128,30 @@ paths:
       responses:
         '200':
           description: Rapport de validation (valid, errors, warnings)
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/flows/node-variables:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: >-
+        Variables du script d'un nœud (ADR 0025) : schéma, références `{{…}}` disponibles à cet endroit
+        du graphe (flux, métadonnées d'exemple, nœuds en amont, plugins qui s'exécutent avant) et
+        `config` résolue avec des valeurs d'exemple. Le graphe peut ne pas être enregistré.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [graph, nodeId]
+              properties:
+                graph: {type: object}
+                nodeId: {type: string}
+                mediaInfo: {description: Exemple de métadonnées du fichier (JSON de sonde)}
+      responses:
+        '200':
+          description: >-
+            `variables`, `references` (`reference`, `label`, `source` : flow, media_info, node, plugin,
+            `sample`), `resolved` (absent si la résolution échoue) et `error`
         default: {$ref: '#/components/responses/Error'}
   /api/v1/flows/{id}/versions/{version}/restore:
     post:

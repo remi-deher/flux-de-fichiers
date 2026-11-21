@@ -16,6 +16,7 @@ mod quick_add;
 mod script_inspector;
 mod simulation;
 mod state;
+mod variables_form;
 mod versions;
 
 pub use editor::FlowEditor;

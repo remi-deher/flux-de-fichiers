@@ -1,6 +1,6 @@
 # 0025 — Variables de script, exposition par les plugins et dépendances
 
-Statut : accepté par l'utilisateur (21 nov. 2026) ; phases A, B et C implémentées.
+Statut : accepté par l'utilisateur (21 nov. 2026) ; phases A à D implémentées.
 
 ## Contexte
 
@@ -84,7 +84,15 @@ réimplémenter ce travail.
   dans les références et contrôle les dépendances avant le script ; l'aperçu d'un script de dépôt
   affiche ses dépendances et leur disponibilité ; la résolution des dépendances et `DependencyInstallResult`
   signalent le dépôt à ajouter (`suggestedRepositories`).
-- Reportés : le refus d'une référence inconnue à l'enregistrement du flux (phase D, avec le
-  sélecteur qui sait ce qui est disponible en amont), la résolution des secrets, la saisie de
-  `requires` dans l'éditeur de scripts locaux et l'affichage des `exposes` dans la fiche d'un plugin.
+- Phase D : `POST /api/v1/flows/node-variables` renvoie, pour un nœud du graphe courant (même non
+  enregistré), le schéma de son script, les références disponibles à cet endroit (flux, champs d'un
+  exemple de métadonnées, sorties des nœuds en amont, variables des plugins qui s'exécutent avant,
+  sondes comprises) et la `config` résolue avec des valeurs d'exemple (les sorties des nœuds en amont
+  y sont des marqueurs). L'inspecteur du nœud génère le formulaire depuis le schéma, avec un sélecteur
+  de références et cet aperçu. `PUT /api/v1/flows/{id}` refuse (400, `invalid_flow_variables`, avec la
+  liste des références en cause) un flux dont une variable déclarée contient une référence inconnue ou
+  vers un nœud qui ne le précède pas ; `POST /api/v1/flows/validate` la signale dans `errors`. Seules
+  les clés du schéma sont contrôlées.
+- Reportés : la résolution et la saisie des secrets dans le flux, la saisie de `requires` dans
+  l'éditeur de scripts locaux et l'affichage des `exposes` dans la fiche d'un plugin.
 - Les scripts existants, sans `variables`, restent valides (liste vide par défaut).

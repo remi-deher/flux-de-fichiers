@@ -603,10 +603,18 @@ impl OperationRegistry {
 
     /// Expositions des plugins, triées par opération ; un espace de noms déjà pris l'est par la première.
     pub fn exposed_variables(&self) -> Vec<&ExposedVariables> {
+        self.exposed_variables_where(|_| true)
+    }
+
+    /// Comme `exposed_variables`, limité aux opérations retenues par `keep`.
+    pub fn exposed_variables_where(
+        &self,
+        keep: impl Fn(&OperationContract) -> bool,
+    ) -> Vec<&ExposedVariables> {
         let mut exposing: Vec<&OperationContract> = self
             .operations
             .values()
-            .filter(|op| op.exposes.is_some())
+            .filter(|op| op.exposes.is_some() && keep(op))
             .collect();
         exposing.sort_by(|a, b| a.id.cmp(&b.id));
         let mut seen = HashSet::new();
@@ -754,6 +762,18 @@ impl OperationRegistry {
                 )
             })
             .collect()
+    }
+
+    /// L'opération est-elle une sonde, exécutée avant tout nœud du flux ?
+    pub fn is_probe(op: &OperationContract) -> bool {
+        matches!(
+            &op.runtime,
+            OperationRuntime::Binary(bin)
+                if matches!(
+                    bin.execution_mode,
+                    BinaryExecutionMode::ProbePrimary | BinaryExecutionMode::ProbeEnrich
+                )
+        )
     }
 
     pub fn all_probes(&self) -> Vec<&OperationContract> {

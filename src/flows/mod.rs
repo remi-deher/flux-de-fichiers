@@ -11,6 +11,7 @@ pub mod lease_secrets;
 pub mod placement;
 pub(crate) mod publication;
 pub mod script_runner;
+mod node_references;
 mod variables;
 
 #[cfg(test)]
@@ -30,6 +31,7 @@ use std::{
 use uuid::Uuid;
 
 pub use condition::{ConditionConfig, evaluate_condition};
+pub use node_references::{check_references, node_variables_view, upstream_node_ids};
 pub use contract::{
     BinaryExecutionMode, BinaryRuntime, ContractError, HttpRuntime, OperationContract,
     OperationRegistry, OperationRuntime, PrimitiveKind, ScriptInterpreter, ScriptRuntime, ToolRef,
@@ -504,25 +506,8 @@ impl<'a> FlowEngine<'a> {
                     }
                 }
                 OperationRuntime::Script(script_rt) => {
-                    let mut effective_rt = script_rt.clone();
-                    if effective_rt.code.is_none()
-                        && node.config.get("mode").and_then(Value::as_str) != Some("inline")
-                        && let Some(script_id) = node
-                            .config
-                            .get("scriptId")
-                            .and_then(Value::as_str)
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                        && let Some(target_op) =
-                            self.registry.get(&format!("operation.{script_id}"))
-                        && let OperationRuntime::Script(target_rt) = &target_op.runtime
-                    {
-                        let fallback_tool = effective_rt.tool.clone();
-                        effective_rt = target_rt.clone();
-                        if effective_rt.tool.is_none() {
-                            effective_rt.tool = fallback_tool;
-                        }
-                    }
+                    let effective_rt =
+                        node_references::effective_script_runtime(self.registry, &node, script_rt);
                     let script_error_code = effective_rt
                         .error_code
                         .unwrap_or(forgearr_shared::jobs::JobErrorCode::OperationFailed);

@@ -36,6 +36,8 @@ pub enum AppError {
     UnsupportedArchive(String),
     #[error("invalid manifest: {0}")]
     InvalidManifest(String),
+    #[error("invalid flow variables: {0}")]
+    InvalidFlowVariables(String),
     #[error("repository unavailable: {0}")]
     RepositoryUnavailable(String),
     #[error("central unavailable")]
@@ -80,6 +82,7 @@ impl IntoResponse for AppError {
             | Self::ToolUnavailable(_)
             | Self::UnsupportedArchive(_)
             | Self::InvalidManifest(_) => (StatusCode::BAD_REQUEST, "invalid_tool_artifact"),
+            Self::InvalidFlowVariables(_) => (StatusCode::BAD_REQUEST, "invalid_flow_variables"),
             Self::RepositoryUnavailable(_) => (StatusCode::BAD_GATEWAY, "repository_unavailable"),
             Self::CentralUnavailable => (StatusCode::BAD_GATEWAY, "central_unavailable"),
             Self::ResultUndeliverable => (StatusCode::BAD_GATEWAY, "result_undeliverable"),
@@ -90,9 +93,9 @@ impl IntoResponse for AppError {
             }
         };
         let mut error = json!({"code": code});
-        if let Self::RepositoryUnavailable(detail) = &self {
+        if let Self::InvalidFlowVariables(detail) | Self::RepositoryUnavailable(detail) = &self {
             let message = bounded_detail(detail);
-            tracing::warn!(code, %message, "dépôt ou outil indisponible");
+            tracing::warn!(code, %message, "détail d'erreur transmis au client");
             error["message"] = json!(message);
         }
         let mut response = (status, Json(json!({"error": error}))).into_response();

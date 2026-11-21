@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.67.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.66.0...v0.67.0) (2026-11-21)
+
+
+### Features
+
+* **plugins:** sous-catégories media-encoding et media-subtitles ([25e5ed2](https://github.com/remi-deher/flux-de-fichiers/commit/25e5ed2f3fbc873ed2d7bd3b0f1f588de9032466))
+* **plugins:** sous-catégories media-encoding et media-subtitles ([ebd8eb5](https://github.com/remi-deher/flux-de-fichiers/commit/ebd8eb57d9d0b859a65f35cc596ff78f1c21acb6))
+
 ## [0.66.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.65.0...v0.66.0) (2026-11-21)
 
 

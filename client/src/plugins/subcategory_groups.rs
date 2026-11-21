@@ -99,6 +99,29 @@ mod tests {
     }
 
     #[test]
+    fn encoding_and_subtitles_groups_sit_between_managers_and_notifications() {
+        let grouped = group_by_subcategory(vec![
+            entry("notify", Some("notifications")),
+            entry("sous-titres", Some("media-subtitles")),
+            entry("video", Some("media-encoding")),
+            entry("vmaf", Some("media-encoding")),
+            entry("sonarr", Some("media-managers")),
+        ]);
+        let titles: Vec<&str> = grouped.groups.iter().map(|group| group.title).collect();
+        assert_eq!(
+            titles,
+            vec![
+                "Gestionnaires de médiathèque",
+                "Encodage et conversion",
+                "Sous-titres",
+                "Notifications"
+            ]
+        );
+        let encoding = grouped.groups.get(1).map(|group| ids(&group.entries));
+        assert_eq!(encoding, Some(vec!["video", "vmaf"]));
+    }
+
+    #[test]
     fn unknown_subcategory_ids_stay_ungrouped() {
         let grouped = group_by_subcategory(vec![entry("odd", Some("studio")), entry("none", None)]);
         assert_eq!(ids(&grouped.ungrouped), vec!["odd", "none"]);

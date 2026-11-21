@@ -818,10 +818,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("plugins"))?;
         let plugins = [
-            ("plex", r#""category": "media", "subcategory": "media-servers""#),
-            ("jellyfin", r#""category": "media", "subcategory": "Media Servers""#),
+            (
+                "plex",
+                r#""category": "media", "subcategory": "media-servers""#,
+            ),
+            (
+                "jellyfin",
+                r#""category": "media", "subcategory": "Media Servers""#,
+            ),
             ("custom", r#""category": "media", "subcategory": "studio""#),
-            ("webhook", r#""category": "io", "subcategory": "media-servers""#),
+            (
+                "webhook",
+                r#""category": "io", "subcategory": "media-servers""#,
+            ),
             ("bare", r#""category": "media""#),
         ];
         let mut index_entries = Vec::new();
@@ -861,7 +870,12 @@ mod tests {
         let listed = serde_json::to_value(&entries)?;
         let serialized: Vec<bool> = listed
             .as_array()
-            .map(|items| items.iter().map(|item| item.get("subcategory").is_some()).collect())
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|item| item.get("subcategory").is_some())
+                    .collect()
+            })
             .unwrap_or_default();
         assert_eq!(serialized.iter().filter(|present| **present).count(), 1);
 

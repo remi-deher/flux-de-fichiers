@@ -88,7 +88,11 @@ mod tests {
         let titles: Vec<&str> = grouped.groups.iter().map(|group| group.title).collect();
         assert_eq!(
             titles,
-            vec!["Serveurs média", "Gestionnaires de médiathèque", "Notifications"]
+            vec![
+                "Serveurs média",
+                "Gestionnaires de médiathèque",
+                "Notifications"
+            ]
         );
         let media_servers = grouped.groups.first().map(|group| ids(&group.entries));
         assert_eq!(media_servers, Some(vec!["plex", "jellyfin"]));

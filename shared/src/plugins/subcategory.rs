@@ -60,7 +60,9 @@ impl SubcategoryId {
             return Err(SubcategoryIdError::TooLong);
         }
         let allowed = |character: char| {
-            character.is_ascii_lowercase() || character.is_ascii_digit() || character == ID_SEPARATOR
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || character == ID_SEPARATOR
         };
         if !raw.chars().all(allowed) {
             return Err(SubcategoryIdError::InvalidCharacter);

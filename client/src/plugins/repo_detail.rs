@@ -47,6 +47,18 @@ fn ContentTab(detail: RepositoryDetailView) -> impl IntoView {
                 <MetaRow term="Schéma d'index" mono=true>{schema}</MetaRow>
             })}
         </div>
+        {(!detail.warnings.is_empty()).then(|| view! {
+            <div class="pack-components">
+                <h3 class="form-label">"Sous-catégories non retenues"</h3>
+                <ul class="step-list">
+                    {detail.warnings.into_iter().map(|warning| view! {
+                        <li class="step-item">
+                            <div class="step-item__meta">{warning}</div>
+                        </li>
+                    }).collect_view()}
+                </ul>
+            </div>
+        })}
         <div class="pack-components">
             <h3 class="form-label">"Pièces exposées par ce dépôt"</h3>
             {if detail.entries.is_empty() {
@@ -177,7 +189,7 @@ pub fn RepoDetail(
                         let sync_id = data.repository.id.clone();
                         let banner_tone = if !data.repository.enabled {
                             StoreTone::Neutral
-                        } else if data.skipped_count > 0 {
+                        } else if data.skipped_count > 0 || !data.warnings.is_empty() {
                             StoreTone::Warning
                         } else if data.synced_on_disk {
                             StoreTone::Success
@@ -191,10 +203,17 @@ pub fn RepoDetail(
                         } else {
                             format!("{} entrée(s) indexée(s)", data.entries_count)
                         };
-                        let banner_text = if data.skipped_count > 0 {
-                            Some(format!("{} fiche(s) ignorée(s) lors du dernier index.", data.skipped_count))
-                        } else {
+                        let mut notices = Vec::new();
+                        if data.skipped_count > 0 {
+                            notices.push(format!("{} fiche(s) ignorée(s) lors du dernier index.", data.skipped_count));
+                        }
+                        if !data.warnings.is_empty() {
+                            notices.push(format!("{} sous-catégorie(s) non retenue(s).", data.warnings.len()));
+                        }
+                        let banner_text = if notices.is_empty() {
                             data.repository.last_synced_at.as_ref().map(|dt| format!("Dernière synchro : {dt}"))
+                        } else {
+                            Some(notices.join(" "))
                         };
                         let sync_btn = view! {
                             <button

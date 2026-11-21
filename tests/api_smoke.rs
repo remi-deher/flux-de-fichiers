@@ -15,6 +15,10 @@ use std::sync::Arc;
 use tower::ServiceExt;
 
 async fn test_app() -> anyhow::Result<axum::Router> {
+    test_app_serving("frontend/dist".into()).await
+}
+
+async fn test_app_serving(static_dir: std::path::PathBuf) -> anyhow::Result<axum::Router> {
     let config = Config {
         bind: "127.0.0.1:3000".parse()?,
         database_url: "sqlite::memory:".into(),
@@ -23,7 +27,7 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         config_dir: "var/config".into(),
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
-        static_dir: "frontend/dist".into(),
+        static_dir,
         max_file_bytes: 10_000_000,
         local_worker: false,
         web_origin: None,
@@ -55,7 +59,8 @@ async fn test_smoke_health_check() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_smoke_frontend_served() -> anyhow::Result<()> {
-    let app = test_app().await?;
+    let page = common::static_dir_with_page()?;
+    let app = test_app_serving(page.path().to_path_buf()).await?;
     let req = Request::builder()
         .uri("/")
         .method("GET")
@@ -71,7 +76,8 @@ async fn test_smoke_frontend_served() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_smoke_forgearr_mark_served_as_svg() -> anyhow::Result<()> {
-    let app = test_app().await?;
+    let page = common::static_dir_with_page()?;
+    let app = test_app_serving(page.path().to_path_buf()).await?;
     let req = Request::builder()
         .uri(forgearr_shared::brand::MARK_PATH)
         .body(Body::empty())?;

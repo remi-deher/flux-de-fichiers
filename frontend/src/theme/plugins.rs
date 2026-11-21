@@ -175,7 +175,7 @@ pub const PLUGINS_CSS: &str = r#"
 /* --- Grille App Store responsive --- */
 .store-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(18.5rem, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
 }
 

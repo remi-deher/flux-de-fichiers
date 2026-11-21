@@ -32,10 +32,10 @@ Tu travailles sur le projet **Forgearr**. Source de vérité : `AGENTS.md`, puis
   cargo test -p <paquet>
   ```
 - La cible `wasm32-unknown-unknown` n'est pas installée en local : le client se vérifie en natif ici, en WASM en CI.
-- **Régénérer la page** après toute modification du thème ou de la page (`feature.yml` refuse une page périmée) :
+- **La page `frontend/dist/index.html` est générée et non versionnée** (ignorée par Git) : le Dockerfile
+  et `npm run dev` la produisent eux-mêmes, et `feature.yml` vérifie qu'elle se génère. Pour la produire à la main :
   ```bash
   cargo run -p forgearr-frontend
-  # Régénère frontend/dist/index.html
   ```
 
 ---

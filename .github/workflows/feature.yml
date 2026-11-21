@@ -7,9 +7,13 @@ on:
   pull_request:
     branches: [dev]
     types: [opened, synchronize, reopened, ready_for_review]
+  # Après chaque fusion, le même job remplit le cache de `dev` : GitHub ne laisse
+  # une PR restaurer que les caches de sa branche cible ou de la branche par défaut.
+  push:
+    branches: [dev]
 
 concurrency:
-  group: feature-${{ github.event.pull_request.number }}
+  group: feature-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -32,7 +36,5 @@ jobs:
           cargo clippy -p forgearr-shared -p forgearr-client -p forgearr-frontend --all-targets --locked -- -D warnings
           cargo clippy -p forgearr-client --target wasm32-unknown-unknown --locked -- -D warnings
           cargo test -p forgearr-shared -p forgearr-client -p forgearr-frontend --locked
-      - name: La page générée est à jour
-        run: |
-          cargo run -p forgearr-frontend --locked
-          git diff --exit-code frontend/dist/index.html
+      - name: La page se génère (frontend/dist/index.html n'est pas versionnée)
+        run: cargo run -p forgearr-frontend --locked

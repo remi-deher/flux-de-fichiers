@@ -106,20 +106,18 @@ mod tests {
     }
 
     #[test]
-    fn routing_as_str_round_trips_through_serde() {
+    fn routing_as_str_round_trips_through_serde() -> serde_json::Result<()> {
         for routing in ScriptRouting::ALL {
             assert_eq!(ScriptRouting::parse(routing.as_str()), routing);
-            let encoded = serde_json::to_value(routing).unwrap();
+            let encoded = serde_json::to_value(routing)?;
             assert_eq!(encoded, json!(routing.as_str()));
-            assert_eq!(
-                serde_json::from_value::<ScriptRouting>(encoded).unwrap(),
-                routing
-            );
+            assert_eq!(serde_json::from_value::<ScriptRouting>(encoded)?, routing);
         }
+        Ok(())
     }
 
     #[test]
-    fn branch_port_parses_and_formats() {
+    fn branch_port_parses_and_formats() -> serde_json::Result<()> {
         assert_eq!(BranchPort::parse("true"), Some(BranchPort::True));
         assert_eq!(BranchPort::parse("false"), Some(BranchPort::False));
         assert_eq!(BranchPort::parse("alt"), None);
@@ -127,9 +125,10 @@ mod tests {
         assert_eq!(BranchPort::from_bool(true), BranchPort::True);
         assert_eq!(BranchPort::from_bool(false), BranchPort::False);
         for port in BranchPort::ALL {
-            let encoded = serde_json::to_value(port).unwrap();
+            let encoded = serde_json::to_value(port)?;
             assert_eq!(encoded, json!(port.as_str()));
-            assert_eq!(serde_json::from_value::<BranchPort>(encoded).unwrap(), port);
+            assert_eq!(serde_json::from_value::<BranchPort>(encoded)?, port);
         }
+        Ok(())
     }
 }

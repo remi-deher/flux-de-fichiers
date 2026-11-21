@@ -725,6 +725,7 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                     <div class="resource-grid resource-grid--list">
                         {shown.into_iter().map(|worker| {
                             let id = worker.id;
+                            let slot_total = worker.slots().total;
                             let liveness = worker.liveness(now);
                             let (badge_label, badge_variant) = liveness_badge(liveness);
                             let (role_label, role_tone) = role_meta(&worker);
@@ -797,8 +798,8 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                                 >
                                     <div class="cluster cluster-wrap">
                                         <Tag label=role_label tone=role_tone />
-                                        {(worker.slots().total > 1).then(|| view! {
-                                            <Tag label=format!("{}× simult.", worker.slots().total) tone=TagTone::Neutral />
+                                        {(slot_total > 1).then(|| view! {
+                                            <Tag label=format!("{slot_total}× simult.") tone=TagTone::Neutral />
                                         })}
                                         {worker.schedule.as_ref().filter(|s| s.enabled).map(|s| view! {
                                             <Tag label=format!("{:02}h–{:02}h", s.start_hour, s.end_hour) tone=TagTone::Mono />

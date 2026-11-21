@@ -14,6 +14,8 @@ pub const RESERVED_NAMESPACES: &[&str] = &["nodes"];
 pub const MAX_EXPOSED_VARIABLES: usize = 128;
 /// Nombre maximal de dépendances déclarées par un script.
 pub const MAX_REQUIREMENTS: usize = 32;
+/// Longueur maximale du message de dépréciation d'une variable exposée.
+pub const MAX_DEPRECATION_LEN: usize = 300;
 /// Nombre maximal de segments d'un nom ou d'un chemin.
 pub const MAX_PATH_SEGMENTS: usize = 8;
 /// Version majeure du contrat exposé que vise un script par défaut.
@@ -34,6 +36,12 @@ pub struct ExposedVariable {
     pub kind: VariableKind,
     /// Requête de la valeur dans `mediaInfo` après l'opération du plugin (première valeur non nulle).
     pub path: String,
+    /// Message de dépréciation : la variable reste lue, mais les flux et scripts qui l'utilisent sont avertis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deprecated: Option<String>,
+    /// Nom relatif de la variable qui la remplace dans le même contrat (exige `deprecated`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaced_by: Option<String>,
 }
 
 /// Ce qu'un plugin expose aux scripts, versionné.
@@ -51,6 +59,14 @@ impl ExposedVariables {
     /// Version majeure du contrat, si `contract_version` est bien formée.
     pub fn contract_major(&self) -> Option<u32> {
         parse_contract_major(&self.contract_version)
+    }
+
+    /// Référence complète de la variable qui en remplace une dépréciée, si le contrat la désigne.
+    pub fn replacement_reference(&self, variable: &ExposedVariable) -> Option<String> {
+        variable
+            .replaced_by
+            .as_ref()
+            .map(|name| format!("{}.{name}", self.namespace))
     }
 
     /// Référence complète d'une variable : `espace.nom`.
@@ -129,6 +145,7 @@ pub enum ExposeError {
     DuplicateName(String),
     NestedName(String),
     InvalidPath(String),
+    InvalidDeprecation(String),
     SecretNotExposable(String),
     TooManyRequirements,
     InvalidReference(String),
@@ -166,6 +183,10 @@ impl fmt::Display for ExposeError {
             Self::InvalidPath(name) => {
                 write!(f, "chemin invalide pour la variable exposée « {name} »")
             }
+            Self::InvalidDeprecation(name) => write!(
+                f,
+                "dépréciation invalide pour la variable exposée « {name} » (message non vide de {MAX_DEPRECATION_LEN} caractères au plus ; replacedBy exige deprecated et désigne une autre variable du contrat)"
+            ),
             Self::SecretNotExposable(name) => {
                 write!(f, "la variable « {name} » ne peut pas être un secret")
             }
@@ -304,7 +325,26 @@ pub fn validate_exposed(exposed: &ExposedVariables) -> Result<(), ExposeError> {
             }
         }
     }
+    for variable in &exposed.variables {
+        if !deprecation_is_valid(variable, &exposed.variables) {
+            return Err(ExposeError::InvalidDeprecation(variable.name.clone()));
+        }
+    }
     Ok(())
+}
+
+/// Message non vide et borné ; une variable de remplacement exige la dépréciation et désigne une autre
+/// variable du même contrat.
+fn deprecation_is_valid(variable: &ExposedVariable, all: &[ExposedVariable]) -> bool {
+    let message_is_valid = variable.deprecated.as_deref().is_none_or(|message| {
+        !message.trim().is_empty() && message.chars().count() <= MAX_DEPRECATION_LEN
+    });
+    let replacement_is_valid = variable.replaced_by.as_ref().is_none_or(|target| {
+        variable.deprecated.is_some()
+            && *target != variable.name
+            && all.iter().any(|other| other.name == *target)
+    });
+    message_is_valid && replacement_is_valid
 }
 
 fn index_url_is_valid(url: &str) -> bool {
@@ -361,6 +401,8 @@ mod tests {
             description: None,
             kind: VariableKind::Text,
             path: path.into(),
+            deprecated: None,
+            replaced_by: None,
         }
     }
 
@@ -664,6 +706,66 @@ mod tests {
         assert_eq!(
             validate_requirements(&two_majors),
             Err(ExposeError::AmbiguousNamespace("mediainfo".into()))
+        );
+    }
+
+    fn with_deprecation(deprecated: Option<&str>, replaced_by: Option<&str>) -> ExposedVariables {
+        let mut exposure = mediainfo();
+        exposure.variables = vec![
+            exposed_variable("video.codec", "a"),
+            exposed_variable("video.codec_name", "b"),
+        ];
+        exposure.variables[0].deprecated = deprecated.map(str::to_owned);
+        exposure.variables[0].replaced_by = replaced_by.map(str::to_owned);
+        exposure
+    }
+
+    #[test]
+    fn a_deprecated_variable_may_name_its_replacement_in_the_same_contract()
+    -> Result<(), serde_json::Error> {
+        assert_eq!(validate_exposed(&with_deprecation(None, None)), Ok(()));
+        assert_eq!(
+            validate_exposed(&with_deprecation(Some("Renommée."), None)),
+            Ok(())
+        );
+        let exposure = with_deprecation(Some("Renommée."), Some("video.codec_name"));
+        assert_eq!(validate_exposed(&exposure), Ok(()));
+        let variable = &exposure.variables[0];
+        assert_eq!(
+            exposure.replacement_reference(variable),
+            Some("mediainfo.video.codec_name".to_owned())
+        );
+        assert_eq!(exposure.replacement_reference(&exposure.variables[1]), None);
+
+        let json = serde_json::to_string(&exposure)?;
+        assert!(json.contains("\"replacedBy\":\"video.codec_name\""));
+        let plain = serde_json::to_string(&mediainfo())?;
+        assert!(!plain.contains("deprecated") && !plain.contains("replacedBy"));
+        let again: ExposedVariables = serde_json::from_str(&json)?;
+        assert_eq!(again, exposure);
+        Ok(())
+    }
+
+    #[test]
+    fn malformed_deprecations_are_refused() {
+        let invalid = |exposure: ExposedVariables| {
+            assert_eq!(
+                validate_exposed(&exposure),
+                Err(ExposeError::InvalidDeprecation("video.codec".into()))
+            );
+        };
+        invalid(with_deprecation(Some("   "), None));
+        invalid(with_deprecation(
+            Some("x".repeat(MAX_DEPRECATION_LEN + 1).as_str()),
+            None,
+        ));
+        invalid(with_deprecation(None, Some("video.codec_name")));
+        invalid(with_deprecation(Some("Renommée."), Some("video.absente")));
+        invalid(with_deprecation(Some("Renommée."), Some("video.codec")));
+        let longest = "x".repeat(MAX_DEPRECATION_LEN);
+        assert_eq!(
+            validate_exposed(&with_deprecation(Some(longest.as_str()), None)),
+            Ok(())
         );
     }
 }

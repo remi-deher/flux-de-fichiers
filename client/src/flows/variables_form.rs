@@ -251,16 +251,26 @@ fn ResolvedPreview(editor: Editor, node_id: String) -> impl IntoView {
             {move || match preview.get() {
                 None => view! { <p class="text-dim text-sm">"Calcul…"</p> }.into_any(),
                 Some(Err(error)) => view! { <p class="form-error">{error.message()}</p> }.into_any(),
-                Some(Ok(data)) => match (data.error, data.resolved) {
-                    (Some(message), _) => view! { <p class="form-error">{message}</p> }.into_any(),
-                    (None, Some(resolved)) => view! {
-                        <pre class="code-block-wrapper"><code>
-                            {serde_json::to_string_pretty(&resolved).unwrap_or_default()}
-                        </code></pre>
+                Some(Ok(data)) => {
+                    let warnings = data.warnings;
+                    let body = match (data.error, data.resolved) {
+                        (Some(message), _) => view! { <p class="form-error">{message}</p> }.into_any(),
+                        (None, Some(resolved)) => view! {
+                            <pre class="code-block-wrapper"><code>
+                                {serde_json::to_string_pretty(&resolved).unwrap_or_default()}
+                            </code></pre>
+                        }
+                        .into_any(),
+                        (None, None) => ().into_any(),
+                    };
+                    view! {
+                        {body}
+                        {warnings.into_iter().map(|warning| view! {
+                            <p class="form-help">{format!("Attention : {warning}")}</p>
+                        }).collect_view()}
                     }
-                    .into_any(),
-                    (None, None) => ().into_any(),
-                },
+                    .into_any()
+                }
             }}
         </div>
     }

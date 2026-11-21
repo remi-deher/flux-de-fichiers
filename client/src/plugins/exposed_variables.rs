@@ -19,6 +19,15 @@ fn variable_title(variable: &ExposedVariable) -> &str {
     }
 }
 
+/// Texte de dépréciation d'une variable : le message du plugin et, s'il en désigne une, sa remplaçante.
+pub fn deprecation_text(exposed: &ExposedVariables, variable: &ExposedVariable) -> Option<String> {
+    let message = variable.deprecated.as_ref()?;
+    Some(match exposed.replacement_reference(variable) {
+        Some(target) => format!("{message} Utilisez {{{{{target}}}}}."),
+        None => message.clone(),
+    })
+}
+
 /// Avertissement quand l'espace de noms est partagé avec d'autres plugins.
 pub fn conflict_notice(view: &ExposedNamespaceView) -> Option<(String, String)> {
     if view.conflicts_with.is_empty() {
@@ -74,7 +83,13 @@ fn NamespaceBlock(view: ExposedNamespaceView) -> impl IntoView {
                                     <span class="text-strong">{variable_title(variable).to_owned()}</span>
                                     <code class="code-snippet">{reference_text(&exposed, variable)}</code>
                                     <Tag label=variable.kind.label() tone=TagTone::Primary />
+                                    {variable.deprecated.is_some().then(|| view! {
+                                        <Tag label="Déprécié" tone=TagTone::Warning />
+                                    })}
                                 </div>
+                                {deprecation_text(&exposed, variable).map(|text| view! {
+                                    <div class="step-item__meta">{text}</div>
+                                })}
                                 {variable.description.clone().map(|text| view! {
                                     <div class="step-item__meta text-dim">{text}</div>
                                 })}
@@ -158,6 +173,22 @@ mod tests {
             shadowed.is_some_and(|(title, text)| title.contains("déjà pris")
                 && text.contains("beta, gamma")
                 && text.contains("`requires`"))
+        );
+    }
+
+    #[test]
+    fn a_deprecated_variable_shows_its_message_and_its_replacement() {
+        let mut exposure = exposed();
+        assert_eq!(deprecation_text(&exposure, &exposure.variables[0]), None);
+        exposure.variables[0].deprecated = Some("Renommée.".into());
+        assert_eq!(
+            deprecation_text(&exposure, &exposure.variables[0]).as_deref(),
+            Some("Renommée.")
+        );
+        exposure.variables[0].replaced_by = Some("video.codec_name".into());
+        assert_eq!(
+            deprecation_text(&exposure, &exposure.variables[0]).as_deref(),
+            Some("Renommée. Utilisez {{mediainfo.video.codec_name}}.")
         );
     }
 }

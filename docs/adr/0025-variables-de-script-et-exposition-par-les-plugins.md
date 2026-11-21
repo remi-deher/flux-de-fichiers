@@ -47,6 +47,12 @@ réimplémenter ce travail.
    dépendance (`requires` : fournisseur et version majeure) ; sans dépendance, la première (par identifiant
    d'opération) l'emporte. Un script qui lie un même espace à deux fournisseurs ou à deux versions
    majeures est refusé. Seuls les plugins du catalogue exposent ; l'ouverture aux scripts est reportée.
+   **Dépréciation.** Une variable exposée peut porter `deprecated` (message non vide, 300 caractères au
+   plus) et `replacedBy` (nom relatif d'une autre variable du même contrat ; exige `deprecated`). Une
+   variable dépréciée reste lue : un script qui l'utilise continue de fonctionner, et le central
+   avertit sans bloquer (fiche du plugin, sélecteur de références, aperçu du nœud, `warnings` de la
+   validation et en-tête `x-flux-warnings` à l'enregistrement), en citant le message et la variable de
+   remplacement. Un plugin peut ainsi renommer une variable en gardant l'ancienne le temps d'une version.
 5. **Dépendance dure par défaut.** Un script déclare `runtime.requires` : pour chaque variable
    consommée, sa référence complète, l'identifiant du plugin fournisseur, la version majeure du
    contrat visée (1 par défaut) et, si le fournisseur n'est pas dans le même dépôt, un pointeur
@@ -113,6 +119,9 @@ réimplémenter ce travail.
   flux peuvent ainsi lire deux plugins qui partagent un espace de noms. Le sélecteur de références, le
   contrôle à l'enregistrement et l'aperçu suivent la même règle. `validate_requirements` refuse un
   espace de noms lié à deux fournisseurs ou à deux versions majeures.
+- Dépréciation : `deprecated` et `replacedBy` sont validés comme le reste de `exposes` (au chargement et à la
+  synchronisation). La CI du dépôt de plugins n'autorise le retrait d'une variable que si elle était déjà
+  dépréciée dans la version de la base, ou avec une montée de version majeure du contrat.
 - Reportés : la résolution et la saisie des secrets dans le flux et la saisie de `requires` dans
   l'éditeur de scripts locaux.
 - Les scripts existants, sans `variables`, restent valides (liste vide par défaut).

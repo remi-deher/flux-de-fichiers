@@ -384,6 +384,21 @@ async fn flow_validation_reports_invalid_variable_references_in_its_errors() -> 
 
 /// Écrit dans `dir` un plugin dont l'opération expose `namespace` ; renvoie son entrée d'index.
 fn write_exposing_plugin(dir: &Path, plugin_id: &str, namespace: &str) -> anyhow::Result<Value> {
+    write_exposing_plugin_with(
+        dir,
+        plugin_id,
+        namespace,
+        json!([{"name": "video.codec", "label": "Codec vidéo", "path": "video.codec"}]),
+    )
+}
+
+/// Comme `write_exposing_plugin`, avec la liste de variables exposées donnée.
+fn write_exposing_plugin_with(
+    dir: &Path,
+    plugin_id: &str,
+    namespace: &str,
+    variables: Value,
+) -> anyhow::Result<Value> {
     let plugin_dir = dir.join("plugins").join(plugin_id);
     std::fs::create_dir_all(plugin_dir.join("operations"))?;
     std::fs::write(
@@ -402,10 +417,7 @@ fn write_exposing_plugin(dir: &Path, plugin_id: &str, namespace: &str) -> anyhow
             "name": "Sonde", "providerId": plugin_id, "providerKind": "plugin",
             "capability": "probe", "status": "validated",
             "runtime": {"kind": "primitive", "primitive": "entry"},
-            "exposes": {
-                "namespace": namespace, "contractVersion": "1.0.0",
-                "variables": [{"name": "video.codec", "label": "Codec vidéo", "path": "video.codec"}]
-            }
+            "exposes": {"namespace": namespace, "contractVersion": "1.0.0", "variables": variables}
         })
         .to_string(),
     )?;
@@ -413,6 +425,17 @@ fn write_exposing_plugin(dir: &Path, plugin_id: &str, namespace: &str) -> anyhow
         "id": plugin_id, "type": "plugin", "version": "1.0.0", "name": plugin_id,
         "manifestPath": format!("plugins/{plugin_id}/manifest.json")
     }))
+}
+
+/// Ajoute des entrées à l'index déjà écrit dans `dir` (par exemple par `save_local_script`).
+fn append_index_entries(dir: &Path, entries: Vec<Value>) -> anyhow::Result<()> {
+    let path = dir.join("index.json");
+    let mut index: Value = serde_json::from_str(&std::fs::read_to_string(&path)?)?;
+    if let Some(existing) = index["entries"].as_array_mut() {
+        existing.extend(entries);
+    }
+    std::fs::write(path, index.to_string())?;
+    Ok(())
 }
 
 fn write_catalogue(dir: &Path, entries: Vec<Value>) -> anyhow::Result<()> {
@@ -503,5 +526,99 @@ async fn a_plugin_sheet_carries_its_own_exposures_and_a_plain_plugin_has_none() 
         .uri("/api/v1/plugins/exposed-variables")
         .body(Body::empty())?;
     assert_eq!(send(&app, anonymous).await?.0, StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn deprecated_exposed_variables_warn_in_validation_the_node_preview_and_the_save_header()
+-> anyhow::Result<()> {
+    let app = test_app().await?;
+    let dir = app.plugins_dir.path();
+    save_encoder_script(dir)?;
+    let plugin = write_exposing_plugin_with(
+        dir,
+        "alpha",
+        "mediainfo",
+        json!([
+            {"name": "video.codec", "path": "video.codec", "deprecated": "Renommée.", "replacedBy": "video.codec_name"},
+            {"name": "video.codec_name", "path": "video.name"}
+        ]),
+    )?;
+    append_index_entries(dir, vec![plugin])?;
+    let graph = encoder_graph(json!({"cible": "{{mediainfo.video.codec}}"}));
+
+    let (status, report) = send(
+        &app,
+        authorized(
+            "POST",
+            "/api/v1/flows/validate",
+            Some(&json!({"definition": graph})),
+        )?,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    let warnings: Vec<&str> = report["warnings"]
+        .as_array()
+        .map(|list| list.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("dépréciée") && w.contains("{{mediainfo.video.codec_name}}")),
+        "{warnings:?}"
+    );
+    assert!(report["errors"].as_array().is_some_and(|errors| {
+        errors
+            .iter()
+            .all(|e| e.as_str().is_some_and(|t| !t.contains("référence")))
+    }));
+
+    let request =
+        json!({"graph": graph, "nodeId": "enc", "mediaInfo": {"video": {"codec": "HEVC"}}});
+    let (_, view) = send(
+        &app,
+        authorized("POST", "/api/v1/flows/node-variables", Some(&request))?,
+    )
+    .await?;
+    assert_eq!(
+        view["resolved"]["cible"],
+        json!("HEVC"),
+        "la variable dépréciée reste lue"
+    );
+    assert!(
+        view["warnings"][0]
+            .as_str()
+            .is_some_and(|w| w.contains("dépréciée")),
+        "{view}"
+    );
+
+    let saved = app
+        .router
+        .clone()
+        .oneshot(authorized(
+            "PUT",
+            "/api/v1/flows/flow.dep",
+            Some(&flow_payload(&graph)),
+        )?)
+        .await?;
+    assert_eq!(saved.status(), StatusCode::OK);
+    let header = saved
+        .headers()
+        .get("x-flux-warnings")
+        .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned())
+        .unwrap_or_default();
+    assert!(header.contains("dépréciée"), "{header}");
+
+    let current = encoder_graph(json!({"cible": "{{mediainfo.video.codec_name}}"}));
+    let (_, view) = send(
+        &app,
+        authorized(
+            "POST",
+            "/api/v1/flows/node-variables",
+            Some(&json!({"graph": current, "nodeId": "enc"})),
+        )?,
+    )
+    .await?;
+    assert!(view.get("warnings").is_none(), "{view}");
     Ok(())
 }

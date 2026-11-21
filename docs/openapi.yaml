@@ -115,7 +115,8 @@ paths:
       summary: >-
         Valider la structure d'un graphe de flux avant sauvegarde ; les références `{{…}}` des
         variables déclarées des nœuds script (inconnues, ou vers un nœud qui ne précède pas) sont
-        aussi signalées dans `errors` (ADR 0025)
+        aussi signalées dans `errors` ; une référence à une variable exposée dépréciée l'est dans `warnings`
+        (ADR 0025)
       requestBody:
         required: true
         content:
@@ -135,7 +136,8 @@ paths:
       summary: >-
         Variables du script d'un nœud (ADR 0025) : schéma, références `{{…}}` disponibles à cet endroit
         du graphe (flux, métadonnées d'exemple, nœuds en amont, plugins qui s'exécutent avant) et
-        `config` résolue avec des valeurs d'exemple. Le graphe peut ne pas être enregistré.
+        `config` résolue avec des valeurs d'exemple. Le graphe peut ne pas être enregistré. `warnings` liste les
+        références à des variables exposées dépréciées (absent s'il n'y en a pas).
       requestBody:
         required: true
         content:

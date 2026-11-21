@@ -9,12 +9,14 @@ mod custom_args;
 pub mod header_secrets;
 pub mod http_runner;
 pub mod lease_secrets;
+mod node_references;
 pub mod placement;
 pub(crate) mod publication;
 mod script_branch;
 mod sub_flow;
 pub mod script_runner;
 pub mod substitution;
+mod variables;
 mod variables_step;
 
 #[cfg(test)]
@@ -33,7 +35,7 @@ use chrono::Utc;
 use forgearr_shared::{
     capabilities::WorkerCapabilities,
     flows::{BranchPort, FlowVariables, LinkedFlow, ScriptRouting},
-    relay::RelayRequest,
+    relay::{RelayRequest, RelayedNodeOutput},
 };
 use serde_json::{Map, Value};
 use std::{
@@ -54,13 +56,16 @@ pub use contract::{
 pub use custom_args::{CustomArgsError, parse_custom_args, safe_custom_args};
 pub use forgearr_shared::flows::{FlowBlockKind, FlowConnection, FlowGraph, FlowNode, FlowRecord};
 pub use header_secrets::{
-    decrypt_definition_headers, extract_and_mask_definition_headers, has_webhook_headers,
+    decrypt_definition_headers, extract_and_mask_definition_headers, has_flow_secrets,
     inject_definition_headers, mask_definition, migrate_flow_secrets, rotate_definition,
     seal_definition,
 };
 pub use lease_secrets::{
     decrypt_plugin_settings_value, load_flow_plugin_configs, seal_claim_secrets_for_worker,
     unseal_claim_secrets_for_worker,
+};
+pub use node_references::{
+    check_references, node_variables_view, reference_warnings, upstream_node_ids,
 };
 
 const MAX_FLOW_STEPS: usize = 32;
@@ -139,6 +144,8 @@ pub struct FlowExecutionOutcome {
     pub warning: bool,
     pub output_spec: OutputSpec,
     pub steps: Vec<crate::domain::JobStepEntry>,
+    /// Métadonnées du fichier en fin d'exécution (sonde et enrichissements des étapes).
+    pub media_info: Value,
     /// Présent quand le bloc « Relayer la tâche » a arrêté l'exécution locale (ADR 0018).
     pub relay: Option<RelayRequest>,
 }
@@ -168,6 +175,8 @@ pub struct FlowEngine<'a> {
     pub resume_node_id: Option<&'a str>,
     /// Identité de l'exécution, source des variables intrinsèques.
     pub run_info: FlowRunInfo<'a>,
+    /// Sorties des nœuds exécutés avant le relais, transmises par le worker émetteur.
+    pub resumed_outputs: &'a HashMap<String, RelayedNodeOutput>,
 }
 
 impl<'a> FlowEngine<'a> {
@@ -237,6 +246,7 @@ impl<'a> FlowEngine<'a> {
             is_in_place: !outcome.is_staged_output,
             warning: outcome.warning,
             output_spec: bin_rt.output_spec().unwrap_or_default(),
+            media_info,
             steps: vec![crate::domain::JobStepEntry {
                 step_index: 0,
                 node_id: "default".to_owned(),
@@ -362,6 +372,13 @@ impl<'a> FlowEngine<'a> {
         let mut active_flow_id = flow.id.clone();
         let mut frames: Vec<sub_flow::SubFlowFrame> = Vec::new();
         let mut relay: Option<RelayRequest> = None;
+        // Sorties des nœuds déjà exécutés, lues par `{{nodes.<id>.…}}` (ADR 0025).
+        // Après un relais, ceux des nœuds exécutés par le worker précédent sont repris (ADR 0018).
+        let mut node_outputs: HashMap<String, variables::NodeOutput> = self
+            .resumed_outputs
+            .iter()
+            .map(|(id, output)| (id.clone(), variables::NodeOutput::from(output)))
+            .collect();
         let mut remaining_steps = MAX_FLOW_STEPS;
         let mut step_index: i32 = 0;
 
@@ -629,25 +646,70 @@ impl<'a> FlowEngine<'a> {
                 }
                 OperationRuntime::Script(script_rt) => {
                     let routing = ScriptRouting::from_config(&node.config);
-                    let mut effective_rt = script_rt.clone();
-                    if effective_rt.code.is_none()
-                        && node.config.get("mode").and_then(Value::as_str) != Some("inline")
-                        && let Some(script_id) = node
-                            .config
-                            .get("scriptId")
-                            .and_then(Value::as_str)
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                        && let Some(target_op) =
-                            self.registry.get(&format!("operation.{script_id}"))
-                        && let OperationRuntime::Script(target_rt) = &target_op.runtime
-                    {
-                        let fallback_tool = effective_rt.tool.clone();
-                        effective_rt = target_rt.clone();
-                        if effective_rt.tool.is_none() {
-                            effective_rt.tool = fallback_tool;
-                        }
+                    let effective_rt =
+                        node_references::effective_script_runtime(self.registry, &node, script_rt);
+                    let script_error_code = effective_rt
+                        .error_code
+                        .unwrap_or(forgearr_shared::jobs::JobErrorCode::OperationFailed);
+                    let unmet = if effective_rt.dependencies_unverified {
+                        Vec::new()
+                    } else {
+                        self.registry.unmet_requirements(&effective_rt.requires)
+                    };
+                    if !unmet.is_empty() {
+                        let list = unmet
+                            .iter()
+                            .map(|requirement| {
+                                format!("{} ({})", requirement.variable, requirement.provider)
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let message = format!("dépendances du script indisponibles : {list}");
+                        steps.push(failed_step(
+                            step_index,
+                            &node,
+                            Some(op.id.clone()),
+                            message.clone(),
+                            None,
+                        ));
+                        return Err(FlowExecutionError {
+                            code: script_error_code,
+                            message,
+                            steps,
+                        });
                     }
+                    let variable_context = variables::VariableContext::new(
+                        &current_working_file,
+                        source_file,
+                        work_dir,
+                        &ctx.media_info,
+                        &node_outputs,
+                        &self
+                            .registry
+                            .exposures_for_requirements(&effective_rt.requires),
+                    );
+                    let script_config = match variables::resolve_node_config(
+                        &effective_rt.variables,
+                        &node_config,
+                        &variable_context,
+                    ) {
+                        Ok(config) => config,
+                        Err(err) => {
+                            let message = err.to_string();
+                            steps.push(failed_step(
+                                step_index,
+                                &node,
+                                Some(op.id.clone()),
+                                message.clone(),
+                                None,
+                            ));
+                            return Err(FlowExecutionError {
+                                code: script_error_code,
+                                message,
+                                steps,
+                            });
+                        }
+                    };
                     match script_runner::execute_script_operation(
                         op,
                         &effective_rt,
@@ -655,7 +717,7 @@ impl<'a> FlowEngine<'a> {
                         self.tool_versions,
                         &active_flow_id,
                         &node.id,
-                        &node_config,
+                        &script_config,
                         work_dir,
                         &current_working_file,
                         source_file,
@@ -779,6 +841,14 @@ impl<'a> FlowEngine<'a> {
                 }
             }
 
+            node_outputs.insert(
+                node.id.clone(),
+                variables::NodeOutput {
+                    message: step_message.clone(),
+                    next_port: next_port.clone(),
+                    working_file: current_working_file.to_string_lossy().into_owned(),
+                },
+            );
             steps.push(crate::domain::JobStepEntry {
                 step_index,
                 node_id: node.id.clone(),
@@ -822,6 +892,12 @@ impl<'a> FlowEngine<'a> {
             current_node_id = next;
         }
 
+        if let Some(request) = relay.as_mut() {
+            request.node_outputs = node_outputs
+                .iter()
+                .map(|(id, output)| (id.clone(), RelayedNodeOutput::from(output)))
+                .collect();
+        }
         let resolved_spec = last_output_spec
             .or_else(|| self.registry.output_spec_for_flow(Some(flow), None))
             .unwrap_or_default();
@@ -832,6 +908,7 @@ impl<'a> FlowEngine<'a> {
             warning: final_warning,
             output_spec: resolved_spec,
             steps,
+            media_info: ctx.media_info,
             relay,
         })
     }

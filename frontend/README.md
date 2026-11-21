@@ -9,6 +9,8 @@ Toute l'interface est le client Leptos compilé en WASM, dans [`client/`](../cli
   `/pkg/flux_client.js`.
 
 Le central sert `dist/index.html` pour toute route d'interface et `dist/pkg/` pour le WASM.
+Ces deux sorties sont générées et ne sont pas versionnées : le `Dockerfile` et `npm run dev`
+les produisent, `cargo run -p forgearr-frontend` génère la page à la main.
 
 ## Construire
 

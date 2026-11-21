@@ -1,9 +1,9 @@
 mod accounts;
+mod artifacts;
 pub mod auth;
 pub mod diagnostics;
 mod flow_links;
 pub(crate) mod flows;
-pub(crate) mod handoffs;
 pub(crate) mod installation;
 pub(crate) mod jobs;
 mod keys;
@@ -12,12 +12,12 @@ pub(crate) mod local;
 mod password_reset;
 pub(crate) mod plugins;
 pub(crate) mod recovery_kit;
+pub(crate) mod result_ready;
 pub(crate) mod session;
 mod setup;
 pub(crate) mod source_publication;
 pub(crate) mod source_recovery;
 pub(crate) mod source_recovery_remote;
-pub(crate) mod source_relay;
 pub(crate) mod system;
 pub(crate) mod transfers;
 mod worker_view;
@@ -54,6 +54,8 @@ use tower_http::{
 const SSE_REPLAY_CAPACITY: usize = 256;
 const SSE_BROADCAST_CAPACITY: usize = 256;
 const OUTBOUND_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+/// Délai accordé aux requêtes en cours à l'arrêt du serveur TLS avant de les couper.
+const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(15);
 
 /// Tampon d'historique borné pour la reprise SSE via `Last-Event-ID`.
 #[derive(Clone)]
@@ -121,7 +123,6 @@ pub struct AppState {
     pub catalog_cache: crate::plugins::CatalogCache,
     pub event_history: EventHistory,
     pub browse_broker: crate::filesystem_browser::RemoteBrowseBroker,
-    pub source_relay: crate::source_relay::SourceRelayBroker,
     pub source_publication: crate::source_publication_broker::SourcePublicationBroker,
     pub source_inspection: crate::source_publication_broker::SourcePublicationBroker,
     pub pending_worker_setup: Arc<tokio::sync::Mutex<Option<installation::PendingWorkerSetup>>>,
@@ -129,6 +130,9 @@ pub struct AppState {
     pub ai_health: crate::ai::health::AiHealthTracker,
     pub ai_models: crate::ai::health::ModelCache,
     pub ai_diagnosis: crate::ai::diagnosis::DiagnosisStore,
+    /// Identifiant du worker intégré une fois enregistré (absent s'il est désactivé) : il détient les
+    /// sources que le central voit et reçoit leurs résultats (ADR 0022).
+    pub local_worker_id: Arc<std::sync::OnceLock<uuid::Uuid>>,
 }
 
 impl AppState {
@@ -145,7 +149,6 @@ impl AppState {
             catalog_cache: crate::plugins::CatalogCache::new(),
             event_history: EventHistory::new(),
             browse_broker: crate::filesystem_browser::RemoteBrowseBroker::new(),
-            source_relay: crate::source_relay::SourceRelayBroker::new(),
             source_publication: crate::source_publication_broker::SourcePublicationBroker::default(
             ),
             source_inspection: crate::source_publication_broker::SourcePublicationBroker::default(),
@@ -154,6 +157,7 @@ impl AppState {
             ai_health: crate::ai::health::AiHealthTracker::new(),
             ai_models: crate::ai::health::ModelCache::new(),
             ai_diagnosis: crate::ai::diagnosis::DiagnosisStore::new(),
+            local_worker_id: Arc::new(std::sync::OnceLock::new()),
         }
     }
 
@@ -227,7 +231,7 @@ pub fn is_long_running_route(path: &str) -> bool {
     let id = parts.next();
     let action = parts.next();
     id.is_some_and(|segment| !segment.is_empty())
-        && matches!(action, Some("source" | "output" | "result"))
+        && matches!(action, Some("output"))
         && parts.next().is_none()
 }
 
@@ -286,6 +290,12 @@ fn json_routes() -> Router<AppState> {
             "/api/v1/flows/failure-default",
             get(flow_links::get_default_failure_flow).put(flow_links::put_default_failure_flow),
         )
+        .route(
+            "/api/v1/flows/node-variables",
+            post(flows::node_variables)
+                .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
+        )
+        .route("/api/v1/flows/{id}/media-sample", get(flows::media_sample))
         .route("/api/v1/flows/{id}/versions", get(flows::list_versions))
         .route(
             "/api/v1/flows/{id}/versions/{version}",
@@ -303,7 +313,12 @@ fn json_routes() -> Router<AppState> {
                 .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
         )
         .route("/api/v1/plugins", get(plugins::catalog))
+        .route(
+            "/api/v1/plugins/exposed-variables",
+            get(plugins::exposed_variables),
+        )
         .route("/api/v1/plugins/{id}", get(plugins::plugin_detail))
+        .route("/api/v1/plugins/{id}/icon", get(plugins::plugin_icon))
         .route(
             "/api/v1/plugins/{id}/install",
             post(plugins::install_plugin),
@@ -319,6 +334,18 @@ fn json_routes() -> Router<AppState> {
         .route(
             "/api/v1/plugins/repositories/{id}",
             get(plugins::repository_detail).delete(plugins::delete_repository),
+        )
+        .route(
+            "/api/v1/plugins/repositories/{id}/scripts/{entry_id}",
+            get(plugins::repository_script),
+        )
+        .route(
+            "/api/v1/plugins/scripts/{entry_id}",
+            get(plugins::catalog_script),
+        )
+        .route(
+            "/api/v1/plugins/scripts/{entry_id}/import",
+            post(plugins::import_catalog_script),
         )
         .route(
             "/api/v1/plugins/repositories/{id}/sync",
@@ -508,19 +535,6 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/jobs/{id}/progress", post(jobs::progress))
         .route("/api/v1/jobs/{id}/failure", post(jobs::failure))
         .route("/api/v1/jobs/{id}/relay", post(jobs::relay))
-        .route(
-            "/api/v1/jobs/{id}/handoff",
-            post(handoffs::begin)
-                .get(handoffs::status)
-                .put(handoffs::upload),
-        )
-        .route("/api/v1/jobs/{id}/handoff/file", get(handoffs::download))
-        .route("/api/v1/jobs/{id}/handoff/ack", post(handoffs::acknowledge))
-        .route("/api/v1/worker/handoffs/claim", post(handoffs::claim))
-        .route(
-            "/api/v1/worker/handoffs/{id}/{epoch}/retained",
-            get(handoffs::retained),
-        )
         .layer(axum::extract::DefaultBodyLimit::max(JSON_BODY_LIMIT))
         .layer(tower_http::timeout::TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
@@ -537,23 +551,39 @@ fn transfer_routes() -> Router<AppState> {
             "/api/v1/jobs/{id}/output",
             get(transfers::output).delete(transfers::delete_output),
         )
-        .route("/api/v1/jobs/{id}/source", get(transfers::source))
+        .route(
+            "/api/v1/jobs/{id}/source/ticket",
+            post(transfers::reissue_ticket),
+        )
+        .route(
+            "/api/v1/jobs/{id}/artifacts/{kind}",
+            put(artifacts::declare),
+        )
+        .route(
+            "/api/v1/jobs/{id}/artifacts/working/received",
+            post(artifacts::received),
+        )
+        .route(
+            "/api/v1/jobs/{id}/retained/{kind}",
+            get(artifacts::retained),
+        )
+        .route("/api/v1/jobs/{id}/result/ready", post(result_ready::ready))
+        .route(
+            "/api/v1/jobs/{id}/result/authorize",
+            post(result_ready::authorize_application),
+        )
+        .route(
+            "/api/v1/jobs/{id}/result/applied",
+            post(result_ready::applied),
+        )
+        .route(
+            "/api/v1/worker/source-publications/{id}/ticket",
+            post(source_publication::result_ticket),
+        )
         .route("/api/v1/worker/transfers/redeem", post(transfers::redeem))
-        .route(
-            "/api/v1/worker/source-relay/pending",
-            get(source_relay::pending),
-        )
-        .route(
-            "/api/v1/worker/source-relay/{request_id}",
-            put(source_relay::send),
-        )
         .route(
             "/api/v1/worker/source-publications/pending",
             get(source_publication::pending),
-        )
-        .route(
-            "/api/v1/worker/source-publications/{id}/staged",
-            get(source_publication::staged),
         )
         .route(
             "/api/v1/worker/source-publications/{id}/authorize",
@@ -571,7 +601,6 @@ fn transfer_routes() -> Router<AppState> {
             "/api/v1/worker/source-publication-inspections/{id}/report",
             post(source_publication::inspection_report),
         )
-        .route("/api/v1/jobs/{id}/result", put(transfers::result))
         .route(
             "/api/v1/files/{name}",
             put(libraries::upload_file).delete(libraries::delete_file),
@@ -790,7 +819,7 @@ pub(crate) async fn populate_claim_contracts(
         claim.probe_tool_id = Some(probe.tool_id);
         claim.probe_version = Some(probe.version);
     }
-    // Flux principal (ou opération par défaut) puis flux liés figés (ADR 0022).
+    // Flux principal (ou opération par défaut) puis flux liés figés (ADR 0026).
     let claim_flows: Vec<Option<FlowRecord>> = std::iter::once(claim.frozen_flow.clone())
         .chain(claim.linked_flows.iter().map(|linked| Some(linked.flow.clone())))
         .collect();
@@ -1027,7 +1056,6 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         state.clone(),
         pending_publications,
     ));
-    let handoff_cleanup = tokio::spawn(handoffs::cleanup_loop(state.clone()));
     let app = router(state);
     tracing::info!(%addr, "central started");
     if let Some((cert, key)) = tls {
@@ -1036,7 +1064,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         let shutdown = handle.clone();
         let signal = tokio::spawn(async move {
             shutdown_signal().await;
-            shutdown.graceful_shutdown(Some(Duration::from_secs(15)));
+            shutdown.graceful_shutdown(Some(SHUTDOWN_GRACE_PERIOD));
         });
         let result = axum_server::bind_rustls(addr, tls)
             .handle(handle)
@@ -1053,7 +1081,6 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         .await?;
     }
     plugin_sync.abort();
-    handoff_cleanup.abort();
     lib_scans.abort();
     ai_diagnosis.abort();
     source_recovery.abort();

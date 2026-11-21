@@ -1,5 +1,150 @@
 # Changelog
 
+## [0.77.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.76.0...v0.77.0) (2026-11-21)
+
+
+### Features
+
+* **catalogue:** aperçu du code d'un script et ajout à la librairie depuis son tiroir ([25e27e4](https://github.com/remi-deher/flux-de-fichiers/commit/25e27e4729e619eb4a42ccbb91a67abe84be89b8))
+* **catalogue:** aperçu du code d'un script et ajout à la librairie depuis son tiroir ([cef20f7](https://github.com/remi-deher/flux-de-fichiers/commit/cef20f74999168966da45e40f453daf90682fda7))
+
+## [0.76.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.75.0...v0.76.0) (2026-11-21)
+
+
+### Features
+
+* **flux:** secrets des variables de script et sorties de nœuds conservées après un relais ([d671ca1](https://github.com/remi-deher/flux-de-fichiers/commit/d671ca12db8fe8eaa6daada6822e033ecef39e9b))
+* **flux:** secrets des variables de script et sorties de nœuds conservées après un relais ([94e635e](https://github.com/remi-deher/flux-de-fichiers/commit/94e635ebd304a6f59eae3983d2dcbc199df46b55))
+* **scripts:** identifiants de nœud à points, grammaires two-face, échantillon du dernier job ([a0770d6](https://github.com/remi-deher/flux-de-fichiers/commit/a0770d68eec81473c6c87cb2792a08fa20403c64))
+
+
+### Bug Fixes
+
+* **client:** le champ secret partage son état « enregistré » entre le placeholder et le bouton ([d54944c](https://github.com/remi-deher/flux-de-fichiers/commit/d54944c247409f079cacacdb94bd1d3ec1d9a993))
+* **coloration:** analyseur PowerShell maison à la place de two-face ([f016c61](https://github.com/remi-deher/flux-de-fichiers/commit/f016c612d812cc8fe4ea3e0341fbad0112008c7c))
+
+## [0.75.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.74.0...v0.75.0) (2026-11-21)
+
+
+### Features
+
+* **libraries:** dépendances (requires) d'un script local dans son éditeur (ADR 0025) ([b442363](https://github.com/remi-deher/flux-de-fichiers/commit/b4423630acc92faebd53919d6654bcef4f4f7ac1))
+* **libraries:** dépendances (requires) d'un script local dans son éditeur (ADR 0025) ([194f35f](https://github.com/remi-deher/flux-de-fichiers/commit/194f35f18cd5ba2189640d77f937b725be72cd86))
+
+## [0.74.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.73.0...v0.74.0) (2026-11-21)
+
+
+### Features
+
+* **plugins:** dépréciation d'une variable exposée (ADR 0025) ([7d27278](https://github.com/remi-deher/flux-de-fichiers/commit/7d272786826433e84ad7086bf48d017a6097d10c))
+
+## [0.73.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.72.0...v0.73.0) (2026-11-21)
+
+
+### Features
+
+* **flows:** un script lit l'exposition que désigne sa dépendance (ADR 0025) ([f4b9a83](https://github.com/remi-deher/flux-de-fichiers/commit/f4b9a83aac9b6dc6b90b49ccb9134bd5dee1c4d4))
+
+## [0.72.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.71.0...v0.72.0) (2026-11-21)
+
+
+### Features
+
+* **plugins:** variables exposées dans la fiche d'un plugin (ADR 0025) ([f92e5cb](https://github.com/remi-deher/flux-de-fichiers/commit/f92e5cbd46452a2188acec88f2d26c17987a5078))
+* **plugins:** variables exposées dans la fiche d'un plugin (ADR 0025) ([6611ace](https://github.com/remi-deher/flux-de-fichiers/commit/6611ace69dd3319eca6b40101002e197fc65adc3))
+
+## [0.71.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.70.0...v0.71.0) (2026-11-21)
+
+
+### Features
+
+* **flows:** chemins à sélecteur pour les variables exposées (ADR 0025) ([6f393fb](https://github.com/remi-deher/flux-de-fichiers/commit/6f393fb66172201183fb5840cf60d71fc4e5f694))
+* **flows:** chemins à sélecteur pour les variables exposées et tests des routes (ADR 0025) ([6b82899](https://github.com/remi-deher/flux-de-fichiers/commit/6b82899a68574959ce90f3252c358e31852e58cc))
+
+## [0.70.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.69.0...v0.70.0) (2026-11-21)
+
+
+### Features
+
+* **scripts:** aperçu coloré des scripts de dépôt et variables de script (ADR 0025) ([c1d7fc3](https://github.com/remi-deher/flux-de-fichiers/commit/c1d7fc376231027a83087086009ac9ae78951ca0))
+
+
+### Bug Fixes
+
+* **clippy:** code mort et slices clonés signalés par la CI ([4de72bd](https://github.com/remi-deher/flux-de-fichiers/commit/4de72bdb186fc0ef2880b3c6f7caab7e0d62c7c8))
+
+## [0.69.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.68.0...v0.69.0) (2026-11-21)
+
+
+### Features
+
+* **plugins:** la cause d'une synchronisation en échec devient visible ([4b0916d](https://github.com/remi-deher/flux-de-fichiers/commit/4b0916dc4e7dc90eb79e49821042b6a109b56cd8))
+* **plugins:** rendre visible la cause d'une synchronisation en échec ([f16cf6a](https://github.com/remi-deher/flux-de-fichiers/commit/f16cf6a085c2a927f5aac895360969cac307c499))
+
+## [0.68.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.67.0...v0.68.0) (2026-11-21)
+
+
+### Features
+
+* **plugins:** icônes SVG des plugins (ADR 0024) ([dc6f0aa](https://github.com/remi-deher/flux-de-fichiers/commit/dc6f0aa052c8e467eeb8222ed10c722298d56014))
+* **plugins:** icônes SVG des plugins (ADR 0024) ([47a4ac7](https://github.com/remi-deher/flux-de-fichiers/commit/47a4ac74cfb868178ae6d4f906c7b203907a7328))
+* **plugins:** sous-catégories core-blocks, scripting et archives ([6fb2cb6](https://github.com/remi-deher/flux-de-fichiers/commit/6fb2cb64a3a6d10120d427ce24fc1fbdf3610a50))
+* **plugins:** sous-catégories core-blocks, scripting et archives ([84878d8](https://github.com/remi-deher/flux-de-fichiers/commit/84878d802e26be9e61415dd4b9e7ec6850d0635b))
+
+
+### Bug Fixes
+
+* **plugins:** une icône SVG doit déclarer xmlns ([eecaa23](https://github.com/remi-deher/flux-de-fichiers/commit/eecaa2392da65a14eb5bc1e2fbe99432c38031bc))
+
+## [0.67.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.66.0...v0.67.0) (2026-11-21)
+
+
+### Features
+
+* **plugins:** sous-catégories media-encoding et media-subtitles ([25e5ed2](https://github.com/remi-deher/flux-de-fichiers/commit/25e5ed2f3fbc873ed2d7bd3b0f1f588de9032466))
+* **plugins:** sous-catégories media-encoding et media-subtitles ([ebd8eb5](https://github.com/remi-deher/flux-de-fichiers/commit/ebd8eb57d9d0b859a65f35cc596ff78f1c21acb6))
+
+## [0.66.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.65.0...v0.66.0) (2026-11-21)
+
+
+### Features
+
+* **ui:** catalogue des plugins sur 2 colonnes, pied de sidebar compact ([1d718d3](https://github.com/remi-deher/flux-de-fichiers/commit/1d718d3346e30d563f8af9fada5e2ce628489890))
+* **ui:** catalogue des plugins sur 2 colonnes, pied de sidebar compact ([338d472](https://github.com/remi-deher/flux-de-fichiers/commit/338d4729eb13c652c1e7e73ce8dff5a68b788834))
+
+## [0.65.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.64.0...v0.65.0) (2026-11-21)
+
+
+### Features
+
+* **plugins:** sous-catégories officielles (ADR 0023) ([9897706](https://github.com/remi-deher/flux-de-fichiers/commit/9897706f1893f22485bd5c52366409d6a6e58787))
+* **plugins:** sous-catégories officielles (registre versionné, repli et avertissements) ([63a5806](https://github.com/remi-deher/flux-de-fichiers/commit/63a5806b3678520390deff28dde9a57804382fdf))
+
+## [0.64.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.63.1...v0.64.0) (2026-11-20)
+
+
+### Features
+
+* **transfert:** billet ré-émissible et reprise du téléchargement direct par Range ([5a8283d](https://github.com/remi-deher/flux-de-fichiers/commit/5a8283d650d3374a5284b6eb82d3321f355d4856))
+* **transfert:** le worker intégré détient les sources du central (ADR 0022, étape 3c-i) ([f2ade59](https://github.com/remi-deher/flux-de-fichiers/commit/f2ade5933e6340d7374b3ae98f939503f0e5db8c))
+* **transfert:** registre d'artefacts retenus et billets d'artefact (ADR 0022, étape 1) ([2bd73bf](https://github.com/remi-deher/flux-de-fichiers/commit/2bd73bf8944374db0534209bb24b93ccc161e520))
+* **transfert:** relais par artefact côté central (ADR 0022, étape 2a) ([1d99c8f](https://github.com/remi-deher/flux-de-fichiers/commit/1d99c8f6cff00fc643b124d3f7c173919a5eb3dc))
+* **transfert:** résultat retenu tiré par le détenteur, côté central (ADR 0022, étape 3a) ([97d46df](https://github.com/remi-deher/flux-de-fichiers/commit/97d46df922021b41c65bfcc6947635a435d82893))
+* **transfert:** workers au relais par artefact (ADR 0022, étape 2b-i) ([f24b190](https://github.com/remi-deher/flux-de-fichiers/commit/f24b19043ffababebc081668e8d3e0246752653d))
+* **transfert:** workers au résultat retenu et tiré (ADR 0022, étape 3b) ([0a644bd](https://github.com/remi-deher/flux-de-fichiers/commit/0a644bd1e22dbfd0c3da734a514b5387343a72bb))
+
+
+### Bug Fixes
+
+* **transfert:** lier redeem à l'identité du worker et protéger les permis ([17c7a71](https://github.com/remi-deher/flux-de-fichiers/commit/17c7a713c587e2d5adb05b856272a924da030343))
+
+## [0.63.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.63.0...v0.63.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* respecter la limite des transferts pendant le flux ([d74439b](https://github.com/remi-deher/flux-de-fichiers/commit/d74439bd659a5c4901621f16ff46305e04026f7d))
+
 ## [0.63.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.62.0...v0.63.0) (2026-11-20)
 
 

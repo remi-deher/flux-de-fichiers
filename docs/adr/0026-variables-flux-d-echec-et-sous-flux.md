@@ -1,4 +1,4 @@
-# 0022 — Variables de flux, flux d'échec et sous-flux
+# 0026 — Variables de flux, flux d'échec et sous-flux
 
 Statut : proposé (21 nov. 2026). Implémenté sur la branche `feat/flux-variables-conditions-ordonnancement`,
 non vérifié par la CI au moment de la rédaction. Précise l'[ADR 0012](0012-perimetre-perte-de-bail-et-versions-de-flows.md)

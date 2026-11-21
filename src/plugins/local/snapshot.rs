@@ -20,7 +20,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn read_local_script(root: &Path, entry: &CatalogEntry) -> Option<LocalScriptSummary> {
+/// Lit le manifeste, l'opération et le code d'un script du catalogue situé sous `root`.
+pub(in crate::plugins) fn read_local_script(
+    root: &Path,
+    entry: &CatalogEntry,
+) -> Option<LocalScriptSummary> {
     let manifest_path = root.join(&entry.manifest_path);
     let item_dir = manifest_path.parent()?;
     let val: Value = serde_json::from_str(&fs::read_to_string(&manifest_path).ok()?).ok()?;
@@ -38,6 +42,18 @@ fn read_local_script(root: &Path, entry: &CatalogEntry) -> Option<LocalScriptSum
         return None;
     }
     let code = fs::read_to_string(item_dir.join(&entrypoint)).unwrap_or_default();
+    let variables = runtime
+        .get("variables")
+        .and_then(|raw| serde_json::from_value(raw.clone()).ok())
+        .unwrap_or_default();
+    let requires = runtime
+        .get("requires")
+        .and_then(|raw| serde_json::from_value(raw.clone()).ok())
+        .unwrap_or_default();
+    let dependencies_unverified = runtime
+        .get("dependenciesUnverified")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let slug = entry
         .id
         .strip_prefix("script.")
@@ -53,6 +69,9 @@ fn read_local_script(root: &Path, entry: &CatalogEntry) -> Option<LocalScriptSum
         code,
         category: entry.category,
         tags: entry.tags.clone(),
+        variables,
+        requires,
+        dependencies_unverified,
     })
 }
 

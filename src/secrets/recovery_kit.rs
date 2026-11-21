@@ -3,8 +3,11 @@
 //! Dérivation Argon2id (sel aléatoire, paramètres inscrits dans le kit), puis ChaCha20-Poly1305.
 //! Le fichier exporté peut être rangé avec les sauvegardes : sans la phrase de passe il ne révèle rien.
 
-use super::{KEY_BYTES, NONCE_BYTES, decode_hex, encode_hex, retired_keys};
-use crate::error::{AppError, AppResult};
+use super::{KEY_BYTES, NONCE_BYTES, decode_hex, retired_keys};
+use crate::{
+    error::{AppError, AppResult},
+    opaque_token::encode_hex,
+};
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
     ChaCha20Poly1305, Key, KeyInit, Nonce,

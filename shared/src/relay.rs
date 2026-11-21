@@ -3,10 +3,27 @@
 use crate::capabilities::CapabilityRequirement;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::{collections::HashMap, time::Duration};
 use uuid::Uuid;
 
 /// Nombre maximal de relais d'une même tâche, pour éviter qu'elle ne circule indéfiniment.
 pub const MAX_RELAYS_PER_JOB: i64 = 3;
+
+/// Longueur maximale (en caractères) du message d'un nœud transmis au worker repreneur.
+pub const MAX_RELAYED_MESSAGE_CHARS: usize = 2000;
+/// Taille maximale des sorties de nœuds transmises avec un relais, une fois sérialisées.
+pub const MAX_RELAYED_OUTPUTS_BYTES: usize = 256 * 1024;
+
+/// Ce qu'un nœud déjà exécuté expose aux suivants (`{{nodes.<id>.message|nextPort}}`), transmis au
+/// worker repreneur. Le fichier de travail d'un nœud appartient au worker émetteur : il n'est pas transmis.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelayedNodeOutput {
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub next_port: Option<String>,
+}
 
 /// Cible d'un relais : un worker capable (choisi par le central) ou un worker précis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,10 +43,14 @@ pub struct RelayRequest {
     /// Variables personnalisées du flux (`vars.*`) restaurées chez le repreneur.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub variables: Map<String, Value>,
+    /// Sorties des nœuds exécutés avant le relais, pour que `{{nodes.<id>.…}}` reste lisible à la reprise.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub node_outputs: HashMap<String, RelayedNodeOutput>,
 }
 
-/// Durée maximale d'attente de la remise d'un fichier de travail.
-pub const HANDOFF_TTL_SECONDS: i64 = 600;
+/// Garde d'âge d'un fichier de travail retenu : avant ce délai, son détenteur ne demande pas au
+/// central s'il doit le purger.
+pub const HANDOFF_TTL: Duration = Duration::from_secs(600);
 
 /// Fichier de travail conservé par le worker émetteur.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,64 +69,6 @@ pub struct HandoffInput {
     pub artifact: HandoffArtifact,
 }
 
-/// Étape de la remise conservée par le central.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HandoffState {
-    Uploading,
-    Pending,
-    Claimed,
-    Acknowledged,
-    Failed,
-}
-
-impl HandoffState {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Uploading => "uploading",
-            Self::Pending => "pending",
-            Self::Claimed => "claimed",
-            Self::Acknowledged => "acknowledged",
-            Self::Failed => "failed",
-        }
-    }
-}
-
-/// Offre temporaire remise au repreneur avant que le bail d'origine ne soit libéré.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HandoffOffer {
-    pub job_id: Uuid,
-    pub from_worker_id: Uuid,
-    pub source_lease_epoch: i64,
-    pub artifact: HandoffArtifact,
-    pub receipt_token: String,
-}
-
-/// Accusé de réception d'un fichier déjà téléchargé et vérifié par le repreneur.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HandoffAcknowledgement {
-    pub worker_id: Uuid,
-    pub receipt_token: String,
-    pub sha256: String,
-    pub bytes: i64,
-}
-
-/// Demande initiale accompagnée du bail qui reste détenu par l'émetteur.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HandoffBegin {
-    pub worker_id: Uuid,
-    pub lease_token: Uuid,
-    pub lease_epoch: i64,
-    pub request: RelayRequest,
-    pub artifact: HandoffArtifact,
-    /// Avertissement accumulé par les étapes déjà exécutées.
-    #[serde(default)]
-    pub warning: bool,
-}
-
 /// Relais rapporté par un worker, avec les preuves de son bail.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RelayReport {
@@ -114,6 +77,9 @@ pub struct RelayReport {
     #[serde(default)]
     pub lease_epoch: i64,
     pub request: RelayRequest,
+    /// Avertissement accumulé par le worker avant le relais.
+    #[serde(default)]
+    pub warning: bool,
 }
 
 /// Marque « relayée » d'une tâche, pour l'interface.
@@ -165,18 +131,17 @@ mod tests {
     }
 
     #[test]
-    fn handoff_warning_defaults_to_false_for_older_senders() -> Result<(), serde_json::Error> {
+    fn relay_report_warning_defaults_to_false_for_older_senders() -> Result<(), serde_json::Error> {
         let mut value = serde_json::json!({
-            "workerId": Uuid::nil(), "leaseToken": Uuid::nil(), "leaseEpoch": 1,
-            "request": {"target": {"mode":"worker", "worker_id": Uuid::nil()}, "resumeNodeId":"next"},
-            "artifact": {"name":"file.mkv", "sha256":"a".repeat(64), "bytes":5}
+            "worker_id": Uuid::nil(), "lease_token": Uuid::nil(), "lease_epoch": 1,
+            "request": {"target": {"mode":"worker", "worker_id": Uuid::nil()}, "resumeNodeId":"next"}
         });
-        let begin: HandoffBegin = serde_json::from_value(value.clone())?;
-        assert!(!begin.warning);
-        assert!(begin.request.variables.is_empty(), "variables absentes des anciens workers");
+        let report: RelayReport = serde_json::from_value(value.clone())?;
+        assert!(!report.warning);
+        assert!(report.request.variables.is_empty(), "variables absentes des anciens workers");
         value["warning"] = serde_json::json!(true);
-        let begin: HandoffBegin = serde_json::from_value(value)?;
-        assert!(begin.warning);
+        let report: RelayReport = serde_json::from_value(value)?;
+        assert!(report.warning);
         Ok(())
     }
 
@@ -188,6 +153,7 @@ mod tests {
             },
             resume_node_id: "next".into(),
             variables: Map::new(),
+            node_outputs: HashMap::new(),
         };
         assert!(serde_json::to_value(&request)?.get("variables").is_none());
         request

@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "subcategories": [
+    {
+      "id": "core-blocks",
+      "category": "other",
+      "labels": { "fr": "Blocs essentiels", "en": "Core blocks" },
+      "order": 5
+    },
+    {
+      "id": "media-servers",
+      "category": "media",
+      "labels": { "fr": "Serveurs média", "en": "Media servers" },
+      "order": 10
+    },
+    {
+      "id": "media-managers",
+      "category": "media",
+      "labels": { "fr": "Gestionnaires de médiathèque", "en": "Media managers" },
+      "order": 20
+    },
+    {
+      "id": "media-encoding",
+      "category": "media",
+      "labels": { "fr": "Encodage et conversion", "en": "Encoding and conversion" },
+      "order": 30
+    },
+    {
+      "id": "media-subtitles",
+      "category": "media",
+      "labels": { "fr": "Sous-titres", "en": "Subtitles" },
+      "order": 40
+    },
+    {
+      "id": "notifications",
+      "category": "io",
+      "labels": { "fr": "Notifications", "en": "Notifications" },
+      "order": 50
+    },
+    {
+      "id": "archives",
+      "category": "io",
+      "labels": { "fr": "Archives", "en": "Archives" },
+      "order": 60
+    },
+    {
+      "id": "scripting",
+      "category": "data",
+      "labels": { "fr": "Scripts", "en": "Scripts" },
+      "order": 70
+    }
+  ]
+}

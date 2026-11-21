@@ -1,12 +1,11 @@
 //! Mot de passe oublié par courriel (ADR 0015) : jeton à usage unique, haché en base, envoyé en lien.
 
 use crate::{
-    api_keys::hash_secret,
     error::{AppError, AppResult},
     mail::{MailSender, OutgoingMail},
+    opaque_token::{new_opaque_token, sha256_hex},
     password, repository,
 };
-use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
 use sqlx::SqlitePool;
 use std::{
     collections::HashMap,
@@ -19,7 +18,6 @@ pub const RESET_TOKEN_LIFETIME_SECONDS: i64 = 1_800;
 const SECONDS_PER_MINUTE: i64 = 60;
 /// Délai minimal entre deux courriels pour un même compte.
 const REQUEST_COOLDOWN_SECONDS: i64 = 60;
-const RESET_TOKEN_BYTES: usize = 32;
 const EMAIL_MAX_LEN: usize = 254;
 /// Demandes tolérées par adresse saisie et par fenêtre.
 const MAX_REQUESTS_PER_WINDOW: usize = 5;
@@ -55,12 +53,6 @@ pub fn parse_optional_email(raw: &str) -> AppResult<Option<String>> {
     } else {
         validate_email(raw).map(Some)
     }
-}
-
-fn new_token() -> String {
-    let mut bytes = [0u8; RESET_TOKEN_BYTES];
-    OsRng.fill_bytes(&mut bytes);
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// Limite les demandes par adresse saisie, que le compte existe ou non.
@@ -144,10 +136,10 @@ pub async fn issue_and_send(
         return Ok(());
     }
     repository::delete_account_reset_tokens(pool, &account.id).await?;
-    let token = new_token();
+    let token = new_opaque_token();
     repository::insert_reset_token(
         pool,
-        &hash_secret(&token),
+        &sha256_hex(&token),
         &account.id,
         RESET_TOKEN_LIFETIME_SECONDS,
     )
@@ -168,7 +160,7 @@ pub async fn issue_and_send(
 /// Le mot de passe est vérifié avant le jeton : un mot de passe refusé ne le brûle pas.
 pub async fn confirm_reset(pool: &SqlitePool, token: &str, new_password: &str) -> AppResult<()> {
     password::validate_password(new_password)?;
-    let account_id = repository::consume_reset_token(pool, &hash_secret(token.trim()))
+    let account_id = repository::consume_reset_token(pool, &sha256_hex(token.trim()))
         .await?
         .ok_or(AppError::Invalid)?;
     let (account, _) = repository::get_account(pool, &account_id)
@@ -211,14 +203,6 @@ mod tests {
         assert_eq!(parse_optional_email("a@b.fr")?.as_deref(), Some("a@b.fr"));
         assert!(parse_optional_email("x").is_err());
         Ok(())
-    }
-
-    #[test]
-    fn test_tokens_are_long_hex_and_distinct() {
-        let token = new_token();
-        assert_eq!(token.len(), RESET_TOKEN_BYTES * 2);
-        assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
-        assert_ne!(token, new_token());
     }
 
     #[test]

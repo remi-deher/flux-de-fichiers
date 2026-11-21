@@ -5,9 +5,12 @@ mod draft;
 mod form;
 mod history;
 mod packs;
+mod requirements_editor;
 mod resources;
+mod rows;
 mod scripts;
 mod transfer_workers;
+mod variables_editor;
 
 use crate::flows::FlowsSection;
 use crate::route::encode_segment;

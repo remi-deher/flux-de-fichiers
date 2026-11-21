@@ -10,8 +10,12 @@ use crate::{
     tools_cache::{ToolCacheManager, host_arch},
 };
 use forgearr_shared::{
+    exposed_variables::{
+        ExposedVariables, ScriptRequirement, validate_exposed, validate_requirements,
+    },
     flows::{FlowGraph, FlowNode, FlowRecord},
     jobs::JobErrorCode,
+    script_variables::validate_variables,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -53,6 +57,20 @@ pub enum ContractError {
     InvalidContract(String),
 }
 
+/// Refuse un contrat dont les variables, expositions ou dépendances déclarées sont invalides.
+fn validate_contract_declarations(contract: &OperationContract) -> Result<(), ContractError> {
+    let invalid =
+        |reason: String| ContractError::InvalidContract(format!("{} : {reason}", contract.id));
+    if let Some(exposed) = &contract.exposes {
+        validate_exposed(exposed).map_err(|err| invalid(err.to_string()))?;
+    }
+    if let OperationRuntime::Script(script) = &contract.runtime {
+        validate_variables(&script.variables).map_err(|err| invalid(err.to_string()))?;
+        validate_requirements(&script.requires).map_err(|err| invalid(err.to_string()))?;
+    }
+    Ok(())
+}
+
 /// Référence déclarative vers un outil du catalogue requis par une opération.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,6 +97,9 @@ pub struct OperationContract {
     pub capability: String,
     pub status: String,
     pub runtime: OperationRuntime,
+    /// Variables que l'opération expose aux scripts via `mediaInfo` (ADR 0025).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exposes: Option<ExposedVariables>,
 }
 
 /// Définition d'exécution selon la nature (`primitive`, `binary`, `http`, `script`).
@@ -119,6 +140,15 @@ pub struct ScriptRuntime {
     pub timeout_seconds: u64,
     #[serde(default)]
     pub defaults: Map<String, Value>,
+    /// Variables typées du script (ADR 0025) ; vide pour les scripts sans schéma.
+    #[serde(default)]
+    pub variables: Vec<forgearr_shared::script_variables::ScriptVariable>,
+    /// Variables exposées par des plugins que le script consomme ; dépendance dure par défaut.
+    #[serde(default)]
+    pub requires: Vec<ScriptRequirement>,
+    /// Script intégré sans ses dépendances : elles ne sont pas contrôlées (saisie manuelle).
+    #[serde(default)]
+    pub dependencies_unverified: bool,
     /// Le script accepte une entrée non média (ex. archive à extraire) : un flux qui le contient
     /// tolère l'échec de la sonde initiale.
     #[serde(default)]
@@ -138,7 +168,7 @@ pub enum PrimitiveKind {
     /// Écrit une variable personnalisée `vars.<nom>` dans le contexte de la tâche.
     #[serde(rename = "set-variable")]
     SetVariable,
-    /// Exécute un autre flux puis reprend à la sortie du bloc (ADR 0022).
+    /// Exécute un autre flux puis reprend à la sortie du bloc (ADR 0026).
     #[serde(rename = "sub-flow")]
     SubFlow,
 }
@@ -572,9 +602,112 @@ impl OperationRegistry {
     pub fn register_json(&mut self, raw: Value) -> Result<(), ContractError> {
         let contract: OperationContract = serde_json::from_value(raw.clone())
             .map_err(|err| ContractError::InvalidContract(err.to_string()))?;
+        validate_contract_declarations(&contract)?;
         self.raw_operations.insert(contract.id.clone(), raw);
         self.operations.insert(contract.id.clone(), contract);
         Ok(())
+    }
+
+    /// Expositions des plugins, triées par opération ; un espace de noms déjà pris l'est par la première.
+    pub fn exposed_variables(&self) -> Vec<&ExposedVariables> {
+        self.exposed_variables_where(|_| true)
+    }
+
+    /// Expositions déclarées avec le plugin fournisseur de chacune, triées par identifiant d'opération.
+    pub fn exposure_claims(&self) -> Vec<(&str, &ExposedVariables)> {
+        let mut exposing: Vec<&OperationContract> = self
+            .operations
+            .values()
+            .filter(|op| op.exposes.is_some())
+            .collect();
+        exposing.sort_by(|a, b| a.id.cmp(&b.id));
+        exposing
+            .into_iter()
+            .filter_map(|op| {
+                op.exposes
+                    .as_ref()
+                    .map(|exposed| (op.provider_id.as_str(), exposed))
+            })
+            .collect()
+    }
+
+    /// Expositions que désignent les dépendances d'un script : pour chacune, celle du plugin fournisseur
+    /// qui fournit la variable dans la version majeure visée. Un espace de noms contesté entre plusieurs
+    /// plugins se résout ainsi par la dépendance du script et non par l'ordre des opérations.
+    pub fn exposures_bound_by(&self, requirements: &[ScriptRequirement]) -> Vec<&ExposedVariables> {
+        let claims = self.exposure_claims();
+        let mut bound: Vec<&ExposedVariables> = Vec::new();
+        for requirement in requirements {
+            let found = claims
+                .iter()
+                .find(|claim| claim.0 == requirement.provider && claim.1.provides(requirement))
+                .map(|claim| claim.1);
+            if let Some(exposed) = found
+                && !bound.iter().any(|known| std::ptr::eq(*known, exposed))
+            {
+                bound.push(exposed);
+            }
+        }
+        bound
+    }
+
+    /// Expositions lues par un script : celles de ses dépendances, puis la première exposition de chaque
+    /// autre espace de noms (script sans `requires`, ou référence à un espace qu'il ne déclare pas).
+    pub fn exposures_for_requirements(
+        &self,
+        requirements: &[ScriptRequirement],
+    ) -> Vec<&ExposedVariables> {
+        let mut chosen = self.exposures_bound_by(requirements);
+        for fallback in self.exposed_variables() {
+            if !chosen
+                .iter()
+                .any(|known| known.namespace == fallback.namespace)
+            {
+                chosen.push(fallback);
+            }
+        }
+        chosen
+    }
+
+    /// Comme `exposed_variables`, limité aux opérations retenues par `keep`.
+    pub fn exposed_variables_where(
+        &self,
+        keep: impl Fn(&OperationContract) -> bool,
+    ) -> Vec<&ExposedVariables> {
+        let mut exposing: Vec<&OperationContract> = self
+            .operations
+            .values()
+            .filter(|op| op.exposes.is_some() && keep(op))
+            .collect();
+        exposing.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut seen = HashSet::new();
+        exposing
+            .into_iter()
+            .filter_map(|op| op.exposes.as_ref())
+            .filter(|exposed| seen.insert(exposed.namespace.as_str()))
+            .collect()
+    }
+
+    /// Un plugin fournisseur chargé expose-t-il la variable, dans la version majeure visée ?
+    pub fn is_requirement_met(&self, requirement: &ScriptRequirement) -> bool {
+        self.operations.values().any(|op| {
+            op.provider_id == requirement.provider
+                && op
+                    .exposes
+                    .as_ref()
+                    .is_some_and(|exposed| exposed.provides(requirement))
+        })
+    }
+
+    /// Dépendances d'un script que ce registre ne satisfait pas.
+    pub fn unmet_requirements<'a>(
+        &self,
+        requirements: &'a [ScriptRequirement],
+    ) -> Vec<&'a ScriptRequirement> {
+        requirements
+            .iter()
+            .filter(|requirement| !self.is_requirement_met(requirement))
+            .collect()
     }
 
     pub fn register_block_mapping(&mut self, block_or_alias: &str, op_id: &str) {
@@ -692,6 +825,18 @@ impl OperationRegistry {
                 )
             })
             .collect()
+    }
+
+    /// L'opération est-elle une sonde, exécutée avant tout nœud du flux ?
+    pub fn is_probe(op: &OperationContract) -> bool {
+        matches!(
+            &op.runtime,
+            OperationRuntime::Binary(bin)
+                if matches!(
+                    bin.execution_mode,
+                    BinaryExecutionMode::ProbePrimary | BinaryExecutionMode::ProbeEnrich
+                )
+        )
     }
 
     pub fn all_probes(&self) -> Vec<&OperationContract> {
@@ -1534,6 +1679,202 @@ mod tests {
             panic!("attendu ScriptRuntime");
         };
         assert!(evil_rt.code.is_none());
+        Ok(())
+    }
+    fn provider_operation(op_id: &str, provider: &str, namespace: &str, version: &str) -> Value {
+        json!({
+            "schemaVersion": "1.1.0", "id": op_id, "version": "1.0.0", "name": "Fournisseur",
+            "providerId": provider, "providerKind": "plugin", "capability": "probe", "status": "validated",
+            "runtime": {"kind": "script", "interpreter": "sh"},
+            "exposes": {
+                "namespace": namespace,
+                "contractVersion": version,
+                "variables": [{"name": "video.codec", "type": "text", "path": "video.codec"}]
+            }
+        })
+    }
+
+    fn script_operation_requiring(requires: Value) -> Value {
+        json!({
+            "schemaVersion": "1.1.0", "id": "operation.script.consumer", "version": "1.0.0", "name": "Consommateur",
+            "providerId": "script.consumer", "providerKind": "script", "capability": "script", "status": "validated",
+            "runtime": {"kind": "script", "interpreter": "sh", "requires": requires}
+        })
+    }
+
+    #[test]
+    fn exposures_are_registered_and_requirements_are_checked_against_the_provider()
+    -> Result<(), ContractError> {
+        let mut reg = OperationRegistry::new();
+        reg.register_json(provider_operation(
+            "operation.mi.probe",
+            "app.mediainfo",
+            "mediainfo",
+            "1.0.0",
+        ))?;
+        let exposed = reg.exposed_variables();
+        assert_eq!(exposed.len(), 1);
+        assert_eq!(exposed[0].namespace, "mediainfo");
+
+        let met = ScriptRequirement {
+            variable: "mediainfo.video.codec".into(),
+            provider: "app.mediainfo".into(),
+            contract_major: 1,
+            repository: None,
+        };
+        let wrong_provider = ScriptRequirement {
+            provider: "app.autre".into(),
+            ..met.clone()
+        };
+        let wrong_major = ScriptRequirement {
+            contract_major: 2,
+            ..met.clone()
+        };
+        let unknown = ScriptRequirement {
+            variable: "mediainfo.audio.codec".into(),
+            ..met.clone()
+        };
+        let all = [met.clone(), wrong_provider, wrong_major, unknown];
+        let unmet = reg.unmet_requirements(&all);
+        assert_eq!(unmet.len(), 3);
+        assert!(!unmet.contains(&&met));
+        Ok(())
+    }
+
+    #[test]
+    fn the_first_operation_keeps_a_contested_namespace() -> Result<(), ContractError> {
+        let mut reg = OperationRegistry::new();
+        reg.register_json(provider_operation(
+            "operation.b.probe",
+            "app.b",
+            "mediainfo",
+            "1.0.0",
+        ))?;
+        reg.register_json(provider_operation(
+            "operation.a.probe",
+            "app.a",
+            "mediainfo",
+            "2.0.0",
+        ))?;
+        let exposed = reg.exposed_variables();
+        assert_eq!(exposed.len(), 1);
+        assert_eq!(exposed[0].contract_version, "2.0.0");
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_declarations_are_refused_at_registration() {
+        let mut reg = OperationRegistry::new();
+        assert!(
+            reg.register_json(provider_operation("operation.x", "app.x", "nodes", "1.0.0"))
+                .is_err()
+        );
+        assert!(
+            reg.register_json(provider_operation(
+                "operation.x",
+                "app.x",
+                "mediainfo",
+                "1.0"
+            ))
+            .is_err()
+        );
+        assert!(
+            reg.register_json(script_operation_requiring(
+                json!([{"variable": "codec", "provider": "app.x"}])
+            ))
+            .is_err()
+        );
+        assert!(reg.get("operation.x").is_none());
+        assert!(
+            reg.register_json(script_operation_requiring(
+                json!([{"variable": "mediainfo.video.codec", "provider": "app.mediainfo"}])
+            ))
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_script_dependency_picks_its_provider_even_when_another_plugin_shares_the_namespace()
+    -> Result<(), ContractError> {
+        let mut reg = OperationRegistry::new();
+        reg.register_json(provider_operation(
+            "operation.a.probe",
+            "alpha",
+            "mediainfo",
+            "1.0.0",
+        ))?;
+        reg.register_json(provider_operation(
+            "operation.b.probe",
+            "beta",
+            "mediainfo",
+            "1.5.0",
+        ))?;
+        reg.register_json(provider_operation(
+            "operation.c.probe",
+            "gamma",
+            "mediainfo",
+            "2.0.0",
+        ))?;
+        let requirement = |provider: &str, major: u32| ScriptRequirement {
+            variable: "mediainfo.video.codec".into(),
+            provider: provider.into(),
+            contract_major: major,
+            repository: None,
+        };
+
+        let beta = [requirement("beta", 1)];
+        let bound = reg.exposures_bound_by(&beta);
+        assert_eq!(bound.len(), 1);
+        assert_eq!(bound[0].contract_version, "1.5.0");
+        let read = reg.exposures_for_requirements(&beta);
+        assert_eq!(
+            read.len(),
+            1,
+            "l'espace déjà lié n'est pas repris par le repli"
+        );
+        assert_eq!(read[0].contract_version, "1.5.0");
+
+        let gamma = [requirement("gamma", 2)];
+        assert_eq!(reg.exposures_bound_by(&gamma)[0].contract_version, "2.0.0");
+
+        let none = reg.exposures_for_requirements(&[]);
+        assert_eq!(none.len(), 1);
+        assert_eq!(
+            none[0].contract_version, "1.0.0",
+            "sans dépendance, la première l'emporte"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_unmatched_dependency_binds_nothing_and_falls_back_to_the_first_exposure()
+    -> Result<(), ContractError> {
+        let mut reg = OperationRegistry::new();
+        reg.register_json(provider_operation(
+            "operation.a.probe",
+            "alpha",
+            "mediainfo",
+            "1.0.0",
+        ))?;
+        let unmatched = |provider: &str, major: u32| {
+            [ScriptRequirement {
+                variable: "mediainfo.video.codec".into(),
+                provider: provider.into(),
+                contract_major: major,
+                repository: None,
+            }]
+        };
+        for requirements in [unmatched("alpha", 2), unmatched("inconnu", 1)] {
+            assert!(reg.exposures_bound_by(&requirements).is_empty());
+            assert_eq!(reg.exposures_for_requirements(&requirements).len(), 1);
+        }
+        let unknown_variable = [ScriptRequirement {
+            variable: "mediainfo.audio.absente".into(),
+            provider: "alpha".into(),
+            contract_major: 1,
+            repository: None,
+        }];
+        assert!(reg.exposures_bound_by(&unknown_variable).is_empty());
         Ok(())
     }
 }

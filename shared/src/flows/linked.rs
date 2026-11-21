@@ -1,4 +1,4 @@
-//! Flux liés à un flux : flux d'échec et sous-flux (ADR 0022).
+//! Flux liés à un flux : flux d'échec et sous-flux (ADR 0026).
 //!
 //! Le flux d'échec est désigné par la clé `failureFlowId` du graphe (clé optionnelle, absente
 //! des définitions déjà stockées). Un sous-flux est appelé par le bloc primitif « Aller au

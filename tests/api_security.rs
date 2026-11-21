@@ -13,6 +13,10 @@ use std::sync::Arc;
 use tower::ServiceExt;
 
 fn app() -> anyhow::Result<axum::Router> {
+    app_serving("frontend/dist".into())
+}
+
+fn app_serving(static_dir: std::path::PathBuf) -> anyhow::Result<axum::Router> {
     let config = Config {
         bind: "127.0.0.1:3000".parse()?,
         database_url: "sqlite::memory:".into(),
@@ -21,7 +25,7 @@ fn app() -> anyhow::Result<axum::Router> {
         config_dir: "var/config".into(),
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
-        static_dir: "frontend/dist".into(),
+        static_dir,
         max_file_bytes: 1024,
         local_worker: false,
         web_origin: None,
@@ -90,7 +94,6 @@ async fn protected_routes_reject_missing_keys_before_accessing_resources() -> an
         "/api/v1/api-keys",
         "/api/v1/workers",
         "/api/v1/jobs/00000000-0000-0000-0000-000000000001/output",
-        "/api/v1/jobs/00000000-0000-0000-0000-000000000001/source",
     ] {
         let response = app()?
             .oneshot(Request::builder().uri(path).body(Body::empty())?)
@@ -239,9 +242,8 @@ async fn authorization_header_takes_priority_over_web_session_cookie() -> anyhow
 fn csrf_requires_matching_cookie_header_and_server_verifier() -> anyhow::Result<()> {
     use chrono::Utc;
     use forgearr::web_session::{self, ValidatedSession};
-    use sha2::{Digest, Sha256};
     let token = "csrf-token-for-test";
-    let csrf_hash = format!("{:x}", Sha256::digest(token.as_bytes()));
+    let csrf_hash = forgearr::opaque_token::sha256_hex(token);
     let session = ValidatedSession {
         token_hash: "opaque-session-hash".into(),
         csrf_hash,
@@ -314,8 +316,9 @@ async fn malformed_identifiers_and_unknown_routes_have_safe_json_errors() -> any
         assert_eq!(body["error"]["code"], "invalid_request");
     }
 
-    // SPA fallback: non-API route returns 200 OK when frontend dist/index.html is present
-    let response = app()?
+    // SPA fallback: non-API route returns 200 OK when the static dir holds an index.html
+    let page = common::static_dir_with_page()?;
+    let response = app_serving(page.path().to_path_buf())?
         .oneshot(Request::builder().uri("/unknown").body(Body::empty())?)
         .await?;
     assert_eq!(response.status(), StatusCode::OK);

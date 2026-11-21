@@ -6,6 +6,7 @@ use forgearr_shared::{
 };
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Sortie du bloc « Capacité du worker » quand le worker courant satisfait l'exigence.
@@ -69,6 +70,7 @@ pub fn build_relay_request(config: &Value, resume_node_id: &str) -> Result<Relay
         target,
         resume_node_id: resume_node_id.to_owned(),
         variables: Default::default(),
+        node_outputs: HashMap::new(),
     })
 }
 

@@ -56,6 +56,8 @@ mod tests {
             current_choice: Some(current),
             distribution: None,
             category: None,
+            subcategory: None,
+            has_icon: false,
             tags: Vec::new(),
             owner: None,
             sha256: None,

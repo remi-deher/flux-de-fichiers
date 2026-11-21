@@ -1,29 +1,17 @@
-//! Billets de lecture d'une source détenue par un autre worker (ADR 0019).
+//! Billets de lecture d'une source ou d'un artefact détenu par un autre worker (ADR 0019 et 0022).
 
 use crate::{
-    domain::{Claim, JobStatus},
+    domain::{Claim, JobStatus, LeaseRequest},
     error::{AppError, AppResult},
+    opaque_token::{new_opaque_token, sha256_hex},
 };
 use forgearr_shared::{
-    transfer::{SOURCE_TICKET_TTL_SECONDS, SourceTicket, TransferGrant},
+    transfer::{ArtifactKind, SOURCE_TICKET_TTL_SECONDS, SourceTicket, TransferGrant},
     workers::WORKER_ONLINE_SECONDS,
 };
-use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
+use std::path::Path;
 use uuid::Uuid;
-
-/// Empreinte stockée d'un secret de billet.
-fn token_hash(token: &str) -> String {
-    Sha256::digest(token.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-/// Secret opaque de 244 bits tirés de l'aléa du système.
-fn new_token() -> String {
-    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
-}
 
 /// Adresse de transfert annoncée par un worker, acceptée seulement en `http` ou `https`.
 pub fn valid_transfer_url(raw: &str) -> Option<String> {
@@ -48,6 +36,20 @@ pub async fn set_transfer_url(
         .bind(transfer_url)
         .execute(pool)
         .await?;
+    Ok(())
+}
+
+/// Désigne (ou non) le worker qui sert les dossiers du central à la place du central : un seul à la
+/// fois porte ce rôle.
+pub async fn set_serves_central(pool: &SqlitePool, worker: Uuid, serves: bool) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE workers SET serves_central=CASE WHEN id=?1 THEN ?2 ELSE 0 END \
+         WHERE id=?1 OR serves_central=1",
+    )
+    .bind(worker)
+    .bind(serves)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -112,46 +114,91 @@ async fn source_holders_matching(
         && let Some(source) = super::job_source(pool, job_id).await?
         && (!writable || (source.source_writable && source.source_key.is_none()))
         && let Some(owner) = source.source_worker_id.filter(|owner| *owner != exclude)
+        && let Some((transfer_url, true)) = worker_reach(pool, owner).await?
     {
-        let row: Option<(Option<String>, bool)> = sqlx::query_as(
-            "SELECT transfer_url, last_seen > datetime('now', '-' || ?2 || ' seconds') \
-             FROM workers WHERE id=?1",
-        )
-        .bind(owner)
-        .bind(WORKER_ONLINE_SECONDS)
-        .fetch_optional(pool)
-        .await?;
-        if let Some((transfer_url, true)) = row {
-            holders.push(SourceHolder {
-                worker_id: owner,
-                root: source.source_root,
-                transfer_url,
-            });
-        }
+        holders.push(SourceHolder {
+            worker_id: owner,
+            root: source.source_root,
+            transfer_url,
+        });
     }
     Ok(holders)
 }
 
 /// Remet au worker traitant un billet pour lire la source chez un détenteur en ligne.
 ///
-/// Sans effet si la source est déjà lisible (montage, central) ou si aucun détenteur n'annonce
-/// d'adresse : le worker traitant utilisera alors le repli par le central.
+/// Sans effet si la source est déjà montée par le worker, ou si aucun détenteur (worker à accès direct
+/// ou worker intégré pour le central) n'annonce d'adresse : la tâche échoue alors avec
+/// `source_unreachable`, il n'y a plus de repli par le central.
 pub async fn attach_source_ticket(
     pool: &SqlitePool,
     worker: Uuid,
     claim: &mut Claim,
 ) -> AppResult<()> {
+    if claim.handoff_input.is_some() {
+        // Remise par artefact (ADR 0022) : le billet désigne le fichier de travail chez son
+        // détenteur, et non la source.
+        let ticket = issue_artifact_ticket(
+            pool,
+            claim.job_id,
+            ArtifactKind::Working,
+            worker,
+            claim.lease_epoch,
+        )
+        .await?;
+        claim.source_ticket = ticket;
+        return Ok(());
+    }
     if claim.local_source_root.is_some() {
         return Ok(());
     }
-    let Some(source) = super::job_source(pool, claim.job_id).await? else {
-        return Ok(());
-    };
-    // Source du central (aucun worker propriétaire) ou déjà montée par ce worker : rien à transférer.
-    if source.source_worker_id.is_none_or(|owner| owner == worker) {
-        return Ok(());
+    let ticket = issue_source_ticket(pool, worker, claim.job_id, claim.lease_epoch).await?;
+    claim.source_ticket = ticket;
+    Ok(())
+}
+
+/// Remet un billet frais au worker traitant dont le bail est actif : le billet précédent a expiré
+/// ou la lecture a été interrompue et doit reprendre (`Range`). Le nouveau billet remplace les
+/// précédents du même bail ; un transfert déjà en cours n'est pas coupé (le billet n'est validé
+/// qu'au début de chaque requête).
+pub async fn reissue_source_ticket(
+    pool: &SqlitePool,
+    job_id: Uuid,
+    lease: &LeaseRequest,
+) -> AppResult<Option<SourceTicket>> {
+    super::active(pool, job_id, lease).await?;
+    let input = super::relays::artifact_input(pool, job_id, lease.worker_id).await?;
+    if input.is_some() {
+        return issue_artifact_ticket(
+            pool,
+            job_id,
+            ArtifactKind::Working,
+            lease.worker_id,
+            lease.lease_epoch,
+        )
+        .await;
     }
-    let holder = source_holders(pool, claim.job_id, worker)
+    issue_source_ticket(pool, lease.worker_id, job_id, lease.lease_epoch).await
+}
+
+/// Billet pour lire la source chez un détenteur en ligne ; `None` si la source est déjà lisible
+/// (central, montage) ou si aucun détenteur n'annonce d'adresse.
+async fn issue_source_ticket(
+    pool: &SqlitePool,
+    worker: Uuid,
+    job_id: Uuid,
+    lease_epoch: i64,
+) -> AppResult<Option<SourceTicket>> {
+    let source = super::job_source(pool, job_id).await?;
+    // Source du central (aucun worker propriétaire) : le worker intégré la sert.
+    let Some(source) = source.filter(|source| source.source_worker_id.is_some()) else {
+        return issue_central_ticket(pool, worker, job_id, lease_epoch).await;
+    };
+    // Déjà montée par ce worker : rien à transférer.
+    if source.source_worker_id == Some(worker) {
+        return Ok(None);
+    }
+    let holder = source_holders(pool, job_id, worker)
         .await?
         .into_iter()
         .find(|holder| holder.transfer_url.is_some());
@@ -161,27 +208,132 @@ pub async fn attach_source_ticket(
         ..
     }) = holder
     else {
-        return Ok(());
+        return Ok(None);
     };
-    let token = new_token();
+    let ticket = store_ticket(pool, holder, url, job_id, worker, lease_epoch, None).await?;
+    Ok(Some(ticket))
+}
+
+/// Billet pour lire une source du central chez le worker intégré, s'il annonce une adresse ;
+/// `None` sinon, ou si le preneur est ce worker.
+async fn issue_central_ticket(
+    pool: &SqlitePool,
+    taker: Uuid,
+    job_id: Uuid,
+    lease_epoch: i64,
+) -> AppResult<Option<SourceTicket>> {
+    let holder: Option<(Uuid, String)> = sqlx::query_as(
+        "SELECT id, transfer_url FROM workers \
+         WHERE serves_central=1 AND id != ?1 AND transfer_url IS NOT NULL \
+           AND last_seen > datetime('now', '-' || ?2 || ' seconds')",
+    )
+    .bind(taker)
+    .bind(WORKER_ONLINE_SECONDS)
+    .fetch_optional(pool)
+    .await?;
+    let Some((holder, url)) = holder else {
+        return Ok(None);
+    };
+    let ticket = store_ticket(pool, holder, url, job_id, taker, lease_epoch, None).await?;
+    Ok(Some(ticket))
+}
+
+/// Billet pour tirer un artefact retenu chez son détenteur : `None` si l'artefact n'existe pas, si
+/// le preneur est le détenteur, ou si le détenteur n'est pas en ligne avec une adresse annoncée.
+pub async fn issue_artifact_ticket(
+    pool: &SqlitePool,
+    job_id: Uuid,
+    kind: ArtifactKind,
+    taker: Uuid,
+    lease_epoch: i64,
+) -> AppResult<Option<SourceTicket>> {
+    let Some(artifact) = super::get_artifact(pool, job_id, kind).await? else {
+        return Ok(None);
+    };
+    if artifact.holder_worker_id == taker {
+        return Ok(None);
+    }
+    let Some((Some(url), true)) = worker_reach(pool, artifact.holder_worker_id).await? else {
+        return Ok(None);
+    };
+    let ticket = store_ticket(
+        pool,
+        artifact.holder_worker_id,
+        url,
+        job_id,
+        taker,
+        lease_epoch,
+        Some(kind),
+    )
+    .await?;
+    Ok(Some(ticket))
+}
+
+/// Le worker annonce-t-il une adresse de transfert, donc peut-il servir des fichiers ?
+pub async fn can_serve(pool: &SqlitePool, worker: Uuid) -> AppResult<bool> {
+    Ok(matches!(
+        worker_reach(pool, worker).await?,
+        Some((Some(_), _))
+    ))
+}
+
+/// Adresse de transfert annoncée par un worker et sa présence en ligne ; `None` s'il est inconnu.
+async fn worker_reach(
+    pool: &SqlitePool,
+    worker: Uuid,
+) -> AppResult<Option<(Option<String>, bool)>> {
+    let reach: Option<(Option<String>, bool)> = sqlx::query_as(
+        "SELECT transfer_url, last_seen > datetime('now', '-' || ?2 || ' seconds') \
+         FROM workers WHERE id=?1",
+    )
+    .bind(worker)
+    .bind(WORKER_ONLINE_SECONDS)
+    .fetch_optional(pool)
+    .await?;
+    Ok(reach)
+}
+
+/// Enregistre un billet (seule l'empreinte du secret est conservée). Il remplace les billets
+/// précédents du même preneur, du même bail et de la même cible (source ou nature d'artefact).
+async fn store_ticket(
+    pool: &SqlitePool,
+    holder: Uuid,
+    url: String,
+    job_id: Uuid,
+    taker: Uuid,
+    lease_epoch: i64,
+    artifact: Option<ArtifactKind>,
+) -> AppResult<SourceTicket> {
+    let token = new_opaque_token();
+    let artifact_kind = artifact.map(ArtifactKind::as_str);
     sqlx::query("DELETE FROM source_tickets WHERE expires_at <= datetime('now')")
         .execute(pool)
         .await?;
     sqlx::query(
-        "INSERT INTO source_tickets(token_hash, job_id, source_worker_id, target_worker_id, \
-             lease_epoch, expires_at) \
-         VALUES(?1, ?2, ?3, ?4, ?5, datetime('now', '+' || ?6 || ' seconds'))",
+        "DELETE FROM source_tickets \
+         WHERE job_id=?1 AND target_worker_id=?2 AND lease_epoch=?3 AND artifact_kind IS ?4",
     )
-    .bind(token_hash(&token))
-    .bind(claim.job_id)
-    .bind(holder)
-    .bind(worker)
-    .bind(claim.lease_epoch)
-    .bind(SOURCE_TICKET_TTL_SECONDS)
+    .bind(job_id)
+    .bind(taker)
+    .bind(lease_epoch)
+    .bind(artifact_kind)
     .execute(pool)
     .await?;
-    claim.source_ticket = Some(SourceTicket { url, token });
-    Ok(())
+    sqlx::query(
+        "INSERT INTO source_tickets(token_hash, job_id, source_worker_id, target_worker_id, \
+             lease_epoch, expires_at, artifact_kind) \
+         VALUES(?1, ?2, ?3, ?4, ?5, datetime('now', '+' || ?6 || ' seconds'), ?7)",
+    )
+    .bind(sha256_hex(&token))
+    .bind(job_id)
+    .bind(holder)
+    .bind(taker)
+    .bind(lease_epoch)
+    .bind(SOURCE_TICKET_TTL_SECONDS)
+    .bind(artifact_kind)
+    .execute(pool)
+    .await?;
+    Ok(SourceTicket { url, token })
 }
 
 /// Valide un billet présenté au worker source et dit ce qu'il doit servir.
@@ -193,43 +345,85 @@ pub async fn redeem_ticket(
     token: &str,
     source_worker: Uuid,
 ) -> AppResult<TransferGrant> {
-    let row: Option<(Uuid, i64)> = sqlx::query_as(
-        "SELECT job_id, lease_epoch FROM source_tickets \
+    redeem(pool, token, source_worker, None).await
+}
+
+/// Variante du worker intégré : il sert aussi les dossiers du central, dont le dépôt d'entrée
+/// `input_dir` pour les tâches sans dossier configuré.
+pub async fn redeem_central_ticket(
+    pool: &SqlitePool,
+    token: &str,
+    source_worker: Uuid,
+    input_dir: &Path,
+) -> AppResult<TransferGrant> {
+    redeem(pool, token, source_worker, Some(input_dir)).await
+}
+
+async fn redeem(
+    pool: &SqlitePool,
+    token: &str,
+    source_worker: Uuid,
+    input_dir: Option<&Path>,
+) -> AppResult<TransferGrant> {
+    let row: Option<(Uuid, i64, Option<String>)> = sqlx::query_as(
+        "SELECT job_id, lease_epoch, artifact_kind FROM source_tickets \
          WHERE token_hash=?1 AND source_worker_id=?2 AND expires_at > datetime('now')",
     )
-    .bind(token_hash(token))
+    .bind(sha256_hex(token))
     .bind(source_worker)
     .fetch_optional(pool)
     .await?;
-    let (job_id, lease_epoch) = row.ok_or(AppError::Unauthorized)?;
+    let (job_id, lease_epoch, artifact_kind) = row.ok_or(AppError::Unauthorized)?;
     let job = super::get_job(pool, job_id).await?;
     if job.status != JobStatus::Running || job.lease_epoch != lease_epoch {
         return Err(AppError::Conflict);
     }
-    // Racine chez ce détenteur : son montage vérifié, sinon la racine enregistrée sur la tâche.
-    let mount: Option<String> = sqlx::query_scalar(
-        "SELECT local_path FROM verified_job_source_mounts WHERE job_id=?1 AND worker_id=?2",
-    )
-    .bind(job_id)
-    .bind(source_worker)
-    .fetch_optional(pool)
-    .await?;
-    let root = match mount {
-        Some(root) => root,
-        None => {
-            let source = super::job_source(pool, job_id)
-                .await?
-                .filter(|source| source.source_worker_id == Some(source_worker))
-                .ok_or(AppError::NotFound)?;
-            source.source_root
-        }
-    };
+    if let Some(raw_kind) = artifact_kind {
+        let kind = ArtifactKind::parse(&raw_kind).ok_or(AppError::Internal)?;
+        let artifact = super::get_artifact(pool, job_id, kind)
+            .await?
+            .filter(|artifact| artifact.holder_worker_id == source_worker)
+            .ok_or(AppError::NotFound)?;
+        return Ok(TransferGrant {
+            root: artifact.declaration.root,
+            source_name: artifact.declaration.name,
+            sha256: artifact.declaration.sha256,
+            bytes: artifact.declaration.bytes,
+        });
+    }
+    let root = source_root(pool, job_id, source_worker, input_dir).await?;
     Ok(TransferGrant {
         root,
         source_name: job.source_name,
         sha256: job.source_sha256.ok_or(AppError::Internal)?,
         bytes: job.source_bytes.ok_or(AppError::Internal)?,
     })
+}
+
+/// Racine de la source chez ce détenteur : son montage vérifié, sinon la racine enregistrée sur la
+/// tâche ; pour le worker intégré (`input_dir` fourni), celle du central.
+async fn source_root(
+    pool: &SqlitePool,
+    job_id: Uuid,
+    worker: Uuid,
+    input_dir: Option<&Path>,
+) -> AppResult<String> {
+    let mount: Option<String> = sqlx::query_scalar(
+        "SELECT local_path FROM verified_job_source_mounts WHERE job_id=?1 AND worker_id=?2",
+    )
+    .bind(job_id)
+    .bind(worker)
+    .fetch_optional(pool)
+    .await?;
+    if let Some(root) = mount {
+        return Ok(root);
+    }
+    match (super::job_source(pool, job_id).await?, input_dir) {
+        (Some(source), _) if source.source_worker_id == Some(worker) => Ok(source.source_root),
+        (Some(source), Some(_)) if source.source_worker_id.is_none() => Ok(source.source_root),
+        (None, Some(dir)) => Ok(dir.to_string_lossy().into_owned()),
+        _ => Err(AppError::NotFound),
+    }
 }
 
 #[cfg(test)]
@@ -247,14 +441,5 @@ mod tests {
         assert!(valid_transfer_url("http://user:pass@nas").is_none());
         assert!(valid_transfer_url("http://nas?x=1").is_none());
         assert!(valid_transfer_url("pas une url").is_none());
-    }
-
-    #[test]
-    fn tokens_are_long_and_hashed_deterministically() {
-        let token = new_token();
-        assert_eq!(token.len(), 64);
-        assert_ne!(token, new_token());
-        assert_eq!(token_hash(&token), token_hash(&token));
-        assert_eq!(token_hash(&token).len(), 64);
     }
 }

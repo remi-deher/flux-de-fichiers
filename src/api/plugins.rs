@@ -10,8 +10,21 @@ use crate::{
 use axum::{
     Json,
     extract::{Path, State},
+    http::header,
+    response::{IntoResponse, Response},
 };
 use serde_json::Value;
+use std::time::Duration;
+
+/// Type de contenu de l'icône d'un plugin.
+const ICON_CONTENT_TYPE: &str = "image/svg+xml";
+/// CSP de l'icône : même chargée hors d'une image, elle ne peut rien exécuter ni charger.
+const ICON_CSP: &str = "default-src 'none'; sandbox";
+/// Une icône change rarement : le navigateur peut la garder quelques minutes.
+const ICON_CACHE_CONTROL: &str = "private, max-age=300";
+
+/// Délai maximal d'un test de connexion à l'adresse d'un plugin.
+const CONNECTION_TEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Liste les pièces du catalogue à exposer ; les blocs, propriété d'un plugin, n'en font pas partie.
 pub async fn catalog(
@@ -55,6 +68,40 @@ pub async fn plugin_detail(
         .collect();
     plugins::attach_dependency_statuses(&mut detail, &tool_statuses);
     Ok(Json(detail))
+}
+
+/// Variables exposées par les plugins du catalogue, avec l'état de chaque espace de noms (ADR 0025).
+pub async fn exposed_variables(
+    State(s): State<AppState>,
+    _auth: ViewPluginsAuth,
+) -> AppResult<Json<Vec<forgearr_shared::exposed_variables::ExposedNamespaceView>>> {
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let registry = s.catalog_cache.operations(&roots).await;
+    Ok(Json(plugins::exposure_views(&registry)))
+}
+
+/// Icône SVG d'un plugin, validée par liste blanche puis servie comme image inerte (ADR 0024).
+pub async fn plugin_icon(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    _auth: ViewPluginsAuth,
+) -> AppResult<Response> {
+    if !plugins::is_valid_repository_id(&id) {
+        return Err(AppError::NotFound);
+    }
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let svg = tokio::task::spawn_blocking(move || plugins::plugin_icon_svg(&roots, &id))
+        .await
+        .ok()
+        .flatten()
+        .ok_or(AppError::NotFound)?;
+    let headers = [
+        (header::CONTENT_TYPE, ICON_CONTENT_TYPE),
+        (header::CONTENT_SECURITY_POLICY, ICON_CSP),
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        (header::CACHE_CONTROL, ICON_CACHE_CONTROL),
+    ];
+    Ok((headers, svg).into_response())
 }
 
 /// Liste l'état d'installation et de cache des outils distribués.
@@ -317,7 +364,7 @@ pub async fn test_connection(
     let client = match crate::net_policy::build_pinned_client(
         &parsed_url,
         &addresses,
-        std::time::Duration::from_secs(5),
+        CONNECTION_TEST_TIMEOUT,
     ) {
         Ok(client) => client,
         Err(_) => {
@@ -411,6 +458,63 @@ pub async fn repository_detail(
             .await
             .map_err(|_| AppError::Internal)?;
     Ok(Json(detail))
+}
+
+/// Code d'un script d'un dépôt, en lecture seule, pour le prévisualiser avant installation.
+pub async fn repository_script(
+    State(s): State<AppState>,
+    Path((id, entry_id)): Path<(String, String)>,
+    _auth: ViewPluginsAuth,
+) -> AppResult<Json<forgearr_shared::highlight::ScriptPreviewView>> {
+    let repos_dir = s.config.plugin_repos_dir();
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let registry = s.catalog_cache.operations(&roots).await;
+    let script = tokio::task::spawn_blocking(move || {
+        plugins::read_repository_script_preview(&repos_dir, &id, &entry_id, &registry)
+    })
+    .await
+    .map_err(|_| AppError::Internal)?;
+    script.map(Json).ok_or(AppError::NotFound)
+}
+
+/// Code d'un script du catalogue, quel que soit son dépôt, en lecture seule.
+pub async fn catalog_script(
+    State(s): State<AppState>,
+    Path(entry_id): Path<String>,
+    _auth: ViewPluginsAuth,
+) -> AppResult<Json<forgearr_shared::highlight::ScriptPreviewView>> {
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let registry = s.catalog_cache.operations(&roots).await;
+    let preview = tokio::task::spawn_blocking(move || {
+        plugins::read_catalog_script_preview(&roots, &entry_id, &registry)
+    })
+    .await
+    .map_err(|_| AppError::Internal)?;
+    preview.map(Json).ok_or(AppError::NotFound)
+}
+
+/// Copie un script du catalogue dans la librairie locale (« ma collection »), où il se modifie.
+///
+/// Un script déjà local, ou dont le nom existe déjà dans la librairie, est refusé (409).
+pub async fn import_catalog_script(
+    State(s): State<AppState>,
+    Path(entry_id): Path<String>,
+    _auth: ManagePluginsAuth,
+) -> AppResult<Json<forgearr_shared::local::LocalScriptSummary>> {
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let local_dir = plugins::local_catalog_dir(&s.config);
+    let saved = tokio::task::spawn_blocking(move || {
+        let (source_dir, request) =
+            plugins::catalog_script_import(&roots, &entry_id).ok_or(AppError::NotFound)?;
+        if source_dir == local_dir {
+            return Err(AppError::Conflict);
+        }
+        plugins::save_local_script(&local_dir, request)
+    })
+    .await
+    .map_err(|_| AppError::Internal)??;
+    s.catalog_cache.invalidate().await;
+    Ok(Json(saved))
 }
 
 /// Ajoute un nouveau dépôt tiers de plugins ou flux.

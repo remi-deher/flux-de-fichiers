@@ -23,7 +23,7 @@ struct LeaseSecretsEnvelope {
     plugin_configs: HashMap<String, Value>,
     #[serde(default)]
     flow_headers: HashMap<String, HashMap<String, String>>,
-    /// En-têtes des flux liés (ADR 0022), par clé [`linked_key`].
+    /// En-têtes des flux liés (ADR 0026), par clé [`linked_key`].
     #[serde(default)]
     linked_flow_headers: HashMap<String, HashMap<String, HashMap<String, String>>>,
 }
@@ -260,6 +260,7 @@ mod tests {
             media_root: None,
             local_source_root: None,
             resume_node_id: None,
+            resumed_outputs: HashMap::new(),
             handoff_input: None,
             prior_warning: false,
             source_ticket: None,

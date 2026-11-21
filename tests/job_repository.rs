@@ -5,6 +5,8 @@ use forgearr::{
     error::AppError,
     repository,
 };
+use forgearr_shared::flow_analysis::FlowMediaSample;
+use serde_json::json;
 use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::{
     Arc,
@@ -736,5 +738,82 @@ async fn verified_mount_aliases_share_a_task_and_keep_independent_volumes_distin
         (volume.saved_bytes, volume.grown_bytes, volume.grown_count),
         (-3, 3, 1)
     );
+    Ok(())
+}
+
+/// Une tâche du flux par défaut, réclamée par un worker : renvoie son bail.
+async fn leased_flow_job(
+    pool: &sqlx::SqlitePool,
+    source: &str,
+) -> anyhow::Result<(Uuid, LeaseRequest)> {
+    let worker = repository::register(pool, "worker-echantillon").await?;
+    let job = repository::insert_job(pool, source, None, &"ab".repeat(32), 12).await?;
+    let claim = repository::claim(pool, worker.id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("bail attendu"))?;
+    let lease = LeaseRequest {
+        worker_id: worker.id,
+        lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
+        telemetry: None,
+    };
+    Ok((job.id, lease))
+}
+
+#[tokio::test]
+async fn the_last_real_job_of_a_flow_gives_its_metadata_as_a_sample() -> anyhow::Result<()> {
+    let pool = pool().await?;
+    repository::save_flow(&pool, "flow.echantillon", &flow_request("E", "{}")).await?;
+    assert!(
+        repository::latest_flow_media_sample(&pool, "flow.echantillon")
+            .await?
+            .is_none()
+    );
+
+    let (job, lease) = leased_flow_job(&pool, "premier.mkv").await?;
+    let media = json!({"video": {"codec": "hevc"}});
+    repository::save_flow_media_sample(&pool, job, &lease, &media).await?;
+    let sample = repository::latest_flow_media_sample(&pool, "flow.echantillon")
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("échantillon attendu"))?;
+    assert_eq!(sample.job_id, job);
+    assert_eq!(sample.source_name, "premier.mkv");
+    assert_eq!(sample.media_info, media);
+    let input = sample.to_simulation_input();
+    assert_eq!(input.file_name, "premier.mkv");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&input.probe_json)?,
+        media
+    );
+
+    let newer = json!({"video": {"codec": "h264"}});
+    repository::save_flow_media_sample(&pool, job, &lease, &newer).await?;
+    let replaced = repository::latest_flow_media_sample(&pool, "flow.echantillon").await?;
+    assert_eq!(replaced.map(|sample| sample.media_info), Some(newer));
+    Ok(())
+}
+
+#[tokio::test]
+async fn empty_oversized_or_unleased_metadata_is_never_kept() -> anyhow::Result<()> {
+    let pool = pool().await?;
+    repository::save_flow(&pool, "flow.echantillon", &flow_request("E", "{}")).await?;
+    let (job, lease) = leased_flow_job(&pool, "film.mkv").await?;
+
+    repository::save_flow_media_sample(&pool, job, &lease, &json!({})).await?;
+    repository::save_flow_media_sample(&pool, job, &lease, &serde_json::Value::Null).await?;
+    let oversized = json!({"x": "a".repeat(FlowMediaSample::MAX_BYTES)});
+    repository::save_flow_media_sample(&pool, job, &lease, &oversized).await?;
+    assert!(
+        repository::latest_flow_media_sample(&pool, "flow.echantillon")
+            .await?
+            .is_none()
+    );
+
+    let stale = LeaseRequest {
+        lease_token: Uuid::new_v4(),
+        ..lease
+    };
+    let refused = repository::save_flow_media_sample(&pool, job, &stale, &json!({"a": 1})).await;
+    assert!(matches!(refused, Err(AppError::Conflict)));
     Ok(())
 }

@@ -1,6 +1,7 @@
 //! Vue Catalogue en style App Store : vitrine des packs recommandés, filtres d'état et grille responsive.
 
 use super::metadata::{StoreCard, StoreTone, readiness_badge};
+use super::subcategory_groups::group_by_subcategory;
 use super::{SelectedItem, card_description, section_badge_label, section_icon};
 use crate::api;
 use crate::ui::filters::{Filters, PluginKindFilter, plugin_kind};
@@ -248,8 +249,8 @@ pub fn partition_catalog_sections(entries: Vec<CatalogEntry>) -> CatalogSections
 
 #[component]
 fn CatalogGridSection(
-    #[prop(optional)] title: Option<&'static str>,
-    #[prop(optional)] subtitle: Option<&'static str>,
+    #[prop(optional_no_strip)] title: Option<&'static str>,
+    #[prop(optional_no_strip)] subtitle: Option<&'static str>,
     entries: Vec<CatalogEntry>,
     can_configure: bool,
     active_item_id: Signal<Option<String>>,
@@ -275,6 +276,7 @@ fn CatalogGridSection(
             <div class="store-grid">
                 {entries.into_iter().map(|entry| {
                     let active_id = entry.id.clone();
+                    let plugin_icon = entry.has_icon.then(|| entry.id.clone());
                     let desc = card_description(&entry);
                     let badge_label = section_badge_label(entry.entry_type);
                     let runtime = entry.runtime.clone().unwrap_or_default();
@@ -347,6 +349,7 @@ fn CatalogGridSection(
                             title=entry.name
                             description=desc
                             icon=icon
+                            plugin_icon=plugin_icon
                             tone=tone
                             status_badge=Some(status_badge)
                             context_tags=Some(context_tags)
@@ -363,6 +366,44 @@ fn CatalogGridSection(
         </div>
     }
     .into_any()
+}
+
+/// Grille de pièces regroupées par sous-catégorie officielle ; sans sous-catégorie, une seule grille.
+#[component]
+fn GroupedCatalogSections(
+    #[prop(optional_no_strip)] title: Option<&'static str>,
+    #[prop(optional_no_strip)] subtitle: Option<&'static str>,
+    entries: Vec<CatalogEntry>,
+    can_configure: bool,
+    active_item_id: Signal<Option<String>>,
+    on_open_plugin: Callback<SelectedItem>,
+    on_open_pack: Callback<SelectedItem>,
+    on_open_item: Callback<CatalogEntry>,
+) -> impl IntoView {
+    let grouped = group_by_subcategory(entries);
+    view! {
+        <CatalogGridSection
+            title=title
+            subtitle=subtitle
+            entries=grouped.ungrouped
+            can_configure=can_configure
+            active_item_id=active_item_id
+            on_open_plugin=on_open_plugin
+            on_open_pack=on_open_pack
+            on_open_item=on_open_item
+        />
+        {grouped.groups.into_iter().map(|group| view! {
+            <CatalogGridSection
+                title=Some(group.title)
+                entries=group.entries
+                can_configure=can_configure
+                active_item_id=active_item_id
+                on_open_plugin=on_open_plugin
+                on_open_pack=on_open_pack
+                on_open_item=on_open_item
+            />
+        }).collect_view()}
+    }
 }
 
 #[component]
@@ -526,8 +567,8 @@ pub fn CatalogSectionView(
                                     </div>
                                 })}
                                 <CatalogGridSection
-                                    title="Packs"
-                                    subtitle="Ensembles prêts à l'emploi"
+                                    title=Some("Packs")
+                                    subtitle=Some("Ensembles prêts à l'emploi")
                                     entries=fallback_packs
                                     can_configure=can_configure
                                     active_item_id=active_item_id
@@ -535,9 +576,9 @@ pub fn CatalogSectionView(
                                     on_open_pack=on_open_pack
                                     on_open_item=on_open_item
                                 />
-                                <CatalogGridSection
-                                    title="Plugins"
-                                    subtitle="Extensions ajoutant des blocs et intégrations à vos flux"
+                                <GroupedCatalogSections
+                                    title=Some("Plugins")
+                                    subtitle=Some("Extensions ajoutant des blocs et intégrations à vos flux")
                                     entries=sections.plugins
                                     can_configure=can_configure
                                     active_item_id=active_item_id
@@ -546,8 +587,8 @@ pub fn CatalogSectionView(
                                     on_open_item=on_open_item
                                 />
                                 <CatalogGridSection
-                                    title="Flux & scripts"
-                                    subtitle="Modèles de flux prêts à l'emploi et scripts exécutables"
+                                    title=Some("Flux & scripts")
+                                    subtitle=Some("Modèles de flux prêts à l'emploi et scripts exécutables")
                                     entries=sections.flows_and_scripts
                                     can_configure=can_configure
                                     active_item_id=active_item_id
@@ -556,8 +597,8 @@ pub fn CatalogSectionView(
                                     on_open_item=on_open_item
                                 />
                                 <CatalogGridSection
-                                    title="Ressources"
-                                    subtitle="Préréglages, polices, images et fichiers partagés"
+                                    title=Some("Ressources")
+                                    subtitle=Some("Préréglages, polices, images et fichiers partagés")
                                     entries=sections.resources
                                     can_configure=can_configure
                                     active_item_id=active_item_id
@@ -569,7 +610,7 @@ pub fn CatalogSectionView(
                             .into_any()
                         } else {
                             view! {
-                                <CatalogGridSection
+                                <GroupedCatalogSections
                                     entries=shown
                                     can_configure=can_configure
                                     active_item_id=active_item_id
@@ -605,6 +646,8 @@ mod tests {
             current_choice: None,
             distribution: None,
             category: None,
+            subcategory: None,
+            has_icon: false,
             tags: Vec::new(),
             owner: None,
             sha256: None,

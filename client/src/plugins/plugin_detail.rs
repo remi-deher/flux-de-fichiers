@@ -1,5 +1,6 @@
 //! Tiroir d'inspection à onglets d'un plugin : aperçu orienté action, blocs, paramètres et informations.
 
+use super::exposed_variables::ExposedVariablesSection;
 use super::metadata::{CommonInfoRows, MetaRow, StatusBanner, StoreTone, tool_status_tag};
 use super::settings::PluginSettings;
 use super::{CATALOG_PATH, SelectedItem, bump, install_with_dependencies_action};
@@ -342,6 +343,7 @@ fn InfoTab(detail: PluginDetailView) -> impl IntoView {
             <MetaRow term="Blocs exposés">{blocks_count}</MetaRow>
             <MetaRow term="Paramètres">{settings_label}</MetaRow>
         </div>
+        <ExposedVariablesSection exposures=detail.exposures />
     }
 }
 

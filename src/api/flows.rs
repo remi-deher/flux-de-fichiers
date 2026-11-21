@@ -45,6 +45,18 @@ pub async fn get_flow(
     Ok(Json(flow))
 }
 
+/// Métadonnées du dernier vrai job du flux, pour l'échantillon de simulation (404 s'il n'y en a pas).
+pub async fn media_sample(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    _auth: ViewFlowsAuth,
+) -> AppResult<Json<forgearr_shared::flow_analysis::FlowMediaSample>> {
+    repository::latest_flow_media_sample(&s.pool, &id)
+        .await?
+        .map(Json)
+        .ok_or(AppError::NotFound)
+}
+
 /// Versions figées d'un flux, la plus récente d'abord.
 pub async fn list_versions(
     State(s): State<AppState>,
@@ -86,7 +98,7 @@ pub async fn save_flow(
     }
     super::flow_links::ensure_valid_links(&s.pool, &id, &payload.definition).await?;
     let mut payload = payload;
-    if crate::flows::has_webhook_headers(&payload.definition) {
+    if crate::flows::has_flow_secrets(&payload.definition) {
         let existing = repository::get_flow(&s.pool, &id)
             .await
             .ok()
@@ -95,12 +107,20 @@ pub async fn save_flow(
         payload.definition =
             crate::flows::seal_definition(&secrets, &id, &payload.definition, existing.as_deref())?;
     }
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let registry = s.catalog_cache.operations(&roots).await;
+    if let Ok(graph) =
+        serde_json::from_str::<forgearr_shared::flows::FlowGraph>(&payload.definition)
+    {
+        let problems = crate::flows::check_references(&graph, &registry);
+        if !problems.is_empty() {
+            return Err(AppError::InvalidFlowVariables(problems.join(" | ")));
+        }
+    }
     let mut flow = repository::save_flow(&s.pool, &id, &payload).await?;
     flow.definition = crate::flows::mask_definition(&flow.definition);
 
     let mut headers = axum::http::HeaderMap::new();
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    let registry = s.catalog_cache.operations(&roots).await;
     if !registry.is_empty() {
         let cache_mgr = crate::tools_cache::ToolCacheManager::new(&s.config.tools_cache_dir);
         let mut configured = std::collections::HashSet::new();
@@ -112,7 +132,11 @@ pub async fn save_flow(
                 configured.insert(plugin_id);
             }
         }
-        let warnings = registry.flow_readiness_warnings(&flow, &cache_mgr, &configured);
+        let mut warnings = registry.flow_readiness_warnings(&flow, &cache_mgr, &configured);
+        warnings.extend(crate::flows::reference_warnings(
+            &forgearr_shared::flows::FlowGraph::parse(&payload.definition),
+            &registry,
+        ));
         if !warnings.is_empty() {
             tracing::warn!(flow_id = %id, warnings = ?warnings, "dépendances ou réglages manquants lors de l'enregistrement du flux");
             if let Ok(val) = axum::http::HeaderValue::from_str(&warnings.join(" | ")) {
@@ -137,7 +161,7 @@ pub async fn delete_flow(
 #[serde(rename_all = "camelCase")]
 pub struct ValidateFlowRequest {
     pub definition: serde_json::Value,
-    /// Flux validé, pour détecter un appel de sous-flux qui reviendrait sur lui (ADR 0022).
+    /// Flux validé, pour détecter un appel de sous-flux qui reviendrait sur lui (ADR 0026).
     #[serde(default)]
     pub flow_id: Option<String>,
 }
@@ -256,6 +280,9 @@ pub async fn validate_flow(
     if has_cycle(&graph) {
         errors.push("Le graphe contient au moins un cycle.".to_owned());
     }
+    let registry = s.catalog_cache.operations(&roots).await;
+    errors.extend(crate::flows::check_references(&graph, &registry));
+    warnings.extend(crate::flows::reference_warnings(&graph, &registry));
     Ok(Json(FlowValidationReport {
         valid: errors.is_empty(),
         node_count: graph.nodes.len(),
@@ -263,6 +290,17 @@ pub async fn validate_flow(
         errors,
         warnings,
     }))
+}
+
+/// Variables du script d'un nœud : schéma, références disponibles à cet endroit et `config` résolue d'exemple.
+pub async fn node_variables(
+    State(s): State<AppState>,
+    _auth: ViewFlowsAuth,
+    Json(payload): Json<forgearr_shared::flow_variables::NodeVariablesRequest>,
+) -> AppResult<Json<forgearr_shared::flow_variables::NodeVariablesView>> {
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let registry = s.catalog_cache.operations(&roots).await;
+    Ok(Json(crate::flows::node_variables_view(&payload, &registry)))
 }
 
 /// Restaure une version figée d'un flux en tant que nouvelle version courante.

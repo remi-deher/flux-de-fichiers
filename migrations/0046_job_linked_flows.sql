@@ -1,4 +1,4 @@
--- Flux liés figés avec une tâche (ADR 0022) : flux d'échec et sous-flux.
+-- Flux liés figés avec une tâche (ADR 0026) : flux d'échec et sous-flux.
 -- Additive : une tâche existante n'a aucun flux lié, elle s'exécute comme avant.
 -- Sans clé étrangère vers flow_versions : une version figée reste lisible après suppression du flux.
 CREATE TABLE job_linked_flows (

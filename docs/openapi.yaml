@@ -112,7 +112,11 @@ paths:
   /api/v1/flows/validate:
     post:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Valider la structure d'un graphe de flux avant sauvegarde
+      summary: >-
+        Valider la structure d'un graphe de flux avant sauvegarde ; les références `{{…}}` des
+        variables déclarées des nœuds script (inconnues, ou vers un nœud qui ne précède pas) sont
+        aussi signalées dans `errors` ; une référence à une variable exposée dépréciée l'est dans `warnings`
+        (ADR 0025)
       requestBody:
         required: true
         content:
@@ -156,6 +160,77 @@ paths:
               schema: {$ref: '#/components/schemas/DefaultFailureFlow'}
         '400': {description: Flux inconnu}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/plugins/scripts/{entry_id}:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: >-
+        Code d'un script du catalogue (tous dépôts confondus, le premier dépôt qui porte l'identifiant l'emporte),
+        en lecture seule : métadonnées, variables, lignes de jetons colorés et état de ses dépendances. Affiché dans
+        le tiroir de l'entrée du catalogue.
+      parameters:
+        - {name: entry_id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Aperçu du script.}
+        '404': {description: Script inconnu.}
+  /api/v1/plugins/scripts/{entry_id}/import:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: >-
+        Copie un script du catalogue dans la librairie locale (« ma collection ») sous un identifiant neuf, avec son
+        code, ses variables et ses dépendances. 409 si le script est déjà local ou si un script local porte déjà ce nom.
+      parameters:
+        - {name: entry_id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Script local créé.}
+        '404': {description: Script inconnu.}
+        '409': {description: Déjà dans la librairie locale.}
+  /api/v1/flows/{id}/media-sample:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: >-
+        Métadonnées finales du dernier job exécuté pour ce flux (ADR 0025), proposées comme échantillon de
+        simulation. 404 tant qu'aucun job n'a été exécuté.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Dernier échantillon.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobId, sourceName, mediaInfo, recordedAt]
+                properties:
+                  jobId: {type: string, format: uuid}
+                  sourceName: {type: string}
+                  mediaInfo: {type: object}
+                  recordedAt: {type: string}
+        '404': {description: Aucun échantillon pour ce flux.}
+  /api/v1/flows/node-variables:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: >-
+        Variables du script d'un nœud (ADR 0025) : schéma, références `{{…}}` disponibles à cet endroit
+        du graphe (flux, métadonnées d'exemple, nœuds en amont, plugins qui s'exécutent avant) et
+        `config` résolue avec des valeurs d'exemple. Le graphe peut ne pas être enregistré. `warnings` liste les
+        références à des variables exposées dépréciées (absent s'il n'y en a pas). Les secrets présents dans `config.secrets` n'y apparaissent jamais (remplacés par `••••••••`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [graph, nodeId]
+              properties:
+                graph: {type: object}
+                nodeId: {type: string}
+                mediaInfo: {description: Exemple de métadonnées du fichier (JSON de sonde)}
+      responses:
+        '200':
+          description: >-
+            `variables`, `references` (`reference`, `label`, `source` : flow, media_info, node, plugin,
+            `sample`), `resolved` (absent si la résolution échoue) et `error`
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/flows/{id}/versions/{version}/restore:
     post:
       security: [{ApiKey: []}, {WebSession: []}]
@@ -172,14 +247,6 @@ paths:
       responses:
         '200':
           description: Flux restauré
-        default: {$ref: '#/components/responses/Error'}
-  /api/v1/jobs/{id}/delete:
-    delete:
-      security: [{ApiKey: []}, {WebSession: []}]
-      summary: Supprimer ou annuler une tâche (DELETE /api/v1/jobs/{id})
-      responses:
-        '204':
-          description: Tâche supprimée
         default: {$ref: '#/components/responses/Error'}
   /api/v1/libraries/{id}/files/{name}:
     post:
@@ -479,6 +546,13 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Job'}
         default: {$ref: '#/components/responses/Error'}
+    delete:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Supprimer ou annuler une tâche
+      responses:
+        '204':
+          description: Tâche supprimée
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/jobs/{id}/retry:
     parameters: [{$ref: '#/components/parameters/JobId'}]
     post:
@@ -598,7 +672,7 @@ paths:
   /api/v1/plugins:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Catalogue lu dans les dépôts de plugins synchronisés (enrichi de `runtime` : état opérationnel, réglages, outils manquants, blocs/composants)
+      summary: "Catalogue lu dans les dépôts de plugins synchronisés (enrichi de `runtime` : état opérationnel, réglages, outils manquants, blocs/composants)"
       responses:
         '200':
           description: Fiches du catalogue enrichies de `runtime` (`readiness`, `hasSettings`, `configured`, `missingToolsCount`, `blocksCount`, `componentsCount`) ; une fiche inconnue du central est ignorée
@@ -609,10 +683,10 @@ paths:
   /api/v1/plugins/{id}:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Détail d'un plugin, dépendances (avec `status` réel dans le cache d'outils), blocs fournis et statut des outils requis
+      summary: Détail d'un plugin, dépendances (avec `status` réel dans le cache d'outils), blocs fournis, statut des outils requis et variables exposées aux scripts (`exposures`, absent si le plugin n'en expose pas)
       parameters: [{in: path, name: id, required: true, schema: {type: string}}]
       responses:
-        '200': {description: Vue détaillée du plugin (`dependencies[].status` indique `ready`, `installing` ou `not_installed`)}
+        '200': {description: "Vue détaillée du plugin (`dependencies[].status` indique `ready`, `installing` ou `not_installed`)"}
         '404': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins/repositories:
@@ -655,6 +729,21 @@ paths:
       responses:
         '200': {description: Dépôt supprimé}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/plugins/repositories/{id}/scripts/{entryId}:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: >-
+        Aperçu en lecture seule d'un script d'un dépôt synchronisé : métadonnées et variables, code,
+        lignes de jetons colorés (kind : plain, comment, string, number, keyword, function, variable,
+        operator), dépendances sur des variables exposées par des plugins (`requirements`, avec leur
+        disponibilité sur ce central) et `dependenciesUnverified`
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string}}
+        - {in: path, name: entryId, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Script et jetons de coloration syntaxique}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins/repositories/{id}/toggle:
     put:
       security: [{ApiKey: []}, {WebSession: []}]
@@ -674,6 +763,18 @@ paths:
       responses:
         '200': {description: Bilan (entrées, fichiers, fiches ignorées)}
         '502': {description: Dépôt injoignable ou refusé, l'ancienne copie est conservée}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/plugins/exposed-variables:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: >-
+        Variables exposées aux scripts par les plugins du catalogue (ADR 0025) : pour chaque exposition,
+        le plugin fournisseur (`provider`), son contrat (`exposes` : espace de noms, version, variables et
+        chemin lu dans `mediaInfo`), `active` (lue par les scripts sans dépendance explicite : à espace de noms
+        égal, la première l'emporte ; un script qui la désigne dans `requires` la lit quel que soit cet état)
+        et `conflictsWith` (autres plugins qui déclarent le même espace de noms)
+      responses:
+        '200': {description: Expositions, triées par identifiant d'opération}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins/{id}/settings:
     get:
@@ -1149,120 +1250,120 @@ paths:
                   centralUrl: {type: string, description: Worker seulement}
                   registered: {type: boolean, description: Worker seulement}
                   centralReachable: {type: boolean, description: Worker seulement}
-  /api/v1/jobs/{id}/handoff:
-    parameters:
-      - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
-    post:
-      security: [{ApiKey: []}]
-      summary: Préparer la remise du fichier de travail en conservant le bail d'origine
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [workerId, leaseToken, leaseEpoch, request, artifact]
-              properties:
-                workerId: {type: string, format: uuid}
-                leaseToken: {type: string, format: uuid}
-                leaseEpoch: {type: integer}
-                request: {type: object, description: Cible du relais et identifiant du nœud de reprise}
-                artifact: {$ref: '#/components/schemas/HandoffArtifact'}
-                warning: {type: boolean, default: false, description: Avertissement cumulé avant la remise}
-      responses:
-        '201': {description: Remise créée ; le fichier doit encore être chargé et vérifié}
-        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/artifacts/{kind}:
     put:
       security: [{ApiKey: []}]
-      summary: Déposer le fichier déclaré avant sa mise à disposition de la cible
+      summary: Déclarer un fichier retenu chez le worker (fichier de travail d'un relais, ou résultat)
       parameters:
-        - {in: header, name: x-worker-id, required: true, schema: {type: string, format: uuid}}
-        - {in: header, name: x-lease-token, required: true, schema: {type: string, format: uuid}}
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {in: path, name: kind, required: true, schema: {type: string, enum: [working, result]}}
+        - {$ref: '#/components/parameters/WorkerId'}
+        - {$ref: '#/components/parameters/LeaseToken'}
         - {in: header, name: x-lease-epoch, required: true, schema: {type: integer}}
       requestBody:
         required: true
         content:
-          application/octet-stream:
-            schema: {type: string, contentMediaType: application/octet-stream}
+          application/json:
+            schema: {$ref: '#/components/schemas/ArtifactDeclaration'}
       responses:
-        '204': {description: Copie vérifiée et disponible}
+        '204': {description: Artefact déclaré ; le preneur le tire chez ce worker avec un billet}
+        '409': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/artifacts/working/received:
+    post:
+      security: [{ApiKey: []}]
+      summary: Confirmer la réception vérifiée du fichier de travail ; son détenteur peut le purger
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/WorkerId'}
+        - {$ref: '#/components/parameters/LeaseToken'}
+        - {in: header, name: x-lease-epoch, required: true, schema: {type: integer}}
+      responses:
+        '204': {description: Réception enregistrée}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/retained/{kind}:
     get:
       security: [{ApiKey: []}]
-      summary: État de la remise pour son émetteur
+      summary: Indiquer si un fichier retenu est encore nécessaire (purge par son détenteur)
       parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {in: path, name: kind, required: true, schema: {type: string, enum: [working, result]}}
         - {in: query, name: worker_id, required: true, schema: {type: string, format: uuid}}
         - {in: query, name: lease_epoch, required: true, schema: {type: integer}}
       responses:
         '200':
-          description: État de la remise
-          content:
-            application/json:
-              schema: {type: string, enum: [uploading, pending, claimed, acknowledged, failed]}
-        default: {$ref: '#/components/responses/Error'}
-  /api/v1/worker/handoffs/{id}/{epoch}/retained:
-    get:
-      security: [{ApiKey: []}]
-      summary: Indiquer si une copie de travail du repreneur est encore nécessaire
-      parameters:
-        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
-        - {in: path, name: epoch, required: true, schema: {type: integer}}
-        - {in: query, name: worker_id, required: true, schema: {type: string, format: uuid}}
-      responses:
-        '200':
-          description: La copie doit être conservée si la réponse vaut true
+          description: Le fichier doit être conservé si la réponse vaut true
           content:
             application/json:
               schema: {type: boolean}
         default: {$ref: '#/components/responses/Error'}
-  /api/v1/worker/handoffs/claim:
+  /api/v1/jobs/{id}/result/ready:
     post:
       security: [{ApiKey: []}]
-      summary: Réserver une offre de fichier de travail pour le worker appelant
-      parameters:
-        - {in: query, name: worker_id, required: true, schema: {type: string, format: uuid}}
-      responses:
-        '200':
-          description: Offre réservée ou null si aucune remise ne convient
-          content:
-            application/json:
-              schema: {anyOf: [{$ref: '#/components/schemas/HandoffOffer'}, {type: 'null'}]}
-        default: {$ref: '#/components/responses/Error'}
-  /api/v1/jobs/{id}/handoff/file:
-    get:
-      security: [{ApiKey: []}]
-      summary: Télécharger le fichier de travail réservé
+      summary: Annoncer que le résultat déclaré est prêt ; la réponse arrive une fois le résultat appliqué
       parameters:
         - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
-        - {in: query, name: worker_id, required: true, schema: {type: string, format: uuid}}
-        - {in: header, name: x-handoff-token, required: true, schema: {type: string}}
-      responses:
-        '200':
-          description: Octets à vérifier par taille et SHA-256 avant l'accusé
-          content:
-            application/octet-stream:
-              schema: {type: string, contentMediaType: application/octet-stream}
-        default: {$ref: '#/components/responses/Error'}
-  /api/v1/jobs/{id}/handoff/ack:
-    post:
-      security: [{ApiKey: []}]
-      summary: Accuser réception du fichier vérifié et libérer le bail d'origine
-      parameters:
-        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/WorkerId'}
+        - {$ref: '#/components/parameters/LeaseToken'}
+        - {in: header, name: x-lease-epoch, required: true, schema: {type: integer}}
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [workerId, receiptToken, sha256, bytes]
+              required: [extension]
               properties:
-                workerId: {type: string, format: uuid}
-                receiptToken: {type: string}
-                sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
-                bytes: {type: integer, minimum: 1}
+                extension: {type: string}
+                warning: {type: boolean, default: false}
+                can_apply_locally: {type: boolean, default: false, description: Le worker sait appliquer lui-même le remplacement sur son montage}
       responses:
-        '204': {description: Accusé accepté ou déjà reçu ; remise idempotente}
+        '200':
+          description: Sans apply_locally, un autre détenteur a tiré et appliqué le résultat ; avec, le worker l'applique puis confirme par result/applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  apply_locally:
+                    type: object
+                    required: [policy, root]
+                    properties:
+                      policy: {type: string, enum: [replace_with_backup, replace_in_place]}
+                      root: {type: string, description: Racine du montage inscriptible de la source chez ce worker}
+        '502': {description: "result_undeliverable : aucun détenteur actif ou adresse de transfert pour recevoir le résultat"}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/result/authorize:
+    post:
+      security: [{ApiKey: []}]
+      summary: Dernière vérification du bail juste avant que le worker remplace la source
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/WorkerId'}
+        - {$ref: '#/components/parameters/LeaseToken'}
+        - {in: header, name: x-lease-epoch, required: true, schema: {type: integer}}
+      responses:
+        '204': {description: Remplacement autorisé}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/result/applied:
+    post:
+      security: [{ApiKey: []}]
+      summary: Annoncer l'issue du remplacement appliqué par le worker qui traite
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/WorkerId'}
+        - {$ref: '#/components/parameters/LeaseToken'}
+        - {in: header, name: x-lease-epoch, required: true, schema: {type: integer}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: string, enum: [published, source_changed, failed]}
+      responses:
+        '204': {description: Tâche réussie}
+        '409': {description: Source modifiée (aucun remplacement) ou bail perdu}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/worker/software-encoder-probes:
     get:
@@ -1798,45 +1899,6 @@ paths:
         '204': {description: Échec enregistré}
         '409': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
-  /api/v1/jobs/{id}/source:
-    parameters:
-      - {$ref: '#/components/parameters/JobId'}
-      - {$ref: '#/components/parameters/WorkerId'}
-      - {$ref: '#/components/parameters/LeaseToken'}
-    get:
-      security: [{ApiKey: []}]
-      summary: Télécharger la source pour un bail actif ; le worker vérifie son empreinte
-      responses:
-        '200':
-          description: Fichier source, Content-Length fourni
-          content:
-            video/x-matroska:
-              schema: {type: string, format: binary}
-        '409': {$ref: '#/components/responses/Error'}
-        default: {$ref: '#/components/responses/Error'}
-  /api/v1/jobs/{id}/result:
-    parameters:
-      - {$ref: '#/components/parameters/JobId'}
-      - {$ref: '#/components/parameters/WorkerId'}
-      - {$ref: '#/components/parameters/LeaseToken'}
-    put:
-      security: [{ApiKey: []}]
-      summary: Téléverser puis valider et publier le résultat atomiquement
-      parameters:
-        - in: header
-          name: x-remux-warning
-          schema: {type: boolean, default: false}
-      requestBody:
-        required: true
-        content:
-          video/x-matroska:
-            schema: {type: string, format: binary}
-      responses:
-        '204': {description: Résultat publié, bail consommé}
-        '400': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
-        '413': {$ref: '#/components/responses/Error'}
-        default: {$ref: '#/components/responses/Error'}
 components:
   securitySchemes:
     ApiKey: {type: http, scheme: bearer, description: "Clé d'API fdf_<id>_<secret> (rôle admin ou worker) ; si Authorization existe elle a priorité sur le cookie, sans repli en cas d'invalidité"}
@@ -1893,6 +1955,9 @@ components:
                 required: [code]
                 properties:
                   code: {type: string}
+                  message:
+                    type: string
+                    description: Cause d'une indisponibilité de dépôt (`repository_unavailable`), sur une ligne, 300 caractères au plus.
   schemas:
     DefaultFailureFlow:
       type: object
@@ -1913,6 +1978,14 @@ components:
         result_bytes: {type: integer, minimum: 1}
         extension: {type: string}
         policy: {type: string, enum: [replace_with_backup, replace_in_place]}
+    ArtifactDeclaration:
+      type: object
+      required: [root, name, sha256, bytes]
+      properties:
+        root: {type: string, description: Dossier du détenteur}
+        name: {type: string, description: Fichier sous cette racine}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        bytes: {type: integer, minimum: 1}
     HandoffArtifact:
       type: object
       required: [name, sha256, bytes]
@@ -1920,15 +1993,6 @@ components:
         name: {type: string, description: Nom du fichier de travail}
         sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
         bytes: {type: integer, minimum: 1}
-    HandoffOffer:
-      type: object
-      required: [jobId, fromWorkerId, sourceLeaseEpoch, artifact, receiptToken]
-      properties:
-        jobId: {type: string, format: uuid}
-        fromWorkerId: {type: string, format: uuid}
-        sourceLeaseEpoch: {type: integer}
-        artifact: {$ref: '#/components/schemas/HandoffArtifact'}
-        receiptToken: {type: string, description: Secret réservé au repreneur pour télécharger et accuser réception}
     ApiKey:
       type: object
       properties:
@@ -2028,6 +2092,14 @@ components:
         source_bytes: {type: integer, minimum: 1}
         local_source_root: {type: string, description: "Dossier local au worker pour une source sur son montage."}
         resume_node_id: {type: string, description: Identifiant du nœud où reprendre le flux figé.}
+        resumed_outputs:
+          type: object
+          description: "Sorties des nœuds exécutés avant le relais (`message`, `nextPort`), lues par `{{nodes.<id>.…}}` à la reprise (ADR 0025)."
+          additionalProperties:
+            type: object
+            properties:
+              message: {type: string, nullable: true}
+              nextPort: {type: string, nullable: true}
         prior_warning: {type: boolean, default: false, description: Avertissement accumulé avant la remise.}
         linked_flows:
           type: array
@@ -2088,6 +2160,38 @@ components:
         code: {type: string}
         category: {type: [string, 'null'], enum: [media, data, io, other, null]}
         tags: {type: array, items: {type: string}}
+        variables: {type: array, items: {$ref: '#/components/schemas/ScriptVariable'}}
+        requires: {type: array, items: {$ref: '#/components/schemas/ScriptRequirement'}}
+        dependenciesUnverified: {type: boolean}
+    ScriptRequirement:
+      type: object
+      description: Variable exposée par un plugin que le script consomme (ADR 0025) ; dépendance dure par défaut
+      required: [variable, provider]
+      properties:
+        variable: {type: string, description: 'Référence complète : espace.nom'}
+        provider: {type: string, description: Identifiant du plugin fournisseur dans le catalogue}
+        contractMajor: {type: integer, minimum: 0, default: 1}
+        repository:
+          type: object
+          description: Dépôt qui publie le fournisseur, jamais ajouté automatiquement
+          required: [id, indexUrl]
+          properties:
+            id: {type: string}
+            indexUrl: {type: string, format: uri}
+    ScriptVariable:
+      type: object
+      description: Variable d'un script déclarée dans `runtime.variables` (ADR 0025)
+      required: [name]
+      properties:
+        name: {type: string, maxLength: 64, pattern: '^[a-z][a-z0-9_]*$'}
+        label: {type: string}
+        description: {type: [string, 'null']}
+        type: {type: string, enum: [text, multiline, number, boolean, choice, secret], default: text}
+        default: {description: "Valeur du type de la variable ; interdite pour un secret"}
+        required: {type: boolean}
+        options: {type: array, items: {type: string}, description: Options d'un choix (obligatoires pour ce type seulement)}
+        min: {type: number}
+        max: {type: number}
     UpsertLocalScriptRequest:
       type: object
       required: [name, interpreter, code]
@@ -2100,6 +2204,9 @@ components:
         filename: {type: [string, 'null']}
         category: {type: [string, 'null'], enum: [media, data, io, other, null]}
         tags: {type: array, items: {type: string}}
+        variables: {type: array, items: {$ref: '#/components/schemas/ScriptVariable'}, description: Schéma validé à l'écriture ; `400` s'il est invalide}
+        requires: {type: array, items: {$ref: '#/components/schemas/ScriptRequirement'}, description: Dépendances validées à l'écriture (références espace.nom uniques, un fournisseur et une version majeure par espace de noms) ; `400` si elles sont invalides}
+        dependenciesUnverified: {type: boolean, description: Script intégré sans ses dépendances ; elles ne sont ni contrôlées ni installées}
     LocalResourceSummary:
       type: object
       required: [id, slug, name, entryType, filename, sizeBytes]

@@ -1,6 +1,7 @@
+mod artifacts;
 mod enrollment;
+mod flow_samples;
 mod flows;
-mod handoffs;
 mod identity;
 mod jobs;
 mod libraries;
@@ -16,19 +17,20 @@ mod source_publication_journal;
 mod source_tickets;
 mod step_context;
 
+pub use artifacts::{
+    JobArtifact, artifact_retained, confirm_artifact_received, declare_artifact, get_artifact,
+    release_artifact,
+};
 pub use enrollment::{
     create_enrollment_request, decide_enrollment_request, enrollment_window_status,
     list_enrollment_requests, poll_enrollment_request, purge_expired_enrollment_requests,
     set_enrollment_window,
 };
 
+pub use flow_samples::{latest_flow_media_sample, save_flow_media_sample};
 pub use flows::{
     DEFINITION_STORES, DefinitionStore, default_flow, delete_flow, get_flow, get_flow_version,
     list_flow_versions, list_flows, save_flow,
-};
-pub use handoffs::{
-    acknowledge_handoff, begin_handoff, claim_handoff, expire_handoffs, finish_handoff_upload,
-    handoff_download_artifact, handoff_state, handoff_upload_artifact, retained_handoff_needed,
 };
 pub use identity::{
     Account, ApiKeyRecord, INSTANCE_NAME_KEY, account_count, create_account, create_first_account,
@@ -70,10 +72,12 @@ pub use plugins::{
 };
 pub use relays::{RelayOutcome, list_relays, relay_job};
 pub use source_publication_journal::{
-    PendingSourcePublication, begin_source_publication, clear_source_publication,
-    mark_source_publication_uncertain, pending_source_publications, recover_source_publications,
+    PendingSourcePublication, begin_local_publication, begin_pulled_publication,
+    begin_source_publication, clear_source_publication, mark_source_publication_uncertain,
+    pending_source_publications, recover_source_publications,
 };
 pub use source_tickets::{
-    SourceHolder, attach_source_ticket, redeem_ticket, set_transfer_url, source_holders,
+    SourceHolder, attach_source_ticket, can_serve, issue_artifact_ticket, redeem_central_ticket,
+    redeem_ticket, reissue_source_ticket, set_serves_central, set_transfer_url, source_holders,
     valid_transfer_url, writable_source_holders,
 };

@@ -97,6 +97,11 @@ async fn only_direct_and_transfer_workers_take_library_jobs() -> anyhow::Result<
         claim_of(&pool, outsider.id).await?.is_none(),
         "aucun accès : jamais attribué"
     );
+    assert!(
+        claim_of(&pool, transfer.id).await?.is_none(),
+        "le détenteur sans adresse de transfert ne sert personne"
+    );
+    repository::set_transfer_url(&pool, direct.id, Some("http://nas.lan:9000")).await?;
     let claim = claim_of(&pool, transfer.id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("le worker par transfert doit obtenir la tâche neuve"))?;
@@ -110,6 +115,7 @@ async fn a_direct_worker_keeps_its_jobs_and_the_integrated_worker_serves_central
     let pool = pool().await?;
     let direct = repository::register(&pool, "direct").await?;
     let integrated = repository::register(&pool, INTEGRATED_WORKER_NAME).await?;
+    repository::set_serves_central(&pool, integrated.id, true).await?;
     let remote = repository::register(&pool, "distant").await?;
     let library = repository::insert_library(
         &pool,
@@ -222,6 +228,7 @@ async fn transfer_workers_take_jobs_of_replace_libraries() -> anyhow::Result<()>
         &[(direct.id, "/mnt/a")],
     )
     .await?;
+    repository::set_transfer_url(&pool, direct.id, Some("http://nas.lan:9000")).await?;
     // Politique changée hors de l'API : l'accès par transfert reste valable.
     sqlx::query("UPDATE libraries SET output_policy='replace_in_place' WHERE id=?1")
         .bind(library.id)
@@ -434,5 +441,26 @@ async fn writable_central_mount_is_used_only_while_currently_authorized() -> any
             .await?
             .is_none()
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_central_source_waits_for_the_worker_that_serves_the_central() -> anyhow::Result<()> {
+    let pool = pool().await?;
+    let integrated = repository::register(&pool, "integre").await?;
+    let remote = repository::register(&pool, "distant").await?;
+    repository::set_serves_central(&pool, integrated.id, true).await?;
+    let hash = "ab".repeat(32);
+    repository::insert_job(&pool, "un.mkv", None, &hash, 10).await?;
+
+    // Sans adresse de transfert, aucun autre worker ne peut lire la source du central.
+    assert!(claim_of(&pool, remote.id).await?.is_none());
+    // Le worker qui sert le central la lit sur place.
+    assert!(claim_of(&pool, integrated.id).await?.is_some());
+
+    // Avec une adresse annoncée, un autre worker la tire chez lui.
+    repository::insert_job(&pool, "deux.mkv", None, &hash, 10).await?;
+    repository::set_transfer_url(&pool, integrated.id, Some("http://central.lan:9000")).await?;
+    assert!(claim_of(&pool, remote.id).await?.is_some());
     Ok(())
 }

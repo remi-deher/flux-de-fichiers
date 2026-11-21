@@ -1,23 +1,75 @@
 use crate::{
     api::{self, AppState},
-    domain::{JobErrorCode, JobEventType, JobStatus, LeaseRequest},
+    domain::{JobErrorCode, LeaseRequest, LibraryOutputPolicy},
+    error::{AppError, AppResult},
     job_runner::{self, JobRunError},
     repository, storage,
+    worker::timing::{HEARTBEAT_INTERVAL, IDLE_POLL_INTERVAL, SOFTWARE_PROBE_REFRESH},
+    worker_transfer::TransferState,
+};
+use forgearr_shared::transfer::{
+    ArtifactKind, ResultReady, SourcePublicationOutcome, SourcePublicationReport,
+    SourcePublicationTask,
 };
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
-const IDLE_POLL_INTERVAL: Duration = Duration::from_secs(1);
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
-const SOFTWARE_PROBE_REFRESH: Duration = Duration::from_secs(60);
-const RECEIVED_HANDOFF_DIRECTORY: &str = "received-handoffs";
+pub(crate) mod retention;
+
+/// Variables d'environnement du serveur de transfert du worker intégré : adresse annoncée aux autres
+/// workers et port d'écoute (comme `WORKER_TRANSFER_URL` et `WORKER_TRANSFER_PORT` d'un worker distant).
+const LOCAL_TRANSFER_URL_VAR: &str = "LOCAL_WORKER_TRANSFER_URL";
+const LOCAL_TRANSFER_PORT_VAR: &str = "LOCAL_WORKER_TRANSFER_PORT";
+
+/// Attente d'une demande de publication avant de redemander (le courtier réveille dès qu'une arrive).
+const PUBLICATION_WAIT: Duration = Duration::from_secs(15);
 
 async fn refresh_software_capabilities(state: &AppState) {
     let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
     let probes = crate::software_probe::discover_software_probes(&roots);
     let cache = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
     crate::software_probe::refresh_software_capabilities(&cache, &probes).await;
+}
+
+/// Validation des billets présentés au serveur de transfert du worker intégré : directement auprès
+/// de la base du central, sans appel réseau. Il sert aussi les dossiers du central, dont le dépôt
+/// d'entrée `input_dir`.
+pub(crate) fn local_redeemer(
+    pool: sqlx::SqlitePool,
+    worker_id: Uuid,
+    input_dir: std::path::PathBuf,
+) -> crate::worker_transfer::Redeemer {
+    std::sync::Arc::new(move |token: String| {
+        let pool = pool.clone();
+        let input_dir = input_dir.clone();
+        Box::pin(async move {
+            repository::redeem_central_ticket(&pool, &token, worker_id, &input_dir)
+                .await
+                .map_err(|_| axum::http::StatusCode::FORBIDDEN)
+        })
+    })
+}
+
+/// Annonce l'adresse de transfert du worker intégré et sert ses fichiers retenus, comme un worker
+/// ordinaire ; sans adresse ni port, il n'annonce rien.
+async fn start_transfer_server(state: &AppState, worker_id: Uuid) {
+    let (url, port) =
+        crate::worker_transfer::transfer_settings(LOCAL_TRANSFER_URL_VAR, LOCAL_TRANSFER_PORT_VAR);
+    let announced = url.as_deref().filter(|_| port.is_some());
+    if let Err(error) = repository::set_transfer_url(&state.pool, worker_id, announced).await {
+        tracing::warn!(error = %error, "adresse de transfert du worker intégré non enregistrée");
+    }
+    // Il traite toujours les dossiers du central ; l'adresse annoncée permet en plus de les lire
+    // chez lui depuis un autre worker.
+    if let Err(error) = repository::set_serves_central(&state.pool, worker_id, true).await {
+        tracing::warn!(error = %error, "rôle de serveur des dossiers du central non enregistré");
+    }
+    if let (Some(port), Some(_)) = (port, announced) {
+        let input_dir = state.config.input_dir.clone();
+        let redeemer = local_redeemer(state.pool.clone(), worker_id, input_dir);
+        crate::worker_transfer::spawn_listener(port, TransferState::new(redeemer));
+    }
 }
 
 pub async fn run(state: AppState) {
@@ -42,6 +94,10 @@ pub async fn run(state: AppState) {
         }
     };
     tracing::info!(worker_id=%worker.id, "local worker registered");
+    let _ = state.local_worker_id.set(worker.id);
+    start_transfer_server(&state, worker.id).await;
+    retention::prune(&state, worker.id).await;
+    tokio::spawn(respond_to_publications(state.clone(), worker.id));
     let refresh_state = state.clone();
     let refresh_worker = worker.id;
     tokio::spawn(async move {
@@ -52,16 +108,10 @@ pub async fn run(state: AppState) {
                 _ = api::shutdown_signal() => return,
                 _ = tokio::time::sleep(SOFTWARE_PROBE_REFRESH) => {
                     refresh_software_capabilities(&refresh_state).await;
+                    retention::prune(&refresh_state, refresh_worker).await;
                     let snapshot = probe.sample();
                     if let Err(error) = repository::touch_worker_telemetry(&refresh_state.pool, refresh_worker, None, Some(&snapshot)).await {
                         tracing::warn!(worker_id=%refresh_worker, error=%error, "local capability telemetry update failed");
-                    }
-                    let pool = refresh_state.pool.clone();
-                    if let Err(error) = crate::worker::prune_retained(&refresh_state.config.data_dir.join(RECEIVED_HANDOFF_DIRECTORY), |job, epoch| {
-                        let pool = pool.clone();
-                        async move { Ok(repository::retained_handoff_needed(&pool, job, refresh_worker, epoch).await?) }
-                    }).await {
-                        tracing::warn!(error=%error, "local retained handoff cleanup failed");
                     }
                 },
             }
@@ -88,11 +138,6 @@ pub async fn run(state: AppState) {
             .map(|w| w.slots().total)
             .unwrap_or(worker.slots().total);
         while (active.len() as i32) < max_concurrency {
-            match receive_handoff(&state, worker.id).await {
-                Ok(true) => {}
-                Ok(false) => {}
-                Err(error) => tracing::warn!(error=%error, "local handoff reception failed"),
-            }
             let claim = tokio::select! {
                 result = repository::claim(&state.pool, worker.id) => result,
                 _ = api::shutdown_signal() => {
@@ -126,40 +171,117 @@ pub async fn run(state: AppState) {
     }
 }
 
-/// Le central vérifie sa copie locale avant que le worker intégré accuse réception.
-async fn receive_handoff(state: &AppState, worker: Uuid) -> anyhow::Result<bool> {
-    let Some(offer) = repository::claim_handoff(&state.pool, worker).await? else {
-        return Ok(false);
-    };
-    let staging = state.config.data_dir.join("staging");
-    let source = crate::api::handoffs::artifact_path(state, offer.job_id, offer.source_lease_epoch);
-    let received_root = state.config.data_dir.join(RECEIVED_HANDOFF_DIRECTORY);
-    tokio::fs::create_dir_all(&received_root).await?;
-    let retained = crate::worker::retained_handoff_path(
-        &received_root,
-        offer.job_id,
-        offer.source_lease_epoch,
-    );
-    let temp = staging.join(format!(".tmp-handoff-{}", Uuid::new_v4()));
-    let result = async {
-        copy_verified_source(&source, &temp, state.config.max_file_bytes, &offer.artifact.sha256, offer.artifact.bytes).await?;
-        tokio::fs::hard_link(&temp, &retained).await?;
-        storage::sync_directory(&received_root).await?;
-        let ack = forgearr_shared::relay::HandoffAcknowledgement { worker_id: worker, receipt_token: offer.receipt_token,
-            sha256: offer.artifact.sha256, bytes: offer.artifact.bytes };
-        if repository::acknowledge_handoff(&state.pool, offer.job_id, &ack).await? {
-            state.notify_job_event(JobEventType::JobRelayed, offer.job_id, JobStatus::Queued, None);
-            if let Err(error) = tokio::fs::remove_file(&source).await
-                && error.kind() != std::io::ErrorKind::NotFound
-            {
-                tracing::warn!(job_id=%offer.job_id, error=%error, "handoff staging cleanup failed");
-            }
+/// Le worker intégré détient les sources que le central voit : il reçoit les résultats à appliquer,
+/// les tire chez le worker qui les retient et applique la politique de sortie (ADR 0022).
+pub(crate) async fn respond_to_publications(state: AppState, worker_id: Uuid) {
+    loop {
+        let tasks = tokio::select! {
+            _ = api::shutdown_signal() => return,
+            tasks = state.source_publication.take_for_worker(worker_id, PUBLICATION_WAIT) => tasks,
+        };
+        for task in tasks {
+            let state = state.clone();
+            tokio::spawn(async move { publish_local(&state, task).await });
         }
-        Ok::<(), anyhow::Error>(())
-    }.await;
-    let _ = tokio::fs::remove_file(temp).await;
-    result?;
-    Ok(true)
+    }
+}
+
+async fn publish_local(state: &AppState, task: SourcePublicationTask) {
+    let outcome = match apply_pulled_result(state, &task).await {
+        Ok(()) => SourcePublicationOutcome::Published,
+        Err(AppError::SourceChanged) => SourcePublicationOutcome::SourceChanged,
+        Err(error) => {
+            tracing::warn!(error = %error, "publication locale du résultat impossible");
+            SourcePublicationOutcome::Failed
+        }
+    };
+    let report = SourcePublicationReport {
+        request_id: task.request_id,
+        worker_id: task.worker_id,
+        outcome,
+    };
+    if !state.source_publication.report(report).await {
+        tracing::warn!(request_id = %task.request_id, "réponse de publication locale refusée");
+    }
+}
+
+/// Tire le résultat chez le worker qui le retient, le vérifie, puis applique la politique de sortie
+/// sur la source du central. Le fichier tiré est temporaire.
+async fn apply_pulled_result(state: &AppState, task: &SourcePublicationTask) -> AppResult<()> {
+    let access = state
+        .source_publication
+        .access_for_worker(task.request_id, task.worker_id)
+        .await
+        .ok_or(AppError::NotFound)?;
+    let ticket = task.result_ticket.clone().ok_or(AppError::Invalid)?;
+    let name = format!(".source-publication-{}.tmp", task.request_id);
+    let file = state.config.data_dir.join("staging").join(name);
+    let max = state.config.max_file_bytes;
+    let result = async {
+        crate::worker_transfer::download_direct_resuming(
+            &crate::worker_transfer::direct_client().map_err(|_| AppError::CentralUnavailable)?,
+            ticket,
+            &file,
+            max,
+            &task.result_sha256,
+            task.result_bytes,
+            || async {
+                let kind = ArtifactKind::Result;
+                let epoch = access.lease.lease_epoch;
+                let fresh = repository::issue_artifact_ticket(
+                    &state.pool,
+                    access.job_id,
+                    kind,
+                    task.worker_id,
+                    epoch,
+                )
+                .await?;
+                anyhow::Ok(fresh)
+            },
+        )
+        .await
+        .map_err(|_| AppError::Invalid)?;
+        if task.policy == LibraryOutputPolicy::OutputDir {
+            return install_in_output_dir(state, task, &access, &file).await;
+        }
+        let root = std::path::Path::new(&task.root);
+        let source = crate::library_scan::source_path(root, &task.source_name)
+            .await
+            .map_err(crate::source_publication::missing_source_is_changed)?;
+        crate::source_publication::apply_library_output_policy(
+            task.policy,
+            &source,
+            &file,
+            &task.extension,
+            &task.source_sha256,
+            task.source_bytes,
+            max,
+            async {
+                let active = repository::active(&state.pool, access.job_id, &access.lease).await;
+                active.map(|_| ())
+            },
+        )
+        .await
+    }
+    .await;
+    let _ = tokio::fs::remove_file(&file).await;
+    result
+}
+
+/// Installe le résultat tiré dans le dossier de sortie du central, sous le nom de la tâche.
+async fn install_in_output_dir(
+    state: &AppState,
+    task: &SourcePublicationTask,
+    access: &crate::source_publication_broker::PublicationAccess,
+    file: &std::path::Path,
+) -> AppResult<()> {
+    repository::active(&state.pool, access.job_id, &access.lease).await?;
+    let name =
+        crate::storage::output_file_name(access.job_id, access.lease.lease_token, &task.extension);
+    let output_dir = std::path::Path::new(&task.root);
+    tokio::fs::create_dir_all(output_dir).await?;
+    tokio::fs::hard_link(file, output_dir.join(name)).await?;
+    crate::storage::sync_directory(output_dir).await
 }
 
 async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Claim) {
@@ -244,6 +366,7 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
         lease.clone(),
     ));
     let processing = async {
+        let pulls_working_file = claim.handoff_input.is_some();
         match (&source, claim.source_ticket.as_ref()) {
             (Some(source), _) => {
                 copy_verified_source(
@@ -255,14 +378,22 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
                 )
                 .await?;
             }
+            // Le billet désigne le fichier de travail : la source se vérifie chez son détenteur.
+            (None, _) if pulls_working_file => {}
             (None, Some(ticket)) => {
-                crate::worker_transfer::download_direct(
+                crate::worker_transfer::download_direct_resuming(
                     &crate::worker_transfer::direct_client()?,
-                    ticket,
+                    ticket.clone(),
                     &source_snapshot,
                     state.config.max_file_bytes,
                     &claim.source_sha256,
                     claim.source_bytes,
+                    || async {
+                        anyhow::Ok(
+                            repository::reissue_source_ticket(&state.pool, claim.job_id, &lease)
+                                .await?,
+                        )
+                    },
                 )
                 .await?;
             }
@@ -270,25 +401,12 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
         }
 
         let working_snapshot = if let Some(handoff) = &claim.handoff_input {
-            let retained = crate::worker::retained_handoff_path(
-                &state.config.data_dir.join(RECEIVED_HANDOFF_DIRECTORY),
-                claim.job_id,
-                handoff.source_lease_epoch,
-            );
             let working_dir = work_dir.join("handoff");
             tokio::fs::create_dir(&working_dir).await?;
             let target = working_dir.join(forgearr_shared::jobs::source_working_filename(
                 &handoff.artifact.name,
             ));
-            copy_verified_source(
-                &retained,
-                &target,
-                state.config.max_file_bytes,
-                &handoff.artifact.sha256,
-                handoff.artifact.bytes,
-            )
-            .await?;
-            tokio::fs::remove_file(retained).await?;
+            pull_handoff_input(state, &claim, &lease, handoff, &target).await?;
             target
         } else {
             source_snapshot.clone()
@@ -325,15 +443,26 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
             Ok(())
         };
 
-        if let Some(request) = execution.relay.as_ref() {
+        if let Err(error) = repository::save_flow_media_sample(
+            &state.pool,
+            claim.job_id,
+            &lease,
+            &execution.media_info,
+        )
+        .await
+        {
+            tracing::warn!(job_id = %claim.job_id, %error, "échantillon de métadonnées non retenu");
+        }
+
+        if let Some(request) = &execution.relay {
             step_report?;
-            send_handoff(
+            let working = (execution.working_file.as_path(), work_dir.as_path());
+            retention::relay_working_file(
                 state,
                 claim.job_id,
                 &lease,
                 request,
-                &execution.working_file,
-                &work_dir,
+                working,
                 execution.warning,
             )
             .await?;
@@ -343,12 +472,22 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
             tracing::warn!(job_id = %claim.job_id, error = %error, "failed to persist job steps");
         }
 
+        // Un autre worker détient la bibliothèque : il tire le résultat chez ce worker (ADR 0022).
+        let ready = ResultReady {
+            extension: execution.output_spec.extension.clone(),
+            warning: execution.warning,
+            can_apply_locally: false,
+        };
+        let working_file = execution.working_file.as_path();
+        if retention::publish_retained(state, &job, &lease, working_file, &ready).await? {
+            return anyhow::Ok(());
+        }
         crate::api::transfers::publish_staged(
             state,
             claim.job_id,
             &lease,
             &job,
-            Some(&source_snapshot),
+            (!pulls_working_file || source.is_some()).then_some(source_snapshot.as_path()),
             &execution.working_file,
             execution.warning,
             &execution.output_spec,
@@ -395,57 +534,32 @@ async fn execute(state: &AppState, worker_id: Uuid, mut claim: crate::domain::Cl
     cleanup(&work_dir).await;
 }
 
-/// Conserve le dossier du traitement intégré jusqu'à la réception vérifiée.
-async fn send_handoff(
+/// Tire le fichier de travail chez son détenteur, le vérifie, puis confirme la réception au central.
+async fn pull_handoff_input(
     state: &AppState,
-    job: Uuid,
+    claim: &crate::domain::Claim,
     lease: &LeaseRequest,
-    request: &forgearr_shared::relay::RelayRequest,
-    working_file: &std::path::Path,
-    work_dir: &std::path::Path,
-    warning: bool,
+    input: &forgearr_shared::relay::HandoffInput,
+    dest: &std::path::Path,
 ) -> anyhow::Result<()> {
-    use forgearr_shared::relay::{HandoffArtifact, HandoffState};
-    let working_file = storage::verified_working_path(working_file, work_dir).await?;
-    let (sha256, bytes) = storage::fingerprint(&working_file, state.config.max_file_bytes).await?;
-    let artifact = HandoffArtifact {
-        name: working_file
-            .file_name()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| anyhow::anyhow!("invalid handoff filename"))?
-            .to_owned(),
-        sha256,
-        bytes: i64::try_from(bytes)?,
-    };
-    crate::api::handoffs::begin_or_fail(state, job, lease, request, &artifact, warning).await?;
-    let staged = crate::api::handoffs::artifact_path(state, job, lease.lease_epoch);
-    copy_verified_source(
-        &working_file,
-        &staged,
+    let ticket = claim
+        .source_ticket
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("no ticket to pull the working file"))?;
+    crate::worker_transfer::download_direct_resuming(
+        &crate::worker_transfer::direct_client()?,
+        ticket,
+        dest,
         state.config.max_file_bytes,
-        &artifact.sha256,
-        artifact.bytes,
+        &input.artifact.sha256,
+        input.artifact.bytes,
+        || async {
+            anyhow::Ok(repository::reissue_source_ticket(&state.pool, claim.job_id, lease).await?)
+        },
     )
     .await?;
-    storage::sync_directory(&state.config.data_dir.join("staging")).await?;
-    if let Err(error) = repository::finish_handoff_upload(&state.pool, job, lease).await {
-        let _ = tokio::fs::remove_file(staged).await;
-        return Err(error.into());
-    }
-    let deadline = tokio::time::Instant::now()
-        + Duration::from_secs(forgearr_shared::relay::HANDOFF_TTL_SECONDS as u64);
-    loop {
-        repository::expire_handoffs(&state.pool).await?;
-        match repository::handoff_state(&state.pool, job, lease.worker_id, lease.lease_epoch)
-            .await?
-        {
-            HandoffState::Acknowledged => return Ok(()),
-            HandoffState::Failed => anyhow::bail!("handoff failed"),
-            HandoffState::Uploading | HandoffState::Pending | HandoffState::Claimed => {}
-        }
-        anyhow::ensure!(tokio::time::Instant::now() < deadline, "handoff timed out");
-        tokio::time::sleep(IDLE_POLL_INTERVAL).await;
-    }
+    repository::confirm_artifact_received(&state.pool, claim.job_id, lease).await?;
+    Ok(())
 }
 
 async fn heartbeat_loop(

@@ -175,7 +175,7 @@ pub const PLUGINS_CSS: &str = r#"
 /* --- Grille App Store responsive --- */
 .store-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(18.5rem, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
 }
 
@@ -222,6 +222,16 @@ pub const PLUGINS_CSS: &str = r#"
   color: var(--text-main);
   border: 1px solid var(--border-subtle);
   flex-shrink: 0;
+}
+
+/* Icône SVG d'un plugin : masque d'image qui reprend la couleur du texte (ADR 0024). */
+.plugin-icon {
+  display: inline-block;
+  width: 1.25rem;
+  height: 1.25rem;
+  background-color: currentColor;
+  -webkit-mask: var(--plugin-icon-url) center / contain no-repeat;
+  mask: var(--plugin-icon-url) center / contain no-repeat;
 }
 
 .store-card[data-tone="success"] .store-card__icon {
@@ -589,4 +599,13 @@ pub const PLUGINS_CSS: &str = r#"
     align-items: flex-start;
   }
 }
+
+/* --- Coloration syntaxique des aperçus de code --- */
+.tok-comment { color: var(--text-dim); font-style: italic; }
+.tok-string { color: var(--success); }
+.tok-number { color: var(--warning); }
+.tok-keyword { color: var(--primary); font-weight: 600; }
+.tok-function { color: var(--info); }
+.tok-variable { color: var(--accent); }
+.tok-operator { color: var(--text-dim); }
 "#;

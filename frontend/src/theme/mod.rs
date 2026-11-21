@@ -94,6 +94,38 @@ mod tests {
         assert!(styles.contains(".ai-chat__messages {"));
     }
 
+    #[test]
+    fn store_grid_has_two_columns_and_the_sidebar_never_scrolls_sideways() {
+        let styles = get_all_styles();
+        assert!(styles.contains("grid-template-columns: repeat(2, minmax(0, 1fr));"));
+        let sidebar = styles
+            .split(".application-sidebar {")
+            .nth(1)
+            .and_then(|rest| rest.split('}').next())
+            .unwrap_or_default();
+        assert!(sidebar.contains("overflow-x: hidden;"));
+    }
+
+    #[test]
+    fn plugin_icon_is_a_theme_colored_mask() {
+        let styles = get_all_styles();
+        let rule = styles
+            .split(".plugin-icon {")
+            .nth(1)
+            .and_then(|rest| rest.split('}').next())
+            .unwrap_or_default();
+        assert!(rule.contains("background-color: currentColor;"));
+        assert!(rule.contains("mask: var(--plugin-icon-url) center / contain no-repeat;"));
+    }
+
+    #[test]
+    fn collapse_button_is_square_and_shares_its_style_with_logout() {
+        let styles = get_all_styles();
+        assert!(styles.contains(".sidebar-collapse-btn,\n.sidebar-logout-btn {"));
+        assert!(!styles.contains(".collapse-label"));
+        assert!(styles.contains(".theme-segmented {\n  display: flex;\n  flex: 1;"));
+    }
+
     /// Vérifie qu'une feuille CSS a ses accolades équilibrées et aucune imbrication hors `@media`/`@container`/`@keyframes`.
     fn assert_balanced_css(name: &str, css: &str) {
         let mut depth: usize = 0;

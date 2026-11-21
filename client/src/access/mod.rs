@@ -169,11 +169,13 @@ mod tests {
         let throttled = ApiError::Rejected {
             status: 429,
             code: "too_many_attempts".into(),
+            detail: None,
         };
         assert!(access_error(&throttled).contains("Trop d'essais"));
         let other = ApiError::Rejected {
             status: 500,
             code: "internal".into(),
+            detail: None,
         };
         assert_eq!(access_error(&other), other.message());
     }

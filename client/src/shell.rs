@@ -322,6 +322,13 @@ fn Sidebar(me: Me, jobs: Signal<Vec<Job>>, workers: Signal<Vec<Worker>>) -> impl
     let router = use_router();
     let collapsed = RwSignal::new(false);
     let saved_collapsed = RwSignal::new(false);
+    let collapse_label = move || {
+        if collapsed.get() {
+            "Déplier la navigation"
+        } else {
+            "Replier la navigation"
+        }
+    };
     let was_workbench = RwSignal::new(false);
     Effect::new(move |_| {
         let in_workbench = is_workbench_route(&router.current());
@@ -389,10 +396,10 @@ fn Sidebar(me: Me, jobs: Signal<Vec<Job>>, workers: Signal<Vec<Worker>>) -> impl
                 </div>
                 <div class="sidebar-footer-tools">
                     <button type="button" class="sidebar-collapse-btn"
-                        aria-label=move || if collapsed.get() { "Déplier la navigation" } else { "Replier la navigation" }
+                        aria-label=collapse_label
+                        title=collapse_label
                         on:click=move |_| collapsed.update(|value| *value = !*value)>
                         <Icon name=IconName::ChevronLeft size=16 class="collapse-icon" />
-                        <span class="collapse-label">"Replier"</span>
                     </button>
                     <ThemePicker />
                 </div>

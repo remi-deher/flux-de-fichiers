@@ -66,6 +66,7 @@ pub const BASE_CSS: &str = r#"
   position: sticky;
   top: 0.5rem;
   height: calc(100vh - 1rem);
+  overflow-x: hidden;
   overflow-y: auto;
   z-index: 50;
   box-sizing: border-box;
@@ -82,7 +83,6 @@ pub const BASE_CSS: &str = r#"
 .application-sidebar.is-collapsed .tab-btn-label,
 .application-sidebar.is-collapsed .tab-btn-badge,
 .application-sidebar.is-collapsed .nav-group-label,
-.application-sidebar.is-collapsed .collapse-label,
 .application-sidebar.is-collapsed .sidebar-user-meta {
   display: none;
 }
@@ -363,23 +363,26 @@ pub const BASE_CSS: &str = r#"
   text-overflow: ellipsis;
 }
 
-.sidebar-collapse-btn {
+/* Boutons carrés du pied : replier la barre et se déconnecter. */
+.sidebar-collapse-btn,
+.sidebar-logout-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.45rem 0.6rem;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: transparent;
-  border: 1px solid var(--border-color);
   color: var(--text-dim);
-  font-size: var(--font-size-xs);
   cursor: pointer;
   transition: all 0.2s ease-in-out;
 }
 
-.sidebar-collapse-btn:hover {
+.sidebar-collapse-btn:hover,
+.sidebar-logout-btn:hover {
   background-color: var(--bg-subtle);
   color: var(--text-main);
   border-color: var(--primary);
@@ -397,7 +400,8 @@ pub const BASE_CSS: &str = r#"
 /* Thème : trois boutons exclusifs. */
 .theme-segmented {
   display: flex;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   overflow: hidden;
@@ -406,6 +410,7 @@ pub const BASE_CSS: &str = r#"
 .theme-segmented__btn {
   flex: 1;
   padding: 0.4rem 0.25rem;
+  white-space: nowrap;
   border: 0;
   background: transparent;
   color: var(--text-dim);
@@ -426,26 +431,6 @@ pub const BASE_CSS: &str = r#"
 /* Déconnexion : un bouton discret à côté du thème, toujours accessible. */
 .sidebar-footer-tools {
   align-items: center;
-}
-
-.sidebar-logout-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-
-.sidebar-logout-btn:hover {
-  border-color: var(--primary);
-  color: var(--text-main);
 }
 
 /* --- Zone de transition & contenu principal --- */

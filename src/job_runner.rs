@@ -20,6 +20,8 @@ pub struct JobExecutionResult {
     pub warning: bool,
     pub output_spec: OutputSpec,
     pub steps: Vec<JobStepEntry>,
+    /// Métadonnées du fichier en fin d'exécution.
+    pub media_info: serde_json::Value,
     /// Demande de relais à transmettre au central ; aucun résultat n'est alors à publier.
     pub relay: Option<forgearr_shared::relay::RelayRequest>,
 }
@@ -185,6 +187,7 @@ pub async fn execute_claim_processing(
             linked_flows: &claim.linked_flows,
             failure: None,
         },
+        resumed_outputs: &claim.resumed_outputs,
     };
 
     let outcome = match claim.frozen_flow.as_ref() {
@@ -212,6 +215,7 @@ pub async fn execute_claim_processing(
             warning: res.warning || claim.prior_warning,
             output_spec: res.output_spec,
             steps: res.steps,
+            media_info: res.media_info,
             relay: res.relay,
         }),
         Err(error) => {
@@ -221,8 +225,10 @@ pub async fn execute_claim_processing(
                 steps: error.steps,
             };
             if let Some(failure_flow) = first_linked(&claim.linked_flows, LinkedFlowRole::Failure) {
+                let no_resumed_outputs = HashMap::new();
                 let failure_engine = FlowEngine {
                     resume_node_id: None,
+                    resumed_outputs: &no_resumed_outputs,
                     run_info: FlowRunInfo {
                         resume_variables: None,
                         failure: Some(FailureInfo {
@@ -333,6 +339,7 @@ mod tests {
             media_root: None,
             local_source_root: None,
             resume_node_id: None,
+            resumed_outputs: HashMap::new(),
             handoff_input: None,
             prior_warning: false,
             source_ticket: None,

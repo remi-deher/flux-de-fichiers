@@ -1,7 +1,9 @@
 //! Contrats de la librairie locale (scripts, fichiers ressources, modèles de blocs/flows, packs) sans dépôt GitHub.
 
+use crate::exposed_variables::ScriptRequirement;
 use crate::plugins::vocab::{CatalogItemType, PluginCategory};
 use crate::plugins::{CatalogEntry, PackComponent};
+use crate::script_variables::ScriptVariable;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -88,10 +90,19 @@ pub struct LocalScriptSummary {
     pub category: Option<PluginCategory>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Variables déclarées dans le manifeste du script (ADR 0025).
+    #[serde(default)]
+    pub variables: Vec<ScriptVariable>,
+    /// Variables exposées par des plugins que le script consomme (dépendance dure par défaut).
+    #[serde(default)]
+    pub requires: Vec<ScriptRequirement>,
+    /// Script intégré sans ses dépendances : elles ne sont ni contrôlées ni installées.
+    #[serde(default)]
+    pub dependencies_unverified: bool,
 }
 
 /// Création ou mise à jour d'un script local (`POST /api/v1/local/scripts`).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpsertLocalScriptRequest {
     #[serde(default)]
@@ -107,6 +118,12 @@ pub struct UpsertLocalScriptRequest {
     pub category: Option<PluginCategory>,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub variables: Vec<ScriptVariable>,
+    #[serde(default)]
+    pub requires: Vec<ScriptRequirement>,
+    #[serde(default)]
+    pub dependencies_unverified: bool,
 }
 
 /// Fichier ressource local (image, sous-titre, son, police, modèle…).

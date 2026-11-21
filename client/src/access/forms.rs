@@ -257,6 +257,7 @@ pub fn WorkerSetupForm(goto: Callback<Gate>) -> impl IntoView {
                             feedback.set(Some(access_error(&api::ApiError::Rejected {
                                 status: 400,
                                 code,
+                                detail: None,
                             })));
                             break;
                         }

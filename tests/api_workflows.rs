@@ -301,10 +301,10 @@ async fn json_routes_reject_oversized_bodies_and_transfers_do_not() -> anyhow::R
     assert!(is_long_running_route("/api/v1/ai/runs/abc/events"));
     assert!(!is_long_running_route("/api/v1/ai/runs/abc"));
     assert!(!is_long_running_route("/api/v1/ai/runs//events"));
-    assert!(is_long_running_route(
+    assert!(!is_long_running_route(
         "/api/v1/jobs/11111111-1111-1111-1111-111111111111/result"
     ));
-    assert!(is_long_running_route(
+    assert!(!is_long_running_route(
         "/api/v1/jobs/11111111-1111-1111-1111-111111111111/source"
     ));
     assert!(is_long_running_route(
@@ -327,15 +327,8 @@ async fn json_routes_reject_oversized_bodies_and_transfers_do_not() -> anyhow::R
             "Bearer fdf_b0000001_fedcba9876543210fedcba9876543210fedcba9876543210",
         )
         .body(Body::from(oversized))?;
-    let resp = app.clone().oneshot(req).await?;
-    assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
-
-    let req = Request::builder()
-        .uri("/api/v1/jobs/11111111-1111-1111-1111-111111111111/result")
-        .method("PUT")
-        .body(Body::from("x".repeat(JSON_BODY_LIMIT + 1)))?;
     let resp = app.oneshot(req).await?;
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
     Ok(())
 }
 

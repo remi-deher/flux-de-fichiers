@@ -63,6 +63,29 @@ impl SimulationPreset {
     }
 }
 
+/// Métadonnées du dernier vrai job d'un flux, proposées comme échantillon de simulation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowMediaSample {
+    pub job_id: uuid::Uuid,
+    pub source_name: String,
+    pub media_info: serde_json::Value,
+    pub recorded_at: String,
+}
+
+impl FlowMediaSample {
+    /// Taille maximale des métadonnées conservées (JSON sérialisé) ; au-delà, rien n'est enregistré.
+    pub const MAX_BYTES: usize = 256 * 1024;
+
+    /// Entrée de simulation correspondante (nom du fichier et métadonnées en JSON lisible).
+    pub fn to_simulation_input(&self) -> SimulationInput {
+        SimulationInput {
+            file_name: self.source_name.clone(),
+            probe_json: serde_json::to_string_pretty(&self.media_info).unwrap_or_default(),
+        }
+    }
+}
+
 /// Entrée fictive utilisée pour simuler le routage d'un flux sur un document de sonde quelconque.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -1,4 +1,4 @@
-//! Bloc primitif « Aller au sous-flux » : appel d'un flux lié figé, avec retour (ADR 0022).
+//! Bloc primitif « Aller au sous-flux » : appel d'un flux lié figé, avec retour (ADR 0026).
 
 use super::{block, contract::OperationRegistry};
 use forgearr_shared::flows::{

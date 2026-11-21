@@ -20,6 +20,7 @@ mod script_inspector;
 mod simulation;
 mod state;
 mod template_input;
+mod variables_form;
 mod versions;
 
 pub use editor::FlowEditor;

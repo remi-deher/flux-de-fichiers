@@ -1,4 +1,4 @@
-//! Flux liés figés à la création d'une tâche : flux d'échec et sous-flux (ADR 0022).
+//! Flux liés figés à la création d'une tâche : flux d'échec et sous-flux (ADR 0026).
 
 use crate::error::AppResult;
 use forgearr_shared::flows::{FlowGraph, LinkedFlow, LinkedFlowRole};

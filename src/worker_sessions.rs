@@ -2,7 +2,8 @@
 //! purgées dès qu'un compte disparaît ou est désactivé à la synchronisation.
 
 use crate::{
-    web_session::{ValidatedSession, WebSession, digest},
+    opaque_token::sha256_hex,
+    web_session::{ValidatedSession, WebSession},
     worker_view::VerifiedAccount,
 };
 use chrono::{Duration, Utc};
@@ -34,7 +35,7 @@ impl SessionStore {
             csrf_token: Uuid::new_v4().to_string(),
             expires_at: Utc::now() + self.ttl,
         };
-        let token_hash = digest(&web.token);
+        let token_hash = sha256_hex(&web.token);
         if let Ok(mut entries) = self.entries.lock() {
             let now = Utc::now();
             entries.retain(|_, entry| entry.session.expires_at > now);
@@ -43,7 +44,7 @@ impl SessionStore {
                 Entry {
                     session: ValidatedSession {
                         token_hash,
-                        csrf_hash: digest(&web.csrf_token),
+                        csrf_hash: sha256_hex(&web.csrf_token),
                         expires_at: web.expires_at,
                         account_id: account.id.clone(),
                     },
@@ -93,21 +94,21 @@ mod tests {
     fn test_opened_session_is_found_by_its_token_hash_only() {
         let store = SessionStore::new(60);
         let web = store.open(&account("1"));
-        let found = store.lookup(&digest(&web.token));
+        let found = store.lookup(&sha256_hex(&web.token));
         assert_eq!(found.map(|(_, account)| account.id), Some("1".to_owned()));
         assert!(store.lookup(&web.token).is_none());
-        assert!(store.lookup(&digest("autre")).is_none());
+        assert!(store.lookup(&sha256_hex("autre")).is_none());
     }
 
     #[test]
     fn test_closed_and_expired_sessions_are_gone() {
         let store = SessionStore::new(60);
         let web = store.open(&account("1"));
-        store.close(&digest(&web.token));
-        assert!(store.lookup(&digest(&web.token)).is_none());
+        store.close(&sha256_hex(&web.token));
+        assert!(store.lookup(&sha256_hex(&web.token)).is_none());
         let expired = SessionStore::new(-1);
         let web = expired.open(&account("1"));
-        assert!(expired.lookup(&digest(&web.token)).is_none());
+        assert!(expired.lookup(&sha256_hex(&web.token)).is_none());
     }
 
     #[test]
@@ -116,7 +117,7 @@ mod tests {
         let kept = store.open(&account("1"));
         let dropped = store.open(&account("2"));
         store.retain_accounts(&["1".to_owned()]);
-        assert!(store.lookup(&digest(&kept.token)).is_some());
-        assert!(store.lookup(&digest(&dropped.token)).is_none());
+        assert!(store.lookup(&sha256_hex(&kept.token)).is_some());
+        assert!(store.lookup(&sha256_hex(&dropped.token)).is_none());
     }
 }

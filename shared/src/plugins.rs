@@ -1,11 +1,13 @@
 //! Contrat des plugins : catalogue, dépôts, outils distribués et réglages (ADR 0014).
 
+pub mod subcategory;
 pub mod vocab;
 
 use crate::flows::OwnedBlockSpec;
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use subcategory::SubcategoryId;
 use vocab::{CatalogCapability, CatalogItemType, PluginCategory};
 
 /// Dépôt distant de distribution de plugins, outils et flux.
@@ -100,6 +102,10 @@ pub struct CatalogRuntimeSummary {
     pub flow_preview: Option<CatalogFlowPreview>,
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// Fiche d'index dans `index.json` à la racine du dépôt.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -125,6 +131,18 @@ pub struct CatalogEntry {
         skip_serializing_if = "vocab::hides_category_badge"
     )]
     pub category: Option<PluginCategory>,
+    /// Sous-catégorie officielle retenue (ADR 0023) ; absente si le dépôt n'en déclare pas ou
+    /// si sa valeur n'est pas validée par le registre.
+    #[serde(
+        default,
+        deserialize_with = "subcategory::deserialize_optional_subcategory",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub subcategory: Option<SubcategoryId>,
+    /// Le manifeste déclare une icône SVG présente dans la copie locale ; elle se lit par
+    /// `GET /api/v1/plugins/{id}/icon` (ADR 0024).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub has_icon: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     /// Plugin propriétaire. Obligatoire pour un bloc, qui ne vit jamais seul dans un dépôt.
@@ -274,6 +292,9 @@ pub struct DependencyInstallResult {
     pub installed_tools: Vec<String>,
     pub failed_tools: Vec<(String, String)>,
     pub missing_dependencies: Vec<String>,
+    /// Dépôts désignés par des scripts pour fournir une dépendance absente : à ajouter explicitement.
+    #[serde(default)]
+    pub suggested_repositories: Vec<crate::exposed_variables::RepositoryPointer>,
 }
 
 /// Dépendance déclarée dans le manifeste d'un plugin.
@@ -329,6 +350,9 @@ pub struct PluginDetailView {
     pub has_settings: bool,
     #[serde(default)]
     pub blocks: Vec<OwnedBlockSpec>,
+    /// Variables que ce plugin expose aux scripts (ADR 0025).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exposures: Vec<crate::exposed_variables::ExposedNamespaceView>,
     #[serde(
         default,
         deserialize_with = "vocab::deserialize_optional_date",
@@ -424,6 +448,9 @@ pub struct RepositoryDetailView {
     pub release_version: Option<String>,
     pub entries_count: usize,
     pub skipped_count: usize,
+    /// Sous-catégories déclarées par le dépôt mais non retenues (ADR 0023).
+    #[serde(default)]
+    pub warnings: Vec<String>,
     #[serde(default)]
     pub entries: Vec<CatalogEntry>,
 }

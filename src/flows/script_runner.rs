@@ -4,6 +4,7 @@ use crate::{
     flows::{
         binary_runner::tool_search_path,
         contract::{OperationContract, ScriptInterpreter, ScriptRuntime, merge_params},
+        variables::secret_values,
     },
     tool_run::{
         MAX_STDOUT_CAPTURE_BYTES, ProgressParser, TailBuffer, for_each_segment, mask_log_secrets,
@@ -14,6 +15,7 @@ use crate::{
 use forgearr_shared::{
     flows::{FlowVariables, SCRIPT_SCHEMA_VERSION},
     jobs::JobErrorCode,
+    script_variables::SECRET_PLACEHOLDER,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -214,6 +216,19 @@ fn merge_media_info(current: &Value, patch: Value) -> Value {
     }
 }
 
+/// Remplace chaque valeur secrète par un marqueur : un script qui écrit un secret dans son message,
+/// ses journaux ou sa progression ne le diffuse ni dans le flux ni dans les journaux.
+fn redact(text: &str, secrets: &[String]) -> String {
+    secrets.iter().fold(text.to_owned(), |clean, secret| {
+        clean.replace(secret.as_str(), SECRET_PLACEHOLDER)
+    })
+}
+
+/// Message d'un script : secrets retirés, puis jetons et identifiants d'URL masqués.
+fn scrub(text: &str, secrets: &[String]) -> String {
+    mask_log_secrets(&redact(text, secrets))
+}
+
 /// Exécute une opération `kind: "script"` en échangeant du JSON via `stdin`/`stdout`.
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_script_operation(
@@ -233,6 +248,11 @@ pub async fn execute_script_operation(
     on_progress: ScriptProgressCallback,
 ) -> Result<ScriptStepOutcome, ScriptStepError> {
     let error_code = rt.error_code.unwrap_or(JobErrorCode::OperationFailed);
+    let secrets = secret_values(&rt.variables, node_config);
+    let on_progress: ScriptProgressCallback = {
+        let secrets = secrets.clone();
+        Arc::new(move |percent, line| on_progress(percent, &redact(line, &secrets)))
+    };
     let interp_override = node_config
         .get("interpreter")
         .and_then(Value::as_str)
@@ -373,6 +393,7 @@ pub async fn execute_script_operation(
         }
     };
 
+    let excerpt = excerpt.map(|text| redact(&text, &secrets));
     let status = status_res.map_err(|err| ScriptStepError {
         code: error_code,
         message: format!("attente du script « {} » impossible : {err}", op.id),
@@ -411,7 +432,7 @@ pub async fn execute_script_operation(
     if !status.success() {
         let msg = parsed_output
             .and_then(|out| out.message)
-            .map(|m| mask_log_secrets(&m))
+            .map(|m| scrub(&m, &secrets))
             .unwrap_or_else(|| format!("script « {} » en échec (code {:?})", op.id, status.code()));
         return Err(ScriptStepError {
             code: error_code,
@@ -437,14 +458,14 @@ pub async fn execute_script_operation(
             code: error_code,
             message: output
                 .message
-                .map(|m| mask_log_secrets(&m))
+                .map(|m| scrub(&m, &secrets))
                 .unwrap_or_else(|| format!("le script « {} » a signalé une erreur", op.id)),
             excerpt,
         }),
         ScriptOutcomeStatus::Skip => Ok(ScriptStepOutcome::Skipped {
             message: output
                 .message
-                .map(|m| mask_log_secrets(&m))
+                .map(|m| scrub(&m, &secrets))
                 .unwrap_or_else(|| "étape ignorée par le script".into()),
             excerpt,
             next_port: output.next_port,
@@ -471,7 +492,7 @@ pub async fn execute_script_operation(
                 next_port: output.next_port,
                 stop_pipeline: output.stop_pipeline,
                 variables: output.variables,
-                message: output.message.map(|m| mask_log_secrets(&m)),
+                message: output.message.map(|m| scrub(&m, &secrets)),
                 excerpt,
             })
         }
@@ -495,6 +516,9 @@ mod tests {
             error_code: None,
             timeout_seconds,
             defaults: serde_json::Map::new(),
+            variables: Vec::new(),
+            requires: Vec::new(),
+            dependencies_unverified: false,
             accepts_non_media: false,
         };
         let op = OperationContract {
@@ -507,6 +531,7 @@ mod tests {
             capability: "custom".into(),
             status: "validated".into(),
             runtime: OperationRuntime::Script(rt.clone()),
+            exposes: None,
         };
         (op, rt)
     }
@@ -797,6 +822,69 @@ printf '{"status":"ok","message":"vu %s","variables":{"cible":"av1"}}' "$seen"
             }
             ScriptStepOutcome::Skipped { .. } => anyhow::bail!("étape ignorée inattendue"),
         }
+        Ok(())
+    }
+
+    #[test]
+    fn redaction_replaces_every_occurrence_of_each_secret() {
+        let secrets = vec!["t0k".to_owned(), "autre".to_owned()];
+        assert_eq!(
+            redact("t0k puis autre puis t0k", &secrets),
+            format!("{SECRET_PLACEHOLDER} puis {SECRET_PLACEHOLDER} puis {SECRET_PLACEHOLDER}")
+        );
+        assert_eq!(redact("rien à cacher", &secrets), "rien à cacher");
+        assert_eq!(redact("texte", &[]), "texte");
+    }
+
+    #[tokio::test]
+    async fn a_script_receives_its_secret_but_cannot_leak_it_in_its_message_or_logs()
+    -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let cache = ToolCacheManager::new(dir.path().join("cache"));
+        let source = dir.path().join("input.mkv");
+        std::fs::write(&source, b"mkv")?;
+        let script = "cat > entree.json\nif grep -q '\"jeton\":\"t0k-secret\"' entree.json; then\necho 'Progress: 50% avec t0k-secret' >&2\nprintf '{\"status\":\"ok\",\"message\":\"recu t0k-secret\"}'\nelse\nprintf '{\"status\":\"error\",\"message\":\"secret absent\"}'\nfi";
+        let (op, mut rt) = test_op(script, 10);
+        rt.variables = vec![forgearr_shared::script_variables::ScriptVariable {
+            name: "jeton".into(),
+            kind: forgearr_shared::script_variables::VariableKind::Secret,
+            ..Default::default()
+        }];
+        let lines = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let sink = lines.clone();
+        let outcome = execute_script_operation(
+            &op,
+            &rt,
+            &cache,
+            &HashMap::new(),
+            "flow-1",
+            "node-1",
+            &serde_json::json!({"jeton": "t0k-secret"}),
+            dir.path(),
+            &source,
+            &source,
+            &Value::Null,
+            &FlowVariables::default(),
+            1,
+            Arc::new(move |_, line| {
+                if let Ok(mut guard) = sink.lock() {
+                    guard.push(line.to_owned());
+                }
+            }),
+        )
+        .await?;
+        let ScriptStepOutcome::Succeeded { message, .. } = outcome else {
+            anyhow::bail!("le script aurait dû réussir : il reçoit son secret");
+        };
+        assert_eq!(
+            message.as_deref(),
+            Some(format!("recu {SECRET_PLACEHOLDER}").as_str())
+        );
+        let logged = lines
+            .lock()
+            .map(|guard| guard.join("|"))
+            .unwrap_or_default();
+        assert!(!logged.contains("t0k-secret"), "{logged}");
         Ok(())
     }
 }

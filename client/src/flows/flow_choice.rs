@@ -1,5 +1,5 @@
 //! Choix d'un flux du central : sous-flux d'un bloc, flux d'échec du flux et flux d'échec global
-//! (ADR 0022).
+//! (ADR 0026).
 
 use super::fields::select_options;
 use super::state::Editor;

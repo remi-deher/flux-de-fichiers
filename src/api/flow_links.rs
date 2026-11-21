@@ -1,4 +1,4 @@
-//! Flux liés : validation des sous-flux et du flux d'échec, flux d'échec global (ADR 0022).
+//! Flux liés : validation des sous-flux et du flux d'échec, flux d'échec global (ADR 0026).
 
 use super::{AppState, ManageFlowsAuth, ViewFlowsAuth};
 use crate::{

@@ -117,8 +117,8 @@ paramètres.
 - Secrets webhook / Arr déchiffrés voyagent dans le bail (à durcir si besoin).
 - Baux sans numéro d'époque (*fencing*) : un ancien worker peut encore répondre tard.
 - Requêtes SQL non vérifiées à la compilation (`query!` non adopté, voir l'audit).
-- `frontend/dist/index.html` est versionné : le régénérer (`cargo run -p forgearr-frontend`) après
-  toute modification du thème ou de la page.
+- `frontend/dist/index.html` est généré et non versionné (depuis le 21 nov. 2026) : le `Dockerfile` et
+  `npm run dev` le produisent, `cargo run -p forgearr-frontend` le génère à la main.
 
 ## Reste à faire (liste complète au 14 nov.)
 
@@ -188,6 +188,7 @@ Reporté (décision du 14 nov.) : on ne corrige pas pour le moment, on le fera p
 - [x] Release `test → main` : aucune pour le moment (décision du 14 nov.).
 - [x] `frontend/dist/index.html` reste versionné et régénéré à chaque changement ;
       `feature.yml` échoue si la page est périmée.
+      *(Remplacé le 21 nov. 2026 : la page n'est plus versionnée, `feature.yml` vérifie seulement qu'elle se génère.)*
 
 ## Ordre suggéré pour un autre agent
 

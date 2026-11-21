@@ -2,11 +2,13 @@
 
 use super::metadata::{MetaRow, StatusBanner, StoreTone};
 use super::repos::RepoAction;
+use super::script_preview::{ScriptPreview, script_preview_path};
 use super::{REPOSITORIES_PATH, section_badge_label};
 use crate::api;
 use crate::route::encode_segment;
 use crate::ui::{Tag, TagTone};
 use forgearr_shared::plugins::RepositoryDetailView;
+use forgearr_shared::plugins::vocab::CatalogItemType;
 use leptos::prelude::*;
 
 /// Onglets du tiroir d'un dépôt de plugins.
@@ -29,8 +31,24 @@ impl RepoDrawerTab {
     }
 }
 
+/// Onglet Contenu : liste des pièces, ou aperçu du code du script sélectionné.
 #[component]
-fn ContentTab(detail: RepositoryDetailView) -> impl IntoView {
+fn ContentTab(detail: RepositoryDetailView, previewed: RwSignal<Option<String>>) -> impl IntoView {
+    let repo_id = detail.repository.id.clone();
+    move || match previewed.get() {
+        Some(entry_id) => view! {
+            <ScriptPreview
+                path=script_preview_path(&repo_id, &entry_id)
+                on_back=Some(Callback::new(move |()| previewed.set(None)))
+            />
+        }
+        .into_any(),
+        None => view! { <ContentList detail=detail.clone() previewed=previewed /> }.into_any(),
+    }
+}
+
+#[component]
+fn ContentList(detail: RepositoryDetailView, previewed: RwSignal<Option<String>>) -> impl IntoView {
     let entries_count = detail.entries_count.to_string();
     let skipped_count = detail.skipped_count.to_string();
     view! {
@@ -47,6 +65,18 @@ fn ContentTab(detail: RepositoryDetailView) -> impl IntoView {
                 <MetaRow term="Schéma d'index" mono=true>{schema}</MetaRow>
             })}
         </div>
+        {(!detail.warnings.is_empty()).then(|| view! {
+            <div class="pack-components">
+                <h3 class="form-label">"Sous-catégories non retenues"</h3>
+                <ul class="step-list">
+                    {detail.warnings.into_iter().map(|warning| view! {
+                        <li class="step-item">
+                            <div class="step-item__meta">{warning}</div>
+                        </li>
+                    }).collect_view()}
+                </ul>
+            </div>
+        })}
         <div class="pack-components">
             <h3 class="form-label">"Pièces exposées par ce dépôt"</h3>
             {if detail.entries.is_empty() {
@@ -54,12 +84,24 @@ fn ContentTab(detail: RepositoryDetailView) -> impl IntoView {
             } else {
                 view! {
                     <ul class="step-list">
-                        {detail.entries.into_iter().map(|entry| view! {
+                        {detail.entries.into_iter().map(|entry| {
+                            let preview_id = (entry.entry_type == CatalogItemType::Script)
+                                .then(|| entry.id.clone());
+                            view! {
                             <li class="step-item">
                                 <div class="step-item__head">
                                     <Tag label=section_badge_label(entry.entry_type) tone=TagTone::Primary />
                                     <span class="text-strong">{entry.name}</span>
                                     <Tag label=entry.version tone=TagTone::Mono />
+                                    {preview_id.map(|id| view! {
+                                        <button
+                                            type="button"
+                                            class="btn btn-secondary btn-sm"
+                                            on:click=move |_| previewed.set(Some(id.clone()))
+                                        >
+                                            "Voir le code"
+                                        </button>
+                                    })}
                                 </div>
                                 <div class="step-item__meta">
                                     <Tag label=entry.id tone=TagTone::Mono />
@@ -68,6 +110,7 @@ fn ContentTab(detail: RepositoryDetailView) -> impl IntoView {
                                     })}
                                 </div>
                             </li>
+                            }
                         }).collect_view()}
                     </ul>
                 }.into_any()
@@ -160,6 +203,7 @@ pub fn RepoDetail(
     action_pending: Signal<bool>,
 ) -> impl IntoView {
     let path = format!("{REPOSITORIES_PATH}/{}", encode_segment(&repo_id));
+    let previewed = RwSignal::new(None::<String>);
     let detail = LocalResource::new(move || {
         reload_key.track();
         let path = path.clone();
@@ -177,7 +221,7 @@ pub fn RepoDetail(
                         let sync_id = data.repository.id.clone();
                         let banner_tone = if !data.repository.enabled {
                             StoreTone::Neutral
-                        } else if data.skipped_count > 0 {
+                        } else if data.skipped_count > 0 || !data.warnings.is_empty() {
                             StoreTone::Warning
                         } else if data.synced_on_disk {
                             StoreTone::Success
@@ -191,10 +235,17 @@ pub fn RepoDetail(
                         } else {
                             format!("{} entrée(s) indexée(s)", data.entries_count)
                         };
-                        let banner_text = if data.skipped_count > 0 {
-                            Some(format!("{} fiche(s) ignorée(s) lors du dernier index.", data.skipped_count))
-                        } else {
+                        let mut notices = Vec::new();
+                        if data.skipped_count > 0 {
+                            notices.push(format!("{} fiche(s) ignorée(s) lors du dernier index.", data.skipped_count));
+                        }
+                        if !data.warnings.is_empty() {
+                            notices.push(format!("{} sous-catégorie(s) non retenue(s).", data.warnings.len()));
+                        }
+                        let banner_text = if notices.is_empty() {
                             data.repository.last_synced_at.as_ref().map(|dt| format!("Dernière synchro : {dt}"))
+                        } else {
+                            Some(notices.join(" "))
                         };
                         let sync_btn = view! {
                             <button
@@ -215,7 +266,7 @@ pub fn RepoDetail(
                                 action=Some(sync_btn)
                             />
                             {match active_tab {
-                                RepoDrawerTab::Content => view! { <ContentTab detail=data /> }.into_any(),
+                                RepoDrawerTab::Content => view! { <ContentTab detail=data previewed=previewed /> }.into_any(),
                                 RepoDrawerTab::Sync => view! {
                                     <SyncTab detail=data on_action=on_action action_pending=action_pending />
                                 }

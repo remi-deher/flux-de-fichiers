@@ -2,10 +2,14 @@
 
 use super::{
     OperationRegistry, OperationRuntime, ScriptRuntime,
-    variables::{NodeOutput, VariableContext, as_text, lookup_in, references_in, resolve_node_config},
+    variables::{
+        NodeOutput, VariableContext, as_text, lookup_in, references_in, resolve_node_config,
+    },
 };
 use forgearr_shared::{
-    flow_variables::{NodeVariablesRequest, NodeVariablesView, ReferenceSource, ReferenceSuggestion},
+    flow_variables::{
+        NodeVariablesRequest, NodeVariablesView, ReferenceSource, ReferenceSuggestion,
+    },
     flows::{FlowGraph, FlowNode},
 };
 use serde_json::Value;
@@ -129,19 +133,47 @@ pub fn reference_suggestions(
     registry: &OperationRegistry,
     sample_media: &Value,
 ) -> Vec<ReferenceSuggestion> {
-    let suggestion = |reference: String, label: String, source, sample: Option<String>| {
-        ReferenceSuggestion { reference, label, source, sample }
-    };
+    let suggestion =
+        |reference: String, label: String, source, sample: Option<String>| ReferenceSuggestion {
+            reference,
+            label,
+            source,
+            sample,
+        };
     let mut out = vec![
-        suggestion("workingFile".into(), "Fichier courant".into(), ReferenceSource::Flow, Some(SAMPLE_WORKING_FILE.into())),
-        suggestion("sourceFile".into(), "Fichier source".into(), ReferenceSource::Flow, Some(SAMPLE_SOURCE_FILE.into())),
-        suggestion("workDir".into(), "Dossier de travail".into(), ReferenceSource::Flow, Some(SAMPLE_WORK_DIR.into())),
+        suggestion(
+            "workingFile".into(),
+            "Fichier courant".into(),
+            ReferenceSource::Flow,
+            Some(SAMPLE_WORKING_FILE.into()),
+        ),
+        suggestion(
+            "sourceFile".into(),
+            "Fichier source".into(),
+            ReferenceSource::Flow,
+            Some(SAMPLE_SOURCE_FILE.into()),
+        ),
+        suggestion(
+            "workDir".into(),
+            "Dossier de travail".into(),
+            ReferenceSource::Flow,
+            Some(SAMPLE_WORK_DIR.into()),
+        ),
     ];
     for (path, sample) in media_info_leaves(sample_media) {
-        out.push(suggestion(path.clone(), path, ReferenceSource::MediaInfo, Some(sample)));
+        out.push(suggestion(
+            path.clone(),
+            path,
+            ReferenceSource::MediaInfo,
+            Some(sample),
+        ));
     }
     let upstream = upstream_node_ids(graph, node_id);
-    for node in graph.nodes.iter().filter(|node| upstream.contains(&node.id)) {
+    for node in graph
+        .nodes
+        .iter()
+        .filter(|node| upstream.contains(&node.id))
+    {
         for (field, label) in NODE_OUTPUT_FIELDS {
             out.push(suggestion(
                 format!("nodes.{}.{field}", node.id),
@@ -162,7 +194,12 @@ pub fn reference_suggestions(
             } else {
                 variable.label.clone()
             };
-            out.push(suggestion(exposed.reference(variable), label, ReferenceSource::Plugin, sample));
+            out.push(suggestion(
+                exposed.reference(variable),
+                label,
+                ReferenceSource::Plugin,
+                sample,
+            ));
         }
     }
     out
@@ -185,12 +222,14 @@ fn reference_problem(
 ) -> Option<&'static str> {
     let mut parts = reference.split('.');
     match parts.next() {
-        Some("workingFile" | "sourceFile" | "workDir") => parts
-            .next()
-            .map(|_| "cette valeur n'a pas de sous-champ"),
+        Some("workingFile" | "sourceFile" | "workDir") => {
+            parts.next().map(|_| "cette valeur n'a pas de sous-champ")
+        }
         Some("mediaInfo") => None,
         Some("nodes") => match (parts.next(), parts.next(), parts.next()) {
-            (Some(id), Some(field), None) if NODE_OUTPUT_FIELDS.iter().any(|(name, _)| *name == field) => {
+            (Some(id), Some(field), None)
+                if NODE_OUTPUT_FIELDS.iter().any(|(name, _)| *name == field) =>
+            {
                 (!upstream.contains(id)).then_some("ce nœud ne s'exécute pas avant celui-ci")
             }
             _ => Some("forme attendue : nodes.<id>.message, nextPort ou workingFile"),
@@ -205,7 +244,12 @@ pub fn check_references(graph: &FlowGraph, registry: &OperationRegistry) -> Vec<
     let plugin_references: HashSet<String> = registry
         .exposed_variables()
         .iter()
-        .flat_map(|exposed| exposed.variables.iter().map(|variable| exposed.reference(variable)))
+        .flat_map(|exposed| {
+            exposed
+                .variables
+                .iter()
+                .map(|variable| exposed.reference(variable))
+        })
         .collect();
     let mut problems = Vec::new();
     for node in &graph.nodes {
@@ -221,7 +265,9 @@ pub fn check_references(graph: &FlowGraph, registry: &OperationRegistry) -> Vec<
             }
             for text in &texts {
                 for reference in references_in(text) {
-                    if let Some(problem) = reference_problem(reference, &upstream, &plugin_references) {
+                    if let Some(problem) =
+                        reference_problem(reference, &upstream, &plugin_references)
+                    {
                         problems.push(format!(
                             "Nœud {} : variable « {} » : référence {{{{{reference}}}}} refusée ({problem})",
                             node.id, variable.name
@@ -337,21 +383,34 @@ mod tests {
         assert_eq!(upstream_node_ids(&g, "enc"), ["in", "mi"]);
         assert_eq!(upstream_node_ids(&g, "in"), Vec::<String>::new());
         let mut cyclic = g.clone();
-        cyclic.connections.push(serde_json::from_value(json!({"from": "enc", "to": "in"})).unwrap_or_else(|_| g.connections[0].clone()));
+        cyclic.connections.push(
+            serde_json::from_value(json!({"from": "enc", "to": "in"}))
+                .unwrap_or_else(|_| g.connections[0].clone()),
+        );
         assert!(!upstream_node_ids(&cyclic, "enc").contains(&"enc".to_owned()));
     }
 
     #[test]
-    fn suggestions_cover_flow_values_metadata_previous_nodes_and_upstream_plugins() -> anyhow::Result<()> {
+    fn suggestions_cover_flow_values_metadata_previous_nodes_and_upstream_plugins()
+    -> anyhow::Result<()> {
         let reg = registry()?;
         let g = graph(json!({}));
         let media = json!({"video": {"codec": "hevc"}, "streams": [{"lang": "fr"}]});
         let refs = reference_suggestions(&g, "enc", &reg, &media);
         let find = |reference: &str| refs.iter().find(|r| r.reference == reference);
-        assert_eq!(find("workingFile").map(|r| r.source), Some(ReferenceSource::Flow));
-        assert_eq!(find("mediaInfo.video.codec").and_then(|r| r.sample.clone()), Some("hevc".into()));
+        assert_eq!(
+            find("workingFile").map(|r| r.source),
+            Some(ReferenceSource::Flow)
+        );
+        assert_eq!(
+            find("mediaInfo.video.codec").and_then(|r| r.sample.clone()),
+            Some("hevc".into())
+        );
         assert!(find("mediaInfo.streams.0.lang").is_some());
-        assert_eq!(find("nodes.mi.message").map(|r| r.source), Some(ReferenceSource::Node));
+        assert_eq!(
+            find("nodes.mi.message").map(|r| r.source),
+            Some(ReferenceSource::Node)
+        );
         assert!(find("nodes.apres.message").is_none() && find("nodes.enc.message").is_none());
         let plugin = find("mediainfo.video.codec");
         assert_eq!(plugin.map(|r| r.label.as_str()), Some("Codec vidéo"));
@@ -364,8 +423,12 @@ mod tests {
 
     #[test]
     fn sampled_metadata_paths_are_bounded() {
-        let wide: serde_json::Map<String, Value> = (0..200).map(|n| (format!("k{n:03}"), json!(n))).collect();
-        assert_eq!(media_info_leaves(&Value::Object(wide)).len(), MAX_SAMPLE_PATHS);
+        let wide: serde_json::Map<String, Value> =
+            (0..200).map(|n| (format!("k{n:03}"), json!(n))).collect();
+        assert_eq!(
+            media_info_leaves(&Value::Object(wide)).len(),
+            MAX_SAMPLE_PATHS
+        );
         let array = json!({"a": [1, 2, 3, 4, 5]});
         assert_eq!(media_info_leaves(&array).len(), MAX_SAMPLE_ARRAY_ITEMS);
         let deep = json!({"a": {"b": {"c": {"d": {"e": {"f": {"g": 1}}}}}}});
@@ -402,16 +465,22 @@ mod tests {
     }
 
     #[test]
-    fn the_preview_resolves_defaults_and_example_values_or_explains_the_failure() -> anyhow::Result<()> {
+    fn the_preview_resolves_defaults_and_example_values_or_explains_the_failure()
+    -> anyhow::Result<()> {
         let reg = registry()?;
         let request = |config: Value| NodeVariablesRequest {
             graph: graph(config),
             node_id: "enc".into(),
             media_info: json!({"video": {"codec": "hevc"}}),
         };
-        let view = node_variables_view(&request(json!({"cible": "{{workingFile}}", "codec": "{{mediainfo.video.codec}}"})), &reg);
+        let view = node_variables_view(
+            &request(json!({"cible": "{{workingFile}}", "codec": "{{mediainfo.video.codec}}"})),
+            &reg,
+        );
         assert_eq!(view.error, None);
-        let resolved = view.resolved.ok_or_else(|| anyhow::anyhow!("config non résolue"))?;
+        let resolved = view
+            .resolved
+            .ok_or_else(|| anyhow::anyhow!("config non résolue"))?;
         assert_eq!(resolved["crf"], json!(23));
         assert_eq!(resolved["cible"], json!("/travail/fichier.mkv"));
         assert_eq!(resolved["codec"], json!("hevc"));
@@ -422,10 +491,19 @@ mod tests {
         assert!(failing.resolved.is_none());
         assert!(failing.error.is_some_and(|e| e.contains("cible")));
 
-        let missing = NodeVariablesRequest { node_id: "inconnu".into(), ..request(json!({})) };
+        let missing = NodeVariablesRequest {
+            node_id: "inconnu".into(),
+            ..request(json!({}))
+        };
         assert!(node_variables_view(&missing, &reg).error.is_some());
-        let not_a_script = NodeVariablesRequest { node_id: "mi".into(), ..request(json!({})) };
-        assert_eq!(node_variables_view(&not_a_script, &reg), NodeVariablesView::default());
+        let not_a_script = NodeVariablesRequest {
+            node_id: "mi".into(),
+            ..request(json!({}))
+        };
+        assert_eq!(
+            node_variables_view(&not_a_script, &reg),
+            NodeVariablesView::default()
+        );
         Ok(())
     }
 }

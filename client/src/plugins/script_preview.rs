@@ -81,11 +81,7 @@ fn RequirementsList(requirements: Vec<RequirementStatus>, unverified: bool) -> i
 }
 
 #[component]
-pub fn ScriptPreview(
-    repo_id: String,
-    entry_id: String,
-    on_back: Callback<()>,
-) -> impl IntoView {
+pub fn ScriptPreview(repo_id: String, entry_id: String, on_back: Callback<()>) -> impl IntoView {
     let path = script_preview_path(&repo_id, &entry_id);
     let script = LocalResource::new(move || {
         let path = path.clone();
@@ -140,12 +136,21 @@ mod tests {
                 index_url: "https://exemple.org/index.json".into(),
             }),
         };
-        let missing = RequirementStatus { requirement: requirement.clone(), available: false };
+        let missing = RequirementStatus {
+            requirement: requirement.clone(),
+            available: false,
+        };
         assert!(repository_hint(&missing).is_some_and(|text| text.contains("repo.tiers")));
-        let available = RequirementStatus { requirement: requirement.clone(), available: true };
+        let available = RequirementStatus {
+            requirement: requirement.clone(),
+            available: true,
+        };
         assert_eq!(repository_hint(&available), None);
         let unnamed = RequirementStatus {
-            requirement: ScriptRequirement { repository: None, ..requirement },
+            requirement: ScriptRequirement {
+                repository: None,
+                ..requirement
+            },
             available: false,
         };
         assert_eq!(repository_hint(&unnamed), None);

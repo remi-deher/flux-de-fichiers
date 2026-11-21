@@ -119,9 +119,15 @@ mod tests {
             .to_string(),
         )?;
         let read = read_script_requirements(dir.path());
-        assert_eq!(read.requires, vec![requirement("mediainfo.video.codec", "app.mediainfo")]);
+        assert_eq!(
+            read.requires,
+            vec![requirement("mediainfo.video.codec", "app.mediainfo")]
+        );
         assert!(read.dependencies_unverified);
-        assert_eq!(read_script_requirements(&dir.path().join("absent")), ScriptRequirements::default());
+        assert_eq!(
+            read_script_requirements(&dir.path().join("absent")),
+            ScriptRequirements::default()
+        );
         Ok(())
     }
 
@@ -143,7 +149,10 @@ mod tests {
             &registry,
         );
         assert_eq!(
-            statuses.iter().map(|status| status.available).collect::<Vec<_>>(),
+            statuses
+                .iter()
+                .map(|status| status.available)
+                .collect::<Vec<_>>(),
             [true, false]
         );
         Ok(())
@@ -157,18 +166,31 @@ mod tests {
 
         let bad_namespace = json!({"providerId": "p", "runtime": {},
             "exposes": {"namespace": "nodes", "contractVersion": "1.0.0", "variables": []}});
-        assert!(operation_declaration_issue(&bad_namespace.to_string()).is_some_and(|m| m.contains("réservé")));
+        assert!(
+            operation_declaration_issue(&bad_namespace.to_string())
+                .is_some_and(|m| m.contains("réservé"))
+        );
 
         let bad_requires = json!({"providerId": "p", "runtime": {"requires": [{"variable": "codec", "provider": "x"}]}});
         assert!(operation_declaration_issue(&bad_requires.to_string()).is_some());
 
-        let bad_variables = json!({"providerId": "p", "runtime": {"variables": [{"name": "Mauvais"}]}});
-        assert!(operation_declaration_issue(&bad_variables.to_string()).is_some_and(|m| m.contains("invalide")));
+        let bad_variables =
+            json!({"providerId": "p", "runtime": {"variables": [{"name": "Mauvais"}]}});
+        assert!(
+            operation_declaration_issue(&bad_variables.to_string())
+                .is_some_and(|m| m.contains("invalide"))
+        );
 
         let unreadable = json!({"providerId": "p", "runtime": {}, "exposes": {"namespace": 3}});
-        assert!(operation_declaration_issue(&unreadable.to_string()).is_some_and(|m| m.contains("illisible")));
+        assert!(
+            operation_declaration_issue(&unreadable.to_string())
+                .is_some_and(|m| m.contains("illisible"))
+        );
 
-        assert_eq!(operation_declaration_issue(r#"{"id":"manifeste","files":[]}"#), None);
+        assert_eq!(
+            operation_declaration_issue(r#"{"id":"manifeste","files":[]}"#),
+            None
+        );
         assert_eq!(operation_declaration_issue("pas du json"), None);
     }
 }

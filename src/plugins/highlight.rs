@@ -71,7 +71,11 @@ fn plain_lines(code: &str) -> Vec<Vec<CodeToken>> {
         .collect()
 }
 
-fn highlight_with(syntaxes: &SyntaxSet, extension: &str, code: &str) -> Option<Vec<Vec<CodeToken>>> {
+fn highlight_with(
+    syntaxes: &SyntaxSet,
+    extension: &str,
+    code: &str,
+) -> Option<Vec<Vec<CodeToken>>> {
     let syntax = syntaxes.find_syntax_by_extension(extension)?;
     let mut state = ParseState::new(syntax);
     let mut stack = ScopeStack::new();
@@ -104,7 +108,11 @@ mod tests {
     fn rebuild(lines: &[Vec<CodeToken>]) -> String {
         lines
             .iter()
-            .map(|line| line.iter().map(|token| token.text.as_str()).collect::<String>())
+            .map(|line| {
+                line.iter()
+                    .map(|token| token.text.as_str())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -146,7 +154,12 @@ mod tests {
         let lines = highlight_code(code, "inconnu");
         assert_eq!(lines.len(), 3);
         assert!(lines[1].is_empty());
-        assert!(lines.iter().flatten().all(|token| token.kind == TokenKind::Plain));
+        assert!(
+            lines
+                .iter()
+                .flatten()
+                .all(|token| token.kind == TokenKind::Plain)
+        );
         assert_eq!(rebuild(&lines), code);
     }
 

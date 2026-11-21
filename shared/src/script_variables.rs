@@ -124,17 +124,26 @@ impl fmt::Display for VariableSchemaError {
             ),
             Self::DuplicateName(name) => write!(f, "variable « {name} » déclarée deux fois"),
             Self::InvalidDefault(name) => {
-                write!(f, "valeur par défaut de « {name} » incompatible avec son type")
+                write!(
+                    f,
+                    "valeur par défaut de « {name} » incompatible avec son type"
+                )
             }
             Self::SecretWithDefault(name) => {
-                write!(f, "le secret « {name} » ne peut pas avoir de valeur par défaut")
+                write!(
+                    f,
+                    "le secret « {name} » ne peut pas avoir de valeur par défaut"
+                )
             }
             Self::InvalidOptions(name) => write!(
                 f,
                 "options de « {name} » invalides (un choix exige de 1 à {MAX_CHOICE_OPTIONS} options distinctes et non vides, les autres types aucune)"
             ),
             Self::InvalidRange(name) => {
-                write!(f, "bornes de « {name} » invalides (min ≤ max, nombres seulement)")
+                write!(
+                    f,
+                    "bornes de « {name} » invalides (min ≤ max, nombres seulement)"
+                )
             }
         }
     }
@@ -153,11 +162,9 @@ fn options_are_valid(variable: &ScriptVariable) -> bool {
     if variable.kind != VariableKind::Choice {
         return variable.options.is_empty();
     }
-    let distinct = variable
-        .options
-        .iter()
-        .enumerate()
-        .all(|(index, option)| !option.trim().is_empty() && !variable.options[..index].contains(option));
+    let distinct = variable.options.iter().enumerate().all(|(index, option)| {
+        !option.trim().is_empty() && !variable.options[..index].contains(option)
+    });
     !variable.options.is_empty() && variable.options.len() <= MAX_CHOICE_OPTIONS && distinct
 }
 
@@ -165,7 +172,10 @@ fn range_is_valid(variable: &ScriptVariable) -> bool {
     match (&variable.min, &variable.max) {
         (None, None) => true,
         (min, max) if variable.kind == VariableKind::Number => {
-            match (min.as_ref().and_then(Number::as_f64), max.as_ref().and_then(Number::as_f64)) {
+            match (
+                min.as_ref().and_then(Number::as_f64),
+                max.as_ref().and_then(Number::as_f64),
+            ) {
                 (Some(low), Some(high)) => low <= high,
                 _ => true,
             }
@@ -180,8 +190,16 @@ fn default_is_valid(variable: &ScriptVariable, value: &Value) -> bool {
         | (VariableKind::Boolean, Value::Bool(_)) => true,
         (VariableKind::Choice, Value::String(choice)) => variable.options.contains(choice),
         (VariableKind::Number, Value::Number(number)) => number.as_f64().is_some_and(|n| {
-            variable.min.as_ref().and_then(Number::as_f64).is_none_or(|low| n >= low)
-                && variable.max.as_ref().and_then(Number::as_f64).is_none_or(|high| n <= high)
+            variable
+                .min
+                .as_ref()
+                .and_then(Number::as_f64)
+                .is_none_or(|low| n >= low)
+                && variable
+                    .max
+                    .as_ref()
+                    .and_then(Number::as_f64)
+                    .is_none_or(|high| n <= high)
         }),
         _ => false,
     }
@@ -197,7 +215,10 @@ pub fn validate_variables(variables: &[ScriptVariable]) -> Result<(), VariableSc
         if !is_valid_name(&variable.name) {
             return Err(VariableSchemaError::InvalidName(name));
         }
-        if variables[..index].iter().any(|other| other.name == variable.name) {
+        if variables[..index]
+            .iter()
+            .any(|other| other.name == variable.name)
+        {
             return Err(VariableSchemaError::DuplicateName(name));
         }
         if !options_are_valid(variable) {
@@ -306,13 +327,23 @@ mod tests {
     #[test]
     fn rejects_unsafe_and_duplicate_names() {
         let too_long = "a".repeat(MAX_VARIABLE_NAME_LEN + 1);
-        for bad in ["", "1crf", "Crf", "a-b", "mediainfo.codec", too_long.as_str()] {
+        for bad in [
+            "",
+            "1crf",
+            "Crf",
+            "a-b",
+            "mediainfo.codec",
+            too_long.as_str(),
+        ] {
             assert_eq!(
                 validate_variables(&[variable(bad, VariableKind::Text)]),
                 Err(VariableSchemaError::InvalidName(bad.to_owned()))
             );
         }
-        let twice = [variable("crf", VariableKind::Text), variable("crf", VariableKind::Number)];
+        let twice = [
+            variable("crf", VariableKind::Text),
+            variable("crf", VariableKind::Number),
+        ];
         assert_eq!(
             validate_variables(&twice),
             Err(VariableSchemaError::DuplicateName("crf".into()))
@@ -387,13 +418,31 @@ mod tests {
 
     #[test]
     fn default_text_conversion_matches_the_kind() {
-        assert_eq!(default_from_text(VariableKind::Number, " 23 "), Ok(Some(json!(23))));
-        assert_eq!(default_from_text(VariableKind::Number, "1.5"), Ok(Some(json!(1.5))));
-        assert_eq!(default_from_text(VariableKind::Number, "abc"), Err(InvalidDefaultText));
+        assert_eq!(
+            default_from_text(VariableKind::Number, " 23 "),
+            Ok(Some(json!(23)))
+        );
+        assert_eq!(
+            default_from_text(VariableKind::Number, "1.5"),
+            Ok(Some(json!(1.5)))
+        );
+        assert_eq!(
+            default_from_text(VariableKind::Number, "abc"),
+            Err(InvalidDefaultText)
+        );
         assert_eq!(default_from_text(VariableKind::Number, ""), Ok(None));
-        assert_eq!(default_from_text(VariableKind::Boolean, "true"), Ok(Some(json!(true))));
-        assert_eq!(default_from_text(VariableKind::Boolean, "peut-être"), Err(InvalidDefaultText));
-        assert_eq!(default_from_text(VariableKind::Text, "fr"), Ok(Some(json!("fr"))));
+        assert_eq!(
+            default_from_text(VariableKind::Boolean, "true"),
+            Ok(Some(json!(true)))
+        );
+        assert_eq!(
+            default_from_text(VariableKind::Boolean, "peut-être"),
+            Err(InvalidDefaultText)
+        );
+        assert_eq!(
+            default_from_text(VariableKind::Text, "fr"),
+            Ok(Some(json!("fr")))
+        );
         assert_eq!(default_from_text(VariableKind::Secret, "x"), Ok(None));
         assert_eq!(default_to_text(Some(&json!(23))), "23");
         assert_eq!(default_to_text(Some(&json!("fr"))), "fr");

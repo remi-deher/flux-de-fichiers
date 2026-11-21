@@ -1133,7 +1133,8 @@ async fn script_variables_are_resolved_from_defaults_flow_values_and_previous_no
         .await
         .map_err(|e| e.message)?;
 
-    let payload: Value = serde_json::from_str(&std::fs::read_to_string(work.join("payload.json"))?)?;
+    let payload: Value =
+        serde_json::from_str(&std::fs::read_to_string(work.join("payload.json"))?)?;
     assert_eq!(payload["config"]["crf"], json!(23));
     assert_eq!(payload["config"]["precedent"], json!("marqué"));
     assert!(
@@ -1205,8 +1206,11 @@ async fn a_required_variable_without_value_fails_the_step_with_a_clear_message()
         .ok_or("l'exécution aurait dû échouer")?;
 
     assert!(failure.message.contains("cible"));
-    assert!(failure.steps.iter().any(|step| {
-        step.node_id == "strict" && step.status == JobStepStatus::Failed
-    }));
+    assert!(
+        failure
+            .steps
+            .iter()
+            .any(|step| { step.node_id == "strict" && step.status == JobStepStatus::Failed })
+    );
     Ok(())
 }

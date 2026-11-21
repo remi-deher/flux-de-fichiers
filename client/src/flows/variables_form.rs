@@ -69,7 +69,10 @@ pub fn group_references(
 /// Libellé d'une option du sélecteur : la référence, son intitulé et sa valeur d'exemple.
 fn reference_option_label(suggestion: &ReferenceSuggestion) -> String {
     match &suggestion.sample {
-        Some(sample) => format!("{} — {} (ex. {sample})", suggestion.reference, suggestion.label),
+        Some(sample) => format!(
+            "{} — {} (ex. {sample})",
+            suggestion.reference, suggestion.label
+        ),
         None => format!("{} — {}", suggestion.reference, suggestion.label),
     }
 }
@@ -279,7 +282,11 @@ fn structure_key(editor: Editor, node_id: &str) -> String {
             .find(|node| node.id == node_id)
             .and_then(|node| node.config.get("scriptId").and_then(Value::as_str))
             .unwrap_or_default();
-        format!("{script}#{}#{:?}#{media}", nodes.join(";"), graph.connections)
+        format!(
+            "{script}#{}#{:?}#{media}",
+            nodes.join(";"),
+            graph.connections
+        )
     })
 }
 
@@ -339,7 +346,11 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn suggestion(reference: &str, source: ReferenceSource, sample: Option<&str>) -> ReferenceSuggestion {
+    fn suggestion(
+        reference: &str,
+        source: ReferenceSource,
+        sample: Option<&str>,
+    ) -> ReferenceSuggestion {
         ReferenceSuggestion {
             reference: reference.into(),
             label: "libellé".into(),
@@ -350,12 +361,30 @@ mod tests {
 
     #[test]
     fn typed_input_becomes_the_matching_json_value() {
-        assert_eq!(value_from_input(VariableKind::Number, "23"), Some(json!(23)));
-        assert_eq!(value_from_input(VariableKind::Number, "1.5"), Some(json!(1.5)));
-        assert_eq!(value_from_input(VariableKind::Boolean, "true"), Some(json!(true)));
-        assert_eq!(value_from_input(VariableKind::Boolean, "false"), Some(json!(false)));
-        assert_eq!(value_from_input(VariableKind::Text, "fr"), Some(json!("fr")));
-        assert_eq!(value_from_input(VariableKind::Choice, "en"), Some(json!("en")));
+        assert_eq!(
+            value_from_input(VariableKind::Number, "23"),
+            Some(json!(23))
+        );
+        assert_eq!(
+            value_from_input(VariableKind::Number, "1.5"),
+            Some(json!(1.5))
+        );
+        assert_eq!(
+            value_from_input(VariableKind::Boolean, "true"),
+            Some(json!(true))
+        );
+        assert_eq!(
+            value_from_input(VariableKind::Boolean, "false"),
+            Some(json!(false))
+        );
+        assert_eq!(
+            value_from_input(VariableKind::Text, "fr"),
+            Some(json!("fr"))
+        );
+        assert_eq!(
+            value_from_input(VariableKind::Choice, "en"),
+            Some(json!("en"))
+        );
     }
 
     #[test]
@@ -364,7 +393,10 @@ mod tests {
             value_from_input(VariableKind::Number, "{{mediaInfo.video.width}}"),
             Some(json!("{{mediaInfo.video.width}}"))
         );
-        assert_eq!(value_from_input(VariableKind::Number, "beaucoup"), Some(json!("beaucoup")));
+        assert_eq!(
+            value_from_input(VariableKind::Number, "beaucoup"),
+            Some(json!("beaucoup"))
+        );
         assert_eq!(value_from_input(VariableKind::Text, "   "), None);
         assert_eq!(value_from_input(VariableKind::Number, ""), None);
     }
@@ -380,7 +412,10 @@ mod tests {
     #[test]
     fn a_picked_reference_is_appended_in_braces() {
         assert_eq!(append_reference("", "workingFile"), "{{workingFile}}");
-        assert_eq!(append_reference("dossier/", "workDir"), "dossier/{{workDir}}");
+        assert_eq!(
+            append_reference("dossier/", "workDir"),
+            "dossier/{{workDir}}"
+        );
     }
 
     #[test]
@@ -395,7 +430,11 @@ mod tests {
         let sources: Vec<ReferenceSource> = groups.iter().map(|(source, _)| *source).collect();
         assert_eq!(
             sources,
-            [ReferenceSource::Flow, ReferenceSource::Node, ReferenceSource::Plugin]
+            [
+                ReferenceSource::Flow,
+                ReferenceSource::Node,
+                ReferenceSource::Plugin
+            ]
         );
         assert_eq!(groups[0].1.len(), 2);
         assert!(group_references(&[]).is_empty());
@@ -404,7 +443,11 @@ mod tests {
     #[test]
     fn option_labels_show_the_sample_when_known() {
         assert_eq!(
-            reference_option_label(&suggestion("mediaInfo.video.codec", ReferenceSource::MediaInfo, Some("hevc"))),
+            reference_option_label(&suggestion(
+                "mediaInfo.video.codec",
+                ReferenceSource::MediaInfo,
+                Some("hevc")
+            )),
             "mediaInfo.video.codec — libellé (ex. hevc)"
         );
         assert_eq!(

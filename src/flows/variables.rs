@@ -67,7 +67,12 @@ impl VariableContext {
         for exposure in exposed {
             for variable in &exposure.variables {
                 if let Some(value) = lookup_in(media_info, &variable.path) {
-                    insert_nested(&mut root, &exposure.namespace, &variable.name, value.clone());
+                    insert_nested(
+                        &mut root,
+                        &exposure.namespace,
+                        &variable.name,
+                        value.clone(),
+                    );
                 }
             }
         }
@@ -135,7 +140,9 @@ fn path_value(path: &Path) -> Value {
 /// Raison pour laquelle les variables d'un nœud n'ont pas pu être résolues.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum VariableError {
-    #[error("variable « {variable} » : la référence {{{{{reference}}}}} n'a pas de valeur à cette étape")]
+    #[error(
+        "variable « {variable} » : la référence {{{{{reference}}}}} n'a pas de valeur à cette étape"
+    )]
     MissingReference { variable: String, reference: String },
     #[error("variable « {0} » requise : aucune valeur")]
     MissingRequired(String),
@@ -330,10 +337,7 @@ fn resolve_variable(
     finish(variable, Some(resolved))
 }
 
-fn finish(
-    variable: &ScriptVariable,
-    value: Option<Value>,
-) -> Result<Option<Value>, VariableError> {
+fn finish(variable: &ScriptVariable, value: Option<Value>) -> Result<Option<Value>, VariableError> {
     match value {
         Some(value) if variable.required && is_blank(&value) => {
             Err(VariableError::MissingRequired(variable.name.clone()))
@@ -418,14 +422,21 @@ mod tests {
                 Segment::Reference("x"),
             ]
         );
-        assert_eq!(parse_template("{{ pas une ref }}"), vec![Segment::Text("{{ pas une ref }}")]);
-        assert_eq!(parse_template("ouvert {{ sans fin"), vec![Segment::Text("ouvert {{ sans fin")]);
+        assert_eq!(
+            parse_template("{{ pas une ref }}"),
+            vec![Segment::Text("{{ pas une ref }}")]
+        );
+        assert_eq!(
+            parse_template("ouvert {{ sans fin"),
+            vec![Segment::Text("ouvert {{ sans fin")]
+        );
         assert_eq!(parse_template("{{}}"), vec![Segment::Text("{{}}")]);
         assert!(parse_template("").is_empty());
     }
 
     #[test]
-    fn a_whole_reference_keeps_its_json_type_and_embedded_ones_become_text() -> Result<(), VariableError> {
+    fn a_whole_reference_keeps_its_json_type_and_embedded_ones_become_text()
+    -> Result<(), VariableError> {
         let variables = [
             variable("largeur", VariableKind::Number),
             variable("fichier", VariableKind::Text),
@@ -446,7 +457,8 @@ mod tests {
     }
 
     #[test]
-    fn references_reach_the_flow_values_array_items_and_previous_nodes() -> Result<(), VariableError> {
+    fn references_reach_the_flow_values_array_items_and_previous_nodes() -> Result<(), VariableError>
+    {
         let variables = [
             variable("source", VariableKind::Text),
             variable("dossier", VariableKind::Text),
@@ -497,7 +509,10 @@ mod tests {
         );
         let mut with_default = variable("langue", VariableKind::Text);
         with_default.default_value = Some(json!("fr"));
-        let resolved = resolve(&[with_default], json!({"langue": "{{mediaInfo.audio.lang}}"}))?;
+        let resolved = resolve(
+            &[with_default],
+            json!({"langue": "{{mediaInfo.audio.lang}}"}),
+        )?;
         assert_eq!(resolved["langue"], json!("fr"));
         Ok(())
     }
@@ -505,14 +520,22 @@ mod tests {
     #[test]
     fn a_null_value_counts_as_missing() {
         let nodes = HashMap::from([("a".to_owned(), NodeOutput::default())]);
-        let context = VariableContext::new(Path::new("f"), Path::new("s"), Path::new("w"), &json!({}), &nodes, &[]);
+        let context = VariableContext::new(
+            Path::new("f"),
+            Path::new("s"),
+            Path::new("w"),
+            &json!({}),
+            &nodes,
+            &[],
+        );
         assert!(context.lookup("nodes.a.message").is_none());
         assert!(context.lookup("nodes.a.workingFile").is_some());
         assert!(context.lookup("nodes.absent.message").is_none());
     }
 
     #[test]
-    fn schema_defaults_fill_absent_keys_and_required_variables_must_have_a_value() -> Result<(), VariableError> {
+    fn schema_defaults_fill_absent_keys_and_required_variables_must_have_a_value()
+    -> Result<(), VariableError> {
         let mut crf = variable("crf", VariableKind::Number);
         crf.default_value = Some(json!(23));
         let mut cible = variable("cible", VariableKind::Text);
@@ -527,7 +550,10 @@ mod tests {
             resolve(&[cible.clone()], json!({"cible": "  "})),
             Err(VariableError::MissingRequired("cible".into()))
         );
-        assert_eq!(resolve(&[cible], json!({"cible": "x"}))?["cible"], json!("x"));
+        assert_eq!(
+            resolve(&[cible], json!({"cible": "x"}))?["cible"],
+            json!("x")
+        );
         assert_eq!(resolve(&[crf], json!({"crf": 18}))?["crf"], json!(18));
         Ok(())
     }
@@ -537,7 +563,10 @@ mod tests {
         let mut crf = variable("crf", VariableKind::Number);
         crf.min = Some(0.into());
         crf.max = Some(51.into());
-        assert_eq!(resolve(&[crf.clone()], json!({"crf": "23"}))?["crf"], json!(23));
+        assert_eq!(
+            resolve(&[crf.clone()], json!({"crf": "23"}))?["crf"],
+            json!(23)
+        );
         assert_eq!(
             resolve(&[crf.clone()], json!({"crf": 99})),
             Err(VariableError::OutOfRange("crf".into()))
@@ -548,12 +577,18 @@ mod tests {
         ));
 
         let flag = variable("supprimer", VariableKind::Boolean);
-        assert_eq!(resolve(&[flag.clone()], json!({"supprimer": "true"}))?["supprimer"], json!(true));
+        assert_eq!(
+            resolve(&[flag.clone()], json!({"supprimer": "true"}))?["supprimer"],
+            json!(true)
+        );
         assert!(resolve(&[flag], json!({"supprimer": 3})).is_err());
 
         let mut langue = variable("langue", VariableKind::Choice);
         langue.options = vec!["fr".into(), "en".into()];
-        assert_eq!(resolve(&[langue.clone()], json!({"langue": "en"}))?["langue"], json!("en"));
+        assert_eq!(
+            resolve(&[langue.clone()], json!({"langue": "en"}))?["langue"],
+            json!("en")
+        );
         assert_eq!(
             resolve(&[langue], json!({"langue": "de"})),
             Err(VariableError::NotAnOption("langue".into()))
@@ -580,7 +615,10 @@ mod tests {
 
     #[test]
     fn an_optional_variable_without_value_stays_absent() -> Result<(), VariableError> {
-        let resolved = resolve(&[variable("note", VariableKind::Text)], json!({"note": null}))?;
+        let resolved = resolve(
+            &[variable("note", VariableKind::Text)],
+            json!({"note": null}),
+        )?;
         assert!(resolved.get("note").is_none());
         Ok(())
     }
@@ -656,7 +694,11 @@ mod tests {
         assert_eq!(resolved["largeur"], json!(1920));
         assert_eq!(resolved["langue"], json!("fr"));
         assert_eq!(
-            resolve_node_config(&variables[3..], &json!({"absente": "{{mediainfo.absente}}"}), &context),
+            resolve_node_config(
+                &variables[3..],
+                &json!({"absente": "{{mediainfo.absente}}"}),
+                &context
+            ),
             Err(VariableError::MissingReference {
                 variable: "absente".into(),
                 reference: "mediainfo.absente".into(),
@@ -671,6 +713,9 @@ mod tests {
         insert_nested(&mut root, "ns", "a.b", json!(1));
         insert_nested(&mut root, "ns", "a.c", json!(2));
         insert_nested(&mut root, "ns", "d", json!(3));
-        assert_eq!(Value::Object(root), json!({"ns": {"a": {"b": 1, "c": 2}, "d": 3}}));
+        assert_eq!(
+            Value::Object(root),
+            json!({"ns": {"a": {"b": 1, "c": 2}, "d": 3}})
+        );
     }
 }

@@ -83,12 +83,16 @@ mod tests {
         labels.sort_unstable();
         labels.dedup();
         assert_eq!(labels.len(), sources.len());
-        assert_eq!(serde_json::to_string(&ReferenceSource::MediaInfo)?, "\"media_info\"");
+        assert_eq!(
+            serde_json::to_string(&ReferenceSource::MediaInfo)?,
+            "\"media_info\""
+        );
         Ok(())
     }
 
     #[test]
-    fn a_request_without_media_info_deserializes_and_a_default_view_is_empty() -> Result<(), serde_json::Error> {
+    fn a_request_without_media_info_deserializes_and_a_default_view_is_empty()
+    -> Result<(), serde_json::Error> {
         let request: NodeVariablesRequest = serde_json::from_str(r#"{"graph":{},"nodeId":"n1"}"#)?;
         assert!(request.media_info.is_null());
         let view = NodeVariablesView::default();

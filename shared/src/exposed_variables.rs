@@ -128,23 +128,36 @@ impl fmt::Display for ExposeError {
             Self::InvalidNamespace(name) => write!(f, "espace de noms invalide « {name} »"),
             Self::ReservedNamespace(name) => write!(f, "espace de noms réservé « {name} »"),
             Self::InvalidContractVersion(version) => {
-                write!(f, "version de contrat invalide « {version} » (MAJEUR.MINEUR.CORRECTIF)")
+                write!(
+                    f,
+                    "version de contrat invalide « {version} » (MAJEUR.MINEUR.CORRECTIF)"
+                )
             }
             Self::TooManyVariables => {
                 write!(f, "au plus {MAX_EXPOSED_VARIABLES} variables exposées")
             }
             Self::InvalidName(name) => write!(f, "nom de variable exposée invalide « {name} »"),
-            Self::DuplicateName(name) => write!(f, "variable exposée « {name} » déclarée deux fois"),
-            Self::NestedName(name) => {
-                write!(f, "« {name} » est à la fois une valeur et un groupe d'autres variables")
+            Self::DuplicateName(name) => {
+                write!(f, "variable exposée « {name} » déclarée deux fois")
             }
-            Self::InvalidPath(name) => write!(f, "chemin invalide pour la variable exposée « {name} »"),
+            Self::NestedName(name) => {
+                write!(
+                    f,
+                    "« {name} » est à la fois une valeur et un groupe d'autres variables"
+                )
+            }
+            Self::InvalidPath(name) => {
+                write!(f, "chemin invalide pour la variable exposée « {name} »")
+            }
             Self::SecretNotExposable(name) => {
                 write!(f, "la variable « {name} » ne peut pas être un secret")
             }
             Self::TooManyRequirements => write!(f, "au plus {MAX_REQUIREMENTS} dépendances"),
             Self::InvalidReference(reference) => {
-                write!(f, "référence de dépendance invalide « {reference} » (espace.nom attendu)")
+                write!(
+                    f,
+                    "référence de dépendance invalide « {reference} » (espace.nom attendu)"
+                )
             }
             Self::DuplicateRequirement(reference) => {
                 write!(f, "dépendance « {reference} » déclarée deux fois")
@@ -319,7 +332,10 @@ mod tests {
         let raw = r#"{"namespace":"mediainfo","contractVersion":"1.0.0","variables":[{"name":"video.codec","type":"text","path":"video.codec"}]}"#;
         let parsed: ExposedVariables = serde_json::from_str(raw)?;
         assert_eq!(validate_exposed(&parsed), Ok(()));
-        assert_eq!(parsed.reference(&parsed.variables[0]), "mediainfo.video.codec");
+        assert_eq!(
+            parsed.reference(&parsed.variables[0]),
+            "mediainfo.video.codec"
+        );
         let again: ExposedVariables = serde_json::from_str(&serde_json::to_string(&parsed)?)?;
         assert_eq!(again, parsed);
         assert_eq!(validate_exposed(&mediainfo()), Ok(()));
@@ -355,13 +371,22 @@ mod tests {
     fn names_paths_and_kinds_are_checked() {
         let mut exposed = mediainfo();
         exposed.variables[0].name = "Video.Codec".into();
-        assert!(matches!(validate_exposed(&exposed), Err(ExposeError::InvalidName(_))));
+        assert!(matches!(
+            validate_exposed(&exposed),
+            Err(ExposeError::InvalidName(_))
+        ));
 
         let mut exposed = mediainfo();
         exposed.variables[0].path = "video..codec".into();
-        assert!(matches!(validate_exposed(&exposed), Err(ExposeError::InvalidPath(_))));
+        assert!(matches!(
+            validate_exposed(&exposed),
+            Err(ExposeError::InvalidPath(_))
+        ));
         exposed.variables[0].path = "video codec".into();
-        assert!(matches!(validate_exposed(&exposed), Err(ExposeError::InvalidPath(_))));
+        assert!(matches!(
+            validate_exposed(&exposed),
+            Err(ExposeError::InvalidPath(_))
+        ));
         exposed.variables[0].path = "streams.0.Codec-ID".into();
         assert_eq!(validate_exposed(&exposed), Ok(()));
 
@@ -377,18 +402,31 @@ mod tests {
     fn duplicates_and_value_group_conflicts_are_refused() {
         let mut exposed = mediainfo();
         exposed.variables.push(exposed_variable("video.codec", "x"));
-        assert!(matches!(validate_exposed(&exposed), Err(ExposeError::DuplicateName(_))));
+        assert!(matches!(
+            validate_exposed(&exposed),
+            Err(ExposeError::DuplicateName(_))
+        ));
 
         let mut exposed = mediainfo();
         exposed.variables.push(exposed_variable("video", "video"));
-        assert!(matches!(validate_exposed(&exposed), Err(ExposeError::NestedName(_))));
+        assert!(matches!(
+            validate_exposed(&exposed),
+            Err(ExposeError::NestedName(_))
+        ));
 
         let mut exposed = mediainfo();
-        exposed.variables.push(exposed_variable("video.codec.id", "x"));
-        assert!(matches!(validate_exposed(&exposed), Err(ExposeError::NestedName(_))));
+        exposed
+            .variables
+            .push(exposed_variable("video.codec.id", "x"));
+        assert!(matches!(
+            validate_exposed(&exposed),
+            Err(ExposeError::NestedName(_))
+        ));
 
         let mut exposed = mediainfo();
-        exposed.variables.push(exposed_variable("video.codecs", "x"));
+        exposed
+            .variables
+            .push(exposed_variable("video.codecs", "x"));
         assert_eq!(validate_exposed(&exposed), Ok(()));
     }
 
@@ -398,7 +436,10 @@ mod tests {
         exposed.variables = (0..=MAX_EXPOSED_VARIABLES)
             .map(|n| exposed_variable(&format!("v{n}"), "x"))
             .collect();
-        assert_eq!(validate_exposed(&exposed), Err(ExposeError::TooManyVariables));
+        assert_eq!(
+            validate_exposed(&exposed),
+            Err(ExposeError::TooManyVariables)
+        );
     }
 
     #[test]
@@ -414,7 +455,8 @@ mod tests {
     }
 
     #[test]
-    fn requirements_default_to_the_first_major_and_are_validated() -> Result<(), serde_json::Error> {
+    fn requirements_default_to_the_first_major_and_are_validated() -> Result<(), serde_json::Error>
+    {
         let raw = r#"[{"variable":"mediainfo.video.codec","provider":"app.mediainfo"}]"#;
         let parsed: Vec<ScriptRequirement> = serde_json::from_str(raw)?;
         assert_eq!(parsed[0].contract_major, DEFAULT_CONTRACT_MAJOR);
@@ -432,7 +474,10 @@ mod tests {
         ));
         let mut provider = requirement("a.b");
         provider.provider = "../x".into();
-        assert!(matches!(validate_requirements(&[provider]), Err(ExposeError::InvalidProvider(_))));
+        assert!(matches!(
+            validate_requirements(&[provider]),
+            Err(ExposeError::InvalidProvider(_))
+        ));
         Ok(())
     }
 
@@ -468,6 +513,9 @@ mod tests {
         let many: Vec<ScriptRequirement> = (0..=MAX_REQUIREMENTS)
             .map(|n| requirement(&format!("ns.v{n}")))
             .collect();
-        assert_eq!(validate_requirements(&many), Err(ExposeError::TooManyRequirements));
+        assert_eq!(
+            validate_requirements(&many),
+            Err(ExposeError::TooManyRequirements)
+        );
     }
 }

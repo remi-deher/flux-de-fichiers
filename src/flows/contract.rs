@@ -59,7 +59,8 @@ pub enum ContractError {
 
 /// Refuse un contrat dont les variables, expositions ou dépendances déclarées sont invalides.
 fn validate_contract_declarations(contract: &OperationContract) -> Result<(), ContractError> {
-    let invalid = |reason: String| ContractError::InvalidContract(format!("{} : {reason}", contract.id));
+    let invalid =
+        |reason: String| ContractError::InvalidContract(format!("{} : {reason}", contract.id));
     if let Some(exposed) = &contract.exposes {
         validate_exposed(exposed).map_err(|err| invalid(err.to_string()))?;
     }
@@ -1650,9 +1651,15 @@ mod tests {
     }
 
     #[test]
-    fn exposures_are_registered_and_requirements_are_checked_against_the_provider() -> Result<(), ContractError> {
+    fn exposures_are_registered_and_requirements_are_checked_against_the_provider()
+    -> Result<(), ContractError> {
         let mut reg = OperationRegistry::new();
-        reg.register_json(provider_operation("operation.mi.probe", "app.mediainfo", "mediainfo", "1.0.0"))?;
+        reg.register_json(provider_operation(
+            "operation.mi.probe",
+            "app.mediainfo",
+            "mediainfo",
+            "1.0.0",
+        ))?;
         let exposed = reg.exposed_variables();
         assert_eq!(exposed.len(), 1);
         assert_eq!(exposed[0].namespace, "mediainfo");
@@ -1663,9 +1670,18 @@ mod tests {
             contract_major: 1,
             repository: None,
         };
-        let wrong_provider = ScriptRequirement { provider: "app.autre".into(), ..met.clone() };
-        let wrong_major = ScriptRequirement { contract_major: 2, ..met.clone() };
-        let unknown = ScriptRequirement { variable: "mediainfo.audio.codec".into(), ..met.clone() };
+        let wrong_provider = ScriptRequirement {
+            provider: "app.autre".into(),
+            ..met.clone()
+        };
+        let wrong_major = ScriptRequirement {
+            contract_major: 2,
+            ..met.clone()
+        };
+        let unknown = ScriptRequirement {
+            variable: "mediainfo.audio.codec".into(),
+            ..met.clone()
+        };
         let all = [met.clone(), wrong_provider, wrong_major, unknown];
         let unmet = reg.unmet_requirements(&all);
         assert_eq!(unmet.len(), 3);
@@ -1676,8 +1692,18 @@ mod tests {
     #[test]
     fn the_first_operation_keeps_a_contested_namespace() -> Result<(), ContractError> {
         let mut reg = OperationRegistry::new();
-        reg.register_json(provider_operation("operation.b.probe", "app.b", "mediainfo", "1.0.0"))?;
-        reg.register_json(provider_operation("operation.a.probe", "app.a", "mediainfo", "2.0.0"))?;
+        reg.register_json(provider_operation(
+            "operation.b.probe",
+            "app.b",
+            "mediainfo",
+            "1.0.0",
+        ))?;
+        reg.register_json(provider_operation(
+            "operation.a.probe",
+            "app.a",
+            "mediainfo",
+            "2.0.0",
+        ))?;
         let exposed = reg.exposed_variables();
         assert_eq!(exposed.len(), 1);
         assert_eq!(exposed[0].contract_version, "2.0.0");
@@ -1687,18 +1713,31 @@ mod tests {
     #[test]
     fn invalid_declarations_are_refused_at_registration() {
         let mut reg = OperationRegistry::new();
-        assert!(reg
-            .register_json(provider_operation("operation.x", "app.x", "nodes", "1.0.0"))
-            .is_err());
-        assert!(reg
-            .register_json(provider_operation("operation.x", "app.x", "mediainfo", "1.0"))
-            .is_err());
-        assert!(reg
-            .register_json(script_operation_requiring(json!([{"variable": "codec", "provider": "app.x"}])))
-            .is_err());
+        assert!(
+            reg.register_json(provider_operation("operation.x", "app.x", "nodes", "1.0.0"))
+                .is_err()
+        );
+        assert!(
+            reg.register_json(provider_operation(
+                "operation.x",
+                "app.x",
+                "mediainfo",
+                "1.0"
+            ))
+            .is_err()
+        );
+        assert!(
+            reg.register_json(script_operation_requiring(
+                json!([{"variable": "codec", "provider": "app.x"}])
+            ))
+            .is_err()
+        );
         assert!(reg.get("operation.x").is_none());
-        assert!(reg
-            .register_json(script_operation_requiring(json!([{"variable": "mediainfo.video.codec", "provider": "app.mediainfo"}])))
-            .is_ok());
+        assert!(
+            reg.register_json(script_operation_requiring(
+                json!([{"variable": "mediainfo.video.codec", "provider": "app.mediainfo"}])
+            ))
+            .is_ok()
+        );
     }
 }

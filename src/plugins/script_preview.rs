@@ -123,9 +123,12 @@ mod tests {
     }
 
     #[test]
-    fn preview_reports_requirements_and_whether_their_provider_is_available() -> anyhow::Result<()> {
+    fn preview_reports_requirements_and_whether_their_provider_is_available() -> anyhow::Result<()>
+    {
         let (repos_dir, script_id) = repository_with_script()?;
-        let operation = repos_dir.path().join("repo.test/scripts/tag-mkv/operations/run.json");
+        let operation = repos_dir
+            .path()
+            .join("repo.test/scripts/tag-mkv/operations/run.json");
         let mut json: serde_json::Value = serde_json::from_str(&fs::read_to_string(&operation)?)?;
         json["runtime"]["requires"] = serde_json::json!([
             {"variable": "mediainfo.video.codec", "provider": "app.mediainfo"}

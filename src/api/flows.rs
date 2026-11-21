@@ -91,7 +91,9 @@ pub async fn save_flow(
     }
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     let registry = s.catalog_cache.operations(&roots).await;
-    if let Ok(graph) = serde_json::from_str::<forgearr_shared::flows::FlowGraph>(&payload.definition) {
+    if let Ok(graph) =
+        serde_json::from_str::<forgearr_shared::flows::FlowGraph>(&payload.definition)
+    {
         let problems = crate::flows::check_references(&graph, &registry);
         if !problems.is_empty() {
             return Err(AppError::InvalidFlowVariables(problems.join(" | ")));

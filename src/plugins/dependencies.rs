@@ -88,7 +88,10 @@ fn visit_script_providers(
     visited: &mut HashSet<String>,
     plan: &mut DependencyPlan,
 ) {
-    let Some(item_dir) = root.join(&entry.manifest_path).parent().map(std::path::Path::to_path_buf)
+    let Some(item_dir) = root
+        .join(&entry.manifest_path)
+        .parent()
+        .map(std::path::Path::to_path_buf)
     else {
         return;
     };
@@ -274,7 +277,9 @@ mod tests {
         Ok(())
     }
 
-    fn script_catalogue(requires: serde_json::Value) -> anyhow::Result<(tempfile::TempDir, Vec<PathBuf>)> {
+    fn script_catalogue(
+        requires: serde_json::Value,
+    ) -> anyhow::Result<(tempfile::TempDir, Vec<PathBuf>)> {
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         write(
@@ -285,8 +290,16 @@ mod tests {
                 {"id":"app.mediainfo","type":"app","version":"1.0.0","name":"MediaInfo","manifestPath":"apps/mediainfo/manifest.json"}
             ]}"#,
         )?;
-        write(root, "scripts/codec/manifest.json", &manifest("script.codec", "script", &[]))?;
-        write(root, "apps/mediainfo/manifest.json", &manifest("app.mediainfo", "app", &[]))?;
+        write(
+            root,
+            "scripts/codec/manifest.json",
+            &manifest("script.codec", "script", &[]),
+        )?;
+        write(
+            root,
+            "apps/mediainfo/manifest.json",
+            &manifest("app.mediainfo", "app", &[]),
+        )?;
         write(
             root,
             "scripts/codec/operations/run.json",
@@ -309,7 +322,8 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_provider_is_reported_with_the_repository_to_add_but_never_added() -> anyhow::Result<()> {
+    fn a_missing_provider_is_reported_with_the_repository_to_add_but_never_added()
+    -> anyhow::Result<()> {
         let (_dir, roots) = script_catalogue(serde_json::json!([
             {"variable": "exiftool.camera.model", "provider": "app.exiftool",
              "repository": {"id": "repo.tiers", "indexUrl": "https://exemple.org/p/index.json"}}

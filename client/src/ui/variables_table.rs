@@ -83,7 +83,10 @@ mod tests {
         number.default_value = Some(json!(23));
         number.min = Some(0.into());
         number.max = Some(51.into());
-        assert_eq!(variable_details(&number), vec!["Défaut : 23", "Bornes : 0 à 51"]);
+        assert_eq!(
+            variable_details(&number),
+            vec!["Défaut : 23", "Bornes : 0 à 51"]
+        );
 
         let mut choice = variable(VariableKind::Choice);
         choice.options = vec!["fr".into(), "en".into()];

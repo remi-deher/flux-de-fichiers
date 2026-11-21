@@ -8,10 +8,10 @@ mod custom_args;
 pub mod header_secrets;
 pub mod http_runner;
 pub mod lease_secrets;
+mod node_references;
 pub mod placement;
 pub(crate) mod publication;
 pub mod script_runner;
-mod node_references;
 mod variables;
 
 #[cfg(test)]
@@ -31,7 +31,6 @@ use std::{
 use uuid::Uuid;
 
 pub use condition::{ConditionConfig, evaluate_condition};
-pub use node_references::{check_references, node_variables_view, upstream_node_ids};
 pub use contract::{
     BinaryExecutionMode, BinaryRuntime, ContractError, HttpRuntime, OperationContract,
     OperationRegistry, OperationRuntime, PrimitiveKind, ScriptInterpreter, ScriptRuntime, ToolRef,
@@ -47,6 +46,7 @@ pub use lease_secrets::{
     decrypt_plugin_settings_value, load_flow_plugin_configs, seal_claim_secrets_for_worker,
     unseal_claim_secrets_for_worker,
 };
+pub use node_references::{check_references, node_variables_view, upstream_node_ids};
 
 const MAX_FLOW_STEPS: usize = 32;
 

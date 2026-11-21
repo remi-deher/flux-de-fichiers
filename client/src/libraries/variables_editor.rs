@@ -89,7 +89,11 @@ pub fn rows_to_variables(rows: &[VariableRow]) -> Result<Vec<ScriptVariable>, St
     Ok(variables)
 }
 
-fn read_row<T>(rows: RwSignal<Vec<VariableRow>>, key: u32, read: impl Fn(&VariableRow) -> T) -> Option<T> {
+fn read_row<T>(
+    rows: RwSignal<Vec<VariableRow>>,
+    key: u32,
+    read: impl Fn(&VariableRow) -> T,
+) -> Option<T> {
     rows.with(|all| all.iter().find(|row| row.key == key).map(read))
 }
 
@@ -104,7 +108,9 @@ fn edit_row(rows: RwSignal<Vec<VariableRow>>, key: u32, edit: impl FnOnce(&mut V
 #[component]
 fn VariableRowEditor(rows: RwSignal<Vec<VariableRow>>, key: u32, read_only: bool) -> impl IntoView {
     let kind = move || read_row(rows, key, |row| row.variable.kind).unwrap_or_default();
-    let text = move |read: fn(&VariableRow) -> String| move || read_row(rows, key, read).unwrap_or_default();
+    let text = move |read: fn(&VariableRow) -> String| {
+        move || read_row(rows, key, read).unwrap_or_default()
+    };
     let name_id = format!("var-name-{key}");
     view! {
         <div class="step-item">
@@ -190,8 +196,15 @@ fn VariableRowEditor(rows: RwSignal<Vec<VariableRow>>, key: u32, read_only: bool
 pub fn VariablesEditor(rows: RwSignal<Vec<VariableRow>>, read_only: bool) -> impl IntoView {
     let add = move |_| {
         rows.update(|all| {
-            let key = all.iter().map(|row| row.key).max().map_or(0, |last| last + 1);
-            all.push(VariableRow { key, ..VariableRow::default() });
+            let key = all
+                .iter()
+                .map(|row| row.key)
+                .max()
+                .map_or(0, |last| last + 1);
+            all.push(VariableRow {
+                key,
+                ..VariableRow::default()
+            });
         });
     };
     view! {
@@ -216,8 +229,16 @@ mod tests {
     use serde_json::json;
 
     fn row(name: &str, kind: VariableKind) -> VariableRow {
-        let variable = ScriptVariable { name: name.into(), kind, ..ScriptVariable::default() };
-        VariableRow { key: 0, variable, ..VariableRow::default() }
+        let variable = ScriptVariable {
+            name: name.into(),
+            kind,
+            ..ScriptVariable::default()
+        };
+        VariableRow {
+            key: 0,
+            variable,
+            ..VariableRow::default()
+        }
     }
 
     #[test]
@@ -238,7 +259,10 @@ mod tests {
             ..ScriptVariable::default()
         };
         let variables = vec![crf, langue];
-        assert_eq!(rows_to_variables(&rows_from(variables.clone())), Ok(variables));
+        assert_eq!(
+            rows_to_variables(&rows_from(variables.clone())),
+            Ok(variables)
+        );
     }
 
     #[test]
@@ -266,8 +290,15 @@ mod tests {
 
     #[test]
     fn schema_errors_are_reported_to_the_user() {
-        let rows = [row("crf", VariableKind::Text), row("crf", VariableKind::Text)];
-        assert!(rows_to_variables(&rows).err().is_some_and(|msg| msg.contains("deux fois")));
+        let rows = [
+            row("crf", VariableKind::Text),
+            row("crf", VariableKind::Text),
+        ];
+        assert!(
+            rows_to_variables(&rows)
+                .err()
+                .is_some_and(|msg| msg.contains("deux fois"))
+        );
         assert!(rows_to_variables(&[row("Mauvais Nom", VariableKind::Text)]).is_err());
     }
 

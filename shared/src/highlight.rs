@@ -62,8 +62,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn token_kind_serializes_to_snake_case_and_has_unique_css_classes() -> Result<(), serde_json::Error>
-    {
+    fn token_kind_serializes_to_snake_case_and_has_unique_css_classes()
+    -> Result<(), serde_json::Error> {
         assert_eq!(serde_json::to_string(&TokenKind::Keyword)?, "\"keyword\"");
         let kinds = [
             TokenKind::Plain,

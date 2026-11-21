@@ -398,15 +398,15 @@ fn reject_invalid_operation_declarations(
     files: &mut Vec<(String, String)>,
     skipped: &mut Vec<String>,
 ) {
-    files.retain(|(relative, content)| {
-        match super::operation_declaration_issue(content) {
+    files.retain(
+        |(relative, content)| match super::operation_declaration_issue(content) {
             Some(issue) => {
                 skipped.push(format!("{relative} : déclarations refusées ({issue})"));
                 false
             }
             None => true,
-        }
-    });
+        },
+    );
 }
 
 /// Garde les icônes qui passent la validation par liste blanche ; les autres sont signalées.

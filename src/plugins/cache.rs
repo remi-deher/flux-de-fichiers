@@ -2,9 +2,9 @@
 
 use super::{
     CatalogEntry, CatalogItemType, PluginDetailView, SettingsField, ToolStatusSummary,
-    build_plugin_detail, catalog_with_roots, flow_block_catalog, is_tool_installable,
-    load_manifest, parse_distribution, read_distribution, settings_fields as load_settings_fields,
-    summarize_tool,
+    build_plugin_detail, catalog_with_roots, exposure_views, flow_block_catalog,
+    is_tool_installable, load_manifest, parse_distribution, read_distribution,
+    settings_fields as load_settings_fields, summarize_tool,
 };
 use crate::{flows::OperationRegistry, tools_cache::ToolCacheManager};
 use forgearr_shared::flows::OwnedBlockSpec;
@@ -126,10 +126,17 @@ impl CatalogCache {
         })?;
         let root = root.clone();
         let entry = entry.clone();
+        let exposures = exposure_views(&snapshot.operations)
+            .into_iter()
+            .filter(|view| view.provider == plugin_id)
+            .collect();
         let blocks = snapshot.blocks;
-        tokio::task::spawn_blocking(move || build_plugin_detail(&root, &entry, &blocks))
-            .await
-            .ok()
+        let mut detail =
+            tokio::task::spawn_blocking(move || build_plugin_detail(&root, &entry, &blocks))
+                .await
+                .ok()?;
+        detail.exposures = exposures;
+        Some(detail)
     }
 
     pub async fn operations(&self, roots: &[PathBuf]) -> OperationRegistry {

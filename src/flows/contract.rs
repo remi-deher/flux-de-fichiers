@@ -607,6 +607,24 @@ impl OperationRegistry {
         self.exposed_variables_where(|_| true)
     }
 
+    /// Expositions déclarées avec le plugin fournisseur de chacune, triées par identifiant d'opération.
+    pub fn exposure_claims(&self) -> Vec<(&str, &ExposedVariables)> {
+        let mut exposing: Vec<&OperationContract> = self
+            .operations
+            .values()
+            .filter(|op| op.exposes.is_some())
+            .collect();
+        exposing.sort_by(|a, b| a.id.cmp(&b.id));
+        exposing
+            .into_iter()
+            .filter_map(|op| {
+                op.exposes
+                    .as_ref()
+                    .map(|exposed| (op.provider_id.as_str(), exposed))
+            })
+            .collect()
+    }
+
     /// Comme `exposed_variables`, limité aux opérations retenues par `keep`.
     pub fn exposed_variables_where(
         &self,

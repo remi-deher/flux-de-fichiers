@@ -297,11 +297,14 @@ mod tests {
     fn embedded_registry_lists_the_official_families_in_a_strict_global_order() {
         let registry = SubcategoryRegistry::embedded();
         let expected = [
+            ("core-blocks", PluginCategory::Other),
             ("media-servers", PluginCategory::Media),
             ("media-managers", PluginCategory::Media),
             ("media-encoding", PluginCategory::Media),
             ("media-subtitles", PluginCategory::Media),
             ("notifications", PluginCategory::Io),
+            ("archives", PluginCategory::Io),
+            ("scripting", PluginCategory::Data),
         ];
         let actual: Vec<(&str, PluginCategory)> = registry
             .subcategories

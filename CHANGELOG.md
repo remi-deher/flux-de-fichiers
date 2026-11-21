@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.65.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.64.0...v0.65.0) (2026-11-21)
+
+
+### Features
+
+* **plugins:** sous-catégories officielles (ADR 0023) ([9897706](https://github.com/remi-deher/flux-de-fichiers/commit/9897706f1893f22485bd5c52366409d6a6e58787))
+* **plugins:** sous-catégories officielles (registre versionné, repli et avertissements) ([63a5806](https://github.com/remi-deher/flux-de-fichiers/commit/63a5806b3678520390deff28dde9a57804382fdf))
+
 ## [0.64.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.63.1...v0.64.0) (2026-11-20)
 
 

@@ -94,6 +94,8 @@ mod tests {
             remote_addr: None,
             telemetry: None,
             max_concurrency: 1,
+            max_cpu_jobs: None,
+            max_gpu_jobs: None,
             schedule: None,
             transfer_enabled: false,
         }
@@ -119,6 +121,7 @@ mod tests {
             exclude_patterns: Vec::new(),
             min_file_bytes: 0,
             output_policy: forgearr_shared::libraries::LibraryOutputPolicy::OutputDir,
+            default_priority: forgearr_shared::jobs::LIBRARY_DEFAULT_JOB_PRIORITY,
             created_at: now,
             updated_at: now,
         };

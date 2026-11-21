@@ -68,11 +68,13 @@ pub fn tools() -> Vec<McpTool> {
         ),
         McpTool::write(
             "update_worker_settings",
-            "Configure la concurrence maximale (1 à 16) et la fenêtre horaire d'un worker.",
+            "Configure la concurrence maximale (1 à 16), les places CPU/GPU (0 à 16, absentes : concurrence commune) et la fenêtre horaire d'un worker.",
             obj_schema(
                 json!({
                     "id": { "type": "string" },
                     "maxConcurrency": { "type": "integer", "minimum": 1, "maximum": 16 },
+                    "maxCpuJobs": { "type": ["integer", "null"], "minimum": 0, "maximum": 16 },
+                    "maxGpuJobs": { "type": ["integer", "null"], "minimum": 0, "maximum": 16 },
                     "schedule": { "type": ["object", "null"] }
                 }),
                 &["id", "maxConcurrency"],
@@ -127,6 +129,10 @@ struct UpdateWorkerArgs {
     id: Uuid,
     #[serde(alias = "maxConcurrency")]
     max_concurrency: i32,
+    #[serde(default, alias = "maxCpuJobs")]
+    max_cpu_jobs: Option<i32>,
+    #[serde(default, alias = "maxGpuJobs")]
+    max_gpu_jobs: Option<i32>,
     #[serde(default)]
     schedule: Option<WorkerSchedule>,
 }
@@ -202,6 +208,8 @@ pub async fn call(
                 ManageWorkersAuth(principal.clone()),
                 Json(UpdateWorkerSettingsRequest {
                     max_concurrency: parsed.max_concurrency,
+                    max_cpu_jobs: parsed.max_cpu_jobs,
+                    max_gpu_jobs: parsed.max_gpu_jobs,
                     schedule: parsed.schedule,
                 }),
             )

@@ -853,7 +853,8 @@ impl WorkerLoop {
         let outcome: anyhow::Result<()> = async {
             let mut was_disconnected = false;
             let mut idle_polls: u32 = 0;
-            let mut max_concurrency = worker.max_concurrency.max(1);
+            // Total des places ; la limite par classe (CPU/GPU) est appliquée par `claim`.
+            let mut max_concurrency = worker.slots().total.max(1);
             let mut active = tokio::task::JoinSet::new();
             loop {
                 while active.try_join_next().is_some() {}
@@ -872,7 +873,7 @@ impl WorkerLoop {
                         .await
                     && let Ok(updated) = resp.json::<Worker>().await
                 {
-                    max_concurrency = updated.max_concurrency.max(1);
+                    max_concurrency = updated.slots().total.max(1);
                 }
                 let telemetry = if idle_polls.is_multiple_of(REREGISTRATION_EVERY_IDLE_POLLS) {
                     Some(probe.sample())

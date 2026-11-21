@@ -2,11 +2,12 @@
 //! choix d'un script de la librairie, création rapide, code inline et routage conditionnel.
 
 use super::state::Editor;
+use super::template_input::ScriptProtocolHelp;
 use super::variables_form::ScriptVariablesPanel;
 use crate::api;
 use crate::libraries::starter_script_code;
 use crate::ui::Toasts;
-use forgearr_shared::flows::FlowNode;
+use forgearr_shared::flows::{BranchPort, FlowNode, SCRIPT_ROUTING_KEY, ScriptRouting};
 use forgearr_shared::local::{
     LocalLibrarySnapshot, LocalScriptSummary, ScriptInterpreter, UpsertLocalScriptRequest,
 };
@@ -54,12 +55,26 @@ pub fn initial_script_mode(node: &FlowNode) -> &'static str {
     }
 }
 
-pub fn initial_script_routing(node: &FlowNode) -> &'static str {
-    if node.config.get("routing").and_then(Value::as_str) == Some("conditional") {
-        "conditional"
-    } else {
-        "single"
+pub fn initial_script_routing(node: &FlowNode) -> ScriptRouting {
+    ScriptRouting::from_config(&node.config)
+}
+
+/// Libellé d'un mode de sortie dans le sélecteur.
+fn routing_label(routing: ScriptRouting) -> &'static str {
+    match routing {
+        ScriptRouting::Single => "Simple (1 sortie)",
+        ScriptRouting::Conditional => "Conditionnel (Vrai / Faux)",
     }
+}
+
+/// Aide affichée sous l'éditeur de code : réponse attendue en mode conditionnel.
+fn conditional_reply_help() -> String {
+    format!(
+        "Renvoyez {{\"status\":\"ok\",\"nextPort\":\"{}\"}} en mode conditionnel (ok → {}, skip → {} par défaut).",
+        BranchPort::True.as_str(),
+        BranchPort::True.as_str(),
+        BranchPort::False.as_str(),
+    )
 }
 
 #[component]
@@ -89,7 +104,7 @@ pub fn ScriptBlockInspector(
         }
     };
     let code = RwSignal::new(initial_code);
-    let routing = RwSignal::new(initial_script_routing(&node).to_owned());
+    let routing = RwSignal::new(initial_script_routing(&node));
 
     let creating = RwSignal::new(false);
     let new_name = RwSignal::new(String::new());
@@ -317,8 +332,9 @@ pub fn ScriptBlockInspector(
                             }
                         />
                         <p class="form-help">
-                            "Renvoyez {\"status\":\"ok\",\"nextPort\":\"true\"} en mode conditionnel."
+                            {conditional_reply_help()}
                         </p>
+                        <ScriptProtocolHelp />
                     </div>
                     {can_manage.then(|| view! {
                         <div class="form-group">
@@ -369,17 +385,18 @@ pub fn ScriptBlockInspector(
                 id="script-block-routing"
                 class="form-input"
                 disabled=!can_manage
-                prop:value=move || routing.get()
+                prop:value=move || routing.get().as_str()
                 on:change=move |ev| {
-                    let next = event_target_value(&ev);
-                    routing.set(next.clone());
+                    let next = ScriptRouting::parse(&event_target_value(&ev));
+                    routing.set(next);
                     update_node_config(editor, &nid_route, move |map| {
-                        map.insert("routing".into(), json!(next));
+                        map.insert(SCRIPT_ROUTING_KEY.into(), json!(next.as_str()));
                     });
                 }
             >
-                <option value="single">"Simple (1 sortie)"</option>
-                <option value="conditional">"Conditionnel (Vrai / Faux)"</option>
+                {ScriptRouting::ALL.into_iter().map(|mode| view! {
+                    <option value=mode.as_str()>{routing_label(mode)}</option>
+                }).collect_view()}
             </select>
         </div>
 
@@ -404,7 +421,7 @@ mod tests {
             extra: Map::new(),
         };
         assert_eq!(initial_script_mode(&node), "inline");
-        assert_eq!(initial_script_routing(&node), "single");
+        assert_eq!(initial_script_routing(&node), ScriptRouting::Single);
 
         let cond_node = FlowNode {
             id: "n2".into(),
@@ -414,6 +431,10 @@ mod tests {
             extra: Map::new(),
         };
         assert_eq!(initial_script_mode(&cond_node), "library");
-        assert_eq!(initial_script_routing(&cond_node), "conditional");
+        assert_eq!(
+            initial_script_routing(&cond_node),
+            ScriptRouting::Conditional
+        );
+        assert!(conditional_reply_help().contains("\"nextPort\":\"true\""));
     }
 }

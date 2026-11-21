@@ -888,7 +888,7 @@ async fn relay_call(
             "worker_id": worker,
             "lease_token": claim.lease_token,
             "lease_epoch": claim.lease_epoch,
-            "request": {"target": target, "resumeNodeId": "outB"}
+            "request": {"target": target, "resumeNodeId": "outB", "variables": {"codec": "hevc"}}
         })),
     )
     .await?;
@@ -927,6 +927,8 @@ async fn a_capable_relay_is_offered_to_every_capable_worker() -> anyhow::Result<
         .ok_or_else(|| anyhow::anyhow!("un worker capable doit obtenir la tâche"))?;
     assert_eq!(resumed.job_id, job.id);
     assert_eq!(resumed.resume_node_id.as_deref(), Some("outB"));
+    assert_eq!(resumed.resume_variables["codec"], "hevc");
+    assert_eq!(resumed.worker_name.as_deref(), Some("gpu-deux"));
     assert!(claim_for(&h, first).await?.is_none(), "déjà prise");
 
     let (st, infos) = json_call(

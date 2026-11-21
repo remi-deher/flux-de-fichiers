@@ -69,6 +69,7 @@ pub fn build_relay_request(config: &Value, resume_node_id: &str) -> Result<Relay
     Ok(RelayRequest {
         target,
         resume_node_id: resume_node_id.to_owned(),
+        variables: Default::default(),
         node_outputs: HashMap::new(),
     })
 }

@@ -457,6 +457,17 @@ pub const FLOWS_CSS: &str = r#"
   margin-bottom: 0.5rem;
 }
 
+.flow-condition__group {
+  border-left: 2px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding-left: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+.flow-condition__rule {
+  grid-template-columns: 1fr 1fr 1fr auto;
+}
+
 /* Sélecteur historique conservé pour compatibilité des tests de thème. */
 .studio-toolbar {
   background: var(--bg-card);

@@ -15,6 +15,10 @@ pub enum OwnedFieldKind {
     Headers,
     /// Choix d'un worker du central ; la valeur enregistrée est son identifiant.
     Worker,
+    /// Règles combinées d'une condition (`ConditionGroup`), éditées par un éditeur dédié.
+    Condition,
+    /// Choix d'un flux du central ; la valeur enregistrée est son identifiant.
+    Flow,
 }
 
 /// Réglage d'un bloc, version détenue.
@@ -75,7 +79,11 @@ impl OwnedBlockSpec {
                     OwnedFieldKind::Select(options) => {
                         json!(options.first().map_or("", |(value, _)| value.as_str()))
                     }
-                    OwnedFieldKind::Text | OwnedFieldKind::Worker => json!(""),
+                    OwnedFieldKind::Text | OwnedFieldKind::Worker | OwnedFieldKind::Flow => {
+                        json!("")
+                    }
+                    // Pas de groupe : la règle plate reste celle évaluée.
+                    OwnedFieldKind::Condition => Value::Null,
                 });
             config.insert(field.name.clone(), value);
         }
@@ -200,5 +208,19 @@ mod tests {
         assert_eq!(config["method"], "POST");
         assert_eq!(config["fail_on_error"], false);
         assert_eq!(webhook.missing_fields(&config), vec!["URL".to_owned()]);
+    }
+
+    #[test]
+    fn default_config_leaves_condition_group_empty() {
+        let mut block = sample_webhook();
+        block.fields = vec![OwnedFieldSpec {
+            name: "group".into(),
+            label: "Règles combinées".into(),
+            kind: OwnedFieldKind::Condition,
+            required: false,
+            help: String::new(),
+            default: None,
+        }];
+        assert_eq!(block.default_config()["group"], Value::Null);
     }
 }

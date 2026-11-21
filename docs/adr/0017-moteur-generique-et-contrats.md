@@ -1,6 +1,12 @@
 # 0017 — Moteur générique : tout passe par les contrats du dépôt
 
-Statut : proposé (14 nov. 2026), orientation et vocabulaire validés par l'utilisateur.
+Statut : accepté (21 nov. 2026), implémenté. Orientation et vocabulaire validés par l'utilisateur
+(14 nov. 2026). Constaté dans le code : plus de `ensure_job_tools`, de constantes d'outils ni d'enum
+`FlowBlockKind` fermé ; blocs lus depuis le catalogue du dépôt de plugins, runners génériques
+(`flows/binary_runner.rs`, `flows/http_runner.rs`, `flows/script_runner.rs`), cache d'apps
+(`tools_cache.rs`). Écart restant : le code d'erreur typé `app_unavailable` (point 4) n'existe pas ;
+une app API non configurée ou en échec remonte `integration_failed` (ou `probe_unavailable` pour la
+sonde).
 
 ## Contexte
 

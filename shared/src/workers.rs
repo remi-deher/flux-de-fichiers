@@ -6,6 +6,13 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+mod slots;
+
+pub use slots::{
+    RunningJobs, WORKER_MAX_CLASS_SLOTS, WORKER_MIN_CLASS_SLOTS, WorkerSlots, class_slots_valid,
+    worker_slots,
+};
+
 /// Nom par défaut du worker intégré au central (`LOCAL_WORKER_NAME` le change).
 pub const INTEGRATED_WORKER_NAME: &str = "central-local";
 
@@ -89,6 +96,12 @@ pub const fn default_worker_concurrency() -> i32 {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateWorkerSettingsRequest {
     pub max_concurrency: i32,
+    /// Places CPU ; absentes avec `max_gpu_jobs` : mode historique (`max_concurrency` commun).
+    #[serde(default)]
+    pub max_cpu_jobs: Option<i32>,
+    /// Places GPU ; 0 écarte les tâches GPU de ce worker.
+    #[serde(default)]
+    pub max_gpu_jobs: Option<i32>,
     #[serde(default)]
     pub schedule: Option<WorkerSchedule>,
 }
@@ -106,6 +119,12 @@ pub struct Worker {
     pub telemetry: Option<WorkerTelemetry>,
     #[serde(default = "default_worker_concurrency")]
     pub max_concurrency: i32,
+    /// Places CPU déclarées (voir `WorkerSlots`) ; absentes : mode historique.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cpu_jobs: Option<i32>,
+    /// Places GPU déclarées (voir `WorkerSlots`) ; absentes : mode historique.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_gpu_jobs: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<WorkerSchedule>,
     /// Le worker annonce une adresse de transfert de sources (ADR 0019) : la voie directe est possible.
@@ -114,6 +133,11 @@ pub struct Worker {
 }
 
 impl Worker {
+    /// Places effectives : par classe si déclarées, sinon `max_concurrency` communes.
+    pub fn slots(&self) -> WorkerSlots {
+        worker_slots(self.max_concurrency, self.max_cpu_jobs, self.max_gpu_jobs)
+    }
+
     /// Le worker intégré au central, sous son nom par défaut.
     pub fn is_integrated(&self) -> bool {
         self.name == INTEGRATED_WORKER_NAME
@@ -283,6 +307,8 @@ mod tests {
             remote_addr: None,
             telemetry: None,
             max_concurrency: 1,
+            max_cpu_jobs: None,
+            max_gpu_jobs: None,
             schedule: None,
             transfer_enabled: false,
         };
@@ -301,6 +327,8 @@ mod tests {
             remote_addr: None,
             telemetry: None,
             max_concurrency: 1,
+            max_cpu_jobs: None,
+            max_gpu_jobs: None,
             schedule: None,
             transfer_enabled: false,
         };
@@ -314,5 +342,22 @@ mod tests {
             Liveness::Silent
         );
         assert_eq!(worker(-30).silence_seconds(now), 0);
+    }
+
+    #[test]
+    fn worker_without_class_slots_keeps_legacy_json() -> Result<(), serde_json::Error> {
+        let raw = r#"{"id":"00000000-0000-0000-0000-000000000000","name":"nas","last_seen":"2026-01-01T00:00:00Z","max_concurrency":2}"#;
+        let worker: Worker = serde_json::from_str(raw)?;
+        assert_eq!((worker.max_cpu_jobs, worker.max_gpu_jobs), (None, None));
+        assert_eq!(worker.slots().total, 2);
+        let json = serde_json::to_value(&worker)?;
+        assert!(json.get("max_cpu_jobs").is_none());
+        let request: UpdateWorkerSettingsRequest =
+            serde_json::from_str(r#"{"maxConcurrency":1,"maxGpuJobs":1}"#)?;
+        assert_eq!(
+            (request.max_cpu_jobs, request.max_gpu_jobs),
+            (None, Some(1))
+        );
+        Ok(())
     }
 }

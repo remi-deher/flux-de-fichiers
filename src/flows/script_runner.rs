@@ -12,9 +12,13 @@ use crate::{
     },
     tools_cache::ToolCacheManager,
 };
-use forgearr_shared::{jobs::JobErrorCode, script_variables::SECRET_PLACEHOLDER};
+use forgearr_shared::{
+    flows::{FlowVariables, SCRIPT_SCHEMA_VERSION},
+    jobs::JobErrorCode,
+    script_variables::SECRET_PLACEHOLDER,
+};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -26,7 +30,6 @@ use thiserror::Error;
 use tokio::{io::AsyncWriteExt, process::Command};
 
 const DEFAULT_SAFE_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
-const SCRIPT_SCHEMA_VERSION: &str = "1.0";
 const MAX_SCRIPT_ARGS: usize = 64;
 
 /// Callback de progression émis pendant l'exécution d'un script.
@@ -56,6 +59,8 @@ pub struct ScriptInput<'a> {
     pub work_dir: String,
     pub media_info: &'a Value,
     pub config: Value,
+    /// Variables du flux : `{"file": {..}, "job": {..}, "vars": {..}}`.
+    pub variables: Value,
 }
 
 /// Réponse JSON optionnelle lue sur `stdout` après exécution du script.
@@ -74,6 +79,9 @@ pub struct ScriptOutput {
     pub media_info: Option<Value>,
     #[serde(default)]
     pub stop_pipeline: bool,
+    /// Variables personnalisées à fusionner dans `vars.*` (objet plat nom → scalaire).
+    #[serde(default)]
+    pub variables: Option<Map<String, Value>>,
 }
 
 /// Issue d'une étape script exécutée avec succès ou ignorée.
@@ -84,12 +92,16 @@ pub enum ScriptStepOutcome {
         updated_media_info: Option<Value>,
         next_port: Option<String>,
         stop_pipeline: bool,
+        /// Variables renvoyées par le script, à fusionner dans le contexte.
+        variables: Option<Map<String, Value>>,
         message: Option<String>,
         excerpt: Option<String>,
     },
     Skipped {
         message: String,
         excerpt: Option<String>,
+        /// Port demandé par le script (`nextPort`), résolu ensuite selon le mode de sortie.
+        next_port: Option<String>,
     },
 }
 
@@ -231,6 +243,7 @@ pub async fn execute_script_operation(
     working_file: &Path,
     source_file: &Path,
     media_info: &Value,
+    variables: &FlowVariables,
     step_index: i32,
     on_progress: ScriptProgressCallback,
 ) -> Result<ScriptStepOutcome, ScriptStepError> {
@@ -301,6 +314,7 @@ pub async fn execute_script_operation(
         work_dir: work_dir.to_string_lossy().into_owned(),
         media_info,
         config: merged_config,
+        variables: variables.as_document(),
     };
     let stdin_bytes = serde_json::to_vec(&payload).map_err(|err| ScriptStepError {
         code: error_code,
@@ -433,6 +447,7 @@ pub async fn execute_script_operation(
             updated_media_info: None,
             next_port: None,
             stop_pipeline: false,
+            variables: None,
             message: None,
             excerpt,
         });
@@ -453,6 +468,7 @@ pub async fn execute_script_operation(
                 .map(|m| scrub(&m, &secrets))
                 .unwrap_or_else(|| "étape ignorée par le script".into()),
             excerpt,
+            next_port: output.next_port,
         }),
         ScriptOutcomeStatus::Ok => {
             let next_working_file = match output.working_file {
@@ -475,6 +491,7 @@ pub async fn execute_script_operation(
                 updated_media_info,
                 next_port: output.next_port,
                 stop_pipeline: output.stop_pipeline,
+                variables: output.variables,
                 message: output.message.map(|m| scrub(&m, &secrets)),
                 excerpt,
             })
@@ -554,6 +571,7 @@ mod tests {
             &working,
             &original,
             &Value::Null,
+            &FlowVariables::default(),
             1,
             Arc::new(|_, _| {}),
         )
@@ -600,6 +618,7 @@ mod tests {
             &source,
             &source,
             &serde_json::json!({"format": {"duration": "10"}}),
+            &FlowVariables::default(),
             1,
             cb,
         )
@@ -611,9 +630,11 @@ mod tests {
                 updated_media_info,
                 next_port,
                 stop_pipeline,
+                variables,
                 message,
                 excerpt,
             } => {
+                assert!(variables.is_none());
                 assert_eq!(next_working_file, Some(std::fs::canonicalize(&out_file)?));
                 assert_eq!(next_port.as_deref(), Some("branch_a"));
                 assert!(!stop_pipeline);
@@ -632,6 +653,42 @@ mod tests {
                 .map_err(|_| anyhow::anyhow!("lock"))?
                 .contains(&50)
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn skip_carries_next_port() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let cache = ToolCacheManager::new(dir.path().join("cache"));
+        let source = dir.path().join("input.mkv");
+        std::fs::write(&source, b"mkv")?;
+        let (op, rt) = test_op(
+            "cat >/dev/null\nprintf '%s' '{\"status\":\"skip\",\"nextPort\":\"true\"}'",
+            10,
+        );
+        let outcome = execute_script_operation(
+            &op,
+            &rt,
+            &cache,
+            &HashMap::new(),
+            "flow-1",
+            "node-1",
+            &serde_json::json!({}),
+            dir.path(),
+            &source,
+            &source,
+            &serde_json::json!({}),
+            &FlowVariables::default(),
+            1,
+            Arc::new(|_, _| {}),
+        )
+        .await?;
+        match outcome {
+            ScriptStepOutcome::Skipped { next_port, .. } => {
+                assert_eq!(next_port.as_deref(), Some("true"));
+            }
+            ScriptStepOutcome::Succeeded { .. } => anyhow::bail!("attendu Skipped"),
+        }
         Ok(())
     }
 
@@ -662,6 +719,7 @@ mod tests {
             &source,
             &source,
             &Value::Null,
+            &FlowVariables::default(),
             1,
             Arc::new(|_, _| {}),
         )
@@ -698,6 +756,7 @@ printf '{"status":"ok","message":"isolated"}'
             &source,
             &source,
             &Value::Null,
+            &FlowVariables::default(),
             1,
             Arc::new(|_, _| {}),
         )
@@ -709,6 +768,58 @@ printf '{"status":"ok","message":"isolated"}'
                 ..
             } if m == "isolated"
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn output_of_a_1_0_script_has_no_variables() -> Result<(), serde_json::Error> {
+        let output: ScriptOutput = serde_json::from_str(r#"{"status":"ok","nextPort":"a"}"#)?;
+        assert!(output.variables.is_none());
+        assert_eq!(output.next_port.as_deref(), Some("a"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn script_receives_and_returns_flow_variables() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let cache = ToolCacheManager::new(dir.path().join("cache"));
+        let source = dir.path().join("input.mkv");
+        std::fs::write(&source, b"mkv")?;
+        let mut variables = FlowVariables::default();
+        variables.set_custom("codec", serde_json::json!("hevc"))?;
+        // Le script relit `vars.codec` sur stdin et renvoie une nouvelle variable.
+        let script = r#"
+seen=$(grep -c '"vars":{"codec":"hevc"}' -)
+printf '{"status":"ok","message":"vu %s","variables":{"cible":"av1"}}' "$seen"
+"#;
+        let (op, rt) = test_op(script, 10);
+        let outcome = execute_script_operation(
+            &op,
+            &rt,
+            &cache,
+            &HashMap::new(),
+            "flow-1",
+            "node-1",
+            &Value::Null,
+            dir.path(),
+            &source,
+            &source,
+            &Value::Null,
+            &variables,
+            1,
+            Arc::new(|_, _| {}),
+        )
+        .await?;
+        match outcome {
+            ScriptStepOutcome::Succeeded {
+                variables, message, ..
+            } => {
+                assert_eq!(message.as_deref(), Some("vu 1"));
+                let returned = variables.ok_or_else(|| anyhow::anyhow!("variables absentes"))?;
+                assert_eq!(returned["cible"], "av1");
+            }
+            ScriptStepOutcome::Skipped { .. } => anyhow::bail!("étape ignorée inattendue"),
+        }
         Ok(())
     }
 
@@ -751,6 +862,7 @@ printf '{"status":"ok","message":"isolated"}'
             &source,
             &source,
             &Value::Null,
+            &FlowVariables::default(),
             1,
             Arc::new(move |_, line| {
                 if let Ok(mut guard) = sink.lock() {

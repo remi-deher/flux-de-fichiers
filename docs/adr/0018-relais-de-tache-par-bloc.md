@@ -1,8 +1,10 @@
 # 0018 — Relais de tâche entre workers par bloc de flux
 
-Statut : proposé (19 nov. 2026), orientation validée par l'utilisateur (relais par blocs dédiés,
-sondes matérielles légères dans l'image, relais avant tout traitement). Cet ADR pose les bases ;
-le relais en cours de flux viendra ensuite.
+Statut : accepté (21 nov. 2026), implémenté. Orientation validée par l'utilisateur (relais par blocs
+dédiés, sondes matérielles légères dans l'image, relais avant tout traitement). Constaté dans le code :
+sondes `hardware_probe.rs` (`lspci`, `nvidia-smi`, `vainfo`), blocs `worker-capability` et `relay`,
+table `job_relays`, filtre de capacité dans `claim`, plafond de relais nommé, code `no_capable_worker`,
+événement `job_relayed`, route `GET /api/v1/jobs/relays`. Le relais en cours de flux reste reporté.
 
 ## Contexte
 

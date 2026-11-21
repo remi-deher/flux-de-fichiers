@@ -5,27 +5,39 @@ mod block;
 mod condition;
 pub mod contract;
 mod custom_args;
+mod deferred_variables;
 pub mod header_secrets;
 pub mod http_runner;
 pub mod lease_secrets;
 mod node_references;
 pub mod placement;
 pub(crate) mod publication;
+mod script_branch;
 pub mod script_runner;
+mod sub_flow;
+pub mod substitution;
 mod variables;
+mod variables_step;
 
 #[cfg(test)]
 mod engine_tests;
 #[cfg(test)]
 mod placement_flow_tests;
+#[cfg(test)]
+mod script_branch_flow_tests;
+#[cfg(test)]
+mod sub_flow_tests;
+#[cfg(test)]
+mod variables_flow_tests;
 
 use crate::{media::OutputSpec, tools_cache::ToolCacheManager};
 use chrono::Utc;
 use forgearr_shared::{
     capabilities::WorkerCapabilities,
+    flows::{BranchPort, FlowVariables, LinkedFlow, ScriptRouting},
     relay::{RelayRequest, RelayedNodeOutput},
 };
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -33,7 +45,10 @@ use std::{
 };
 use uuid::Uuid;
 
-pub use condition::{ConditionConfig, evaluate_condition};
+pub use condition::{
+    ConditionConfig, definition_condition_errors, evaluate_condition,
+    evaluate_condition_with_variables, graph_condition_errors,
+};
 pub use contract::{
     BinaryExecutionMode, BinaryRuntime, ContractError, HttpRuntime, OperationContract,
     OperationRegistry, OperationRuntime, PrimitiveKind, ScriptInterpreter, ScriptRuntime, ToolRef,
@@ -69,6 +84,8 @@ pub struct FlowContext {
     pub current_step: String,
     pub status: String,
     pub timestamp: String,
+    /// Variables de la tâche (intrinsèques et `vars.*`), lues par les modèles `{$…}`.
+    pub variables: FlowVariables,
 }
 
 impl FlowContext {
@@ -87,8 +104,36 @@ impl FlowContext {
             current_step: "start".to_owned(),
             status: "running".to_owned(),
             timestamp: Utc::now().to_rfc3339(),
+            variables: FlowVariables::default(),
         }
     }
+
+    /// Change de fichier de travail et recalcule les variables `file.*`.
+    pub fn set_working_file(&mut self, file: PathBuf) {
+        substitution::set_file_variables(&mut self.variables, &file);
+        self.working_file = file;
+    }
+}
+
+/// Identité de l'exécution transmise par le bail (variables `library.*`, `worker.name`, reprise).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FlowRunInfo<'a> {
+    pub library_id: Option<Uuid>,
+    pub library_name: Option<&'a str>,
+    pub worker_name: Option<&'a str>,
+    /// Variables personnalisées restaurées après un relais.
+    pub resume_variables: Option<&'a Map<String, Value>>,
+    /// Flux liés figés avec la tâche (sous-flux, flux d'échec).
+    pub linked_flows: &'a [LinkedFlow],
+    /// Erreur de la tâche, présente seulement pendant l'exécution du flux d'échec.
+    pub failure: Option<FailureInfo<'a>>,
+}
+
+/// Erreur transmise au flux d'échec (variables `error.code`, `error.message`).
+#[derive(Clone, Copy, Debug)]
+pub struct FailureInfo<'a> {
+    pub code: &'a str,
+    pub message: &'a str,
 }
 
 /// Résultat final d'une exécution complète de flux (ou de l'opération de repli par défaut).
@@ -128,6 +173,8 @@ pub struct FlowEngine<'a> {
     pub worker_capabilities: Option<&'a WorkerCapabilities>,
     /// Nœud où reprendre un flux relayé, au lieu du bloc d'entrée.
     pub resume_node_id: Option<&'a str>,
+    /// Identité de l'exécution, source des variables intrinsèques.
+    pub run_info: FlowRunInfo<'a>,
     /// Sorties des nœuds exécutés avant le relais, transmises par le worker émetteur.
     pub resumed_outputs: &'a HashMap<String, RelayedNodeOutput>,
 }
@@ -208,6 +255,7 @@ impl<'a> FlowEngine<'a> {
                 status: crate::domain::JobStepStatus::Succeeded,
                 message: outcome.message,
                 output_excerpt: outcome.excerpt,
+                variables: None,
             }],
             relay: None,
         })
@@ -222,7 +270,7 @@ impl<'a> FlowEngine<'a> {
         work_dir: &Path,
         on_progress: FlowProgressCallback,
     ) -> Result<FlowExecutionOutcome, FlowExecutionError> {
-        let graph: FlowGraph =
+        let mut graph: FlowGraph =
             serde_json::from_str(&flow.definition).map_err(|err| FlowExecutionError {
                 code: forgearr_shared::jobs::JobErrorCode::OperationFailed,
                 message: format!("définition de flux invalide : {err}"),
@@ -275,14 +323,34 @@ impl<'a> FlowEngine<'a> {
             media_info,
         );
         ctx.media_root = self.media_root.map(Path::to_path_buf);
+        let job_id_text = job_id.to_string();
+        let library_id_text = self.run_info.library_id.map(|id| id.to_string());
+        substitution::set_identity_variables(
+            &mut ctx.variables,
+            &substitution::RunIdentity {
+                job_id: Some(&job_id_text),
+                flow_id: Some(&flow.id),
+                source_name: Some(&ctx.source_name),
+                library_id: library_id_text.as_deref(),
+                library_name: self.run_info.library_name,
+                worker_name: self.run_info.worker_name,
+            },
+        );
+        ctx.set_working_file(current_working_file.clone());
+        if let Some(failure) = self.run_info.failure {
+            substitution::set_failure_variables(&mut ctx.variables, failure.code, failure.message);
+        }
+        if let Some(resumed) = self.run_info.resume_variables
+            && let Err(err) = ctx.variables.merge_custom(resumed)
+        {
+            return Err(FlowExecutionError {
+                code: forgearr_shared::jobs::JobErrorCode::OperationFailed,
+                message: format!("variables de reprise invalides : {err}"),
+                steps,
+            });
+        }
 
-        let Some(input_node) = graph
-            .nodes
-            .iter()
-            .find(|node| block::is_entry_node(self.registry, node))
-            .cloned()
-            .or_else(|| graph.nodes.first().cloned())
-        else {
+        let Some(input_node_id) = block::entry_node_id(self.registry, &graph) else {
             return Err(FlowExecutionError {
                 code: forgearr_shared::jobs::JobErrorCode::OperationFailed,
                 message: "le flux ne contient aucun bloc d'entrée".to_owned(),
@@ -299,8 +367,10 @@ impl<'a> FlowEngine<'a> {
                     steps,
                 });
             }
-            None => input_node.id,
+            None => input_node_id,
         };
+        let mut active_flow_id = flow.id.clone();
+        let mut frames: Vec<sub_flow::SubFlowFrame> = Vec::new();
         let mut relay: Option<RelayRequest> = None;
         // Sorties des nœuds déjà exécutés, lues par `{{nodes.<id>.…}}` (ADR 0025).
         // Après un relais, ceux des nœuds exécutés par le worker précédent sont repris (ADR 0018).
@@ -336,11 +406,15 @@ impl<'a> FlowEngine<'a> {
 
             let mut step_ctx = ctx.clone();
             step_ctx.current_step = node.name.clone();
+            // Configuration rendue avec les variables du flux (les nœuds HTTP rendent la leur).
+            let node_config = substitution::substitute_node_config(&node.config, &ctx.variables);
             let mut next_port: Option<String> = None;
             let mut stop_pipeline = false;
             let mut step_status = crate::domain::JobStepStatus::Succeeded;
             let mut step_message: Option<String> = None;
             let mut step_excerpt: Option<String> = None;
+            let mut step_variables: Option<Map<String, Value>> = None;
+            let mut jump_to: Option<String> = None;
 
             match &op.runtime {
                 OperationRuntime::Primitive(prim) => match prim.primitive {
@@ -349,15 +423,76 @@ impl<'a> FlowEngine<'a> {
                         stop_pipeline = true;
                     }
                     PrimitiveKind::Condition => {
-                        let cond_cfg: ConditionConfig =
-                            serde_json::from_value(node.config.clone()).unwrap_or_default();
-                        let matched = evaluate_condition(&cond_cfg, &ctx.media_info);
-                        next_port = Some(if matched { "true" } else { "false" }.to_owned());
+                        let cond_cfg = condition::read_condition(&node.id, &node_config);
+                        let matched = evaluate_condition_with_variables(
+                            &cond_cfg,
+                            &ctx.media_info,
+                            &ctx.variables,
+                        );
+                        next_port = Some(BranchPort::from_bool(matched).as_str().to_owned());
                     }
                     PrimitiveKind::Capability => {
-                        match placement::evaluate_capability(&node.config, self.worker_capabilities)
+                        match placement::evaluate_capability(&node_config, self.worker_capabilities)
                         {
                             Ok(port) => next_port = Some(port.to_owned()),
+                            Err(message) => {
+                                return Err(operation_failure(
+                                    steps, step_index, &node, &op.id, message, None,
+                                ));
+                            }
+                        }
+                    }
+                    PrimitiveKind::SubFlow => {
+                        match sub_flow::enter_sub_flow(
+                            self.registry,
+                            self.run_info.linked_flows,
+                            &node,
+                            &active_flow_id,
+                            &frames,
+                        ) {
+                            Ok(entry) => {
+                                step_message = Some(entry.step_message());
+                                remaining_steps += entry.graph.nodes.len();
+                                jump_to = Some(entry.entry_node_id);
+                                frames.push(sub_flow::SubFlowFrame {
+                                    graph: std::mem::replace(&mut graph, entry.graph),
+                                    flow_id: std::mem::replace(&mut active_flow_id, entry.flow_id),
+                                    call_node_id: node.id.clone(),
+                                });
+                            }
+                            Err(message) => {
+                                return Err(operation_failure(
+                                    steps, step_index, &node, &op.id, message, None,
+                                ));
+                            }
+                        }
+                    }
+                    PrimitiveKind::Relay => {
+                        let decided = if !frames.is_empty() {
+                            Err("le relais est impossible dans un sous-flux".to_owned())
+                        } else if source_modified_in_place {
+                            Err(
+                                "le transfert est impossible après modification de la source en place"
+                                    .to_owned(),
+                            )
+                        } else {
+                            next_connection(&graph.connections, &node.id, None)
+                                .ok_or_else(|| {
+                                    "le bloc « Relayer la tâche » n'a aucune sortie « Reprise »"
+                                        .to_owned()
+                                })
+                                .and_then(|resume| {
+                                    placement::build_relay_request(&node_config, &resume.to)
+                                })
+                        };
+                        match decided {
+                            Ok(mut request) => {
+                                request.variables = ctx.variables.custom.clone();
+                                relay = Some(request);
+                                stop_pipeline = true;
+                                step_message =
+                                    Some("tâche relayée vers un autre worker".to_owned());
+                            }
                             Err(message) => {
                                 steps.push(failed_step(
                                     step_index,
@@ -374,29 +509,9 @@ impl<'a> FlowEngine<'a> {
                             }
                         }
                     }
-                    PrimitiveKind::Relay => {
-                        let decided = if source_modified_in_place {
-                            Err(
-                                "le transfert est impossible après modification de la source en place"
-                                    .to_owned(),
-                            )
-                        } else {
-                            next_connection(&graph.connections, &node.id, None)
-                                .ok_or_else(|| {
-                                    "le bloc « Relayer la tâche » n'a aucune sortie « Reprise »"
-                                        .to_owned()
-                                })
-                                .and_then(|resume| {
-                                    placement::build_relay_request(&node.config, &resume.to)
-                                })
-                        };
-                        match decided {
-                            Ok(request) => {
-                                relay = Some(request);
-                                stop_pipeline = true;
-                                step_message =
-                                    Some("tâche relayée vers un autre worker".to_owned());
-                            }
+                    PrimitiveKind::SetVariable => {
+                        match variables_step::apply_set_variable(&node_config, &mut ctx.variables) {
+                            Ok(message) => step_message = Some(message),
                             Err(message) => {
                                 steps.push(failed_step(
                                     step_index,
@@ -429,7 +544,7 @@ impl<'a> FlowEngine<'a> {
                         },
                         op,
                         bin_rt,
-                        &node.config,
+                        &node_config,
                     )
                     .await;
                     match outcome {
@@ -442,8 +557,9 @@ impl<'a> FlowEngine<'a> {
                             }
                             if let Some(next_file) = res.next_working_file {
                                 current_working_file = next_file;
-                                ctx.working_file = current_working_file.clone();
                             }
+                            // Taille et nom à jour, y compris après une modification en place.
+                            ctx.set_working_file(current_working_file.clone());
                             if res.is_staged_output {
                                 is_in_place = false;
                             }
@@ -475,6 +591,7 @@ impl<'a> FlowEngine<'a> {
                 {
                     step_status = crate::domain::JobStepStatus::Skipped;
                     step_message = Some(publication::DEFERRED_MESSAGE.to_owned());
+                    step_variables = Some(ctx.variables.custom.clone());
                 }
                 OperationRuntime::Http(http_rt) => {
                     let outbound_policy = crate::net_policy::OutboundPolicy {
@@ -484,11 +601,13 @@ impl<'a> FlowEngine<'a> {
                         }),
                         require_https: false,
                     };
+                    let http_config =
+                        substitution::substitute_flow_variables_only(&node.config, &ctx.variables);
                     match http_runner::execute_http_operation_with_policy(
                         http_rt,
-                        &flow.id,
+                        &active_flow_id,
                         &node.id,
-                        &node.config,
+                        &http_config,
                         self.plugin_configs,
                         &step_ctx,
                         self.secrets_dir,
@@ -521,6 +640,7 @@ impl<'a> FlowEngine<'a> {
                     }
                 }
                 OperationRuntime::Script(script_rt) => {
+                    let routing = ScriptRouting::from_config(&node.config);
                     let effective_rt =
                         node_references::effective_script_runtime(self.registry, &node, script_rt);
                     let script_error_code = effective_rt
@@ -565,7 +685,7 @@ impl<'a> FlowEngine<'a> {
                     );
                     let script_config = match variables::resolve_node_config(
                         &effective_rt.variables,
-                        &node.config,
+                        &node_config,
                         &variable_context,
                     ) {
                         Ok(config) => config,
@@ -590,13 +710,14 @@ impl<'a> FlowEngine<'a> {
                         &effective_rt,
                         self.cache_mgr,
                         self.tool_versions,
-                        &flow.id,
+                        &active_flow_id,
                         &node.id,
                         &script_config,
                         work_dir,
                         &current_working_file,
                         source_file,
                         &ctx.media_info,
+                        &ctx.variables,
                         step_index,
                         on_progress.clone(),
                     )
@@ -607,9 +728,30 @@ impl<'a> FlowEngine<'a> {
                             updated_media_info,
                             next_port: script_port,
                             stop_pipeline: script_stop,
+                            variables,
                             message,
                             excerpt,
                         }) => {
+                            if let Some(returned) = variables
+                                && let Err(err) = ctx.variables.merge_custom(&returned)
+                            {
+                                let message = format!("variables renvoyées par le script : {err}");
+                                return Err(operation_failure(
+                                    steps, step_index, &node, &op.id, message, excerpt,
+                                ));
+                            }
+                            next_port = match script_branch::resolve_script_port(
+                                routing,
+                                script_runner::ScriptOutcomeStatus::Ok,
+                                script_port,
+                            ) {
+                                Ok(port) => port,
+                                Err(message) => {
+                                    return Err(operation_failure(
+                                        steps, step_index, &node, &op.id, message, excerpt,
+                                    ));
+                                }
+                            };
                             let reprobe =
                                 next_working_file.is_some() && updated_media_info.is_none();
                             if let Some(updated_info) = updated_media_info {
@@ -617,7 +759,7 @@ impl<'a> FlowEngine<'a> {
                             }
                             if let Some(next_file) = next_working_file {
                                 current_working_file = next_file;
-                                ctx.working_file = current_working_file.clone();
+                                ctx.set_working_file(current_working_file.clone());
                                 is_in_place = false;
                             }
                             // Nouveau fichier sans métadonnées fournies : il est inspecté à son tour.
@@ -651,12 +793,27 @@ impl<'a> FlowEngine<'a> {
                                     }
                                 }
                             }
-                            next_port = script_port;
                             stop_pipeline = script_stop;
                             step_message = message;
                             step_excerpt = excerpt;
                         }
-                        Ok(script_runner::ScriptStepOutcome::Skipped { message, excerpt }) => {
+                        Ok(script_runner::ScriptStepOutcome::Skipped {
+                            message,
+                            excerpt,
+                            next_port: skip_port,
+                        }) => {
+                            next_port = match script_branch::resolve_script_port(
+                                routing,
+                                script_runner::ScriptOutcomeStatus::Skip,
+                                skip_port,
+                            ) {
+                                Ok(port) => port,
+                                Err(message) => {
+                                    return Err(operation_failure(
+                                        steps, step_index, &node, &op.id, message, excerpt,
+                                    ));
+                                }
+                            };
                             step_status = crate::domain::JobStepStatus::Skipped;
                             step_message = Some(message);
                             step_excerpt = excerpt;
@@ -695,23 +852,39 @@ impl<'a> FlowEngine<'a> {
                 status: step_status,
                 message: step_message,
                 output_excerpt: step_excerpt,
+                variables: step_variables,
             });
 
-            if stop_pipeline {
-                tracing::info!(job_id = %job_id, "reached terminal node, terminating pipeline");
-                break;
+            if let Some(entry_node_id) = jump_to {
+                current_node_id = entry_node_id;
+                continue;
             }
-            let Some(conn) =
+            // Relais : la tâche quitte ce worker, aucun appelant n'est repris.
+            let mut next_node = if stop_pipeline {
+                None
+            } else {
                 next_connection(&graph.connections, &current_node_id, next_port.as_deref())
-            else {
+                    .map(|conn| conn.to.clone())
+            };
+            // Fin d'un sous-flux : reprise à la sortie du bloc appelant.
+            while next_node.is_none() && relay.is_none() {
+                let Some(frame) = frames.pop() else {
+                    break;
+                };
+                graph = frame.graph;
+                active_flow_id = frame.flow_id;
+                next_node = next_connection(&graph.connections, &frame.call_node_id, None)
+                    .map(|conn| conn.to.clone());
+            }
+            let Some(next) = next_node else {
                 tracing::info!(
                     job_id = %job_id,
                     node_id = %current_node_id,
-                    "no outgoing connection, pipeline ending"
+                    "terminal node or no outgoing connection, pipeline ending"
                 );
                 break;
             };
-            current_node_id = conn.to.clone();
+            current_node_id = next;
         }
 
         if let Some(request) = relay.as_mut() {
@@ -751,6 +924,30 @@ fn failed_step(
         status: crate::domain::JobStepStatus::Failed,
         message: Some(message),
         output_excerpt: excerpt,
+        variables: None,
+    }
+}
+
+/// Ajoute l'étape en échec et construit l'erreur `OperationFailed` qui arrête le flux.
+fn operation_failure(
+    mut steps: Vec<crate::domain::JobStepEntry>,
+    step_index: i32,
+    node: &FlowNode,
+    operation_id: &str,
+    message: String,
+    excerpt: Option<String>,
+) -> FlowExecutionError {
+    steps.push(failed_step(
+        step_index,
+        node,
+        Some(operation_id.to_owned()),
+        message.clone(),
+        excerpt,
+    ));
+    FlowExecutionError {
+        code: forgearr_shared::jobs::JobErrorCode::OperationFailed,
+        message,
+        steps,
     }
 }
 

@@ -1,8 +1,10 @@
 # 0021 — Modes d'accès des workers aux bibliothèques
 
-Statut : proposé (19 nov. 2026). Orientation validée par l'utilisateur : une bibliothèque porte un flux et
-des workers qui ont ou non un accès direct aux fichiers mais qui peuvent traiter les tâches. Les deux
-choix détaillés ci-dessous (points 4 et 8) sont **confirmés par l'utilisateur**. Précise les
+Statut : accepté (21 nov. 2026), implémenté. Orientation et choix des points 4 et 8 confirmés par
+l'utilisateur. Constaté dans le code : table `library_transfer_workers` (migration 0033),
+`transfer_workers` dans l'API, le client et les outils MCP, attribution par appartenance dans `claim`,
+détenteur choisi par `source_key` (`repository/source_tickets.rs`), journal de publication durable
+(migration 0034, `source_publication.rs`) et échec `source_changed`. Précise les
 [ADR 0018](0018-relais-de-tache-par-bloc.md), [0019](0019-partage-des-sources-entre-workers.md) et
 [0020](0020-blocs-de-transfert-dans-le-flux.md).
 

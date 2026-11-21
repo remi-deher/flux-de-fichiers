@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.73.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.72.0...v0.73.0) (2026-11-21)
+
+
+### Features
+
+* **flows:** un script lit l'exposition que désigne sa dépendance (ADR 0025) ([f4b9a83](https://github.com/remi-deher/flux-de-fichiers/commit/f4b9a83aac9b6dc6b90b49ccb9134bd5dee1c4d4))
+
 ## [0.72.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.71.0...v0.72.0) (2026-11-21)
 
 

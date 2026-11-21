@@ -7,6 +7,7 @@ use super::{
     },
 };
 use forgearr_shared::{
+    exposed_variables::{ExposedVariable, ExposedVariables},
     flow_variables::{
         NodeVariablesRequest, NodeVariablesView, ReferenceSource, ReferenceSuggestion,
     },
@@ -207,10 +208,15 @@ pub fn reference_suggestions(
     for exposed in exposures {
         for variable in &exposed.variables {
             let sample = exposed_value(sample_media, &variable.path).map(as_text);
-            let label = if variable.label.trim().is_empty() {
+            let base_label = if variable.label.trim().is_empty() {
                 exposed.reference(variable)
             } else {
                 variable.label.clone()
+            };
+            let label = if variable.deprecated.is_some() {
+                format!("{base_label} (déprécié)")
+            } else {
+                base_label
             };
             out.push(suggestion(
                 exposed.reference(variable),
@@ -298,6 +304,70 @@ pub fn check_references(graph: &FlowGraph, registry: &OperationRegistry) -> Vec<
     problems
 }
 
+/// Avertissements d'un nœud : références, dans ses variables déclarées, à des variables exposées
+/// dépréciées (celles que son script lit). Sans effet sur l'exécution ; chacun cite le message du
+/// plugin et la variable de remplacement quand il en désigne une.
+fn node_deprecation_warnings(
+    node: &FlowNode,
+    runtime: &ScriptRuntime,
+    registry: &OperationRegistry,
+) -> Vec<String> {
+    let exposures = registry.exposures_for_requirements(&runtime.requires);
+    let deprecated: HashMap<String, (&ExposedVariables, &ExposedVariable)> = exposures
+        .iter()
+        .flat_map(|exposed| {
+            exposed
+                .variables
+                .iter()
+                .filter(|variable| variable.deprecated.is_some())
+                .map(move |variable| (exposed.reference(variable), (*exposed, variable)))
+        })
+        .collect();
+    let mut warnings: Vec<String> = Vec::new();
+    if deprecated.is_empty() {
+        return warnings;
+    }
+    for variable in &runtime.variables {
+        let mut texts = Vec::new();
+        if let Some(value) = node.config.get(&variable.name) {
+            strings_in(value, &mut texts);
+        }
+        for text in &texts {
+            for reference in references_in(text) {
+                let Some((exposed, exposure)) = deprecated.get(reference) else {
+                    continue;
+                };
+                let message = exposure.deprecated.as_deref().unwrap_or_default();
+                let replacement = exposed
+                    .replacement_reference(exposure)
+                    .map(|target| format!(" ; utilisez {{{{{target}}}}}"))
+                    .unwrap_or_default();
+                let warning = format!(
+                    "Nœud {} : variable « {} » : la référence {{{{{reference}}}}} est dépréciée ({message}){replacement}",
+                    node.id, variable.name
+                );
+                if !warnings.contains(&warning) {
+                    warnings.push(warning);
+                }
+            }
+        }
+    }
+    warnings
+}
+
+/// Avertissements de tout le graphe : références à des variables exposées dépréciées.
+pub fn reference_warnings(graph: &FlowGraph, registry: &OperationRegistry) -> Vec<String> {
+    graph
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            script_runtime_for_node(registry, node)
+                .map(|runtime| node_deprecation_warnings(node, &runtime, registry))
+        })
+        .flatten()
+        .collect()
+}
+
 /// Schéma du script du nœud, références disponibles et `config` résolue avec des valeurs d'exemple.
 pub fn node_variables_view(
     request: &NodeVariablesRequest,
@@ -346,6 +416,7 @@ pub fn node_variables_view(
     };
     NodeVariablesView {
         references: reference_suggestions(graph, &node.id, registry, &sample_media),
+        warnings: node_deprecation_warnings(node, &runtime, registry),
         variables: runtime.variables,
         resolved,
         error,
@@ -601,6 +672,93 @@ mod tests {
             Some(json!("VIDEO-A"))
         );
         assert!(check_references(&graph, &reg).is_empty());
+        Ok(())
+    }
+
+    fn deprecating_provider() -> Value {
+        json!({
+            "schemaVersion": "1.1.0", "id": "operation.p.probe", "version": "1.0.0", "name": "Fournisseur",
+            "providerId": "plug", "providerKind": "plugin", "capability": "probe", "status": "validated",
+            "runtime": {"kind": "primitive", "primitive": "entry"},
+            "exposes": {"namespace": "mediainfo", "contractVersion": "1.1.0", "variables": [
+                {"name": "video.codec", "label": "Codec", "path": "p.old",
+                 "deprecated": "Renommée en video.codec_name.", "replacedBy": "video.codec_name"},
+                {"name": "video.codec_name", "label": "Nom du codec", "path": "p.new"},
+                {"name": "video.height", "path": "p.h", "deprecated": "Abandonnée."}
+            ]}
+        })
+    }
+
+    #[test]
+    fn a_reference_to_a_deprecated_exposed_variable_warns_with_its_replacement()
+    -> anyhow::Result<()> {
+        let mut reg = OperationRegistry::new();
+        reg.register_json(deprecating_provider())?;
+        // Le script désigne le fournisseur : le sélecteur ne propose que les plugins disponibles.
+        reg.register_json(codec_script(
+            "operation.script.dep",
+            json!([{"variable": "mediainfo.video.codec", "provider": "plug"}]),
+        ))?;
+        reg.register_block_mapping("block.script.dep", "operation.script.dep");
+        let graph: FlowGraph = serde_json::from_value(json!({
+            "nodes": [
+                {"id": "ancien", "type": "block.script.dep", "name": "Ancien",
+                 "config": {"codec": "{{mediainfo.video.codec}} {{mediainfo.video.codec}}"}},
+                {"id": "sans", "type": "block.script.dep", "name": "Sans remplaçante",
+                 "config": {"codec": "{{mediainfo.video.height}}"}},
+                {"id": "neuf", "type": "block.script.dep", "name": "Récent",
+                 "config": {"codec": "{{mediainfo.video.codec_name}}"}}
+            ],
+            "connections": []
+        }))?;
+
+        let warnings = reference_warnings(&graph, &reg);
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(
+            warnings[0].contains("Nœud ancien")
+                && warnings[0].contains("{{mediainfo.video.codec}}")
+                && warnings[0].contains("Renommée en video.codec_name.")
+                && warnings[0].contains("utilisez {{mediainfo.video.codec_name}}")
+        );
+        assert!(
+            warnings[1].contains("Nœud sans")
+                && warnings[1].contains("Abandonnée.")
+                && !warnings[1].contains("utilisez")
+        );
+        assert!(
+            check_references(&graph, &reg).is_empty(),
+            "une référence dépréciée reste valable"
+        );
+
+        let view = node_variables_view(
+            &NodeVariablesRequest {
+                graph: graph.clone(),
+                node_id: "ancien".into(),
+                media_info: json!({"p": {"old": "X", "new": "Y"}}),
+            },
+            &reg,
+        );
+        assert_eq!(view.error, None);
+        assert_eq!(
+            view.resolved.map(|config| config["codec"].clone()),
+            Some(json!("X X"))
+        );
+        assert_eq!(view.warnings.len(), 1, "doublon fusionné");
+        let label = view
+            .references
+            .iter()
+            .find(|reference| reference.reference == "mediainfo.video.codec")
+            .map(|reference| reference.label.clone());
+        assert_eq!(label.as_deref(), Some("Codec (déprécié)"));
+        let current = node_variables_view(
+            &NodeVariablesRequest {
+                graph,
+                node_id: "neuf".into(),
+                media_info: json!({}),
+            },
+            &reg,
+        );
+        assert!(current.warnings.is_empty());
         Ok(())
     }
 }

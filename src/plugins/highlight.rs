@@ -1,5 +1,7 @@
-//! Coloration syntaxique des scripts : moteur syntect, grammaires de `two-face` (celles de syntect
-//! plus PowerShell, TOML, TypeScript, etc.).
+//! Coloration syntaxique des scripts avec les grammaires embarquées de syntect ; PowerShell, qu'elles
+//! n'embarquent pas, a son propre analyseur (`powershell`).
+
+mod powershell;
 
 use forgearr_shared::highlight::{CodeToken, TokenKind};
 use std::sync::LazyLock;
@@ -23,7 +25,10 @@ const SCOPE_RULES: &[(&str, TokenKind)] = &[
     ("variable", TokenKind::Variable),
 ];
 
-static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_newlines);
+/// Extension des scripts PowerShell, colorés par l'analyseur maison.
+const POWERSHELL_EXTENSION: &str = "ps1";
+
+static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
 
 static RULES: LazyLock<Vec<(Scope, TokenKind)>> = LazyLock::new(|| {
     SCOPE_RULES
@@ -99,6 +104,9 @@ fn highlight_with(
 /// Découpe `code` en lignes de jetons selon l'extension du langage ; texte brut si le langage
 /// n'a pas de grammaire embarquée ou si l'analyse échoue.
 pub fn highlight_code(code: &str, extension: &str) -> Vec<Vec<CodeToken>> {
+    if extension == POWERSHELL_EXTENSION {
+        return powershell::highlight_powershell(code);
+    }
     highlight_with(&SYNTAXES, extension, code).unwrap_or_else(|| plain_lines(code))
 }
 
@@ -165,12 +173,12 @@ mod tests {
     }
 
     #[test]
-    fn colors_powershell_comments_strings_and_variables() {
-        let code = "# note\n$cible = \"film\"\nWrite-Output $cible\n";
+    fn powershell_has_its_own_highlighter() {
+        let code = "# note\n$x = 1\nWrite-Output $x\n";
         let lines = highlight_code(code, "ps1");
         assert!(has_token(&lines, "# note", TokenKind::Comment));
-        assert!(has_token(&lines, "film", TokenKind::String));
-        assert!(has_token(&lines, "$cible", TokenKind::Variable));
+        assert!(has_token(&lines, "$x", TokenKind::Variable));
+        assert!(has_token(&lines, "Write-Output", TokenKind::Function));
         assert_eq!(rebuild(&lines), code.trim_end());
     }
 

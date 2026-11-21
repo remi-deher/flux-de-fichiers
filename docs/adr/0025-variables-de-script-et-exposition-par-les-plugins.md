@@ -160,6 +160,8 @@ réimplémenter ce travail.
   (`flow_media_samples`, migration 0043, 256 Kio au plus, une ligne par flux, supprimée avec lui) sous le bail
   du job. `GET /api/v1/flows/{id}/media-sample` les renvoie (404 sans job) ; le bouton « Dernier job réel »
   du simulateur les charge, ce qui alimente aussi l'aperçu des variables et les références proposées.
-- Coloration : les grammaires viennent de `two-face` (celles de syntect, plus PowerShell, TOML, TypeScript…),
-  même moteur regex pur Rust ; `ps1` est donc coloré.
+- Coloration PowerShell : les grammaires de syntect en regex pur Rust n'incluent pas PowerShell (celle de `two-face`
+  l'exclut aussi avec ce moteur : elle exige un moteur regex en C). `ps1` a donc un analyseur lexical maison
+  (`src/plugins/highlight/powershell.rs`) : commentaires, chaînes et ici-chaînes, variables, nombres, mots-clés,
+  opérateurs `-eq` et cmdlets `Verbe-Nom`, sans jamais perdre de texte.
 - Les scripts existants, sans `variables`, restent valides (liste vide par défaut).

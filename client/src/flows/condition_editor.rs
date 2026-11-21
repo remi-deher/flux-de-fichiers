@@ -125,7 +125,11 @@ pub fn ConditionEditor(editor: Editor, node_id: String, label: String) -> impl I
     let read = move || {
         editor
             .graph
-            .with(|graph| graph.node(&id.read_value()).map(|node| read_config(&node.config)))
+            .with(|graph| {
+                graph
+                    .node(&id.read_value())
+                    .map(|node| read_config(&node.config))
+            })
             .unwrap_or_default()
     };
     let on_edit = Callback::new(move |(path, edit): (Vec<usize>, ConditionEdit)| {

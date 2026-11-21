@@ -249,12 +249,15 @@ pub(super) fn variables_json(variables: &Map<String, Value>) -> AppResult<Option
     FlowVariables::default()
         .merge_custom(variables)
         .map_err(|_| AppError::Invalid)?;
-    serde_json::to_string(variables).map(Some).map_err(|_| AppError::Internal)
+    serde_json::to_string(variables)
+        .map(Some)
+        .map_err(|_| AppError::Internal)
 }
 
 /// Relit des variables de relais stockées ; une valeur illisible est ignorée.
 pub(super) fn parse_variables_json(raw: Option<&str>) -> Map<String, Value> {
-    raw.and_then(|text| serde_json::from_str(text).ok()).unwrap_or_default()
+    raw.and_then(|text| serde_json::from_str(text).ok())
+        .unwrap_or_default()
 }
 
 /// Sorties des nœuds à stocker avec le relais ; `None` s'il n'y en a pas, refus si elles dépassent la borne.
@@ -377,11 +380,11 @@ pub async fn list_relays(pool: &SqlitePool, ids: &[Uuid]) -> AppResult<Vec<JobRe
 mod tests {
     use super::*;
     use chrono::{Duration, Utc};
-    use serde_json::json;
     use forgearr_shared::{
         capabilities::{EncodeAcceleration, HardwareEncoder, VideoCodec, WorkerCapabilities},
         workers::WorkerTelemetry,
     };
+    use serde_json::json;
 
     fn worker(name: &str, hevc: bool) -> Worker {
         let capabilities = WorkerCapabilities {

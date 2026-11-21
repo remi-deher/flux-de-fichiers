@@ -85,18 +85,11 @@ fn test_condition_evaluation() {
     );
     assert!(flows::evaluate_condition(&cond_lang_fre, &probe_info));
 
-    let cond_format = ConditionConfig::single(
-        "format",
-        ConditionOperator::from_loose("exact"),
-        "EPUB",
-    );
+    let cond_format =
+        ConditionConfig::single("format", ConditionOperator::from_loose("exact"), "EPUB");
     assert!(flows::evaluate_condition(&cond_format, &probe_info));
 
-    let cond_pages = ConditionConfig::single(
-        "pages",
-        ConditionOperator::from_loose("gt"),
-        "200",
-    );
+    let cond_pages = ConditionConfig::single("pages", ConditionOperator::from_loose("gt"), "200");
     assert!(flows::evaluate_condition(&cond_pages, &probe_info));
 }
 

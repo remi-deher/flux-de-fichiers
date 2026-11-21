@@ -78,7 +78,10 @@ mod tests {
         stored.insert("id".to_owned(), json!("42"));
         let vars = with_stored_custom(&base, &stored)?;
         let config = json!({ "url": "/api/{$vars.id}/{$file.name}" });
-        assert_eq!(deferred_config(&config, &vars), json!({ "url": "/api/42/Film.mkv" }));
+        assert_eq!(
+            deferred_config(&config, &vars),
+            json!({ "url": "/api/42/Film.mkv" })
+        );
         Ok(())
     }
 }

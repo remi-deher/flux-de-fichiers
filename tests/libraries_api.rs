@@ -699,7 +699,13 @@ async fn worker_slots_library_priority_and_job_resources_round_trip() -> anyhow:
     let worker = register_worker(&app, "nas-slots").await?;
     let settings = format!("/api/v1/workers/{worker}/settings");
 
-    let legacy = admin(&app, "PUT", &settings, Some(serde_json::json!({"maxConcurrency": 2}))).await?;
+    let legacy = admin(
+        &app,
+        "PUT",
+        &settings,
+        Some(serde_json::json!({"maxConcurrency": 2})),
+    )
+    .await?;
     assert_eq!(legacy.status(), StatusCode::OK);
     let legacy = json_of(legacy).await?;
     assert!(legacy.get("max_cpu_jobs").is_none());
@@ -750,7 +756,13 @@ async fn worker_slots_library_priority_and_job_resources_round_trip() -> anyhow:
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
 
     let unknown = uuid::Uuid::new_v4();
-    let resources = admin(&app, "GET", &format!("/api/v1/jobs/resources?ids={unknown}"), None).await?;
+    let resources = admin(
+        &app,
+        "GET",
+        &format!("/api/v1/jobs/resources?ids={unknown}"),
+        None,
+    )
+    .await?;
     assert_eq!(resources.status(), StatusCode::OK);
     assert_eq!(json_of(resources).await?, serde_json::json!([]));
     let malformed = admin(&app, "GET", "/api/v1/jobs/resources?ids=pas-un-uuid", None).await?;

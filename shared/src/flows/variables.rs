@@ -203,9 +203,7 @@ impl FlowVariables {
         let expr = expr.trim();
         match expr.strip_prefix(CUSTOM_PREFIX) {
             Some(name) => self.custom.get(name),
-            None => {
-                IntrinsicVariable::from_key(expr).and_then(|var| self.intrinsic.get(var.key()))
-            }
+            None => IntrinsicVariable::from_key(expr).and_then(|var| self.intrinsic.get(var.key())),
         }
     }
 
@@ -234,7 +232,10 @@ impl FlowVariables {
                 group.insert(field.to_owned(), value.clone());
             }
         }
-        doc.insert(CUSTOM_NAMESPACE.to_owned(), Value::Object(self.custom.clone()));
+        doc.insert(
+            CUSTOM_NAMESPACE.to_owned(),
+            Value::Object(self.custom.clone()),
+        );
         Value::Object(doc)
     }
 }
@@ -340,7 +341,9 @@ pub fn render_template(template: &str, resolve: &dyn Fn(&str) -> Option<Value>) 
 
 /// Expression d'une chaîne réduite à un seul jeton (`"{$x}"`), dont le type JSON est conservé.
 pub fn exact_token(text: &str) -> Option<&str> {
-    let inner = text.strip_prefix(TEMPLATE_OPEN)?.strip_suffix(TEMPLATE_CLOSE)?;
+    let inner = text
+        .strip_prefix(TEMPLATE_OPEN)?
+        .strip_suffix(TEMPLATE_CLOSE)?;
     if inner.contains(TEMPLATE_CLOSE) {
         return None;
     }
@@ -356,9 +359,12 @@ pub fn render_value(value: &Value, resolve: &dyn Fn(&str) -> Option<Value>) -> V
         Value::String(text) => exact_token(text)
             .and_then(resolve)
             .unwrap_or_else(|| Value::String(render_template(text, resolve))),
-        Value::Array(items) => {
-            Value::Array(items.iter().map(|item| render_value(item, resolve)).collect())
-        }
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| render_value(item, resolve))
+                .collect(),
+        ),
         Value::Object(fields) => Value::Object(
             fields
                 .iter()
@@ -387,7 +393,9 @@ pub fn is_known_expression(expr: &str) -> bool {
         Some(name) => is_valid_variable_name(name),
         None => {
             IntrinsicVariable::from_key(expr).is_some()
-                || HTTP_NAMESPACES.iter().any(|namespace| expr.starts_with(namespace))
+                || HTTP_NAMESPACES
+                    .iter()
+                    .any(|namespace| expr.starts_with(namespace))
         }
     }
 }
@@ -441,7 +449,10 @@ mod tests {
             rendered,
             json!({"size": 1234, "list": ["hevc", 3], "text": "n=1234"})
         );
-        assert_eq!(render_value(&json!("{$vars.absent|d}"), &resolve), json!("d"));
+        assert_eq!(
+            render_value(&json!("{$vars.absent|d}"), &resolve),
+            json!("d")
+        );
     }
 
     #[test]

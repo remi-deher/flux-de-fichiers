@@ -1,7 +1,7 @@
 //! Inspecteur latéral repliable du bloc sélectionné : réglages, liaisons, duplication et retrait.
 
-use super::dnd::BranchTarget;
 use super::condition_edit::visible_fields;
+use super::dnd::BranchTarget;
 use super::fields::FieldControl;
 use super::presentation::{NodeDomain, node_output_ports, output_presentation};
 use super::script_inspector::{ScriptBlockInspector, UNIFIED_SCRIPT_KIND};

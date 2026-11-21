@@ -475,7 +475,11 @@ async fn jobs_freeze_library_flow_record_steps_and_clear_output_explicitly() -> 
     assert_eq!(steps.len(), 1);
     let stored = repository::step_variables(&pool, job.id, 0).await?;
     assert_eq!(stored.get("id"), Some(&serde_json::json!("42")));
-    assert!(repository::step_variables(&pool, job.id, 1).await?.is_empty());
+    assert!(
+        repository::step_variables(&pool, job.id, 1)
+            .await?
+            .is_empty()
+    );
     assert_eq!(steps[0].operation_id.as_deref(), Some("ffmpeg.encode"));
 
     assert!(matches!(
@@ -558,7 +562,8 @@ async fn priority_cancellation_batch_concurrency_schedule_and_stats() -> anyhow:
     assert!(repository::claim(&pool, worker.id).await?.is_none());
 
     // Passer la concurrence à 2 débloque la tâche suivante (third, priorité 5 > -10).
-    let updated_worker = repository::update_worker_settings(&pool, worker.id, 2, None, None, None).await?;
+    let updated_worker =
+        repository::update_worker_settings(&pool, worker.id, 2, None, None, None).await?;
     assert_eq!(updated_worker.max_concurrency, 2);
     let second_claim = repository::claim(&pool, worker.id)
         .await?

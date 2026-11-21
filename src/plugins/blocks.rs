@@ -408,7 +408,8 @@ mod tests {
             panic!("un champ worker doit être lu");
         };
         assert_eq!(field.kind, OwnedFieldKind::Worker);
-        let condition = serde_json::json!({"name": "group", "label": "Règles", "type": "condition"});
+        let condition =
+            serde_json::json!({"name": "group", "label": "Règles", "type": "condition"});
         let Some(field) = parse_ui_field(&condition) else {
             panic!("un champ condition doit être lu");
         };

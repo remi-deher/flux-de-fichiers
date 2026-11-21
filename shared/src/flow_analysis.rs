@@ -201,7 +201,10 @@ fn evaluate_node_condition(node: &FlowNode, probe_info: &Value) -> (bool, String
     let config: ConditionConfig = serde_json::from_value(node.config.clone()).unwrap_or_default();
     let result = evaluate_condition(&config, probe_info);
     let verdict = if result { "Vrai" } else { "Faux" };
-    (result, format!("{} → {verdict}", describe_condition(&config)))
+    (
+        result,
+        format!("{} → {verdict}", describe_condition(&config)),
+    )
 }
 
 fn find_entry_node<'a>(graph: &'a FlowGraph, catalog: &[OwnedBlockSpec]) -> Option<&'a FlowNode> {

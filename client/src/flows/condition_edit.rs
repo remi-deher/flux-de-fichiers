@@ -79,10 +79,7 @@ fn group_at_mut<'a>(
     }
 }
 
-fn rule_at_mut<'a>(
-    group: &'a mut ConditionGroup,
-    path: &[usize],
-) -> Option<&'a mut ConditionRule> {
+fn rule_at_mut<'a>(group: &'a mut ConditionGroup, path: &[usize]) -> Option<&'a mut ConditionRule> {
     let (&last, parent) = path.split_last()?;
     match group_at_mut(group, parent)?.rules.get_mut(last)? {
         ConditionNode::Rule(rule) => Some(rule),
@@ -227,8 +224,15 @@ mod tests {
     #[test]
     fn editing_a_single_rule_keeps_the_flat_format() {
         let mut config = flat();
-        assert!(apply_edit(&mut config, &[0], ConditionEdit::SetTarget("av1".into())));
-        assert_eq!(config, ConditionConfig::single("codec", ConditionOperator::Exact, "av1"));
+        assert!(apply_edit(
+            &mut config,
+            &[0],
+            ConditionEdit::SetTarget("av1".into())
+        ));
+        assert_eq!(
+            config,
+            ConditionConfig::single("codec", ConditionOperator::Exact, "av1")
+        );
         assert!(apply_edit(
             &mut config,
             &[0],
@@ -249,7 +253,11 @@ mod tests {
         assert_eq!(group.rules.len(), 2);
         assert_eq!(
             group.rules[0],
-            ConditionNode::Rule(ConditionRule::new("codec", ConditionOperator::Exact, "hevc"))
+            ConditionNode::Rule(ConditionRule::new(
+                "codec",
+                ConditionOperator::Exact,
+                "hevc"
+            ))
         );
         let patch = condition_patch(&config);
         assert_eq!(patch.get("property"), Some(&json!("")));
@@ -303,7 +311,11 @@ mod tests {
         assert!(apply_edit(&mut config, &[], ConditionEdit::ToggleNegate));
         assert!(config.group.as_ref().is_some_and(|group| group.negate));
         assert!(!apply_edit(&mut config, &[0], ConditionEdit::ToggleNegate));
-        assert!(!apply_edit(&mut config, &[], ConditionEdit::SetTarget("x".into())));
+        assert!(!apply_edit(
+            &mut config,
+            &[],
+            ConditionEdit::SetTarget("x".into())
+        ));
     }
 
     #[test]

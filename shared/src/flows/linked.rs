@@ -263,7 +263,11 @@ mod tests {
         assert_eq!(encoded[FAILURE_FLOW_KEY], "flow.echec");
         stored.set_failure_flow_id(Some(""));
         assert_eq!(stored.failure_flow_id(), None);
-        assert!(serde_json::to_value(&stored)?.get(FAILURE_FLOW_KEY).is_none());
+        assert!(
+            serde_json::to_value(&stored)?
+                .get(FAILURE_FLOW_KEY)
+                .is_none()
+        );
         Ok(())
     }
 
@@ -324,7 +328,10 @@ mod tests {
             ("f4", &["f5"]),
             ("f5", &[]),
         ]);
-        assert!(matches!(check("root", &too_deep), Err(LinkError::TooDeep(_))));
+        assert!(matches!(
+            check("root", &too_deep),
+            Err(LinkError::TooDeep(_))
+        ));
     }
 
     #[test]

@@ -137,7 +137,12 @@ impl ConditionGroup {
 
     /// Nombre de niveaux de groupes, celui-ci compris.
     pub fn depth(&self) -> usize {
-        1 + self.rules.iter().map(ConditionNode::depth).max().unwrap_or(0)
+        1 + self
+            .rules
+            .iter()
+            .map(ConditionNode::depth)
+            .max()
+            .unwrap_or(0)
     }
 
     fn describe(&self) -> String {

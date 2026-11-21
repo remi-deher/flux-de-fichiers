@@ -89,7 +89,9 @@ async fn library_job(
 }
 
 async fn claimed(pool: &sqlx::SqlitePool, worker: Uuid) -> anyhow::Result<Option<Uuid>> {
-    Ok(repository::claim(pool, worker).await?.map(|claim| claim.job_id))
+    Ok(repository::claim(pool, worker)
+        .await?
+        .map(|claim| claim.job_id))
 }
 
 #[tokio::test]
@@ -133,7 +135,11 @@ async fn gpu_flow_job_gets_gpu_resource_class() -> anyhow::Result<()> {
             .collect::<Vec<_>>(),
         vec![(cpu, JobResourceClass::Cpu), (gpu, JobResourceClass::Gpu)]
     );
-    assert!(repository::job_resource_classes(&pool, &[]).await?.is_empty());
+    assert!(
+        repository::job_resource_classes(&pool, &[])
+            .await?
+            .is_empty()
+    );
     Ok(())
 }
 
@@ -151,7 +157,9 @@ async fn job_inherits_library_default_priority() -> anyhow::Result<()> {
     .await?;
     assert_eq!(library.default_priority, 20);
     assert_eq!(
-        repository::get_library(&pool, library.id).await?.default_priority,
+        repository::get_library(&pool, library.id)
+            .await?
+            .default_priority,
         20
     );
     assert_eq!(library_job(&pool, library.id, 1, None).await?, 20);
@@ -215,7 +223,10 @@ async fn separate_slots_allow_cpu_while_gpu_runs() -> anyhow::Result<()> {
     let worker = repository::register(&pool, "split").await?;
     let updated =
         repository::update_worker_settings(&pool, worker.id, 1, Some(1), Some(1), None).await?;
-    assert_eq!((updated.max_cpu_jobs, updated.max_gpu_jobs), (Some(1), Some(1)));
+    assert_eq!(
+        (updated.max_cpu_jobs, updated.max_gpu_jobs),
+        (Some(1), Some(1))
+    );
     assert_eq!(updated.slots().total, 2);
     let gpu = job(&pool, GPU_FLOW, 1, Some(10)).await?;
     job(&pool, GPU_FLOW, 2, Some(5)).await?;
@@ -244,7 +255,12 @@ async fn gpu_slots_zero_skips_gpu_jobs_but_claims_cpu() -> anyhow::Result<()> {
 async fn update_worker_settings_validates_class_slots() -> anyhow::Result<()> {
     let pool = pool().await?;
     let worker = repository::register(&pool, "bounds").await?;
-    for (cpu, gpu) in [(Some(0), Some(0)), (Some(17), None), (None, Some(-1)), (Some(0), None)] {
+    for (cpu, gpu) in [
+        (Some(0), Some(0)),
+        (Some(17), None),
+        (None, Some(-1)),
+        (Some(0), None),
+    ] {
         assert!(matches!(
             repository::update_worker_settings(&pool, worker.id, 1, cpu, gpu, None).await,
             Err(AppError::Invalid)
@@ -259,7 +275,10 @@ async fn update_worker_settings_validates_class_slots() -> anyhow::Result<()> {
     let reset = repository::update_worker_settings(&pool, worker.id, 3, None, None, None).await?;
     assert_eq!((reset.max_cpu_jobs, reset.max_gpu_jobs), (None, None));
     assert_eq!(
-        repository::get_worker(&pool, worker.id).await?.slots().total,
+        repository::get_worker(&pool, worker.id)
+            .await?
+            .slots()
+            .total,
         3
     );
     Ok(())
@@ -313,13 +332,9 @@ async fn reprocess_of_an_older_gpu_version_keeps_the_gpu_class() -> anyhow::Resu
         .bind(previous.id)
         .execute(&pool)
         .await?;
-    let replay = repository::library_history::reprocess(
-        &pool,
-        library.id,
-        previous.id,
-        Some(GPU_VERSION),
-    )
-    .await?;
+    let replay =
+        repository::library_history::reprocess(&pool, library.id, previous.id, Some(GPU_VERSION))
+            .await?;
     assert_eq!(replay.flow_version, Some(GPU_VERSION));
     assert_eq!(
         repository::job_resource_class(&pool, replay.id).await?,

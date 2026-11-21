@@ -70,8 +70,14 @@ mod tests {
             serde_json::from_str::<JobResourceClass>("\"tpu\"")?,
             JobResourceClass::Cpu
         );
-        assert_eq!(JobResourceClass::parse_or_default("GPU"), JobResourceClass::Gpu);
-        assert_eq!(JobResourceClass::parse_or_default(""), JobResourceClass::Cpu);
+        assert_eq!(
+            JobResourceClass::parse_or_default("GPU"),
+            JobResourceClass::Gpu
+        );
+        assert_eq!(
+            JobResourceClass::parse_or_default(""),
+            JobResourceClass::Cpu
+        );
         Ok(())
     }
 }

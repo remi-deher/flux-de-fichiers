@@ -40,11 +40,7 @@ pub(super) fn flow_options(
             .unwrap_or_default()
     });
     Signal::derive(move || {
-        options_from(
-            empty,
-            &flows.get().unwrap_or_default(),
-            exclude.as_deref(),
-        )
+        options_from(empty, &flows.get().unwrap_or_default(), exclude.as_deref())
     })
 }
 

@@ -431,7 +431,10 @@ mod tests {
             extra: Map::new(),
         };
         assert_eq!(initial_script_mode(&cond_node), "library");
-        assert_eq!(initial_script_routing(&cond_node), ScriptRouting::Conditional);
+        assert_eq!(
+            initial_script_routing(&cond_node),
+            ScriptRouting::Conditional
+        );
         assert!(conditional_reply_help().contains("\"nextPort\":\"true\""));
     }
 }

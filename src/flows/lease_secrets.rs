@@ -282,7 +282,12 @@ mod tests {
 
         let worker_key = "fdf_01020304_0123456789abcdef0123456789abcdef0123456789abcdef";
         seal_claim_secrets_for_worker(&mut claim, worker_key)?;
-        assert!(!claim.linked_flows[0].flow.definition.contains("Bearer secret-token"));
+        assert!(
+            !claim.linked_flows[0]
+                .flow
+                .definition
+                .contains("Bearer secret-token")
+        );
         assert!(claim.plugin_configs.is_empty());
         assert!(claim.sealed_secrets.is_some());
         let wire_def = &claim
@@ -311,7 +316,12 @@ mod tests {
             .ok_or_else(|| anyhow::anyhow!("flow attendu"))?
             .definition;
         assert!(clear_def.contains("Bearer secret-token"));
-        assert!(claim.linked_flows[0].flow.definition.contains("Bearer secret-token"));
+        assert!(
+            claim.linked_flows[0]
+                .flow
+                .definition
+                .contains("Bearer secret-token")
+        );
         Ok(())
     }
 }

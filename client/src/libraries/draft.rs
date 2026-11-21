@@ -1,10 +1,10 @@
 //! Brouillon d'une bibliothèque en cours d'édition, sans DOM.
 
+use forgearr_shared::jobs::{JOB_PRIORITY_MAX, JOB_PRIORITY_MIN};
 use forgearr_shared::libraries::{
     LIBRARY_NAME_MAX, Library, LibraryAccess, LibraryOutputPolicy, LibraryWorkerPath, LibraryWrite,
     MAX_SCAN_INTERVAL_MINUTES, has_unshared_remote_sources, suggested_library_name_from_path,
 };
-use forgearr_shared::jobs::{JOB_PRIORITY_MAX, JOB_PRIORITY_MIN};
 use forgearr_shared::workers::Worker;
 use uuid::Uuid;
 

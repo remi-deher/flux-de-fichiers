@@ -470,15 +470,18 @@ fn render_string_template(
     vars: &HashMap<String, Value>,
     ctx: &FlowContext,
 ) -> Result<String, String> {
-    Ok(render_template_with(template, &mut |token: &TemplateToken<'_>| {
-        let resolved = resolve_exact_value_token(token.expr, node_config, settings, vars, ctx);
-        let piece = render_piece(resolved.as_ref(), token.default);
-        if token.expr.starts_with("setting.") && token.trailing.starts_with('/') {
-            piece.trim_end_matches('/').to_owned()
-        } else {
-            piece
-        }
-    }))
+    Ok(render_template_with(
+        template,
+        &mut |token: &TemplateToken<'_>| {
+            let resolved = resolve_exact_value_token(token.expr, node_config, settings, vars, ctx);
+            let piece = render_piece(resolved.as_ref(), token.default);
+            if token.expr.starts_with("setting.") && token.trailing.starts_with('/') {
+                piece.trim_end_matches('/').to_owned()
+            } else {
+                piece
+            }
+        },
+    ))
 }
 
 #[cfg(test)]

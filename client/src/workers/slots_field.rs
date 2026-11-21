@@ -17,7 +17,10 @@ pub fn capacity_label(worker: &Worker) -> String {
     if worker.max_cpu_jobs.is_none() && worker.max_gpu_jobs.is_none() {
         format!("{} tâche(s), CPU ou GPU", slots.total)
     } else {
-        format!("{} CPU · {} GPU ({} au total)", slots.cpu, slots.gpu, slots.total)
+        format!(
+            "{} CPU · {} GPU ({} au total)",
+            slots.cpu, slots.gpu, slots.total
+        )
     }
 }
 
@@ -74,7 +77,13 @@ mod tests {
 
     #[test]
     fn capacity_label_follows_the_slot_mode() {
-        assert_eq!(capacity_label(&worker(None, None)), "2 tâche(s), CPU ou GPU");
-        assert_eq!(capacity_label(&worker(Some(2), Some(1))), "2 CPU · 1 GPU (3 au total)");
+        assert_eq!(
+            capacity_label(&worker(None, None)),
+            "2 tâche(s), CPU ou GPU"
+        );
+        assert_eq!(
+            capacity_label(&worker(Some(2), Some(1))),
+            "2 CPU · 1 GPU (3 au total)"
+        );
     }
 }

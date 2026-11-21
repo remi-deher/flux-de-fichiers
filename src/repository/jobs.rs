@@ -678,8 +678,8 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
     }
 
     let running = super::resource_slots::running_jobs(&mut tx, worker).await?;
-    let admitted = worker_slots(max_concurrency, max_cpu_jobs, max_gpu_jobs)
-        .admitted_classes(running);
+    let admitted =
+        worker_slots(max_concurrency, max_cpu_jobs, max_gpu_jobs).admitted_classes(running);
     if admitted.is_empty() {
         tx.commit().await?;
         return Ok(None);

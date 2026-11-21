@@ -75,7 +75,14 @@ async fn run(
     resume_node_id: Option<&str>,
 ) -> Result<FlowExecutionOutcome, String> {
     let registry = placement_registry();
-    run_engine(&registry, flow, capabilities, resume_node_id, FlowRunInfo::default()).await
+    run_engine(
+        &registry,
+        flow,
+        capabilities,
+        resume_node_id,
+        FlowRunInfo::default(),
+    )
+    .await
 }
 
 /// Exécute `flow` avec de faux outils (sonde, MP4Box, mkvpropedit) et l'identité donnée.

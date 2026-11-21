@@ -26,7 +26,9 @@ fn text(value: Option<&str>) -> Value {
 }
 
 fn os_text(value: Option<&OsStr>) -> Value {
-    value.map_or(Value::Null, |part| Value::String(part.to_string_lossy().into_owned()))
+    value.map_or(Value::Null, |part| {
+        Value::String(part.to_string_lossy().into_owned())
+    })
 }
 
 /// Renseigne les variables intrinsèques d'identité (`job.id`, `library.name`…).
@@ -50,7 +52,10 @@ pub fn set_file_variables(vars: &mut FlowVariables, file: &Path) {
     vars.set_intrinsic(IntrinsicVariable::FileName, os_text(file.file_name()));
     vars.set_intrinsic(IntrinsicVariable::FileStem, os_text(file.file_stem()));
     vars.set_intrinsic(IntrinsicVariable::FileExt, os_text(file.extension()));
-    vars.set_intrinsic(IntrinsicVariable::FileDir, os_text(file.parent().map(Path::as_os_str)));
+    vars.set_intrinsic(
+        IntrinsicVariable::FileDir,
+        os_text(file.parent().map(Path::as_os_str)),
+    );
     let size = std::fs::metadata(file).map_or(Value::Null, |meta| Value::from(meta.len()));
     vars.set_intrinsic(IntrinsicVariable::FileSize, size);
 }
@@ -101,7 +106,9 @@ fn render_flow_variables_only(value: &Value, vars: &FlowVariables) -> Value {
             {
                 return resolved.clone();
             }
-            Value::String(render_template_with(text, &mut |token: &TemplateToken<'_>| {
+            Value::String(render_template_with(text, &mut |token: &TemplateToken<
+                '_,
+            >| {
                 if FlowVariables::is_variable_property(token.expr) {
                     render_piece(vars.lookup(token.expr), token.default)
                 } else {
@@ -168,7 +175,10 @@ mod tests {
         assert_eq!(vars.lookup("error.code"), None);
         set_failure_variables(&mut vars, "operation_failed", "encodage interrompu");
         assert_eq!(vars.lookup("error.code"), Some(&json!("operation_failed")));
-        assert_eq!(vars.lookup("error.message"), Some(&json!("encodage interrompu")));
+        assert_eq!(
+            vars.lookup("error.message"),
+            Some(&json!("encodage interrompu"))
+        );
     }
 
     #[test]

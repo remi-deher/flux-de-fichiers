@@ -39,7 +39,11 @@ fn node_condition_error(node: &FlowNode) -> Option<String> {
 
 /// Erreurs de condition d'un graphe (profondeur, nombre de règles, expressions régulières).
 pub fn graph_condition_errors(graph: &FlowGraph) -> Vec<String> {
-    graph.nodes.iter().filter_map(node_condition_error).collect()
+    graph
+        .nodes
+        .iter()
+        .filter_map(node_condition_error)
+        .collect()
 }
 
 /// Erreurs de condition d'une définition JSON (une définition illisible relève d'autres contrôles).

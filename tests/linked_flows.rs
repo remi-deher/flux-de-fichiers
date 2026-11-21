@@ -170,11 +170,7 @@ fn authorized(method: &str, uri: &str, body: &Value) -> anyhow::Result<Request<B
         .body(Body::from(serde_json::to_vec(body)?))?)
 }
 
-async fn put_flow(
-    app: &axum::Router,
-    id: &str,
-    definition: &Value,
-) -> anyhow::Result<StatusCode> {
+async fn put_flow(app: &axum::Router, id: &str, definition: &Value) -> anyhow::Result<StatusCode> {
     let flow = json!({
         "name": id,
         "description": null,
@@ -229,12 +225,18 @@ async fn the_global_failure_flow_is_read_and_written_through_the_api() -> anyhow
     let (app, _pool) = setup().await?;
     let uri = "/api/v1/flows/failure-default";
     let unknown = json!({"flowId": "flow.absent"});
-    let response = app.clone().oneshot(authorized("PUT", uri, &unknown)?).await?;
+    let response = app
+        .clone()
+        .oneshot(authorized("PUT", uri, &unknown)?)
+        .await?;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     expect_put(&app, FAILURE_FLOW, &plain("échec"), StatusCode::OK).await?;
     let chosen = json!({"flowId": FAILURE_FLOW});
-    let response = app.clone().oneshot(authorized("PUT", uri, &chosen)?).await?;
+    let response = app
+        .clone()
+        .oneshot(authorized("PUT", uri, &chosen)?)
+        .await?;
     assert_eq!(response.status(), StatusCode::OK);
 
     let request = Request::builder()

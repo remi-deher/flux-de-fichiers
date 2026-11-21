@@ -39,8 +39,14 @@ fn nested(levels: usize) -> ConditionGroup {
 #[test]
 fn evaluates_structured_array_predicates_and_generic_documents() {
     let doc = doc();
-    assert!(evaluate_condition(&rule("tracks[type=video].codec", "eq", "hevc"), &doc));
-    assert!(evaluate_condition(&rule("tracks[type=video].codec", "neq", "h264"), &doc));
+    assert!(evaluate_condition(
+        &rule("tracks[type=video].codec", "eq", "hevc"),
+        &doc
+    ));
+    assert!(evaluate_condition(
+        &rule("tracks[type=video].codec", "neq", "h264"),
+        &doc
+    ));
     assert!(evaluate_condition(
         &rule("tracks[type=audio].properties.language", "contains", "fre"),
         &doc
@@ -48,35 +54,65 @@ fn evaluates_structured_array_predicates_and_generic_documents() {
     assert!(evaluate_condition(&rule("format", "exact", "epub"), &doc));
     assert!(evaluate_condition(&rule("pages", "gt", "200"), &doc));
     assert!(evaluate_condition(&rule("any", "eq", "aac"), &doc));
-    assert!(!evaluate_condition(&rule("missing.path", "eq", "hevc"), &doc));
+    assert!(!evaluate_condition(
+        &rule("missing.path", "eq", "hevc"),
+        &doc
+    ));
 }
 
 #[test]
 fn legacy_eq_still_means_contains() {
-    assert_eq!(ConditionOperator::from_loose("eq"), ConditionOperator::Contains);
-    assert!(evaluate_condition(&rule("tracks[type=video].codec", "eq", "hev"), &doc()));
+    assert_eq!(
+        ConditionOperator::from_loose("eq"),
+        ConditionOperator::Contains
+    );
+    assert!(evaluate_condition(
+        &rule("tracks[type=video].codec", "eq", "hev"),
+        &doc()
+    ));
 }
 
 #[test]
 fn neq_alias_maps_to_not_contains() {
-    assert_eq!(ConditionOperator::from_loose("neq"), ConditionOperator::NotContains);
-    assert!(!evaluate_condition(&rule("tracks[type=video].codec", "neq", "hev"), &doc()));
+    assert_eq!(
+        ConditionOperator::from_loose("neq"),
+        ConditionOperator::NotContains
+    );
+    assert!(!evaluate_condition(
+        &rule("tracks[type=video].codec", "neq", "hev"),
+        &doc()
+    ));
 }
 
 /// Non-régression : avant les opérateurs typés, ces chaînes inconnues signifiaient « contient ».
 #[test]
 fn legacy_unknown_operators_keep_contains_meaning() {
     for legacy in ["ne", "equals", "match", "ge", "le"] {
-        assert_eq!(ConditionOperator::from_loose(legacy), ConditionOperator::Contains);
+        assert_eq!(
+            ConditionOperator::from_loose(legacy),
+            ConditionOperator::Contains
+        );
     }
-    assert!(evaluate_condition(&rule("tracks[type=video].codec", "ne", "hevc"), &doc()));
+    assert!(evaluate_condition(
+        &rule("tracks[type=video].codec", "ne", "hevc"),
+        &doc()
+    ));
 }
 
 #[test]
 fn unknown_or_uppercase_operator_falls_back() {
-    assert_eq!(rule("format", "EQ", "ep").rule.operator, ConditionOperator::Contains);
-    assert_eq!(rule("format", "foo", "ep").rule.operator, ConditionOperator::Contains);
-    assert_eq!(rule("format", " GTE ", "1").rule.operator, ConditionOperator::Gte);
+    assert_eq!(
+        rule("format", "EQ", "ep").rule.operator,
+        ConditionOperator::Contains
+    );
+    assert_eq!(
+        rule("format", "foo", "ep").rule.operator,
+        ConditionOperator::Contains
+    );
+    assert_eq!(
+        rule("format", " GTE ", "1").rule.operator,
+        ConditionOperator::Gte
+    );
     let numeric_operator = config_from(json!({"property": "format", "operator": 3}));
     assert_eq!(numeric_operator.rule.operator, ConditionOperator::Contains);
 }
@@ -84,11 +120,17 @@ fn unknown_or_uppercase_operator_falls_back() {
 #[test]
 fn serializes_canonical_names() {
     for operator in ConditionOperator::ALL {
-        assert_eq!(serde_json::to_value(operator).ok(), Some(json!(operator.as_str())));
+        assert_eq!(
+            serde_json::to_value(operator).ok(),
+            Some(json!(operator.as_str()))
+        );
         assert_eq!(ConditionOperator::from_loose(operator.as_str()), operator);
     }
     for combinator in ConditionCombinator::ALL {
-        assert_eq!(serde_json::to_value(combinator).ok(), Some(json!(combinator.as_str())));
+        assert_eq!(
+            serde_json::to_value(combinator).ok(),
+            Some(json!(combinator.as_str()))
+        );
     }
 }
 
@@ -97,7 +139,10 @@ fn flat_legacy_config_deserializes_without_group() {
     let config = config_from(json!({
         "property": "format", "operator": "eq", "target": "epub", "label": "autre clé"
     }));
-    assert_eq!(config, ConditionConfig::single("format", ConditionOperator::Contains, "epub"));
+    assert_eq!(
+        config,
+        ConditionConfig::single("format", ConditionOperator::Contains, "epub")
+    );
     let serialized = serde_json::to_value(&config).unwrap_or_default();
     assert!(serialized.get("group").is_none());
     assert_eq!(config_from(json!({})), ConditionConfig::default());
@@ -177,17 +222,26 @@ fn negated_group() {
 #[test]
 fn regex_operator_case_insensitive_and_invalid_is_false() {
     let doc = doc();
-    assert!(evaluate_condition(&rule("tracks[type=video].codec", "regex", "^hev"), &doc));
+    assert!(evaluate_condition(
+        &rule("tracks[type=video].codec", "regex", "^hev"),
+        &doc
+    ));
     assert!(evaluate_condition(&rule("format", "regex", "^E.UB$"), &doc));
     let invalid = rule("format", "regex", "(");
     assert!(!evaluate_condition(&invalid, &doc));
-    assert!(matches!(validate_condition(&invalid), Err(ConditionError::InvalidRegex(_))));
+    assert!(matches!(
+        validate_condition(&invalid),
+        Err(ConditionError::InvalidRegex(_))
+    ));
 }
 
 #[test]
 fn in_operator_splits_list() {
     let doc = doc();
-    assert!(evaluate_condition(&rule("format", "in", "pdf, EPUB ,mobi"), &doc));
+    assert!(evaluate_condition(
+        &rule("format", "in", "pdf, EPUB ,mobi"),
+        &doc
+    ));
     assert!(!evaluate_condition(&rule("format", "in", "pdf,mobi"), &doc));
     assert!(!evaluate_condition(&rule("format", "in", "ep"), &doc));
 }
@@ -195,8 +249,14 @@ fn in_operator_splits_list() {
 #[test]
 fn not_exact() {
     let doc = doc();
-    assert!(evaluate_condition(&rule("format", "not_exact", "epu"), &doc));
-    assert!(!evaluate_condition(&rule("format", "not_exact", "epub"), &doc));
+    assert!(evaluate_condition(
+        &rule("format", "not_exact", "epu"),
+        &doc
+    ));
+    assert!(!evaluate_condition(
+        &rule("format", "not_exact", "epub"),
+        &doc
+    ));
 }
 
 #[test]
@@ -231,7 +291,10 @@ fn round_trip_config_with_group() {
     inner.negate = true;
     let config = ConditionConfig::grouped(ConditionGroup::new(
         ConditionCombinator::All,
-        vec![leaf("format", ConditionOperator::Regex, "^e"), ConditionNode::Group(inner)],
+        vec![
+            leaf("format", ConditionOperator::Regex, "^e"),
+            ConditionNode::Group(inner),
+        ],
     ));
     let value = serde_json::to_value(&config).unwrap_or_default();
     assert_eq!(config_from(value), config);
@@ -266,13 +329,19 @@ fn empty_group_falls_back_to_flat_rule() {
 fn describe_rule_without_target() {
     let config = ConditionConfig::single("", ConditionOperator::Exists, "ignoré");
     assert_eq!(describe_condition(&config), "any ∃");
-    assert!(ConditionOperator::ALL.iter().all(|op| !op.label().is_empty()));
+    assert!(
+        ConditionOperator::ALL
+            .iter()
+            .all(|op| !op.label().is_empty())
+    );
 }
 
 #[test]
 fn reads_flow_variables_and_falls_back_to_the_probe() {
     let mut variables = FlowVariables::default();
-    variables.set_custom("codec", json!("hevc")).unwrap_or_default();
+    variables
+        .set_custom("codec", json!("hevc"))
+        .unwrap_or_default();
     variables.set_intrinsic(crate::flows::IntrinsicVariable::FileExt, json!("mkv"));
     let probe = json!({"format": {"format_name": "matroska"}});
     let check =

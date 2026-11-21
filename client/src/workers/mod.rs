@@ -25,8 +25,8 @@ use forgearr_shared::workers::{
 };
 use leptos::prelude::*;
 use library_modes::{WorkerLibrariesSection, worker_libraries};
-use slots_field::{ClassSlotsField, capacity_label};
 use serde::Serialize;
+use slots_field::{ClassSlotsField, capacity_label};
 use uuid::Uuid;
 
 const WORKERS_PATH: &str = "/api/v1/workers";

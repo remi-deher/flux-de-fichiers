@@ -3,9 +3,9 @@
 pub mod binary_runner;
 mod block;
 mod condition;
-mod deferred_variables;
 pub mod contract;
 mod custom_args;
+mod deferred_variables;
 pub mod header_secrets;
 pub mod http_runner;
 pub mod lease_secrets;
@@ -13,8 +13,8 @@ mod node_references;
 pub mod placement;
 pub(crate) mod publication;
 mod script_branch;
-mod sub_flow;
 pub mod script_runner;
+mod sub_flow;
 pub mod substitution;
 mod variables;
 mod variables_step;
@@ -437,12 +437,7 @@ impl<'a> FlowEngine<'a> {
                             Ok(port) => next_port = Some(port.to_owned()),
                             Err(message) => {
                                 return Err(operation_failure(
-                                    steps,
-                                    step_index,
-                                    &node,
-                                    &op.id,
-                                    message,
-                                    None,
+                                    steps, step_index, &node, &op.id, message, None,
                                 ));
                             }
                         }

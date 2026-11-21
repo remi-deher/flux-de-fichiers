@@ -57,10 +57,7 @@ fn last_node(outcome: &FlowExecutionOutcome) -> Option<&str> {
     outcome.steps.last().map(|step| step.node_id.as_str())
 }
 
-async fn run(
-    flow: &FlowRecord,
-    run_info: FlowRunInfo<'_>,
-) -> Result<FlowExecutionOutcome, String> {
+async fn run(flow: &FlowRecord, run_info: FlowRunInfo<'_>) -> Result<FlowExecutionOutcome, String> {
     run_engine(&variables_registry(), flow, None, None, run_info).await
 }
 

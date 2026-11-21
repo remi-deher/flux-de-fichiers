@@ -138,7 +138,10 @@ mod tests {
         });
         let report: RelayReport = serde_json::from_value(value.clone())?;
         assert!(!report.warning);
-        assert!(report.request.variables.is_empty(), "variables absentes des anciens workers");
+        assert!(
+            report.request.variables.is_empty(),
+            "variables absentes des anciens workers"
+        );
         value["warning"] = serde_json::json!(true);
         let report: RelayReport = serde_json::from_value(value)?;
         assert!(report.warning);

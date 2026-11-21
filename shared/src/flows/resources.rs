@@ -48,21 +48,41 @@ mod tests {
 
     #[test]
     fn empty_graph_is_cpu() {
-        assert_eq!(flow_resource_class(&FlowGraph::default()), JobResourceClass::Cpu);
+        assert_eq!(
+            flow_resource_class(&FlowGraph::default()),
+            JobResourceClass::Cpu
+        );
     }
 
     #[test]
     fn hardware_acceleration_is_gpu() -> Result<(), serde_json::Error> {
-        assert_eq!(flow_resource_class(&graph_with(json!("cpu"))?), JobResourceClass::Cpu);
-        assert_eq!(flow_resource_class(&graph_with(json!("nvenc"))?), JobResourceClass::Gpu);
-        assert_eq!(flow_resource_class(&graph_with(json!("vaapi"))?), JobResourceClass::Gpu);
+        assert_eq!(
+            flow_resource_class(&graph_with(json!("cpu"))?),
+            JobResourceClass::Cpu
+        );
+        assert_eq!(
+            flow_resource_class(&graph_with(json!("nvenc"))?),
+            JobResourceClass::Gpu
+        );
+        assert_eq!(
+            flow_resource_class(&graph_with(json!("vaapi"))?),
+            JobResourceClass::Gpu
+        );
         Ok(())
     }
 
     #[test]
     fn unknown_or_templated_values_are_cpu() -> Result<(), serde_json::Error> {
-        for value in [json!("quantum"), json!("{{custom.accel}}"), json!(42), json!(null)] {
-            assert_eq!(flow_resource_class(&graph_with(value)?), JobResourceClass::Cpu);
+        for value in [
+            json!("quantum"),
+            json!("{{custom.accel}}"),
+            json!(42),
+            json!(null),
+        ] {
+            assert_eq!(
+                flow_resource_class(&graph_with(value)?),
+                JobResourceClass::Cpu
+            );
         }
         Ok(())
     }

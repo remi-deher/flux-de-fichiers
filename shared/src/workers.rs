@@ -354,7 +354,10 @@ mod tests {
         assert!(json.get("max_cpu_jobs").is_none());
         let request: UpdateWorkerSettingsRequest =
             serde_json::from_str(r#"{"maxConcurrency":1,"maxGpuJobs":1}"#)?;
-        assert_eq!((request.max_cpu_jobs, request.max_gpu_jobs), (None, Some(1)));
+        assert_eq!(
+            (request.max_cpu_jobs, request.max_gpu_jobs),
+            (None, Some(1))
+        );
         Ok(())
     }
 }

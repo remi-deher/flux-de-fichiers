@@ -821,7 +821,12 @@ pub(crate) async fn populate_claim_contracts(
     }
     // Flux principal (ou opération par défaut) puis flux liés figés (ADR 0026).
     let claim_flows: Vec<Option<FlowRecord>> = std::iter::once(claim.frozen_flow.clone())
-        .chain(claim.linked_flows.iter().map(|linked| Some(linked.flow.clone())))
+        .chain(
+            claim
+                .linked_flows
+                .iter()
+                .map(|linked| Some(linked.flow.clone())),
+        )
         .collect();
     let mut tool_refs: Vec<crate::flows::ToolRef> = Vec::new();
     for flow in &claim_flows {

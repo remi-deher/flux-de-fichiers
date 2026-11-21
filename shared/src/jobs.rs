@@ -393,10 +393,12 @@ mod tests {
 
     #[test]
     fn new_job_priority_is_optional_and_keeps_explicit_values() -> Result<(), serde_json::Error> {
-        let inherited: NewJob = serde_json::from_str(r#"{"source_name":"a.mkv","target_worker_id":null}"#)?;
+        let inherited: NewJob =
+            serde_json::from_str(r#"{"source_name":"a.mkv","target_worker_id":null}"#)?;
         assert_eq!(inherited.priority, None);
-        let explicit: NewJob =
-            serde_json::from_str(r#"{"source_name":"a.mkv","target_worker_id":null,"priority":5}"#)?;
+        let explicit: NewJob = serde_json::from_str(
+            r#"{"source_name":"a.mkv","target_worker_id":null,"priority":5}"#,
+        )?;
         assert_eq!(explicit.priority, Some(5));
         assert_eq!(default_library_job_priority(), LIBRARY_DEFAULT_JOB_PRIORITY);
         Ok(())

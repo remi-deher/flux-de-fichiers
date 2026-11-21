@@ -199,8 +199,7 @@ pub async fn placement(
             PlacementStatus::OutsideSchedule
         } else {
             let running =
-                super::resource_slots::running_jobs(&mut *pool.acquire().await?, worker.id)
-                    .await?;
+                super::resource_slots::running_jobs(&mut *pool.acquire().await?, worker.id).await?;
             if !worker.slots().admits(resource_class, running) {
                 PlacementStatus::AtCapacity
             } else {

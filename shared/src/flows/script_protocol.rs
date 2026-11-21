@@ -17,10 +17,16 @@ pub const SCRIPT_INPUT_FIELDS: [ProtocolField; 10] = [
     ("operationId", "contrat d'opération exécuté"),
     ("workingFile", "fichier de travail courant"),
     ("sourceFile", "fichier d'origine de la tâche"),
-    ("workDir", "dossier de travail (seul dossier accepté en sortie)"),
+    (
+        "workDir",
+        "dossier de travail (seul dossier accepté en sortie)",
+    ),
     ("mediaInfo", "métadonnées de la sonde"),
     ("config", "réglages du bloc, modèles {$…} déjà rendus"),
-    ("variables", "variables du flux : file.*, job.*, library.*, worker.*, vars.*"),
+    (
+        "variables",
+        "variables du flux : file.*, job.*, library.*, worker.*, vars.*",
+    ),
 ];
 
 /// Champs reconnus dans la réponse JSON lue sur `stdout` (tous facultatifs).
@@ -31,7 +37,10 @@ pub const SCRIPT_OUTPUT_FIELDS: [ProtocolField; 7] = [
     ("workingFile", "nouveau fichier de travail, dans workDir"),
     ("mediaInfo", "métadonnées fusionnées dans la sonde"),
     ("stopPipeline", "arrête le flux après ce bloc"),
-    ("variables", "objet plat nom → texte, nombre ou booléen, fusionné dans vars.*"),
+    (
+        "variables",
+        "objet plat nom → texte, nombre ou booléen, fusionné dans vars.*",
+    ),
 ];
 
 #[cfg(test)]

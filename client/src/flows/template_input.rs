@@ -31,7 +31,11 @@ pub fn variable_suggestions(graph: &FlowGraph) -> Vec<VariableSuggestion> {
         })
         .collect();
     for node in &graph.nodes {
-        let name = node.config.get("name").and_then(Value::as_str).unwrap_or_default();
+        let name = node
+            .config
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         let expr = format!("{CUSTOM_PREFIX}{}", name.trim());
         if node.kind.as_str().ends_with(SET_VARIABLE_BLOCK)
             && is_known_expression(&expr)
@@ -70,7 +74,12 @@ pub fn TemplateInput(
             .to_owned()
     };
     let write = move |text: String| {
-        set_field(editor, &node_id.read_value(), &field_name.get_value(), Value::String(text));
+        set_field(
+            editor,
+            &node_id.read_value(),
+            &field_name.get_value(),
+            Value::String(text),
+        );
     };
     let suggestions = Memo::new(move |_| editor.graph.with(variable_suggestions));
     let unknown = move || unknown_tokens(&value());
@@ -159,6 +168,9 @@ mod tests {
     #[test]
     fn flags_unknown_tokens_only() {
         assert!(unknown_tokens("{$file.stem}-{$vars.x}{$setting.url}{{$brut}").is_empty());
-        assert_eq!(unknown_tokens("{$fichier.nom}"), vec!["fichier.nom".to_owned()]);
+        assert_eq!(
+            unknown_tokens("{$fichier.nom}"),
+            vec!["fichier.nom".to_owned()]
+        );
     }
 }

@@ -47,8 +47,14 @@ mod tests {
             resolve_script_port(single, ScriptOutcomeStatus::Ok, Some("alt".into())),
             Ok(Some("alt".into()))
         );
-        assert_eq!(resolve_script_port(single, ScriptOutcomeStatus::Ok, None), Ok(None));
-        assert_eq!(resolve_script_port(single, ScriptOutcomeStatus::Skip, None), Ok(None));
+        assert_eq!(
+            resolve_script_port(single, ScriptOutcomeStatus::Ok, None),
+            Ok(None)
+        );
+        assert_eq!(
+            resolve_script_port(single, ScriptOutcomeStatus::Skip, None),
+            Ok(None)
+        );
     }
 
     #[test]

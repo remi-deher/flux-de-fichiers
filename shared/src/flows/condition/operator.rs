@@ -127,4 +127,3 @@ pub(super) fn lenient<'de, D: Deserializer<'de>>(
         _ => ConditionOperator::default(),
     })
 }
-

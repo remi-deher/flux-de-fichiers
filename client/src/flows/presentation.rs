@@ -332,7 +332,11 @@ pub fn node_chips(node: &FlowNode, spec: Option<&OwnedBlockSpec>) -> Vec<NodeChi
     if let Some(group) = condition_group(obj) {
         return vec![NodeChip {
             key: None,
-            value: format!("{} règles ({})", group.rules.len(), group.combinator.label()),
+            value: format!(
+                "{} règles ({})",
+                group.rules.len(),
+                group.combinator.label()
+            ),
         }];
     }
     if let Some((property, op, target)) = condition_parts(obj, spec) {

@@ -24,7 +24,10 @@ fn sub_flow_registry() -> OperationRegistry {
         "status": "validated",
         "runtime": { "kind": "primitive", "primitive": "sub-flow" }
     }));
-    assert!(registered.is_ok(), "contrat de test valide : {registered:?}");
+    assert!(
+        registered.is_ok(),
+        "contrat de test valide : {registered:?}"
+    );
     reg.register_block_mapping("sub-flow", SUB_FLOW_OPERATION);
     reg
 }
@@ -99,10 +102,7 @@ fn forwarder(id: &str, target: &str) -> FlowRecord {
     )
 }
 
-async fn run_with(
-    flow: &FlowRecord,
-    links: &[LinkedFlow],
-) -> Result<FlowExecutionOutcome, String> {
+async fn run_with(flow: &FlowRecord, links: &[LinkedFlow]) -> Result<FlowExecutionOutcome, String> {
     let info = FlowRunInfo {
         linked_flows: links,
         ..FlowRunInfo::default()
@@ -132,7 +132,10 @@ async fn a_sub_flow_that_was_not_frozen_fails_the_step() {
 #[tokio::test]
 async fn a_recursive_call_is_refused_at_run_time() {
     // `flow` appelle `flow.sub`, qui rappelle `flow` : refusé même si les deux sont figés.
-    let sub = linked(vec![forwarder("flow.sub", "flow"), forwarder("flow", "flow.sub")]);
+    let sub = linked(vec![
+        forwarder("flow.sub", "flow"),
+        forwarder("flow", "flow.sub"),
+    ]);
     let error = run_with(&caller("flow.sub"), &sub).await;
     assert!(matches!(error, Err(message) if message.contains("récursif")));
 }

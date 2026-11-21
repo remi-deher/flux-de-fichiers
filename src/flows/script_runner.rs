@@ -812,9 +812,7 @@ printf '{"status":"ok","message":"vu %s","variables":{"cible":"av1"}}' "$seen"
         .await?;
         match outcome {
             ScriptStepOutcome::Succeeded {
-                variables,
-                message,
-                ..
+                variables, message, ..
             } => {
                 assert_eq!(message.as_deref(), Some("vu 1"));
                 let returned = variables.ok_or_else(|| anyhow::anyhow!("variables absentes"))?;

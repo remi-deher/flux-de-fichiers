@@ -48,10 +48,14 @@ pub(super) fn enter_sub_flow(
         return Err(format!("appel récursif du sous-flux « {target} » refusé"));
     }
     if frames.len() >= MAX_SUB_FLOW_DEPTH {
-        return Err(format!("profondeur maximale de sous-flux atteinte ({MAX_SUB_FLOW_DEPTH})"));
+        return Err(format!(
+            "profondeur maximale de sous-flux atteinte ({MAX_SUB_FLOW_DEPTH})"
+        ));
     }
     let Some(record) = find_linked(linked, LinkedFlowRole::SubFlow, target) else {
-        return Err(format!("le sous-flux « {target} » n'a pas été figé avec la tâche"));
+        return Err(format!(
+            "le sous-flux « {target} » n'a pas été figé avec la tâche"
+        ));
     };
     let graph: FlowGraph = serde_json::from_str(&record.definition)
         .map_err(|err| format!("définition du sous-flux « {target} » invalide : {err}"))?;

@@ -82,7 +82,10 @@ mod tests {
 
     #[test]
     fn routing_reads_config_with_fallback() {
-        assert_eq!(ScriptRouting::from_config(&json!({})), ScriptRouting::Single);
+        assert_eq!(
+            ScriptRouting::from_config(&json!({})),
+            ScriptRouting::Single
+        );
         assert_eq!(
             ScriptRouting::from_config(&json!({"routing": "single"})),
             ScriptRouting::Single
@@ -95,7 +98,10 @@ mod tests {
             ScriptRouting::from_config(&json!({"routing": "inconnu"})),
             ScriptRouting::Single
         );
-        assert_eq!(ScriptRouting::from_config(&json!({"routing": 3})), ScriptRouting::Single);
+        assert_eq!(
+            ScriptRouting::from_config(&json!({"routing": 3})),
+            ScriptRouting::Single
+        );
         assert_eq!(ScriptRouting::parse("autre"), ScriptRouting::Single);
     }
 
@@ -105,7 +111,10 @@ mod tests {
             assert_eq!(ScriptRouting::parse(routing.as_str()), routing);
             let encoded = serde_json::to_value(routing).unwrap();
             assert_eq!(encoded, json!(routing.as_str()));
-            assert_eq!(serde_json::from_value::<ScriptRouting>(encoded).unwrap(), routing);
+            assert_eq!(
+                serde_json::from_value::<ScriptRouting>(encoded).unwrap(),
+                routing
+            );
         }
     }
 

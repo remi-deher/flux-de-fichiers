@@ -5,9 +5,9 @@ mod flows;
 mod identity;
 mod jobs;
 mod libraries;
-pub(crate) mod linked_flows;
 mod library_access;
 pub(crate) mod library_history;
+pub(crate) mod linked_flows;
 mod mcp_audit;
 mod password_reset;
 mod plugins;
@@ -48,15 +48,13 @@ pub use jobs::{
     retry_job, save_job_steps, save_job_steps_for_lease, succeeded_output_name,
     touch_worker_telemetry, update_job_priority, update_worker_settings, worker_exists,
 };
-pub use linked_flows::{
-    DEFAULT_FAILURE_FLOW_KEY, default_failure_flow, frozen_linked_flows, set_default_failure_flow,
-};
-pub use step_context::{library_name, step_variables, worker_name};
-pub use resource_slots::{job_resource_class, job_resource_classes};
 pub use libraries::{
     delete_library, due_scheduled_libraries, get_library, insert_library,
     library_worker_local_path, library_worker_local_path_for_job, list_libraries,
     prepare_transfer_workers, touch_library_scanned, update_library,
+};
+pub use linked_flows::{
+    DEFAULT_FAILURE_FLOW_KEY, default_failure_flow, frozen_linked_flows, set_default_failure_flow,
 };
 pub use mcp_audit::{
     DEFAULT_AUDIT_LIMIT, MAX_AUDIT_LIMIT, NewMcpAuditEntry, list_mcp_audit, record_mcp_audit,
@@ -71,6 +69,7 @@ pub use plugins::{
     toggle_plugin_repository, touch_plugin_repository_sync, verify_or_pin_release,
 };
 pub use relays::{RelayOutcome, list_relays, relay_job};
+pub use resource_slots::{job_resource_class, job_resource_classes};
 pub use source_publication_journal::{
     PendingSourcePublication, begin_local_publication, begin_pulled_publication,
     begin_source_publication, clear_source_publication, mark_source_publication_uncertain,
@@ -81,3 +80,4 @@ pub use source_tickets::{
     redeem_ticket, reissue_source_ticket, set_serves_central, set_transfer_url, source_holders,
     valid_transfer_url, writable_source_holders,
 };
+pub use step_context::{library_name, step_variables, worker_name};

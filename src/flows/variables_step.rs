@@ -56,7 +56,8 @@ pub fn apply_set_variable(config: &Value, vars: &mut FlowVariables) -> Result<St
         .map_err(|_| "configuration invalide du bloc « Définir une variable »".to_owned())?;
     let name = config.name.trim();
     let value = convert(&config.value, config.value_type)?;
-    vars.set_custom(name, value).map_err(|err| err.to_string())?;
+    vars.set_custom(name, value)
+        .map_err(|err| err.to_string())?;
     Ok(format!("variable vars.{name} définie"))
 }
 
@@ -96,7 +97,11 @@ mod tests {
         assert!(rejected(json!({"name": "a b", "value": "x"})));
         assert!(rejected(json!({"name": "", "value": "x"})));
         assert!(rejected(json!({"name": "file.name", "value": "x"})));
-        assert!(rejected(json!({"name": "n", "value": "abc", "valueType": "number"})));
-        assert!(rejected(json!({"name": "b", "value": "peut-être", "valueType": "bool"})));
+        assert!(rejected(
+            json!({"name": "n", "value": "abc", "valueType": "number"})
+        ));
+        assert!(rejected(
+            json!({"name": "b", "value": "peut-être", "valueType": "bool"})
+        ));
     }
 }

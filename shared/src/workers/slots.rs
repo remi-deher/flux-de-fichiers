@@ -121,7 +121,14 @@ mod tests {
     #[test]
     fn legacy_mode_shares_max_concurrency_between_classes() {
         let slots = worker_slots(1, None, None);
-        assert_eq!(slots, WorkerSlots { cpu: 1, gpu: 1, total: 1 });
+        assert_eq!(
+            slots,
+            WorkerSlots {
+                cpu: 1,
+                gpu: 1,
+                total: 1
+            }
+        );
         assert!(slots.admits(CPU, running(0, 0)));
         assert!(!slots.admits(CPU, running(0, 1)));
         assert!(slots.admitted_classes(running(0, 1)).is_empty());
@@ -131,7 +138,14 @@ mod tests {
     #[test]
     fn cpu_only_declaration_disables_gpu() {
         let slots = worker_slots(3, Some(2), None);
-        assert_eq!(slots, WorkerSlots { cpu: 2, gpu: 0, total: 2 });
+        assert_eq!(
+            slots,
+            WorkerSlots {
+                cpu: 2,
+                gpu: 0,
+                total: 2
+            }
+        );
         assert!(!slots.admits(GPU, running(0, 0)));
         assert_eq!(slots.admitted_classes(running(1, 0)), vec![CPU]);
     }
@@ -139,7 +153,14 @@ mod tests {
     #[test]
     fn gpu_only_declaration_keeps_max_concurrency_for_cpu() {
         let slots = worker_slots(2, None, Some(1));
-        assert_eq!(slots, WorkerSlots { cpu: 2, gpu: 1, total: 3 });
+        assert_eq!(
+            slots,
+            WorkerSlots {
+                cpu: 2,
+                gpu: 1,
+                total: 3
+            }
+        );
     }
 
     #[test]

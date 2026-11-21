@@ -33,17 +33,30 @@ fn conditional_inline(code: &str) -> serde_json::Value {
 async fn run_branch(script_config: serde_json::Value) -> Result<FlowExecutionOutcome, String> {
     let mut reg = placement_registry();
     register_scripts_run(&mut reg).map_err(|e| e.to_string())?;
-    run_engine(&reg, &branch_flow(script_config), None, None, FlowRunInfo::default()).await
+    run_engine(
+        &reg,
+        &branch_flow(script_config),
+        None,
+        None,
+        FlowRunInfo::default(),
+    )
+    .await
 }
 
 fn visited(outcome: &FlowExecutionOutcome) -> Vec<&str> {
-    outcome.steps.iter().map(|step| step.node_id.as_str()).collect()
+    outcome
+        .steps
+        .iter()
+        .map(|step| step.node_id.as_str())
+        .collect()
 }
 
 #[tokio::test]
 async fn conditional_script_without_next_port_routes_to_true() -> TestResult {
-    let outcome =
-        run_branch(conditional_inline("cat >/dev/null\nprintf '{\"status\":\"ok\"}'")).await?;
+    let outcome = run_branch(conditional_inline(
+        "cat >/dev/null\nprintf '{\"status\":\"ok\"}'",
+    ))
+    .await?;
     assert_eq!(visited(&outcome), ["n1", "n2", "n_true"]);
     Ok(())
 }
@@ -57,8 +70,10 @@ async fn conditional_script_without_json_routes_to_true() -> TestResult {
 
 #[tokio::test]
 async fn conditional_script_skip_routes_to_false() -> TestResult {
-    let outcome =
-        run_branch(conditional_inline("cat >/dev/null\nprintf '{\"status\":\"skip\"}'")).await?;
+    let outcome = run_branch(conditional_inline(
+        "cat >/dev/null\nprintf '{\"status\":\"skip\"}'",
+    ))
+    .await?;
     assert_eq!(visited(&outcome), ["n1", "n2", "n_false"]);
     assert_eq!(outcome.steps[1].status, JobStepStatus::Skipped);
     Ok(())

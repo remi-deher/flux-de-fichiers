@@ -1,14 +1,18 @@
 //! Simulation à sec et comparaison de graphes de flux partagées entre l'interface et MCP.
 
 use crate::flows::{
-    ConditionConfig, FlowConnection, FlowGraph, FlowNode, OwnedBlockSpec, describe_condition,
-    evaluate_condition, find_owned,
+    ConditionConfig, FlowConnection, FlowGraph, FlowNode, FlowVariables, IntrinsicVariable,
+    OwnedBlockSpec, apply_set_variable, describe_condition, evaluate_condition_with_variables,
+    find_owned, is_set_variable_kind, is_sub_flow_kind, render_value, sub_flow_target,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 pub const MAX_SIMULATION_STEPS: usize = 64;
+/// Détail d'une étape sans résumé propre.
+const DEFAULT_STEP_DETAIL: &str = "Étape exécutée";
 
 /// Exemples prêts à l'emploi de documents JSON de sonde pour tester un flux.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -197,14 +201,62 @@ fn is_condition_node(node: &FlowNode, spec: Option<&OwnedBlockSpec>) -> bool {
             && node.config.get("target").is_some())
 }
 
-fn evaluate_node_condition(node: &FlowNode, probe_info: &Value) -> (bool, String) {
+fn evaluate_node_condition(
+    node: &FlowNode,
+    probe_info: &Value,
+    variables: &FlowVariables,
+) -> (bool, String) {
     let config: ConditionConfig = serde_json::from_value(node.config.clone()).unwrap_or_default();
-    let result = evaluate_condition(&config, probe_info);
+    let result = evaluate_condition_with_variables(&config, probe_info, variables);
     let verdict = if result { "Vrai" } else { "Faux" };
     (
         result,
         format!("{} → {verdict}", describe_condition(&config)),
     )
+}
+
+/// Variables `file.*` déduites du nom de fichier simulé (sans taille ni dossier réels).
+fn simulation_variables(file_name: &str) -> FlowVariables {
+    let mut variables = FlowVariables::default();
+    let path = Path::new(file_name.trim());
+    let text = |part: Option<&std::ffi::OsStr>| {
+        part.map_or(Value::Null, |p| {
+            Value::String(p.to_string_lossy().into_owned())
+        })
+    };
+    variables.set_intrinsic(IntrinsicVariable::FileName, text(path.file_name()));
+    variables.set_intrinsic(IntrinsicVariable::FileStem, text(path.file_stem()));
+    variables.set_intrinsic(IntrinsicVariable::FileExt, text(path.extension()));
+    variables
+}
+
+/// Applique un bloc « Définir une variable » comme le moteur : configuration rendue avec les
+/// variables courantes, puis écriture validée. Une erreur devient un avertissement.
+fn simulate_set_variable(
+    node: &FlowNode,
+    variables: &mut FlowVariables,
+    warnings: &mut Vec<String>,
+) -> Option<String> {
+    let resolve = |expr: &str| variables.lookup(expr).cloned();
+    let config = render_value(&node.config, &resolve);
+    match apply_set_variable(&config, variables) {
+        Ok(message) => Some(message),
+        Err(err) => {
+            warnings.push(format!("« {} » : {err}", node.name));
+            None
+        }
+    }
+}
+
+/// Le simulateur ne charge pas les autres flux : il signale le sous-flux et continue.
+fn sub_flow_warning(node: &FlowNode) -> String {
+    match sub_flow_target(node) {
+        Some(target) => format!(
+            "« {} » appelle le sous-flux « {target} », non simulé : ses blocs et variables sont ignorés.",
+            node.name
+        ),
+        None => format!("« {} » n'a pas de sous-flux cible.", node.name),
+    }
 }
 
 fn find_entry_node<'a>(graph: &'a FlowGraph, catalog: &[OwnedBlockSpec]) -> Option<&'a FlowNode> {
@@ -265,6 +317,7 @@ pub fn simulate_flow_with(
             json!({ "file_name": input.file_name.trim() })
         }
     };
+    let mut variables = simulation_variables(&input.file_name);
     let mut current_id = Some(entry.id.clone());
 
     while let Some(node_id) = current_id {
@@ -297,11 +350,22 @@ pub fn simulate_flow_with(
         }
 
         let (selected_port, detail) = if is_condition_node(node, spec) {
-            let (matched, note) = evaluate_node_condition(node, &probe_info);
+            let (matched, note) = evaluate_node_condition(node, &probe_info, &variables);
             let port_key = if matched { "true" } else { "false" };
             (Some(port_key.to_owned()), note)
         } else {
-            let summary = summarize_node(node, spec).unwrap_or_else(|| "Étape exécutée".to_owned());
+            let kind = node.kind.as_str();
+            let applied = if is_set_variable_kind(kind) {
+                simulate_set_variable(node, &mut variables, &mut warnings)
+            } else {
+                if is_sub_flow_kind(kind) {
+                    warnings.push(sub_flow_warning(node));
+                }
+                None
+            };
+            let summary = applied
+                .or_else(|| summarize_node(node, spec))
+                .unwrap_or_else(|| DEFAULT_STEP_DETAIL.to_owned());
             (None, summary)
         };
 
@@ -579,5 +643,78 @@ mod tests {
             step.detail,
             "(format = pdf OU tracks[type=video].codec ∈ h264, hevc) → Vrai"
         );
+    }
+
+    fn edge(from: &str, to: &str, port: Option<&str>) -> FlowConnection {
+        FlowConnection {
+            from: from.into(),
+            to: to.into(),
+            port: port.map(Into::into),
+        }
+    }
+
+    fn variable_graph(set_config: Value, middle: Option<FlowNode>) -> FlowGraph {
+        let mut nodes = vec![
+            node("in", "file-input", "Entrée", json!({})),
+            node("set", "set-variable", "Définir", set_config),
+            node(
+                "cond",
+                "condition",
+                "Codec ?",
+                json!({ "property": "vars.cible", "operator": "exact", "target": "film.mkv" }),
+            ),
+            node("out", "file-output", "Sortie", json!({})),
+        ];
+        let mut connections = vec![edge("in", "set", None), edge("cond", "out", Some("true"))];
+        match middle {
+            Some(extra) => {
+                connections.push(edge("set", &extra.id, None));
+                connections.push(edge(&extra.id, "cond", None));
+                nodes.push(extra);
+            }
+            None => connections.push(edge("set", "cond", None)),
+        }
+        FlowGraph {
+            nodes,
+            connections,
+            extra: Map::new(),
+        }
+    }
+
+    fn input(file_name: &str) -> SimulationInput {
+        SimulationInput {
+            file_name: file_name.to_owned(),
+            probe_json: "{}".to_owned(),
+        }
+    }
+
+    #[test]
+    fn simulation_applies_set_variable_with_templates() {
+        let graph = variable_graph(json!({ "name": "cible", "value": "{$file.name}" }), None);
+        let report = simulate_flow_basic(&graph, &[], &input("film.mkv"));
+        assert_eq!(report.status, SimulationStatus::Complete);
+        assert_eq!(report.steps[1].detail, "variable vars.cible définie");
+        assert_eq!(report.steps[2].port_taken.as_deref(), Some("true"));
+
+        let other = simulate_flow_basic(&graph, &[], &input("autre.mkv"));
+        assert_eq!(other.status, SimulationStatus::IncompletePath);
+        assert_eq!(other.steps[2].port_taken.as_deref(), Some("false"));
+    }
+
+    #[test]
+    fn simulation_warns_on_invalid_set_variable() {
+        let graph = variable_graph(json!({ "name": "file.name", "value": "x" }), None);
+        let report = simulate_flow_basic(&graph, &[], &input("film.mkv"));
+        assert!(report.warnings.iter().any(|w| w.starts_with("« Définir »")));
+        assert_eq!(report.steps[2].port_taken.as_deref(), Some("false"));
+    }
+
+    #[test]
+    fn simulation_signals_sub_flow_without_following_it() {
+        let sub = node("sub", "sub-flow", "Appel", json!({ "flowId": "f2" }));
+        let graph = variable_graph(json!({ "name": "cible", "value": "film.mkv" }), Some(sub));
+        let report = simulate_flow_basic(&graph, &[], &input("x.mkv"));
+        assert_eq!(report.status, SimulationStatus::Complete);
+        assert!(report.warnings.iter().any(|w| w.contains("« f2 »")));
     }
 }

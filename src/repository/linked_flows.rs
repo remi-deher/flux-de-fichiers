@@ -1,7 +1,7 @@
 //! Flux liés figés à la création d'une tâche : flux d'échec et sous-flux (ADR 0026).
 
 use crate::error::AppResult;
-use forgearr_shared::flows::{FlowGraph, LinkedFlow, LinkedFlowRole};
+use forgearr_shared::flows::{FlowGraph, LinkedFlow, LinkedFlowRole, MAX_SUB_FLOW_DEPTH};
 use sqlx::{SqliteConnection, SqlitePool};
 use std::collections::VecDeque;
 use uuid::Uuid;
@@ -86,6 +86,8 @@ async fn insert_link(
 /// Fige, pour la tâche `job`, la version courante du flux d'échec (celui du flux, sinon le
 /// global) et de tous les sous-flux atteignables depuis le flux figé `root` et le flux d'échec.
 /// Remplace un figement antérieur. Un flux lié introuvable est ignoré (il échouera à l'exécution).
+/// L'exploration s'arrête à `MAX_SUB_FLOW_DEPTH` niveaux (le flux principal et le flux d'échec
+/// sont au niveau 0) : au-delà, l'exécution refuse de toute façon l'appel.
 pub(super) async fn freeze_linked_flows(
     conn: &mut SqliteConnection,
     job: Uuid,
@@ -106,20 +108,20 @@ pub(super) async fn freeze_linked_flows(
         None => default_failure_flow_with(&mut *conn).await?,
     };
 
-    let mut pending: VecDeque<String> = VecDeque::new();
+    let mut pending: VecDeque<(String, usize)> = VecDeque::new();
     let mut frozen_sub_flows: Vec<String> = Vec::new();
     if let Some(graph) = &root_graph {
-        pending.extend(graph.sub_flow_ids());
+        pending.extend(called_by(graph, 0));
     }
     if let Some(failure_id) = failure_id.as_deref()
         && let Some((version, definition)) = current_flow(&mut *conn, failure_id).await?
     {
         let role = LinkedFlowRole::Failure;
         insert_link(&mut *conn, job, role, failure_id, version).await?;
-        pending.extend(FlowGraph::parse(&definition).sub_flow_ids());
+        pending.extend(called_by(&FlowGraph::parse(&definition), 0));
     }
-    while let Some(flow_id) = pending.pop_front() {
-        if frozen_sub_flows.contains(&flow_id) {
+    while let Some((flow_id, depth)) = pending.pop_front() {
+        if depth > MAX_SUB_FLOW_DEPTH || frozen_sub_flows.contains(&flow_id) {
             continue;
         }
         frozen_sub_flows.push(flow_id.clone());
@@ -129,9 +131,18 @@ pub(super) async fn freeze_linked_flows(
         };
         let role = LinkedFlowRole::SubFlow;
         insert_link(&mut *conn, job, role, &flow_id, version).await?;
-        pending.extend(FlowGraph::parse(&definition).sub_flow_ids());
+        pending.extend(called_by(&FlowGraph::parse(&definition), depth));
     }
     Ok(())
+}
+
+/// Sous-flux appelés par `graph`, situé au niveau `depth`, avec leur propre niveau.
+fn called_by(graph: &FlowGraph, depth: usize) -> impl Iterator<Item = (String, usize)> {
+    let child_depth = depth + 1;
+    graph
+        .sub_flow_ids()
+        .into_iter()
+        .map(move |id| (id, child_depth))
 }
 
 /// Versions figées des flux liés de la tâche, prêtes à voyager avec le bail.

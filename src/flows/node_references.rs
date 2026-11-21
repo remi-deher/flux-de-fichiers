@@ -9,10 +9,12 @@ use super::{
 };
 use forgearr_shared::{
     exposed_variables::{ExposedVariable, ExposedVariables},
-    flow_variables::{
-        NodeVariablesRequest, NodeVariablesView, ReferenceSource, ReferenceSuggestion,
+    flows::{
+        FlowGraph, FlowNode,
+        node_references::{
+            NodeVariablesRequest, NodeVariablesView, ReferenceSource, ReferenceSuggestion,
+        },
     },
-    flows::{FlowGraph, FlowNode},
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};

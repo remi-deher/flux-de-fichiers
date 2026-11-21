@@ -102,6 +102,10 @@ pub struct CatalogRuntimeSummary {
     pub flow_preview: Option<CatalogFlowPreview>,
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// Fiche d'index dans `index.json` à la racine du dépôt.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -135,6 +139,10 @@ pub struct CatalogEntry {
         skip_serializing_if = "Option::is_none"
     )]
     pub subcategory: Option<SubcategoryId>,
+    /// Le manifeste déclare une icône SVG présente dans la copie locale ; elle se lit par
+    /// `GET /api/v1/plugins/{id}/icon` (ADR 0024).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub has_icon: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     /// Plugin propriétaire. Obligatoire pour un bloc, qui ne vit jamais seul dans un dépôt.

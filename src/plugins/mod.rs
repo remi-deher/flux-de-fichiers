@@ -11,6 +11,7 @@ use std::{
 mod blocks;
 mod cache;
 mod dependencies;
+mod icon;
 mod install;
 mod legacy_ids;
 mod local;
@@ -337,6 +338,7 @@ fn apply_document_metadata(root: &Path, entry: &mut CatalogEntry) {
             .as_ref()
             .and_then(|labels| labels.subcategory.as_deref()),
     );
+    entry.has_icon = icon::entry_has_icon(root, entry, document.as_ref());
     if entry.description.is_none() {
         entry.description = document
             .as_ref()
@@ -372,6 +374,29 @@ pub fn settings_fields(roots: &[PathBuf], plugin_id: &str) -> Vec<SettingsField>
         .and_then(|manifest| manifest.settings_schema)
         .map(|schema| schema.fields)
         .unwrap_or_default()
+}
+
+/// Icône SVG d'un plugin du catalogue, relue et validée à chaque appel ; `None` sans icône valide.
+///
+/// Comme pour le catalogue, le premier dossier qui porte l'identifiant l'emporte.
+pub fn plugin_icon_svg(roots: &[PathBuf], plugin_id: &str) -> Option<String> {
+    for root in roots {
+        let Ok(content) = std::fs::read_to_string(root.join("index.json")) else {
+            continue;
+        };
+        let Ok(parsed) = parse_index_tolerant(&content) else {
+            continue;
+        };
+        if let Some(entry) = parsed
+            .index
+            .entries
+            .iter()
+            .find(|entry| entry.id == plugin_id)
+        {
+            return icon::read_valid_icon(root, &entry.manifest_path);
+        }
+    }
+    None
 }
 
 /// Le plugin existe-t-il dans le catalogue ?
@@ -726,6 +751,7 @@ mod tests {
             distribution: None,
             category: None,
             subcategory: None,
+            has_icon: false,
             tags: Vec::new(),
             owner: None,
             sha256: None,
@@ -1030,6 +1056,7 @@ mod tests {
             distribution: None,
             category: None,
             subcategory: None,
+            has_icon: false,
             tags: vec!["arr".into()],
             owner: None,
             sha256: None,

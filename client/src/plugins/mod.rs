@@ -6,6 +6,7 @@ mod item_detail;
 mod metadata;
 mod pack_detail;
 mod plugin_detail;
+mod plugin_icon;
 mod repo_detail;
 mod repos;
 mod settings;
@@ -471,6 +472,7 @@ mod tests {
             distribution: None,
             category: None,
             subcategory: None,
+            has_icon: false,
             tags: Vec::new(),
             owner: None,
             sha256: None,

@@ -1,5 +1,6 @@
 //! Composants factorisés et helpers de présentation de la section Plugins (Zéro Boilerplate).
 
+use super::plugin_icon::PluginIcon;
 use crate::ui::focus::on_activate;
 use crate::ui::{Icon, IconName, Tag, TagTone};
 use chrono::NaiveDate;
@@ -157,6 +158,7 @@ pub fn StoreCard(
     #[prop(into)] title: String,
     #[prop(into)] description: String,
     icon: IconName,
+    #[prop(optional_no_strip)] plugin_icon: Option<String>,
     #[prop(optional)] tone: StoreTone,
     #[prop(optional_no_strip)] status_badge: Option<AnyView>,
     #[prop(optional_no_strip)] context_tags: Option<AnyView>,
@@ -177,7 +179,10 @@ pub fn StoreCard(
         >
             <div class="store-card__head">
                 <span class="store-card__icon" aria-hidden="true">
-                    <Icon name=icon size=CARD_ICON_SIZE />
+                    {match plugin_icon {
+                        Some(plugin_id) => view! { <PluginIcon plugin_id=plugin_id /> }.into_any(),
+                        None => view! { <Icon name=icon size=CARD_ICON_SIZE /> }.into_any(),
+                    }}
                 </span>
                 <div class="store-card__identity">
                     <div class="store-card__title-row">

@@ -63,6 +63,7 @@ mod tests {
             distribution: None,
             category: None,
             subcategory: subcategory.and_then(|raw| SubcategoryId::parse(raw).ok()),
+            has_icon: false,
             tags: Vec::new(),
             owner: None,
             sha256: None,
@@ -119,6 +120,21 @@ mod tests {
         );
         let encoding = grouped.groups.get(1).map(|group| ids(&group.entries));
         assert_eq!(encoding, Some(vec!["video", "vmaf"]));
+    }
+
+    #[test]
+    fn core_blocks_come_first_and_scripts_and_archives_last() {
+        let grouped = group_by_subcategory(vec![
+            entry("scripts", Some("scripting")),
+            entry("archives", Some("archives")),
+            entry("plex", Some("media-servers")),
+            entry("essentiel", Some("core-blocks")),
+        ]);
+        let titles: Vec<&str> = grouped.groups.iter().map(|group| group.title).collect();
+        assert_eq!(
+            titles,
+            vec!["Blocs essentiels", "Serveurs média", "Archives", "Scripts"]
+        );
     }
 
     #[test]

@@ -43,8 +43,10 @@ réimplémenter ce travail.
    que dans son espace de noms. Un nom ne peut pas être à la fois une valeur et un groupe
    (`video` et `video.codec`). Un renommage, un retrait ou un changement de type impose une montée
    de version majeure. Une variable n'a de valeur que si le plugin fournisseur l'a produite en amont
-   dans le flux ; si deux opérations réclament le même espace de noms, la première (par identifiant
-   d'opération) l'emporte. Seuls les plugins du catalogue exposent ; l'ouverture aux scripts est reportée.
+   dans le flux ; si deux plugins déclarent le même espace de noms, un script lit celui que désigne sa
+   dépendance (`requires` : fournisseur et version majeure) ; sans dépendance, la première (par identifiant
+   d'opération) l'emporte. Un script qui lie un même espace à deux fournisseurs ou à deux versions
+   majeures est refusé. Seuls les plugins du catalogue exposent ; l'ouverture aux scripts est reportée.
 5. **Dépendance dure par défaut.** Un script déclare `runtime.requires` : pour chaque variable
    consommée, sa référence complète, l'identifiant du plugin fournisseur, la version majeure du
    contrat visée (1 par défaut) et, si le fournisseur n'est pas dans le même dépôt, un pointeur
@@ -105,6 +107,12 @@ réimplémenter ce travail.
   `GET /api/v1/plugins/exposed-variables` liste toutes les expositions du catalogue. Chacune porte `active`
   et `conflictsWith` : à espace de noms égal, la première (par identifiant d'opération) est lue par le
   moteur, les autres sont signalées comme contestées.
+- Liaison par la dépendance : à chaque étape, le moteur construit le contexte de références d'après le
+  `requires` du script (`exposures_for_requirements`) : l'exposition du fournisseur et de la version
+  majeure désignés, puis la première exposition de chaque espace de noms non lié. Deux scripts d'un même
+  flux peuvent ainsi lire deux plugins qui partagent un espace de noms. Le sélecteur de références, le
+  contrôle à l'enregistrement et l'aperçu suivent la même règle. `validate_requirements` refuse un
+  espace de noms lié à deux fournisseurs ou à deux versions majeures.
 - Reportés : la résolution et la saisie des secrets dans le flux et la saisie de `requires` dans
   l'éditeur de scripts locaux.
 - Les scripts existants, sans `variables`, restent valides (liste vide par défaut).

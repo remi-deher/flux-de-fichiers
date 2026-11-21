@@ -152,4 +152,14 @@ réimplémenter ce travail.
   nœud antérieur appartient au worker émetteur : `nodes.<id>.workingFile` n'a plus de valeur après un relais
   (la référence échoue avec son message habituel, sauf défaut de la variable). La reprise sans artefact
   (la tâche repart de la source) ne restaure rien, comme elle ne reprend pas le nœud.
+- Identifiants de nœud avec des points : `{{nodes.<id>.<champ>}}` lit le champ (`message`, `nextPort`,
+  `workingFile`) au dernier segment ; tout ce qui précède est l'identifiant (`nodes.encodage.v2.message`).
+  Un identifiant qui contient d'autres caractères que lettres, chiffres, `.`, `_` et `-` ne peut pas être référencé.
+- Échantillon de métadonnées : à la fin d'un job, le worker (local ou distant, `StepsReport.mediaInfo`)
+  rapporte les métadonnées finales du fichier ; le central garde les dernières de chaque flux
+  (`flow_media_samples`, migration 0043, 256 Kio au plus, une ligne par flux, supprimée avec lui) sous le bail
+  du job. `GET /api/v1/flows/{id}/media-sample` les renvoie (404 sans job) ; le bouton « Dernier job réel »
+  du simulateur les charge, ce qui alimente aussi l'aperçu des variables et les références proposées.
+- Coloration : les grammaires viennent de `two-face` (celles de syntect, plus PowerShell, TOML, TypeScript…),
+  même moteur regex pur Rust ; `ps1` est donc coloré.
 - Les scripts existants, sans `variables`, restent valides (liste vide par défaut).

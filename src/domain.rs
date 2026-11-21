@@ -50,6 +50,9 @@ pub struct StepsReport {
     #[serde(default)]
     pub lease_epoch: i64,
     pub steps: Vec<JobStepEntry>,
+    /// Métadonnées finales du fichier, retenues comme échantillon du flux (absentes en cas d'échec).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_info: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

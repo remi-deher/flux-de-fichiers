@@ -112,8 +112,32 @@ impl VariableContext {
 
     /// Valeur désignée par un chemin pointé ; `null` compte comme absente.
     fn lookup(&self, path: &str) -> Option<&Value> {
-        lookup_in(&self.root, path)
+        let Some((node_id, field)) = split_node_reference(path) else {
+            return lookup_in(&self.root, path);
+        };
+        let value = self.root.get(ROOT_NODES)?.get(node_id)?.get(field)?;
+        (!value.is_null()).then_some(value)
     }
+}
+
+/// Champs qu'un nœud exécuté expose, avec leur libellé.
+pub(super) const NODE_OUTPUT_FIELDS: [(&str, &str); 3] = [
+    ("message", "message"),
+    ("nextPort", "port de sortie"),
+    ("workingFile", "fichier courant"),
+];
+
+/// Sépare `nodes.<id>.<champ>` : le champ est le dernier segment, l'identifiant tout ce qui précède,
+/// points compris (un nœud peut s'appeler `encodage.v2`).
+pub(super) fn split_node_reference(path: &str) -> Option<(&str, &str)> {
+    let (node_id, field) = path
+        .strip_prefix(ROOT_NODES)?
+        .strip_prefix('.')?
+        .rsplit_once('.')?;
+    NODE_OUTPUT_FIELDS
+        .iter()
+        .any(|(name, _)| *name == field)
+        .then_some((node_id, field))
 }
 
 /// Références `{{chemin}}` d'un texte, dans l'ordre.
@@ -1043,5 +1067,42 @@ mod tests {
             Some(MAX_RELAYED_MESSAGE_CHARS)
         );
         assert_eq!(relayed.next_port, None);
+    }
+
+    #[test]
+    fn a_node_id_may_contain_dots() {
+        assert_eq!(
+            split_node_reference("nodes.encodage.v2.message"),
+            Some(("encodage.v2", "message"))
+        );
+        assert_eq!(split_node_reference("nodes.a.autre"), None);
+        assert_eq!(split_node_reference("nodes.message"), None);
+        assert_eq!(split_node_reference("mediaInfo.a.message"), None);
+
+        let nodes = HashMap::from([(
+            "encodage.v2".to_owned(),
+            NodeOutput {
+                message: Some("fini".into()),
+                next_port: None,
+                working_file: "/w/x.mkv".into(),
+            },
+        )]);
+        let context = VariableContext::new(
+            Path::new("f"),
+            Path::new("s"),
+            Path::new("w"),
+            &json!({}),
+            &nodes,
+            &[],
+        );
+        assert_eq!(
+            context.lookup("nodes.encodage.v2.message"),
+            Some(&json!("fini"))
+        );
+        assert_eq!(
+            context.lookup("nodes.encodage.v2.workingFile"),
+            Some(&json!("/w/x.mkv"))
+        );
+        assert!(context.lookup("nodes.encodage.v2.nextPort").is_none());
     }
 }

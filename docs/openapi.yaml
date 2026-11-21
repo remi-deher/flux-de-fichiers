@@ -130,6 +130,28 @@ paths:
         '200':
           description: Rapport de validation (valid, errors, warnings)
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/flows/{id}/media-sample:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: >-
+        Métadonnées finales du dernier job exécuté pour ce flux (ADR 0025), proposées comme échantillon de
+        simulation. 404 tant qu'aucun job n'a été exécuté.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Dernier échantillon.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobId, sourceName, mediaInfo, recordedAt]
+                properties:
+                  jobId: {type: string, format: uuid}
+                  sourceName: {type: string}
+                  mediaInfo: {type: object}
+                  recordedAt: {type: string}
+        '404': {description: Aucun échantillon pour ce flux.}
   /api/v1/flows/node-variables:
     post:
       security: [{ApiKey: []}, {WebSession: []}]

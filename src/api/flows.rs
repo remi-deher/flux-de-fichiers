@@ -45,6 +45,18 @@ pub async fn get_flow(
     Ok(Json(flow))
 }
 
+/// Métadonnées du dernier vrai job du flux, pour l'échantillon de simulation (404 s'il n'y en a pas).
+pub async fn media_sample(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    _auth: ViewFlowsAuth,
+) -> AppResult<Json<forgearr_shared::flow_analysis::FlowMediaSample>> {
+    repository::latest_flow_media_sample(&s.pool, &id)
+        .await?
+        .map(Json)
+        .ok_or(AppError::NotFound)
+}
+
 /// Versions figées d'un flux, la plus récente d'abord.
 pub async fn list_versions(
     State(s): State<AppState>,

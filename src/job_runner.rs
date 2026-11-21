@@ -19,6 +19,8 @@ pub struct JobExecutionResult {
     pub warning: bool,
     pub output_spec: OutputSpec,
     pub steps: Vec<JobStepEntry>,
+    /// Métadonnées du fichier en fin d'exécution.
+    pub media_info: serde_json::Value,
     /// Demande de relais à transmettre au central ; aucun résultat n'est alors à publier.
     pub relay: Option<forgearr_shared::relay::RelayRequest>,
 }
@@ -198,6 +200,7 @@ pub async fn execute_claim_processing(
             warning: res.warning || claim.prior_warning,
             output_spec: res.output_spec,
             steps: res.steps,
+            media_info: res.media_info,
             relay: res.relay,
         })
         .map_err(|error| JobRunError {

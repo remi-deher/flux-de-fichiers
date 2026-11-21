@@ -1,4 +1,5 @@
-//! Coloration syntaxique des scripts avec les grammaires embarquées de syntect.
+//! Coloration syntaxique des scripts : moteur syntect, grammaires de `two-face` (celles de syntect
+//! plus PowerShell, TOML, TypeScript, etc.).
 
 use forgearr_shared::highlight::{CodeToken, TokenKind};
 use std::sync::LazyLock;
@@ -22,7 +23,7 @@ const SCOPE_RULES: &[(&str, TokenKind)] = &[
     ("variable", TokenKind::Variable),
 ];
 
-static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_newlines);
 
 static RULES: LazyLock<Vec<(Scope, TokenKind)>> = LazyLock::new(|| {
     SCOPE_RULES
@@ -164,9 +165,13 @@ mod tests {
     }
 
     #[test]
-    fn powershell_never_loses_text_whether_or_not_a_grammar_is_embedded() {
-        let code = "$x = 1\nWrite-Output $x\n";
-        assert_eq!(rebuild(&highlight_code(code, "ps1")), code.trim_end());
+    fn colors_powershell_comments_strings_and_variables() {
+        let code = "# note\n$cible = \"film\"\nWrite-Output $cible\n";
+        let lines = highlight_code(code, "ps1");
+        assert!(has_token(&lines, "# note", TokenKind::Comment));
+        assert!(has_token(&lines, "film", TokenKind::String));
+        assert!(has_token(&lines, "$cible", TokenKind::Variable));
+        assert_eq!(rebuild(&lines), code.trim_end());
     }
 
     #[test]

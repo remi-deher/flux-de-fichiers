@@ -816,3 +816,37 @@ async fn the_node_preview_never_shows_a_secret_and_counts_a_stored_one_as_given(
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn the_media_sample_route_serves_the_last_job_metadata_or_not_found() -> anyhow::Result<()> {
+    let app = test_app().await?;
+    let uri = format!("/api/v1/flows/{SECRET_FLOW_ID}/media-sample");
+    let (status, _) = send(&app, authorized("GET", &uri, None)?).await?;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    sqlx::query(
+        "INSERT INTO flows (id, name, file_mask, is_default, definition) VALUES (?1, 'F', '*.mkv', 0, '{}')",
+    )
+    .bind(SECRET_FLOW_ID)
+    .execute(&app.pool)
+    .await?;
+    let job = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO flow_media_samples (flow_id, job_id, source_name, media_info_json) VALUES (?1, ?2, 'film.mkv', ?3)",
+    )
+    .bind(SECRET_FLOW_ID)
+    .bind(job)
+    .bind(json!({"video": {"codec": "hevc"}}).to_string())
+    .execute(&app.pool)
+    .await?;
+    let (status, body) = send(&app, authorized("GET", &uri, None)?).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["sourceName"], json!("film.mkv"));
+    assert_eq!(body["mediaInfo"]["video"]["codec"], json!("hevc"));
+    assert_eq!(body["jobId"], json!(job.to_string()));
+
+    let anonymous = Request::builder().uri(&uri).body(Body::empty())?;
+    let (status, _) = send(&app, anonymous).await?;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    Ok(())
+}

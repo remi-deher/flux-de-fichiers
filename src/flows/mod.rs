@@ -99,6 +99,8 @@ pub struct FlowExecutionOutcome {
     pub warning: bool,
     pub output_spec: OutputSpec,
     pub steps: Vec<crate::domain::JobStepEntry>,
+    /// Métadonnées du fichier en fin d'exécution (sonde et enrichissements des étapes).
+    pub media_info: Value,
     /// Présent quand le bloc « Relayer la tâche » a arrêté l'exécution locale (ADR 0018).
     pub relay: Option<RelayRequest>,
 }
@@ -197,6 +199,7 @@ impl<'a> FlowEngine<'a> {
             is_in_place: !outcome.is_staged_output,
             warning: outcome.warning,
             output_spec: bin_rt.output_spec().unwrap_or_default(),
+            media_info,
             steps: vec![crate::domain::JobStepEntry {
                 step_index: 0,
                 node_id: "default".to_owned(),
@@ -727,6 +730,7 @@ impl<'a> FlowEngine<'a> {
             warning: final_warning,
             output_spec: resolved_spec,
             steps,
+            media_info: ctx.media_info,
             relay,
         })
     }

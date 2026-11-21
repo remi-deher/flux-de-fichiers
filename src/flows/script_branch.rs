@@ -91,8 +91,7 @@ mod tests {
 
     #[test]
     fn conditional_rejects_unknown_port() {
-        let err = resolve_script_port(CONDITIONAL, ScriptOutcomeStatus::Ok, Some("alt".into()))
-            .unwrap_err();
-        assert!(err.contains("alt"));
+        let result = resolve_script_port(CONDITIONAL, ScriptOutcomeStatus::Ok, Some("alt".into()));
+        assert!(matches!(result, Err(err) if err.contains("alt")));
     }
 }

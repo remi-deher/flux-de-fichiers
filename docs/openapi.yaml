@@ -605,6 +605,19 @@ paths:
       responses:
         '200': {description: Dépôt supprimé}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/plugins/repositories/{id}/scripts/{entryId}:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: >-
+        Aperçu en lecture seule d'un script d'un dépôt synchronisé : métadonnées, code et lignes
+        de jetons colorés (kind : plain, comment, string, number, keyword, function, variable, operator)
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string}}
+        - {in: path, name: entryId, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Script et jetons de coloration syntaxique}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins/repositories/{id}/toggle:
     put:
       security: [{ApiKey: []}, {WebSession: []}]

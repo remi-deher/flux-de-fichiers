@@ -1,7 +1,10 @@
 //! Prévisualisation en lecture seule du code d'un script exposé par un dépôt synchronisé.
 
-use super::{CatalogItemType, local::read_local_script, parse_index_tolerant, repository_dir};
-use forgearr_shared::local::LocalScriptSummary;
+use super::{
+    CatalogItemType, highlight::highlight_code, local::read_local_script, parse_index_tolerant,
+    repository_dir,
+};
+use forgearr_shared::{highlight::ScriptPreviewView, local::LocalScriptSummary};
 use std::{fs, path::Path};
 
 /// Script d'un dépôt lu depuis sa copie locale, ou `None` si le dépôt, l'entrée ou le code manque.
@@ -19,6 +22,17 @@ pub fn read_repository_script(
         .into_iter()
         .find(|entry| entry.entry_type == CatalogItemType::Script && entry.id == entry_id)?;
     read_local_script(&dir, &entry)
+}
+
+/// Aperçu d'un script d'un dépôt : métadonnées, code et lignes de jetons colorés.
+pub fn read_repository_script_preview(
+    repos_dir: &Path,
+    repository_id: &str,
+    entry_id: &str,
+) -> Option<ScriptPreviewView> {
+    let script = read_repository_script(repos_dir, repository_id, entry_id)?;
+    let lines = highlight_code(&script.code, script.interpreter.default_extension());
+    Some(ScriptPreviewView { script, lines })
 }
 
 #[cfg(test)]
@@ -56,6 +70,16 @@ mod tests {
             .ok_or_else(|| anyhow::anyhow!("script introuvable"))?;
         assert_eq!(script.code, SCRIPT_CODE);
         assert_eq!(script.entrypoint, "run.sh");
+        Ok(())
+    }
+
+    #[test]
+    fn preview_carries_highlighted_lines_matching_the_code() -> anyhow::Result<()> {
+        let (repos_dir, script_id) = repository_with_script()?;
+        let preview = read_repository_script_preview(repos_dir.path(), "repo.test", &script_id)
+            .ok_or_else(|| anyhow::anyhow!("aperçu introuvable"))?;
+        assert_eq!(preview.lines.len(), SCRIPT_CODE.lines().count());
+        assert_eq!(preview.script.code, SCRIPT_CODE);
         Ok(())
     }
 

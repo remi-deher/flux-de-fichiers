@@ -455,10 +455,10 @@ pub async fn repository_script(
     State(s): State<AppState>,
     Path((id, entry_id)): Path<(String, String)>,
     _auth: ViewPluginsAuth,
-) -> AppResult<Json<forgearr_shared::local::LocalScriptSummary>> {
+) -> AppResult<Json<forgearr_shared::highlight::ScriptPreviewView>> {
     let repos_dir = s.config.plugin_repos_dir();
     let script = tokio::task::spawn_blocking(move || {
-        plugins::read_repository_script(&repos_dir, &id, &entry_id)
+        plugins::read_repository_script_preview(&repos_dir, &id, &entry_id)
     })
     .await
     .map_err(|_| AppError::Internal)?;

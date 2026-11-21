@@ -11,6 +11,7 @@ use std::{
 mod blocks;
 mod cache;
 mod dependencies;
+mod highlight;
 mod icon;
 mod install;
 mod legacy_ids;
@@ -68,7 +69,7 @@ pub use forgearr_shared::plugins::{
     PluginSettingsView, RepositoryDetailView, ToolArtifactSummary, ToolDetailView, ToolStatus,
     ToolStatusSummary,
 };
-pub use script_preview::read_repository_script;
+pub use script_preview::read_repository_script_preview;
 pub use secret_settings::{
     decrypt_all, mask, migrate_plaintext, plugin_secret_aad, reseal_legacy_settings,
     rotate_settings, seal, secret_names,

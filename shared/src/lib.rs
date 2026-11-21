@@ -13,6 +13,7 @@ pub mod diagnostics;
 pub mod flow_analysis;
 pub mod flows;
 pub mod format;
+pub mod highlight;
 pub mod jobs;
 pub mod libraries;
 pub mod local;

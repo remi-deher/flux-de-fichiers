@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.72.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.71.0...v0.72.0) (2026-11-21)
+
+
+### Features
+
+* **plugins:** variables exposées dans la fiche d'un plugin (ADR 0025) ([f92e5cb](https://github.com/remi-deher/flux-de-fichiers/commit/f92e5cbd46452a2188acec88f2d26c17987a5078))
+* **plugins:** variables exposées dans la fiche d'un plugin (ADR 0025) ([6611ace](https://github.com/remi-deher/flux-de-fichiers/commit/6611ace69dd3319eca6b40101002e197fc65adc3))
+
 ## [0.71.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.70.0...v0.71.0) (2026-11-21)
 
 

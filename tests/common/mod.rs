@@ -12,10 +12,12 @@ pub const WORKER_KEY: &str = "fdf_b0000001_fedcba9876543210fedcba9876543210fedcb
 /// Page minimale servie par les tests d'interface : la vraie page est générée, non versionnée.
 pub const TEST_PAGE: &str = "<!doctype html><title>Forgearr</title>";
 
-/// Dossier statique temporaire contenant `index.html`, à garder en vie pendant le test.
+/// Dossier statique temporaire contenant `index.html` et la marque SVG (versionnée), à garder en
+/// vie pendant le test : le central ne sert aucun fichier statique sans `index.html`.
 pub fn static_dir_with_page() -> anyhow::Result<tempfile::TempDir> {
     let dir = tempfile::tempdir()?;
     std::fs::write(dir.path().join("index.html"), TEST_PAGE)?;
+    std::fs::copy("frontend/dist/forgearr.svg", dir.path().join("forgearr.svg"))?;
     Ok(dir)
 }
 

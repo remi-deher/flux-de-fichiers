@@ -76,7 +76,8 @@ async fn test_smoke_frontend_served() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_smoke_forgearr_mark_served_as_svg() -> anyhow::Result<()> {
-    let app = test_app().await?;
+    let page = common::static_dir_with_page()?;
+    let app = test_app_serving(page.path().to_path_buf()).await?;
     let req = Request::builder()
         .uri(forgearr_shared::brand::MARK_PATH)
         .body(Body::empty())?;

@@ -116,7 +116,7 @@ pub async fn reprocess(
         size,
         Some(library_id),
         previous.flow_id.as_deref(),
-        previous.priority,
+        Some(previous.priority),
         source.as_ref(),
     )
     .await?;
@@ -137,6 +137,20 @@ pub async fn reprocess(
             .execute(&mut *tx)
             .await?;
         job.flow_version = Some(version);
+        // La classe de ressource suit la version figée relancée, pas la dernière version.
+        let class = super::resource_slots::frozen_flow_class(
+            &mut tx,
+            job.flow_id.as_deref().map(|id| (id, version)),
+        )
+        .await?;
+        super::resource_slots::set_job_class(&mut tx, job.id, class).await?;
+        // Les flux liés suivent aussi la version relancée.
+        super::linked_flows::freeze_linked_flows(
+            &mut tx,
+            job.id,
+            job.flow_id.as_deref().map(|id| (id, version)),
+        )
+        .await?;
     }
     tx.commit().await?;
     Ok(job)
@@ -164,6 +178,7 @@ pub async fn placement(
     let timezone = crate::runtime_settings::load_timezone(pool).await;
     let now_utc = chrono::Utc::now();
     let (weekday, hour) = forgearr_shared::timezone::local_weekday_and_hour(now_utc, &timezone);
+    let resource_class = super::job_resource_class(pool, job.id).await?;
     let mut candidates = Vec::new();
     for worker in super::list_workers(pool).await? {
         let has_source = if shared {
@@ -183,9 +198,10 @@ pub async fn placement(
         {
             PlacementStatus::OutsideSchedule
         } else {
-            let count: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE worker_id=? AND status='running' AND leased_until>datetime('now')")
-                .bind(worker.id).fetch_one(pool).await?;
-            if count >= i64::from(worker.max_concurrency) {
+            let running =
+                super::resource_slots::running_jobs(&mut *pool.acquire().await?, worker.id)
+                    .await?;
+            if !worker.slots().admits(resource_class, running) {
                 PlacementStatus::AtCapacity
             } else {
                 PlacementStatus::Ready

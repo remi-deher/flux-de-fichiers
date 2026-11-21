@@ -57,6 +57,8 @@ fn field_kind_label(kind: &OwnedFieldKind) -> &'static str {
         OwnedFieldKind::Select(_) => "Sélection",
         OwnedFieldKind::Headers => "En-têtes",
         OwnedFieldKind::Worker => "Worker",
+        OwnedFieldKind::Condition => "Condition",
+        OwnedFieldKind::Flow => "Flux",
     }
 }
 

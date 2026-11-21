@@ -192,6 +192,8 @@ fn parse_ui_field(raw: &Value) -> Option<OwnedFieldSpec> {
         "boolean" => OwnedFieldKind::Bool,
         "headers" => OwnedFieldKind::Headers,
         "worker" => OwnedFieldKind::Worker,
+        "condition" => OwnedFieldKind::Condition,
+        "flow" => OwnedFieldKind::Flow,
         "select" => {
             let options = raw
                 .get("options")
@@ -406,5 +408,15 @@ mod tests {
             panic!("un champ worker doit être lu");
         };
         assert_eq!(field.kind, OwnedFieldKind::Worker);
+        let condition = serde_json::json!({"name": "group", "label": "Règles", "type": "condition"});
+        let Some(field) = parse_ui_field(&condition) else {
+            panic!("un champ condition doit être lu");
+        };
+        assert_eq!(field.kind, OwnedFieldKind::Condition);
+        let flow = serde_json::json!({"name": "flowId", "label": "Sous-flux", "type": "flow"});
+        let Some(field) = parse_ui_field(&flow) else {
+            panic!("un champ flux doit être lu");
+        };
+        assert_eq!(field.kind, OwnedFieldKind::Flow);
     }
 }

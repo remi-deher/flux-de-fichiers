@@ -6,9 +6,11 @@ use crate::{
 };
 use forgearr_shared::{
     capabilities::CapabilityRequirement,
+    flows::FlowVariables,
     relay::{HandoffState, JobRelayInfo, MAX_RELAYS_PER_JOB, RelayRequest, RelayTarget},
     workers::WORKER_ONLINE_SECONDS,
 };
+use serde_json::{Map, Value};
 use sqlx::SqlitePool;
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -150,16 +152,18 @@ pub async fn relay_job(
                 return Err(AppError::Conflict);
             }
             sqlx::query(
-                "INSERT INTO job_relays(job_id, from_worker_id, relay_count, resume_node_id, requirement_json) \
-                 VALUES(?1, ?2, 1, ?3, ?4) \
+                "INSERT INTO job_relays(job_id, from_worker_id, relay_count, resume_node_id, requirement_json, variables_json) \
+                 VALUES(?1, ?2, 1, ?3, ?4, ?5) \
                  ON CONFLICT(job_id) DO UPDATE SET from_worker_id=excluded.from_worker_id, \
                      relay_count=relay_count+1, resume_node_id=excluded.resume_node_id, \
-                     requirement_json=excluded.requirement_json, relayed_at=datetime('now')",
+                     requirement_json=excluded.requirement_json, \
+                     variables_json=excluded.variables_json, relayed_at=datetime('now')",
             )
             .bind(id)
             .bind(lease.worker_id)
             .bind(&request.resume_node_id)
             .bind(requirement_json)
+            .bind(variables_json(&request.variables)?)
             .execute(&mut *tx)
             .await?;
             RelayOutcome::Relayed {
@@ -197,14 +201,42 @@ pub async fn relay_job(
     Ok(outcome)
 }
 
-/// Nœud de reprise d'une tâche relayée, lu au moment du bail.
-pub(super) async fn resume_node(pool: &SqlitePool, job: Uuid) -> AppResult<Option<String>> {
-    Ok(
-        sqlx::query_scalar("SELECT resume_node_id FROM job_relays WHERE job_id=?1")
+/// Reprise d'une tâche relayée, lue au moment du bail.
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct ResumeState {
+    pub node_id: Option<String>,
+    pub variables: Map<String, Value>,
+}
+
+/// Valide puis sérialise les variables personnalisées d'un relais (`NULL` si aucune).
+pub(super) fn variables_json(variables: &Map<String, Value>) -> AppResult<Option<String>> {
+    if variables.is_empty() {
+        return Ok(None);
+    }
+    FlowVariables::default()
+        .merge_custom(variables)
+        .map_err(|_| AppError::Invalid)?;
+    serde_json::to_string(variables).map(Some).map_err(|_| AppError::Internal)
+}
+
+/// Relit des variables de relais stockées ; une valeur illisible est ignorée.
+pub(super) fn parse_variables_json(raw: Option<&str>) -> Map<String, Value> {
+    raw.and_then(|text| serde_json::from_str(text).ok()).unwrap_or_default()
+}
+
+/// Nœud et variables de reprise d'une tâche relayée, lus au moment du bail.
+pub(super) async fn resume_state(pool: &SqlitePool, job: Uuid) -> AppResult<ResumeState> {
+    let row: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT resume_node_id, variables_json FROM job_relays WHERE job_id=?1")
             .bind(job)
             .fetch_optional(pool)
-            .await?,
-    )
+            .await?;
+    Ok(row
+        .map(|(node_id, variables)| ResumeState {
+            node_id: Some(node_id),
+            variables: parse_variables_json(variables.as_deref()),
+        })
+        .unwrap_or_default())
 }
 
 /// Marques « relayée » des tâches données (celles qui n'ont pas été relayées sont absentes).
@@ -240,6 +272,7 @@ pub async fn list_relays(pool: &SqlitePool, ids: &[Uuid]) -> AppResult<Vec<JobRe
 mod tests {
     use super::*;
     use chrono::{Duration, Utc};
+    use serde_json::json;
     use forgearr_shared::{
         capabilities::{EncodeAcceleration, HardwareEncoder, VideoCodec, WorkerCapabilities},
         workers::WorkerTelemetry,
@@ -276,6 +309,8 @@ mod tests {
                 capabilities,
             }),
             max_concurrency: 1,
+            max_cpu_jobs: None,
+            max_gpu_jobs: None,
             schedule: None,
             transfer_enabled: false,
         }
@@ -356,5 +391,18 @@ mod tests {
             decide_placement(&workers, origin.id, &to_self, &all_access(&workers)),
             None
         );
+    }
+
+    #[test]
+    fn relay_variables_round_trip_and_are_validated() -> AppResult<()> {
+        assert_eq!(variables_json(&Map::new())?, None);
+        let mut variables = Map::new();
+        variables.insert("codec".into(), json!("hevc"));
+        let stored = variables_json(&variables)?;
+        assert_eq!(parse_variables_json(stored.as_deref()), variables);
+        assert!(parse_variables_json(Some("illisible")).is_empty());
+        variables.insert("nom invalide".into(), json!(1));
+        assert!(matches!(variables_json(&variables), Err(AppError::Invalid)));
+        Ok(())
     }
 }

@@ -1,7 +1,11 @@
 //! Présentation métier de l'éditeur : domaines visuels, ports sémantiques, résumés et diagnostics.
 
+use super::condition_edit::GROUP_KEY;
 use crate::ui::IconName;
-use forgearr_shared::flows::{FlowGraph, FlowNode, OwnedBlockSpec, OwnedFieldKind, find_owned};
+use forgearr_shared::flows::{
+    ConditionConfig, ConditionGroup, ConditionOperator, FlowGraph, FlowNode, OwnedBlockSpec,
+    OwnedFieldKind, describe_condition, find_owned,
+};
 use serde_json::Value;
 
 const SUMMARY_MAX_CHARS: usize = 42;
@@ -203,26 +207,32 @@ fn is_condition_config(
     spec: Option<&OwnedBlockSpec>,
 ) -> bool {
     spec.is_some_and(|s| !s.ports.is_empty())
+        || obj.contains_key(GROUP_KEY)
         || (obj.contains_key("property")
             && obj.contains_key("operator")
             && obj.contains_key("target"))
 }
 
-fn condition_op_symbol(raw: Option<&str>) -> &str {
-    match raw.unwrap_or("eq") {
-        "eq" => "=",
-        "neq" => "!=",
-        "contains" => "~",
-        "gt" => ">",
-        "lt" => "<",
-        other => other,
-    }
+fn condition_op_symbol(obj: &serde_json::Map<String, Value>) -> &'static str {
+    obj.get("operator")
+        .and_then(Value::as_str)
+        .map(ConditionOperator::from_loose)
+        .unwrap_or_default()
+        .symbol()
+}
+
+/// Groupe de règles combinées, s'il est présent et non vide.
+fn condition_group(obj: &serde_json::Map<String, Value>) -> Option<ConditionGroup> {
+    obj.get(GROUP_KEY)
+        .cloned()
+        .and_then(|value| serde_json::from_value::<ConditionGroup>(value).ok())
+        .filter(|group| !group.rules.is_empty())
 }
 
 fn condition_parts<'a>(
     obj: &'a serde_json::Map<String, Value>,
     spec: Option<&OwnedBlockSpec>,
-) -> Option<(&'a str, &'a str, &'a str)> {
+) -> Option<(&'a str, &'static str, &'a str)> {
     if !is_condition_config(obj, spec) {
         return None;
     }
@@ -231,8 +241,7 @@ fn condition_parts<'a>(
     if property.is_empty() || target.is_empty() {
         return None;
     }
-    let op = condition_op_symbol(obj.get("operator").and_then(Value::as_str));
-    Some((property, op, target))
+    Some((property, condition_op_symbol(obj), target))
 }
 
 fn visible_config_entries<'a>(
@@ -291,6 +300,12 @@ fn scalar_summary_part(key: &str, value: &Value) -> Option<String> {
 /// Résumé compact de configuration affiché dans la simulation et l'aperçu texte.
 pub fn node_summary(node: &FlowNode, spec: Option<&OwnedBlockSpec>) -> Option<String> {
     let obj = node.config.as_object()?;
+    if let Some(group) = condition_group(obj) {
+        return Some(truncate_text(
+            describe_condition(&ConditionConfig::grouped(group)),
+            SUMMARY_MAX_CHARS,
+        ));
+    }
     if let Some((property, op, target)) = condition_parts(obj, spec) {
         return Some(truncate_text(
             format!("{property} {op} {target}"),
@@ -314,6 +329,12 @@ pub fn node_chips(node: &FlowNode, spec: Option<&OwnedBlockSpec>) -> Vec<NodeChi
     let Some(obj) = node.config.as_object() else {
         return Vec::new();
     };
+    if let Some(group) = condition_group(obj) {
+        return vec![NodeChip {
+            key: None,
+            value: format!("{} règles ({})", group.rules.len(), group.combinator.label()),
+        }];
+    }
     if let Some((property, op, target)) = condition_parts(obj, spec) {
         return vec![NodeChip {
             key: Some(truncate_text(property.to_owned(), CHIP_KEY_MAX_CHARS)),
@@ -321,7 +342,7 @@ pub fn node_chips(node: &FlowNode, spec: Option<&OwnedBlockSpec>) -> Vec<NodeChi
         }];
     }
     if is_condition_config(obj, spec) {
-        let op = condition_op_symbol(obj.get("operator").and_then(Value::as_str));
+        let op = condition_op_symbol(obj);
         return obj
             .get("property")
             .and_then(Value::as_str)
@@ -514,7 +535,26 @@ mod tests {
         );
         assert_eq!(
             node_summary(&cond, find_owned(&catalog, &cond.kind)),
-            Some("video.codec = hevc".to_owned())
+            Some("video.codec ~ hevc".to_owned())
+        );
+        let grouped = make_node(
+            FlowBlockKind::parse("essentiel.condition"),
+            "HEVC ou AV1 ?",
+            json!({"group": {"combinator": "any", "rules": [
+                {"property": "codec", "operator": "exact", "target": "hevc"},
+                {"property": "codec", "operator": "exact", "target": "av1"}
+            ]}}),
+        );
+        assert_eq!(
+            node_summary(&grouped, find_owned(&catalog, &grouped.kind)),
+            Some("(codec = hevc OU codec = av1)".to_owned())
+        );
+        assert_eq!(
+            node_chips(&grouped, find_owned(&catalog, &grouped.kind)),
+            vec![NodeChip {
+                key: None,
+                value: "2 règles (OU)".to_owned(),
+            }]
         );
 
         let hook = make_node(
@@ -580,7 +620,7 @@ mod tests {
             ),
             vec![NodeChip {
                 key: Some("any".to_owned()),
-                value: "= ?".to_owned(),
+                value: "~ ?".to_owned(),
             }]
         );
         let cond_blank = make_node(
@@ -599,7 +639,7 @@ mod tests {
             node_chips(&cond, find_owned(&catalog, &cond.kind)),
             vec![NodeChip {
                 key: Some("video.codec".to_owned()),
-                value: "= hevc".to_owned(),
+                value: "~ hevc".to_owned(),
             }]
         );
 

@@ -692,3 +692,68 @@ async fn scans_grouped_central_and_worker_folders_and_keeps_distinct_history() -
     assert_eq!(replay["target_worker_id"], worker);
     Ok(())
 }
+
+#[tokio::test]
+async fn worker_slots_library_priority_and_job_resources_round_trip() -> anyhow::Result<()> {
+    let app = test_app().await?;
+    let worker = register_worker(&app, "nas-slots").await?;
+    let settings = format!("/api/v1/workers/{worker}/settings");
+
+    let legacy = admin(&app, "PUT", &settings, Some(serde_json::json!({"maxConcurrency": 2}))).await?;
+    assert_eq!(legacy.status(), StatusCode::OK);
+    let legacy = json_of(legacy).await?;
+    assert!(legacy.get("max_cpu_jobs").is_none());
+    assert!(legacy.get("max_gpu_jobs").is_none());
+
+    let split = admin(
+        &app,
+        "PUT",
+        &settings,
+        Some(serde_json::json!({"maxConcurrency": 2, "maxCpuJobs": 2, "maxGpuJobs": 1})),
+    )
+    .await?;
+    assert_eq!(split.status(), StatusCode::OK);
+    let listed = json_of(admin(&app, "GET", "/api/v1/workers", None).await?).await?;
+    let entry = listed
+        .as_array()
+        .and_then(|workers| workers.iter().find(|w| w["id"] == worker.as_str()))
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(entry["max_cpu_jobs"], 2);
+    assert_eq!(entry["max_gpu_jobs"], 1);
+
+    let empty = admin(
+        &app,
+        "PUT",
+        &settings,
+        Some(serde_json::json!({"maxConcurrency": 1, "maxCpuJobs": 0, "maxGpuJobs": 0})),
+    )
+    .await?;
+    assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
+
+    let created = admin(
+        &app,
+        "POST",
+        "/api/v1/libraries",
+        Some(serde_json::json!({"name": "Prioritaire", "workers": [], "default_priority": 30})),
+    )
+    .await?;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    assert_eq!(json_of(created).await?["default_priority"], 30);
+    let invalid = admin(
+        &app,
+        "POST",
+        "/api/v1/libraries",
+        Some(serde_json::json!({"name": "Hors bornes", "workers": [], "default_priority": 500})),
+    )
+    .await?;
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let unknown = uuid::Uuid::new_v4();
+    let resources = admin(&app, "GET", &format!("/api/v1/jobs/resources?ids={unknown}"), None).await?;
+    assert_eq!(resources.status(), StatusCode::OK);
+    assert_eq!(json_of(resources).await?, serde_json::json!([]));
+    let malformed = admin(&app, "GET", "/api/v1/jobs/resources?ids=pas-un-uuid", None).await?;
+    assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+    Ok(())
+}

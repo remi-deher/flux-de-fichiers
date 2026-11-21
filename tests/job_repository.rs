@@ -462,11 +462,18 @@ async fn jobs_freeze_library_flow_record_steps_and_clear_output_explicitly() -> 
             status: forgearr::domain::JobStepStatus::Succeeded,
             message: Some("OK".into()),
             output_excerpt: Some("frame=10".into()),
+            variables: Some(serde_json::Map::from_iter([(
+                "id".to_owned(),
+                serde_json::json!("42"),
+            )])),
         }],
     )
     .await?;
     let steps = repository::list_job_steps(&pool, job.id).await?;
     assert_eq!(steps.len(), 1);
+    let stored = repository::step_variables(&pool, job.id, 0).await?;
+    assert_eq!(stored.get("id"), Some(&serde_json::json!("42")));
+    assert!(repository::step_variables(&pool, job.id, 1).await?.is_empty());
     assert_eq!(steps[0].operation_id.as_deref(), Some("ffmpeg.encode"));
 
     assert!(matches!(
@@ -513,7 +520,7 @@ async fn priority_cancellation_batch_concurrency_schedule_and_stats() -> anyhow:
         1_000,
         None,
         None,
-        -10,
+        Some(-10),
     )
     .await?;
     let high = repository::insert_job_with_priority(
@@ -524,7 +531,7 @@ async fn priority_cancellation_batch_concurrency_schedule_and_stats() -> anyhow:
         2_000,
         None,
         None,
-        20,
+        Some(20),
     )
     .await?;
     let third = repository::insert_job_with_priority(
@@ -535,7 +542,7 @@ async fn priority_cancellation_batch_concurrency_schedule_and_stats() -> anyhow:
         500,
         None,
         None,
-        5,
+        Some(5),
     )
     .await?;
 
@@ -549,7 +556,7 @@ async fn priority_cancellation_batch_concurrency_schedule_and_stats() -> anyhow:
     assert!(repository::claim(&pool, worker.id).await?.is_none());
 
     // Passer la concurrence à 2 débloque la tâche suivante (third, priorité 5 > -10).
-    let updated_worker = repository::update_worker_settings(&pool, worker.id, 2, None).await?;
+    let updated_worker = repository::update_worker_settings(&pool, worker.id, 2, None, None, None).await?;
     assert_eq!(updated_worker.max_concurrency, 2);
     let second_claim = repository::claim(&pool, worker.id)
         .await?
@@ -602,6 +609,8 @@ async fn priority_cancellation_batch_concurrency_schedule_and_stats() -> anyhow:
         &pool,
         worker.id,
         2,
+        None,
+        None,
         Some(&forgearr::domain::WorkerSchedule {
             enabled: true,
             start_hour: blocked_start,

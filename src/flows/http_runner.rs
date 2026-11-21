@@ -8,7 +8,10 @@ use crate::flows::{
     },
     header_secrets::decrypt_headers,
 };
-use forgearr_shared::jobs::JobErrorCode;
+use forgearr_shared::{
+    flows::{TemplateToken, exact_token, render_piece, render_template_with},
+    jobs::JobErrorCode,
+};
 use reqwest::{Client, Method};
 use serde_json::{Map, Value};
 use std::{collections::HashMap, path::Path, time::Duration};
@@ -393,12 +396,9 @@ fn resolve_json_value(
 ) -> Result<Value, String> {
     match value {
         Value::String(s) => {
-            if let Some(token) = s
-                .strip_prefix("{$")
-                .and_then(|inner| inner.strip_suffix('}'))
-                && !token.contains("}{")
+            if let Some(expr) = exact_token(s)
                 && let Some(exact) =
-                    resolve_exact_value_token(token, node_config, settings, vars, ctx)
+                    resolve_exact_value_token(expr, node_config, settings, vars, ctx)
             {
                 return Ok(exact);
             }
@@ -436,14 +436,15 @@ fn resolve_json_value(
     }
 }
 
+/// Résout une expression HTTP : `context.*`, `var.*` (variables locales extraites entre étapes),
+/// `setting.*`, `config.*`, puis les variables du flux (`vars.*`, `file.*`…).
 fn resolve_exact_value_token(
-    token: &str,
+    expr: &str,
     node_config: &Value,
     settings: Option<&Value>,
     vars: &HashMap<String, Value>,
     ctx: &FlowContext,
 ) -> Option<Value> {
-    let (expr, _default) = token.split_once('|').unwrap_or((token, ""));
     match expr {
         "context.mediaInfo" => Some(ctx.media_info.clone()),
         "context.jobId" => Some(Value::String(ctx.job_id.to_string())),
@@ -458,7 +459,7 @@ fn resolve_exact_value_token(
         other if other.starts_with("config.") => {
             node_config.get(&other["config.".len()..]).cloned()
         }
-        _ => None,
+        other => ctx.variables.lookup(other).cloned(),
     }
 }
 
@@ -469,33 +470,15 @@ fn render_string_template(
     vars: &HashMap<String, Value>,
     ctx: &FlowContext,
 ) -> Result<String, String> {
-    let mut rendered = String::with_capacity(template.len());
-    let mut rest = template;
-    while let Some(open) = rest.find("{$") {
-        rendered.push_str(&rest[..open]);
-        let after_open = &rest[open + 2..];
-        let Some(close) = after_open.find('}') else {
-            rendered.push_str("{$");
-            rest = after_open;
-            continue;
-        };
-        let token = &after_open[..close];
-        let trailing = &after_open[close + 1..];
-        let (expr, default_val) = token.split_once('|').unwrap_or((token, ""));
-        let mut piece = resolve_exact_value_token(expr, node_config, settings, vars, ctx)
-            .map(|v| scalar_to_string(Some(&v)))
-            .unwrap_or_default();
-        if piece.is_empty() && !default_val.is_empty() {
-            piece = default_val.to_owned();
+    Ok(render_template_with(template, &mut |token: &TemplateToken<'_>| {
+        let resolved = resolve_exact_value_token(token.expr, node_config, settings, vars, ctx);
+        let piece = render_piece(resolved.as_ref(), token.default);
+        if token.expr.starts_with("setting.") && token.trailing.starts_with('/') {
+            piece.trim_end_matches('/').to_owned()
+        } else {
+            piece
         }
-        if expr.starts_with("setting.") && trailing.starts_with('/') {
-            piece = piece.trim_end_matches('/').to_owned();
-        }
-        rendered.push_str(&piece);
-        rest = trailing;
-    }
-    rendered.push_str(rest);
-    Ok(rendered)
+    }))
 }
 
 #[cfg(test)]
@@ -619,6 +602,38 @@ mod tests {
             outcome,
             HttpStepOutcome::Succeeded { message: Some(ref m) } if m == "commande *arr transmise"
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn http_templates_read_flow_variables_and_keep_local_namespaces() -> Result<(), String> {
+        let mut ctx = FlowContext::new(
+            Uuid::nil(),
+            "film.mkv".to_owned(),
+            Path::new("/tmp/film.mkv").to_path_buf(),
+            json!({}),
+        );
+        ctx.variables
+            .set_custom("titre", json!("Film"))
+            .map_err(|err| err.to_string())?;
+        let settings = json!({"url": "http://arr/"});
+        let locals = HashMap::from([("id".to_owned(), json!(7))]);
+        let rendered = render_string_template(
+            "{$setting.url}/api/{$var.id}?t={$vars.titre}&x={{$brut}",
+            &json!({}),
+            Some(&settings),
+            &locals,
+            &ctx,
+        )?;
+        assert_eq!(rendered, "http://arr/api/7?t=Film&x={$brut}");
+        let body = resolve_json_value(
+            &json!({"id": "{$var.id}", "titre": "{$vars.titre}"}),
+            &json!({}),
+            Some(&settings),
+            &locals,
+            &ctx,
+        )?;
+        assert_eq!(body, json!({"id": 7, "titre": "Film"}));
         Ok(())
     }
 }

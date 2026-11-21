@@ -2,11 +2,13 @@
 
 use crate::{
     domain::{
-        LIBRARY_NAME_MAX, LIBRARY_PATH_MAX, Library, LibraryAccess, LibraryOutputPolicy,
-        LibraryWorkerPath, LibraryWrite, MAX_SCAN_INTERVAL_MINUTES,
+        JOB_PRIORITY_MAX, JOB_PRIORITY_MIN, LIBRARY_NAME_MAX, LIBRARY_PATH_MAX, Library,
+        LibraryAccess, LibraryOutputPolicy, LibraryWorkerPath, LibraryWrite,
+        MAX_SCAN_INTERVAL_MINUTES,
     },
     error::{AppError, AppResult},
 };
+use forgearr_shared::jobs::LIBRARY_DEFAULT_JOB_PRIORITY;
 use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -44,6 +46,7 @@ struct PreparedLibrary {
     exclude_patterns_csv: String,
     min_file_bytes: i64,
     output_policy: LibraryOutputPolicy,
+    default_priority: i32,
 }
 
 fn split_csv(raw: &str) -> Vec<String> {
@@ -194,6 +197,9 @@ async fn prepare(pool: &SqlitePool, write: LibraryWrite) -> AppResult<PreparedLi
     if !(0..=MAX_SCAN_INTERVAL_MINUTES).contains(&write.scan_interval_minutes) {
         return Err(AppError::Invalid);
     }
+    if !(JOB_PRIORITY_MIN..=JOB_PRIORITY_MAX).contains(&write.default_priority) {
+        return Err(AppError::Invalid);
+    }
     let min_file_bytes = i64::try_from(write.min_file_bytes).map_err(|_| AppError::Invalid)?;
     let include_extensions_csv = join_csv(&write.include_extensions)?;
     let exclude_patterns_csv = join_csv(&write.exclude_patterns)?;
@@ -207,13 +213,16 @@ async fn prepare(pool: &SqlitePool, write: LibraryWrite) -> AppResult<PreparedLi
         exclude_patterns_csv,
         min_file_bytes,
         output_policy: write.output_policy,
+        default_priority: write.default_priority,
     })
 }
 
+/// `default_priority` est lue à part (requête runtime) : les macros de `LibraryRow` l'ignorent.
 fn assemble(
     row: LibraryRow,
     workers: Vec<LibraryWorkerPath>,
     transfer_workers: Vec<Uuid>,
+    default_priority: i32,
 ) -> Library {
     Library {
         id: row.id,
@@ -227,9 +236,35 @@ fn assemble(
         exclude_patterns: split_csv(&row.exclude_patterns),
         min_file_bytes: row.min_file_bytes.max(0) as u64,
         output_policy: row.output_policy,
+        default_priority,
         created_at: row.created_at,
         updated_at: row.updated_at,
     }
+}
+
+/// Priorité par défaut d'une bibliothèque (colonne lue hors macro).
+async fn default_priority_of(pool: &SqlitePool, id: Uuid) -> AppResult<i32> {
+    Ok(
+        sqlx::query_scalar::<_, i32>("SELECT default_priority FROM libraries WHERE id=?1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?
+            .unwrap_or(LIBRARY_DEFAULT_JOB_PRIORITY),
+    )
+}
+
+/// Enregistre la priorité par défaut, dans la transaction d'écriture de la bibliothèque.
+async fn save_default_priority(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+    id: Uuid,
+    default_priority: i32,
+) -> AppResult<()> {
+    sqlx::query("UPDATE libraries SET default_priority=?2 WHERE id=?1")
+        .bind(id)
+        .bind(default_priority)
+        .execute(conn)
+        .await?;
+    Ok(())
 }
 
 async fn workers_of(
@@ -316,6 +351,12 @@ pub async fn list_libraries(pool: &SqlitePool) -> AppResult<Vec<Library>> {
     )
     .fetch_all(pool)
     .await?;
+    let mut priorities: HashMap<Uuid, i32> =
+        sqlx::query_as::<_, (Uuid, i32)>("SELECT id, default_priority FROM libraries")
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .collect();
     let mut transfer_by_library: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
     for (library_id, worker_id) in transfer_rows {
         transfer_by_library
@@ -340,7 +381,10 @@ pub async fn list_libraries(pool: &SqlitePool) -> AppResult<Vec<Library>> {
         .map(|row| {
             let workers = by_library.remove(&row.id).unwrap_or_default();
             let transfer_workers = transfer_by_library.remove(&row.id).unwrap_or_default();
-            assemble(row, workers, transfer_workers)
+            let default_priority = priorities
+                .remove(&row.id)
+                .unwrap_or(LIBRARY_DEFAULT_JOB_PRIORITY);
+            assemble(row, workers, transfer_workers, default_priority)
         })
         .collect())
 }
@@ -356,7 +400,8 @@ pub async fn get_library(pool: &SqlitePool, id: Uuid) -> AppResult<Library> {
     .ok_or(AppError::NotFound)?;
     let workers = workers_of(pool, id).await?;
     let transfer_workers = transfer_workers_of(pool, id).await?;
-    Ok(assemble(row, workers, transfer_workers))
+    let default_priority = default_priority_of(pool, id).await?;
+    Ok(assemble(row, workers, transfer_workers, default_priority))
 }
 
 pub async fn insert_library(pool: &SqlitePool, write: LibraryWrite) -> AppResult<Library> {
@@ -379,8 +424,14 @@ pub async fn insert_library(pool: &SqlitePool, write: LibraryWrite) -> AppResult
     .await?;
     insert_workers(&mut tx, id, &prepared.workers).await?;
     insert_transfer_workers(&mut tx, id, &prepared.transfer_workers).await?;
+    save_default_priority(&mut tx, id, prepared.default_priority).await?;
     tx.commit().await?;
-    Ok(assemble(row, prepared.workers, prepared.transfer_workers))
+    Ok(assemble(
+        row,
+        prepared.workers,
+        prepared.transfer_workers,
+        prepared.default_priority,
+    ))
 }
 
 pub async fn update_library(
@@ -417,8 +468,14 @@ pub async fn update_library(
         .await?;
     insert_workers(&mut tx, id, &prepared.workers).await?;
     insert_transfer_workers(&mut tx, id, &prepared.transfer_workers).await?;
+    save_default_priority(&mut tx, id, prepared.default_priority).await?;
     tx.commit().await?;
-    Ok(assemble(row, prepared.workers, prepared.transfer_workers))
+    Ok(assemble(
+        row,
+        prepared.workers,
+        prepared.transfer_workers,
+        prepared.default_priority,
+    ))
 }
 
 pub async fn delete_library(pool: &SqlitePool, id: Uuid) -> AppResult<()> {

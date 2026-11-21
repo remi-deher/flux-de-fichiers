@@ -48,6 +48,7 @@ struct ClaimedHandoff {
     artifact_sha256: String,
     artifact_bytes: i64,
     warning: bool,
+    variables_json: Option<String>,
 }
 
 fn valid_artifact(artifact: &HandoffArtifact, max_bytes: u64) -> bool {
@@ -110,8 +111,8 @@ pub async fn begin_handoff(
         tx.commit().await?;
         return Ok(false);
     }
-    sqlx::query("INSERT INTO job_handoffs(job_id,from_worker_id,source_lease_epoch,target_worker_id,requirement_json,resume_node_id,artifact_name,artifact_sha256,artifact_bytes,state,expires_at,warning) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,datetime('now','+' || ?11 || ' seconds'),?12)")
-        .bind(job).bind(lease.worker_id).bind(lease.lease_epoch).bind(target).bind(requirement).bind(&request.resume_node_id).bind(&artifact.name).bind(artifact.sha256.to_ascii_lowercase()).bind(artifact.bytes).bind(HandoffState::Uploading.as_str()).bind(HANDOFF_TTL_SECONDS).bind(warning).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO job_handoffs(job_id,from_worker_id,source_lease_epoch,target_worker_id,requirement_json,resume_node_id,artifact_name,artifact_sha256,artifact_bytes,state,expires_at,warning,variables_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,datetime('now','+' || ?11 || ' seconds'),?12,?13)")
+        .bind(job).bind(lease.worker_id).bind(lease.lease_epoch).bind(target).bind(requirement).bind(&request.resume_node_id).bind(&artifact.name).bind(artifact.sha256.to_ascii_lowercase()).bind(artifact.bytes).bind(HandoffState::Uploading.as_str()).bind(HANDOFF_TTL_SECONDS).bind(warning).bind(super::relays::variables_json(&request.variables)?).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(true)
 }
@@ -327,7 +328,7 @@ pub async fn acknowledge_handoff(
         return Ok(false);
     }
     let handoff: Option<ClaimedHandoff> = sqlx::query_as(
-        "SELECT from_worker_id,source_lease_epoch,resume_node_id,requirement_json,artifact_sha256,artifact_bytes,warning \
+        "SELECT from_worker_id,source_lease_epoch,resume_node_id,requirement_json,artifact_sha256,artifact_bytes,warning,variables_json \
          FROM job_handoffs WHERE job_id=?1 AND state=?2 AND receiver_worker_id=?3 \
            AND receiver_token_hash=?4 AND expires_at > datetime('now')",
     ).bind(job_id).bind(HandoffState::Claimed.as_str()).bind(ack.worker_id).bind(receipt_hash(&ack.receipt_token)).fetch_optional(&mut *tx).await?;
@@ -346,12 +347,13 @@ pub async fn acknowledge_handoff(
         .bind(job_id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("INSERT INTO job_handoff_steps(job_id,step_index,node_id,block_kind,operation_id,status,message,output_excerpt,created_at) SELECT job_id,step_index,node_id,block_kind,operation_id,status,message,output_excerpt,created_at FROM job_steps WHERE job_id=?1")
+    sqlx::query("INSERT INTO job_handoff_steps(job_id,step_index,node_id,block_kind,operation_id,status,message,output_excerpt,created_at,variables_json) SELECT job_id,step_index,node_id,block_kind,operation_id,status,message,output_excerpt,created_at,variables_json FROM job_steps WHERE job_id=?1")
         .bind(job_id).execute(&mut *tx).await?;
-    sqlx::query("INSERT INTO job_relays(job_id,from_worker_id,relay_count,resume_node_id,requirement_json) VALUES(?1,?2,1,?3,?4) \
+    sqlx::query("INSERT INTO job_relays(job_id,from_worker_id,relay_count,resume_node_id,requirement_json,variables_json) VALUES(?1,?2,1,?3,?4,?5) \
         ON CONFLICT(job_id) DO UPDATE SET from_worker_id=excluded.from_worker_id,relay_count=relay_count+1, \
-        resume_node_id=excluded.resume_node_id,requirement_json=excluded.requirement_json,relayed_at=datetime('now')")
-        .bind(job_id).bind(handoff.from_worker_id).bind(handoff.resume_node_id).bind(handoff.requirement_json).execute(&mut *tx).await?;
+        resume_node_id=excluded.resume_node_id,requirement_json=excluded.requirement_json, \
+        variables_json=excluded.variables_json,relayed_at=datetime('now')")
+        .bind(job_id).bind(handoff.from_worker_id).bind(handoff.resume_node_id).bind(handoff.requirement_json).bind(handoff.variables_json).execute(&mut *tx).await?;
     sqlx::query("UPDATE job_handoffs SET state=?2,acknowledged_at=datetime('now') WHERE job_id=?1 AND source_lease_epoch=?3 AND state=?4")
         .bind(job_id).bind(HandoffState::Acknowledged.as_str()).bind(handoff.source_lease_epoch).bind(HandoffState::Claimed.as_str()).execute(&mut *tx).await?;
     tx.commit().await?;

@@ -40,6 +40,9 @@ pub struct JobStepEntry {
     pub message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_excerpt: Option<String>,
+    /// Variables personnalisées (`vars.*`) figées pour une notification différée après publication.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variables: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// Rapport d'étapes transmis par un worker distant au central.
@@ -110,9 +113,35 @@ pub struct Claim {
     /// Billet pour lire la source chez le worker qui la détient (ADR 0019).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_ticket: Option<forgearr_shared::transfer::SourceTicket>,
+    /// Nom de la bibliothèque de la tâche (variable de flux `library.name`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library_name: Option<String>,
+    /// Nom du worker détenteur du bail (variable de flux `worker.name`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_name: Option<String>,
+    /// Variables personnalisées (`vars.*`) transmises par le worker qui a relayé la tâche.
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub resume_variables: serde_json::Map<String, serde_json::Value>,
+    /// Versions figées des sous-flux et du flux d'échec de la tâche (ADR 0022).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked_flows: Vec<forgearr_shared::flows::LinkedFlow>,
 }
 
 impl Claim {
+    /// Flux figé principal puis flux liés : tous ceux que le worker peut exécuter pour ce bail.
+    pub fn executable_flows(&self) -> impl Iterator<Item = &FlowRecord> {
+        self.frozen_flow
+            .iter()
+            .chain(self.linked_flows.iter().map(|linked| &linked.flow))
+    }
+
+    /// Version mutable de [`Claim::executable_flows`] (chiffrement des en-têtes).
+    pub fn executable_flows_mut(&mut self) -> impl Iterator<Item = &mut FlowRecord> {
+        self.frozen_flow
+            .iter_mut()
+            .chain(self.linked_flows.iter_mut().map(|linked| &mut linked.flow))
+    }
+
     /// Le fichier à sonder peut être le résultat intermédiaire d'un worker précédent.
     pub fn working_source_name(&self) -> &str {
         self.handoff_input
@@ -314,12 +343,32 @@ mod tests {
             handoff_input: None,
             prior_warning: false,
             source_ticket: None,
+            library_name: None,
+            worker_name: None,
+            resume_variables: serde_json::Map::new(),
+            linked_flows: Vec::new(),
         };
         let encoded = serde_json::to_value(&with_flow)?;
         assert_eq!(encoded["frozen_flow"]["id"], "flow.x");
         assert_eq!(encoded["frozen_flow"]["version"], 3);
         assert!(encoded.get("operations").is_none());
         assert!(encoded.get("plugin_configs").is_none());
+        assert!(encoded.get("resume_variables").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn claim_without_flow_variables_still_deserializes() -> Result<(), serde_json::Error> {
+        let claim: Claim = serde_json::from_value(serde_json::json!({
+            "job_id": Uuid::nil(),
+            "lease_token": Uuid::nil(),
+            "source_name": "a.mkv",
+            "source_sha256": "ab",
+            "source_bytes": 1
+        }))?;
+        assert!(claim.library_name.is_none());
+        assert!(claim.worker_name.is_none());
+        assert!(claim.resume_variables.is_empty());
         Ok(())
     }
 

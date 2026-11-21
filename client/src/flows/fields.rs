@@ -1,27 +1,36 @@
 //! Contrôles de réglage générés depuis la fiche du bloc (`OwnedFieldSpec`).
 
+use super::condition_editor::ConditionEditor;
 use super::state::Editor;
+use super::template_input::TemplateInput;
 use forgearr_shared::flows::{OwnedFieldKind, OwnedFieldSpec};
 use leptos::prelude::*;
 use serde_json::{Map, Value};
 
-/// Écrit `value` sous `config.<field>` du bloc `node_id`.
-fn set_field(editor: Editor, node_id: &str, field: &str, value: Value) {
+/// Option vide du choix de sous-flux.
+const SUB_FLOW_EMPTY_LABEL: &str = "Choisir un flux";
+
+/// Fusionne `entries` dans `config` du bloc `node_id`, en une seule modification d'historique.
+pub(super) fn set_fields(editor: Editor, node_id: &str, entries: Map<String, Value>) {
     let node_id = node_id.to_owned();
-    let field = field.to_owned();
     editor.edit(move |graph| {
         if let Some(node) = graph.node_mut(&node_id) {
             if !node.config.is_object() {
                 node.config = Value::Object(Map::new());
             }
             if let Some(config) = node.config.as_object_mut() {
-                config.insert(field, value);
+                config.extend(entries);
             }
         }
     });
 }
 
-fn current(editor: Editor, node_id: &str, field: &str) -> Value {
+/// Écrit `value` sous `config.<field>` du bloc `node_id`.
+pub(super) fn set_field(editor: Editor, node_id: &str, field: &str, value: Value) {
+    set_fields(editor, node_id, Map::from_iter([(field.to_owned(), value)]));
+}
+
+pub(super) fn current(editor: Editor, node_id: &str, field: &str) -> Value {
     editor
         .graph
         .with(|graph| {
@@ -196,11 +205,22 @@ pub fn FieldControl(editor: Editor, node_id: String, field: OwnedFieldSpec) -> i
                     input_id=input_id.clone() label=label.clone() options=options />
             }.into_any()
         }
+        OwnedFieldKind::Flow => {
+            let options = super::flow_choice::flow_options(
+                SUB_FLOW_EMPTY_LABEL,
+                editor.flow_id.get_untracked(),
+            );
+            view! {
+                <OptionSelect editor=editor node_id=id.get_value() field_name=field_name.get_value()
+                    input_id=input_id.clone() label=label.clone() options=options />
+            }.into_any()
+        }
+        OwnedFieldKind::Condition => view! {
+            <ConditionEditor editor=editor node_id=id.get_value() label=label.clone() />
+        }.into_any(),
         OwnedFieldKind::Text => view! {
-            <label for=input_id.clone() class="form-label">{label.clone()}</label>
-            <input id=input_id.clone() class="form-input"
-                prop:value=move || current(editor, &id.read_value(), &field_name.get_value()).as_str().unwrap_or_default().to_owned()
-                on:input=move |event| set_field(editor, &id.read_value(), &field_name.get_value(), Value::String(event_target_value(&event))) />
+            <TemplateInput editor=editor node_id=id field_name=field_name
+                input_id=input_id.clone() label=label.clone() />
         }.into_any(),
     };
     view! {

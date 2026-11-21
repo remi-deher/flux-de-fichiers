@@ -10,7 +10,8 @@ use crate::{
     telemetry::TelemetrySnapshot,
 };
 use chrono::{DateTime, Utc};
-use forgearr_shared::workers::WorkerTelemetry;
+use forgearr_shared::jobs::LIBRARY_DEFAULT_JOB_PRIORITY;
+use forgearr_shared::workers::{WorkerTelemetry, worker_slots};
 use sqlx::SqlitePool;
 use std::future::Future;
 use uuid::Uuid;
@@ -48,20 +49,17 @@ impl WorkerRow {
             max_concurrency: self
                 .max_concurrency
                 .clamp(WORKER_MIN_CONCURRENCY, WORKER_MAX_CONCURRENCY),
+            max_cpu_jobs: None,
+            max_gpu_jobs: None,
             schedule,
             transfer_enabled: false,
         }
     }
 }
 
+/// Worker lu par macro, complété des colonnes lues en runtime (transfert, places par classe).
 async fn worker_with_transfer(pool: &SqlitePool, row: WorkerRow) -> AppResult<Worker> {
-    let mut worker = row.into_worker();
-    worker.transfer_enabled =
-        sqlx::query_scalar::<_, bool>("SELECT transfer_url IS NOT NULL FROM workers WHERE id=?1")
-            .bind(worker.id)
-            .fetch_one(pool)
-            .await?;
-    Ok(worker)
+    super::resource_slots::with_extras(pool, row.into_worker()).await
 }
 
 fn serialize_telemetry(snapshot: Option<&TelemetrySnapshot>) -> Option<String> {
@@ -98,13 +96,20 @@ pub async fn register_with_metadata(
     worker_with_transfer(pool, row).await
 }
 
-/// Met à jour la concurrence maximale et la fenêtre horaire d'un worker.
+/// Met à jour la concurrence maximale, les places CPU/GPU et la fenêtre horaire d'un worker.
+///
+/// `max_cpu_jobs` et `max_gpu_jobs` à `None` gardent le mode historique (voir `WorkerSlots`).
 pub async fn update_worker_settings(
     pool: &SqlitePool,
     id: Uuid,
     max_concurrency: i32,
+    max_cpu_jobs: Option<i32>,
+    max_gpu_jobs: Option<i32>,
     schedule: Option<&WorkerSchedule>,
 ) -> AppResult<Worker> {
+    if !forgearr_shared::workers::class_slots_valid(max_cpu_jobs, max_gpu_jobs) {
+        return Err(AppError::Invalid);
+    }
     if !(WORKER_MIN_CONCURRENCY..=WORKER_MAX_CONCURRENCY).contains(&max_concurrency) {
         return Err(AppError::Invalid);
     }
@@ -120,6 +125,7 @@ pub async fn update_worker_settings(
         .map(serde_json::to_string)
         .transpose()
         .map_err(|_| AppError::Invalid)?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let row = sqlx::query_as!(
         WorkerRow,
         r#"UPDATE workers SET max_concurrency = ?2, schedule_json = ?3 WHERE id = ?1 RETURNING id AS "id!: Uuid", name, last_seen AS "last_seen: DateTime<Utc>", version, remote_addr, telemetry_json, max_concurrency AS "max_concurrency: i32", schedule_json"#,
@@ -127,9 +133,11 @@ pub async fn update_worker_settings(
         max_concurrency,
         schedule_json,
     )
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or(AppError::NotFound)?;
+    super::resource_slots::save_class_slots(&mut tx, id, max_cpu_jobs, max_gpu_jobs).await?;
+    tx.commit().await?;
     worker_with_transfer(pool, row).await
 }
 
@@ -232,18 +240,15 @@ pub async fn list_workers(pool: &SqlitePool) -> AppResult<Vec<Worker>> {
     )
     .fetch_all(pool)
     .await?;
-    let announcing: std::collections::HashSet<Uuid> =
-        sqlx::query_scalar("SELECT id FROM workers WHERE transfer_url IS NOT NULL")
-            .fetch_all(pool)
-            .await?
-            .into_iter()
-            .collect();
+    let mut extras = super::resource_slots::all_extras(pool).await?;
     Ok(workers
         .into_iter()
         .map(WorkerRow::into_worker)
-        .map(|worker| Worker {
-            transfer_enabled: announcing.contains(&worker.id),
-            ..worker
+        .map(|mut worker| {
+            if let Some(extra) = extras.remove(&worker.id) {
+                extra.apply(&mut worker);
+            }
+            worker
         })
         .collect())
 }
@@ -306,12 +311,13 @@ pub async fn insert_job_with_options(
         source_bytes,
         library_id,
         explicit_flow_id,
-        0,
+        None,
     )
     .await
 }
 
-/// Variante avec priorité explicite (`JOB_PRIORITY_MIN..=JOB_PRIORITY_MAX`).
+/// Variante avec priorité explicite (`JOB_PRIORITY_MIN..=JOB_PRIORITY_MAX`) ; `None` reprend la
+/// priorité par défaut de la bibliothèque.
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_job_with_priority(
     pool: &SqlitePool,
@@ -321,7 +327,7 @@ pub async fn insert_job_with_priority(
     source_bytes: i64,
     library_id: Option<Uuid>,
     explicit_flow_id: Option<&str>,
-    priority: i32,
+    priority: Option<i32>,
 ) -> AppResult<Job> {
     let mut conn = pool.acquire().await?;
     create_job(
@@ -430,7 +436,7 @@ pub async fn enqueue_library_source(
         bytes,
         Some(library_id),
         flow_id,
-        0,
+        None,
         Some(source),
     )
     .await?;
@@ -440,6 +446,9 @@ pub async fn enqueue_library_source(
     Ok(Some(job))
 }
 
+/// Crée une tâche en file. Sans `priority`, elle hérite de la priorité par défaut de sa
+/// bibliothèque (sinon `LIBRARY_DEFAULT_JOB_PRIORITY`) ; sa classe de ressource (CPU/GPU) est
+/// déduite du flux figé (`flow_resource_class`).
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn create_job(
     conn: &mut sqlx::SqliteConnection,
@@ -449,10 +458,10 @@ pub(super) async fn create_job(
     source_bytes: i64,
     library_id: Option<Uuid>,
     explicit_flow_id: Option<&str>,
-    priority: i32,
+    priority: Option<i32>,
     source: Option<&JobSource>,
 ) -> AppResult<Job> {
-    let clamped_priority = priority.clamp(JOB_PRIORITY_MIN, JOB_PRIORITY_MAX);
+    let mut library_priority: Option<i32> = None;
     let mut chosen_flow_id: Option<String> = explicit_flow_id
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -468,7 +477,16 @@ pub(super) async fn create_job(
         if chosen_flow_id.is_none() {
             chosen_flow_id = row.flow_id;
         }
+        library_priority =
+            sqlx::query_scalar::<_, i32>("SELECT default_priority FROM libraries WHERE id=?1")
+                .bind(lib_id)
+                .fetch_optional(&mut *conn)
+                .await?;
     }
+    let clamped_priority = priority
+        .or(library_priority)
+        .unwrap_or(LIBRARY_DEFAULT_JOB_PRIORITY)
+        .clamp(JOB_PRIORITY_MIN, JOB_PRIORITY_MAX);
 
     let resolved_flow: Option<(String, i64)> = if let Some(flow_id) = chosen_flow_id.as_deref() {
         let found = sqlx::query!(
@@ -487,6 +505,13 @@ pub(super) async fn create_job(
             .map(|flow| (flow.id, flow.version))
     };
 
+    let resource_class = super::resource_slots::frozen_flow_class(
+        &mut *conn,
+        resolved_flow
+            .as_ref()
+            .map(|(id, version)| (id.as_str(), *version)),
+    )
+    .await?;
     let (flow_id, flow_version) = match resolved_flow {
         Some((id, version)) => (Some(id), Some(version)),
         None => (None, None),
@@ -507,6 +532,13 @@ pub(super) async fn create_job(
         clamped_priority,
     )
     .fetch_one(&mut *conn)
+    .await?;
+    super::resource_slots::set_job_class(&mut *conn, job.id, resource_class).await?;
+    super::linked_flows::freeze_linked_flows(
+        &mut *conn,
+        job.id,
+        job.flow_id.as_deref().zip(job.flow_version),
+    )
     .await?;
     if let Some(source) = source {
         sqlx::query(
@@ -596,20 +628,25 @@ pub async fn list_jobs(pool: &SqlitePool, before: Option<Uuid>, limit: i64) -> A
     Ok(jobs)
 }
 
+/// Réserve la prochaine tâche du worker.
+///
+/// Ordre : fenêtre horaire du worker, puis places libres par classe de ressource (`WorkerSlots` :
+/// `max_concurrency` commun en mode historique, sinon `max_cpu_jobs`/`max_gpu_jobs`), puis la
+/// tâche admissible de plus haute priorité, la plus ancienne à priorité égale
+/// (`priority DESC, created_at ASC, id ASC`). Les capacités d'encodage exigées par un relais
+/// restent filtrées à part : les places ne font que limiter le nombre de tâches.
 pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> {
     let timezone = crate::runtime_settings::load_timezone(pool).await;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let worker_cfg = sqlx::query!(
-        r#"UPDATE workers SET last_seen=datetime('now') WHERE id=?1 RETURNING max_concurrency AS "max_concurrency: i32", schedule_json"#,
-        worker,
+    let worker_cfg = sqlx::query_as::<_, (i32, Option<i32>, Option<i32>, Option<String>)>(
+        "UPDATE workers SET last_seen=datetime('now') WHERE id=?1 RETURNING max_concurrency, max_cpu_jobs, max_gpu_jobs, schedule_json",
     )
+    .bind(worker)
     .fetch_optional(&mut *tx)
     .await?;
-    let Some(worker_cfg) = worker_cfg else {
+    let Some((max_concurrency, max_cpu_jobs, max_gpu_jobs, schedule_json)) = worker_cfg else {
         return Err(AppError::NotFound);
     };
-    let max_concurrency = worker_cfg.max_concurrency;
-    let schedule_json = worker_cfg.schedule_json;
     // Bail expiré : échec explicite, jamais de remise en file silencieuse (relance : `retry_job`).
     let failed_status = JobStatus::Failed;
     let lease_expired_code = JobErrorCode::LeaseExpired;
@@ -640,19 +677,14 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
         }
     }
 
-    let running_count: i64 = sqlx::query_scalar!(
-        r#"SELECT COUNT(*) AS "count!: i64" FROM jobs WHERE worker_id=?1 AND status=?2"#,
-        worker,
-        running_status,
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-    if running_count
-        >= i64::from(max_concurrency.clamp(WORKER_MIN_CONCURRENCY, WORKER_MAX_CONCURRENCY))
-    {
+    let running = super::resource_slots::running_jobs(&mut tx, worker).await?;
+    let admitted = worker_slots(max_concurrency, max_cpu_jobs, max_gpu_jobs)
+        .admitted_classes(running);
+    if admitted.is_empty() {
         tx.commit().await?;
         return Ok(None);
     }
+    let admitted_json = serde_json::to_string(&admitted).map_err(|_| AppError::Internal)?;
 
     let queued_status = JobStatus::Queued;
     let claimable_sql = format!(
@@ -670,6 +702,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                            AND e.value=json_extract(r.requirement_json, '$.codec')
                            AND (json_extract(r.requirement_json, '$.acceleration') IS NULL
                                 OR json_extract(r.requirement_json, '$.acceleration')=?5)))
+         AND resource_class IN (SELECT value FROM json_each(?6))
          AND {access}
          ORDER BY priority DESC, created_at ASC, id ASC LIMIT 1",
         access = super::library_access::job_access_sql("?3", "?4"),
@@ -680,6 +713,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
         .bind(worker)
         .bind(forgearr_shared::workers::INTEGRATED_WORKER_NAME)
         .bind(forgearr_shared::capabilities::EncodeAcceleration::Cpu.as_str())
+        .bind(admitted_json)
         .fetch_optional(&mut *tx)
         .await?;
     let job: Option<Job> = if let Some(id) = next_id {
@@ -726,7 +760,9 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
             let local_source_root = job_source(pool, j.id).await?.and_then(|source| {
                 (source.source_worker_id == Some(worker)).then_some(source.source_root)
             });
-            let resume_node_id = super::relays::resume_node(pool, j.id).await?;
+            let resume = super::relays::resume_state(pool, j.id).await?;
+            let library_name = super::step_context::library_name(pool, j.library_id).await?;
+            let worker_name = super::step_context::worker_name(pool, worker).await?;
             let handoff_input =
                 super::handoffs::acknowledged_handoff_input(pool, j.id, worker, j.lease_epoch)
                     .await?;
@@ -749,10 +785,14 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
                 allow_private_integrations: None,
                 media_root: None,
                 local_source_root,
-                resume_node_id,
+                resume_node_id: resume.node_id,
                 handoff_input,
                 prior_warning: j.warning,
                 source_ticket: None,
+                library_name,
+                worker_name,
+                resume_variables: resume.variables,
+                linked_flows: super::linked_flows::frozen_linked_flows(pool, j.id).await?,
             }))
         }
     }
@@ -1014,7 +1054,7 @@ async fn save_job_steps_inner(
     sqlx::query!("DELETE FROM job_steps WHERE job_id=?1", job_id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("INSERT INTO job_steps(job_id,step_index,node_id,block_kind,operation_id,status,message,output_excerpt,created_at) SELECT job_id,step_index,node_id,block_kind,operation_id,status,message,output_excerpt,created_at FROM job_handoff_steps WHERE job_id=?1")
+    sqlx::query("INSERT INTO job_steps(job_id,step_index,node_id,block_kind,operation_id,status,message,output_excerpt,created_at,variables_json) SELECT job_id,step_index,node_id,block_kind,operation_id,status,message,output_excerpt,created_at,variables_json FROM job_handoff_steps WHERE job_id=?1")
         .bind(job_id).execute(&mut *tx).await?;
     let prefix: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(step_index), 0) FROM job_handoff_steps WHERE job_id=?1",
@@ -1026,19 +1066,26 @@ async fn save_job_steps_inner(
         let step_index = i64::from(step.step_index)
             .checked_add(prefix)
             .ok_or(AppError::Invalid)?;
-        sqlx::query!(
+        let variables_json = step
+            .variables
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|_| AppError::Invalid)?;
+        sqlx::query(
             "INSERT INTO job_steps (job_id, step_index, node_id, block_kind, operation_id, \
-                                    status, message, output_excerpt) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            job_id,
-            step_index,
-            step.node_id,
-            step.block_kind,
-            step.operation_id,
-            step.status,
-            step.message,
-            step.output_excerpt,
+                                    status, message, output_excerpt, variables_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )
+        .bind(job_id)
+        .bind(step_index)
+        .bind(&step.node_id)
+        .bind(&step.block_kind)
+        .bind(&step.operation_id)
+        .bind(step.status)
+        .bind(&step.message)
+        .bind(&step.output_excerpt)
+        .bind(variables_json)
         .execute(&mut *tx)
         .await?;
     }

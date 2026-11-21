@@ -85,8 +85,8 @@ pub async fn run(state: AppState) {
         while active.try_join_next().is_some() {}
         let max_concurrency = repository::get_worker(&state.pool, worker.id)
             .await
-            .map(|w| w.max_concurrency)
-            .unwrap_or(worker.max_concurrency);
+            .map(|w| w.slots().total)
+            .unwrap_or(worker.slots().total);
         while (active.len() as i32) < max_concurrency {
             match receive_handoff(&state, worker.id).await {
                 Ok(true) => {}

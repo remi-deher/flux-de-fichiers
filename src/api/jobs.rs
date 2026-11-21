@@ -233,7 +233,7 @@ pub async fn workers(
     Ok(Json(repository::list_workers(&s.pool).await?))
 }
 
-/// Met à jour la concurrence maximale et la fenêtre horaire d'un worker.
+/// Met à jour la concurrence maximale, les places CPU/GPU et la fenêtre horaire d'un worker.
 pub async fn update_worker_settings(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
@@ -241,8 +241,15 @@ pub async fn update_worker_settings(
     Json(r): Json<UpdateWorkerSettingsRequest>,
 ) -> AppResult<Json<Worker>> {
     Ok(Json(
-        repository::update_worker_settings(&s.pool, id, r.max_concurrency, r.schedule.as_ref())
-            .await?,
+        repository::update_worker_settings(
+            &s.pool,
+            id,
+            r.max_concurrency,
+            r.max_cpu_jobs,
+            r.max_gpu_jobs,
+            r.schedule.as_ref(),
+        )
+        .await?,
     ))
 }
 
@@ -329,19 +336,40 @@ pub struct RelayInfoQuery {
     ids: String,
 }
 
+/// Identifiants listés par l'interface et lus au plus par requête de détails.
+const MAX_DETAIL_IDS: usize = 200;
+
+impl RelayInfoQuery {
+    /// Identifiants séparés par une virgule (les `MAX_DETAIL_IDS` premiers).
+    fn parse_ids(&self) -> AppResult<Vec<Uuid>> {
+        self.ids
+            .split(',')
+            .take(MAX_DETAIL_IDS)
+            .map(|id| id.parse::<Uuid>().map_err(|_| AppError::Invalid))
+            .collect()
+    }
+}
+
 /// Marques « relayée » des tâches listées, pour l'interface (200 identifiants au plus).
 pub async fn relay_infos(
     State(s): State<AppState>,
     Query(query): Query<RelayInfoQuery>,
     _auth: ViewJobsAuth,
 ) -> AppResult<Json<Vec<forgearr_shared::relay::JobRelayInfo>>> {
-    let ids = query
-        .ids
-        .split(',')
-        .take(200)
-        .map(|id| id.parse::<Uuid>().map_err(|_| AppError::Invalid))
-        .collect::<AppResult<Vec<_>>>()?;
-    Ok(Json(repository::list_relays(&s.pool, &ids).await?))
+    Ok(Json(
+        repository::list_relays(&s.pool, &query.parse_ids()?).await?,
+    ))
+}
+
+/// Classe de ressource (CPU/GPU) des tâches listées, pour l'interface (200 identifiants au plus).
+pub async fn resource_infos(
+    State(s): State<AppState>,
+    Query(query): Query<RelayInfoQuery>,
+    _auth: ViewJobsAuth,
+) -> AppResult<Json<Vec<forgearr_shared::jobs::JobResourceInfo>>> {
+    Ok(Json(
+        repository::job_resource_classes(&s.pool, &query.parse_ids()?).await?,
+    ))
 }
 
 /// Relaie la tâche d'un worker vers la file d'un autre worker (ADR 0018).

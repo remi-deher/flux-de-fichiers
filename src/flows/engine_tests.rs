@@ -246,6 +246,7 @@ async fn remux_mp4_contract_runs_mp4box_and_reports_progress()
         allow_private_integrations: None,
         worker_capabilities: None,
         resume_node_id: None,
+        run_info: FlowRunInfo::default(),
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -310,6 +311,7 @@ exit 2
         allow_private_integrations: None,
         worker_capabilities: None,
         resume_node_id: None,
+        run_info: FlowRunInfo::default(),
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -400,6 +402,7 @@ exit 9
         allow_private_integrations: None,
         worker_capabilities: None,
         resume_node_id: None,
+        run_info: FlowRunInfo::default(),
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -441,6 +444,7 @@ async fn mkvpropedit_skips_when_unchanged_and_fails_cleanly_on_error()
         allow_private_integrations: None,
         worker_capabilities: None,
         resume_node_id: None,
+        run_info: FlowRunInfo::default(),
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, dir.path(), progress)
     .await
@@ -623,6 +627,7 @@ async fn local_script_executes_end_to_end_across_registry_routing_and_claim_payl
         allow_private_integrations: None,
         worker_capabilities: None,
         resume_node_id: None,
+        run_info: FlowRunInfo::default(),
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -703,6 +708,7 @@ async fn local_script_stop_pipeline_halts_execution_before_output()
         allow_private_integrations: None,
         worker_capabilities: None,
         resume_node_id: None,
+        run_info: FlowRunInfo::default(),
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -711,6 +717,30 @@ async fn local_script_stop_pipeline_halts_execution_before_output()
     assert_eq!(outcome.steps.len(), 2);
     assert_eq!(outcome.steps[1].node_id, "n2");
     assert_eq!(outcome.steps[1].message.as_deref(), Some("arrêt demandé"));
+    Ok(())
+}
+
+/// Enregistre le bloc unifié `scripts.run` (interpréteur `sh`).
+pub(super) fn register_scripts_run(
+    reg: &mut OperationRegistry,
+) -> Result<(), Box<dyn std::error::Error>> {
+    reg.register_json(json!({
+        "schemaVersion": "1.1.0",
+        "id": "operation.scripts.run",
+        "version": "1.0.0",
+        "name": "Script",
+        "providerId": "scripts",
+        "providerKind": "plugin",
+        "capability": "script",
+        "status": "validated",
+        "runtime": {
+            "kind": "script",
+            "tool": { "id": "interpreteurs", "version": "1.0.0" },
+            "interpreter": "sh",
+            "timeoutSeconds": 300
+        }
+    }))?;
+    reg.register_block_mapping("scripts.run", "operation.scripts.run");
     Ok(())
 }
 
@@ -742,23 +772,7 @@ async fn unified_script_block_supports_inline_library_ref_and_strict_next_port()
 
     let mut reg = OperationRegistry::load_from_roots(&[local_dir]);
     register_core_and_probe(&mut reg)?;
-    reg.register_json(json!({
-        "schemaVersion": "1.1.0",
-        "id": "operation.scripts.run",
-        "version": "1.0.0",
-        "name": "Script",
-        "providerId": "scripts",
-        "providerKind": "plugin",
-        "capability": "script",
-        "status": "validated",
-        "runtime": {
-            "kind": "script",
-            "tool": { "id": "interpreteurs", "version": "1.0.0" },
-            "interpreter": "sh",
-            "timeoutSeconds": 300
-        }
-    }))?;
-    reg.register_block_mapping("scripts.run", "operation.scripts.run");
+    register_scripts_run(&mut reg)?;
 
     // 1. Mode inline -> passe au bloc suivant en mode library (scriptId) qui renvoie nextPort: "false".
     // Seule la branche "true" est câblée : next_connection ne doit PAS retomber sur "true".
@@ -816,6 +830,7 @@ async fn unified_script_block_supports_inline_library_ref_and_strict_next_port()
         allow_private_integrations: None,
         worker_capabilities: None,
         resume_node_id: None,
+        run_info: FlowRunInfo::default(),
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -942,6 +957,7 @@ async fn non_media_input_is_accepted_then_the_extracted_file_is_probed()
                 allow_private_integrations: None,
                 worker_capabilities: None,
                 resume_node_id: None,
+                run_info: FlowRunInfo::default(),
             }
             .execute_flow(Uuid::new_v4(), flow, source, work, progress)
             .await
@@ -989,6 +1005,7 @@ async fn arr_notification_is_deferred_until_publication() -> anyhow::Result<()> 
         ],
         "connections":[{"from":"entry","to":"notify"},{"from":"notify","to":"end"}]
     }));
+    let resumed = serde_json::Map::from_iter([("x".to_owned(), json!("1"))]);
     let engine = FlowEngine {
         registry: &registry,
         cache_mgr: &cache,
@@ -1001,6 +1018,10 @@ async fn arr_notification_is_deferred_until_publication() -> anyhow::Result<()> 
         allow_private_integrations: Some(false),
         worker_capabilities: None,
         resume_node_id: None,
+        run_info: FlowRunInfo {
+            resume_variables: Some(&resumed),
+            ..FlowRunInfo::default()
+        },
     };
     let outcome = engine
         .execute_flow(
@@ -1016,6 +1037,10 @@ async fn arr_notification_is_deferred_until_publication() -> anyhow::Result<()> 
         step.node_id == "notify"
             && step.status == crate::domain::JobStepStatus::Skipped
             && step.message.as_deref() == Some(publication::DEFERRED_MESSAGE)
+            && step
+                .variables
+                .as_ref()
+                .is_some_and(|vars| vars.get("x") == Some(&json!("1")))
     }));
     Ok(())
 }

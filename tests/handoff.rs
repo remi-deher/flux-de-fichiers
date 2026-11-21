@@ -36,6 +36,7 @@ async fn pending(pool: &SqlitePool) -> anyhow::Result<(Uuid, LeaseRequest, Uuid,
             worker_id: receiver.id,
         },
         resume_node_id: "next".into(),
+        variables: serde_json::Map::from_iter([("codec".to_owned(), serde_json::json!("hevc"))]),
     };
     let artifact = HandoffArtifact {
         name: "working.mkv".into(),
@@ -70,6 +71,7 @@ async fn verified_ack_transfers_the_job_only_after_receipt() -> anyhow::Result<(
         status: JobStepStatus::Succeeded,
         message: None,
         output_excerpt: None,
+        variables: None,
     };
     repository::save_job_steps_for_lease(&pool, job_id, &lease, &[step("before")]).await?;
     assert_eq!(
@@ -127,6 +129,8 @@ async fn verified_ack_transfers_the_job_only_after_receipt() -> anyhow::Result<(
         .await?
         .ok_or_else(|| anyhow::anyhow!("reprise absente"))?;
     assert_eq!(resumed.resume_node_id.as_deref(), Some("next"));
+    assert_eq!(resumed.resume_variables["codec"], "hevc");
+    assert_eq!(resumed.worker_name.as_deref(), Some("receiver"));
     assert!(resumed.prior_warning);
     assert_eq!(
         resumed

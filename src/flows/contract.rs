@@ -92,7 +92,7 @@ pub enum OperationRuntime {
     Script(ScriptRuntime),
 }
 
-pub use forgearr_shared::local::ScriptInterpreter;
+pub use forgearr_shared::{flows::scalar_to_string, local::ScriptInterpreter};
 
 /// Contrat d'exécution d'un script ou exécutable agnostique via `stdin`/`stdout` JSON (`kind: "script"`).
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -135,6 +135,12 @@ pub enum PrimitiveKind {
     Capability,
     /// Relaie la tâche vers la file d'un autre worker (ADR 0018).
     Relay,
+    /// Écrit une variable personnalisée `vars.<nom>` dans le contexte de la tâche.
+    #[serde(rename = "set-variable")]
+    SetVariable,
+    /// Exécute un autre flux puis reprend à la sortie du bloc (ADR 0022).
+    #[serde(rename = "sub-flow")]
+    SubFlow,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1189,16 +1195,6 @@ fn is_non_empty(value: Option<&Value>) -> bool {
         Some(Value::Array(arr)) => !arr.is_empty(),
         Some(Value::Object(obj)) => !obj.is_empty(),
         Some(_) => true,
-    }
-}
-
-pub fn scalar_to_string(value: Option<&Value>) -> String {
-    match value {
-        None | Some(Value::Null) => String::new(),
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::Number(n)) => n.to_string(),
-        Some(Value::Bool(b)) => b.to_string(),
-        Some(other) => other.to_string(),
     }
 }
 

@@ -1,6 +1,7 @@
 //! Inspecteur latéral repliable du bloc sélectionné : réglages, liaisons, duplication et retrait.
 
 use super::dnd::BranchTarget;
+use super::condition_edit::visible_fields;
 use super::fields::FieldControl;
 use super::presentation::{NodeDomain, node_output_ports, output_presentation};
 use super::script_inspector::{ScriptBlockInspector, UNIFIED_SCRIPT_KIND};
@@ -173,6 +174,7 @@ pub fn NodeInspector(editor: Editor, can_manage: bool) -> impl IntoView {
                     .as_ref()
                     .map(|s| s.fields.clone())
                     .unwrap_or_default();
+                let fields = visible_fields(fields);
                 let node_for_script = node.clone();
                 let name_id = node_id.clone();
                 let dup_id = node_id.clone();

@@ -4,14 +4,17 @@ mod handoffs;
 mod identity;
 mod jobs;
 mod libraries;
+pub(crate) mod linked_flows;
 mod library_access;
 pub(crate) mod library_history;
 mod mcp_audit;
 mod password_reset;
 mod plugins;
 mod relays;
+mod resource_slots;
 mod source_publication_journal;
 mod source_tickets;
+mod step_context;
 
 pub use enrollment::{
     create_enrollment_request, decide_enrollment_request, enrollment_window_status,
@@ -43,6 +46,11 @@ pub use jobs::{
     retry_job, save_job_steps, save_job_steps_for_lease, succeeded_output_name,
     touch_worker_telemetry, update_job_priority, update_worker_settings, worker_exists,
 };
+pub use linked_flows::{
+    DEFAULT_FAILURE_FLOW_KEY, default_failure_flow, frozen_linked_flows, set_default_failure_flow,
+};
+pub use step_context::{library_name, step_variables, worker_name};
+pub use resource_slots::{job_resource_class, job_resource_classes};
 pub use libraries::{
     delete_library, due_scheduled_libraries, get_library, insert_library,
     library_worker_local_path, library_worker_local_path_for_job, list_libraries,

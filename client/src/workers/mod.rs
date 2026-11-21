@@ -1,6 +1,7 @@
 //! Écran Workers : présence, connectivité, worker intégré, retrait et enrôlement (ADR 0014).
 
 mod library_modes;
+mod slots_field;
 
 use crate::route::{Link, Route};
 use crate::settings::duration_label;
@@ -24,6 +25,7 @@ use forgearr_shared::workers::{
 };
 use leptos::prelude::*;
 use library_modes::{WorkerLibrariesSection, worker_libraries};
+use slots_field::{ClassSlotsField, capacity_label};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -325,6 +327,9 @@ fn WorkerDetail(
         days: Vec::new(),
     });
     let concurrency_val = RwSignal::new(worker.max_concurrency);
+    let cpu_slots = RwSignal::new(worker.max_cpu_jobs);
+    let gpu_slots = RwSignal::new(worker.max_gpu_jobs);
+    let capacity = capacity_label(&worker);
     let sched_enabled = RwSignal::new(initial_sched.enabled);
     let sched_start = RwSignal::new(initial_sched.start_hour);
     let sched_end = RwSignal::new(initial_sched.end_hour);
@@ -357,7 +362,7 @@ fn WorkerDetail(
                 <div class="detail-term">"Dernier contact"</div><div class="detail-val">{format::datetime(worker.last_seen)}</div>
                 <div class="detail-term">"Ancienneté"</div>
                 <div class="detail-val" class:text-danger=liveness == Liveness::Silent>{age}</div>
-                <div class="detail-term">"Concurrence max"</div><div class="detail-val">{format!("{} tâche(s)", worker.max_concurrency)}</div>
+                <div class="detail-term">"Capacité"</div><div class="detail-val">{capacity}</div>
             </div>
             {can_manage.then(|| view! {
                 <form class="inspection-panel__section" on:submit=move |ev| {
@@ -370,6 +375,8 @@ fn WorkerDetail(
                     });
                     save_settings.dispatch(UpdateWorkerSettingsRequest {
                         max_concurrency: concurrency_val.get_untracked().clamp(WORKER_MIN_CONCURRENCY, WORKER_MAX_CONCURRENCY),
+                        max_cpu_jobs: cpu_slots.get_untracked(),
+                        max_gpu_jobs: gpu_slots.get_untracked(),
                         schedule,
                     });
                 }>
@@ -385,6 +392,12 @@ fn WorkerDetail(
                                 }
                             } />
                     </div>
+                    <ClassSlotsField input_id="worker-cpu-slots" label="Places CPU (facultatif)"
+                        help="Vide avec les places GPU : la concurrence ci-dessus vaut pour toutes les tâches."
+                        value=cpu_slots />
+                    <ClassSlotsField input_id="worker-gpu-slots" label="Places GPU (facultatif)"
+                        help="Tâches à encodage matériel (NVENC, VA-API). 0 : ce worker ne prend aucune tâche GPU."
+                        value=gpu_slots />
                     <label class="cluster">
                         <input type="checkbox"
                             prop:checked=move || sched_enabled.get()
@@ -784,8 +797,8 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                                 >
                                     <div class="cluster cluster-wrap">
                                         <Tag label=role_label tone=role_tone />
-                                        {(worker.max_concurrency > 1).then(|| view! {
-                                            <Tag label=format!("{}× simult.", worker.max_concurrency) tone=TagTone::Neutral />
+                                        {(worker.slots().total > 1).then(|| view! {
+                                            <Tag label=format!("{}× simult.", worker.slots().total) tone=TagTone::Neutral />
                                         })}
                                         {worker.schedule.as_ref().filter(|s| s.enabled).map(|s| view! {
                                             <Tag label=format!("{:02}h–{:02}h", s.start_hour, s.end_hour) tone=TagTone::Mono />
@@ -1027,6 +1040,8 @@ mod tests {
                 remote_addr: None,
                 telemetry: None,
                 max_concurrency: 1,
+                max_cpu_jobs: None,
+                max_gpu_jobs: None,
                 schedule: None,
                 transfer_enabled: false,
             },
@@ -1038,6 +1053,8 @@ mod tests {
                 remote_addr: None,
                 telemetry: None,
                 max_concurrency: 1,
+                max_cpu_jobs: None,
+                max_gpu_jobs: None,
                 schedule: None,
                 transfer_enabled: false,
             },
@@ -1049,6 +1066,8 @@ mod tests {
                 remote_addr: None,
                 telemetry: None,
                 max_concurrency: 1,
+                max_cpu_jobs: None,
+                max_gpu_jobs: None,
                 schedule: None,
                 transfer_enabled: false,
             },

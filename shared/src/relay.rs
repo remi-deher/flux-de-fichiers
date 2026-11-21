@@ -2,6 +2,7 @@
 
 use crate::capabilities::CapabilityRequirement;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use uuid::Uuid;
 
 /// Nombre maximal de relais d'une même tâche, pour éviter qu'elle ne circule indéfiniment.
@@ -22,6 +23,9 @@ pub struct RelayRequest {
     pub target: RelayTarget,
     /// Nœud du flux où le worker repreneur reprend l'exécution.
     pub resume_node_id: String,
+    /// Variables personnalisées du flux (`vars.*`) restaurées chez le repreneur.
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub variables: Map<String, Value>,
 }
 
 /// Durée maximale d'attente de la remise d'un fichier de travail.
@@ -169,9 +173,28 @@ mod tests {
         });
         let begin: HandoffBegin = serde_json::from_value(value.clone())?;
         assert!(!begin.warning);
+        assert!(begin.request.variables.is_empty(), "variables absentes des anciens workers");
         value["warning"] = serde_json::json!(true);
         let begin: HandoffBegin = serde_json::from_value(value)?;
         assert!(begin.warning);
+        Ok(())
+    }
+
+    #[test]
+    fn relay_request_carries_flow_variables() -> Result<(), serde_json::Error> {
+        let mut request = RelayRequest {
+            target: RelayTarget::Worker {
+                worker_id: Uuid::nil(),
+            },
+            resume_node_id: "next".into(),
+            variables: Map::new(),
+        };
+        assert!(serde_json::to_value(&request)?.get("variables").is_none());
+        request
+            .variables
+            .insert("codec".into(), Value::String("hevc".into()));
+        let decoded: RelayRequest = serde_json::from_value(serde_json::to_value(&request)?)?;
+        assert_eq!(decoded, request);
         Ok(())
     }
 }

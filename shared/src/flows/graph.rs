@@ -1,6 +1,9 @@
 //! Opérations d'édition du graphe et disposition en couches pour l'affichage.
 
-use super::{FlowBlockKind, FlowConnection, FlowGraph, FlowNode, OwnedBlockSpec, find_owned};
+use super::{
+    BranchPort, FlowBlockKind, FlowConnection, FlowGraph, FlowNode, OwnedBlockSpec, ScriptRouting,
+    find_owned,
+};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -57,14 +60,14 @@ impl FlowGraph {
     /// plus toute sortie nommée déjà utilisée par une liaison enregistrée.
     pub fn output_ports(&self, node: &FlowNode, catalog: &[OwnedBlockSpec]) -> Vec<Option<String>> {
         let spec = find_owned(catalog, &node.kind);
-        let is_conditional_script = node
-            .config
-            .get("routing")
-            .and_then(serde_json::Value::as_str)
-            == Some("conditional");
+        let is_conditional_script =
+            ScriptRouting::from_config(&node.config) == ScriptRouting::Conditional;
         let mut ports: Vec<Option<String>> = match spec {
             Some(spec) if spec.terminal => Vec::new(),
-            _ if is_conditional_script => vec![Some("true".to_owned()), Some("false".to_owned())],
+            _ if is_conditional_script => BranchPort::ALL
+                .into_iter()
+                .map(|port| Some(port.as_str().to_owned()))
+                .collect(),
             Some(spec) if !spec.ports.is_empty() => spec
                 .ports
                 .iter()

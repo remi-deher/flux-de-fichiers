@@ -1,6 +1,7 @@
 mod accounts;
 pub mod auth;
 pub mod diagnostics;
+mod flow_links;
 pub(crate) mod flows;
 pub(crate) mod handoffs;
 pub(crate) mod installation;
@@ -268,6 +269,7 @@ fn json_routes() -> Router<AppState> {
             get(jobs::failure_details).post(jobs::replay_failures),
         )
         .route("/api/v1/jobs/relays", get(jobs::relay_infos))
+        .route("/api/v1/jobs/resources", get(jobs::resource_infos))
         .route(
             "/api/v1/worker/filesystem/pending",
             get(libraries::worker_pending_browse),
@@ -280,6 +282,10 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/flows", get(flows::list_flows))
         .route("/api/v1/flows/blocks", get(flows::list_blocks))
         .route("/api/v1/flows/validate", post(flows::validate_flow))
+        .route(
+            "/api/v1/flows/failure-default",
+            get(flow_links::get_default_failure_flow).put(flow_links::put_default_failure_flow),
+        )
         .route("/api/v1/flows/{id}/versions", get(flows::list_versions))
         .route(
             "/api/v1/flows/{id}/versions/{version}",
@@ -784,7 +790,18 @@ pub(crate) async fn populate_claim_contracts(
         claim.probe_tool_id = Some(probe.tool_id);
         claim.probe_version = Some(probe.version);
     }
-    let tool_refs = registry.required_tool_refs_for_flow(claim.frozen_flow.as_ref());
+    // Flux principal (ou opération par défaut) puis flux liés figés (ADR 0022).
+    let claim_flows: Vec<Option<FlowRecord>> = std::iter::once(claim.frozen_flow.clone())
+        .chain(claim.linked_flows.iter().map(|linked| Some(linked.flow.clone())))
+        .collect();
+    let mut tool_refs: Vec<crate::flows::ToolRef> = Vec::new();
+    for flow in &claim_flows {
+        for tool in registry.required_tool_refs_for_flow(flow.as_ref()) {
+            if !tool_refs.iter().any(|known| known.id == tool.id) {
+                tool_refs.push(tool);
+            }
+        }
+    }
     let mut required_tools = Vec::with_capacity(tool_refs.len());
     for tool in tool_refs {
         let version = catalog_cache.resolve_tool_version(&roots, &tool.id).await;
@@ -795,36 +812,42 @@ pub(crate) async fn populate_claim_contracts(
     }
     claim.required_tools = required_tools;
 
-    let (operations, block_operations) =
-        registry.claim_payload_for_flow(claim.frozen_flow.as_ref());
-    claim.operations = operations;
-    claim.block_operations = block_operations;
+    claim.operations.clear();
+    claim.block_operations.clear();
+    for flow in &claim_flows {
+        let (operations, block_operations) = registry.claim_payload_for_flow(flow.as_ref());
+        claim.operations.extend(operations);
+        claim.block_operations.extend(block_operations);
+    }
 
     let effective = crate::runtime_settings::load_effective(pool, config).await;
     claim.allow_private_integrations = Some(effective.integration_policy().allow_private_hosts);
 
-    if let Some(ref mut flow) = claim.frozen_flow
-        && let Ok(secrets) = crate::secrets::SecretBox::open(&config.config_dir)
-    {
-        flow.definition =
-            crate::flows::decrypt_definition_headers(&secrets, &flow.id, &flow.definition)?;
-    }
-    if let Some(flow) = claim.frozen_flow.as_ref() {
-        claim.plugin_configs =
-            crate::flows::load_flow_plugin_configs(pool, &config.config_dir, &registry, Some(flow))
-                .await;
-        if !claim.plugin_configs.is_empty() {
-            let mut media_root = config.input_dir.clone();
-            if let Some(source) = repository::job_source(pool, claim.job_id).await? {
-                media_root = source.source_root.into();
-            } else if let Some(lib_id) = claim.library_id
-                && let Ok(Some(local_path)) =
-                    repository::library_worker_local_path(pool, lib_id, worker_id).await
-            {
-                media_root = local_path.into();
-            }
-            claim.media_root = Some(media_root);
+    if let Ok(secrets) = crate::secrets::SecretBox::open(&config.config_dir) {
+        for flow in claim.executable_flows_mut() {
+            flow.definition =
+                crate::flows::decrypt_definition_headers(&secrets, &flow.id, &flow.definition)?;
         }
+    }
+    let mut plugin_configs = std::collections::HashMap::new();
+    for flow in claim_flows.iter().flatten() {
+        plugin_configs.extend(
+            crate::flows::load_flow_plugin_configs(pool, &config.config_dir, &registry, Some(flow))
+                .await,
+        );
+    }
+    claim.plugin_configs = plugin_configs;
+    if !claim.plugin_configs.is_empty() {
+        let mut media_root = config.input_dir.clone();
+        if let Some(source) = repository::job_source(pool, claim.job_id).await? {
+            media_root = source.source_root.into();
+        } else if let Some(lib_id) = claim.library_id
+            && let Ok(Some(local_path)) =
+                repository::library_worker_local_path(pool, lib_id, worker_id).await
+        {
+            media_root = local_path.into();
+        }
+        claim.media_root = Some(media_root);
     }
     Ok(())
 }

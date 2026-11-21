@@ -2,10 +2,13 @@
 
 mod canvas;
 mod canvas_keys;
+mod condition_edit;
+mod condition_editor;
 mod dnd;
 mod drag;
 mod editor;
 mod fields;
+mod flow_choice;
 mod geometry;
 mod inspector;
 mod palette;
@@ -16,6 +19,7 @@ mod quick_add;
 mod script_inspector;
 mod simulation;
 mod state;
+mod template_input;
 mod versions;
 
 pub use editor::FlowEditor;
@@ -1374,6 +1378,7 @@ mod tests {
             exclude_patterns: Vec::new(),
             min_file_bytes: 0,
             output_policy: forgearr_shared::libraries::LibraryOutputPolicy::OutputDir,
+            default_priority: forgearr_shared::jobs::LIBRARY_DEFAULT_JOB_PRIORITY,
             created_at: now,
             updated_at: now,
         };

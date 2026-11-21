@@ -122,9 +122,39 @@ paths:
               required: [definition]
               properties:
                 definition: {type: [object, string]}
+                flowId:
+                  type: string
+                  description: Flux validé, pour refuser un appel de sous-flux qui reviendrait sur lui (ADR 0022).
       responses:
         '200':
-          description: Rapport de validation (valid, errors, warnings)
+          description: Rapport de validation (valid, errors, warnings), y compris sous-flux circulaires, trop profonds (4 niveaux) ou introuvables et flux d'échec inconnu
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/flows/failure-default:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Lire le flux d'échec global (appliqué aux flux qui n'en désignent pas)
+      responses:
+        '200':
+          description: Flux d'échec global
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DefaultFailureFlow'}
+        default: {$ref: '#/components/responses/Error'}
+    put:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Définir ou effacer (flowId null) le flux d'échec global ; droit ManageFlows
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DefaultFailureFlow'}
+      responses:
+        '200':
+          description: Flux d'échec global enregistré
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DefaultFailureFlow'}
+        '400': {description: Flux inconnu}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/flows/{id}/versions/{version}/restore:
     post:
@@ -258,6 +288,22 @@ paths:
       responses:
         '200': {description: Nombre de notifications reprises}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/resources:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Lire la classe de ressource (CPU ou GPU) des tâches indiquées
+      description: "GPU si un bloc du flux figé exige une accélération matérielle (`acceleration` = nvenc ou vaapi), sinon CPU."
+      parameters:
+        - {in: query, name: ids, required: true, schema: {type: string}, description: "UUID séparés par une virgule (200 au plus)."}
+      responses:
+        '200':
+          description: Classe de ressource par tâche
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/JobResourceInfo'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/jobs/{id}/placement:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
@@ -382,6 +428,9 @@ paths:
               properties:
                 source_name: {type: string, maxLength: 240, example: exemple.mkv}
                 target_worker_id: {type: [string, 'null'], format: uuid}
+                library_id: {type: [string, 'null'], format: uuid}
+                flow_id: {type: [string, 'null']}
+                priority: {type: [integer, 'null'], minimum: -100, maximum: 100, description: "Absente : priorité par défaut de la bibliothèque, sinon 0."}
       responses:
         '201':
           description: Tâche créée ; les soumissions répétées créent des tâches distinctes
@@ -1675,7 +1724,7 @@ paths:
   /api/v1/workers/{id}/settings:
     put:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Configurer la concurrence maximale (1..16) et la fenêtre horaire d'un worker
+      summary: Configurer la concurrence maximale (1..16), les places CPU/GPU et la fenêtre horaire d'un worker
       parameters: [{in: path, name: id, required: true, schema: {type: string, format: uuid}}]
       requestBody:
         required: true
@@ -1683,9 +1732,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [max_concurrency]
+              required: [maxConcurrency]
               properties:
-                max_concurrency: {type: integer, minimum: 1, maximum: 16}
+                maxConcurrency: {type: integer, minimum: 1, maximum: 16}
+                maxCpuJobs: {type: [integer, 'null'], minimum: 0, maximum: 16, description: "Places CPU. Absentes avec maxGpuJobs : mode historique (maxConcurrency commun à toutes les tâches)."}
+                maxGpuJobs: {type: [integer, 'null'], minimum: 0, maximum: 16, description: "Places GPU ; absentes si maxCpuJobs est renseigné : 0 (aucune tâche GPU). Les deux à 0 sont refusés."}
                 schedule: {type: [object, 'null']}
       responses:
         '200':
@@ -1843,6 +1894,11 @@ components:
                 properties:
                   code: {type: string}
   schemas:
+    DefaultFailureFlow:
+      type: object
+      description: Flux d'échec global (ADR 0022). Un flux désigne le sien par la clé `failureFlowId` de sa définition.
+      properties:
+        flowId: {type: [string, "null"]}
     SourcePublicationTask:
       type: object
       required: [request_id, worker_id, root, source_name, source_sha256, source_bytes, result_sha256, result_bytes, extension, policy]
@@ -1902,7 +1958,15 @@ components:
         name: {type: string}
         last_seen: {type: string, format: date-time}
         max_concurrency: {type: integer, minimum: 1, maximum: 16}
+        max_cpu_jobs: {type: integer, minimum: 0, maximum: 16, description: "Absent avec max_gpu_jobs : max_concurrency places communes. Sinon places CPU (défaut max_concurrency)."}
+        max_gpu_jobs: {type: integer, minimum: 0, maximum: 16, description: "Places GPU (défaut 0 dès que max_cpu_jobs est renseigné). Total = CPU + GPU."}
         schedule: {type: [object, 'null']}
+    JobResourceInfo:
+      type: object
+      required: [job_id, resource_class]
+      properties:
+        job_id: {type: string, format: uuid}
+        resource_class: {type: string, enum: [cpu, gpu]}
     LibraryWorkerPath:
       type: object
       required: [worker_id, local_path, access]
@@ -1929,6 +1993,7 @@ components:
           items: {type: string}
         min_file_bytes: {type: integer, minimum: 0}
         output_policy: {type: string, enum: [output_dir, replace_with_backup, replace_in_place]}
+        default_priority: {type: integer, minimum: -100, maximum: 100, default: 0, description: "Priorité des tâches créées sans priorité explicite."}
     Library:
       type: object
       required: [id, name, flow_id, workers, scan_interval_minutes, include_extensions, exclude_patterns, min_file_bytes, output_policy, created_at, updated_at]
@@ -1949,6 +2014,7 @@ components:
           items: {type: string}
         min_file_bytes: {type: integer, minimum: 0}
         output_policy: {type: string, enum: [output_dir, replace_with_backup, replace_in_place]}
+        default_priority: {type: integer, minimum: -100, maximum: 100, default: 0}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     Claim:
@@ -1963,6 +2029,15 @@ components:
         local_source_root: {type: string, description: "Dossier local au worker pour une source sur son montage."}
         resume_node_id: {type: string, description: Identifiant du nœud où reprendre le flux figé.}
         prior_warning: {type: boolean, default: false, description: Avertissement accumulé avant la remise.}
+        linked_flows:
+          type: array
+          description: Versions figées du flux d'échec et des sous-flux de la tâche (ADR 0022).
+          items:
+            type: object
+            required: [role, flow]
+            properties:
+              role: {type: string, enum: [failure, sub_flow]}
+              flow: {type: object, description: Flux figé (FlowRecord).}
         handoff_input:
           type: object
           description: Fichier de travail vérifié et conservé par le repreneur.

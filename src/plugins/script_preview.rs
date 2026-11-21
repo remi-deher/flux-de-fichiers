@@ -49,6 +49,7 @@ mod tests {
         let script = save_local_script(
             &repo_dir,
             UpsertLocalScriptRequest {
+                variables: Vec::new(),
                 id: None,
                 name: "Tag MKV".into(),
                 description: None,

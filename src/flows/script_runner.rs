@@ -479,6 +479,7 @@ mod tests {
             error_code: None,
             timeout_seconds,
             defaults: serde_json::Map::new(),
+            variables: Vec::new(),
             accepts_non_media: false,
         };
         let op = OperationContract {

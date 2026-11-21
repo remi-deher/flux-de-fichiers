@@ -42,6 +42,10 @@ pub(in crate::plugins) fn read_local_script(
         return None;
     }
     let code = fs::read_to_string(item_dir.join(&entrypoint)).unwrap_or_default();
+    let variables = runtime
+        .get("variables")
+        .and_then(|raw| serde_json::from_value(raw.clone()).ok())
+        .unwrap_or_default();
     let slug = entry
         .id
         .strip_prefix("script.")
@@ -57,6 +61,7 @@ pub(in crate::plugins) fn read_local_script(
         code,
         category: entry.category,
         tags: entry.tags.clone(),
+        variables,
     })
 }
 

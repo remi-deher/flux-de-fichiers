@@ -1988,6 +1988,21 @@ components:
         code: {type: string}
         category: {type: [string, 'null'], enum: [media, data, io, other, null]}
         tags: {type: array, items: {type: string}}
+        variables: {type: array, items: {$ref: '#/components/schemas/ScriptVariable'}}
+    ScriptVariable:
+      type: object
+      description: Variable d'un script déclarée dans `runtime.variables` (ADR 0025)
+      required: [name]
+      properties:
+        name: {type: string, maxLength: 64, pattern: '^[a-z][a-z0-9_]*$'}
+        label: {type: string}
+        description: {type: [string, 'null']}
+        type: {type: string, enum: [text, multiline, number, boolean, choice, secret], default: text}
+        default: {description: "Valeur du type de la variable ; interdite pour un secret"}
+        required: {type: boolean}
+        options: {type: array, items: {type: string}, description: Options d'un choix (obligatoires pour ce type seulement)}
+        min: {type: number}
+        max: {type: number}
     UpsertLocalScriptRequest:
       type: object
       required: [name, interpreter, code]
@@ -2000,6 +2015,7 @@ components:
         filename: {type: [string, 'null']}
         category: {type: [string, 'null'], enum: [media, data, io, other, null]}
         tags: {type: array, items: {type: string}}
+        variables: {type: array, items: {$ref: '#/components/schemas/ScriptVariable'}, description: Schéma validé à l'écriture ; `400` s'il est invalide}
     LocalResourceSummary:
       type: object
       required: [id, slug, name, entryType, filename, sizeBytes]

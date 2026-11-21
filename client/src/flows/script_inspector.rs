@@ -248,6 +248,7 @@ pub fn ScriptBlockInspector(
                                         return;
                                     }
                                     save_script.dispatch(UpsertLocalScriptRequest {
+                                        variables: Vec::new(),
                                         id: None,
                                         name: name_val,
                                         description: None,
@@ -332,6 +333,7 @@ pub fn ScriptBlockInspector(
                                         return;
                                     }
                                     save_script.dispatch(UpsertLocalScriptRequest {
+                                        variables: Vec::new(),
                                         id: None,
                                         name: name_val,
                                         description: None,

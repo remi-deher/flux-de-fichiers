@@ -3,7 +3,7 @@
 use super::REPOSITORIES_PATH;
 use crate::api;
 use crate::route::encode_segment;
-use crate::ui::{Tag, TagTone};
+use crate::ui::{Tag, TagTone, VariablesTable};
 use forgearr_shared::highlight::{CodeToken, ScriptPreviewView};
 use leptos::prelude::*;
 
@@ -58,6 +58,8 @@ pub fn ScriptPreview(
                     </div>
                     {script.description.map(|text| view! { <p class="text-dim text-sm">{text}</p> })}
                     <pre class="code-block-wrapper"><code>{highlighted_lines(lines)}</code></pre>
+                    <h3 class="form-label">"Variables"</h3>
+                    <VariablesTable variables=script.variables />
                 }.into_any(),
             }}
         </div>

@@ -521,6 +521,7 @@ async fn local_script_executes_end_to_end_across_registry_routing_and_claim_payl
     save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            variables: Vec::new(),
             id: None,
             name: "Router".into(),
             description: None,
@@ -539,6 +540,7 @@ async fn local_script_executes_end_to_end_across_registry_routing_and_claim_payl
     save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            variables: Vec::new(),
             id: None,
             name: "Skipper".into(),
             description: None,
@@ -559,6 +561,7 @@ async fn local_script_executes_end_to_end_across_registry_routing_and_claim_payl
     save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            variables: Vec::new(),
             id: None,
             name: "Unused".into(),
             description: None,
@@ -658,6 +661,7 @@ async fn local_script_stop_pipeline_halts_execution_before_output()
     save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            variables: Vec::new(),
             id: None,
             name: "Halt".into(),
             description: None,
@@ -728,6 +732,7 @@ async fn unified_script_block_supports_inline_library_ref_and_strict_next_port()
     save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            variables: Vec::new(),
             id: None,
             name: "Lib Branch".into(),
             description: None,

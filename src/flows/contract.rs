@@ -119,6 +119,9 @@ pub struct ScriptRuntime {
     pub timeout_seconds: u64,
     #[serde(default)]
     pub defaults: Map<String, Value>,
+    /// Variables typées du script (ADR 0025) ; vide pour les scripts sans schéma.
+    #[serde(default)]
+    pub variables: Vec<forgearr_shared::script_variables::ScriptVariable>,
     /// Le script accepte une entrée non média (ex. archive à extraire) : un flux qui le contient
     /// tolère l'échec de la sonde initiale.
     #[serde(default)]

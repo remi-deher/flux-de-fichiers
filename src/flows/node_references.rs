@@ -3,7 +3,7 @@
 use super::{
     OperationRegistry, OperationRuntime, ScriptRuntime,
     variables::{
-        NodeOutput, VariableContext, as_text, lookup_in, references_in, resolve_node_config,
+        NodeOutput, VariableContext, as_text, exposed_value, references_in, resolve_node_config,
     },
 };
 use forgearr_shared::{
@@ -188,7 +188,7 @@ pub fn reference_suggestions(
         OperationRegistry::is_probe(op) || providers.contains(op.id.as_str())
     }) {
         for variable in &exposed.variables {
-            let sample = lookup_in(sample_media, &variable.path).map(as_text);
+            let sample = exposed_value(sample_media, &variable.path).map(as_text);
             let label = if variable.label.trim().is_empty() {
                 exposed.reference(variable)
             } else {

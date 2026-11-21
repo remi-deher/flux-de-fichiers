@@ -8,6 +8,7 @@ mod write;
 mod tests;
 
 pub use index::rebuild_local_index;
+pub(super) use snapshot::read_local_script;
 pub use snapshot::{build_local_snapshot, local_resource_file};
 pub use write::{
     delete_local_item, save_local_block_template, save_local_flow_template, save_local_pack,

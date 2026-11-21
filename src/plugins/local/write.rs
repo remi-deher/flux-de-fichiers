@@ -100,6 +100,8 @@ pub fn save_local_script(
     if req.code.len() > MAX_SCRIPT_BYTES {
         return Err(AppError::TooLarge);
     }
+    forgearr_shared::script_variables::validate_variables(&req.variables)
+        .map_err(|err| AppError::InvalidManifest(err.to_string()))?;
     let (slug, is_update) = resolve_slug(req.id.as_deref(), "script.", name)?;
     let id = format!("script.{slug}");
     let entrypoint = match req
@@ -130,6 +132,16 @@ pub fn save_local_script(
     let description = normalize_description(req.description.as_deref());
     let interp_name = req.interpreter.executable();
 
+    let mut runtime = json!({
+        "kind": "script",
+        "interpreter": interp_name,
+        "entrypoint": entrypoint,
+        "timeoutSeconds": 300
+    });
+    if !req.variables.is_empty() {
+        runtime["variables"] = serde_json::to_value(&req.variables)
+            .map_err(|err| AppError::InvalidManifest(err.to_string()))?;
+    }
     let operation_json = json!({
         "schemaVersion": "1.1.0",
         "id": op_id,
@@ -139,12 +151,7 @@ pub fn save_local_script(
         "providerKind": "script",
         "capability": "script",
         "status": "validated",
-        "runtime": {
-            "kind": "script",
-            "interpreter": interp_name,
-            "entrypoint": entrypoint,
-            "timeoutSeconds": 300
-        }
+        "runtime": runtime
     });
     write_json_pretty(&base_dir.join("operations/run.json"), &operation_json)?;
 
@@ -200,6 +207,7 @@ pub fn save_local_script(
         code: req.code,
         category: req.category,
         tags: req.tags,
+        variables: req.variables,
     })
 }
 

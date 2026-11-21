@@ -8,6 +8,7 @@ use forgearr_shared::{
         ScriptInterpreter, UploadLocalResourceRequest, UpsertLocalScriptRequest,
     },
     plugins::PackComponent,
+    script_variables::{ScriptVariable, VariableKind},
 };
 use serde_json::json;
 
@@ -19,6 +20,7 @@ fn local_script_upload_templates_and_pack_roundtrip_without_github() -> anyhow::
     let script = save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            variables: Vec::new(),
             id: None,
             name: "Tag MKV".into(),
             description: Some("Ajoute un tag".into()),
@@ -143,6 +145,7 @@ fn duplicate_creation_without_id_returns_conflict_and_updates_clean_old_files() 
     let created = save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            variables: Vec::new(),
             id: None,
             name: "Nettoyeur".into(),
             description: None,
@@ -158,6 +161,7 @@ fn duplicate_creation_without_id_returns_conflict_and_updates_clean_old_files() 
     let dup = save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            variables: Vec::new(),
             id: None,
             name: "Nettoyeur!".into(),
             description: None,
@@ -173,6 +177,7 @@ fn duplicate_creation_without_id_returns_conflict_and_updates_clean_old_files() 
     let updated = save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            variables: Vec::new(),
             id: Some(created.id),
             name: "Nettoyeur Python".into(),
             description: None,
@@ -236,6 +241,7 @@ fn validation_rejects_mismatched_prefix_invalid_graph_and_invalid_pack_dep() -> 
     let bad_prefix = save_local_script(
         &local_dir,
         UpsertLocalScriptRequest {
+            variables: Vec::new(),
             id: Some("pack.local.wrong".into()),
             name: "Wrong".into(),
             description: None,
@@ -283,5 +289,65 @@ fn validation_rejects_mismatched_prefix_invalid_graph_and_invalid_pack_dep() -> 
         local_resource_file(&local_dir, "../etc/passwd"),
         Err(AppError::NotFound)
     ));
+    Ok(())
+}
+
+fn variable_script_request(variables: Vec<ScriptVariable>) -> UpsertLocalScriptRequest {
+    UpsertLocalScriptRequest {
+        variables,
+        id: None,
+        name: "Encodeur".into(),
+        description: None,
+        interpreter: ScriptInterpreter::Sh,
+        code: "cat >/dev/null".into(),
+        filename: None,
+        category: None,
+        tags: vec![],
+    }
+}
+
+fn crf_variable() -> ScriptVariable {
+    ScriptVariable {
+        name: "crf".into(),
+        label: "Qualité".into(),
+        description: Some("Plus bas = meilleure qualité".into()),
+        kind: VariableKind::Number,
+        default_value: Some(json!(23)),
+        required: true,
+        options: Vec::new(),
+        min: Some(0.into()),
+        max: Some(51.into()),
+    }
+}
+
+#[test]
+fn script_variables_round_trip_through_the_manifest_and_the_snapshot() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let local_dir = dir.path().join("local");
+
+    let saved = save_local_script(&local_dir, variable_script_request(vec![crf_variable()]))?;
+    assert_eq!(saved.variables, vec![crf_variable()]);
+
+    let snapshot = build_local_snapshot(std::slice::from_ref(&local_dir), &local_dir);
+    assert_eq!(snapshot.scripts.len(), 1);
+    assert_eq!(snapshot.scripts[0].variables, vec![crf_variable()]);
+
+    let plain_dir = dir.path().join("plain");
+    save_local_script(&plain_dir, variable_script_request(Vec::new()))?;
+    let plain = build_local_snapshot(std::slice::from_ref(&plain_dir), &plain_dir);
+    assert!(plain.scripts[0].variables.is_empty());
+    Ok(())
+}
+
+#[test]
+fn script_with_an_invalid_variable_schema_is_refused_and_writes_nothing() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let local_dir = dir.path().join("local");
+
+    let mut bad = crf_variable();
+    bad.default_value = Some(json!(99));
+    let refused = save_local_script(&local_dir, variable_script_request(vec![bad]));
+    assert!(matches!(refused, Err(AppError::InvalidManifest(_))));
+    assert!(!local_dir.join("scripts/encodeur").exists());
     Ok(())
 }

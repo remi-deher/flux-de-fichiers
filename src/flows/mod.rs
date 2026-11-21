@@ -8,9 +8,11 @@ mod custom_args;
 pub mod header_secrets;
 pub mod http_runner;
 pub mod lease_secrets;
+mod node_references;
 pub mod placement;
 pub(crate) mod publication;
 pub mod script_runner;
+mod variables;
 
 #[cfg(test)]
 mod engine_tests;
@@ -44,6 +46,7 @@ pub use lease_secrets::{
     decrypt_plugin_settings_value, load_flow_plugin_configs, seal_claim_secrets_for_worker,
     unseal_claim_secrets_for_worker,
 };
+pub use node_references::{check_references, node_variables_view, upstream_node_ids};
 
 const MAX_FLOW_STEPS: usize = 32;
 
@@ -289,6 +292,8 @@ impl<'a> FlowEngine<'a> {
             None => input_node.id,
         };
         let mut relay: Option<RelayRequest> = None;
+        // Sorties des nœuds déjà exécutés, lues par `{{nodes.<id>.…}}` (ADR 0025).
+        let mut node_outputs: HashMap<String, variables::NodeOutput> = HashMap::new();
         let mut remaining_steps = MAX_FLOW_STEPS;
         let mut step_index: i32 = 0;
 
@@ -501,25 +506,68 @@ impl<'a> FlowEngine<'a> {
                     }
                 }
                 OperationRuntime::Script(script_rt) => {
-                    let mut effective_rt = script_rt.clone();
-                    if effective_rt.code.is_none()
-                        && node.config.get("mode").and_then(Value::as_str) != Some("inline")
-                        && let Some(script_id) = node
-                            .config
-                            .get("scriptId")
-                            .and_then(Value::as_str)
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                        && let Some(target_op) =
-                            self.registry.get(&format!("operation.{script_id}"))
-                        && let OperationRuntime::Script(target_rt) = &target_op.runtime
-                    {
-                        let fallback_tool = effective_rt.tool.clone();
-                        effective_rt = target_rt.clone();
-                        if effective_rt.tool.is_none() {
-                            effective_rt.tool = fallback_tool;
-                        }
+                    let effective_rt =
+                        node_references::effective_script_runtime(self.registry, &node, script_rt);
+                    let script_error_code = effective_rt
+                        .error_code
+                        .unwrap_or(forgearr_shared::jobs::JobErrorCode::OperationFailed);
+                    let unmet = if effective_rt.dependencies_unverified {
+                        Vec::new()
+                    } else {
+                        self.registry.unmet_requirements(&effective_rt.requires)
+                    };
+                    if !unmet.is_empty() {
+                        let list = unmet
+                            .iter()
+                            .map(|requirement| {
+                                format!("{} ({})", requirement.variable, requirement.provider)
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let message = format!("dépendances du script indisponibles : {list}");
+                        steps.push(failed_step(
+                            step_index,
+                            &node,
+                            Some(op.id.clone()),
+                            message.clone(),
+                            None,
+                        ));
+                        return Err(FlowExecutionError {
+                            code: script_error_code,
+                            message,
+                            steps,
+                        });
                     }
+                    let variable_context = variables::VariableContext::new(
+                        &current_working_file,
+                        source_file,
+                        work_dir,
+                        &ctx.media_info,
+                        &node_outputs,
+                        &self.registry.exposed_variables(),
+                    );
+                    let script_config = match variables::resolve_node_config(
+                        &effective_rt.variables,
+                        &node.config,
+                        &variable_context,
+                    ) {
+                        Ok(config) => config,
+                        Err(err) => {
+                            let message = err.to_string();
+                            steps.push(failed_step(
+                                step_index,
+                                &node,
+                                Some(op.id.clone()),
+                                message.clone(),
+                                None,
+                            ));
+                            return Err(FlowExecutionError {
+                                code: script_error_code,
+                                message,
+                                steps,
+                            });
+                        }
+                    };
                     match script_runner::execute_script_operation(
                         op,
                         &effective_rt,
@@ -527,7 +575,7 @@ impl<'a> FlowEngine<'a> {
                         self.tool_versions,
                         &flow.id,
                         &node.id,
-                        &node.config,
+                        &script_config,
                         work_dir,
                         &current_working_file,
                         source_file,
@@ -614,6 +662,14 @@ impl<'a> FlowEngine<'a> {
                 }
             }
 
+            node_outputs.insert(
+                node.id.clone(),
+                variables::NodeOutput {
+                    message: step_message.clone(),
+                    next_port: next_port.clone(),
+                    working_file: current_working_file.to_string_lossy().into_owned(),
+                },
+            );
             steps.push(crate::domain::JobStepEntry {
                 step_index,
                 node_id: node.id.clone(),

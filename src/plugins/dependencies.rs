@@ -2,12 +2,13 @@
 
 use super::{
     CatalogEntry, CatalogItemType, SyncPolicy, catalog_with_roots, ensure_tool_installed,
-    ensure_tool_installed_verified, load_manifest,
+    ensure_tool_installed_verified, load_manifest, read_script_requirements,
 };
 use crate::{
     error::{AppError, AppResult},
     tools_cache::ToolCacheManager,
 };
+use forgearr_shared::exposed_variables::RepositoryPointer;
 pub use forgearr_shared::plugins::DependencyInstallResult;
 use sqlx::SqlitePool;
 use std::{
@@ -28,6 +29,9 @@ pub struct RequiredTool {
 pub struct DependencyPlan {
     pub tools: Vec<RequiredTool>,
     pub missing: Vec<String>,
+    /// Dépôts désignés par les scripts pour fournir une dépendance absente ; à confirmer par
+    /// l'utilisateur, jamais ajoutés automatiquement (ADR 0025).
+    pub suggested_repositories: Vec<RepositoryPointer>,
 }
 
 /// Résout récursivement les dépendances de `item_id` (lui-même compris s'il est un outil).
@@ -65,11 +69,44 @@ fn visit(
     for dependency in &dependencies {
         visit(entries, &dependency.id, visited, plan);
     }
+    if entry.entry_type == CatalogItemType::Script {
+        visit_script_providers(entries, root, entry, visited, plan);
+    }
     if entry.entry_type == CatalogItemType::App {
         plan.tools.push(RequiredTool {
             id: entry.id.clone(),
             version: entry.version.clone(),
         });
+    }
+}
+
+/// Fournisseurs des variables exposées qu'un script consomme (sauf script « sans dépendance »).
+fn visit_script_providers(
+    entries: &HashMap<String, (PathBuf, CatalogEntry)>,
+    root: &std::path::Path,
+    entry: &CatalogEntry,
+    visited: &mut HashSet<String>,
+    plan: &mut DependencyPlan,
+) {
+    let Some(item_dir) = root
+        .join(&entry.manifest_path)
+        .parent()
+        .map(std::path::Path::to_path_buf)
+    else {
+        return;
+    };
+    let requirements = read_script_requirements(&item_dir);
+    if requirements.dependencies_unverified {
+        return;
+    }
+    for requirement in requirements.requires {
+        visit(entries, &requirement.provider, visited, plan);
+        if !entries.contains_key(&requirement.provider)
+            && let Some(repository) = requirement.repository
+            && !plan.suggested_repositories.contains(&repository)
+        {
+            plan.suggested_repositories.push(repository);
+        }
     }
 }
 
@@ -105,6 +142,7 @@ pub async fn install_with_dependencies(
         installed_tools: Vec::new(),
         failed_tools: Vec::new(),
         missing_dependencies: plan.missing,
+        suggested_repositories: plan.suggested_repositories,
     };
     for tool in &plan.tools {
         match install_tool_with_optional_pool(pool, roots, cache, tool, policy).await {
@@ -236,6 +274,81 @@ mod tests {
         let outcome =
             install_with_dependencies(None, &roots, &cache, &SyncPolicy::default(), "ffmpeg").await;
         assert!(outcome.is_err());
+        Ok(())
+    }
+
+    fn script_catalogue(
+        requires: serde_json::Value,
+    ) -> anyhow::Result<(tempfile::TempDir, Vec<PathBuf>)> {
+        let dir = tempfile::tempdir()?;
+        let root = dir.path();
+        write(
+            root,
+            "index.json",
+            r#"{"schemaVersion":"1.0.0","entries":[
+                {"id":"script.codec","type":"script","version":"1.0.0","name":"Codec","manifestPath":"scripts/codec/manifest.json"},
+                {"id":"app.mediainfo","type":"app","version":"1.0.0","name":"MediaInfo","manifestPath":"apps/mediainfo/manifest.json"}
+            ]}"#,
+        )?;
+        write(
+            root,
+            "scripts/codec/manifest.json",
+            &manifest("script.codec", "script", &[]),
+        )?;
+        write(
+            root,
+            "apps/mediainfo/manifest.json",
+            &manifest("app.mediainfo", "app", &[]),
+        )?;
+        write(
+            root,
+            "scripts/codec/operations/run.json",
+            &serde_json::json!({"runtime": {"requires": requires}}).to_string(),
+        )?;
+        let roots = vec![root.to_path_buf()];
+        Ok((dir, roots))
+    }
+
+    #[test]
+    fn a_script_pulls_in_the_provider_of_the_variables_it_requires() -> anyhow::Result<()> {
+        let (_dir, roots) = script_catalogue(serde_json::json!([
+            {"variable": "mediainfo.video.codec", "provider": "app.mediainfo"}
+        ]))?;
+        let plan = resolve_dependencies(&roots, "script.codec")?;
+        let ids: Vec<_> = plan.tools.iter().map(|tool| tool.id.as_str()).collect();
+        assert_eq!(ids, ["app.mediainfo"]);
+        assert!(plan.missing.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn a_missing_provider_is_reported_with_the_repository_to_add_but_never_added()
+    -> anyhow::Result<()> {
+        let (_dir, roots) = script_catalogue(serde_json::json!([
+            {"variable": "exiftool.camera.model", "provider": "app.exiftool",
+             "repository": {"id": "repo.tiers", "indexUrl": "https://exemple.org/p/index.json"}}
+        ]))?;
+        let plan = resolve_dependencies(&roots, "script.codec")?;
+        assert_eq!(plan.missing, ["app.exiftool"]);
+        assert_eq!(plan.suggested_repositories.len(), 1);
+        assert_eq!(plan.suggested_repositories[0].id, "repo.tiers");
+        Ok(())
+    }
+
+    #[test]
+    fn an_unverified_script_plans_no_dependency() -> anyhow::Result<()> {
+        let (dir, roots) = script_catalogue(serde_json::json!([
+            {"variable": "exiftool.camera.model", "provider": "app.exiftool"}
+        ]))?;
+        write(
+            dir.path(),
+            "scripts/codec/operations/run.json",
+            &serde_json::json!({"runtime": {"dependenciesUnverified": true, "requires": [
+                {"variable": "exiftool.camera.model", "provider": "app.exiftool"}]}})
+            .to_string(),
+        )?;
+        let plan = resolve_dependencies(&roots, "script.codec")?;
+        assert!(plan.missing.is_empty() && plan.tools.is_empty());
         Ok(())
     }
 }

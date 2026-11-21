@@ -11,6 +11,7 @@ use std::{
 mod blocks;
 mod cache;
 mod dependencies;
+mod exposures;
 mod highlight;
 mod icon;
 mod install;
@@ -60,6 +61,7 @@ pub use sync::{
     sync_repository, sync_repository_verified, validate_index_url,
 };
 
+pub use exposures::exposure_views;
 pub use forgearr_shared::plugins::vocab::{
     self, CatalogCapability, CatalogItemType, PluginCategory,
 };
@@ -446,6 +448,7 @@ pub fn build_plugin_detail(
                 .settings_schema
                 .is_some_and(|schema| !schema.fields.is_empty()),
             blocks,
+            exposures: Vec::new(),
             updated_at: entry.updated_at,
         },
         None => PluginDetailView {
@@ -462,6 +465,7 @@ pub fn build_plugin_detail(
             compatibility: PluginCompatibility::default(),
             has_settings: false,
             blocks,
+            exposures: Vec::new(),
             updated_at: entry.updated_at,
         },
     }

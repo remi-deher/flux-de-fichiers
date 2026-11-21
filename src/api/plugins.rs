@@ -70,6 +70,16 @@ pub async fn plugin_detail(
     Ok(Json(detail))
 }
 
+/// Variables exposées par les plugins du catalogue, avec l'état de chaque espace de noms (ADR 0025).
+pub async fn exposed_variables(
+    State(s): State<AppState>,
+    _auth: ViewPluginsAuth,
+) -> AppResult<Json<Vec<forgearr_shared::exposed_variables::ExposedNamespaceView>>> {
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let registry = s.catalog_cache.operations(&roots).await;
+    Ok(Json(plugins::exposure_views(&registry)))
+}
+
 /// Icône SVG d'un plugin, validée par liste blanche puis servie comme image inerte (ADR 0024).
 pub async fn plugin_icon(
     State(s): State<AppState>,

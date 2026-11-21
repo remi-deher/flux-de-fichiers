@@ -306,6 +306,10 @@ fn json_routes() -> Router<AppState> {
                 .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
         )
         .route("/api/v1/plugins", get(plugins::catalog))
+        .route(
+            "/api/v1/plugins/exposed-variables",
+            get(plugins::exposed_variables),
+        )
         .route("/api/v1/plugins/{id}", get(plugins::plugin_detail))
         .route("/api/v1/plugins/{id}/icon", get(plugins::plugin_icon))
         .route(

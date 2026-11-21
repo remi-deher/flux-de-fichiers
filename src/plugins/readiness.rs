@@ -344,6 +344,7 @@ mod tests {
             compatibility: PluginCompatibility::default(),
             has_settings: false,
             blocks: Vec::new(),
+            exposures: Vec::new(),
             updated_at: None,
         };
         let statuses = HashMap::from([("ffmpeg".into(), ToolStatus::Ready)]);

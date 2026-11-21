@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.78.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.77.0...v0.78.0) (2026-11-21)
+
+
+### Features
+
+* **flux:** variables, conditions composées, sous-flux, flux d'échec et places CPU/GPU ([d77324b](https://github.com/remi-deher/flux-de-fichiers/commit/d77324b5371246ed72f0d8a41d6f0e4df37a7e58))
+* **flux:** variables, conditions composées, sous-flux, flux d'échec et places CPU/GPU ([7bd8b6b](https://github.com/remi-deher/flux-de-fichiers/commit/7bd8b6b065e74db30db05467bfe27aaec327c6ee))
+
+
+### Bug Fixes
+
+* **tests:** champs run_info et variables, module library_history public ([c55afb8](https://github.com/remi-deher/flux-de-fichiers/commit/c55afb81cc6fed745e299c74fbc4f30120f885f7))
+* **tests:** clippy unwrap dans script_routing, déplacement partiel de worker ([2adfa13](https://github.com/remi-deher/flux-de-fichiers/commit/2adfa136c1d1603ddc354357bfaeccbbbe19392f))
+* **tests:** clippy unwrap_err dans script_branch ([faddf6d](https://github.com/remi-deher/flux-de-fichiers/commit/faddf6d3a4996b1acd83e3f48c23b4536e3c3982))
+
 ## [0.77.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.76.0...v0.77.0) (2026-11-21)
 
 

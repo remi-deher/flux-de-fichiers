@@ -68,6 +68,20 @@ impl ExposedVariables {
     }
 }
 
+/// Exposition d'un plugin telle que le central la voit : son contrat et l'état de son espace de noms.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExposedNamespaceView {
+    /// Identifiant du plugin qui déclare cette exposition.
+    pub provider: String,
+    pub exposes: ExposedVariables,
+    /// Cette exposition est celle que le moteur lit : à espace de noms égal, la première l'emporte.
+    pub active: bool,
+    /// Autres plugins qui déclarent le même espace de noms.
+    #[serde(default)]
+    pub conflicts_with: Vec<String>,
+}
+
 /// Pointeur vers un dépôt qui fournit une dépendance (jamais ajouté automatiquement).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -1,6 +1,7 @@
 //! Plugins : catalogue App Store, outils distribués, dépôts synchronisés et tiroirs croisés (ADR 0010, 0014).
 
 mod catalog;
+mod exposed_variables;
 mod flow_preview;
 mod item_detail;
 mod metadata;

@@ -100,6 +100,11 @@ réimplémenter ce travail.
   installation plus ancienne qui synchroniserait un catalogue dont `exposes` en contient écarterait
   toute l'opération (revalidation du central) ; un catalogue ne doit donc les utiliser qu'une fois les
   installations à jour.
-- Reportés : la résolution et la saisie des secrets dans le flux, la saisie de `requires` dans
-  l'éditeur de scripts locaux et l'affichage des `exposes` dans la fiche d'un plugin.
+- Fiche d'un plugin : `GET /api/v1/plugins/{id}` renvoie `exposures` (espace de noms, version du contrat,
+  variables et chemin lu), affichées dans l'onglet Informations avec la référence `{{espace.nom}}` ;
+  `GET /api/v1/plugins/exposed-variables` liste toutes les expositions du catalogue. Chacune porte `active`
+  et `conflictsWith` : à espace de noms égal, la première (par identifiant d'opération) est lue par le
+  moteur, les autres sont signalées comme contestées.
+- Reportés : la résolution et la saisie des secrets dans le flux et la saisie de `requires` dans
+  l'éditeur de scripts locaux.
 - Les scripts existants, sans `variables`, restent valides (liste vide par défaut).

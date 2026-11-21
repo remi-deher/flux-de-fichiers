@@ -6,6 +6,7 @@
 
 use forgearr_shared::{
     exposed_variables::ExposedVariables,
+    flows::extract_json_values,
     script_variables::{ScriptVariable, VariableKind, default_from_text},
 };
 use serde_json::{Map, Number, Value};
@@ -66,7 +67,7 @@ impl VariableContext {
         root.insert(ROOT_NODES.into(), Value::Object(nodes_json));
         for exposure in exposed {
             for variable in &exposure.variables {
-                if let Some(value) = lookup_in(media_info, &variable.path) {
+                if let Some(value) = exposed_value(media_info, &variable.path) {
                     insert_nested(
                         &mut root,
                         &exposure.namespace,
@@ -96,6 +97,17 @@ pub(super) fn references_in(text: &str) -> Vec<&str> {
             Segment::Text(_) => None,
         })
         .collect()
+}
+
+/// Valeur d'une variable exposée : première valeur non nulle de la requête `path` dans `media_info`.
+///
+/// La requête est celle des conditions du flux (`a.b`, `liste[0]`, `liste[*]`, `liste[clé=valeur]`) ;
+/// à défaut, un chemin pointé à indices (`a.0.b`) est lu comme avant.
+pub(super) fn exposed_value<'a>(media_info: &'a Value, path: &str) -> Option<&'a Value> {
+    extract_json_values(media_info, path)
+        .into_iter()
+        .find(|value| !value.is_null())
+        .or_else(|| lookup_in(media_info, path))
 }
 
 /// Parcourt `root` selon un chemin pointé (clés d'objet, indices de tableau) ; `null` compte comme absente.
@@ -716,6 +728,102 @@ mod tests {
         assert_eq!(
             Value::Object(root),
             json!({"ns": {"a": {"b": 1, "c": 2}, "d": 3}})
+        );
+    }
+
+    fn selector_exposure() -> ExposedVariables {
+        use forgearr_shared::exposed_variables::ExposedVariable;
+        let track = |name: &str, field: &str, selector: &str| ExposedVariable {
+            name: name.into(),
+            path: format!("mediainfo.media.track{selector}.{field}"),
+            ..ExposedVariable::default()
+        };
+        ExposedVariables {
+            namespace: "mediainfo".into(),
+            contract_version: "1.0.0".into(),
+            variables: vec![
+                track("video.codec", "Format", "[@type=Video]"),
+                track("video.width", "Width", "[@type=Video]"),
+                track("audio.codec", "Format", "[@type=Audio]"),
+                track("general.format", "Format", "[0]"),
+                track("any.format", "Format", "[*]"),
+                track("text.format", "Format", "[@type=Text]"),
+            ],
+        }
+    }
+
+    #[test]
+    fn exposed_variables_read_engine_query_paths_with_selectors() -> Result<(), VariableError> {
+        let media = json!({"mediainfo": {"media": {"track": [
+            {"@type": "General", "Format": "Matroska"},
+            {"@type": "Video", "Format": "HEVC", "Width": "1920"},
+            {"@type": "Audio", "Format": "AAC"},
+            {"@type": "Audio", "Format": "E-AC-3"},
+        ]}}});
+        let exposed = selector_exposure();
+        let context = VariableContext::new(
+            Path::new("f"),
+            Path::new("s"),
+            Path::new("w"),
+            &media,
+            &HashMap::new(),
+            &[&exposed],
+        );
+        let names = [
+            ("codec", VariableKind::Text, "{{mediainfo.video.codec}}"),
+            ("largeur", VariableKind::Number, "{{mediainfo.video.width}}"),
+            ("audio", VariableKind::Text, "{{mediainfo.audio.codec}}"),
+            (
+                "conteneur",
+                VariableKind::Text,
+                "{{mediainfo.general.format}}",
+            ),
+            ("premier", VariableKind::Text, "{{mediainfo.any.format}}"),
+        ];
+        let variables: Vec<ScriptVariable> = names
+            .iter()
+            .map(|(name, kind, _)| variable(name, *kind))
+            .collect();
+        let config = Value::Object(
+            names
+                .iter()
+                .map(|(name, _, reference)| ((*name).to_owned(), json!(reference)))
+                .collect(),
+        );
+        let resolved = resolve_node_config(&variables, &config, &context)?;
+        assert_eq!(resolved["codec"], json!("HEVC"));
+        assert_eq!(resolved["largeur"], json!(1920));
+        assert_eq!(
+            resolved["audio"],
+            json!("AAC"),
+            "la première piste audio l'emporte"
+        );
+        assert_eq!(resolved["conteneur"], json!("Matroska"));
+        assert_eq!(resolved["premier"], json!("Matroska"));
+        assert_eq!(
+            resolve_node_config(
+                &[variable("sous_titres", VariableKind::Text)],
+                &json!({"sous_titres": "{{mediainfo.text.format}}"}),
+                &context,
+            ),
+            Err(VariableError::MissingReference {
+                variable: "sous_titres".into(),
+                reference: "mediainfo.text.format".into(),
+            }),
+            "une requête sans résultat n'a pas de valeur"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_null_match_is_skipped_for_the_next_non_null_one() {
+        let media = json!({"t": [{"k": null}, {"k": "x"}]});
+        assert_eq!(exposed_value(&media, "t[*].k"), Some(&json!("x")));
+        assert_eq!(exposed_value(&media, "t[0].k"), None);
+        assert_eq!(
+            exposed_value(&media, "t.1.k"),
+            Some(&json!("x")),
+            "chemin pointé à indices"
         );
     }
 }

@@ -20,7 +20,7 @@ pub const MAX_PATH_SEGMENTS: usize = 8;
 pub const DEFAULT_CONTRACT_MAJOR: u32 = 1;
 const INDEX_URL_SUFFIX: &str = "/index.json";
 
-/// Variable exposée par un plugin : son nom relatif et le chemin où lire sa valeur.
+/// Variable exposée par un plugin : son nom relatif et la requête qui lit sa valeur dans `mediaInfo`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExposedVariable {
@@ -32,7 +32,7 @@ pub struct ExposedVariable {
     pub description: Option<String>,
     #[serde(rename = "type", default)]
     pub kind: VariableKind,
-    /// Chemin pointé de la valeur dans `mediaInfo` après l'opération du plugin.
+    /// Requête de la valeur dans `mediaInfo` après l'opération du plugin (première valeur non nulle).
     pub path: String,
 }
 
@@ -183,16 +183,43 @@ fn is_dotted_identifier(name: &str) -> bool {
     (1..=MAX_PATH_SEGMENTS).contains(&segments) && name.split('.').all(is_identifier)
 }
 
-/// Chemin dans `mediaInfo` : segments non vides de lettres, chiffres, `_` et `-`.
+fn is_path_key(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+}
+
+/// Filtre `clé=valeur` d'un sélecteur (clé précédée d'un `@` facultatif, comme `@type` de MediaInfo).
+fn is_filter_selector(selector: &str) -> bool {
+    let Some((key, value)) = selector.split_once('=') else {
+        return false;
+    };
+    is_path_key(key.strip_prefix('@').unwrap_or(key))
+        && !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | ' '))
+}
+
+/// Segment d'une requête : une clé, éventuellement suivie de `[*]`, `[n]` ou `[clé=valeur]`.
+fn is_path_segment(segment: &str) -> bool {
+    let Some((key, rest)) = segment.split_once('[') else {
+        return is_path_key(segment);
+    };
+    let Some(selector) = rest.strip_suffix(']') else {
+        return false;
+    };
+    let is_index = !selector.is_empty() && selector.chars().all(|c| c.is_ascii_digit());
+    is_path_key(key) && (selector == "*" || is_index || is_filter_selector(selector))
+}
+
+/// Requête dans `mediaInfo`, celle des conditions du flux : `a.b`, `liste[0]`, `liste[*]`,
+/// `liste[clé=valeur]` (ex. `mediainfo.media.track[@type=Video].Format`). Un point sépare les
+/// segments, la valeur d'un filtre n'en contient donc pas.
 fn is_media_path(path: &str) -> bool {
     let segments = path.split('.').count();
-    (1..=MAX_PATH_SEGMENTS).contains(&segments)
-        && path.split('.').all(|segment| {
-            !segment.is_empty()
-                && segment
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
-        })
+    (1..=MAX_PATH_SEGMENTS).contains(&segments) && path.split('.').all(is_path_segment)
 }
 
 fn is_safe_id(id: &str) -> bool {
@@ -396,6 +423,61 @@ mod tests {
             validate_exposed(&exposed),
             Err(ExposeError::SecretNotExposable(_))
         ));
+    }
+
+    #[test]
+    fn engine_query_selectors_are_valid_paths_and_malformed_ones_are_not() {
+        for path in [
+            "a.b",
+            "liste[0]",
+            "liste[*].b",
+            "a[0].b[1]",
+            "media.track[@type=Video].Format",
+            "t[k=un deux]",
+            "t[k-1=a_b]",
+        ] {
+            let mut exposed = mediainfo();
+            exposed.variables[0].path = path.into();
+            assert_eq!(validate_exposed(&exposed), Ok(()), "{path}");
+        }
+        for path in [
+            "a[", "a[]", "a[0", "a[=x]", "a[k=]", "a[x y]", "a[b[0]]", "a[0]x", "[0]", "a[@@k=v]",
+            "a[k=v.w]", "a[k=v]]", "a[-1]",
+        ] {
+            let mut exposed = mediainfo();
+            exposed.variables[0].path = path.into();
+            assert!(
+                matches!(validate_exposed(&exposed), Err(ExposeError::InvalidPath(_))),
+                "{path}"
+            );
+        }
+    }
+
+    /// Variables que le dépôt officiel de plugins fait exposer à MediaInfo : le central doit les accepter.
+    #[test]
+    fn the_official_mediainfo_exposures_are_accepted() {
+        const TRACK: &str = "mediainfo.media.track";
+        let variables = [
+            ("general.format", "General", "Format"),
+            ("general.duration", "General", "Duration"),
+            ("general.size", "General", "FileSize"),
+            ("general.bitrate", "General", "OverallBitRate"),
+            ("video.codec", "Video", "Format"),
+            ("video.width", "Video", "Width"),
+            ("video.height", "Video", "Height"),
+            ("video.framerate", "Video", "FrameRate"),
+            ("video.bitdepth", "Video", "BitDepth"),
+            ("video.hdr", "Video", "HDR_Format"),
+            ("audio.codec", "Audio", "Format"),
+            ("audio.channels", "Audio", "Channels"),
+            ("audio.language", "Audio", "Language"),
+        ]
+        .map(|(name, track, field)| {
+            exposed_variable(name, &format!("{TRACK}[@type={track}].{field}"))
+        });
+        let mut exposure = mediainfo();
+        exposure.variables = variables.to_vec();
+        assert_eq!(validate_exposed(&exposure), Ok(()));
     }
 
     #[test]

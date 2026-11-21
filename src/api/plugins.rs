@@ -477,6 +477,46 @@ pub async fn repository_script(
     script.map(Json).ok_or(AppError::NotFound)
 }
 
+/// Code d'un script du catalogue, quel que soit son dépôt, en lecture seule.
+pub async fn catalog_script(
+    State(s): State<AppState>,
+    Path(entry_id): Path<String>,
+    _auth: ViewPluginsAuth,
+) -> AppResult<Json<forgearr_shared::highlight::ScriptPreviewView>> {
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let registry = s.catalog_cache.operations(&roots).await;
+    let preview = tokio::task::spawn_blocking(move || {
+        plugins::read_catalog_script_preview(&roots, &entry_id, &registry)
+    })
+    .await
+    .map_err(|_| AppError::Internal)?;
+    preview.map(Json).ok_or(AppError::NotFound)
+}
+
+/// Copie un script du catalogue dans la librairie locale (« ma collection »), où il se modifie.
+///
+/// Un script déjà local, ou dont le nom existe déjà dans la librairie, est refusé (409).
+pub async fn import_catalog_script(
+    State(s): State<AppState>,
+    Path(entry_id): Path<String>,
+    _auth: ManagePluginsAuth,
+) -> AppResult<Json<forgearr_shared::local::LocalScriptSummary>> {
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let local_dir = plugins::local_catalog_dir(&s.config);
+    let saved = tokio::task::spawn_blocking(move || {
+        let (source_dir, request) =
+            plugins::catalog_script_import(&roots, &entry_id).ok_or(AppError::NotFound)?;
+        if source_dir == local_dir {
+            return Err(AppError::Conflict);
+        }
+        plugins::save_local_script(&local_dir, request)
+    })
+    .await
+    .map_err(|_| AppError::Internal)??;
+    s.catalog_cache.invalidate().await;
+    Ok(Json(saved))
+}
+
 /// Ajoute un nouveau dépôt tiers de plugins ou flux.
 pub async fn add_repository(
     State(s): State<AppState>,

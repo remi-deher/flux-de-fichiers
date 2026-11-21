@@ -2,7 +2,7 @@
 
 use super::metadata::{MetaRow, StatusBanner, StoreTone};
 use super::repos::RepoAction;
-use super::script_preview::ScriptPreview;
+use super::script_preview::{ScriptPreview, script_preview_path};
 use super::{REPOSITORIES_PATH, section_badge_label};
 use crate::api;
 use crate::route::encode_segment;
@@ -38,9 +38,8 @@ fn ContentTab(detail: RepositoryDetailView, previewed: RwSignal<Option<String>>)
     move || match previewed.get() {
         Some(entry_id) => view! {
             <ScriptPreview
-                repo_id=repo_id.clone()
-                entry_id=entry_id
-                on_back=Callback::new(move |()| previewed.set(None))
+                path=script_preview_path(&repo_id, &entry_id)
+                on_back=Some(Callback::new(move |()| previewed.set(None)))
             />
         }
         .into_any(),

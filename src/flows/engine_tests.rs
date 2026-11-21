@@ -1090,6 +1090,7 @@ fn variable_flow_engine<'a>(
         worker_capabilities: None,
         resume_node_id: None,
         resumed_outputs,
+        run_info: FlowRunInfo::default(),
     }
 }
 

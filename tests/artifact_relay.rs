@@ -44,6 +44,7 @@ fn step(node: &str, index: i32) -> JobStepEntry {
         status: JobStepStatus::Succeeded,
         message: None,
         output_excerpt: None,
+        variables: None,
     }
 }
 

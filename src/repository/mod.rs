@@ -6,7 +6,7 @@ mod identity;
 mod jobs;
 mod libraries;
 mod library_access;
-pub(crate) mod library_history;
+pub mod library_history;
 pub(crate) mod linked_flows;
 mod mcp_audit;
 mod password_reset;

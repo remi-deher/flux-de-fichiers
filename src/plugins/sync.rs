@@ -1,7 +1,10 @@
 //! Synchronisation d'un dépôt de plugins vers son dossier local : bornée, sans redirection,
 //! refusant les adresses privées, et atomique (l'ancienne copie reste en place en cas d'échec).
 
-use super::{CatalogItemType, PluginRepository, is_valid_repository_id, parse_index_tolerant};
+use super::{
+    CatalogItemType, PluginRepository, icon::check_svg_icon, is_valid_repository_id,
+    parse_index_tolerant,
+};
 use crate::{
     net_policy::{self, NetPolicyError, OutboundPolicy},
     tools_cache::ToolCacheManager,
@@ -370,6 +373,48 @@ async fn fetch_json_batch(
         .await
 }
 
+/// Chemins (relatifs à la racine du dépôt) des icônes SVG déclarées par les manifestes.
+fn icon_paths_from_manifests(manifests: &[(String, String)]) -> Vec<String> {
+    let mut paths: Vec<String> = manifests
+        .iter()
+        .filter_map(|(manifest_rel, content)| {
+            let document: serde_json::Value = serde_json::from_str(content).ok()?;
+            let declared = document.get("icon")?.as_str()?;
+            if !declared.trim().ends_with(".svg") {
+                return None;
+            }
+            resolve_manifest_relative(manifest_rel, declared)
+        })
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+/// Garde les icônes qui passent la validation par liste blanche ; les autres sont signalées.
+fn collect_icons(
+    fetched: Vec<(String, Result<Option<String>, SyncError>)>,
+    expected_sha256: &HashMap<String, String>,
+    require_digest: bool,
+    files: &mut Vec<(String, String)>,
+    skipped: &mut Vec<String>,
+) -> Result<(), SyncError> {
+    for (relative, result) in fetched {
+        match result {
+            Ok(Some(content)) => match check_svg_icon(&content) {
+                Ok(()) => {
+                    verify_optional_sha256(&relative, &content, expected_sha256, require_digest)?;
+                    files.push((relative, content));
+                }
+                Err(issue) => skipped.push(format!("{relative} : icône refusée ({issue})")),
+            },
+            Ok(None) => skipped.push(format!("{relative} : icône introuvable")),
+            Err(error) => skipped.push(format!("{relative} : {error}")),
+        }
+    }
+    Ok(())
+}
+
 /// Écrit les fichiers dans un dossier temporaire, puis le substitue d'un seul renommage.
 async fn publish(
     repos_dir: &Path,
@@ -479,6 +524,20 @@ async fn prepare_sync(
             policy.require_immutable_releases,
             &mut files,
             &mut Vec::new(),
+            &mut skipped,
+        )?;
+    }
+    let icons = icon_paths_from_manifests(&manifest_docs);
+    if files.len() + icons.len() > MAX_FILES {
+        return Err(SyncError::TooManyFiles);
+    }
+    if !icons.is_empty() {
+        let fetched_icons = fetch_json_batch(&client, &base, icons).await;
+        collect_icons(
+            fetched_icons,
+            &expected_sha256,
+            policy.require_immutable_releases,
+            &mut files,
             &mut skipped,
         )?;
     }
@@ -593,6 +652,7 @@ mod tests {
             distribution: None,
             category: None,
             subcategory: None,
+            has_icon: false,
             tags: Vec::new(),
             owner: None,
             sha256: None,
@@ -1003,6 +1063,97 @@ mod tests {
         let on_disk =
             std::fs::read_to_string(dir.path().join("repo.immutable/plugins/a/manifest.json"))?;
         assert!(on_disk.contains("\"A\""));
+        Ok(())
+    }
+
+    type Fetched = (String, Result<Option<String>, SyncError>);
+
+    fn fetched(path: &str, body: Option<&str>) -> Fetched {
+        (path.to_owned(), Ok(body.map(str::to_owned)))
+    }
+
+    fn failed(path: &str) -> Fetched {
+        (path.to_owned(), Err(SyncError::Network("coupé".into())))
+    }
+
+    #[test]
+    fn icon_paths_are_resolved_beside_the_manifest_and_unsafe_ones_are_ignored() {
+        let manifest = |dir: &str, icon: &str| {
+            (
+                format!("plugins/{dir}/manifest.json"),
+                format!(r#"{{"icon": "{icon}"}}"#),
+            )
+        };
+        let manifests = vec![
+            manifest("plex", "icon.svg"),
+            manifest("jelly", "./img/icon.svg"),
+            manifest("twin", "icon.svg"),
+            manifest("evil", "../../secret.svg"),
+            manifest("png", "icon.png"),
+            ("plugins/none/manifest.json".to_owned(), "{}".to_owned()),
+            ("plugins/b/manifest.json".to_owned(), "{".to_owned()),
+        ];
+        let found = icon_paths_from_manifests(&manifests);
+        assert_eq!(found.len(), 3);
+        assert!(found.contains(&"plugins/plex/icon.svg".to_owned()));
+        assert!(found.contains(&"plugins/jelly/img/icon.svg".to_owned()));
+        assert!(found.contains(&"plugins/twin/icon.svg".to_owned()));
+    }
+
+    #[test]
+    fn collect_icons_keeps_safe_svg_and_reports_the_rest() -> anyhow::Result<()> {
+        let results = vec![
+            fetched("plugins/a/icon.svg", Some("<svg/>")),
+            fetched("plugins/b/icon.svg", Some("<svg onload=\"x\"/>")),
+            fetched("plugins/c/icon.svg", None),
+            failed("plugins/d/icon.svg"),
+        ];
+        let mut files = Vec::new();
+        let mut skipped = Vec::new();
+        collect_icons(results, &HashMap::new(), false, &mut files, &mut skipped)?;
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].0, "plugins/a/icon.svg");
+        assert_eq!(skipped.len(), 3);
+        assert!(skipped[0].contains("icône refusée"));
+        assert!(skipped[1].contains("introuvable"));
+        assert!(skipped[2].contains("coupé"));
+        Ok(())
+    }
+
+    #[test]
+    fn immutable_mode_requires_and_checks_the_icon_digest() -> anyhow::Result<()> {
+        let path = "plugins/a/icon.svg";
+        let digest = ToolCacheManager::compute_sha256("<svg/>".as_bytes());
+        let valid = HashMap::from([(path.to_owned(), digest)]);
+        let mut files = Vec::new();
+        let mut skipped = Vec::new();
+        collect_icons(
+            vec![fetched(path, Some("<svg/>"))],
+            &valid,
+            true,
+            &mut files,
+            &mut skipped,
+        )?;
+        assert_eq!(files.len(), 1);
+
+        let missing = collect_icons(
+            vec![fetched(path, Some("<svg/>"))],
+            &HashMap::new(),
+            true,
+            &mut files,
+            &mut skipped,
+        );
+        assert!(matches!(missing, Err(SyncError::IntegrityMismatch(_))));
+
+        let wrong = HashMap::from([(path.to_owned(), "0".repeat(64))]);
+        let mismatch = collect_icons(
+            vec![fetched(path, Some("<svg/>"))],
+            &wrong,
+            true,
+            &mut files,
+            &mut skipped,
+        );
+        assert!(matches!(mismatch, Err(SyncError::IntegrityMismatch(_))));
         Ok(())
     }
 }

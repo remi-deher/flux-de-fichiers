@@ -107,6 +107,18 @@ mod tests {
     }
 
     #[test]
+    fn plugin_icon_is_a_theme_colored_mask() {
+        let styles = get_all_styles();
+        let rule = styles
+            .split(".plugin-icon {")
+            .nth(1)
+            .and_then(|rest| rest.split('}').next())
+            .unwrap_or_default();
+        assert!(rule.contains("background-color: currentColor;"));
+        assert!(rule.contains("mask: var(--plugin-icon-url) center / contain no-repeat;"));
+    }
+
+    #[test]
     fn collapse_button_is_square_and_shares_its_style_with_logout() {
         let styles = get_all_styles();
         assert!(styles.contains(".sidebar-collapse-btn,\n.sidebar-logout-btn {"));

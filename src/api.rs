@@ -302,6 +302,7 @@ fn json_routes() -> Router<AppState> {
         )
         .route("/api/v1/plugins", get(plugins::catalog))
         .route("/api/v1/plugins/{id}", get(plugins::plugin_detail))
+        .route("/api/v1/plugins/{id}/icon", get(plugins::plugin_icon))
         .route(
             "/api/v1/plugins/{id}/install",
             post(plugins::install_plugin),

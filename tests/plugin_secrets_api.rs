@@ -19,6 +19,9 @@ const WEB_SESSION_TTL_SECONDS: i64 = 28_800;
 const RESPONSE_LIMIT_BYTES: usize = 256 * 1024;
 const PLUGIN_ID: &str = "plugin.demo";
 const SECRET_VALUE: &str = "SECRET-VALUE-123";
+const ICON_FILE: &str = "plugins/demo-icon.svg";
+const ICON_URI: &str = "/api/v1/plugins/plugin.demo/icon";
+const DEMO_ICON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/></svg>"#;
 
 struct Harness {
     app: axum::Router,
@@ -44,6 +47,7 @@ fn write_catalog(root: &Path) -> anyhow::Result<()> {
         root.join("plugins/demo.json"),
         r#"{"schemaVersion":"1.1.0","id":"plugin.demo","type":"plugin","version":"1.0.0","name":"Démo",
             "description":"Plugin de démonstration","author":"forgearr","license":"GPL-2.0-or-later",
+            "icon":"demo-icon.svg",
             "dependencies":[{"id":"ffmpeg","versionRange":"^7.0.0","kind":"app","optional":true}],
             "compatibility":{"appMin":"1.0.0","platforms":["linux/amd64"]},
             "settingsSchema":{"fields":[
@@ -54,6 +58,7 @@ fn write_catalog(root: &Path) -> anyhow::Result<()> {
         root.join("plugins/blocks/run.json"),
         r#"{"schemaVersion":"1.1.0","id":"block.demo.run","version":"1.0.0","name":"Démo : exécuter","description":"Exécute la démo","category":"io","operationId":"operation.demo.run"}"#,
     )?;
+    std::fs::write(root.join(ICON_FILE), DEMO_ICON)?;
     std::fs::write(
         root.join("apps/ffmpeg/manifest.json"),
         r#"{"schemaVersion":"1.1.0","id":"ffmpeg","type":"app","version":"7.1.0","name":"FFmpeg","description":"Transcodeur","author":"FFmpeg","license":"GPL-2.0-or-later","tool":{"capability":"encode","interface":"cli"}}"#,
@@ -131,6 +136,21 @@ async fn send_with_key(
     let headers = response.headers().clone();
     let bytes = to_bytes(response.into_body(), read_limit).await?.to_vec();
     Ok((status, headers, bytes))
+}
+
+async fn get_icon(
+    app: &axum::Router,
+    icon_uri: &str,
+) -> anyhow::Result<(StatusCode, axum::http::HeaderMap, Vec<u8>)> {
+    send_with_key(
+        app,
+        TEST_ADMIN_KEY,
+        "GET",
+        icon_uri,
+        None,
+        RESPONSE_LIMIT_BYTES,
+    )
+    .await
 }
 
 async fn call_with_key(
@@ -873,3 +893,70 @@ async fn catalog_runtime_readiness_and_dependency_status_reflect_state() -> anyh
 
     Ok(())
 }
+
+#[tokio::test]
+async fn plugin_icon_is_served_as_an_inert_svg_image() -> anyhow::Result<()> {
+    let harness = harness().await?;
+    let (status, headers, body) = get_icon(&harness.app, ICON_URI).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["content-type"], "image/svg+xml");
+    assert_eq!(
+        headers["content-security-policy"],
+        "default-src 'none'; sandbox"
+    );
+    assert_eq!(headers["x-content-type-options"], "nosniff");
+    assert_eq!(body, DEMO_ICON.as_bytes());
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_unsafe_icon_is_never_served() -> anyhow::Result<()> {
+    let harness = harness().await?;
+    let icon = harness._dirs.0.path().join(ICON_FILE);
+    std::fs::write(icon, r#"<svg onload="alert(1)"></svg>"#)?;
+    let (status, _, _) = get_icon(&harness.app, ICON_URI).await?;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    Ok(())
+}
+
+#[tokio::test]
+async fn plugins_without_an_icon_or_unknown_ones_answer_not_found() -> anyhow::Result<()> {
+    let harness = harness().await?;
+    for uri in [
+        "/api/v1/plugins/ffmpeg/icon",
+        "/api/v1/plugins/inconnu/icon",
+        "/api/v1/plugins/..%2Fsecret/icon",
+    ] {
+        let (status, _, _) = get_icon(&harness.app, uri).await?;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn plugin_icon_requires_authentication() -> anyhow::Result<()> {
+    let harness = harness().await?;
+    let request = Request::builder().uri(ICON_URI).body(Body::empty())?;
+    let response = harness.app.clone().oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn catalog_flags_only_the_plugins_that_declare_an_icon() -> anyhow::Result<()> {
+    let harness = harness().await?;
+    let (status, catalog) = call(&harness.app, "GET", "/api/v1/plugins", None).await?;
+    assert_eq!(status, StatusCode::OK);
+    let entries = catalog
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("catalog array missing"))?;
+    let find = |id: &str| entries.iter().find(|entry| entry["id"] == id);
+    let demo = find(PLUGIN_ID)
+        .ok_or_else(|| anyhow::anyhow!("plugin.demo missing"))?;
+    assert_eq!(demo["hasIcon"], true);
+    let pack = find("pack.suite")
+        .ok_or_else(|| anyhow::anyhow!("pack.suite missing"))?;
+    assert!(pack.get("hasIcon").is_none());
+    Ok(())
+}
+

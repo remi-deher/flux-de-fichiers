@@ -10,9 +10,18 @@ use crate::{
 use axum::{
     Json,
     extract::{Path, State},
+    http::header,
+    response::{IntoResponse, Response},
 };
 use serde_json::Value;
 use std::time::Duration;
+
+/// Type de contenu de l'icône d'un plugin.
+const ICON_CONTENT_TYPE: &str = "image/svg+xml";
+/// CSP de l'icône : même chargée hors d'une image, elle ne peut rien exécuter ni charger.
+const ICON_CSP: &str = "default-src 'none'; sandbox";
+/// Une icône change rarement : le navigateur peut la garder quelques minutes.
+const ICON_CACHE_CONTROL: &str = "private, max-age=300";
 
 /// Délai maximal d'un test de connexion à l'adresse d'un plugin.
 const CONNECTION_TEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -59,6 +68,30 @@ pub async fn plugin_detail(
         .collect();
     plugins::attach_dependency_statuses(&mut detail, &tool_statuses);
     Ok(Json(detail))
+}
+
+/// Icône SVG d'un plugin, validée par liste blanche puis servie comme image inerte (ADR 0024).
+pub async fn plugin_icon(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    _auth: ViewPluginsAuth,
+) -> AppResult<Response> {
+    if !plugins::is_valid_repository_id(&id) {
+        return Err(AppError::NotFound);
+    }
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let svg = tokio::task::spawn_blocking(move || plugins::plugin_icon_svg(&roots, &id))
+        .await
+        .ok()
+        .flatten()
+        .ok_or(AppError::NotFound)?;
+    let headers = [
+        (header::CONTENT_TYPE, ICON_CONTENT_TYPE),
+        (header::CONTENT_SECURITY_POLICY, ICON_CSP),
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        (header::CACHE_CONTROL, ICON_CACHE_CONTROL),
+    ];
+    Ok((headers, svg).into_response())
 }
 
 /// Liste l'état d'installation et de cache des outils distribués.

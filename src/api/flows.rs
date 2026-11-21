@@ -91,6 +91,12 @@ pub async fn save_flow(
     if payload.name.trim().is_empty() {
         return Err(AppError::Invalid);
     }
+    let condition_errors = crate::flows::definition_condition_errors(&payload.definition);
+    if !condition_errors.is_empty() {
+        tracing::warn!(flow_id = %id, errors = ?condition_errors, "condition refusée à l'enregistrement du flux");
+        return Err(AppError::Invalid);
+    }
+    super::flow_links::ensure_valid_links(&s.pool, &id, &payload.definition).await?;
     let mut payload = payload;
     if crate::flows::has_flow_secrets(&payload.definition) {
         let existing = repository::get_flow(&s.pool, &id)
@@ -152,8 +158,12 @@ pub async fn delete_flow(
 }
 
 #[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ValidateFlowRequest {
     pub definition: serde_json::Value,
+    /// Flux validé, pour détecter un appel de sous-flux qui reviendrait sur lui (ADR 0026).
+    #[serde(default)]
+    pub flow_id: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -261,6 +271,12 @@ pub async fn validate_flow(
             errors.push(format!("Boucle directe sur le nœud : {}", conn.from));
         }
     }
+    errors.extend(crate::flows::graph_condition_errors(&graph));
+    let flow_id = payload
+        .flow_id
+        .as_deref()
+        .unwrap_or(super::flow_links::UNSAVED_FLOW_ID);
+    errors.extend(super::flow_links::definition_link_errors(&s.pool, flow_id, &raw).await?);
     if has_cycle(&graph) {
         errors.push("Le graphe contient au moins un cycle.".to_owned());
     }
@@ -294,6 +310,7 @@ pub async fn restore_version(
     _auth: ManageFlowsAuth,
 ) -> AppResult<Json<crate::domain::FlowRecord>> {
     let frozen = repository::get_flow_version(&s.pool, &id, version).await?;
+    super::flow_links::ensure_valid_links(&s.pool, &id, &frozen.definition).await?;
     let req = UpdateFlowRequest {
         name: frozen.name,
         description: frozen.description,

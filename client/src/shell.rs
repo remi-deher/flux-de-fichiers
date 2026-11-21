@@ -644,6 +644,8 @@ mod tests {
             remote_addr: None,
             telemetry: None,
             max_concurrency: 1,
+            max_cpu_jobs: None,
+            max_gpu_jobs: None,
             schedule: None,
             transfer_enabled: false,
         };
@@ -655,6 +657,8 @@ mod tests {
             remote_addr: None,
             telemetry: None,
             max_concurrency: 1,
+            max_cpu_jobs: None,
+            max_gpu_jobs: None,
             schedule: None,
             transfer_enabled: false,
         };

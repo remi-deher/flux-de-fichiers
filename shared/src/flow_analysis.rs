@@ -1,8 +1,8 @@
 //! Simulation à sec et comparaison de graphes de flux partagées entre l'interface et MCP.
 
 use crate::flows::{
-    ConditionConfig, FlowConnection, FlowGraph, FlowNode, OwnedBlockSpec, evaluate_condition,
-    find_owned,
+    ConditionConfig, FlowConnection, FlowGraph, FlowNode, OwnedBlockSpec, describe_condition,
+    evaluate_condition, find_owned,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -191,43 +191,19 @@ fn is_condition_node(node: &FlowNode, spec: Option<&OwnedBlockSpec>) -> bool {
     let has_branch_ports = spec.is_some_and(|s| s.ports.len() >= 2);
     has_branch_ports
         || node.kind.as_str().ends_with("condition")
+        || node.config.get("group").is_some()
         || (node.config.get("property").is_some()
             && node.config.get("operator").is_some()
             && node.config.get("target").is_some())
 }
 
 fn evaluate_node_condition(node: &FlowNode, probe_info: &Value) -> (bool, String) {
-    let config = ConditionConfig {
-        property: node
-            .config
-            .get("property")
-            .and_then(Value::as_str)
-            .unwrap_or("any")
-            .trim()
-            .to_owned(),
-        operator: node
-            .config
-            .get("operator")
-            .and_then(Value::as_str)
-            .unwrap_or("eq")
-            .trim()
-            .to_owned(),
-        target: node
-            .config
-            .get("target")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_owned(),
-    };
+    let config: ConditionConfig = serde_json::from_value(node.config.clone()).unwrap_or_default();
     let result = evaluate_condition(&config, probe_info);
     let verdict = if result { "Vrai" } else { "Faux" };
     (
         result,
-        format!(
-            "{} {} {} → {verdict}",
-            config.property, config.operator, config.target
-        ),
+        format!("{} → {verdict}", describe_condition(&config)),
     )
 }
 
@@ -567,5 +543,41 @@ mod tests {
         assert_eq!(diff.added_nodes.len(), 1);
         assert_eq!(diff.added_nodes[0].id, "n4");
         assert!(diff.removed_nodes.is_empty());
+    }
+
+    #[test]
+    fn simulate_flow_basic_evaluates_grouped_condition() {
+        let group = json!({ "group": { "combinator": "any", "rules": [
+            { "property": "format", "operator": "exact", "target": "pdf" },
+            { "property": "tracks[type=video].codec", "operator": "in", "target": "h264, hevc" }
+        ] } });
+        let graph = FlowGraph {
+            nodes: vec![
+                node("n1", "file-input", "Entrée", json!({})),
+                node("n2", "essentiel.filtre", "Filtre", group),
+                node("n3", "file-output", "Sortie", json!({})),
+            ],
+            connections: vec![
+                FlowConnection {
+                    from: "n1".into(),
+                    to: "n2".into(),
+                    port: None,
+                },
+                FlowConnection {
+                    from: "n2".into(),
+                    to: "n3".into(),
+                    port: Some("true".into()),
+                },
+            ],
+            extra: Map::new(),
+        };
+        let report = simulate_flow_basic(&graph, &[], &SimulationPreset::StructuredTracks.input());
+        assert_eq!(report.status, SimulationStatus::Complete);
+        let step = &report.steps[1];
+        assert_eq!(step.port_taken.as_deref(), Some("true"));
+        assert_eq!(
+            step.detail,
+            "(format = pdf OU tracks[type=video].codec ∈ h264, hevc) → Vrai"
+        );
     }
 }

@@ -1,6 +1,6 @@
 //! Intégrations déclenchées après la publication durable d'un résultat.
 
-use super::{FlowContext, OperationRuntime, http_runner};
+use super::{FlowContext, OperationRuntime, deferred_variables, http_runner, substitution};
 use crate::{
     api::AppState,
     domain::{Job, JobStepStatus},
@@ -83,6 +83,21 @@ async fn execute_notifications(
     );
     ctx.media_root = Some(root);
     ctx.status = "succeeded".to_owned();
+    let job_id_text = job.id.to_string();
+    let library_id_text = job.library_id.map(|id| id.to_string());
+    let library_name = repository::library_name(&state.pool, job.library_id).await?;
+    let worker_name = repository::worker_name(&state.pool, worker_id).await?;
+    let base_variables = deferred_variables::base_variables(
+        output,
+        &substitution::RunIdentity {
+            job_id: Some(&job_id_text),
+            flow_id: Some(flow_id),
+            source_name: Some(&job.source_name),
+            library_id: library_id_text.as_deref(),
+            library_name: library_name.as_deref(),
+            worker_name: worker_name.as_deref(),
+        },
+    );
     let mut attempts = 0;
     for step in logs {
         let Some(node) = graph
@@ -114,7 +129,24 @@ async fn execute_notifications(
         }
         attempts += 1;
         ctx.current_step.clone_from(&node.id);
-        let mut config = node.config.clone();
+        let stored = repository::step_variables(&state.pool, job.id, step.step_index).await?;
+        let mut config = match deferred_variables::with_stored_custom(&base_variables, &stored) {
+            Ok(vars) => {
+                let config = deferred_variables::deferred_config(&node.config, &vars);
+                ctx.variables = vars;
+                config
+            }
+            Err(err) => {
+                ctx.variables.clone_from(&base_variables);
+                tracing::warn!(
+                    job_id = %job.id,
+                    node_id = %node.id,
+                    error = %err,
+                    "variables différées invalides"
+                );
+                node.config.clone()
+            }
+        };
         if let Some(fields) = config.as_object_mut()
             && let Some(param) = &runtime.fail_on_error_param
         {

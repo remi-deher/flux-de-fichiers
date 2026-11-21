@@ -186,7 +186,8 @@ fn library_schema(required: &[&str]) -> Value {
             "includeExtensions": { "type": "array", "items": { "type": "string" } },
             "excludePatterns": { "type": "array", "items": { "type": "string" } },
             "minFileBytes": { "type": "integer", "minimum": 0 },
-            "outputPolicy": { "type": "string", "enum": ["output_dir", "replace_with_backup", "replace_in_place"] }
+            "outputPolicy": { "type": "string", "enum": ["output_dir", "replace_with_backup", "replace_in_place"] },
+            "defaultPriority": { "type": "integer", "minimum": forgearr_shared::jobs::JOB_PRIORITY_MIN, "maximum": forgearr_shared::jobs::JOB_PRIORITY_MAX }
         }),
         required,
     )
@@ -218,6 +219,11 @@ struct LibraryWriteArgs {
     min_file_bytes: u64,
     #[serde(default, alias = "outputPolicy")]
     output_policy: LibraryOutputPolicy,
+    #[serde(
+        default = "forgearr_shared::jobs::default_library_job_priority",
+        alias = "defaultPriority"
+    )]
+    default_priority: i32,
 }
 
 impl From<LibraryWriteArgs> for LibraryWrite {
@@ -232,6 +238,7 @@ impl From<LibraryWriteArgs> for LibraryWrite {
             exclude_patterns: value.exclude_patterns,
             min_file_bytes: value.min_file_bytes,
             output_policy: value.output_policy,
+            default_priority: value.default_priority,
         }
     }
 }

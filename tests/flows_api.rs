@@ -9,6 +9,7 @@ use forgearr::{
     config::Config,
     flows::{self, ConditionConfig},
 };
+use forgearr_shared::flows::ConditionOperator;
 use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -63,40 +64,71 @@ fn test_condition_evaluation() {
         ]
     });
 
-    let cond_hevc = ConditionConfig {
-        property: "tracks[type=video].codec".into(),
-        operator: "eq".into(),
-        target: "hevc".into(),
-    };
+    let cond_hevc = ConditionConfig::single(
+        "tracks[type=video].codec",
+        ConditionOperator::from_loose("eq"),
+        "hevc",
+    );
     assert!(flows::evaluate_condition(&cond_hevc, &probe_info));
 
-    let cond_h264 = ConditionConfig {
-        property: "tracks[type=video].codec".into(),
-        operator: "eq".into(),
-        target: "h264".into(),
-    };
+    let cond_h264 = ConditionConfig::single(
+        "tracks[type=video].codec",
+        ConditionOperator::from_loose("eq"),
+        "h264",
+    );
     assert!(!flows::evaluate_condition(&cond_h264, &probe_info));
 
-    let cond_lang_fre = ConditionConfig {
-        property: "tracks[type=audio].properties.language".into(),
-        operator: "contains".into(),
-        target: "fre".into(),
-    };
+    let cond_lang_fre = ConditionConfig::single(
+        "tracks[type=audio].properties.language",
+        ConditionOperator::from_loose("contains"),
+        "fre",
+    );
     assert!(flows::evaluate_condition(&cond_lang_fre, &probe_info));
 
-    let cond_format = ConditionConfig {
-        property: "format".into(),
-        operator: "exact".into(),
-        target: "EPUB".into(),
-    };
+    let cond_format =
+        ConditionConfig::single("format", ConditionOperator::from_loose("exact"), "EPUB");
     assert!(flows::evaluate_condition(&cond_format, &probe_info));
 
-    let cond_pages = ConditionConfig {
-        property: "pages".into(),
-        operator: "gt".into(),
-        target: "200".into(),
-    };
+    let cond_pages = ConditionConfig::single("pages", ConditionOperator::from_loose("gt"), "200");
     assert!(flows::evaluate_condition(&cond_pages, &probe_info));
+}
+
+#[tokio::test]
+async fn test_saving_a_flow_with_an_invalid_condition_is_rejected() -> anyhow::Result<()> {
+    let app = test_app().await?;
+    let mut group = serde_json::json!({"rules": [{"property": "codec", "operator": "exists"}]});
+    for _ in 0..forgearr_shared::flows::MAX_CONDITION_DEPTH {
+        group = serde_json::json!({"combinator": "any", "rules": [group]});
+    }
+    let configs = [
+        serde_json::json!({"group": group}),
+        serde_json::json!({"property": "codec", "operator": "regex", "target": "("}),
+    ];
+    for config in configs {
+        let definition = serde_json::json!({
+            "nodes": [{"id": "c1", "type": "essentiel.condition", "name": "Condition", "config": config}],
+            "connections": []
+        });
+        let flow = serde_json::json!({
+            "name": "Condition invalide",
+            "description": null,
+            "file_mask": "*.mkv",
+            "is_default": false,
+            "definition": definition.to_string()
+        });
+        let req = Request::builder()
+            .method("PUT")
+            .uri("/api/v1/flows/flow.condition.invalide")
+            .header(
+                "authorization",
+                "Bearer fdf_a0000001_0123456789abcdef0123456789abcdef0123456789abcdef",
+            )
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&flow)?))?;
+        let resp = app.clone().oneshot(req).await?;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+    Ok(())
 }
 
 #[tokio::test]

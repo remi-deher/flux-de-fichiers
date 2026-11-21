@@ -12,7 +12,7 @@ use serde_json::json;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-fn placement_registry() -> OperationRegistry {
+pub(super) fn placement_registry() -> OperationRegistry {
     let mut reg = base_registry();
     for (id, primitive) in [
         ("operation.core.worker-capability", "capability"),
@@ -74,6 +74,25 @@ async fn run(
     capabilities: Option<&WorkerCapabilities>,
     resume_node_id: Option<&str>,
 ) -> Result<FlowExecutionOutcome, String> {
+    let registry = placement_registry();
+    run_engine(
+        &registry,
+        flow,
+        capabilities,
+        resume_node_id,
+        FlowRunInfo::default(),
+    )
+    .await
+}
+
+/// Exécute `flow` avec de faux outils (sonde, MP4Box, mkvpropedit) et l'identité donnée.
+pub(super) async fn run_engine(
+    registry: &OperationRegistry,
+    flow: &FlowRecord,
+    capabilities: Option<&WorkerCapabilities>,
+    resume_node_id: Option<&str>,
+    run_info: FlowRunInfo<'_>,
+) -> Result<FlowExecutionOutcome, String> {
     let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
     let cache = ToolCacheManager::new(dir.path().join("cache"));
     install_fake_probe(&cache).map_err(|e| e.to_string())?;
@@ -91,11 +110,10 @@ async fn run(
     std::fs::write(&source, "x").map_err(|e| e.to_string())?;
     let work = dir.path().join("work");
     std::fs::create_dir(&work).map_err(|e| e.to_string())?;
-    let registry = placement_registry();
     let http = reqwest::Client::new();
     let (progress, _log) = recording_progress();
     FlowEngine {
-        registry: &registry,
+        registry,
         cache_mgr: &cache,
         http_client: &http,
         secrets_dir: None,
@@ -106,6 +124,7 @@ async fn run(
         allow_private_integrations: None,
         worker_capabilities: capabilities,
         resume_node_id,
+        run_info,
         resumed_outputs: &HashMap::new(),
     }
     .execute_flow(Uuid::new_v4(), flow, &source, &work, progress)

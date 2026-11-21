@@ -1,5 +1,6 @@
 //! Brouillon d'une bibliothèque en cours d'édition, sans DOM.
 
+use forgearr_shared::jobs::{JOB_PRIORITY_MAX, JOB_PRIORITY_MIN};
 use forgearr_shared::libraries::{
     LIBRARY_NAME_MAX, Library, LibraryAccess, LibraryOutputPolicy, LibraryWorkerPath, LibraryWrite,
     MAX_SCAN_INTERVAL_MINUTES, has_unshared_remote_sources, suggested_library_name_from_path,
@@ -21,6 +22,8 @@ pub struct LibraryDraft {
     pub exclude_patterns_text: String,
     pub min_file_mb: u64,
     pub output_policy: LibraryOutputPolicy,
+    /// Priorité des tâches créées sans priorité explicite.
+    pub default_priority: i32,
 }
 
 impl LibraryDraft {
@@ -36,6 +39,7 @@ impl LibraryDraft {
             exclude_patterns_text: library.exclude_patterns.join(", "),
             min_file_mb: library.min_file_bytes / (1024 * 1024),
             output_policy: library.output_policy,
+            default_priority: library.default_priority,
         }
     }
 
@@ -177,6 +181,9 @@ impl LibraryDraft {
             exclude_patterns: split_list(&self.exclude_patterns_text),
             min_file_bytes: self.min_file_mb.saturating_mul(1024 * 1024),
             output_policy: self.output_policy,
+            default_priority: self
+                .default_priority
+                .clamp(JOB_PRIORITY_MIN, JOB_PRIORITY_MAX),
         })
     }
 }
@@ -237,6 +244,8 @@ mod tests {
             remote_addr: None,
             telemetry: None,
             max_concurrency: 1,
+            max_cpu_jobs: None,
+            max_gpu_jobs: None,
             schedule: None,
             transfer_enabled: announces,
         }
@@ -380,6 +389,19 @@ mod tests {
     }
 
     #[test]
+    fn the_written_body_bounds_the_default_priority() {
+        let draft = LibraryDraft {
+            name: "Films".into(),
+            default_priority: JOB_PRIORITY_MAX + 50,
+            ..LibraryDraft::default()
+        };
+        assert_eq!(
+            draft.to_write().map(|body| body.default_priority),
+            Ok(JOB_PRIORITY_MAX)
+        );
+    }
+
+    #[test]
     fn library_counts_tracks_ready_and_flow_bound_libraries() {
         let now = chrono::Utc::now();
         let make = |name: &str, flow_id: Option<&str>, workers: Vec<LibraryWorkerPath>| Library {
@@ -394,6 +416,7 @@ mod tests {
             exclude_patterns: Vec::new(),
             min_file_bytes: 0,
             output_policy: LibraryOutputPolicy::OutputDir,
+            default_priority: forgearr_shared::jobs::LIBRARY_DEFAULT_JOB_PRIORITY,
             created_at: now,
             updated_at: now,
         };

@@ -6,6 +6,7 @@ use crate::{
 };
 use forgearr_shared::{
     capabilities::CapabilityRequirement,
+    flows::FlowVariables,
     relay::{
         HandoffArtifact, HandoffInput, JobRelayInfo, MAX_RELAYED_OUTPUTS_BYTES, MAX_RELAYS_PER_JOB,
         RelayRequest, RelayTarget, RelayedNodeOutput,
@@ -13,6 +14,7 @@ use forgearr_shared::{
     transfer::ArtifactKind,
     workers::WORKER_ONLINE_SECONDS,
 };
+use serde_json::{Map, Value};
 use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -130,6 +132,7 @@ pub async fn relay_job(
         return Err(AppError::Invalid);
     }
     let node_outputs_json = serialize_node_outputs(&request.node_outputs)?;
+    let relay_variables = variables_json(&request.variables)?;
     let placement = if relay_count >= MAX_RELAYS_PER_JOB {
         None
     } else {
@@ -173,13 +176,14 @@ pub async fn relay_job(
             }
             sqlx::query(
                 "INSERT INTO job_relays(job_id, from_worker_id, relay_count, resume_node_id, \
-                     requirement_json, artifact_relay, node_outputs_json) \
-                 VALUES(?1, ?2, 1, ?3, ?4, ?5, ?6) \
+                     requirement_json, artifact_relay, node_outputs_json, variables_json) \
+                 VALUES(?1, ?2, 1, ?3, ?4, ?5, ?6, ?7) \
                  ON CONFLICT(job_id) DO UPDATE SET from_worker_id=excluded.from_worker_id, \
                      relay_count=relay_count+1, resume_node_id=excluded.resume_node_id, \
                      requirement_json=excluded.requirement_json, \
                      artifact_relay=excluded.artifact_relay, \
-                     node_outputs_json=excluded.node_outputs_json, relayed_at=datetime('now')",
+                     node_outputs_json=excluded.node_outputs_json, \
+                     variables_json=excluded.variables_json, relayed_at=datetime('now')",
             )
             .bind(id)
             .bind(lease.worker_id)
@@ -187,6 +191,7 @@ pub async fn relay_job(
             .bind(requirement_json)
             .bind(artifact_relay)
             .bind(node_outputs_json)
+            .bind(relay_variables)
             .execute(&mut *tx)
             .await?;
             RelayOutcome::Relayed {
@@ -228,6 +233,33 @@ pub async fn relay_job(
     Ok(outcome)
 }
 
+/// Reprise d'une tâche relayée, lue au moment du bail.
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct ResumeState {
+    pub node_id: Option<String>,
+    pub outputs: HashMap<String, RelayedNodeOutput>,
+    pub variables: Map<String, Value>,
+}
+
+/// Valide puis sérialise les variables personnalisées d'un relais (`NULL` si aucune).
+pub(super) fn variables_json(variables: &Map<String, Value>) -> AppResult<Option<String>> {
+    if variables.is_empty() {
+        return Ok(None);
+    }
+    FlowVariables::default()
+        .merge_custom(variables)
+        .map_err(|_| AppError::Invalid)?;
+    serde_json::to_string(variables)
+        .map(Some)
+        .map_err(|_| AppError::Internal)
+}
+
+/// Relit des variables de relais stockées ; une valeur illisible est ignorée.
+pub(super) fn parse_variables_json(raw: Option<&str>) -> Map<String, Value> {
+    raw.and_then(|text| serde_json::from_str(text).ok())
+        .unwrap_or_default()
+}
+
 /// Sorties des nœuds à stocker avec le relais ; `None` s'il n'y en a pas, refus si elles dépassent la borne.
 fn serialize_node_outputs(
     outputs: &HashMap<String, RelayedNodeOutput>,
@@ -242,15 +274,12 @@ fn serialize_node_outputs(
     Ok(Some(json))
 }
 
-/// Point de reprise d'une tâche relayée, lu au moment du bail : nœud où reprendre et sorties des
-/// nœuds déjà exécutés. Un relais par artefact ne reprend en cours de flux que tant que l'artefact
-/// est déclaré : sans lui (reprise après perte du repreneur), la tâche repart de la source.
-pub(super) async fn resume_point(
-    pool: &SqlitePool,
-    job: Uuid,
-) -> AppResult<Option<(String, HashMap<String, RelayedNodeOutput>)>> {
-    let row: Option<(String, Option<String>)> = sqlx::query_as(
-        "SELECT resume_node_id, node_outputs_json FROM job_relays r WHERE r.job_id=?1 \
+/// Point de reprise d'une tâche relayée, lu au moment du bail : nœud où reprendre, sorties des
+/// nœuds déjà exécutés et variables personnalisées (`vars.*`). Un relais par artefact ne reprend
+/// en cours de flux que tant que l'artefact est déclaré : sans lui (reprise après perte du repreneur), la tâche repart de la source.
+pub(super) async fn resume_state(pool: &SqlitePool, job: Uuid) -> AppResult<ResumeState> {
+    let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT resume_node_id, node_outputs_json, variables_json FROM job_relays r WHERE r.job_id=?1 \
          AND (r.artifact_relay=0 \
          OR EXISTS(SELECT 1 FROM job_artifacts a WHERE a.job_id=r.job_id AND a.kind=?2))",
     )
@@ -258,12 +287,15 @@ pub(super) async fn resume_point(
     .bind(ArtifactKind::Working.as_str())
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|(node, outputs)| {
-        let outputs = outputs
-            .and_then(|json| serde_json::from_str(&json).ok())
-            .unwrap_or_default();
-        (node, outputs)
-    }))
+    Ok(row
+        .map(|(node, outputs, variables)| ResumeState {
+            node_id: Some(node),
+            outputs: outputs
+                .and_then(|json| serde_json::from_str(&json).ok())
+                .unwrap_or_default(),
+            variables: parse_variables_json(variables.as_deref()),
+        })
+        .unwrap_or_default())
 }
 
 /// Fichier de travail que ce bail doit tirer chez son détenteur (relais par artefact, ADR 0022).
@@ -305,9 +337,9 @@ pub(super) async fn snapshot_steps(tx: &mut sqlx::SqliteConnection, job: Uuid) -
         .await?;
     sqlx::query(
         "INSERT INTO job_handoff_steps(job_id, step_index, node_id, block_kind, operation_id, \
-             status, message, output_excerpt, created_at) \
+             status, message, output_excerpt, created_at, variables_json) \
          SELECT job_id, step_index, node_id, block_kind, operation_id, status, message, \
-             output_excerpt, created_at FROM job_steps WHERE job_id=?1",
+             output_excerpt, created_at, variables_json FROM job_steps WHERE job_id=?1",
     )
     .bind(job)
     .execute(&mut *tx)
@@ -352,6 +384,7 @@ mod tests {
         capabilities::{EncodeAcceleration, HardwareEncoder, VideoCodec, WorkerCapabilities},
         workers::WorkerTelemetry,
     };
+    use serde_json::json;
 
     fn worker(name: &str, hevc: bool) -> Worker {
         let capabilities = WorkerCapabilities {
@@ -384,6 +417,8 @@ mod tests {
                 capabilities,
             }),
             max_concurrency: 1,
+            max_cpu_jobs: None,
+            max_gpu_jobs: None,
             schedule: None,
             transfer_enabled: false,
         }
@@ -464,5 +499,18 @@ mod tests {
             decide_placement(&workers, origin.id, &to_self, &all_access(&workers)),
             None
         );
+    }
+
+    #[test]
+    fn relay_variables_round_trip_and_are_validated() -> AppResult<()> {
+        assert_eq!(variables_json(&Map::new())?, None);
+        let mut variables = Map::new();
+        variables.insert("codec".into(), json!("hevc"));
+        let stored = variables_json(&variables)?;
+        assert_eq!(parse_variables_json(stored.as_deref()), variables);
+        assert!(parse_variables_json(Some("illisible")).is_empty());
+        variables.insert("nom invalide".into(), json!(1));
+        assert!(matches!(variables_json(&variables), Err(AppError::Invalid)));
+        Ok(())
     }
 }

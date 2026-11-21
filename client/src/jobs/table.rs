@@ -5,7 +5,7 @@ use super::model::{
 };
 use crate::format;
 use crate::ui::{ProgressBar, Registre, RegistreMessage, StatusBadge, Tag, TagTone, on_activate};
-use forgearr_shared::jobs::{Job, JobStatus};
+use forgearr_shared::jobs::{Job, JobResourceClass, JobResourceInfo, JobStatus};
 use forgearr_shared::relay::JobRelayInfo;
 use leptos::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -112,6 +112,7 @@ pub fn JobsTable(
         |job| job.status == JobStatus::Failed,
     );
     let relays = job_details::<JobRelayInfo>(jobs, "/api/v1/jobs/relays", |_| true);
+    let resources = job_details::<JobResourceInfo>(jobs, "/api/v1/jobs/resources", |_| true);
     let span = headers.len();
     view! {
         <Registre aria_label="Tâches" headers=headers>
@@ -125,6 +126,7 @@ pub fn JobsTable(
                     let libs_map = libraries.get();
                     let failures = failures.get().unwrap_or_default();
                     let relays = relays.get().unwrap_or_default();
+                    let resources = resources.get().unwrap_or_default();
                     list.into_iter().map(|job| {
                         let id = job.id;
                         let status = job.status;
@@ -134,6 +136,10 @@ pub fn JobsTable(
                             .find(|entry| entry.job_id == id)
                             .map(|entry| relay_label(entry, status, &workers_map));
                         let priority = job.priority;
+                        // Seule la classe GPU est signalée : CPU est le cas ordinaire.
+                        let gpu = resources.iter().any(|entry| {
+                            entry.job_id == id && entry.resource_class == JobResourceClass::Gpu
+                        });
                         let flow_label = resolve_flow_label(job.flow_id.as_deref(), &flows_map);
                         let worker_label = resolve_worker_label(job.worker_id, &workers_map);
                         let library_label = resolve_library_label(job.library_id, &libs_map);
@@ -169,6 +175,9 @@ pub fn JobsTable(
                                         })}
                                         {relay.map(|label| view! {
                                             <Tag label=label tone=TagTone::Warning />
+                                        })}
+                                        {gpu.then(|| view! {
+                                            <Tag label=JobResourceClass::Gpu.label() tone=TagTone::Mono />
                                         })}
                                         {(priority != 0).then(|| view! {
                                             <Tag

@@ -36,6 +36,16 @@ central accède à SQLite (`/config/flux.db`) ; les workers échangent avec lui 
 (TLS éventuel via le reverse proxy externe).
 Les migrations sont embarquées et appliquées au démarrage du central.
 
+Attribution (`claim`, `src/repository/jobs.rs`) : fenêtre horaire du worker, puis places
+libres, puis la tâche admissible de plus haute `priority`, la plus ancienne à priorité égale.
+Les places viennent de `WorkerSlots` (`shared/src/workers/slots.rs`) : sans `max_cpu_jobs` ni
+`max_gpu_jobs`, `max_concurrency` places communes (mode historique) ; sinon places par classe
+(GPU à 0 par défaut). La classe d'une tâche (`jobs.resource_class`) est figée à sa création :
+GPU si un bloc du flux figé porte `acceleration` = `nvenc` ou `vaapi`
+(`shared/src/flows/resources.rs`). Une tâche sans priorité explicite prend
+`libraries.default_priority`. Ces colonnes sont lues en SQLx runtime
+(`src/repository/resource_slots.rs`), les macros existantes restant inchangées.
+
 ## Vérifier selon le changement
 
 - Documentation seule : vérifier liens, chemins et `git diff --check` ; pas de

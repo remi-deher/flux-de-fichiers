@@ -164,4 +164,8 @@ réimplémenter ce travail.
   l'exclut aussi avec ce moteur : elle exige un moteur regex en C). `ps1` a donc un analyseur lexical maison
   (`src/plugins/highlight/powershell.rs`) : commentaires, chaînes et ici-chaînes, variables, nombres, mots-clés,
   opérateurs `-eq` et cmdlets `Verbe-Nom`, sans jamais perdre de texte.
+- Aperçu et ajout depuis le catalogue : le tiroir d'une entrée script du catalogue affiche le code coloré, les
+  variables et les dépendances (`GET /api/v1/plugins/scripts/{id}`, quel que soit le dépôt) et propose « Ajouter à ma
+  collection » (`POST /api/v1/plugins/scripts/{id}/import`) : le script est copié dans la librairie locale, sous un
+  identifiant neuf, où il se modifie. Un script déjà local ou de même nom est refusé (409).
 - Les scripts existants, sans `variables`, restent valides (liste vide par défaut).

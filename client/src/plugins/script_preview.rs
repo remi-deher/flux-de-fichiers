@@ -1,12 +1,16 @@
-//! Aperçu en lecture seule du code d'un script d'un dépôt, affiché dans le tiroir du dépôt.
+//! Aperçu en lecture seule du code d'un script du catalogue, affiché dans le tiroir du dépôt ou de
+//! l'entrée du catalogue, avec l'ajout à la librairie locale (« ma collection »).
 
-use super::REPOSITORIES_PATH;
-use crate::api;
+use super::{CATALOG_SCRIPTS_PATH, REPOSITORIES_PATH};
+use crate::api::{self, ApiError};
 use crate::route::encode_segment;
-use crate::ui::{Tag, TagTone, VariablesTable};
+use crate::ui::{Tag, TagTone, Toasts, VariablesTable};
 use forgearr_shared::exposed_variables::RequirementStatus;
 use forgearr_shared::highlight::{CodeToken, ScriptPreviewView};
+use forgearr_shared::local::LocalScriptSummary;
 use leptos::prelude::*;
+
+const CONFLICT_STATUS: u16 = 409;
 
 /// Chemin de l'API qui renvoie le code d'un script d'un dépôt.
 pub fn script_preview_path(repo_id: &str, entry_id: &str) -> String {
@@ -15,6 +19,53 @@ pub fn script_preview_path(repo_id: &str, entry_id: &str) -> String {
         encode_segment(repo_id),
         encode_segment(entry_id)
     )
+}
+
+/// Chemin de l'API qui renvoie le code d'un script du catalogue, quel que soit son dépôt.
+pub fn catalog_script_path(entry_id: &str) -> String {
+    format!("{CATALOG_SCRIPTS_PATH}/{}", encode_segment(entry_id))
+}
+
+/// Chemin de l'API qui copie un script du catalogue dans la librairie locale.
+pub fn catalog_script_import_path(entry_id: &str) -> String {
+    format!("{}/import", catalog_script_path(entry_id))
+}
+
+/// Message affiché quand l'ajout d'un script à la librairie échoue.
+fn import_error_message(error: &ApiError) -> String {
+    match error {
+        ApiError::Rejected {
+            status: CONFLICT_STATUS,
+            ..
+        } => "Ce script est déjà dans votre librairie (un script porte déjà ce nom).".to_owned(),
+        other => other.message(),
+    }
+}
+
+/// Bouton qui copie le script dans la librairie locale, où il devient modifiable.
+#[component]
+fn ImportButton(import_path: String) -> impl IntoView {
+    let pending = RwSignal::new(false);
+    let import = move |_| {
+        let path = import_path.clone();
+        pending.set(true);
+        leptos::task::spawn_local(async move {
+            match api::post::<(), LocalScriptSummary>(&path, None).await {
+                Ok(saved) => Toasts::notify_success(format!(
+                    "« {} » ajouté à votre librairie (section Scripts).",
+                    saved.name
+                )),
+                Err(error) => Toasts::notify_error(import_error_message(&error)),
+            }
+            pending.set(false);
+        });
+    };
+    view! {
+        <button type="button" class="btn btn-primary btn-sm" disabled=move || pending.get()
+            on:click=import>
+            "Ajouter à ma collection"
+        </button>
+    }
 }
 
 /// Rend les lignes de jetons en `<span>` colorés, séparées par des retours à la ligne.
@@ -80,18 +131,26 @@ fn RequirementsList(requirements: Vec<RequirementStatus>, unverified: bool) -> i
     .into_any()
 }
 
+/// Aperçu du script lu à `path`. `on_back` ajoute un retour à la liste ; `import_path` ajoute le
+/// bouton « Ajouter à ma collection » (réservé à qui gère les plugins).
 #[component]
-pub fn ScriptPreview(repo_id: String, entry_id: String, on_back: Callback<()>) -> impl IntoView {
-    let path = script_preview_path(&repo_id, &entry_id);
+pub fn ScriptPreview(
+    path: String,
+    #[prop(optional_no_strip)] on_back: Option<Callback<()>>,
+    #[prop(optional_no_strip)] import_path: Option<String>,
+) -> impl IntoView {
     let script = LocalResource::new(move || {
         let path = path.clone();
         async move { api::get::<ScriptPreviewView>(&path).await }
     });
     view! {
         <div class="pack-components">
-            <button type="button" class="btn btn-secondary btn-sm" on:click=move |_| on_back.run(())>
-                "← Retour au contenu"
-            </button>
+            {on_back.map(|on_back| view! {
+                <button type="button" class="btn btn-secondary btn-sm" on:click=move |_| on_back.run(())>
+                    "← Retour au contenu"
+                </button>
+            })}
+            {import_path.map(|import_path| view! { <ImportButton import_path=import_path /> })}
             {move || match script.get() {
                 None => view! { <p class="text-dim">"Chargement du script…"</p> }.into_any(),
                 Some(Err(error)) => view! { <p class="text-danger">{error.message()}</p> }.into_any(),
@@ -115,6 +174,31 @@ pub fn ScriptPreview(repo_id: String, entry_id: String, on_back: Callback<()>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalog_script_paths_encode_the_entry_id_and_end_with_import_for_the_copy() {
+        let preview = catalog_script_path("script.tag mkv");
+        assert!(preview.starts_with(CATALOG_SCRIPTS_PATH));
+        assert!(!preview.contains(' '));
+        assert_eq!(
+            catalog_script_import_path("script.x"),
+            format!("{CATALOG_SCRIPTS_PATH}/script.x/import")
+        );
+    }
+
+    #[test]
+    fn a_name_conflict_is_explained_and_other_failures_keep_their_own_message() {
+        let conflict = ApiError::Rejected {
+            status: CONFLICT_STATUS,
+            code: "conflict".into(),
+            detail: None,
+        };
+        assert!(import_error_message(&conflict).contains("déjà dans votre librairie"));
+        assert_eq!(
+            import_error_message(&ApiError::Network),
+            ApiError::Network.message()
+        );
+    }
 
     #[test]
     fn script_preview_path_encodes_both_segments() {

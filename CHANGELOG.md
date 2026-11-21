@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.76.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.75.0...v0.76.0) (2026-11-21)
+
+
+### Features
+
+* **flux:** secrets des variables de script et sorties de nœuds conservées après un relais ([d671ca1](https://github.com/remi-deher/flux-de-fichiers/commit/d671ca12db8fe8eaa6daada6822e033ecef39e9b))
+* **flux:** secrets des variables de script et sorties de nœuds conservées après un relais ([94e635e](https://github.com/remi-deher/flux-de-fichiers/commit/94e635ebd304a6f59eae3983d2dcbc199df46b55))
+* **scripts:** identifiants de nœud à points, grammaires two-face, échantillon du dernier job ([a0770d6](https://github.com/remi-deher/flux-de-fichiers/commit/a0770d68eec81473c6c87cb2792a08fa20403c64))
+
+
+### Bug Fixes
+
+* **client:** le champ secret partage son état « enregistré » entre le placeholder et le bouton ([d54944c](https://github.com/remi-deher/flux-de-fichiers/commit/d54944c247409f079cacacdb94bd1d3ec1d9a993))
+* **coloration:** analyseur PowerShell maison à la place de two-face ([f016c61](https://github.com/remi-deher/flux-de-fichiers/commit/f016c612d812cc8fe4ea3e0341fbad0112008c7c))
+
 ## [0.75.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.74.0...v0.75.0) (2026-11-21)
 
 

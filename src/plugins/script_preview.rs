@@ -1,11 +1,15 @@
 //! Prévisualisation en lecture seule du code d'un script exposé par un dépôt synchronisé.
 
 use super::{
-    CatalogEntry, CatalogItemType, highlight::highlight_code, local::read_local_script,
-    parse_index_tolerant, read_script_requirements, repository_dir, requirement_statuses,
+    CatalogEntry, CatalogItemType, catalog_with_roots, highlight::highlight_code,
+    local::read_local_script, parse_index_tolerant, read_script_requirements, repository_dir,
+    requirement_statuses,
 };
 use crate::flows::OperationRegistry;
-use forgearr_shared::highlight::ScriptPreviewView;
+use forgearr_shared::{
+    highlight::ScriptPreviewView,
+    local::{LocalScriptSummary, UpsertLocalScriptRequest},
+};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -28,6 +32,14 @@ fn find_script_entry(
     Some((dir, entry))
 }
 
+/// Script du catalogue (tous dépôts confondus) : dossier racine de sa copie et fiche. Le premier
+/// dépôt qui porte l'identifiant l'emporte, comme dans le catalogue affiché.
+fn find_catalog_script(roots: &[PathBuf], entry_id: &str) -> Option<(PathBuf, CatalogEntry)> {
+    catalog_with_roots(roots)
+        .into_iter()
+        .find(|(_, entry)| entry.entry_type == CatalogItemType::Script && entry.id == entry_id)
+}
+
 /// Aperçu d'un script d'un dépôt : métadonnées, code, lignes de jetons colorés et état de ses
 /// dépendances d'après les plugins chargés par `registry`.
 pub fn read_repository_script_preview(
@@ -37,7 +49,53 @@ pub fn read_repository_script_preview(
     registry: &OperationRegistry,
 ) -> Option<ScriptPreviewView> {
     let (dir, entry) = find_script_entry(repos_dir, repository_id, entry_id)?;
+    preview_of(&dir, &entry, registry)
+}
+
+/// Aperçu d'un script du catalogue, sans connaître son dépôt.
+pub fn read_catalog_script_preview(
+    roots: &[PathBuf],
+    entry_id: &str,
+    registry: &OperationRegistry,
+) -> Option<ScriptPreviewView> {
+    let (dir, entry) = find_catalog_script(roots, entry_id)?;
+    preview_of(&dir, &entry, registry)
+}
+
+/// Script du catalogue prêt à être enregistré dans la librairie locale (nouvel identifiant), avec le
+/// dossier du dépôt qui le porte.
+pub fn catalog_script_import(
+    roots: &[PathBuf],
+    entry_id: &str,
+) -> Option<(PathBuf, UpsertLocalScriptRequest)> {
+    let (dir, entry) = find_catalog_script(roots, entry_id)?;
     let script = read_local_script(&dir, &entry)?;
+    Some((dir, import_request(script)))
+}
+
+/// Requête de création d'un script local qui reproduit `script` sous un identifiant neuf.
+fn import_request(script: LocalScriptSummary) -> UpsertLocalScriptRequest {
+    UpsertLocalScriptRequest {
+        id: None,
+        name: script.name,
+        description: script.description,
+        interpreter: script.interpreter,
+        code: script.code,
+        filename: Some(script.entrypoint),
+        category: script.category,
+        tags: script.tags,
+        variables: script.variables,
+        requires: script.requires,
+        dependencies_unverified: script.dependencies_unverified,
+    }
+}
+
+fn preview_of(
+    dir: &Path,
+    entry: &CatalogEntry,
+    registry: &OperationRegistry,
+) -> Option<ScriptPreviewView> {
+    let script = read_local_script(dir, entry)?;
     let item_dir = dir.join(&entry.manifest_path).parent()?.to_path_buf();
     let declared = read_script_requirements(&item_dir);
     let lines = highlight_code(&script.code, script.interpreter.default_extension());

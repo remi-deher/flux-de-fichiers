@@ -38,6 +38,7 @@ use tool_detail::{ToolDetail, ToolDrawerTab};
 use tools::ToolsSection;
 
 const REPOSITORIES_PATH: &str = "/api/v1/plugins/repositories";
+const CATALOG_SCRIPTS_PATH: &str = "/api/v1/plugins/scripts";
 const CATALOG_PATH: &str = "/api/v1/plugins";
 const TOOLS_PATH: &str = "/api/v1/tools";
 
@@ -408,7 +409,7 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
             <Drawer open=item_open eyebrow="Catalogue" title=drawer_title>
                 {move || match target.get() {
                     Some(InspectionTarget::Item(entry)) => view! {
-                        <CatalogItemDetail entry=*entry />
+                        <CatalogItemDetail entry=*entry can_manage=can_manage />
                     }.into_any(),
                     _ => ().into_any(),
                 }}

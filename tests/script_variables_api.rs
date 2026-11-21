@@ -82,6 +82,8 @@ fn save_encoder_script(dir: &Path) -> anyhow::Result<String> {
     let saved = save_local_script(
         dir,
         UpsertLocalScriptRequest {
+            requires: Vec::new(),
+            dependencies_unverified: false,
             variables: vec![
                 variable("crf", VariableKind::Number, Some(json!(DEFAULT_CRF))),
                 variable("cible", VariableKind::Text, None),
@@ -620,5 +622,68 @@ async fn deprecated_exposed_variables_warn_in_validation_the_node_preview_and_th
     )
     .await?;
     assert!(view.get("warnings").is_none(), "{view}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_local_script_keeps_its_requirements_and_the_unverified_flag() -> anyhow::Result<()> {
+    let app = test_app().await?;
+    let script = |requires: Value, unverified: bool| {
+        json!({
+            "name": "Dépendant", "interpreter": "sh", "code": "cat >/dev/null",
+            "requires": requires, "dependenciesUnverified": unverified
+        })
+    };
+
+    let valid = script(
+        json!([{"variable": "mediainfo.video.codec", "provider": "app.mediainfo"}]),
+        true,
+    );
+    let (status, saved) = send(
+        &app,
+        authorized("POST", "/api/v1/local/scripts", Some(&valid))?,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        saved["requires"][0]["variable"],
+        json!("mediainfo.video.codec")
+    );
+    assert_eq!(saved["requires"][0]["contractMajor"], json!(1));
+    assert_eq!(saved["dependenciesUnverified"], json!(true));
+
+    let (_, snapshot) = send(&app, authorized("GET", "/api/v1/local", None)?).await?;
+    assert_eq!(
+        snapshot["scripts"][0]["requires"][0]["provider"],
+        json!("app.mediainfo")
+    );
+    assert_eq!(
+        snapshot["scripts"][0]["dependenciesUnverified"],
+        json!(true)
+    );
+
+    let ambiguous = script(
+        json!([
+            {"variable": "mediainfo.video.codec", "provider": "app.mediainfo"},
+            {"variable": "mediainfo.audio.codec", "provider": "app.fork"}
+        ]),
+        false,
+    );
+    let (status, _) = send(
+        &app,
+        authorized("POST", "/api/v1/local/scripts", Some(&ambiguous))?,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let invalid = script(
+        json!([{"variable": "codec", "provider": "app.mediainfo"}]),
+        false,
+    );
+    let (status, _) = send(
+        &app,
+        authorized("POST", "/api/v1/local/scripts", Some(&invalid))?,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
     Ok(())
 }

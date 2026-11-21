@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.66.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.65.0...v0.66.0) (2026-11-21)
+
+
+### Features
+
+* **ui:** catalogue des plugins sur 2 colonnes, pied de sidebar compact ([1d718d3](https://github.com/remi-deher/flux-de-fichiers/commit/1d718d3346e30d563f8af9fada5e2ce628489890))
+* **ui:** catalogue des plugins sur 2 colonnes, pied de sidebar compact ([338d472](https://github.com/remi-deher/flux-de-fichiers/commit/338d4729eb13c652c1e7e73ce8dff5a68b788834))
+
 ## [0.65.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.64.0...v0.65.0) (2026-11-21)
 
 

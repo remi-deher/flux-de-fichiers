@@ -694,7 +694,11 @@ mod tests {
     -> anyhow::Result<()> {
         let mut reg = OperationRegistry::new();
         reg.register_json(deprecating_provider())?;
-        reg.register_json(codec_script("operation.script.dep", json!([])))?;
+        // Le script désigne le fournisseur : le sélecteur ne propose que les plugins disponibles.
+        reg.register_json(codec_script(
+            "operation.script.dep",
+            json!([{"variable": "mediainfo.video.codec", "provider": "plug"}]),
+        ))?;
         reg.register_block_mapping("block.script.dep", "operation.script.dep");
         let graph: FlowGraph = serde_json::from_value(json!({
             "nodes": [

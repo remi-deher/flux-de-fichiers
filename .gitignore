@@ -15,7 +15,8 @@ build
 /target/
 frontend/target/
 !frontend/dist/
-!frontend/dist/index.html
+/frontend/dist/index.html
+/frontend/dist/pkg/
 /var/
 /.tools/
 /.scenario/

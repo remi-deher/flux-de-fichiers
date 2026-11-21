@@ -320,6 +320,10 @@ fn json_routes() -> Router<AppState> {
             get(plugins::repository_detail).delete(plugins::delete_repository),
         )
         .route(
+            "/api/v1/plugins/repositories/{id}/scripts/{entry_id}",
+            get(plugins::repository_script),
+        )
+        .route(
             "/api/v1/plugins/repositories/{id}/sync",
             post(plugins::sync_repository),
         )

@@ -20,7 +20,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn read_local_script(root: &Path, entry: &CatalogEntry) -> Option<LocalScriptSummary> {
+/// Lit le manifeste, l'opération et le code d'un script du catalogue situé sous `root`.
+pub(in crate::plugins) fn read_local_script(
+    root: &Path,
+    entry: &CatalogEntry,
+) -> Option<LocalScriptSummary> {
     let manifest_path = root.join(&entry.manifest_path);
     let item_dir = manifest_path.parent()?;
     let val: Value = serde_json::from_str(&fs::read_to_string(&manifest_path).ok()?).ok()?;

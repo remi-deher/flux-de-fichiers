@@ -18,6 +18,7 @@ mod local;
 mod packs;
 mod probe;
 mod readiness;
+mod script_preview;
 mod secret_settings;
 mod settings;
 mod sources;
@@ -67,6 +68,7 @@ pub use forgearr_shared::plugins::{
     PluginSettingsView, RepositoryDetailView, ToolArtifactSummary, ToolDetailView, ToolStatus,
     ToolStatusSummary,
 };
+pub use script_preview::read_repository_script;
 pub use secret_settings::{
     decrypt_all, mask, migrate_plaintext, plugin_secret_aad, reseal_legacy_settings,
     rotate_settings, seal, secret_names,

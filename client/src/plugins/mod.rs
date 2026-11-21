@@ -9,6 +9,7 @@ mod plugin_detail;
 mod plugin_icon;
 mod repo_detail;
 mod repos;
+mod script_preview;
 mod settings;
 mod subcategory_groups;
 mod tool_detail;

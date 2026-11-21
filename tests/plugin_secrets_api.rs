@@ -951,12 +951,9 @@ async fn catalog_flags_only_the_plugins_that_declare_an_icon() -> anyhow::Result
         .as_array()
         .ok_or_else(|| anyhow::anyhow!("catalog array missing"))?;
     let find = |id: &str| entries.iter().find(|entry| entry["id"] == id);
-    let demo = find(PLUGIN_ID)
-        .ok_or_else(|| anyhow::anyhow!("plugin.demo missing"))?;
+    let demo = find(PLUGIN_ID).ok_or_else(|| anyhow::anyhow!("plugin.demo missing"))?;
     assert_eq!(demo["hasIcon"], true);
-    let pack = find("pack.suite")
-        .ok_or_else(|| anyhow::anyhow!("pack.suite missing"))?;
+    let pack = find("pack.suite").ok_or_else(|| anyhow::anyhow!("pack.suite missing"))?;
     assert!(pack.get("hasIcon").is_none());
     Ok(())
 }
-

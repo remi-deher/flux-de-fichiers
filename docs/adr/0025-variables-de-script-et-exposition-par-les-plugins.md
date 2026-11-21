@@ -34,8 +34,11 @@ réimplémenter ce travail.
    (et non son manifeste : les workers ne reçoivent que les opérations, dans le claim, et jamais le
    catalogue). `exposes` porte un `namespace` (`[a-z][a-z0-9_]*`, jamais `nodes`), une
    `contractVersion` (`MAJEUR.MINEUR.CORRECTIF`) et des variables typées (jamais de secret) : un nom
-   relatif (`video.codec`) et le chemin pointé de sa valeur dans `mediaInfo` après l'opération du
-   plugin, jamais du code arbitraire. La référence complète est `namespace.nom`
+   relatif (`video.codec`) et la requête de sa valeur dans `mediaInfo` après l'opération du plugin,
+   jamais du code arbitraire. La requête est celle des conditions du flux : clés pointées, `[n]`,
+   `[*]` et `[clé=valeur]` (`mediainfo.media.track[@type=Video].Format`) ; la première valeur non
+   nulle est retenue, et un chemin pointé à indices (`a.0.b`) reste lu. Un sélecteur est préférable à
+   un indice : l'ordre des pistes d'un fichier varie. La référence complète est `namespace.nom`
    (`{{mediainfo.video.codec}}`) ; le préfixe est imposé par construction, un plugin ne peut exposer
    que dans son espace de noms. Un nom ne peut pas être à la fois une valeur et un groupe
    (`video` et `video.codec`). Un renommage, un retrait ou un changement de type impose une montée
@@ -93,6 +96,10 @@ réimplémenter ce travail.
   liste des références en cause) un flux dont une variable déclarée contient une référence inconnue ou
   vers un nœud qui ne le précède pas ; `POST /api/v1/flows/validate` la signale dans `errors`. Seules
   les clés du schéma sont contrôlées.
+- Compatibilité des chemins à sélecteur : la version 0.70.0 n'acceptait que des chemins pointés. Une
+  installation plus ancienne qui synchroniserait un catalogue dont `exposes` en contient écarterait
+  toute l'opération (revalidation du central) ; un catalogue ne doit donc les utiliser qu'une fois les
+  installations à jour.
 - Reportés : la résolution et la saisie des secrets dans le flux, la saisie de `requires` dans
   l'éditeur de scripts locaux et l'affichage des `exposes` dans la fiche d'un plugin.
 - Les scripts existants, sans `variables`, restent valides (liste vide par défaut).

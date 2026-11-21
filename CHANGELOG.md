@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.68.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.67.0...v0.68.0) (2026-11-21)
+
+
+### Features
+
+* **plugins:** icônes SVG des plugins (ADR 0024) ([dc6f0aa](https://github.com/remi-deher/flux-de-fichiers/commit/dc6f0aa052c8e467eeb8222ed10c722298d56014))
+* **plugins:** icônes SVG des plugins (ADR 0024) ([47a4ac7](https://github.com/remi-deher/flux-de-fichiers/commit/47a4ac74cfb868178ae6d4f906c7b203907a7328))
+* **plugins:** sous-catégories core-blocks, scripting et archives ([6fb2cb6](https://github.com/remi-deher/flux-de-fichiers/commit/6fb2cb64a3a6d10120d427ce24fc1fbdf3610a50))
+* **plugins:** sous-catégories core-blocks, scripting et archives ([84878d8](https://github.com/remi-deher/flux-de-fichiers/commit/84878d802e26be9e61415dd4b9e7ec6850d0635b))
+
+
+### Bug Fixes
+
+* **plugins:** une icône SVG doit déclarer xmlns ([eecaa23](https://github.com/remi-deher/flux-de-fichiers/commit/eecaa2392da65a14eb5bc1e2fbe99432c38031bc))
+
 ## [0.67.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.66.0...v0.67.0) (2026-11-21)
 
 

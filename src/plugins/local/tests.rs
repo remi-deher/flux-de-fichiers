@@ -328,13 +328,13 @@ fn script_variables_round_trip_through_the_manifest_and_the_snapshot() -> anyhow
     let saved = save_local_script(&local_dir, variable_script_request(vec![crf_variable()]))?;
     assert_eq!(saved.variables, vec![crf_variable()]);
 
-    let snapshot = build_local_snapshot(&[local_dir.clone()], &local_dir);
+    let snapshot = build_local_snapshot(std::slice::from_ref(&local_dir), &local_dir);
     assert_eq!(snapshot.scripts.len(), 1);
     assert_eq!(snapshot.scripts[0].variables, vec![crf_variable()]);
 
     let plain_dir = dir.path().join("plain");
     save_local_script(&plain_dir, variable_script_request(Vec::new()))?;
-    let plain = build_local_snapshot(&[plain_dir.clone()], &plain_dir);
+    let plain = build_local_snapshot(std::slice::from_ref(&plain_dir), &plain_dir);
     assert!(plain.scripts[0].variables.is_empty());
     Ok(())
 }

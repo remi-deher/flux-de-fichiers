@@ -5,7 +5,7 @@ use super::{
     parse_index_tolerant, read_script_requirements, repository_dir, requirement_statuses,
 };
 use crate::flows::OperationRegistry;
-use forgearr_shared::{highlight::ScriptPreviewView, local::LocalScriptSummary};
+use forgearr_shared::highlight::ScriptPreviewView;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -26,16 +26,6 @@ fn find_script_entry(
         .into_iter()
         .find(|entry| entry.entry_type == CatalogItemType::Script && entry.id == entry_id)?;
     Some((dir, entry))
-}
-
-/// Script d'un dépôt lu depuis sa copie locale, ou `None` si le dépôt, l'entrée ou le code manque.
-pub fn read_repository_script(
-    repos_dir: &Path,
-    repository_id: &str,
-    entry_id: &str,
-) -> Option<LocalScriptSummary> {
-    let (dir, entry) = find_script_entry(repos_dir, repository_id, entry_id)?;
-    read_local_script(&dir, &entry)
 }
 
 /// Aperçu d'un script d'un dépôt : métadonnées, code, lignes de jetons colorés et état de ses
@@ -63,9 +53,24 @@ pub fn read_repository_script_preview(
 mod tests {
     use super::*;
     use crate::plugins::{local::rebuild_local_index, save_local_script};
-    use forgearr_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
+    use forgearr_shared::local::{LocalScriptSummary, ScriptInterpreter, UpsertLocalScriptRequest};
 
     const SCRIPT_CODE: &str = "cat >/dev/null\nprintf '{\"status\":\"ok\"}'";
+
+    /// Script d'un dépôt, d'après l'aperçu (sans fournisseur chargé).
+    fn read_repository_script(
+        repos_dir: &Path,
+        repository_id: &str,
+        entry_id: &str,
+    ) -> Option<LocalScriptSummary> {
+        read_repository_script_preview(
+            repos_dir,
+            repository_id,
+            entry_id,
+            &OperationRegistry::new(),
+        )
+        .map(|preview| preview.script)
+    }
 
     fn repository_with_script() -> anyhow::Result<(tempfile::TempDir, String)> {
         let repos_dir = tempfile::tempdir()?;

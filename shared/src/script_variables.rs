@@ -360,10 +360,10 @@ mod tests {
         number.min = Some(Number::from(0));
         number.max = Some(Number::from(51));
         number.default_value = Some(json!(23));
-        assert_eq!(validate_variables(&[number.clone()]), Ok(()));
+        assert_eq!(validate_variables(std::slice::from_ref(&number)), Ok(()));
         number.default_value = Some(json!(99));
         assert_eq!(
-            validate_variables(&[number.clone()]),
+            validate_variables(std::slice::from_ref(&number)),
             Err(VariableSchemaError::InvalidDefault("crf".into()))
         );
         number.default_value = Some(json!("23"));
@@ -385,14 +385,14 @@ mod tests {
     fn choices_need_distinct_options_and_a_default_among_them() {
         let mut choice = variable("langue", VariableKind::Choice);
         assert_eq!(
-            validate_variables(&[choice.clone()]),
+            validate_variables(std::slice::from_ref(&choice)),
             Err(VariableSchemaError::InvalidOptions("langue".into()))
         );
         choice.options = vec!["fr".into(), "en".into()];
         choice.default_value = Some(json!("fr"));
-        assert_eq!(validate_variables(&[choice.clone()]), Ok(()));
+        assert_eq!(validate_variables(std::slice::from_ref(&choice)), Ok(()));
         choice.default_value = Some(json!("de"));
-        assert!(validate_variables(&[choice.clone()]).is_err());
+        assert!(validate_variables(std::slice::from_ref(&choice)).is_err());
         choice.default_value = None;
         choice.options = vec!["fr".into(), "fr".into()];
         assert!(validate_variables(&[choice]).is_err());

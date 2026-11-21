@@ -271,7 +271,7 @@ mod tests {
         number.default_text = "23".into();
         number.min_text = "0".into();
         assert_eq!(
-            rows_to_variables(&[number.clone()]).map(|v| v[0].default_value.clone()),
+            rows_to_variables(std::slice::from_ref(&number)).map(|v| v[0].default_value.clone()),
             Ok(Some(json!(23)))
         );
         number.default_text = "abc".into();

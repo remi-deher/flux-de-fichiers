@@ -540,14 +540,14 @@ mod tests {
         crf.default_value = Some(json!(23));
         let mut cible = variable("cible", VariableKind::Text);
         cible.required = true;
-        let resolved = resolve(&[crf.clone()], json!({}))?;
+        let resolved = resolve(std::slice::from_ref(&crf), json!({}))?;
         assert_eq!(resolved["crf"], json!(23));
         assert_eq!(
-            resolve(&[cible.clone()], json!({})),
+            resolve(std::slice::from_ref(&cible), json!({})),
             Err(VariableError::MissingRequired("cible".into()))
         );
         assert_eq!(
-            resolve(&[cible.clone()], json!({"cible": "  "})),
+            resolve(std::slice::from_ref(&cible), json!({"cible": "  "})),
             Err(VariableError::MissingRequired("cible".into()))
         );
         assert_eq!(
@@ -564,11 +564,11 @@ mod tests {
         crf.min = Some(0.into());
         crf.max = Some(51.into());
         assert_eq!(
-            resolve(&[crf.clone()], json!({"crf": "23"}))?["crf"],
+            resolve(std::slice::from_ref(&crf), json!({"crf": "23"}))?["crf"],
             json!(23)
         );
         assert_eq!(
-            resolve(&[crf.clone()], json!({"crf": 99})),
+            resolve(std::slice::from_ref(&crf), json!({"crf": 99})),
             Err(VariableError::OutOfRange("crf".into()))
         );
         assert!(matches!(
@@ -578,7 +578,7 @@ mod tests {
 
         let flag = variable("supprimer", VariableKind::Boolean);
         assert_eq!(
-            resolve(&[flag.clone()], json!({"supprimer": "true"}))?["supprimer"],
+            resolve(std::slice::from_ref(&flag), json!({"supprimer": "true"}))?["supprimer"],
             json!(true)
         );
         assert!(resolve(&[flag], json!({"supprimer": 3})).is_err());
@@ -586,7 +586,7 @@ mod tests {
         let mut langue = variable("langue", VariableKind::Choice);
         langue.options = vec!["fr".into(), "en".into()];
         assert_eq!(
-            resolve(&[langue.clone()], json!({"langue": "en"}))?["langue"],
+            resolve(std::slice::from_ref(&langue), json!({"langue": "en"}))?["langue"],
             json!("en")
         );
         assert_eq!(

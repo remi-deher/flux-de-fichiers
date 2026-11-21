@@ -4,8 +4,9 @@
 //! schéma comblent les clés absentes, les références `{{…}}` sont remplacées, puis chaque valeur
 //! est contrôlée selon son type. Le code du script et les autres clés du nœud restent intacts.
 
-use forgearr_shared::script_variables::{
-    ScriptVariable, VariableKind, default_from_text,
+use forgearr_shared::{
+    exposed_variables::ExposedVariables,
+    script_variables::{ScriptVariable, VariableKind, default_from_text},
 };
 use serde_json::{Map, Number, Value};
 use std::{collections::HashMap, path::Path};
@@ -34,12 +35,15 @@ pub struct VariableContext {
 }
 
 impl VariableContext {
+    /// `exposed` : ce que les plugins chargés exposent ; chaque variable se lit à son chemin de
+    /// `media_info` et devient accessible sous `espace.nom` quand une valeur y existe.
     pub fn new(
         working_file: &Path,
         source_file: &Path,
         work_dir: &Path,
         media_info: &Value,
         nodes: &HashMap<String, NodeOutput>,
+        exposed: &[&ExposedVariables],
     ) -> Self {
         let nodes_json: Map<String, Value> = nodes
             .iter()
@@ -60,6 +64,13 @@ impl VariableContext {
         root.insert(ROOT_WORK_DIR.into(), path_value(work_dir));
         root.insert(ROOT_MEDIA_INFO.into(), media_info.clone());
         root.insert(ROOT_NODES.into(), Value::Object(nodes_json));
+        for exposure in exposed {
+            for variable in &exposure.variables {
+                if let Some(value) = lookup_in(media_info, &variable.path) {
+                    insert_nested(&mut root, &exposure.namespace, &variable.name, value.clone());
+                }
+            }
+        }
         Self {
             root: Value::Object(root),
         }
@@ -67,15 +78,42 @@ impl VariableContext {
 
     /// Valeur désignée par un chemin pointé ; `null` compte comme absente.
     fn lookup(&self, path: &str) -> Option<&Value> {
-        let mut current = &self.root;
-        for segment in path.split('.') {
-            current = match current {
-                Value::Object(map) => map.get(segment)?,
-                Value::Array(items) => items.get(segment.parse::<usize>().ok()?)?,
-                _ => return None,
-            };
-        }
-        (!current.is_null()).then_some(current)
+        lookup_in(&self.root, path)
+    }
+}
+
+/// Parcourt `root` selon un chemin pointé (clés d'objet, indices de tableau) ; `null` compte comme absente.
+fn lookup_in<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut current = root;
+    for segment in path.split('.') {
+        current = match current {
+            Value::Object(map) => map.get(segment)?,
+            Value::Array(items) => items.get(segment.parse::<usize>().ok()?)?,
+            _ => return None,
+        };
+    }
+    (!current.is_null()).then_some(current)
+}
+
+/// Place `value` sous `espace.a.b` en créant les objets intermédiaires.
+fn insert_nested(root: &mut Map<String, Value>, namespace: &str, name: &str, value: Value) {
+    let segments: Vec<&str> = name.split('.').collect();
+    let Some((last, parents)) = segments.split_last() else {
+        return;
+    };
+    let mut current = root
+        .entry(namespace.to_owned())
+        .or_insert_with(|| Value::Object(Map::new()));
+    for segment in parents {
+        let Value::Object(map) = current else {
+            return;
+        };
+        current = map
+            .entry((*segment).to_owned())
+            .or_insert_with(|| Value::Object(Map::new()));
+    }
+    if let Value::Object(map) = current {
+        map.insert((*last).to_owned(), value);
     }
 }
 
@@ -342,6 +380,7 @@ mod tests {
             Path::new("/work"),
             &json!({"video": {"codec": "hevc", "width": 1920}, "streams": [{"lang": "fr"}]}),
             &nodes,
+            &[],
         )
     }
 
@@ -455,7 +494,7 @@ mod tests {
     #[test]
     fn a_null_value_counts_as_missing() {
         let nodes = HashMap::from([("a".to_owned(), NodeOutput::default())]);
-        let context = VariableContext::new(Path::new("f"), Path::new("s"), Path::new("w"), &json!({}), &nodes);
+        let context = VariableContext::new(Path::new("f"), Path::new("s"), Path::new("w"), &json!({}), &nodes, &[]);
         assert!(context.lookup("nodes.a.message").is_none());
         assert!(context.lookup("nodes.a.workingFile").is_some());
         assert!(context.lookup("nodes.absent.message").is_none());
@@ -543,5 +582,84 @@ mod tests {
         }
         .to_string();
         assert!(message.contains("langue") && message.contains("{{mediaInfo.audio.lang}}"));
+    }
+
+    fn exposure() -> ExposedVariables {
+        use forgearr_shared::exposed_variables::ExposedVariable;
+        ExposedVariables {
+            namespace: "mediainfo".into(),
+            contract_version: "1.0.0".into(),
+            variables: vec![
+                ExposedVariable {
+                    name: "video.codec".into(),
+                    path: "video.codec".into(),
+                    ..ExposedVariable::default()
+                },
+                ExposedVariable {
+                    name: "video.largeur".into(),
+                    path: "video.width".into(),
+                    ..ExposedVariable::default()
+                },
+                ExposedVariable {
+                    name: "audio.langue".into(),
+                    path: "streams.0.lang".into(),
+                    ..ExposedVariable::default()
+                },
+                ExposedVariable {
+                    name: "absente".into(),
+                    path: "n.existe.pas".into(),
+                    ..ExposedVariable::default()
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn exposed_variables_are_readable_under_their_namespace() -> Result<(), VariableError> {
+        let media = json!({"video": {"codec": "hevc", "width": 1920}, "streams": [{"lang": "fr"}]});
+        let exposed = exposure();
+        let context = VariableContext::new(
+            Path::new("f"),
+            Path::new("s"),
+            Path::new("w"),
+            &media,
+            &HashMap::new(),
+            &[&exposed],
+        );
+        let variables = [
+            variable("codec", VariableKind::Text),
+            variable("largeur", VariableKind::Number),
+            variable("langue", VariableKind::Text),
+            variable("absente", VariableKind::Text),
+        ];
+        let resolved = resolve_node_config(
+            &variables[..3],
+            &json!({
+                "codec": "{{mediainfo.video.codec}}",
+                "largeur": "{{mediainfo.video.largeur}}",
+                "langue": "{{mediainfo.audio.langue}}",
+            }),
+            &context,
+        )?;
+        assert_eq!(resolved["codec"], json!("hevc"));
+        assert_eq!(resolved["largeur"], json!(1920));
+        assert_eq!(resolved["langue"], json!("fr"));
+        assert_eq!(
+            resolve_node_config(&variables[3..], &json!({"absente": "{{mediainfo.absente}}"}), &context),
+            Err(VariableError::MissingReference {
+                variable: "absente".into(),
+                reference: "mediainfo.absente".into(),
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn insert_nested_builds_intermediate_objects_without_overwriting_siblings() {
+        let mut root = Map::new();
+        insert_nested(&mut root, "ns", "a.b", json!(1));
+        insert_nested(&mut root, "ns", "a.c", json!(2));
+        insert_nested(&mut root, "ns", "d", json!(3));
+        assert_eq!(Value::Object(root), json!({"ns": {"a": {"b": 1, "c": 2}, "d": 3}}));
     }
 }

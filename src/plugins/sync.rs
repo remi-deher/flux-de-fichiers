@@ -391,6 +391,24 @@ fn icon_paths_from_manifests(manifests: &[(String, String)]) -> Vec<String> {
     paths
 }
 
+/// Retire des fichiers à copier les contrats d'opération dont les variables, expositions ou
+/// dépendances sont invalides ; chacun est signalé dans le bilan (ADR 0025). Le central ne se fie
+/// pas à la CI du dépôt : il revalide lui-même.
+fn reject_invalid_operation_declarations(
+    files: &mut Vec<(String, String)>,
+    skipped: &mut Vec<String>,
+) {
+    files.retain(|(relative, content)| {
+        match super::operation_declaration_issue(content) {
+            Some(issue) => {
+                skipped.push(format!("{relative} : déclarations refusées ({issue})"));
+                false
+            }
+            None => true,
+        }
+    });
+}
+
 /// Garde les icônes qui passent la validation par liste blanche ; les autres sont signalées.
 fn collect_icons(
     fetched: Vec<(String, Result<Option<String>, SyncError>)>,
@@ -527,6 +545,7 @@ async fn prepare_sync(
             &mut skipped,
         )?;
     }
+    reject_invalid_operation_declarations(&mut files, &mut skipped);
     let icons = icon_paths_from_manifests(&manifest_docs);
     if files.len() + icons.len() > MAX_FILES {
         return Err(SyncError::TooManyFiles);
@@ -1157,5 +1176,22 @@ mod tests {
         );
         assert!(matches!(mismatch, Err(SyncError::IntegrityMismatch(_))));
         Ok(())
+    }
+
+    #[test]
+    fn invalid_operation_declarations_are_dropped_and_reported_but_other_files_are_kept() {
+        let invalid = r#"{"providerId":"p","runtime":{},"exposes":{"namespace":"nodes","contractVersion":"1.0.0","variables":[]}}"#;
+        let valid = r#"{"providerId":"p","runtime":{"requires":[{"variable":"mediainfo.video.codec","provider":"app.mediainfo"}]}}"#;
+        let mut files = vec![
+            ("index.json".to_owned(), r#"{"entries":[]}"#.to_owned()),
+            ("a/operations/bad.json".to_owned(), invalid.to_owned()),
+            ("a/operations/ok.json".to_owned(), valid.to_owned()),
+        ];
+        let mut skipped = Vec::new();
+        reject_invalid_operation_declarations(&mut files, &mut skipped);
+        let kept: Vec<_> = files.iter().map(|(path, _)| path.as_str()).collect();
+        assert_eq!(kept, ["index.json", "a/operations/ok.json"]);
+        assert_eq!(skipped.len(), 1);
+        assert!(skipped[0].contains("a/operations/bad.json") && skipped[0].contains("réservé"));
     }
 }

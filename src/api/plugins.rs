@@ -457,8 +457,10 @@ pub async fn repository_script(
     _auth: ViewPluginsAuth,
 ) -> AppResult<Json<forgearr_shared::highlight::ScriptPreviewView>> {
     let repos_dir = s.config.plugin_repos_dir();
+    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let registry = s.catalog_cache.operations(&roots).await;
     let script = tokio::task::spawn_blocking(move || {
-        plugins::read_repository_script_preview(&repos_dir, &id, &entry_id)
+        plugins::read_repository_script_preview(&repos_dir, &id, &entry_id, &registry)
     })
     .await
     .map_err(|_| AppError::Internal)?;

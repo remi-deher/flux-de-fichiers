@@ -10,8 +10,12 @@ use crate::{
     tools_cache::{ToolCacheManager, host_arch},
 };
 use forgearr_shared::{
+    exposed_variables::{
+        ExposedVariables, ScriptRequirement, validate_exposed, validate_requirements,
+    },
     flows::{FlowGraph, FlowNode, FlowRecord},
     jobs::JobErrorCode,
+    script_variables::validate_variables,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -53,6 +57,19 @@ pub enum ContractError {
     InvalidContract(String),
 }
 
+/// Refuse un contrat dont les variables, expositions ou dépendances déclarées sont invalides.
+fn validate_contract_declarations(contract: &OperationContract) -> Result<(), ContractError> {
+    let invalid = |reason: String| ContractError::InvalidContract(format!("{} : {reason}", contract.id));
+    if let Some(exposed) = &contract.exposes {
+        validate_exposed(exposed).map_err(|err| invalid(err.to_string()))?;
+    }
+    if let OperationRuntime::Script(script) = &contract.runtime {
+        validate_variables(&script.variables).map_err(|err| invalid(err.to_string()))?;
+        validate_requirements(&script.requires).map_err(|err| invalid(err.to_string()))?;
+    }
+    Ok(())
+}
+
 /// Référence déclarative vers un outil du catalogue requis par une opération.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,6 +96,9 @@ pub struct OperationContract {
     pub capability: String,
     pub status: String,
     pub runtime: OperationRuntime,
+    /// Variables que l'opération expose aux scripts via `mediaInfo` (ADR 0025).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exposes: Option<ExposedVariables>,
 }
 
 /// Définition d'exécution selon la nature (`primitive`, `binary`, `http`, `script`).
@@ -122,6 +142,12 @@ pub struct ScriptRuntime {
     /// Variables typées du script (ADR 0025) ; vide pour les scripts sans schéma.
     #[serde(default)]
     pub variables: Vec<forgearr_shared::script_variables::ScriptVariable>,
+    /// Variables exposées par des plugins que le script consomme ; dépendance dure par défaut.
+    #[serde(default)]
+    pub requires: Vec<ScriptRequirement>,
+    /// Script intégré sans ses dépendances : elles ne sont pas contrôlées (saisie manuelle).
+    #[serde(default)]
+    pub dependencies_unverified: bool,
     /// Le script accepte une entrée non média (ex. archive à extraire) : un flux qui le contient
     /// tolère l'échec de la sonde initiale.
     #[serde(default)]
@@ -569,9 +595,48 @@ impl OperationRegistry {
     pub fn register_json(&mut self, raw: Value) -> Result<(), ContractError> {
         let contract: OperationContract = serde_json::from_value(raw.clone())
             .map_err(|err| ContractError::InvalidContract(err.to_string()))?;
+        validate_contract_declarations(&contract)?;
         self.raw_operations.insert(contract.id.clone(), raw);
         self.operations.insert(contract.id.clone(), contract);
         Ok(())
+    }
+
+    /// Expositions des plugins, triées par opération ; un espace de noms déjà pris l'est par la première.
+    pub fn exposed_variables(&self) -> Vec<&ExposedVariables> {
+        let mut exposing: Vec<&OperationContract> = self
+            .operations
+            .values()
+            .filter(|op| op.exposes.is_some())
+            .collect();
+        exposing.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut seen = HashSet::new();
+        exposing
+            .into_iter()
+            .filter_map(|op| op.exposes.as_ref())
+            .filter(|exposed| seen.insert(exposed.namespace.as_str()))
+            .collect()
+    }
+
+    /// Un plugin fournisseur chargé expose-t-il la variable, dans la version majeure visée ?
+    pub fn is_requirement_met(&self, requirement: &ScriptRequirement) -> bool {
+        self.operations.values().any(|op| {
+            op.provider_id == requirement.provider
+                && op
+                    .exposes
+                    .as_ref()
+                    .is_some_and(|exposed| exposed.provides(requirement))
+        })
+    }
+
+    /// Dépendances d'un script que ce registre ne satisfait pas.
+    pub fn unmet_requirements<'a>(
+        &self,
+        requirements: &'a [ScriptRequirement],
+    ) -> Vec<&'a ScriptRequirement> {
+        requirements
+            .iter()
+            .filter(|requirement| !self.is_requirement_met(requirement))
+            .collect()
     }
 
     pub fn register_block_mapping(&mut self, block_or_alias: &str, op_id: &str) {
@@ -1542,5 +1607,78 @@ mod tests {
         };
         assert!(evil_rt.code.is_none());
         Ok(())
+    }
+    fn provider_operation(op_id: &str, provider: &str, namespace: &str, version: &str) -> Value {
+        json!({
+            "schemaVersion": "1.1.0", "id": op_id, "version": "1.0.0", "name": "Fournisseur",
+            "providerId": provider, "providerKind": "plugin", "capability": "probe", "status": "validated",
+            "runtime": {"kind": "script", "interpreter": "sh"},
+            "exposes": {
+                "namespace": namespace,
+                "contractVersion": version,
+                "variables": [{"name": "video.codec", "type": "text", "path": "video.codec"}]
+            }
+        })
+    }
+
+    fn script_operation_requiring(requires: Value) -> Value {
+        json!({
+            "schemaVersion": "1.1.0", "id": "operation.script.consumer", "version": "1.0.0", "name": "Consommateur",
+            "providerId": "script.consumer", "providerKind": "script", "capability": "script", "status": "validated",
+            "runtime": {"kind": "script", "interpreter": "sh", "requires": requires}
+        })
+    }
+
+    #[test]
+    fn exposures_are_registered_and_requirements_are_checked_against_the_provider() -> Result<(), ContractError> {
+        let mut reg = OperationRegistry::new();
+        reg.register_json(provider_operation("operation.mi.probe", "app.mediainfo", "mediainfo", "1.0.0"))?;
+        let exposed = reg.exposed_variables();
+        assert_eq!(exposed.len(), 1);
+        assert_eq!(exposed[0].namespace, "mediainfo");
+
+        let met = ScriptRequirement {
+            variable: "mediainfo.video.codec".into(),
+            provider: "app.mediainfo".into(),
+            contract_major: 1,
+            repository: None,
+        };
+        let wrong_provider = ScriptRequirement { provider: "app.autre".into(), ..met.clone() };
+        let wrong_major = ScriptRequirement { contract_major: 2, ..met.clone() };
+        let unknown = ScriptRequirement { variable: "mediainfo.audio.codec".into(), ..met.clone() };
+        let all = [met.clone(), wrong_provider, wrong_major, unknown];
+        let unmet = reg.unmet_requirements(&all);
+        assert_eq!(unmet.len(), 3);
+        assert!(!unmet.contains(&&met));
+        Ok(())
+    }
+
+    #[test]
+    fn the_first_operation_keeps_a_contested_namespace() -> Result<(), ContractError> {
+        let mut reg = OperationRegistry::new();
+        reg.register_json(provider_operation("operation.b.probe", "app.b", "mediainfo", "1.0.0"))?;
+        reg.register_json(provider_operation("operation.a.probe", "app.a", "mediainfo", "2.0.0"))?;
+        let exposed = reg.exposed_variables();
+        assert_eq!(exposed.len(), 1);
+        assert_eq!(exposed[0].contract_version, "2.0.0");
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_declarations_are_refused_at_registration() {
+        let mut reg = OperationRegistry::new();
+        assert!(reg
+            .register_json(provider_operation("operation.x", "app.x", "nodes", "1.0.0"))
+            .is_err());
+        assert!(reg
+            .register_json(provider_operation("operation.x", "app.x", "mediainfo", "1.0"))
+            .is_err());
+        assert!(reg
+            .register_json(script_operation_requiring(json!([{"variable": "codec", "provider": "app.x"}])))
+            .is_err());
+        assert!(reg.get("operation.x").is_none());
+        assert!(reg
+            .register_json(script_operation_requiring(json!([{"variable": "mediainfo.video.codec", "provider": "app.mediainfo"}])))
+            .is_ok());
     }
 }

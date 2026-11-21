@@ -10,6 +10,7 @@ pub mod base64;
 pub mod brand;
 pub mod capabilities;
 pub mod diagnostics;
+pub mod exposed_variables;
 pub mod flow_analysis;
 pub mod flows;
 pub mod format;

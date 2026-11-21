@@ -609,8 +609,10 @@ paths:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
       summary: >-
-        Aperçu en lecture seule d'un script d'un dépôt synchronisé : métadonnées, code et lignes
-        de jetons colorés (kind : plain, comment, string, number, keyword, function, variable, operator)
+        Aperçu en lecture seule d'un script d'un dépôt synchronisé : métadonnées et variables, code,
+        lignes de jetons colorés (kind : plain, comment, string, number, keyword, function, variable,
+        operator), dépendances sur des variables exposées par des plugins (`requirements`, avec leur
+        disponibilité sur ce central) et `dependenciesUnverified`
       parameters:
         - {in: path, name: id, required: true, schema: {type: string}}
         - {in: path, name: entryId, required: true, schema: {type: string}}

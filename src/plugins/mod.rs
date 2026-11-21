@@ -20,6 +20,7 @@ mod packs;
 mod probe;
 mod readiness;
 mod script_preview;
+mod script_requirements;
 mod secret_settings;
 mod settings;
 mod sources;
@@ -70,6 +71,9 @@ pub use forgearr_shared::plugins::{
     ToolStatusSummary,
 };
 pub use script_preview::read_repository_script_preview;
+pub use script_requirements::{
+    ScriptRequirements, operation_declaration_issue, read_script_requirements, requirement_statuses,
+};
 pub use secret_settings::{
     decrypt_all, mask, migrate_plaintext, plugin_secret_aad, reseal_legacy_settings,
     rotate_settings, seal, secret_names,

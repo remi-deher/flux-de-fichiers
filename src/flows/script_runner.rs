@@ -480,6 +480,8 @@ mod tests {
             timeout_seconds,
             defaults: serde_json::Map::new(),
             variables: Vec::new(),
+            requires: Vec::new(),
+            dependencies_unverified: false,
             accepts_non_media: false,
         };
         let op = OperationContract {
@@ -492,6 +494,7 @@ mod tests {
             capability: "custom".into(),
             status: "validated".into(),
             runtime: OperationRuntime::Script(rt.clone()),
+            exposes: None,
         };
         (op, rt)
     }

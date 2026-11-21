@@ -523,12 +523,43 @@ impl<'a> FlowEngine<'a> {
                             effective_rt.tool = fallback_tool;
                         }
                     }
+                    let script_error_code = effective_rt
+                        .error_code
+                        .unwrap_or(forgearr_shared::jobs::JobErrorCode::OperationFailed);
+                    let unmet = if effective_rt.dependencies_unverified {
+                        Vec::new()
+                    } else {
+                        self.registry.unmet_requirements(&effective_rt.requires)
+                    };
+                    if !unmet.is_empty() {
+                        let list = unmet
+                            .iter()
+                            .map(|requirement| {
+                                format!("{} ({})", requirement.variable, requirement.provider)
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let message = format!("dépendances du script indisponibles : {list}");
+                        steps.push(failed_step(
+                            step_index,
+                            &node,
+                            Some(op.id.clone()),
+                            message.clone(),
+                            None,
+                        ));
+                        return Err(FlowExecutionError {
+                            code: script_error_code,
+                            message,
+                            steps,
+                        });
+                    }
                     let variable_context = variables::VariableContext::new(
                         &current_working_file,
                         source_file,
                         work_dir,
                         &ctx.media_info,
                         &node_outputs,
+                        &self.registry.exposed_variables(),
                     );
                     let script_config = match variables::resolve_node_config(
                         &effective_rt.variables,
@@ -546,9 +577,7 @@ impl<'a> FlowEngine<'a> {
                                 None,
                             ));
                             return Err(FlowExecutionError {
-                                code: effective_rt
-                                    .error_code
-                                    .unwrap_or(forgearr_shared::jobs::JobErrorCode::OperationFailed),
+                                code: script_error_code,
                                 message,
                                 steps,
                             });

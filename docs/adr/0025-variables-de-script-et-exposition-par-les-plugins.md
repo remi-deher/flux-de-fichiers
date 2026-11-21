@@ -1,6 +1,6 @@
 # 0025 — Variables de script, exposition par les plugins et dépendances
 
-Statut : accepté par l'utilisateur (21 nov. 2026) ; phases A et B implémentées.
+Statut : accepté par l'utilisateur (21 nov. 2026) ; phases A, B et C implémentées.
 
 ## Contexte
 
@@ -30,26 +30,35 @@ réimplémenter ce travail.
    valeur qui est entièrement une référence garde son type JSON ; insérée dans un texte, elle
    devient une chaîne. Une référence inconnue est refusée à l'enregistrement du flux ; sans valeur
    à l'exécution, l'étape échoue avec un message clair, sauf si la variable a une valeur par défaut.
-4. **Exposition par les plugins.** Le manifeste d'un plugin déclare `exposes` : des variables
-   préfixées par son identifiant (`mediainfo.video.codec`), typées, avec un chemin dans le résultat
-   de l'opération du plugin (jamais du code arbitraire) et une version de contrat. Un renommage,
-   un retrait ou un changement de type impose une montée de version majeure du contrat. Une variable
-   exposée n'a de valeur que si le plugin fournisseur la produit en amont dans le flux ; le
-   sélecteur du nœud ne propose que celles disponibles à cet endroit. Seuls les plugins du
-   catalogue exposent des variables ; l'ouverture aux scripts est reportée.
-5. **Dépendance dure par défaut.** Un script déclare `requires` : les variables exposées qu'il
-   consomme, avec le plugin fournisseur, soit dans le même dépôt, soit dans un autre dépôt désigné
-   par son identifiant et l'URL de son index. Sans le fournisseur, le script est indisponible
-   (sauf variable à valeur par défaut). L'installation affiche les dépendances manquantes et
-   propose de les installer ; ajouter un dépôt tiers n'est jamais automatique et demande une
-   confirmation explicite (nom du dépôt, officiel ou tiers).
-6. **Option « sans dépendance ».** Un script peut être intégré sans ses dépendances : les
-   variables sont alors saisies à la main, il est marqué « dépendances non vérifiées », le flux ne
-   peut pas valider ces références à l'enregistrement et l'interface l'affiche clairement.
-7. **Contrôles.** La CI du dépôt de plugins vérifie le schéma, le préfixe, la validité des types,
-   la montée de version sur changement cassant et, quand une fixture existe, la résolution de chaque
-   chemin exposé. Le central ne se fie pas à cette CI : il revalide à la synchronisation et ignore
-   avec un avertissement toute fiche invalide (comme `skipped` et `warnings`, ADR 0010 et 0023).
+4. **Exposition par les plugins.** Le contrat de l'opération d'un plugin déclare `exposes`
+   (et non son manifeste : les workers ne reçoivent que les opérations, dans le claim, et jamais le
+   catalogue). `exposes` porte un `namespace` (`[a-z][a-z0-9_]*`, jamais `nodes`), une
+   `contractVersion` (`MAJEUR.MINEUR.CORRECTIF`) et des variables typées (jamais de secret) : un nom
+   relatif (`video.codec`) et le chemin pointé de sa valeur dans `mediaInfo` après l'opération du
+   plugin, jamais du code arbitraire. La référence complète est `namespace.nom`
+   (`{{mediainfo.video.codec}}`) ; le préfixe est imposé par construction, un plugin ne peut exposer
+   que dans son espace de noms. Un nom ne peut pas être à la fois une valeur et un groupe
+   (`video` et `video.codec`). Un renommage, un retrait ou un changement de type impose une montée
+   de version majeure. Une variable n'a de valeur que si le plugin fournisseur l'a produite en amont
+   dans le flux ; si deux opérations réclament le même espace de noms, la première (par identifiant
+   d'opération) l'emporte. Seuls les plugins du catalogue exposent ; l'ouverture aux scripts est reportée.
+5. **Dépendance dure par défaut.** Un script déclare `runtime.requires` : pour chaque variable
+   consommée, sa référence complète, l'identifiant du plugin fournisseur, la version majeure du
+   contrat visée (1 par défaut) et, si le fournisseur n'est pas dans le même dépôt, un pointeur
+   `repository` (identifiant et URL d'index). Sans le fournisseur chargé, l'étape échoue avant
+   l'exécution en nommant les variables manquantes. La résolution des dépendances d'un script
+   planifie l'installation du fournisseur et signale un fournisseur absent avec le dépôt à ajouter ;
+   ajouter un dépôt tiers n'est jamais automatique et reste une confirmation explicite.
+6. **Option « sans dépendance ».** Un script peut être intégré sans ses dépendances
+   (`runtime.dependenciesUnverified`) : les variables sont alors saisies à la main, il est marqué
+   « dépendances non vérifiées », aucune dépendance n'est contrôlée ni installée, et l'aperçu
+   l'affiche clairement.
+7. **Contrôles.** La CI du dépôt de plugins vérifie le schéma, l'espace de noms, la validité des
+   types, la montée de version sur changement cassant et, quand une fixture existe, la résolution de
+   chaque chemin exposé. Le central ne se fie pas à cette CI : à la synchronisation il retire de la
+   copie tout contrat d'opération dont `variables`, `exposes` ou `requires` sont invalides et le
+   signale dans `SyncReport.skipped` (comme les icônes, ADR 0010 et 0024) ; au chargement, le
+   registre refuse le même contrat (`register_json`), y compris pour un worker qui le reçoit dans un claim.
    Pour le dépôt officiel, la revue de PR du gestionnaire valide ; un dépôt tiers reste « non vérifié ».
 
 ## Phasage
@@ -70,6 +79,12 @@ réimplémenter ce travail.
   retombe sur le défaut de la variable, sinon l'étape échoue en nommant la variable.
 - Les sorties des nœuds (`nodes.<id>.…`) ne viennent que des étapes exécutées par ce worker : après
   un relais de tâche (ADR 0018), un nœud exécuté avant le relais n'a plus de sortie.
+- Phase C : `exposes` (contrat d'opération), `requires` et `dependenciesUnverified` (opération du
+  script), validés à la synchronisation et au chargement ; le moteur expose chaque espace de noms
+  dans les références et contrôle les dépendances avant le script ; l'aperçu d'un script de dépôt
+  affiche ses dépendances et leur disponibilité ; la résolution des dépendances et `DependencyInstallResult`
+  signalent le dépôt à ajouter (`suggestedRepositories`).
 - Reportés : le refus d'une référence inconnue à l'enregistrement du flux (phase D, avec le
-  sélecteur qui sait ce qui est disponible en amont) et la résolution des secrets (phase C).
+  sélecteur qui sait ce qui est disponible en amont), la résolution des secrets, la saisie de
+  `requires` dans l'éditeur de scripts locaux et l'affichage des `exposes` dans la fiche d'un plugin.
 - Les scripts existants, sans `variables`, restent valides (liste vide par défaut).

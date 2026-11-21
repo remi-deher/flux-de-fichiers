@@ -1,5 +1,6 @@
 //! Coloration syntaxique d'un code : jetons typés calculés par le central, rendus par le client.
 
+use crate::exposed_variables::RequirementStatus;
 use crate::local::LocalScriptSummary;
 use serde::{Deserialize, Serialize};
 
@@ -48,6 +49,12 @@ pub struct CodeToken {
 pub struct ScriptPreviewView {
     pub script: LocalScriptSummary,
     pub lines: Vec<Vec<CodeToken>>,
+    /// Variables exposées par des plugins que le script consomme, et leur disponibilité ici.
+    #[serde(default)]
+    pub requirements: Vec<RequirementStatus>,
+    /// Script intégré sans ses dépendances : elles ne sont pas contrôlées.
+    #[serde(default)]
+    pub dependencies_unverified: bool,
 }
 
 #[cfg(test)]

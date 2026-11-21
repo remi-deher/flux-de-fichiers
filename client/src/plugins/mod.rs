@@ -58,7 +58,7 @@ pub(super) fn section_icon(entry_type: CatalogItemType) -> IconName {
 /// Synthèse du bilan d'installation d'un outil ou d'un plugin et de ses dépendances.
 pub(super) fn dependency_install_summary(result: &DependencyInstallResult) -> (bool, String) {
     let ok = result.failed_tools.is_empty() && result.missing_dependencies.is_empty();
-    let msg = if ok {
+    let mut msg = if ok {
         format!(
             "{} outil(s) installé(s) ou déjà prêt(s).",
             result.installed_tools.len()
@@ -71,6 +71,17 @@ pub(super) fn dependency_install_summary(result: &DependencyInstallResult) -> (b
             result.missing_dependencies.len()
         )
     };
+    if !result.suggested_repositories.is_empty() {
+        let repositories: Vec<&str> = result
+            .suggested_repositories
+            .iter()
+            .map(|repository| repository.id.as_str())
+            .collect();
+        msg.push_str(&format!(
+            " Dépôt(s) à ajouter vous-même pour les fournir : {}.",
+            repositories.join(", ")
+        ));
+    }
     (ok, msg)
 }
 
@@ -507,6 +518,7 @@ mod tests {
             installed_tools: vec!["ffmpeg".into(), "mkvtoolnix".into()],
             failed_tools: Vec::new(),
             missing_dependencies: Vec::new(),
+            suggested_repositories: Vec::new(),
         };
         assert_eq!(
             dependency_install_summary(&result),
@@ -522,6 +534,17 @@ mod tests {
                 false,
                 "2 outil(s) prêt(s), 1 en échec, 1 dépendance(s) introuvable(s).".to_owned()
             )
+        );
+        result
+            .suggested_repositories
+            .push(forgearr_shared::exposed_variables::RepositoryPointer {
+                id: "repo.tiers".into(),
+                index_url: "https://exemple.org/index.json".into(),
+            });
+        assert!(
+            dependency_install_summary(&result)
+                .1
+                .ends_with("Dépôt(s) à ajouter vous-même pour les fournir : repo.tiers.")
         );
     }
 

@@ -1,6 +1,6 @@
 # 0025 — Variables de script, exposition par les plugins et dépendances
 
-Statut : accepté par l'utilisateur (21 nov. 2026) ; phase A en cours d'implémentation.
+Statut : accepté par l'utilisateur (21 nov. 2026) ; phases A et B implémentées.
 
 ## Contexte
 
@@ -62,6 +62,14 @@ réimplémenter ce travail.
 
 ## Conséquences
 
-- Les valeurs par défaut du schéma n'alimentent `config` qu'à partir de la phase B ; la phase A
-  décrit et affiche seulement les variables.
+- Phase B (`src/flows/variables.rs`) : avant chaque script, les valeurs par défaut du schéma comblent
+  les clés absentes du nœud, les références `{{…}}` sont résolues, puis chaque valeur est contrôlée
+  et convertie selon son type (nombre, booléen, choix, bornes, `required`). Seules les clés
+  déclarées sont traitées : le code en ligne et les autres clés du nœud ne sont jamais modifiés.
+  Un `{{…}}` dont le contenu n'est pas un chemin valide reste littéral. Une référence sans valeur
+  retombe sur le défaut de la variable, sinon l'étape échoue en nommant la variable.
+- Les sorties des nœuds (`nodes.<id>.…`) ne viennent que des étapes exécutées par ce worker : après
+  un relais de tâche (ADR 0018), un nœud exécuté avant le relais n'a plus de sortie.
+- Reportés : le refus d'une référence inconnue à l'enregistrement du flux (phase D, avec le
+  sélecteur qui sait ce qui est disponible en amont) et la résolution des secrets (phase C).
 - Les scripts existants, sans `variables`, restent valides (liste vide par défaut).

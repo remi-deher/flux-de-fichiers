@@ -1024,3 +1024,189 @@ async fn arr_notification_is_deferred_until_publication() -> anyhow::Result<()> 
     }));
     Ok(())
 }
+
+fn variable_flow_engine<'a>(
+    reg: &'a OperationRegistry,
+    cache: &'a ToolCacheManager,
+    http: &'a reqwest::Client,
+    configs: &'a HashMap<String, Value>,
+    versions: &'a HashMap<String, String>,
+) -> FlowEngine<'a> {
+    FlowEngine {
+        registry: reg,
+        cache_mgr: cache,
+        http_client: http,
+        secrets_dir: None,
+        plugin_configs: configs,
+        tool_versions: versions,
+        media_root: None,
+        logical_source_name: None,
+        allow_private_integrations: None,
+        worker_capabilities: None,
+        resume_node_id: None,
+    }
+}
+
+#[tokio::test]
+async fn script_variables_are_resolved_from_defaults_flow_values_and_previous_nodes()
+-> Result<(), Box<dyn std::error::Error>> {
+    use crate::plugins::save_local_script;
+    use forgearr_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
+    use forgearr_shared::script_variables::{ScriptVariable, VariableKind};
+
+    let dir = tempfile::tempdir()?;
+    let local_dir = dir.path().join("local");
+    let cache = ToolCacheManager::new(dir.path().join("cache"));
+    install_fake_probe(&cache)?;
+
+    save_local_script(
+        &local_dir,
+        UpsertLocalScriptRequest {
+            variables: Vec::new(),
+            id: None,
+            name: "Marker".into(),
+            description: None,
+            interpreter: ScriptInterpreter::Sh,
+            code: "cat >/dev/null\nprintf '{\"status\":\"ok\",\"message\":\"marqué\"}'".into(),
+            filename: None,
+            category: None,
+            tags: vec![],
+        },
+    )?;
+    let text = |name: &str| ScriptVariable {
+        name: name.into(),
+        kind: VariableKind::Text,
+        ..ScriptVariable::default()
+    };
+    save_local_script(
+        &local_dir,
+        UpsertLocalScriptRequest {
+            variables: vec![
+                ScriptVariable {
+                    name: "crf".into(),
+                    kind: VariableKind::Number,
+                    default_value: Some(json!(23)),
+                    ..ScriptVariable::default()
+                },
+                text("cible"),
+                text("precedent"),
+            ],
+            id: None,
+            name: "Encodeur".into(),
+            description: None,
+            interpreter: ScriptInterpreter::Sh,
+            code: "cat > payload.json\nprintf '{\"status\":\"ok\"}'".into(),
+            filename: None,
+            category: None,
+            tags: vec![],
+        },
+    )?;
+
+    let mut reg = OperationRegistry::load_from_roots(&[local_dir]);
+    register_core_and_probe(&mut reg)?;
+    let source = dir.path().join("in.mkv");
+    std::fs::write(&source, "raw")?;
+    let work = dir.path().join("work");
+    std::fs::create_dir(&work)?;
+    let flow = flow_record(json!({
+        "nodes": [
+            {"id": "n1", "type": "file-input", "name": "in"},
+            {"id": "mark", "type": "block.script.marker", "name": "Marker"},
+            {"id": "enc", "type": "block.script.encodeur", "name": "Encodeur", "config": {
+                "cible": "{{workingFile}}",
+                "precedent": "{{nodes.mark.message}}"
+            }},
+            {"id": "n4", "type": "file-output", "name": "out"}
+        ],
+        "connections": [
+            {"from": "n1", "to": "mark"},
+            {"from": "mark", "to": "enc"},
+            {"from": "enc", "to": "n4"}
+        ]
+    }));
+
+    let http = reqwest::Client::new();
+    let (configs, versions) = (HashMap::new(), HashMap::new());
+    let (progress, _) = recording_progress();
+    variable_flow_engine(&reg, &cache, &http, &configs, &versions)
+        .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
+        .await
+        .map_err(|e| e.message)?;
+
+    let payload: Value = serde_json::from_str(&std::fs::read_to_string(work.join("payload.json"))?)?;
+    assert_eq!(payload["config"]["crf"], json!(23));
+    assert_eq!(payload["config"]["precedent"], json!("marqué"));
+    assert!(
+        payload["config"]["cible"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("in.mkv"))
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_required_variable_without_value_fails_the_step_with_a_clear_message()
+-> Result<(), Box<dyn std::error::Error>> {
+    use crate::domain::JobStepStatus;
+    use crate::plugins::save_local_script;
+    use forgearr_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
+    use forgearr_shared::script_variables::{ScriptVariable, VariableKind};
+
+    let dir = tempfile::tempdir()?;
+    let local_dir = dir.path().join("local");
+    let cache = ToolCacheManager::new(dir.path().join("cache"));
+    install_fake_probe(&cache)?;
+
+    save_local_script(
+        &local_dir,
+        UpsertLocalScriptRequest {
+            variables: vec![ScriptVariable {
+                name: "cible".into(),
+                kind: VariableKind::Text,
+                required: true,
+                ..ScriptVariable::default()
+            }],
+            id: None,
+            name: "Strict".into(),
+            description: None,
+            interpreter: ScriptInterpreter::Sh,
+            code: "cat >/dev/null\nprintf '{\"status\":\"ok\"}'".into(),
+            filename: None,
+            category: None,
+            tags: vec![],
+        },
+    )?;
+
+    let mut reg = OperationRegistry::load_from_roots(&[local_dir]);
+    register_core_and_probe(&mut reg)?;
+    let source = dir.path().join("in.mkv");
+    std::fs::write(&source, "raw")?;
+    let work = dir.path().join("work");
+    std::fs::create_dir(&work)?;
+    let flow = flow_record(json!({
+        "nodes": [
+            {"id": "n1", "type": "file-input", "name": "in"},
+            {"id": "strict", "type": "block.script.strict", "name": "Strict"},
+            {"id": "n3", "type": "file-output", "name": "out"}
+        ],
+        "connections": [
+            {"from": "n1", "to": "strict"},
+            {"from": "strict", "to": "n3"}
+        ]
+    }));
+
+    let http = reqwest::Client::new();
+    let (configs, versions) = (HashMap::new(), HashMap::new());
+    let (progress, _) = recording_progress();
+    let failure = variable_flow_engine(&reg, &cache, &http, &configs, &versions)
+        .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
+        .await
+        .err()
+        .ok_or("l'exécution aurait dû échouer")?;
+
+    assert!(failure.message.contains("cible"));
+    assert!(failure.steps.iter().any(|step| {
+        step.node_id == "strict" && step.status == JobStepStatus::Failed
+    }));
+    Ok(())
+}

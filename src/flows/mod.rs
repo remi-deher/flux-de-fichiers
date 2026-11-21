@@ -11,6 +11,7 @@ pub mod lease_secrets;
 pub mod placement;
 pub(crate) mod publication;
 pub mod script_runner;
+mod variables;
 
 #[cfg(test)]
 mod engine_tests;
@@ -289,6 +290,8 @@ impl<'a> FlowEngine<'a> {
             None => input_node.id,
         };
         let mut relay: Option<RelayRequest> = None;
+        // Sorties des nœuds déjà exécutés, lues par `{{nodes.<id>.…}}` (ADR 0025).
+        let mut node_outputs: HashMap<String, variables::NodeOutput> = HashMap::new();
         let mut remaining_steps = MAX_FLOW_STEPS;
         let mut step_index: i32 = 0;
 
@@ -520,6 +523,37 @@ impl<'a> FlowEngine<'a> {
                             effective_rt.tool = fallback_tool;
                         }
                     }
+                    let variable_context = variables::VariableContext::new(
+                        &current_working_file,
+                        source_file,
+                        work_dir,
+                        &ctx.media_info,
+                        &node_outputs,
+                    );
+                    let script_config = match variables::resolve_node_config(
+                        &effective_rt.variables,
+                        &node.config,
+                        &variable_context,
+                    ) {
+                        Ok(config) => config,
+                        Err(err) => {
+                            let message = err.to_string();
+                            steps.push(failed_step(
+                                step_index,
+                                &node,
+                                Some(op.id.clone()),
+                                message.clone(),
+                                None,
+                            ));
+                            return Err(FlowExecutionError {
+                                code: effective_rt
+                                    .error_code
+                                    .unwrap_or(forgearr_shared::jobs::JobErrorCode::OperationFailed),
+                                message,
+                                steps,
+                            });
+                        }
+                    };
                     match script_runner::execute_script_operation(
                         op,
                         &effective_rt,
@@ -527,7 +561,7 @@ impl<'a> FlowEngine<'a> {
                         self.tool_versions,
                         &flow.id,
                         &node.id,
-                        &node.config,
+                        &script_config,
                         work_dir,
                         &current_working_file,
                         source_file,
@@ -614,6 +648,14 @@ impl<'a> FlowEngine<'a> {
                 }
             }
 
+            node_outputs.insert(
+                node.id.clone(),
+                variables::NodeOutput {
+                    message: step_message.clone(),
+                    next_port: next_port.clone(),
+                    working_file: current_working_file.to_string_lossy().into_owned(),
+                },
+            );
             steps.push(crate::domain::JobStepEntry {
                 step_index,
                 node_id: node.id.clone(),

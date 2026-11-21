@@ -106,6 +106,7 @@ async fn run(
         allow_private_integrations: None,
         worker_capabilities: capabilities,
         resume_node_id,
+        resumed_outputs: &HashMap::new(),
     }
     .execute_flow(Uuid::new_v4(), flow, &source, &work, progress)
     .await

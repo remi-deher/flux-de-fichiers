@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.75.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.74.0...v0.75.0) (2026-11-21)
+
+
+### Features
+
+* **libraries:** dépendances (requires) d'un script local dans son éditeur (ADR 0025) ([b442363](https://github.com/remi-deher/flux-de-fichiers/commit/b4423630acc92faebd53919d6654bcef4f4f7ac1))
+* **libraries:** dépendances (requires) d'un script local dans son éditeur (ADR 0025) ([194f35f](https://github.com/remi-deher/flux-de-fichiers/commit/194f35f18cd5ba2189640d77f937b725be72cd86))
+
 ## [0.74.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.73.0...v0.74.0) (2026-11-21)
 
 

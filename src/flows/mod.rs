@@ -21,7 +21,10 @@ mod placement_flow_tests;
 
 use crate::{media::OutputSpec, tools_cache::ToolCacheManager};
 use chrono::Utc;
-use forgearr_shared::{capabilities::WorkerCapabilities, relay::RelayRequest};
+use forgearr_shared::{
+    capabilities::WorkerCapabilities,
+    relay::{RelayRequest, RelayedNodeOutput},
+};
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -38,7 +41,7 @@ pub use contract::{
 pub use custom_args::{CustomArgsError, parse_custom_args, safe_custom_args};
 pub use forgearr_shared::flows::{FlowBlockKind, FlowConnection, FlowGraph, FlowNode, FlowRecord};
 pub use header_secrets::{
-    decrypt_definition_headers, extract_and_mask_definition_headers, has_webhook_headers,
+    decrypt_definition_headers, extract_and_mask_definition_headers, has_flow_secrets,
     inject_definition_headers, mask_definition, migrate_flow_secrets, rotate_definition,
     seal_definition,
 };
@@ -96,6 +99,8 @@ pub struct FlowExecutionOutcome {
     pub warning: bool,
     pub output_spec: OutputSpec,
     pub steps: Vec<crate::domain::JobStepEntry>,
+    /// Métadonnées du fichier en fin d'exécution (sonde et enrichissements des étapes).
+    pub media_info: Value,
     /// Présent quand le bloc « Relayer la tâche » a arrêté l'exécution locale (ADR 0018).
     pub relay: Option<RelayRequest>,
 }
@@ -123,6 +128,8 @@ pub struct FlowEngine<'a> {
     pub worker_capabilities: Option<&'a WorkerCapabilities>,
     /// Nœud où reprendre un flux relayé, au lieu du bloc d'entrée.
     pub resume_node_id: Option<&'a str>,
+    /// Sorties des nœuds exécutés avant le relais, transmises par le worker émetteur.
+    pub resumed_outputs: &'a HashMap<String, RelayedNodeOutput>,
 }
 
 impl<'a> FlowEngine<'a> {
@@ -192,6 +199,7 @@ impl<'a> FlowEngine<'a> {
             is_in_place: !outcome.is_staged_output,
             warning: outcome.warning,
             output_spec: bin_rt.output_spec().unwrap_or_default(),
+            media_info,
             steps: vec![crate::domain::JobStepEntry {
                 step_index: 0,
                 node_id: "default".to_owned(),
@@ -295,7 +303,12 @@ impl<'a> FlowEngine<'a> {
         };
         let mut relay: Option<RelayRequest> = None;
         // Sorties des nœuds déjà exécutés, lues par `{{nodes.<id>.…}}` (ADR 0025).
-        let mut node_outputs: HashMap<String, variables::NodeOutput> = HashMap::new();
+        // Après un relais, ceux des nœuds exécutés par le worker précédent sont repris (ADR 0018).
+        let mut node_outputs: HashMap<String, variables::NodeOutput> = self
+            .resumed_outputs
+            .iter()
+            .map(|(id, output)| (id.clone(), variables::NodeOutput::from(output)))
+            .collect();
         let mut remaining_steps = MAX_FLOW_STEPS;
         let mut step_index: i32 = 0;
 
@@ -701,6 +714,12 @@ impl<'a> FlowEngine<'a> {
             current_node_id = conn.to.clone();
         }
 
+        if let Some(request) = relay.as_mut() {
+            request.node_outputs = node_outputs
+                .iter()
+                .map(|(id, output)| (id.clone(), RelayedNodeOutput::from(output)))
+                .collect();
+        }
         let resolved_spec = last_output_spec
             .or_else(|| self.registry.output_spec_for_flow(Some(flow), None))
             .unwrap_or_default();
@@ -711,6 +730,7 @@ impl<'a> FlowEngine<'a> {
             warning: final_warning,
             output_spec: resolved_spec,
             steps,
+            media_info: ctx.media_info,
             relay,
         })
     }

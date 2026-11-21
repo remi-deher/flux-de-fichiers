@@ -132,12 +132,7 @@ mod tests {
         let titles: Vec<&str> = grouped.groups.iter().map(|group| group.title).collect();
         assert_eq!(
             titles,
-            vec![
-                "Blocs essentiels",
-                "Serveurs média",
-                "Archives",
-                "Scripts"
-            ]
+            vec!["Blocs essentiels", "Serveurs média", "Archives", "Scripts"]
         );
     }
 

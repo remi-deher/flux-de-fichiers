@@ -152,7 +152,7 @@ pub async fn install_tool(
     Path(id): Path<String>,
     _auth: ManagePluginsAuth,
 ) -> AppResult<Json<plugins::DependencyInstallResult>> {
-    install_catalog_item(&s, &id, plugins::CatalogItemType::App).await
+    install_catalog_item(s, id, plugins::CatalogItemType::App).await
 }
 
 /// Installe les outils requis par un plugin (dépendances transitives comprises).
@@ -161,30 +161,33 @@ pub async fn install_plugin(
     Path(id): Path<String>,
     _auth: ManagePluginsAuth,
 ) -> AppResult<Json<plugins::DependencyInstallResult>> {
-    install_catalog_item(&s, &id, plugins::CatalogItemType::Plugin).await
+    install_catalog_item(s, id, plugins::CatalogItemType::Plugin).await
 }
 
-/// Installe une pièce du catalogue du type attendu et ses outils requis.
+/// Installe une pièce du catalogue du type attendu et ses outils requis, même si le client coupe la
+/// connexion pendant le téléchargement.
 async fn install_catalog_item(
-    s: &AppState,
-    id: &str,
+    s: AppState,
+    id: String,
     expected: plugins::CatalogItemType,
 ) -> AppResult<Json<plugins::DependencyInstallResult>> {
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    if !plugins::list_catalog(&roots)
-        .iter()
-        .any(|entry| entry.id == id && entry.entry_type == expected)
-    {
-        return Err(AppError::NotFound);
-    }
-    let cache_mgr = s.tool_cache();
-    let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
-        .await
-        .sync_policy();
-    let result =
-        plugins::install_with_dependencies(Some(&s.pool), &roots, &cache_mgr, &sync_policy, id)
-            .await?;
-    Ok(Json(result))
+    to_completion(async move {
+        let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+        if !plugins::list_catalog(&roots)
+            .iter()
+            .any(|entry| entry.id == id && entry.entry_type == expected)
+        {
+            return Err(AppError::NotFound);
+        }
+        let cache_mgr = s.tool_cache();
+        let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
+            .await
+            .sync_policy();
+        plugins::install_with_dependencies(Some(&s.pool), &roots, &cache_mgr, &sync_policy, &id)
+            .await
+            .map(Json)
+    })
+    .await
 }
 
 /// Enregistre les réglages d'un plugin et le signale, même si le client coupe la connexion.
@@ -548,13 +551,17 @@ pub async fn add_repository(
                 .to_string(),
         ));
     }
+    if plugins::is_reserved_repository_id(&id) {
+        return Err(AppError::InvalidManifest(format!(
+            "L'identifiant de dépôt « {id} » est réservé."
+        )));
+    }
 
     to_completion(async move {
-        let repo =
-            crate::repository::add_plugin_repository(&s.pool, &s.changes, &id, &name, &url).await?;
-        // Une copie locale d'un ancien dépôt de même identifiant rejoint aussitôt le catalogue.
-        s.catalog_cache.invalidate().await;
-        Ok(Json(repo))
+        let repos_dir = s.config.plugin_repos_dir();
+        plugins::add_repository(&s.pool, &s.catalog_cache, &repos_dir, &id, &name, &url)
+            .await
+            .map(Json)
     })
     .await
 }
@@ -577,15 +584,15 @@ pub async fn toggle_repository(
     .await
 }
 
-/// Supprime un dépôt tiers (interdit sur le catalogue officiel).
+/// Supprime un dépôt tiers et sa copie sur disque (interdit sur le catalogue officiel).
 pub async fn delete_repository(
     State(s): State<AppState>,
     Path(id): Path<String>,
     _auth: ManagePluginsAuth,
 ) -> AppResult<Json<Value>> {
     to_completion(async move {
-        crate::repository::delete_plugin_repository(&s.pool, &s.changes, &id).await?;
-        s.catalog_cache.invalidate().await;
+        let repos_dir = s.config.plugin_repos_dir();
+        plugins::delete_repository(&s.pool, &s.catalog_cache, &repos_dir, &id).await?;
         Ok(Json(serde_json::json!({
             "id": id,
             "deleted": true,
@@ -668,18 +675,22 @@ pub async fn tool_detail(
     Ok(Json(detail))
 }
 
-/// Exécute l'installation déclarative d'un pack (outils requis et vérification des composants).
+/// Exécute l'installation déclarative d'un pack (outils requis et vérification des composants), même si
+/// le client coupe la connexion.
 pub async fn install_pack(
     State(s): State<AppState>,
     Path(id): Path<String>,
     _auth: ManagePluginsAuth,
 ) -> AppResult<Json<plugins::PackInstallResult>> {
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    let cache_mgr = s.tool_cache();
-    let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
-        .await
-        .sync_policy();
-    let result =
-        plugins::install_pack_verified(&s.pool, &roots, &cache_mgr, &sync_policy, &id).await?;
-    Ok(Json(result))
+    to_completion(async move {
+        let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+        let cache_mgr = s.tool_cache();
+        let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
+            .await
+            .sync_policy();
+        plugins::install_pack_verified(&s.pool, &roots, &cache_mgr, &sync_policy, &id)
+            .await
+            .map(Json)
+    })
+    .await
 }

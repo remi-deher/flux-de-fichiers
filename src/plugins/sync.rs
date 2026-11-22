@@ -2,10 +2,15 @@
 //! refusant les adresses privées, et atomique (l'ancienne copie reste en place en cas d'échec).
 
 use super::{
-    CatalogItemType, PluginRepository, icon::check_svg_icon, is_valid_repository_id,
+    CatalogItemType, PluginRepository,
+    declared_files::{collect_declared, declared_files},
+    icon::check_svg_icon,
     parse_index_tolerant,
+    repository_copy::{COPY_LOCK, publish},
+    sources::owns_copy,
 };
 use crate::{
+    error::AppError,
     net_policy::{self, NetPolicyError, OutboundPolicy},
     tools_cache::ToolCacheManager,
 };
@@ -26,8 +31,11 @@ pub const ALLOW_PRIVATE_HOSTS_ENV: &str = net_policy::ALLOW_PRIVATE_HOSTS_ENV;
 pub const REQUIRE_IMMUTABLE_RELEASES_ENV: &str = "PLUGIN_REQUIRE_IMMUTABLE_RELEASES";
 const SYNC_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_FILE_BYTES: usize = 1024 * 1024;
-const MAX_FILES: usize = 500;
+pub(super) const MAX_FILES: usize = 500;
 const FETCH_CONCURRENCY: usize = 8;
+
+/// Chemin relatif d'un fichier du dépôt et contenu reçu, `None` s'il n'y est pas.
+pub(super) type Fetched<T> = (String, Result<Option<T>, SyncError>);
 
 /// Règles réseau et d'immuabilité d'une synchronisation.
 #[derive(Clone, Copy, Debug, Default)]
@@ -66,10 +74,29 @@ pub enum SyncError {
     IntegrityMismatch(String),
     #[error("release immuable violée : {0}")]
     ImmutableViolation(String),
+    #[error("dépôt retiré ou remplacé pendant sa synchronisation")]
+    RepositoryRemoved,
     #[error("réseau : {0}")]
     Network(String),
     #[error("stockage : {0}")]
     Storage(#[from] std::io::Error),
+}
+
+impl SyncError {
+    /// Panne passagère du réseau ou du serveur : un nouvel essai peut réussir.
+    pub(super) fn is_transient(&self) -> bool {
+        match self {
+            Self::Network(_) => true,
+            Self::Http { status, .. } => StatusCode::from_u16(*status).is_ok_and(|status| {
+                status.is_server_error()
+                    || matches!(
+                        status,
+                        StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_MANY_REQUESTS
+                    )
+            }),
+            _ => false,
+        }
+    }
 }
 
 /// Bilan d'une synchronisation réussie.
@@ -164,9 +191,42 @@ async fn pinned_client(url: &Url, policy: &SyncPolicy) -> Result<Client, SyncErr
 /// Taille maximale d'une archive d'outil.
 const MAX_ARCHIVE_BYTES: usize = 256 * 1024 * 1024;
 const MAX_REDIRECTS: usize = 3;
+/// Budget d'une archive d'outil, à la mesure de sa taille maximale (`SYNC_TIMEOUT` vaut pour de
+/// petits fichiers texte).
+const ARCHIVE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// Silence toléré du serveur, avant sa réponse comme entre deux blocs de l'archive.
+const ARCHIVE_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Délais d'un téléchargement d'archive.
+#[derive(Clone, Copy)]
+struct ArchiveTimeouts {
+    total: Duration,
+    idle: Duration,
+}
+
+impl ArchiveTimeouts {
+    /// Attend une lecture, abandonnée si le serveur reste silencieux.
+    async fn read<T>(self, reading: impl Future<Output = T>) -> Result<T, SyncError> {
+        tokio::time::timeout(self.idle, reading)
+            .await
+            .map_err(|_| SyncError::Network("téléchargement interrompu : serveur muet".into()))
+    }
+}
 
 /// Télécharge un fichier binaire borné. Chaque redirection est revalidée (hôte public, https exigé).
 pub(super) async fn fetch_archive(url: &Url, policy: &SyncPolicy) -> Result<Vec<u8>, SyncError> {
+    let timeouts = ArchiveTimeouts {
+        total: ARCHIVE_TIMEOUT,
+        idle: ARCHIVE_IDLE_TIMEOUT,
+    };
+    fetch_archive_within(url, policy, timeouts).await
+}
+
+async fn fetch_archive_within(
+    url: &Url,
+    policy: &SyncPolicy,
+    timeouts: ArchiveTimeouts,
+) -> Result<Vec<u8>, SyncError> {
     let mut current = url.clone();
     for _ in 0..=MAX_REDIRECTS {
         if current.scheme() != "https" && !policy.allow_private_hosts {
@@ -175,10 +235,11 @@ pub(super) async fn fetch_archive(url: &Url, policy: &SyncPolicy) -> Result<Vec<
             ));
         }
         let client = pinned_client(&current, policy).await?;
-        let response = client
-            .get(current.clone())
-            .send()
-            .await
+        // Le délai de la requête remplace celui du client, corps de la réponse compris.
+        let sending = client.get(current.clone()).timeout(timeouts.total).send();
+        let response = timeouts
+            .read(sending)
+            .await?
             .map_err(|error| SyncError::Network(error.to_string()))?;
         if response.status().is_redirection() {
             let location = response
@@ -199,7 +260,7 @@ pub(super) async fn fetch_archive(url: &Url, policy: &SyncPolicy) -> Result<Vec<
         }
         let mut body: Vec<u8> = Vec::new();
         let mut chunks = response.bytes_stream();
-        while let Some(chunk) = chunks.next().await {
+        while let Some(chunk) = timeouts.read(chunks.next()).await? {
             let chunk = chunk.map_err(|error| SyncError::Network(error.to_string()))?;
             if body.len() + chunk.len() > MAX_ARCHIVE_BYTES {
                 return Err(SyncError::TooLarge(current.to_string()));
@@ -211,8 +272,8 @@ pub(super) async fn fetch_archive(url: &Url, policy: &SyncPolicy) -> Result<Vec<
     Err(SyncError::Network("trop de redirections".into()))
 }
 
-/// Télécharge un fichier texte borné ; `None` si le serveur répond 404.
-async fn fetch_text(client: &Client, url: &Url) -> Result<Option<String>, SyncError> {
+/// Télécharge un fichier borné ; `None` si le serveur répond 404.
+async fn fetch_bytes(client: &Client, url: &Url) -> Result<Option<Vec<u8>>, SyncError> {
     let response = client
         .get(url.clone())
         .send()
@@ -236,9 +297,24 @@ async fn fetch_text(client: &Client, url: &Url) -> Result<Option<String>, SyncEr
         }
         body.extend_from_slice(&chunk);
     }
+    Ok(Some(body))
+}
+
+fn decode_text(label: &str, body: Vec<u8>) -> Result<String, SyncError> {
     String::from_utf8(body)
-        .map(Some)
-        .map_err(|_| SyncError::InvalidIndex(format!("{url} n'est pas du texte UTF-8")))
+        .map_err(|_| SyncError::InvalidIndex(format!("{label} n'est pas du texte UTF-8")))
+}
+
+/// Adresse d'un fichier du dépôt ; un chemin ne désigne jamais un autre serveur ni un autre dossier.
+fn file_url(base: &Url, relative: &str) -> Result<Url, SyncError> {
+    let url = base
+        .join(relative)
+        .map_err(|error| SyncError::InvalidUrl(error.to_string()))?;
+    if url.as_str().starts_with(base.as_str()) {
+        Ok(url)
+    } else {
+        Err(SyncError::InvalidUrl(format!("{relative} sort du dépôt")))
+    }
 }
 
 /// Fichiers à copier en plus de l'index : le manifeste de chaque fiche, et le contrat de distribution d'une application.
@@ -268,7 +344,7 @@ fn wanted_files(entries: &[super::CatalogEntry]) -> Result<Vec<String>, SyncErro
     Ok(wanted)
 }
 
-fn resolve_manifest_relative(manifest_rel: &str, declared_rel: &str) -> Option<String> {
+pub(super) fn resolve_manifest_relative(manifest_rel: &str, declared_rel: &str) -> Option<String> {
     let trimmed = declared_rel.trim().trim_start_matches("./");
     if trimmed.is_empty() || !ToolCacheManager::is_safe_relative_path(Path::new(trimmed)) {
         return None;
@@ -326,9 +402,9 @@ fn extra_files_from_manifests(
     Ok(extra)
 }
 
-fn verify_optional_sha256(
+pub(super) fn verify_optional_sha256(
     relative: &str,
-    content: &str,
+    content: &[u8],
     expected_by_path: &HashMap<String, String>,
     require_digest: bool,
 ) -> Result<(), SyncError> {
@@ -340,7 +416,7 @@ fn verify_optional_sha256(
         }
         return Ok(());
     };
-    let actual = ToolCacheManager::compute_sha256(content.as_bytes());
+    let actual = ToolCacheManager::compute_sha256(content);
     let expected_norm = expected.to_lowercase();
     if bool::from(actual.as_bytes().ct_eq(expected_norm.as_bytes())) {
         Ok(())
@@ -351,19 +427,15 @@ fn verify_optional_sha256(
     }
 }
 
-async fn fetch_json_batch(
-    client: &Client,
-    base: &Url,
-    paths: Vec<String>,
-) -> Vec<(String, Result<Option<String>, SyncError>)> {
+async fn fetch_batch(client: &Client, base: &Url, paths: Vec<String>) -> Vec<Fetched<Vec<u8>>> {
     stream::iter(paths)
         .map(|relative| {
             let client = client.clone();
             let base = base.clone();
             async move {
-                let result = match base.join(&relative) {
-                    Ok(url) => fetch_text(&client, &url).await,
-                    Err(error) => Err(SyncError::InvalidUrl(error.to_string())),
+                let result = match file_url(&base, &relative) {
+                    Ok(url) => fetch_bytes(&client, &url).await,
+                    Err(error) => Err(error),
                 };
                 (relative, result)
             }
@@ -371,6 +443,18 @@ async fn fetch_json_batch(
         .buffer_unordered(FETCH_CONCURRENCY)
         .collect()
         .await
+}
+
+async fn fetch_text_batch(client: &Client, base: &Url, paths: Vec<String>) -> Vec<Fetched<String>> {
+    fetch_batch(client, base, paths)
+        .await
+        .into_iter()
+        .map(|(relative, result)| {
+            let text =
+                result.and_then(|body| body.map(|bytes| decode_text(&relative, bytes)).transpose());
+            (relative, text)
+        })
+        .collect()
 }
 
 /// Chemins (relatifs à la racine du dépôt) des icônes SVG déclarées par les manifestes.
@@ -411,7 +495,7 @@ fn reject_invalid_operation_declarations(
 
 /// Garde les icônes qui passent la validation par liste blanche ; les autres sont signalées.
 fn collect_icons(
-    fetched: Vec<(String, Result<Option<String>, SyncError>)>,
+    fetched: Vec<Fetched<String>>,
     expected_sha256: &HashMap<String, String>,
     require_digest: bool,
     files: &mut Vec<(String, String)>,
@@ -421,7 +505,12 @@ fn collect_icons(
         match result {
             Ok(Some(content)) => match check_svg_icon(&content) {
                 Ok(()) => {
-                    verify_optional_sha256(&relative, &content, expected_sha256, require_digest)?;
+                    verify_optional_sha256(
+                        &relative,
+                        content.as_bytes(),
+                        expected_sha256,
+                        require_digest,
+                    )?;
                     files.push((relative, content));
                 }
                 Err(issue) => skipped.push(format!("{relative} : icône refusée ({issue})")),
@@ -433,43 +522,8 @@ fn collect_icons(
     Ok(())
 }
 
-/// Écrit les fichiers dans un dossier temporaire, puis le substitue d'un seul renommage.
-async fn publish(
-    repos_dir: &Path,
-    repository_id: &str,
-    files: &[(String, String)],
-) -> Result<(), SyncError> {
-    tokio::fs::create_dir_all(repos_dir).await?;
-    let unique = uuid::Uuid::new_v4().simple();
-    let staging = repos_dir.join(format!(".{repository_id}.tmp-{unique}"));
-    for (relative, content) in files {
-        let target = staging.join(relative);
-        if let Some(parent) = target.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        tokio::fs::write(&target, content).await?;
-    }
-    let destination = repos_dir.join(repository_id);
-    let previous: PathBuf = repos_dir.join(format!(".{repository_id}.old-{unique}"));
-    let had_previous = tokio::fs::try_exists(&destination).await?;
-    if had_previous {
-        tokio::fs::rename(&destination, &previous).await?;
-    }
-    if let Err(error) = tokio::fs::rename(&staging, &destination).await {
-        if had_previous {
-            let _ = tokio::fs::rename(&previous, &destination).await;
-        }
-        let _ = tokio::fs::remove_dir_all(&staging).await;
-        return Err(SyncError::Storage(error));
-    }
-    if had_previous {
-        let _ = tokio::fs::remove_dir_all(&previous).await;
-    }
-    Ok(())
-}
-
 struct PreparedSync {
-    files: Vec<(String, String)>,
+    files: Vec<(String, Vec<u8>)>,
     report: SyncReport,
 }
 
@@ -477,7 +531,8 @@ async fn prepare_sync(
     repository: &PluginRepository,
     policy: &SyncPolicy,
 ) -> Result<PreparedSync, SyncError> {
-    if !is_valid_repository_id(&repository.id) {
+    // La copie d'un ancien dépôt nommé `local` remplacerait la librairie de l'utilisateur.
+    if !owns_copy(&repository.id) {
         return Err(SyncError::InvalidRepositoryId);
     }
     let index_url = Url::parse(&repository.index_url)
@@ -490,12 +545,13 @@ async fn prepare_sync(
     let base = base_url(&index_url)?;
     let client = pinned_client(&index_url, policy).await?;
 
-    let index_text = fetch_text(&client, &index_url)
+    let index_body = fetch_bytes(&client, &index_url)
         .await?
         .ok_or_else(|| SyncError::Http {
             status: StatusCode::NOT_FOUND.as_u16(),
             url: index_url.to_string(),
         })?;
+    let index_text = decode_text(index_url.as_str(), index_body)?;
     let index_sha256 = ToolCacheManager::compute_sha256(index_text.as_bytes());
     let parsed = parse_index_tolerant(&index_text)
         .map_err(|error| SyncError::InvalidIndex(error.to_string()))?;
@@ -521,7 +577,7 @@ async fn prepare_sync(
     let mut already_queued: HashSet<String> = wanted.iter().cloned().collect();
     already_queued.insert(INDEX_RELATIVE_PATH.to_owned());
 
-    let fetched = fetch_json_batch(&client, &base, wanted).await;
+    let fetched = fetch_text_batch(&client, &base, wanted).await;
     let mut files: Vec<(String, String)> = vec![(INDEX_RELATIVE_PATH.to_owned(), index_text)];
     let mut manifest_docs: Vec<(String, String)> = Vec::new();
     collect_fetched_json(
@@ -534,8 +590,9 @@ async fn prepare_sync(
     )?;
 
     let extra = extra_files_from_manifests(&already_queued, &manifest_docs)?;
+    already_queued.extend(extra.iter().cloned());
     if !extra.is_empty() {
-        let extra_fetched = fetch_json_batch(&client, &base, extra).await;
+        let extra_fetched = fetch_text_batch(&client, &base, extra).await;
         collect_fetched_json(
             extra_fetched,
             &expected_sha256,
@@ -550,8 +607,9 @@ async fn prepare_sync(
     if files.len() + icons.len() > MAX_FILES {
         return Err(SyncError::TooManyFiles);
     }
+    already_queued.extend(icons.iter().cloned());
     if !icons.is_empty() {
-        let fetched_icons = fetch_json_batch(&client, &base, icons).await;
+        let fetched_icons = fetch_text_batch(&client, &base, icons).await;
         collect_icons(
             fetched_icons,
             &expected_sha256,
@@ -560,6 +618,21 @@ async fn prepare_sync(
             &mut skipped,
         )?;
     }
+    let room = MAX_FILES.saturating_sub(files.len());
+    let declared = declared_files(&already_queued, &manifest_docs, room, &mut skipped);
+    let declared_fetched = fetch_batch(&client, &base, declared.keys().cloned().collect()).await;
+    let declared_content = collect_declared(
+        declared_fetched,
+        &declared,
+        &expected_sha256,
+        policy.require_immutable_releases,
+        &mut skipped,
+    )?;
+    let files: Vec<(String, Vec<u8>)> = files
+        .into_iter()
+        .map(|(relative, content)| (relative, content.into_bytes()))
+        .chain(declared_content)
+        .collect();
     let warnings = super::subcategory::repository_warnings(&parsed.index.entries, |entry| {
         manifest_docs
             .iter()
@@ -580,15 +653,29 @@ async fn prepare_sync(
     Ok(PreparedSync { files, report })
 }
 
-/// Synchronise un dépôt : index, manifestes et contrats de distribution, copiés atomiquement.
+/// Synchronise un dépôt : index, manifestes, contrats, icônes, scripts et ressources déclarés,
+/// copiés atomiquement.
 pub async fn sync_repository(
     repository: &PluginRepository,
     repos_dir: &Path,
     policy: &SyncPolicy,
 ) -> Result<SyncReport, SyncError> {
     let prepared = prepare_sync(repository, policy).await?;
+    let _copies = COPY_LOCK.lock().await;
     publish(repos_dir, &repository.id, &prepared.files).await?;
     Ok(prepared.report)
+}
+
+/// Un dépôt retiré, ou rajouté avec une autre adresse, pendant le téléchargement n'est pas publié.
+async fn ensure_still_registered(
+    pool: &sqlx::SqlitePool,
+    repository: &PluginRepository,
+) -> Result<(), SyncError> {
+    match crate::repository::get_plugin_repository(pool, &repository.id).await {
+        Ok(current) if current.index_url == repository.index_url => Ok(()),
+        Ok(_) | Err(AppError::NotFound) => Err(SyncError::RepositoryRemoved),
+        Err(error) => Err(SyncError::Network(error.to_string())),
+    }
 }
 
 /// Synchronise un dépôt en imposant l'immuabilité TOFU en base (`plugin_release_pins`) avant publication.
@@ -599,6 +686,9 @@ pub async fn sync_repository_verified(
     policy: &SyncPolicy,
 ) -> Result<SyncReport, SyncError> {
     let prepared = prepare_sync(repository, policy).await?;
+    // Tenu jusqu'à la publication : ni ajout ni retrait du dépôt entre le contrôle et la copie.
+    let _copies = COPY_LOCK.lock().await;
+    ensure_still_registered(pool, repository).await?;
     if let Some(release_version) = &prepared.report.release_version {
         let scope = format!("repo:{}", repository.id);
         match crate::repository::verify_or_pin_release(
@@ -625,7 +715,7 @@ pub async fn sync_repository_verified(
 }
 
 fn collect_fetched_json(
-    fetched: Vec<(String, Result<Option<String>, SyncError>)>,
+    fetched: Vec<Fetched<String>>,
     expected_sha256: &HashMap<String, String>,
     require_digest: bool,
     files: &mut Vec<(String, String)>,
@@ -635,7 +725,12 @@ fn collect_fetched_json(
     for (relative, result) in fetched {
         match result {
             Ok(Some(content)) if serde_json::from_str::<serde_json::Value>(&content).is_ok() => {
-                verify_optional_sha256(&relative, &content, expected_sha256, require_digest)?;
+                verify_optional_sha256(
+                    &relative,
+                    content.as_bytes(),
+                    expected_sha256,
+                    require_digest,
+                )?;
                 manifests.push((relative.clone(), content.clone()));
                 files.push((relative, content));
             }
@@ -656,6 +751,7 @@ mod tests {
     use super::*;
     use crate::plugins::CatalogEntry;
 
+    use axum::body::Bytes;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     fn entry(id: &str, kind: CatalogItemType, manifest: &str) -> CatalogEntry {
@@ -791,31 +887,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_publish_replaces_the_previous_copy_atomically() -> anyhow::Result<()> {
-        let dir = tempfile::tempdir()?;
-        publish(
-            dir.path(),
-            "repo.test",
-            &[("index.json".into(), "{\"v\":1}".into())],
-        )
-        .await?;
-        publish(
-            dir.path(),
-            "repo.test",
-            &[("index.json".into(), "{\"v\":2}".into())],
-        )
-        .await?;
-        let content = std::fs::read_to_string(dir.path().join("repo.test/index.json"))?;
-        assert_eq!(content, "{\"v\":2}");
-        let leftovers: Vec<_> = std::fs::read_dir(dir.path())?
-            .filter_map(Result::ok)
-            .filter(|entry| entry.file_name().to_string_lossy().starts_with('.'))
-            .collect();
-        assert!(leftovers.is_empty());
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_sync_refuses_private_hosts_by_default() {
         let repository = PluginRepository {
             id: "repo.local".into(),
@@ -869,12 +940,7 @@ mod tests {
                 get(|| async { r#"{"toolId":"app.demo","toolVersion":"1.0.0","artifacts":[]}"# }),
             )
             .route("/depot/plugins/x/manifest.json", get(|| async { StatusCode::NOT_FOUND }));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let address = listener.local_addr()?;
-        tokio::spawn(async move {
-            let _ = axum::serve(listener, router).await;
-        });
-        Ok(address)
+        serve(router).await
     }
 
     #[tokio::test]
@@ -1032,7 +1098,10 @@ mod tests {
             let _ = axum::serve(listener, router).await;
         });
 
-        let pool = SqlitePoolOptions::new().connect("sqlite::memory:").await?;
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await?;
         sqlx::migrate!().run(&pool).await?;
         let dir = tempfile::tempdir()?;
         let repo = PluginRepository {
@@ -1048,6 +1117,7 @@ mod tests {
             allow_private_hosts: true,
             require_immutable_releases: true,
         };
+        register(&pool, &repo).await?;
 
         let ok_report = sync_repository_verified(&pool, &repo, dir.path(), &strict_policy).await?;
         assert_eq!(ok_report.release_version.as_deref(), Some("1.0.0"));
@@ -1085,15 +1155,255 @@ mod tests {
         Ok(())
     }
 
+    fn local_repository(address: SocketAddr) -> PluginRepository {
+        PluginRepository {
+            id: "repo.fixture".into(),
+            name: "Fixture".into(),
+            index_url: format!("http://{address}/depot/index.json"),
+            is_official: false,
+            enabled: true,
+            last_synced_at: None,
+            created_at: String::new(),
+        }
+    }
+
+    fn private_policy() -> SyncPolicy {
+        SyncPolicy {
+            allow_private_hosts: true,
+            ..SyncPolicy::default()
+        }
+    }
+
+    async fn register(
+        pool: &sqlx::SqlitePool,
+        repository: &PluginRepository,
+    ) -> crate::error::AppResult<()> {
+        let changes = crate::live::ChangeNotifier::default();
+        let (id, name, url) = (&repository.id, &repository.name, &repository.index_url);
+        crate::repository::add_plugin_repository(pool, &changes, id, name, url).await?;
+        Ok(())
+    }
+
+    async fn serve(router: axum::Router) -> anyhow::Result<SocketAddr> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        Ok(address)
+    }
+
+    const SCRIPT: &str = "print('ok')\n";
+    const MODEL: [u8; 4] = [0xff, 0x00, 0xfe, 0x80];
+
+    /// Dépôt d'un script : son code, une ressource binaire, un fichier trop gros et un absent.
+    async fn serve_script_repository(script_sha256: &str) -> anyhow::Result<SocketAddr> {
+        use axum::routing::get;
+        let index = serde_json::json!({
+            "schemaVersion": "1.0.0",
+            "filesSha256": { "scripts/demo/run.py": script_sha256 },
+            "entries": [{
+                "id": "script.demo", "type": "script", "version": "1.0.0", "name": "Démo",
+                "manifestPath": "scripts/demo/manifest.json"
+            }]
+        })
+        .to_string();
+        let manifest = serde_json::json!({
+            "schemaVersion": "1.1.0", "id": "script.demo", "type": "script", "version": "1.0.0",
+            "name": "Démo",
+            "files": [
+                { "path": "run.py", "role": "script", "mediaType": "text/plain" },
+                { "path": "modele.bin", "role": "asset" },
+                { "path": "enorme.bin", "role": "asset" },
+                { "path": "absent.py", "role": "script" },
+                { "path": "README.md", "role": "docs" }
+            ]
+        })
+        .to_string();
+        serve(
+            axum::Router::new()
+                .route("/depot/index.json", get(move || async move { index }))
+                .route(
+                    "/depot/scripts/demo/manifest.json",
+                    get(move || async move { manifest }),
+                )
+                .route("/depot/scripts/demo/run.py", get(|| async { SCRIPT }))
+                .route(
+                    "/depot/scripts/demo/modele.bin",
+                    get(|| async { MODEL.to_vec() }),
+                )
+                .route(
+                    "/depot/scripts/demo/enorme.bin",
+                    get(|| async { vec![0u8; MAX_FILE_BYTES + 1] }),
+                ),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn declared_scripts_and_assets_are_copied_with_their_repository() -> anyhow::Result<()> {
+        let digest = ToolCacheManager::compute_sha256(SCRIPT.as_bytes());
+        let repository = local_repository(serve_script_repository(&digest).await?);
+        let dir = tempfile::tempdir()?;
+        let report = sync_repository(&repository, dir.path(), &private_policy()).await?;
+
+        let item = dir.path().join("repo.fixture/scripts/demo");
+        assert_eq!(std::fs::read_to_string(item.join("run.py"))?, SCRIPT);
+        assert_eq!(std::fs::read(item.join("modele.bin"))?, MODEL);
+        for left_out in ["enorme.bin", "absent.py"] {
+            assert!(!item.join(left_out).exists());
+            assert!(report.skipped.iter().any(|why| why.contains(left_out)));
+        }
+        assert!(!item.join("README.md").exists());
+        // index, manifeste, script et ressource.
+        assert_eq!(report.files, 4);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_script_with_a_wrong_digest_refuses_the_whole_repository() -> anyhow::Result<()> {
+        let repository = local_repository(serve_script_repository(&"0".repeat(64)).await?);
+        let dir = tempfile::tempdir()?;
+        let refused = sync_repository(&repository, dir.path(), &private_policy()).await;
+        assert!(matches!(refused, Err(SyncError::IntegrityMismatch(_))));
+        assert!(!dir.path().join("repo.fixture").exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_old_repository_named_local_is_not_synchronised() -> anyhow::Result<()> {
+        let address = serve_fixture().await?;
+        let dir = tempfile::tempdir()?;
+        let named = |id: &str| PluginRepository {
+            id: id.to_owned(),
+            ..local_repository(address)
+        };
+        let refused = sync_repository(&named("local"), dir.path(), &private_policy()).await;
+        assert!(matches!(refused, Err(SyncError::InvalidRepositoryId)));
+        assert!(!dir.path().join("local").exists());
+        for usable in ["dev", "installed"] {
+            sync_repository(&named(usable), dir.path(), &private_policy()).await?;
+            assert!(dir.path().join(usable).is_dir(), "{usable}");
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_repository_removed_or_moved_meanwhile_is_not_published() -> anyhow::Result<()> {
+        use sqlx::sqlite::SqlitePoolOptions;
+        let repository = local_repository(serve_fixture().await?);
+        let dir = tempfile::tempdir()?;
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await?;
+        sqlx::migrate!().run(&pool).await?;
+
+        let removed =
+            sync_repository_verified(&pool, &repository, dir.path(), &private_policy()).await;
+        assert!(matches!(removed, Err(SyncError::RepositoryRemoved)));
+
+        // Retiré puis rajouté avec une autre adresse : les fichiers reçus sont ceux de l'ancienne.
+        let moved = PluginRepository {
+            index_url: "https://example.org/index.json".into(),
+            ..repository.clone()
+        };
+        register(&pool, &moved).await?;
+        let replaced =
+            sync_repository_verified(&pool, &repository, dir.path(), &private_policy()).await;
+        assert!(matches!(replaced, Err(SyncError::RepositoryRemoved)));
+        assert!(!dir.path().join("repo.fixture").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn a_path_never_leads_outside_the_repository() -> anyhow::Result<()> {
+        let base = Url::parse("https://example.org/depot/")?;
+        assert_eq!(
+            file_url(&base, "scripts/demo/run.py")?.as_str(),
+            "https://example.org/depot/scripts/demo/run.py"
+        );
+        for outside in ["http://192.168.1.1/secret", "//ailleurs.org/x", "../x"] {
+            assert!(file_url(&base, outside).is_err(), "{outside}");
+        }
+        Ok(())
+    }
+
+    type ArchiveBlock = std::io::Result<Bytes>;
+
+    /// Serveur d'archive : un premier bloc, puis la suite donnée.
+    async fn serve_archive_then<S>(
+        rest: impl Fn() -> S + Clone + Send + Sync + 'static,
+    ) -> anyhow::Result<Url>
+    where
+        S: futures_util::Stream<Item = ArchiveBlock> + Send + 'static,
+    {
+        use axum::{body::Body, routing::get};
+        let router = axum::Router::new().route(
+            "/outil.tar.gz",
+            get(move || {
+                let start = stream::iter([ArchiveBlock::Ok(Bytes::from_static(b"debut"))]);
+                let body = Body::from_stream(start.chain(rest()));
+                async move { body }
+            }),
+        );
+        let address = serve(router).await?;
+        Ok(Url::parse(&format!("http://{address}/outil.tar.gz"))?)
+    }
+
+    const TEST_IDLE: Duration = Duration::from_secs(3);
+    const TEST_TOTAL: Duration = Duration::from_secs(60);
+    /// Bien sous `TEST_IDLE`, même sur une machine de CI chargée.
+    const TEST_PAUSE: Duration = Duration::from_millis(200);
+    const TEST_CHUNKS: usize = 8;
+
+    #[tokio::test]
+    async fn a_silent_archive_server_is_abandoned() -> anyhow::Result<()> {
+        let url = serve_archive_then(stream::pending::<ArchiveBlock>).await?;
+        let timeouts = ArchiveTimeouts {
+            total: TEST_TOTAL,
+            idle: TEST_IDLE,
+        };
+        let stalled = fetch_archive_within(&url, &private_policy(), timeouts).await;
+        assert!(matches!(stalled, Err(SyncError::Network(why)) if why.contains("muet")));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_slow_but_steady_archive_is_received_whole() -> anyhow::Result<()> {
+        let url = serve_archive_then(|| {
+            stream::iter(0..TEST_CHUNKS).then(|_| async {
+                tokio::time::sleep(TEST_PAUSE).await;
+                ArchiveBlock::Ok(Bytes::from_static(b"."))
+            })
+        })
+        .await?;
+        let timeouts = ArchiveTimeouts {
+            total: TEST_TOTAL,
+            idle: TEST_IDLE,
+        };
+        let archive = fetch_archive_within(&url, &private_policy(), timeouts).await?;
+        assert_eq!(archive.len(), b"debut".len() + TEST_CHUNKS);
+
+        // Le budget total reste une limite, même si le serveur ne se tait pas.
+        let bounded = ArchiveTimeouts {
+            total: TEST_PAUSE * 2,
+            idle: TEST_IDLE,
+        };
+        assert!(matches!(
+            fetch_archive_within(&url, &private_policy(), bounded).await,
+            Err(SyncError::Network(_))
+        ));
+        Ok(())
+    }
+
     const ICON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg"/>"#;
 
-    type Fetched = (String, Result<Option<String>, SyncError>);
-
-    fn fetched(path: &str, body: Option<&str>) -> Fetched {
+    fn fetched(path: &str, body: Option<&str>) -> Fetched<String> {
         (path.to_owned(), Ok(body.map(str::to_owned)))
     }
 
-    fn failed(path: &str) -> Fetched {
+    fn failed(path: &str) -> Fetched<String> {
         (path.to_owned(), Err(SyncError::Network("coupé".into())))
     }
 

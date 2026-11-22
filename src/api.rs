@@ -22,6 +22,7 @@ pub(crate) mod source_publication;
 pub(crate) mod source_recovery;
 pub(crate) mod source_recovery_remote;
 pub(crate) mod system;
+mod tool_purge;
 pub(crate) mod transfers;
 mod worker_view;
 use crate::{
@@ -169,7 +170,7 @@ pub(crate) async fn to_completion<T: Send + 'static>(
 pub const JSON_API_TIMEOUT: Duration = Duration::from_secs(60);
 /// Budget de l'assistant IA intégré (boucles multi-tours et modèles locaux Ollama).
 pub const AI_CHAT_TIMEOUT: Duration = Duration::from_secs(180);
-/// Budget des transferts de fichiers et du flux SSE, déjà borné dans `receive`.
+/// Budget des transferts de fichiers, des installations d'outils et du flux SSE, déjà borné dans `receive`.
 pub const TRANSFER_TIMEOUT: Duration = Duration::from_secs(3600);
 pub const JSON_BODY_LIMIT: usize = 16 * 1024;
 /// Limite pour les scripts locaux (`MAX_SCRIPT_BYTES` = 512 Kio + enveloppe JSON), graphes de flows et modèles.
@@ -285,10 +286,6 @@ fn json_routes() -> Router<AppState> {
         .route("/api/v1/plugins/{id}", get(plugins::plugin_detail))
         .route("/api/v1/plugins/{id}/icon", get(plugins::plugin_icon))
         .route(
-            "/api/v1/plugins/{id}/install",
-            post(plugins::install_plugin),
-        )
-        .route(
             "/api/v1/plugins/repositories",
             get(plugins::list_repositories).post(plugins::add_repository),
         )
@@ -327,7 +324,6 @@ fn json_routes() -> Router<AppState> {
             "/api/v1/tools/{id}/distribution",
             get(plugins::tool_distribution),
         )
-        .route("/api/v1/tools/{id}/install", post(plugins::install_tool))
         .route("/api/v1/worker/tools", get(plugins::worker_active_tools))
         .route(
             "/api/v1/worker/software-encoder-probes",
@@ -342,7 +338,6 @@ fn json_routes() -> Router<AppState> {
             "/api/v1/packs/{id}/installation",
             get(plugins::pack_installation),
         )
-        .route("/api/v1/packs/{id}/install", post(plugins::install_pack))
         .route("/api/v1/local", get(local::snapshot))
         .route(
             "/api/v1/local/scripts",
@@ -516,6 +511,13 @@ fn json_routes() -> Router<AppState> {
 fn transfer_routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/libraries/{id}/scan", post(libraries::scan))
+        // Téléchargent des archives d'outils.
+        .route(
+            "/api/v1/plugins/{id}/install",
+            post(plugins::install_plugin),
+        )
+        .route("/api/v1/tools/{id}/install", post(plugins::install_tool))
+        .route("/api/v1/packs/{id}/install", post(plugins::install_pack))
         .route(EVENTS_PATH, get(events::all))
         .route(JOB_EVENTS_PATH, get(events::jobs))
         .route("/api/v1/ai/runs/{id}/events", get(crate::ai::run_events))
@@ -957,25 +959,9 @@ async fn plugin_sync_loop(state: AppState) {
         crate::plugins::sync_enabled_repositories(&state.pool, &state.config, &state.catalog_cache)
             .await;
         state.catalog_cache.invalidate().await;
-        let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
-        let cache = state.tool_cache();
-        let keep: Vec<(String, String)> = state
-            .catalog_cache
-            .tools_status(&roots, &cache)
-            .await
-            .into_iter()
-            .map(|t| (t.id, t.version))
-            .collect();
-        if !keep.is_empty()
-            && let Ok(pruned) = cache.prune_unused(&keep)
-            && pruned > 0
-        {
-            tracing::info!(
-                pruned,
-                "anciennes versions d'outils purgées du cache central"
-            );
-        }
-        tokio::time::sleep(PLUGIN_SYNC_INTERVAL).await;
+        let next_sync = tokio::time::Instant::now() + PLUGIN_SYNC_INTERVAL;
+        tool_purge::prune_before(&state, next_sync).await;
+        tokio::time::sleep_until(next_sync).await;
     }
 }
 
@@ -1024,6 +1010,8 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     let addr = config.bind;
     let tls = config.tls.clone();
     let state = AppState::new(pool.clone(), Arc::new(config));
+    // Avant toute lecture du catalogue par une tâche ou un flux.
+    crate::plugins::recover_repository_copies(&state.pool, &state.config).await;
     // Aucun worker n'a pu joindre le central arrêté : compteurs à zéro avant toute expiration.
     repository::restart_contacts(&state.pool).await?;
     source_recovery::recover(&state).await?;

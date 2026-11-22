@@ -17,8 +17,8 @@ pub(super) use end::set_failed;
 pub use end::{LEASE_STEP, MAX_FREE_RELEASES, release_lease, undeliver_lease};
 pub use outcome::{LeaseChange, LeaseEnd, LeaseOutcome};
 pub use restart::{
-    end_disowned_leases, end_integrated_leases, end_orphaned_lease, lease_orphaned, register_boot,
-    restart_contacts,
+    end_disowned_leases, end_integrated_leases, end_orphaned_lease, integrated_lease_active,
+    lease_orphaned, register_boot, restart_contacts,
 };
 pub use sweep::{SWEEP_PAUSE_SECONDS, SweepPass, sweep, sweep_with_clock};
 pub use view::lease_infos;

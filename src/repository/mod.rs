@@ -61,9 +61,9 @@ pub use jobs::{
 pub use leases::{
     LEASE_STEP, LeaseChange, LeaseEnd, LeaseKey, LeaseOutcome, MAX_FREE_RELEASES,
     SWEEP_PAUSE_SECONDS, SweepPass, active, completed_by_lease, end_disowned_leases,
-    end_integrated_leases, end_orphaned_lease, failed_by_lease, heartbeat, lease_infos,
-    lease_orphaned, register_boot, release_lease, renew_contact, restart_contacts, sweep,
-    sweep_with_clock, undeliver_lease,
+    end_integrated_leases, end_orphaned_lease, failed_by_lease, heartbeat, integrated_lease_active,
+    lease_infos, lease_orphaned, register_boot, release_lease, renew_contact, restart_contacts,
+    sweep, sweep_with_clock, undeliver_lease,
 };
 pub use libraries::{
     delete_library, due_scheduled_libraries, get_library, insert_library,

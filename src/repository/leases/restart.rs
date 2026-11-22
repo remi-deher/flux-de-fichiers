@@ -70,6 +70,17 @@ pub async fn end_integrated_leases(pool: &SqlitePool) -> AppResult<Vec<LeaseChan
     Ok(end_all(pool, held, LeaseEnd::HolderStopped).await)
 }
 
+/// Le worker intégré exécute-t-il une tâche ? Ses outils sont dans le cache du central.
+pub async fn integrated_lease_active(pool: &SqlitePool) -> AppResult<bool> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM jobs j JOIN workers w ON w.id=j.worker_id \
+         WHERE w.serves_central=1 AND j.status=?1)",
+    )
+    .bind(JobStatus::Running)
+    .fetch_one(pool)
+    .await?)
+}
+
 /// Tâches attribuées à ce worker qu'il dit ne pas tenir (réponse de réservation perdue, abandon) et
 /// restées sans contact : reprises sans attendre l'échéance.
 pub async fn end_disowned_leases(

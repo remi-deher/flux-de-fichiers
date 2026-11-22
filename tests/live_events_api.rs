@@ -203,7 +203,8 @@ async fn a_purge_of_the_central_tools_is_signalled() -> anyhow::Result<()> {
         .await?;
     let state = AppState::new(pool, std::sync::Arc::new(config));
     let mut rx = state.event_history.subscribe_from(None).await.rx;
-    assert_eq!(state.tool_cache().prune_unused(&[])?, 1);
+    let keep = [("demo".to_owned(), "2.0.0".to_owned())];
+    assert_eq!(state.tool_cache().prune_unused(&keep)?, 1);
     let (_, event) = tokio::time::timeout(CHANGE_WINDOW * 10, rx.recv()).await??;
     assert!(matches!(event, LiveEvent::Changed(ChangeTopic::Tools)));
     Ok(())

@@ -536,6 +536,7 @@ fn resolve_script_entrypoint(manifest_dir: &Path, raw: &mut Value) {
         return;
     };
     if bytes.len() > MAX_INLINE_SCRIPT_BYTES {
+        tracing::warn!(path = %resolved.display(), "script trop volumineux : code non chargé");
         return;
     }
     if let Ok(code) = String::from_utf8(bytes) {

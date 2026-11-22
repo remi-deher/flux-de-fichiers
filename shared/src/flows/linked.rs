@@ -89,12 +89,17 @@ fn non_empty_text(value: Option<&Value>) -> Option<&str> {
         .filter(|text| !text.is_empty())
 }
 
-/// Vrai si `kind` désigne le bloc « Aller au sous-flux » (`sub-flow` ou `<espace>.sub-flow`).
-pub fn is_sub_flow_kind(kind: &str) -> bool {
-    match kind.strip_suffix(SUB_FLOW_BLOCK) {
+/// Vrai si `kind` vaut `block` ou `<espace>.<block>` (bloc primitif éventuellement préfixé).
+pub fn is_block_kind(kind: &str, block: &str) -> bool {
+    match kind.strip_suffix(block) {
         Some(prefix) => prefix.is_empty() || prefix.ends_with(KIND_NAMESPACE_SEPARATOR),
         None => false,
     }
+}
+
+/// Vrai si `kind` désigne le bloc « Aller au sous-flux » (`sub-flow` ou `<espace>.sub-flow`).
+pub fn is_sub_flow_kind(kind: &str) -> bool {
+    is_block_kind(kind, SUB_FLOW_BLOCK)
 }
 
 /// Flux appelé par un bloc « Aller au sous-flux » ; `None` pour un autre bloc ou sans cible.

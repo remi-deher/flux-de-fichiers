@@ -448,7 +448,7 @@ pub async fn enqueue_library_source(
 
 /// Crée une tâche en file. Sans `priority`, elle hérite de la priorité par défaut de sa
 /// bibliothèque (sinon `LIBRARY_DEFAULT_JOB_PRIORITY`) ; sa classe de ressource (CPU/GPU) est
-/// déduite du flux figé (`flow_resource_class`).
+/// déduite de tous ses flux figés, sous-flux et flux d'échec compris (`refresh_job_class`).
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn create_job(
     conn: &mut sqlx::SqliteConnection,
@@ -505,13 +505,6 @@ pub(super) async fn create_job(
             .map(|flow| (flow.id, flow.version))
     };
 
-    let resource_class = super::resource_slots::frozen_flow_class(
-        &mut *conn,
-        resolved_flow
-            .as_ref()
-            .map(|(id, version)| (id.as_str(), *version)),
-    )
-    .await?;
     let (flow_id, flow_version) = match resolved_flow {
         Some((id, version)) => (Some(id), Some(version)),
         None => (None, None),
@@ -533,13 +526,13 @@ pub(super) async fn create_job(
     )
     .fetch_one(&mut *conn)
     .await?;
-    super::resource_slots::set_job_class(&mut *conn, job.id, resource_class).await?;
     super::linked_flows::freeze_linked_flows(
         &mut *conn,
         job.id,
         job.flow_id.as_deref().zip(job.flow_version),
     )
     .await?;
+    super::resource_slots::refresh_job_class(&mut *conn, job.id).await?;
     if let Some(source) = source {
         sqlx::query(
             "UPDATE jobs SET source_root=?, source_worker_id=?, source_writable=?, source_mtime_ns=?, source_key=? WHERE id=?",
@@ -749,6 +742,9 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
     } else {
         None
     };
+    if let Some(job) = &job {
+        super::failure_flows::reset_for_new_attempt(&mut tx, job.id).await?;
+    }
     tx.commit().await?;
     match job {
         None => Ok(None),
@@ -1069,33 +1065,44 @@ async fn save_job_steps_inner(
     .fetch_one(&mut *tx)
     .await?;
     for step in steps {
-        let step_index = i64::from(step.step_index)
-            .checked_add(prefix)
-            .ok_or(AppError::Invalid)?;
-        let variables_json = step
-            .variables
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|_| AppError::Invalid)?;
-        sqlx::query(
-            "INSERT INTO job_steps (job_id, step_index, node_id, block_kind, operation_id, \
-                                    status, message, output_excerpt, variables_json) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        )
-        .bind(job_id)
-        .bind(step_index)
-        .bind(&step.node_id)
-        .bind(&step.block_kind)
-        .bind(&step.operation_id)
-        .bind(step.status)
-        .bind(&step.message)
-        .bind(&step.output_excerpt)
-        .bind(variables_json)
-        .execute(&mut *tx)
-        .await?;
+        insert_job_step(&mut tx, job_id, prefix, step).await?;
     }
     tx.commit().await?;
+    Ok(())
+}
+
+/// Insère une étape du journal, décalée de `prefix` (étapes déjà présentes avant elle).
+pub(super) async fn insert_job_step(
+    conn: &mut sqlx::SqliteConnection,
+    job_id: Uuid,
+    prefix: i64,
+    step: &JobStepEntry,
+) -> AppResult<()> {
+    let step_index = i64::from(step.step_index)
+        .checked_add(prefix)
+        .ok_or(AppError::Invalid)?;
+    let variables_json = step
+        .variables
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|_| AppError::Invalid)?;
+    sqlx::query(
+        "INSERT INTO job_steps (job_id, step_index, node_id, block_kind, operation_id, \
+                                status, message, output_excerpt, variables_json) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+    )
+    .bind(job_id)
+    .bind(step_index)
+    .bind(&step.node_id)
+    .bind(&step.block_kind)
+    .bind(&step.operation_id)
+    .bind(step.status)
+    .bind(&step.message)
+    .bind(&step.output_excerpt)
+    .bind(variables_json)
+    .execute(conn)
+    .await?;
     Ok(())
 }
 

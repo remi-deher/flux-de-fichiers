@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::fmt;
+use std::{convert::Infallible, fmt};
 
 /// Ouverture d'un jeton de modèle.
 pub const TEMPLATE_OPEN: &str = "{$";
@@ -353,26 +353,41 @@ pub fn exact_token(text: &str) -> Option<&str> {
     Some(expr.trim())
 }
 
+/// Reconstruit un JSON en appliquant `map` à chaque chaîne ; tableaux et objets sont parcourus,
+/// les autres scalaires recopiés. La première erreur interrompt le parcours.
+pub fn map_strings<E>(
+    value: &Value,
+    map: &mut dyn FnMut(&str) -> Result<Value, E>,
+) -> Result<Value, E> {
+    match value {
+        Value::String(text) => map(text),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| map_strings(item, map))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        Value::Object(fields) => fields
+            .iter()
+            .map(|(key, item)| map_strings(item, map).map(|mapped| (key.clone(), mapped)))
+            .collect::<Result<Map<_, _>, _>>()
+            .map(Value::Object),
+        other => Ok(other.clone()),
+    }
+}
+
+/// Variante infaillible de [`map_strings`].
+pub fn map_strings_infallible(value: &Value, map: &mut dyn FnMut(&str) -> Value) -> Value {
+    map_strings::<Infallible>(value, &mut |text| Ok(map(text)))
+        .unwrap_or_else(|never| match never {})
+}
+
 /// Résout récursivement un JSON ; une chaîne réduite à un seul jeton résolu garde son type.
 pub fn render_value(value: &Value, resolve: &dyn Fn(&str) -> Option<Value>) -> Value {
-    match value {
-        Value::String(text) => exact_token(text)
+    map_strings_infallible(value, &mut |text| {
+        exact_token(text)
             .and_then(resolve)
-            .unwrap_or_else(|| Value::String(render_template(text, resolve))),
-        Value::Array(items) => Value::Array(
-            items
-                .iter()
-                .map(|item| render_value(item, resolve))
-                .collect(),
-        ),
-        Value::Object(fields) => Value::Object(
-            fields
-                .iter()
-                .map(|(key, item)| (key.clone(), render_value(item, resolve)))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
+            .unwrap_or_else(|| Value::String(render_template(text, resolve)))
+    })
 }
 
 /// Expressions citées par un modèle (validation et aide de saisie de l'éditeur).
@@ -403,6 +418,23 @@ pub fn is_known_expression(expr: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn map_strings_rebuilds_nested_json_and_stops_on_the_first_error() {
+        let value = serde_json::json!({"a": ["x", 1, {"b": "y"}], "c": null});
+        let upper = map_strings_infallible(&value, &mut |text| Value::String(text.to_uppercase()));
+        assert_eq!(
+            upper,
+            serde_json::json!({"a": ["X", 1, {"b": "Y"}], "c": null})
+        );
+        let mut seen = 0;
+        let failed = map_strings(&value, &mut |text| {
+            seen += 1;
+            Err::<Value, String>(text.to_owned())
+        });
+        assert_eq!(failed, Err("x".to_owned()));
+        assert_eq!(seen, 1);
+    }
     use serde_json::json;
 
     fn sample() -> FlowVariables {

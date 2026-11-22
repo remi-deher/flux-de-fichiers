@@ -5,7 +5,8 @@
 //! les relais. Le classement est pessimiste : un bloc GPU sur une branche conditionnelle classe
 //! toute la tâche en GPU, pour réserver la place au pire cas. Un bloc script n'est GPU que s'il
 //! déclare lui-même `acceleration`. Seule une valeur littérale compte : une variable non résolue
-//! (`{{…}}`) ou une valeur inconnue donne CPU.
+//! (`{{…}}`) ou une valeur inconnue donne CPU. Les flux liés figés avec la tâche (sous-flux et
+//! flux d'échec) comptent comme le flux principal : `flows_resource_class` les réunit.
 
 use super::FlowGraph;
 use crate::capabilities::EncodeAcceleration;
@@ -16,18 +17,29 @@ const ACCELERATION_CONFIG_KEY: &str = "acceleration";
 
 /// Classe de ressource exigée par le graphe (voir l'en-tête du module).
 pub fn flow_resource_class(graph: &FlowGraph) -> JobResourceClass {
-    let hardware = graph.nodes.iter().any(|node| {
+    flows_resource_class([graph])
+}
+
+/// Classe de ressource d'un ensemble de graphes exécutables par une même tâche (flux principal,
+/// sous-flux, flux d'échec) : GPU dès qu'un seul d'entre eux l'exige.
+pub fn flows_resource_class<'a>(
+    graphs: impl IntoIterator<Item = &'a FlowGraph>,
+) -> JobResourceClass {
+    if graphs.into_iter().any(needs_hardware) {
+        JobResourceClass::Gpu
+    } else {
+        JobResourceClass::Cpu
+    }
+}
+
+fn needs_hardware(graph: &FlowGraph) -> bool {
+    graph.nodes.iter().any(|node| {
         node.config
             .get(ACCELERATION_CONFIG_KEY)
             .cloned()
             .and_then(|value| serde_json::from_value::<EncodeAcceleration>(value).ok())
             .is_some_and(|acceleration| acceleration != EncodeAcceleration::Cpu)
-    });
-    if hardware {
-        JobResourceClass::Gpu
-    } else {
-        JobResourceClass::Cpu
-    }
+    })
 }
 
 #[cfg(test)]
@@ -84,6 +96,16 @@ mod tests {
                 JobResourceClass::Cpu
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn any_hardware_graph_makes_the_set_gpu() -> Result<(), serde_json::Error> {
+        let cpu = graph_with(json!("cpu"))?;
+        let gpu = graph_with(json!("vaapi"))?;
+        assert_eq!(flows_resource_class([&cpu, &cpu]), JobResourceClass::Cpu);
+        assert_eq!(flows_resource_class([&cpu, &gpu]), JobResourceClass::Gpu);
+        assert_eq!(flows_resource_class([]), JobResourceClass::Cpu);
         Ok(())
     }
 }

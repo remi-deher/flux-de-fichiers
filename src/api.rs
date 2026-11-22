@@ -1000,6 +1000,8 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     if state.config.local_worker {
         tokio::spawn(crate::local_worker::run(state.clone()));
     }
+    // Flux d'échec des tâches échouées hors worker (perte de bail, refus du central, ADR 0026).
+    tokio::spawn(crate::failure_flow_runner::run(state.clone()));
     match crate::secrets::SecretBox::open(&state.config.config_dir) {
         Ok(secrets) => {
             match crate::flows::migrate_flow_secrets(&state.pool, &secrets).await {

@@ -8,7 +8,7 @@ use crate::{
     domain::{JobStatus, Worker},
     error::AppResult,
 };
-use forgearr_shared::flows::{FlowGraph, flow_resource_class};
+use forgearr_shared::flows::{FlowGraph, flows_resource_class};
 use forgearr_shared::jobs::{JobResourceClass, JobResourceInfo};
 use forgearr_shared::workers::RunningJobs;
 use sqlx::{SqliteConnection, SqlitePool};
@@ -92,31 +92,27 @@ pub(super) async fn running_jobs(
     Ok(running)
 }
 
-/// Classe de ressource du flux figé `flow_id@version` ; sans flux lisible : CPU.
-pub(super) async fn frozen_flow_class(
-    conn: &mut SqliteConnection,
-    flow: Option<(&str, i64)>,
-) -> AppResult<JobResourceClass> {
-    let Some((flow_id, version)) = flow else {
-        return Ok(JobResourceClass::Cpu);
-    };
-    let definition: Option<String> =
-        sqlx::query_scalar("SELECT definition FROM flow_versions WHERE flow_id=?1 AND version=?2")
-            .bind(flow_id)
-            .bind(version)
-            .fetch_optional(conn)
-            .await?;
-    Ok(definition
-        .map(|definition| flow_resource_class(&FlowGraph::parse(&definition)))
-        .unwrap_or_default())
-}
+/// Définitions de tous les flux figés d'une tâche : flux principal et flux liés (sous-flux,
+/// flux d'échec, voir `linked_flows::freeze_linked_flows`).
+const FROZEN_JOB_DEFINITIONS_SQL: &str = "SELECT v.definition FROM jobs j \
+     JOIN flow_versions v ON v.flow_id = j.flow_id AND v.version = j.flow_version WHERE j.id = ?1 \
+     UNION ALL SELECT v.definition FROM job_linked_flows l \
+     JOIN flow_versions v ON v.flow_id = l.flow_id AND v.version = l.version WHERE l.job_id = ?1";
 
-/// Fige la classe de ressource d'une tâche qui vient d'être créée.
-pub(super) async fn set_job_class(
-    conn: &mut SqliteConnection,
-    job: Uuid,
-    class: JobResourceClass,
-) -> AppResult<()> {
+/// Recalcule et fige la classe de ressource d'une tâche d'après tous ses flux figés (principal,
+/// sous-flux, flux d'échec) : GPU dès que l'un d'eux l'exige, CPU sans flux lisible. À appeler
+/// après `freeze_linked_flows`.
+pub(super) async fn refresh_job_class(conn: &mut SqliteConnection, job: Uuid) -> AppResult<()> {
+    let definitions: Vec<String> = sqlx::query_scalar(FROZEN_JOB_DEFINITIONS_SQL)
+        .bind(job)
+        .fetch_all(&mut *conn)
+        .await?;
+    let graphs: Vec<FlowGraph> = definitions
+        .iter()
+        .map(String::as_str)
+        .map(FlowGraph::parse)
+        .collect();
+    let class = flows_resource_class(&graphs);
     sqlx::query("UPDATE jobs SET resource_class=?2 WHERE id=?1")
         .bind(job)
         .bind(class.as_str())

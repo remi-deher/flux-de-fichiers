@@ -28,7 +28,7 @@ pub fn Drawer(
     );
     let label_id = title_id.clone();
     let close = move || open.set(false);
-    let _escape = window_event_listener(ev::keydown, move |event| {
+    crate::ui::listen_window(ev::keydown, move |event| {
         if event.key() == "Escape" && open.get_untracked() {
             close();
         }

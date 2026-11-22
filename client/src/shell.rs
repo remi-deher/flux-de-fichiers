@@ -469,7 +469,7 @@ pub fn Shell(me: Me, children: Children) -> impl IntoView {
     let jobs_list = Signal::derive(move || central_jobs.get().flatten().unwrap_or_default());
     let nav = RwSignal::new(false);
     provide_context(NavDrawer(nav));
-    let _escape = window_event_listener(leptos::ev::keydown, move |event| {
+    crate::ui::listen_window(leptos::ev::keydown, move |event| {
         if event.key() == "Escape" {
             nav.set(false);
         }

@@ -11,6 +11,7 @@ use crate::{
     flows::FailureInfo,
     job_runner::{self, FlowInput},
     repository,
+    worker::startup_purge,
 };
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -23,6 +24,12 @@ const WORK_DIR_PREFIX: &str = "failure-flow-";
 
 /// Boucle du central : prend chaque tâche en attente (passée à `done` avant l'exécution).
 pub async fn run(state: AppState) {
+    // Un flux interrompu ne sera pas rejoué : son dossier ne sert plus.
+    let staging = state.config.data_dir.join("staging");
+    startup_purge::purge_matching(&staging, |name, is_dir| {
+        is_dir && name.starts_with(WORK_DIR_PREFIX)
+    })
+    .await;
     loop {
         match repository::take_pending_failure_flow(&state.pool).await {
             Ok(Some((job, claim))) => {
@@ -120,14 +127,30 @@ async fn execute(state: &AppState, job: &Job, mut claim: Claim) {
 
 /// Rend visible un flux d'échec abandonné avant son exécution (étape de synthèse en échec).
 async fn record_not_run(state: &AppState, job: &Job, reason: &str) {
-    if let Err(error) = repository::record_failure_flow_not_run(&state.pool, job.id, reason).await {
-        tracing::warn!(job_id = %job.id, error = %error, "journal du flux d'échec non enregistré");
-    }
+    let failed = (job.id, job.lease_epoch);
+    log_append(
+        job,
+        repository::record_failure_flow_not_run(&state.pool, failed, reason).await,
+    );
 }
 
 async fn append_steps(state: &AppState, job: &Job, steps: &[JobStepEntry]) {
-    if let Err(error) = repository::append_job_steps(&state.pool, job.id, steps).await {
-        tracing::warn!(job_id = %job.id, error = %error, "journal du flux d'échec non enregistré");
+    let failed = (job.id, job.lease_epoch);
+    log_append(
+        job,
+        repository::append_failure_steps(&state.pool, failed, steps).await,
+    );
+}
+
+fn log_append(job: &Job, appended: crate::error::AppResult<bool>) {
+    match appended {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::warn!(job_id = %job.id, "tâche relancée : journal du flux d'échec abandonné");
+        }
+        Err(error) => {
+            tracing::warn!(job_id = %job.id, error = %error, "journal du flux d'échec non enregistré");
+        }
     }
 }
 

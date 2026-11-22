@@ -251,18 +251,11 @@ pub(crate) async fn publish_staged(
                 job.source_sha256.as_deref().ok_or(AppError::Invalid)?,
                 job.source_bytes.ok_or(AppError::Invalid)?,
                 s.config.max_file_bytes,
-                async { repository::active(&s.pool, id, lease).await.map(|_| ()) },
+                repository::require_publication_grant(&s.pool, id, lease),
             )
             .await;
             if let Err(error) = replacement {
-                // Une source modifiée a été refusée avant remplacement : la copie n'a plus d'objet ;
-                // les autres erreurs peuvent être ambiguës et gardent la copie pour une éventuelle
-                // récupération.
-                let error = abandon_publication(s, job, lease, error).await;
-                if matches!(error, AppError::SourceChanged) {
-                    let _ = tokio::fs::remove_file(&destination).await;
-                }
-                return Err(error);
+                return Err(abandon_publication(s, job, lease, &name, error).await);
             }
         }
     }
@@ -305,20 +298,60 @@ pub(crate) async fn publish_staged(
 }
 
 /// Referme le journal d'un remplacement qui n'a pas abouti : une source modifiée a été refusée
-/// avant tout remplacement (le journal est retiré), toute autre issue reste incertaine.
+/// avant tout remplacement, et sans accord rien n'a pu être remplacé (le journal et la copie centrale
+/// `output_name` éventuelle sont retirés) ; toute autre issue reste incertaine et garde la copie.
 pub(super) async fn abandon_publication(
     s: &AppState,
     job: &Job,
     lease: &LeaseRequest,
+    output_name: &str,
     error: AppError,
 ) -> AppError {
+    let key = (job.id, lease.lease_epoch);
     if matches!(error, AppError::SourceChanged) {
-        let cleared =
-            repository::clear_source_publication(&s.pool, job.id, lease.lease_epoch).await;
-        return cleared.err().unwrap_or(error);
+        if let Err(uncleared) = repository::clear_source_publication(&s.pool, key.0, key.1).await {
+            return uncleared;
+        }
+        discard_intent(s, key, output_name).await;
+        return error;
+    }
+    match drop_unauthorized(s, key, output_name).await {
+        Ok(true) => return error,
+        Ok(false) => {}
+        Err(unread) => {
+            tracing::warn!(job_id=%job.id, error=%unread, "accord de publication illisible");
+        }
     }
     mark_publication_uncertain(s, job.id, lease.lease_epoch).await;
     error
+}
+
+/// Écarte une intention jamais autorisée (rien n'a été remplacé). Le titulaire annoncera de nouveau
+/// son résultat ou déclarera un échec ordinaire ; sans titulaire, la tâche est conclue aussitôt.
+pub(super) async fn drop_unauthorized(
+    s: &AppState,
+    key: repository::LeaseKey,
+    output_name: &str,
+) -> AppResult<bool> {
+    if !repository::abandon_unauthorized_publication(&s.pool, key.0, key.1).await? {
+        return Ok(false);
+    }
+    tracing::info!(job_id=%key.0, "publication jamais autorisée écartée");
+    discard_intent(s, key, output_name).await;
+    Ok(true)
+}
+
+/// Suites d'une intention retirée : copie centrale supprimée, bail orphelin conclu.
+async fn discard_intent(s: &AppState, key: repository::LeaseKey, output_name: &str) {
+    if storage::valid_name(output_name) {
+        let copy = s.config.data_dir.join("output").join(output_name);
+        let _ = tokio::fs::remove_file(copy).await;
+    }
+    match repository::end_orphaned_lease(&s.pool, key).await {
+        Ok(change) => super::leases::notify_lease_changes(s, change.as_slice()),
+        // L'échéance conclura.
+        Err(error) => tracing::warn!(job_id=%key.0, %error, "bail orphelin non conclu"),
+    }
 }
 
 pub(super) async fn mark_publication_uncertain(s: &AppState, job: Uuid, epoch: i64) {
@@ -335,4 +368,4 @@ pub(super) async fn mark_publication_uncertain(s: &AppState, job: Uuid, epoch: i
 
 #[cfg(test)]
 #[path = "transfers_tests.rs"]
-pub(super) mod tests;
+pub(crate) mod tests;

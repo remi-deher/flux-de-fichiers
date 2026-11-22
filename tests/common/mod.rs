@@ -2,6 +2,8 @@
 
 #![allow(dead_code)]
 
+pub mod leases;
+
 use forgearr::api_keys::install_known_key;
 use forgearr_shared::Role;
 use sqlx::SqlitePool;

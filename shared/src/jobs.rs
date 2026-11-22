@@ -7,11 +7,19 @@ use std::path::Path;
 use std::str::FromStr;
 use uuid::Uuid;
 
+mod lease;
 mod resource;
 
+pub use lease::{
+    ACTION_NODE_ID_MAX_CHARS, DEFAULT_UNREACHABLE_TIMEOUT_SECONDS, IrreversibleAction,
+    JobLeaseInfo, LeaseProtocol, LeaseReachability, MAX_UNREACHABLE_TIMEOUT_SECONDS,
+    MIN_UNREACHABLE_TIMEOUT_SECONDS, UNREACHABLE_AFTER_SECONDS, UNREACHABLE_TIMEOUT_HEADER,
+    valid_unreachable_timeout,
+};
 pub use resource::{JobResourceClass, JobResourceInfo};
 
-/// Nombre maximal de tentatives d'une tâche, relances manuelles comprises.
+/// Nombre maximal de tentatives enchaînées ; une relance manuelle d'une tâche qui les a épuisées
+/// remet le compte à zéro.
 pub const MAX_ATTEMPTS: i32 = 3;
 const MAX_WORKING_EXT_LEN: usize = 16;
 
@@ -88,6 +96,12 @@ pub enum JobEventType {
     JobCanceled,
     JobRetried,
     JobRelayed,
+    /// Titulaire silencieux : la tâche reste la sienne (ADR 0027).
+    JobUnreachable,
+    /// Le titulaire est revenu avant l'échéance.
+    JobRestored,
+    /// Bail perdu : la tâche est de nouveau en file.
+    JobRequeued,
 }
 
 impl JobEventType {
@@ -102,6 +116,9 @@ impl JobEventType {
             Self::JobCanceled => "job_canceled",
             Self::JobRetried => "job_retried",
             Self::JobRelayed => "job_relayed",
+            Self::JobUnreachable => "job_unreachable",
+            Self::JobRestored => "job_restored",
+            Self::JobRequeued => "job_requeued",
         }
     }
 }
@@ -373,12 +390,11 @@ pub struct MediaFile {
 }
 
 impl Job {
-    /// Relançable à la main : échec par perte de bail, sous la limite de tentatives (ADR 0012).
+    /// Relançable à la main : échec par perte de bail, tentatives épuisées comprises (ADR 0027).
     pub fn is_retryable(&self) -> bool {
         self.status == JobStatus::Failed
             && self.error_code == Some(JobErrorCode::LeaseExpired)
             && self.output_name.is_none()
-            && self.attempts < MAX_ATTEMPTS
     }
 
     /// Annulable à la main : tâche en attente ou en cours d'exécution.
@@ -433,10 +449,10 @@ mod tests {
     }
 
     #[test]
-    fn only_a_lost_lease_under_the_attempt_limit_is_retryable() {
+    fn only_a_lost_lease_is_retryable_even_without_attempts_left() {
         let lost = Some(JobErrorCode::LeaseExpired);
         assert!(job(JobStatus::Failed, lost, 1).is_retryable());
-        assert!(!job(JobStatus::Failed, lost, MAX_ATTEMPTS).is_retryable());
+        assert!(job(JobStatus::Failed, lost, MAX_ATTEMPTS).is_retryable());
         assert!(!job(JobStatus::Failed, Some(JobErrorCode::OperationFailed), 1).is_retryable());
         assert!(!job(JobStatus::Running, None, 1).is_retryable());
         let mut pending_result = job(JobStatus::Failed, lost, 1);

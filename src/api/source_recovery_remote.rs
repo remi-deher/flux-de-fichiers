@@ -1,6 +1,6 @@
 //! Vérification en lecture seule des publications interrompues sur un détenteur distant.
 
-use super::{AppState, source_recovery};
+use super::{AppState, source_recovery, transfers};
 use crate::{
     domain::{Job, JobStatus, LeaseRequest},
     error::{AppError, AppResult},
@@ -116,13 +116,26 @@ pub(super) async fn recover_one(
     s: &AppState,
     pending: repository::PendingSourcePublication,
 ) -> AppResult<()> {
+    // Le worker qui applique lui-même confirme ou perd son bail : seule sa disparition mérite
+    // une vérification.
+    if pending.applied_locally && awaits_its_holder(s, &pending).await? {
+        return Ok(());
+    }
     match try_recover(s, &pending).await {
         Ok(true) => {
             tracing::info!(job_id=%pending.job_id, "publication distante confirmée après redémarrage")
         }
         Ok(false)
-        | Err(AppError::NotFound | AppError::Invalid | AppError::Conflict | AppError::Storage(_)) =>
-        {
+        | Err(
+            AppError::NotFound
+            | AppError::Invalid
+            | AppError::Conflict
+            | AppError::LeaseLost
+            | AppError::Storage(_),
+        ) => {
+            if drop_unauthorized(s, &pending).await? {
+                return Ok(());
+            }
             repository::mark_source_publication_uncertain(
                 &s.pool,
                 pending.job_id,
@@ -131,6 +144,49 @@ pub(super) async fn recover_one(
             .await?;
         }
         Err(error) => return Err(error),
+    }
+    Ok(())
+}
+
+/// Le titulaire de ce remplacement local est-il encore attendu ?
+async fn awaits_its_holder(
+    s: &AppState,
+    pending: &repository::PendingSourcePublication,
+) -> AppResult<bool> {
+    let job = repository::get_job(&s.pool, pending.job_id).await?;
+    let held = job.status == JobStatus::Running && job.lease_epoch == pending.lease_epoch;
+    Ok(held && !repository::lease_orphaned(&s.pool, pending.job_id).await?)
+}
+
+/// [`transfers::drop_unauthorized`] pour une intention relue au journal.
+async fn drop_unauthorized(
+    s: &AppState,
+    pending: &repository::PendingSourcePublication,
+) -> AppResult<bool> {
+    let key = (pending.job_id, pending.lease_epoch);
+    transfers::drop_unauthorized(s, key, &pending.output_name).await
+}
+
+/// Vérifie la publication d'une tâche dont le worker a redémarré. Sans preuve, l'échéance conclut.
+/// Une publication que le central mène encore se conclut d'elle-même.
+pub(super) async fn recover_deferred(s: AppState, job: Uuid) {
+    if let Err(error) = try_recover_deferred(&s, job).await {
+        tracing::warn!(job_id=%job, %error, "vérification de la publication interrompue impossible");
+    }
+}
+
+async fn try_recover_deferred(s: &AppState, job: Uuid) -> AppResult<()> {
+    let pending = repository::pending_source_publications(&s.pool).await?;
+    let current = pending.into_iter().find(|pending| pending.job_id == job);
+    let Some(pending) = current else {
+        return Ok(());
+    };
+    if s.publications.contains((job, pending.lease_epoch)) || drop_unauthorized(s, &pending).await?
+    {
+        return Ok(());
+    }
+    if try_recover(s, &pending).await? {
+        tracing::info!(job_id=%job, "publication confirmée après redémarrage du worker");
     }
     Ok(())
 }
@@ -214,6 +270,72 @@ mod tests {
             repository::get_job(&state.pool, job.id).await?.status,
             JobStatus::Succeeded
         );
+        Ok(())
+    }
+
+    /// Publication tirée, inscrite puis laissée sans titulaire par le redémarrage de son worker.
+    async fn deferred(state: &AppState, job: &Job, lease: &LeaseRequest) -> anyhow::Result<()> {
+        transfers::tests::current_protocol(state, job.id).await?;
+        let output = repository::PublishedOutput {
+            name: "",
+            sha256: &"cd".repeat(32),
+            bytes: 6,
+            warning: false,
+        };
+        let policy = LibraryOutputPolicy::ReplaceWithBackup;
+        repository::begin_pulled_publication(&state.pool, job.id, lease, output, "mkv", policy)
+            .await?;
+        let boot = Uuid::new_v4();
+        repository::register_boot(&state.pool, lease.worker_id, boot).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_orphaned_intent_never_granted_requeues_the_job() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let (state, job, lease, _) = transfers::tests::setup(dir.path()).await?;
+        deferred(&state, &job, &lease).await?;
+        recover_deferred(state.clone(), job.id).await;
+        let status = repository::get_job(&state.pool, job.id).await?.status;
+        assert_eq!(status, JobStatus::Queued);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_publication_still_running_is_left_alone() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let (state, job, lease, _) = transfers::tests::setup(dir.path()).await?;
+        deferred(&state, &job, &lease).await?;
+        let key = (job.id, lease.lease_epoch);
+        let publications = state.publications.clone();
+        let running =
+            tokio::spawn(async move { publications.run(key, std::future::pending()).await });
+        while !state.publications.contains(key) {
+            tokio::task::yield_now().await;
+        }
+        recover_deferred(state.clone(), job.id).await;
+        assert_eq!(
+            repository::pending_source_publications(&state.pool)
+                .await?
+                .len(),
+            1
+        );
+        running.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_local_replacement_waits_for_its_holder_only() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let (state, job, lease, _) = transfers::tests::setup(dir.path()).await?;
+        deferred(&state, &job, &lease).await?;
+        let pending = repository::pending_source_publications(&state.pool)
+            .await?
+            .pop()
+            .ok_or_else(|| anyhow::anyhow!("journal absent"))?;
+        assert!(!awaits_its_holder(&state, &pending).await?, "orpheline");
+        repository::heartbeat(&state.pool, job.id, &lease).await?;
+        assert!(awaits_its_holder(&state, &pending).await?);
         Ok(())
     }
 }

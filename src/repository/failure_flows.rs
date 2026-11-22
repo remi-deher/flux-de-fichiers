@@ -4,10 +4,12 @@
 //! La migration 0048 marque `pending` toute tâche qui passe à `failed` avec un flux d'échec figé,
 //! sauf si le worker l'a déjà exécuté (étape de synthèse au journal : le trigger fixe `done`). [`take_pending_failure_flow`]
 //! passe la tâche à `done` avant l'exécution : au plus une exécution par échec, même après un
-//! redémarrage ou avec plusieurs exécuteurs.
+//! redémarrage ou avec plusieurs exécuteurs. Un worker qui exécute lui-même le flux d'échec obtient
+//! d'abord l'accord du central, qui pose `done` sous son bail (ADR 0027).
 
+use super::leases::LeaseKey;
 use crate::{
-    domain::{Claim, Job, JobStepEntry, JobStepStatus},
+    domain::{Claim, Job, JobStatus, JobStepEntry, JobStepStatus},
     error::{AppError, AppResult},
     job_runner::{FAILURE_FLOW_STEP_NODE, failure_flow_summary_step},
 };
@@ -39,8 +41,15 @@ impl FailureFlowState {
     }
 }
 
-/// Nouvelle tentative : l'échec précédent et la synthèse de son flux d'échec ne valent plus.
+/// Nouvelle tentative : ni l'échec précédent ni les étapes de la tentative perdue ne valent plus
+/// (celles d'un relais par artefact sont conservées).
 pub(super) async fn reset_for_new_attempt(conn: &mut SqliteConnection, job: Uuid) -> AppResult<()> {
+    forget_failure(conn, job).await?;
+    super::relays::reset_steps(conn, job).await
+}
+
+/// L'échec précédent et la synthèse de son flux d'échec ne valent plus.
+pub(super) async fn forget_failure(conn: &mut SqliteConnection, job: Uuid) -> AppResult<()> {
     sqlx::query("UPDATE jobs SET failure_flow_state=NULL WHERE id=?1")
         .bind(job)
         .execute(&mut *conn)
@@ -70,17 +79,18 @@ pub async fn failure_flow_state(
 /// Prend en charge la plus ancienne tâche en attente : elle passe à `done` dans la même requête,
 /// puis la tâche est relue avec le contexte nécessaire à l'exécution de son flux d'échec.
 pub async fn take_pending_failure_flow(pool: &SqlitePool) -> AppResult<Option<(Job, Claim)>> {
-    let taken: Option<Uuid> = sqlx::query_scalar(
+    let taken: Option<(Uuid, i64)> = sqlx::query_as(
         "UPDATE jobs SET failure_flow_state=?1 \
-         WHERE id=(SELECT id FROM jobs WHERE failure_flow_state=?2 ORDER BY updated_at, id LIMIT 1) \
+         WHERE id=(SELECT id FROM jobs WHERE failure_flow_state=?2 AND status=?3 ORDER BY updated_at, id LIMIT 1) \
            AND failure_flow_state=?2 \
-         RETURNING id",
+         RETURNING id, lease_epoch",
     )
     .bind(FailureFlowState::Done.as_str())
     .bind(FailureFlowState::Pending.as_str())
+    .bind(JobStatus::Failed)
     .fetch_optional(pool)
     .await?;
-    let Some(id) = taken else {
+    let Some((id, epoch)) = taken else {
         return Ok(None);
     };
     let context = async {
@@ -90,10 +100,12 @@ pub async fn take_pending_failure_flow(pool: &SqlitePool) -> AppResult<Option<(J
     }
     .await;
     match context {
+        // Relancée entre-temps : cet échec ne compte plus.
+        Ok((job, _)) if job.lease_epoch != epoch => Ok(None),
         Ok(context) => Ok(Some(context)),
         Err(error) => {
             // La tâche est déjà `done` : la perte du flux d'échec reste visible au journal.
-            record_failure_flow_not_run(pool, id, &error.to_string()).await?;
+            record_failure_flow_not_run(pool, (id, epoch), &error.to_string()).await?;
             Err(error)
         }
     }
@@ -111,15 +123,15 @@ pub fn failure_flow_not_run_message(reason: &str) -> String {
 /// abandonné avant son exécution : sans nouvelle tentative, la perte reste visible.
 pub async fn record_failure_flow_not_run(
     pool: &SqlitePool,
-    job: Uuid,
+    failed: LeaseKey,
     reason: &str,
-) -> AppResult<()> {
+) -> AppResult<bool> {
     let step = failure_flow_summary_step(
         FIRST_APPENDED_STEP_INDEX,
         JobStepStatus::Failed,
         failure_flow_not_run_message(reason),
     );
-    append_job_steps(pool, job, &[step]).await
+    append_failure_steps(pool, failed, &[step]).await
 }
 
 /// Contexte d'exécution du flux d'échec par le central : sans bail ni flux principal, seulement
@@ -153,16 +165,29 @@ async fn failure_claim(pool: &SqlitePool, job: &Job) -> AppResult<Claim> {
         worker_name: None,
         resume_variables: Default::default(),
         linked_flows: super::linked_flows::frozen_linked_flows(pool, job.id).await?,
+        lease_terms: None,
     })
 }
 
-/// Ajoute des étapes à la fin du journal de la tâche, sans toucher aux étapes déjà présentes.
-pub async fn append_job_steps(
+/// Ajoute des étapes à la fin du journal d'un échec précis. `false` : la tâche a été relancée depuis,
+/// les étapes sont abandonnées plutôt que mêlées à la nouvelle tentative.
+pub async fn append_failure_steps(
     pool: &SqlitePool,
-    job: Uuid,
+    (job, epoch): LeaseKey,
     steps: &[JobStepEntry],
-) -> AppResult<()> {
+) -> AppResult<bool> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let current: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM jobs WHERE id=?1 AND lease_epoch=?2 AND status=?3)",
+    )
+    .bind(job)
+    .bind(epoch)
+    .bind(JobStatus::Failed)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !current {
+        return Ok(false);
+    }
     let prefix: i64 =
         sqlx::query_scalar("SELECT COALESCE(MAX(step_index), 0) FROM job_steps WHERE job_id=?1")
             .bind(job)
@@ -172,7 +197,7 @@ pub async fn append_job_steps(
         super::jobs::insert_job_step(&mut tx, job, prefix, step).await?;
     }
     tx.commit().await?;
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(test)]

@@ -2,6 +2,8 @@
 
 Statut : accepté par l'utilisateur (13 nov. 2026).
 
+> Voir l'[ADR 0027](0027-etat-injoignable-et-remise-en-file.md) : point 2 (échec à la perte de bail) remplacé.
+
 ## Contexte
 
 L'analyse du projet de référence `encoding-central`
@@ -16,7 +18,10 @@ sans version, absence d'IA et de MCP.
    (FFmpeg, encodeurs matériels) arrive par les plugins et les outils distribués (ADR 0004,
    0006, 0007), jamais embarqué dans l'image. Remplace la phrase « FFmpeg réservé aux médias
    synthétiques des tests » de `AGENTS.md` et « sans réencodage » du README.
-2. **Perte de bail : échec, relance manuelle.** Un bail expiré fait échouer la tâche avec le
+2. **Perte de bail : échec, relance manuelle.** *Remplacé le 22 nov. 2026 par
+   l'[ADR 0027](0027-etat-injoignable-et-remise-en-file.md) : tâche injoignable, puis remise en file dans
+   la limite de `MAX_ATTEMPTS`, sauf action irréversible autorisée ; l'échec et la relance manuelle ne
+   restent qu'au-delà.* Décision d'origine : un bail expiré fait échouer la tâche avec le
    code `lease_expired`, sans la remettre en file. Le mécanisme de relance est conservé pour
    être intégré plus tard : `POST /api/v1/jobs/{id}/retry` (administrateur) remet en file une
    tâche échouée pour `lease_expired`, dans la limite de `MAX_ATTEMPTS` (3). Aucune autre
@@ -46,5 +51,5 @@ sans version, absence d'IA et de MCP.
 ## Retour arrière
 
 Revenir sur ces points demande une nouvelle migration (les migrations ne se modifient pas) ;
-la relance automatique se rétablit en refaisant passer en `queued` un bail expiré dans
-`repository::claim`.
+la relance automatique est désormais l'affaire du balayage des baux (ADR 0027) ; `repository::claim`
+n'expire plus rien.

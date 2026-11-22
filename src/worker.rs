@@ -1,14 +1,13 @@
 use crate::{
     central_client::CentralClient,
     config,
-    domain::{
-        Claim, ClaimRequest, Failure, JobErrorCode, JobStepEntry, LeaseRequest, ProgressReport,
-        Register, StepsReport, Worker,
-    },
-    job_runner::{self, JobRunError},
+    domain::{Claim, ClaimRequest, JobErrorCode, ProgressReport, Register, Worker},
+    job_runner::{self, JobRunError, action_gate::TaskStop},
+    supervision::TaskWork,
     worker_http::{WorkerState, WorkerWeb},
     worker_settings, worker_transfer,
 };
+use forgearr_shared::jobs::LeaseProtocol;
 use reqwest::{Client, RequestBuilder};
 use std::{
     env,
@@ -19,19 +18,29 @@ use std::{
     },
     time::Duration,
 };
+use tokio::{sync::watch, task::JoinSet};
 use uuid::Uuid;
 
 const REMOTE_BROWSE_WAIT_MS: u64 = 10_000;
 const REMOTE_BROWSE_HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 const REMOTE_BROWSE_REPORT_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_BROWSE_RETRY_DELAY: Duration = Duration::from_secs(2);
+mod contact;
 mod handoff;
+mod held_tasks;
+mod lease_calls;
 mod local_apply;
 mod result_pull;
+pub(crate) mod startup_purge;
 pub(crate) mod timing;
+use contact::CentralReply;
+use handoff::TaskResult;
+use held_tasks::HeldTasks;
+use lease_calls::{CallFailure, TaskLease};
 use timing::{
-    CENTRAL_CONNECT_TIMEOUT, CENTRAL_REQUEST_TIMEOUT, HEARTBEAT_INTERVAL, IDLE_POLL_INTERVAL,
-    PROGRESS_REPORT_TIMEOUT, REGISTRATION_RETRY_DELAY, REREGISTRATION_EVERY_IDLE_POLLS,
+    ABANDONED_WORK_TIMEOUT, CENTRAL_CONNECT_TIMEOUT, CENTRAL_REQUEST_TIMEOUT, IDLE_POLL_INTERVAL,
+    PROGRESS_REPORT_TIMEOUT, PUBLICATION_REPORT_PATIENCE, REGISTRATION_RETRY_DELAY,
+    REREGISTRATION_EVERY_IDLE_POLLS, SHUTDOWN_TIMEOUT, SHUTDOWN_WORK_TIMEOUT,
     SOFTWARE_PROBE_REFRESH, TOOL_DISTRIBUTION_TIMEOUT,
 };
 
@@ -48,28 +57,6 @@ impl PublicationRequestKind {
             Self::Inspect => "/api/v1/worker/source-publication-inspections",
         }
     }
-}
-
-fn publication_error_code(error: &serde_json::Value) -> JobErrorCode {
-    if error
-        .pointer("/error/code")
-        .and_then(serde_json::Value::as_str)
-        == Some(JobErrorCode::SourceChanged.as_str())
-    {
-        JobErrorCode::SourceChanged
-    } else {
-        JobErrorCode::TransferFailed
-    }
-}
-
-/// Erreur de tâche déduite de la réponse refusée du central lors de la publication d'un résultat.
-async fn publication_failure(response: reqwest::Response) -> anyhow::Error {
-    let error = response
-        .json::<serde_json::Value>()
-        .await
-        .unwrap_or_default();
-    let code = publication_error_code(&error);
-    JobRunError::simple(code, code.as_str()).into()
 }
 
 #[derive(Clone)]
@@ -133,8 +120,23 @@ struct WorkerLoop {
     client: Client,
     config: WorkerConfig,
     status: Arc<WorkerState>,
+    /// Identifiant de ce processus, annoncé à son premier enregistrement (ADR 0027).
+    boot_id: Uuid,
+    held: HeldTasks,
+    shutdown: watch::Receiver<bool>,
 }
 impl WorkerLoop {
+    /// Se termine quand l'arrêt est demandé, même s'il l'a été avant l'appel.
+    async fn stopped(&self) {
+        let mut shutdown = self.shutdown.clone();
+        // Émetteur disparu : le processus s'arrête aussi.
+        let _ = shutdown.wait_for(|stopping| *stopping).await;
+    }
+
+    fn stopping(&self) -> bool {
+        *self.shutdown.borrow()
+    }
+
     async fn refresh_software_capabilities(&self) {
         let probes = self
             .request(
@@ -168,39 +170,6 @@ impl WorkerLoop {
             )
             .bearer_auth(&self.config.key)
     }
-    fn leased(
-        &self,
-        method: reqwest::Method,
-        claim: &Claim,
-        worker: Uuid,
-        action: &str,
-    ) -> RequestBuilder {
-        self.request(method, &format!("/api/v1/jobs/{}/{action}", claim.job_id))
-            .header("x-worker-id", worker.to_string())
-            .header("x-lease-token", claim.lease_token.to_string())
-            .header("x-lease-epoch", claim.lease_epoch.to_string())
-    }
-    async fn heartbeat(&self, claim: &Claim, worker: Uuid) -> anyhow::Result<()> {
-        let probe = crate::telemetry::TelemetryProbe::with_storage_path(&self.config.work_dir);
-        loop {
-            tokio::time::sleep(HEARTBEAT_INTERVAL).await;
-            self.request(
-                reqwest::Method::POST,
-                &format!("/api/v1/jobs/{}/heartbeat", claim.job_id),
-            )
-            .timeout(CENTRAL_REQUEST_TIMEOUT)
-            .json(&LeaseRequest {
-                worker_id: worker,
-                lease_token: claim.lease_token,
-                lease_epoch: claim.lease_epoch,
-                telemetry: Some(probe.sample()),
-            })
-            .send()
-            .await?
-            .error_for_status()?;
-        }
-    }
-
     /// Remonte la progression au central (SSE `job_progress`) sans bloquer le remux.
     /// Un seul POST par pourcentage distinct ; les échecs réseau sont ignorés.
     fn progress_callback(&self, claim: &Claim, worker: Uuid) -> crate::flows::FlowProgressCallback {
@@ -240,22 +209,18 @@ impl WorkerLoop {
     /// Demande au central le contrat de distribution d'un outil, puis l'installe dans le cache local.
     async fn install_tool(
         &self,
+        lease: &TaskLease,
         cache: &crate::tools_cache::ToolCacheManager,
         tool_id: &str,
         version: &str,
     ) -> anyhow::Result<()> {
-        let raw = self
-            .request(
-                reqwest::Method::GET,
-                &format!("/api/v1/worker/tools/{tool_id}/distribution"),
-            )
-            .timeout(TOOL_DISTRIBUTION_TIMEOUT)
-            .send()
+        let path = format!("/api/v1/worker/tools/{tool_id}/distribution");
+        let distribution: crate::tools_cache::ToolDistribution = lease
+            .call(lease.budget(TOOL_DISTRIBUTION_TIMEOUT), || {
+                self.request(reqwest::Method::GET, &path)
+            })
             .await?
-            .error_for_status()?
-            .text()
-            .await?;
-        let distribution = crate::plugins::parse_distribution(&raw)?;
+            .json()?;
         anyhow::ensure!(
             distribution.tool_id == tool_id && distribution.tool_version == version,
             "le contrat ne correspond pas à l'outil attendu"
@@ -269,47 +234,21 @@ impl WorkerLoop {
         Ok(())
     }
 
-    async fn report_steps(
-        &self,
-        claim: &Claim,
-        worker: Uuid,
-        steps: &[JobStepEntry],
-        media_info: Option<&serde_json::Value>,
-    ) -> anyhow::Result<()> {
-        if steps.is_empty() {
-            return Ok(());
-        }
-        self.request(
-            reqwest::Method::POST,
-            &format!("/api/v1/jobs/{}/steps", claim.job_id),
-        )
-        .timeout(CENTRAL_REQUEST_TIMEOUT)
-        .json(&StepsReport {
-            worker_id: worker,
-            lease_token: claim.lease_token,
-            lease_epoch: claim.lease_epoch,
-            steps: steps.to_vec(),
-            media_info: media_info.cloned(),
-        })
-        .send()
-        .await?
-        .error_for_status()?;
-        Ok(())
-    }
-
     async fn process(
         &self,
         claim: &Claim,
+        lease: &TaskLease,
         worker: Uuid,
         dir: &std::path::Path,
     ) -> anyhow::Result<()> {
+        tokio::fs::create_dir(dir).await?;
         let cache_mgr = crate::tools_cache::ToolCacheManager::new(&self.config.tools_cache_dir);
         for req in job_runner::collect_wanted_tools(claim) {
             if cache_mgr.is_ready(&req.tool_id, &req.version, crate::tools_cache::host_arch()) {
                 continue;
             }
             if let Err(error) = self
-                .install_tool(&cache_mgr, &req.tool_id, &req.version)
+                .install_tool(lease, &cache_mgr, &req.tool_id, &req.version)
                 .await
             {
                 tracing::warn!(tool = %req.tool_id, version = %req.version, error = %error, "installation de l'outil impossible");
@@ -323,8 +262,7 @@ impl WorkerLoop {
         ));
         if let Some(handoff) = &claim.handoff_input {
             // Remise par artefact (ADR 0022) : le fichier de travail se tire chez son détenteur.
-            self.pull_handoff_input(claim, worker, handoff, &input)
-                .await?;
+            lease.pull_handoff_input(claim, handoff, &input).await?;
         } else if let Some(root) = claim.local_source_root.as_deref() {
             let source = crate::library_scan::source_path(Path::new(root), &claim.source_name)
                 .await
@@ -341,7 +279,7 @@ impl WorkerLoop {
             .await
             .map_err(|_| JobRunError::simple(JobErrorCode::SourceIntegrity, "source_integrity"))?;
         } else {
-            self.download_source(claim, worker, &input).await?;
+            self.download_source(claim, lease, &input).await?;
         }
 
         let progress_cb = self.progress_callback(claim, worker);
@@ -354,51 +292,35 @@ impl WorkerLoop {
             &input,
             dir,
             progress_cb,
+            lease.gate(),
         )
         .await?;
-        let step_report = self
-            .report_steps(claim, worker, &outcome.steps, Some(&outcome.media_info))
+        let step_report = lease
+            .report_steps(&outcome.steps, Some(&outcome.media_info))
             .await;
         if let Some(request) = outcome.relay {
             step_report?;
-            self.send_handoff(
+            return lease
+                .send_handoff(claim, request, &outcome.working_file, dir, outcome.warning)
+                .await;
+        }
+        match step_report {
+            Ok(()) => {}
+            Err(CallFailure::Stop(stop)) => return Err(stop.into()),
+            Err(_) => {
+                tracing::warn!(job_id=%claim.job_id, "step report rejected or unavailable");
+            }
+        }
+        lease
+            .publish_retained_result(
                 claim,
-                worker,
-                request,
-                &outcome.working_file,
-                dir,
-                outcome.warning,
+                TaskResult {
+                    file: &outcome.working_file,
+                    extension: &outcome.output_spec.extension,
+                    warning: outcome.warning,
+                },
             )
-            .await?;
-            return Ok(());
-        }
-        if step_report.is_err() {
-            tracing::warn!(job_id=%claim.job_id, "step report rejected or unavailable");
-        }
-
-        self.publish_retained_result(
-            claim,
-            worker,
-            &outcome.working_file,
-            &outcome.output_spec.extension,
-            outcome.warning,
-        )
-        .await
-    }
-    /// Demande au central un billet frais pour la source de cette tâche (bail actif exigé).
-    async fn reissue_ticket(
-        &self,
-        claim: &Claim,
-        worker: Uuid,
-    ) -> anyhow::Result<Option<forgearr_shared::transfer::SourceTicket>> {
-        Ok(self
-            .leased(reqwest::Method::POST, claim, worker, "source/ticket")
-            .timeout(REMOTE_BROWSE_HTTP_TIMEOUT)
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<Option<forgearr_shared::transfer::SourceTicket>>()
-            .await?)
+            .await
     }
 
     /// Récupère la source en direct chez le worker qui la détient, avec le billet de la tâche
@@ -406,7 +328,7 @@ impl WorkerLoop {
     async fn download_source(
         &self,
         claim: &Claim,
-        worker: Uuid,
+        lease: &TaskLease,
         input: &Path,
     ) -> anyhow::Result<()> {
         let Some(ticket) = claim.source_ticket.clone() else {
@@ -422,7 +344,7 @@ impl WorkerLoop {
             self.config.max_bytes,
             &claim.source_sha256,
             claim.source_bytes,
-            || self.reissue_ticket(claim, worker),
+            || lease.reissue_ticket(),
         )
         .await
         .map_err(|error| {
@@ -438,82 +360,74 @@ impl WorkerLoop {
         })
     }
 
-    async fn execute(&self, claim: Claim, worker: Uuid) -> anyhow::Result<()> {
+    /// Traite la tâche puis déclare son échec éventuel. Un arrêt ([`TaskStop`]) ne se déclare pas.
+    async fn process_and_report(
+        &self,
+        claim: &Claim,
+        lease: &TaskLease,
+        worker: Uuid,
+        dir: &Path,
+    ) -> Result<(), TaskStop> {
+        let Err(error) = self.process(claim, lease, worker, dir).await else {
+            return Ok(());
+        };
+        if let Some(stop) = error.downcast_ref::<TaskStop>() {
+            return Err(*stop);
+        }
+        let (code, steps) = match error.downcast_ref::<JobRunError>() {
+            Some(run_error) => (run_error.code, run_error.steps.as_slice()),
+            None => (JobErrorCode::TransferFailed, Default::default()),
+        };
+        // Do not format reqwest errors: their URLs may contain sensitive context.
+        tracing::warn!(job_id=%claim.job_id, error_code=%code, "processing failed");
+        match lease.report_failure(code, steps).await {
+            Ok(()) => Ok(()),
+            Err(CallFailure::Stop(stop)) => Err(stop),
+            Err(_) => {
+                tracing::warn!(job_id=%claim.job_id, "failure report rejected or unavailable");
+                Ok(())
+            }
+        }
+    }
+
+    /// Exécute une tâche jusqu'à son issue, la perte de son bail ou l'arrêt du worker. Le dossier de
+    /// travail ne disparaît et la tâche n'est rendue qu'une fois ses processus morts.
+    async fn execute(&self, claim: Claim, worker: Uuid) {
+        let _held = self.held.hold(claim.job_id, claim.lease_token);
+        let lease = TaskLease::new(self, &claim, worker);
         let dir = self
             .config
             .work_dir
             .join(format!("{}-{}", claim.job_id, claim.lease_token));
-        tokio::fs::create_dir(&dir).await?;
-        // Dropping processing on a lost lease or shutdown kills the child process.
-        let result = tokio::select! {
-            result = self.process(&claim, worker, &dir) => result,
-            result = self.heartbeat(&claim, worker) => result,
-            _ = crate::api::shutdown_signal() => Err(anyhow::anyhow!("shutdown")),
+        let mut work = TaskWork::default();
+        // Abandonner le traitement tue le groupe de ses processus.
+        let outcome = tokio::select! {
+            outcome = work.scope(self.process_and_report(&claim, &lease, worker, &dir)) => outcome,
+            () = lease.heartbeat_until_lost() => Err(TaskStop::LeaseLost),
+            () = self.stopped() => Err(TaskStop::Shutdown),
         };
-        if let Err(ref error) = result {
-            if error.to_string() == "shutdown" {
-                tokio::fs::remove_dir_all(&dir).await?;
-                return result;
-            }
-            let (code, steps) = if let Some(run_err) = error.downcast_ref::<JobRunError>() {
-                (run_err.code.as_str(), Some(run_err.steps.as_slice()))
-            } else {
-                ("transfer_failed", None)
-            };
-            if let Some(steps) = steps
-                && self
-                    .report_steps(&claim, worker, steps, None)
-                    .await
-                    .is_err()
-            {
-                tracing::warn!(job_id=%claim.job_id, "step report rejected or unavailable");
-            }
-            tracing::warn!(job_id=%claim.job_id, error_code=code, "processing failed");
-            // Do not format reqwest errors: their URLs may contain sensitive context.
-            let report = self
-                .request(
-                    reqwest::Method::POST,
-                    &format!("/api/v1/jobs/{}/failure", claim.job_id),
-                )
-                .timeout(CENTRAL_REQUEST_TIMEOUT)
-                .json(&Failure {
-                    worker_id: worker,
-                    lease_token: claim.lease_token,
-                    lease_epoch: claim.lease_epoch,
-                    error_code: code.into(),
-                })
-                .send()
-                .await;
-            if !matches!(report, Ok(r) if r.status().is_success()) {
-                tracing::warn!(job_id=%claim.job_id, "failure report rejected or unavailable");
-            }
+        if let Err(stop) = outcome {
+            tracing::warn!(job_id=%claim.job_id, reason=%stop, "tâche arrêtée sans échec déclaré");
         }
-        tokio::fs::remove_dir_all(dir).await?;
-        Ok(())
-    }
-
-    /// Purge les résidus orphelins (anciens répertoires job-* ou fichiers .tmp)
-    /// dans le répertoire de travail local sans toucher aux outils ou à la configuration.
-    async fn purge_orphaned_work_artifacts(&self) {
-        let mut entries = match tokio::fs::read_dir(&self.config.work_dir).await {
-            Ok(e) => e,
-            Err(_) => return,
+        let shutdown = outcome == Err(TaskStop::Shutdown);
+        let limit = if shutdown {
+            SHUTDOWN_WORK_TIMEOUT
+        } else {
+            ABANDONED_WORK_TIMEOUT
         };
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            let file_name = entry.file_name();
-            let name = file_name.to_string_lossy();
-            if name.starts_with("job-") || name.starts_with(".tmp") || name.ends_with(".tmp") {
-                let path = entry.path();
-                let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
-                tracing::info!(path = %path.display(), "purging orphaned work artifact");
-                if is_dir {
-                    let _ = tokio::fs::remove_dir_all(&path).await;
-                } else {
-                    let _ = tokio::fs::remove_file(&path).await;
-                }
-            }
+        if !work.ended(limit).await {
+            // Le démarrage suivant purgera ; le central tranche pour la tâche.
+            tracing::warn!(job_id=%claim.job_id, "travail encore en cours : dossier conservé");
+            return;
         }
-        self.prune_stale_tools_cache().await;
+        if shutdown {
+            lease.release().await;
+        }
+        if let Err(error) = tokio::fs::remove_dir_all(&dir).await
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(job_id=%claim.job_id, error=%error, "work directory cleanup failed");
+        }
     }
 
     /// Interroge le central sur les versions actives d'outils et purge les versions obsolètes du cache local.
@@ -571,12 +485,22 @@ pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
     );
     let http = tokio::spawn(crate::worker_http::serve(web.clone()));
     let account_sync = tokio::spawn(web.sync_accounts_loop());
+    let (stop, shutdown) = watch::channel(false);
+    // Un seul écouteur durable : une tâche occupée au moment du signal le voit quand même.
+    let signal = tokio::spawn(async move {
+        crate::api::shutdown_signal().await;
+        let _ = stop.send(true);
+    });
     let runner = WorkerLoop {
         client,
         config,
         status,
+        boot_id: Uuid::new_v4(),
+        held: HeldTasks::default(),
+        shutdown,
     };
     let outcome = runner.work().await;
+    signal.abort();
     http.abort();
     account_sync.abort();
     outcome
@@ -595,7 +519,7 @@ impl WorkerLoop {
                 .send();
             let response = tokio::select! {
                 res = fetch => res,
-                _ = crate::api::shutdown_signal() => return,
+                () = self.stopped() => return,
             };
             let tasks = match response {
                 Ok(resp) if resp.status().is_success() => resp
@@ -605,7 +529,7 @@ impl WorkerLoop {
                 _ => {
                     tokio::select! {
                         _ = tokio::time::sleep(REMOTE_BROWSE_RETRY_DELAY) => continue,
-                        _ = crate::api::shutdown_signal() => return,
+                        () = self.stopped() => return,
                     }
                 }
             };
@@ -656,7 +580,7 @@ impl WorkerLoop {
         );
         loop {
             let tasks = tokio::select! {
-                _ = crate::api::shutdown_signal() => return,
+                () = self.stopped() => return,
                 result = async {
                     self.request(reqwest::Method::GET, &pending)
                         .timeout(REMOTE_BROWSE_HTTP_TIMEOUT).send().await?.error_for_status()?
@@ -722,15 +646,14 @@ impl WorkerLoop {
                 task.source_bytes,
                 self.config.max_bytes,
                 async {
-                    let response = self
-                        .request(
-                            reqwest::Method::GET,
-                            &format!("{prefix}/authorize?worker_id={}", task.worker_id),
-                        )
-                        .send()
-                        .await
-                        .map_err(|_| crate::error::AppError::CentralUnavailable)?;
-                    if response.status().is_success() {
+                    let path = format!("{prefix}/authorize?worker_id={}", task.worker_id);
+                    let granted = self
+                        .attempt_for(PUBLICATION_REPORT_PATIENCE, || {
+                            self.request(reqwest::Method::GET, &path)
+                                .timeout(REMOTE_BROWSE_HTTP_TIMEOUT)
+                        })
+                        .await;
+                    if granted.reply == CentralReply::Accepted {
                         Ok(())
                     } else {
                         Err(crate::error::AppError::CentralUnavailable)
@@ -753,12 +676,17 @@ impl WorkerLoop {
             worker_id: task.worker_id,
             outcome,
         };
-        let _ = self
-            .request(reqwest::Method::POST, &format!("{prefix}/report"))
-            .timeout(REMOTE_BROWSE_REPORT_TIMEOUT)
-            .json(&report)
-            .send()
+        let path = format!("{prefix}/report");
+        let reported = self
+            .attempt_for(PUBLICATION_REPORT_PATIENCE, || {
+                self.request(reqwest::Method::POST, &path)
+                    .timeout(REMOTE_BROWSE_REPORT_TIMEOUT)
+                    .json(&report)
+            })
             .await;
+        if reported.reply != CentralReply::Accepted {
+            tracing::warn!(request_id=%task.request_id, "rapport de publication sans réponse");
+        }
     }
 
     /// Démarre le serveur de transfert en lecture seule si une adresse et un port sont configurés.
@@ -780,32 +708,24 @@ impl WorkerLoop {
         runner.refresh_software_capabilities().await;
         let probe = crate::telemetry::TelemetryProbe::with_storage_path(&runner.config.work_dir);
         let worker = loop {
-            let attempt = async {
-                runner
-                    .request(reqwest::Method::POST, "/api/v1/workers")
-                    .timeout(CENTRAL_REQUEST_TIMEOUT)
-                    .json(&Register {
-                        name: runner.config.name.clone(),
-                        version: Some(crate::version::app_version().to_owned()),
-                        telemetry: Some(probe.sample()),
-                        transfer_url: runner.config.transfer_url.clone(),
-                    })
-                    .send()
-                    .await?
-                    .error_for_status()?
-                    .json::<Worker>()
-                    .await
-            };
             tokio::select! {
-                result = attempt => match result { Ok(worker) => break worker, Err(_) => tracing::warn!("registration unavailable; retrying") },
-                _ = crate::api::shutdown_signal() => return Ok(()),
+                result = runner.register(probe.sample(), Some(runner.boot_id)) => match result {
+                    Ok(worker) => break worker,
+                    Err(_) => tracing::warn!("registration unavailable; retrying"),
+                },
+                () = runner.stopped() => return Ok(()),
             }
-            tokio::select! { _=tokio::time::sleep(REGISTRATION_RETRY_DELAY)=>{}, _=crate::api::shutdown_signal()=>return Ok(()) }
+            tokio::select! {
+                () = tokio::time::sleep(REGISTRATION_RETRY_DELAY) => {}
+                () = runner.stopped() => return Ok(()),
+            }
         };
         tracing::info!(worker_id=%worker.id, "worker registered");
         runner.status.mark_registered();
         runner.status.mark_central_reachable(true);
-        runner.purge_orphaned_work_artifacts().await;
+        // Aucune tâche n'est encore tenue : tout ce qui reste vient du processus précédent.
+        startup_purge::purge(&runner.config.work_dir).await;
+        runner.prune_stale_tools_cache().await;
         let browse_responder = {
             let browse_runner = runner.clone();
             tokio::spawn(async move {
@@ -839,7 +759,7 @@ impl WorkerLoop {
                 }
                 loop {
                     tokio::select! {
-                        _ = crate::api::shutdown_signal() => return,
+                        () = probe_runner.stopped() => return,
                         _ = tokio::time::sleep(SOFTWARE_PROBE_REFRESH) => {
                             probe_runner.refresh_software_capabilities().await;
                             if let Err(error) = probe_runner.prune_handoffs(probe_worker_id).await {
@@ -850,121 +770,11 @@ impl WorkerLoop {
                 }
             })
         };
-        let outcome: anyhow::Result<()> = async {
-            let mut was_disconnected = false;
-            let mut idle_polls: u32 = 0;
-            // Total des places ; la limite par classe (CPU/GPU) est appliquée par `claim`.
-            let mut max_concurrency = worker.slots().total.max(1);
-            let mut active = tokio::task::JoinSet::new();
-            loop {
-                while active.try_join_next().is_some() {}
-                if idle_polls > 0
-                    && idle_polls.is_multiple_of(REREGISTRATION_EVERY_IDLE_POLLS)
-                    && let Ok(resp) = runner
-                        .request(reqwest::Method::POST, "/api/v1/workers")
-                        .timeout(CENTRAL_REQUEST_TIMEOUT)
-                        .json(&Register {
-                            name: runner.config.name.clone(),
-                            version: Some(crate::version::app_version().to_owned()),
-                            telemetry: Some(probe.sample()),
-                            transfer_url: runner.config.transfer_url.clone(),
-                        })
-                        .send()
-                        .await
-                    && let Ok(updated) = resp.json::<Worker>().await
-                {
-                    max_concurrency = updated.slots().total.max(1);
-                }
-                let telemetry = if idle_polls.is_multiple_of(REREGISTRATION_EVERY_IDLE_POLLS) {
-                    Some(probe.sample())
-                } else {
-                    None
-                };
-                idle_polls = idle_polls.wrapping_add(1);
-                while (active.len() as i32) < max_concurrency {
-                    let attempt = async {
-                        let claim = runner
-                            .request(reqwest::Method::POST, "/api/v1/claims")
-                            .timeout(CENTRAL_REQUEST_TIMEOUT)
-                            .json(&ClaimRequest {
-                                worker_id: worker.id,
-                                telemetry: telemetry.clone(),
-                            })
-                            .send()
-                            .await?
-                            .error_for_status()?
-                            .json::<Option<Claim>>()
-                            .await?;
-                        Ok::<_, anyhow::Error>(claim)
-                    };
-                    let claim = tokio::select! {
-                        result = attempt => result,
-                        _ = crate::api::shutdown_signal() => {
-                            active.abort_all();
-                            return Ok(());
-                        }
-                    };
-                    runner.status.mark_central_reachable(claim.is_ok());
-                    match claim {
-                        Ok(Some(mut claim)) => {
-                            if was_disconnected {
-                                runner.purge_orphaned_work_artifacts().await;
-                                was_disconnected = false;
-                            }
-                            if let Err(error) = crate::flows::unseal_claim_secrets_for_worker(
-                                &mut claim,
-                                &runner.config.key,
-                            ) {
-                                tracing::error!(job_id = %claim.job_id, error = %error, "impossible de déchiffrer les secrets du bail");
-                                let _ = runner
-                                    .request(
-                                        reqwest::Method::POST,
-                                        &format!("/api/v1/jobs/{}/failure", claim.job_id),
-                                    )
-                                    .timeout(CENTRAL_REQUEST_TIMEOUT)
-                                    .json(&Failure {
-                                        worker_id: worker.id,
-                                        lease_token: claim.lease_token,
-                                        lease_epoch: claim.lease_epoch,
-                                        error_code: JobErrorCode::TransferFailed.as_str().to_owned(),
-                                    })
-                                    .send()
-                                    .await;
-                            } else {
-                                let spawned_runner = runner.clone();
-                                let wid = worker.id;
-                                active.spawn(async move {
-                                    if let Err(err) = spawned_runner.execute(claim, wid).await {
-                                        tracing::warn!(error = %err, "worker execute task exited with error");
-                                    }
-                                });
-                            }
-                        }
-                        Ok(None) => {
-                            if was_disconnected {
-                                runner.purge_orphaned_work_artifacts().await;
-                                was_disconnected = false;
-                            }
-                            break;
-                        }
-                        Err(_) => {
-                            was_disconnected = true;
-                            tracing::warn!("central unavailable; retrying");
-                            break;
-                        }
-                    }
-                }
-                tokio::select! {
-                    _ = tokio::time::sleep(IDLE_POLL_INTERVAL) => {},
-                    Some(_) = active.join_next(), if !active.is_empty() => {},
-                    _ = crate::api::shutdown_signal() => {
-                        active.abort_all();
-                        return Ok(());
-                    }
-                }
-            }
-        }
-        .await;
+        let mut active = JoinSet::new();
+        runner
+            .claim_until_stopped(&worker, &probe, &mut active)
+            .await;
+        runner.drain(&mut active).await;
         browse_responder.abort();
         source_publication_responder.abort();
         source_inspection_responder.abort();
@@ -972,7 +782,136 @@ impl WorkerLoop {
         if let Some(server) = transfer_server {
             server.abort();
         }
-        outcome
+        Ok(())
+    }
+
+    /// Enregistre ce worker. `boot_id` n'accompagne que le premier enregistrement du processus : le
+    /// répéter annulerait les tâches d'un autre processus du même nom, sans fin (ADR 0027).
+    async fn register(
+        &self,
+        telemetry: crate::telemetry::TelemetrySnapshot,
+        boot_id: Option<Uuid>,
+    ) -> reqwest::Result<Worker> {
+        self.request(reqwest::Method::POST, "/api/v1/workers")
+            .timeout(CENTRAL_REQUEST_TIMEOUT)
+            .json(&Register {
+                name: self.config.name.clone(),
+                version: Some(crate::version::app_version().to_owned()),
+                telemetry: Some(telemetry),
+                transfer_url: self.config.transfer_url.clone(),
+                boot_id,
+            })
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Worker>()
+            .await
+    }
+
+    async fn claim(
+        &self,
+        worker_id: Uuid,
+        telemetry: Option<crate::telemetry::TelemetrySnapshot>,
+    ) -> reqwest::Result<Option<Claim>> {
+        self.request(reqwest::Method::POST, "/api/v1/claims")
+            .timeout(CENTRAL_REQUEST_TIMEOUT)
+            .json(&ClaimRequest {
+                worker_id,
+                telemetry,
+                lease_protocol: Some(LeaseProtocol::LATEST.number()),
+                active_jobs: Some(self.held.jobs()),
+            })
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Option<Claim>>()
+            .await
+    }
+
+    /// Réserve et lance des tâches jusqu'à la demande d'arrêt.
+    async fn claim_until_stopped(
+        &self,
+        worker: &Worker,
+        probe: &crate::telemetry::TelemetryProbe,
+        active: &mut JoinSet<()>,
+    ) {
+        let mut was_disconnected = false;
+        let mut idle_polls: u32 = 0;
+        // Total des places ; la limite par classe (CPU/GPU) est appliquée par `claim`.
+        let mut max_concurrency = worker.slots().total.max(1);
+        while !self.stopping() {
+            while active.try_join_next().is_some() {}
+            let report_due = idle_polls.is_multiple_of(REREGISTRATION_EVERY_IDLE_POLLS);
+            if idle_polls > 0
+                && report_due
+                && let Ok(updated) = self.register(probe.sample(), None).await
+            {
+                max_concurrency = updated.slots().total.max(1);
+            }
+            let telemetry = report_due.then(|| probe.sample());
+            idle_polls = idle_polls.wrapping_add(1);
+            while (active.len() as i32) < max_concurrency {
+                let claim = tokio::select! {
+                    claim = self.claim(worker.id, telemetry.clone()) => claim,
+                    () = self.stopped() => return,
+                };
+                self.status.mark_central_reachable(claim.is_ok());
+                if claim.is_ok() && std::mem::take(&mut was_disconnected) && active.is_empty() {
+                    self.prune_stale_tools_cache().await;
+                }
+                match claim {
+                    Ok(Some(claim)) => {
+                        self.start(claim, worker.id, active);
+                    }
+                    Ok(None) => break,
+                    Err(_) => {
+                        was_disconnected = true;
+                        tracing::warn!("central unavailable; retrying");
+                        break;
+                    }
+                }
+            }
+            tokio::select! {
+                () = tokio::time::sleep(IDLE_POLL_INTERVAL) => {},
+                Some(_) = active.join_next(), if !active.is_empty() => {},
+                () = self.stopped() => return,
+            }
+        }
+    }
+
+    /// Lance la tâche réservée ; un bail dont les secrets ne se lisent pas est déclaré en échec.
+    fn start(&self, mut claim: Claim, worker_id: Uuid, active: &mut JoinSet<()>) {
+        let runner = self.clone();
+        let Err(error) =
+            crate::flows::unseal_claim_secrets_for_worker(&mut claim, &self.config.key)
+        else {
+            active.spawn(async move { runner.execute(claim, worker_id).await });
+            return;
+        };
+        tracing::error!(job_id = %claim.job_id, error = %error, "impossible de déchiffrer les secrets du bail");
+        active.spawn(async move {
+            let _held = runner.held.hold(claim.job_id, claim.lease_token);
+            let lease = TaskLease::new(&runner, &claim, worker_id);
+            let reported = tokio::select! {
+                reported = lease.report_failure(JobErrorCode::TransferFailed, &[]) => reported,
+                () = runner.stopped() => return,
+            };
+            if let Err(failure) = reported {
+                tracing::warn!(job_id = %claim.job_id, ?failure, "failure report rejected or unavailable");
+            }
+        });
+    }
+
+    /// Arrêt propre : chaque tâche s'arrête et se rend ; celles qui tardent sont abandonnées.
+    async fn drain(&self, active: &mut JoinSet<()>) {
+        let drained = async { while active.join_next().await.is_some() {} };
+        if tokio::time::timeout(SHUTDOWN_TIMEOUT, drained)
+            .await
+            .is_err()
+        {
+            tracing::warn!("arrêt : des tâches n'ont pas pu être rendues");
+            active.abort_all();
+        }
     }
 }
 
@@ -990,24 +929,6 @@ mod tests {
             PublicationRequestKind::Inspect
                 .route()
                 .contains("inspections")
-        );
-    }
-
-    #[test]
-    fn result_error_distinguishes_source_changes_from_other_failures() {
-        assert_eq!(
-            publication_error_code(&serde_json::json!({"error":{"code":"source_changed"}})),
-            JobErrorCode::SourceChanged
-        );
-        assert_eq!(
-            publication_error_code(
-                &serde_json::json!({"error":{"code":"lease_expired_or_conflict"}})
-            ),
-            JobErrorCode::TransferFailed
-        );
-        assert_eq!(
-            publication_error_code(&serde_json::Value::Null),
-            JobErrorCode::TransferFailed
         );
     }
 }

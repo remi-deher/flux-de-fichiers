@@ -268,6 +268,7 @@ mod tests {
             worker_name: None,
             resume_variables: serde_json::Map::new(),
             linked_flows: Vec::new(),
+            lease_terms: None,
         };
 
         let mut failure_flow = claim

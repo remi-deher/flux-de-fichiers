@@ -430,19 +430,20 @@ mod tests {
     async fn a_mirror_replaces_the_disabled_official_repository_of_a_blank_installation()
     -> anyhow::Result<()> {
         const OFFICIAL: &str = "repo.official";
-        const URL: &str = "https://example.org/index.json";
+        const THIRD_PARTY_URL: &str = "https://tiers.example/index.json";
+        const MIRROR_URL: &str = "https://miroir.example/index.json";
         let dir = tempfile::tempdir()?;
         let state = state_in(dir.path()).await?;
         let (pool, cache, config) = (&state.pool, &state.catalog_cache, &state.config);
         let pending = [OFFICIAL.to_owned()];
         repository::set_pending_store_repositories(pool, &pending).await?;
         // Tant que l'officiel peut arriver, un autre dépôt n'est qu'une vitrine.
-        add_repository(pool, cache, config, "repo.tiers", "Tiers", URL).await?;
+        add_repository(pool, cache, config, "repo.tiers", "Tiers", THIRD_PARTY_URL).await?;
         let listed = repository::pending_store_repositories(pool).await?;
         assert_eq!(listed.as_deref(), Some(pending.as_slice()));
 
         repository::toggle_plugin_repository(pool, cache.changes(), OFFICIAL).await?;
-        add_repository(pool, cache, config, "repo.miroir", "Miroir", URL).await?;
+        add_repository(pool, cache, config, "repo.miroir", "Miroir", MIRROR_URL).await?;
         let listed = repository::pending_store_repositories(pool).await?;
         assert_eq!(
             listed,

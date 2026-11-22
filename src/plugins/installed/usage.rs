@@ -425,7 +425,7 @@ pub fn item_usage(
                 || task
                     .graph
                     .as_ref()
-                    .map_or_else(|| default_elements(catalog).tools.contains(item_id), &uses)
+                    .map_or_else(|| default_elements(catalog).tools.contains(item_id), uses)
         })
         .flat_map(|task| task.sources.clone())
         .collect();

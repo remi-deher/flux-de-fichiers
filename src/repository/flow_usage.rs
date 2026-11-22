@@ -16,6 +16,9 @@ pub struct FlowDefinition {
     pub definition: String,
 }
 
+/// Version figée d'un flux ; `None` : tâches sans flux.
+pub type TaskFlow = Option<(String, i64)>;
+
 /// Version figée dont des tâches non terminées se servent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UnfinishedFlow {
@@ -53,7 +56,7 @@ pub async fn unfinished_flows(conn: &mut SqliteConnection) -> AppResult<Vec<Unfi
         .bind(DEFERRED_MESSAGE)
         .fetch_all(&mut *conn)
         .await?;
-    let mut grouped: Vec<(Option<(String, i64)>, Vec<String>)> = Vec::new();
+    let mut grouped: Vec<(TaskFlow, Vec<String>)> = Vec::new();
     for (flow_id, version, source) in rows {
         let key = flow_id.zip(version);
         match grouped.last_mut() {
@@ -87,9 +90,6 @@ pub async fn unfinished_flows(conn: &mut SqliteConnection) -> AppResult<Vec<Unfi
     }
     Ok(flows)
 }
-
-/// Version figée d'un flux ; `None` : tâches sans flux.
-pub type TaskFlow = Option<(String, i64)>;
 
 /// Version figée que des tâches en file, ou des flux d'échec en attente, vont utiliser.
 #[derive(Clone, Debug, PartialEq, Eq, sqlx::FromRow)]

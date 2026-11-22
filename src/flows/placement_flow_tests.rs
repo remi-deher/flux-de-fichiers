@@ -126,6 +126,7 @@ pub(super) async fn run_engine(
         resume_node_id,
         run_info,
         resumed_outputs: &HashMap::new(),
+        action_gate: None,
     }
     .execute_flow(Uuid::new_v4(), flow, &source, &work, progress)
     .await

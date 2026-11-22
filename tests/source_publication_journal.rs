@@ -107,7 +107,7 @@ async fn recovery_preserves_lease_expiry_and_success_removes_the_journal() -> an
         .bind(job)
         .execute(&pool)
         .await?;
-    assert!(repository::claim(&pool, lease.worker_id).await?.is_none());
+    repository::sweep(&pool, None, &Default::default()).await?;
     assert_eq!(
         repository::get_job(&pool, job).await?.error_code,
         Some(JobErrorCode::LeaseExpired)
@@ -152,5 +152,27 @@ async fn recovery_preserves_lease_expiry_and_success_removes_the_journal() -> an
             .fetch_one(&pool)
             .await?;
     assert_eq!(remaining, 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_overdue_but_unswept_lease_is_uncertain_and_not_lost() -> anyhow::Result<()> {
+    let (pool, job, lease) = fixture().await?;
+    let output = repository::PublishedOutput {
+        name: "",
+        sha256: &"bb".repeat(32),
+        bytes: 9,
+        warning: false,
+    };
+    let policy = forgearr::domain::LibraryOutputPolicy::ReplaceInPlace;
+    repository::begin_pulled_publication(&pool, job, &lease, output, "mkv", policy).await?;
+    sqlx::query("UPDATE jobs SET leased_until=datetime('now','-1 second') WHERE id=?1")
+        .bind(job)
+        .execute(&pool)
+        .await?;
+    let epoch = lease.lease_epoch;
+    let code = repository::mark_source_publication_uncertain(&pool, job, epoch).await?;
+    assert_eq!(code, Some(JobErrorCode::SourcePublicationUncertain));
+    assert!(!repository::get_job(&pool, job).await?.is_retryable());
     Ok(())
 }

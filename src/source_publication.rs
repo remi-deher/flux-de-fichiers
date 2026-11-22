@@ -5,8 +5,22 @@ use crate::{
     error::{AppError, AppResult},
     storage,
 };
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, SystemTime},
+};
 use uuid::Uuid;
+
+/// Âge maximal de la dernière vérification de la source au moment de la remplacer : au-delà (machine
+/// suspendue entre les deux), la source est vérifiée de nouveau (ADR 0027).
+const VERIFICATION_MAX_AGE: Duration = Duration::from_secs(5);
+
+/// L'horloge murale compte aussi le temps de suspension ; un recul d'horloge vaut une péremption.
+fn verification_stale(verified_at: SystemTime) -> bool {
+    verified_at
+        .elapsed()
+        .map_or(true, |age| age > VERIFICATION_MAX_AGE)
+}
 
 pub(crate) fn missing_source_is_changed(error: AppError) -> AppError {
     match error {
@@ -154,12 +168,16 @@ pub async fn apply_library_output_policy(
         // L'autorisation peut nécessiter un aller-retour réseau : contrôler de nouveau
         // la source avant toute modification du système de fichiers.
         verify_source(source, expected_hash, expected_bytes, max_bytes).await?;
+        let verified_at = SystemTime::now();
         if policy == LibraryOutputPolicy::ReplaceWithBackup {
             let mut backup = source.as_os_str().to_owned();
             backup.push(".bak");
             let backup = PathBuf::from(backup);
             tokio::fs::hard_link(source, &backup).await?;
             created_backup = Some(backup);
+        }
+        if verification_stale(verified_at) {
+            verify_source(source, expected_hash, expected_bytes, max_bytes).await?;
         }
         if target == source {
             tokio::fs::rename(&temp, &target).await?;
@@ -191,6 +209,16 @@ mod tests {
     use super::*;
 
     const MAX_BYTES: u64 = 1024;
+
+    #[test]
+    fn an_old_verification_or_a_clock_jump_is_not_trusted() {
+        let now = SystemTime::now();
+        assert!(!verification_stale(now));
+        assert!(verification_stale(
+            now - VERIFICATION_MAX_AGE - Duration::from_secs(1)
+        ));
+        assert!(verification_stale(now + Duration::from_secs(3600)));
+    }
 
     #[tokio::test]
     async fn refuses_changed_source_and_preserves_it() -> anyhow::Result<()> {

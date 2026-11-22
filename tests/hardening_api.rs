@@ -751,6 +751,7 @@ async fn system_settings_can_be_updated_and_smtp_password_stays_hidden() -> anyh
         block_private_integration_hosts: true,
         check_updates_enabled: false,
         timezone: None,
+        unreachable_timeout_seconds: None,
     };
 
     // Un worker ne peut pas modifier les réglages système.
@@ -1549,7 +1550,8 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
             .0,
         StatusCode::NO_CONTENT
     );
-    sqlx::query("UPDATE jobs SET leased_until=datetime('now', '-1 minute') WHERE id=?1")
+    // Bail repris par le central : ni accord ni rapport.
+    sqlx::query("UPDATE jobs SET lease_epoch=lease_epoch+1 WHERE id=?1")
         .bind(claim.job_id)
         .execute(&h.pool)
         .await?;
@@ -1577,7 +1579,7 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
         .0,
         StatusCode::CONFLICT
     );
-    sqlx::query("UPDATE jobs SET leased_until=datetime('now', '+2 minutes') WHERE id=?1")
+    sqlx::query("UPDATE jobs SET lease_epoch=lease_epoch-1 WHERE id=?1")
         .bind(claim.job_id)
         .execute(&h.pool)
         .await?;

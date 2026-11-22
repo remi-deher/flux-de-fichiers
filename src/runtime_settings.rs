@@ -14,6 +14,7 @@ use crate::{
     secrets::{SecretBox, is_encrypted},
 };
 use forgearr_shared::{
+    jobs::{DEFAULT_UNREACHABLE_TIMEOUT_SECONDS, valid_unreachable_timeout},
     system::{OutboundPolicyStatus, SmtpStatus, UpdateSystemSettingsRequest},
     timezone::{DEFAULT_TIMEZONE, canonical_timezone},
 };
@@ -56,6 +57,16 @@ struct PersistedRuntimeSettings {
     check_updates_enabled: Option<bool>,
     #[serde(default)]
     timezone: Option<String>,
+    #[serde(default)]
+    unreachable_timeout_seconds: Option<i64>,
+}
+
+impl PersistedRuntimeSettings {
+    fn unreachable_timeout(&self) -> i64 {
+        self.unreachable_timeout_seconds
+            .filter(|seconds| valid_unreachable_timeout(*seconds))
+            .unwrap_or(DEFAULT_UNREACHABLE_TIMEOUT_SECONDS)
+    }
 }
 
 /// Vue effective résolue (base SQLite si présente, sinon configuration de démarrage).
@@ -66,6 +77,7 @@ pub struct EffectiveRuntimeSettings {
     pub outbound: OutboundPolicyStatus,
     pub check_updates_enabled: bool,
     pub timezone: String,
+    pub unreachable_timeout_seconds: i64,
 }
 
 impl EffectiveRuntimeSettings {
@@ -154,6 +166,11 @@ pub async fn load_timezone(pool: &SqlitePool) -> String {
         .unwrap_or_else(default_timezone_from_env)
 }
 
+/// Délai d'injoignabilité (secondes) avant qu'une tâche ne soit reprise à son titulaire (ADR 0027).
+pub async fn load_unreachable_timeout(pool: &SqlitePool) -> i64 {
+    read_persisted(pool).await.unreachable_timeout()
+}
+
 /// Charge les réglages effectifs (surcharges SQLite appliquées par-dessus `base`).
 pub async fn load_effective(pool: &SqlitePool, base: &Config) -> EffectiveRuntimeSettings {
     let persisted = read_persisted(pool).await;
@@ -208,6 +225,7 @@ fn resolve_effective(
         outbound,
         check_updates_enabled: persisted.check_updates_enabled.unwrap_or(true),
         timezone,
+        unreachable_timeout_seconds: persisted.unreachable_timeout(),
     }
 }
 
@@ -227,6 +245,13 @@ pub async fn update(
     };
     if !(MIN_WEB_SESSION_TTL_SECONDS..=MAX_WEB_SESSION_TTL_SECONDS)
         .contains(&request.session_ttl_seconds)
+    {
+        return Err(AppError::Invalid);
+    }
+
+    if request
+        .unreachable_timeout_seconds
+        .is_some_and(|seconds| !valid_unreachable_timeout(seconds))
     {
         return Err(AppError::Invalid);
     }
@@ -287,6 +312,9 @@ pub async fn update(
         block_private_integration_hosts: Some(request.block_private_integration_hosts),
         check_updates_enabled: Some(request.check_updates_enabled),
         timezone,
+        unreachable_timeout_seconds: request
+            .unreachable_timeout_seconds
+            .or(previous.unreachable_timeout_seconds),
     };
     let encoded = serde_json::to_string(&next).map_err(|_| AppError::Internal)?;
     repository::set_setting(pool, RUNTIME_SETTINGS_KEY, &encoded).await?;
@@ -399,6 +427,7 @@ mod tests {
                 block_private_integration_hosts: true,
                 check_updates_enabled: true,
                 timezone: Some("Europe/Paris".into()),
+                unreachable_timeout_seconds: Some(120),
             },
         )
         .await?;
@@ -437,10 +466,13 @@ mod tests {
                 block_private_integration_hosts: false,
                 check_updates_enabled: false,
                 timezone: None,
+                unreachable_timeout_seconds: None,
             },
         )
         .await?;
         assert_eq!(kept.config.web_session_ttl_seconds, 3600);
+        assert_eq!(kept.unreachable_timeout_seconds, 120);
+        assert_eq!(load_unreachable_timeout(&pool).await, 120);
         assert_eq!(kept.smtp_status.port, 465);
         assert_eq!(
             kept.config
@@ -465,6 +497,20 @@ mod tests {
                 UpdateSystemSettingsRequest {
                     web_origin: Some("https://flux.exemple.fr/sous-chemin".into()),
                     session_ttl_seconds: 3600,
+                    ..Default::default()
+                },
+            )
+            .await,
+            Err(AppError::Invalid)
+        ));
+
+        assert!(matches!(
+            update(
+                &pool,
+                &base,
+                UpdateSystemSettingsRequest {
+                    session_ttl_seconds: 3600,
+                    unreachable_timeout_seconds: Some(1),
                     ..Default::default()
                 },
             )

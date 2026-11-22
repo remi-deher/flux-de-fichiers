@@ -6,9 +6,7 @@ use crate::{
 use sqlx::sqlite::SqlitePoolOptions;
 use std::{path::Path, sync::Arc, time::Duration};
 
-pub(in crate::api) async fn setup(
-    root: &Path,
-) -> anyhow::Result<(AppState, Job, LeaseRequest, Uuid)> {
+pub(crate) async fn setup(root: &Path) -> anyhow::Result<(AppState, Job, LeaseRequest, Uuid)> {
     let data = root.join("data");
     let input = root.join("input");
     let config_dir = root.join("config");
@@ -86,6 +84,16 @@ pub(in crate::api) async fn setup(
         telemetry: None,
     };
     Ok((AppState::new(pool, Arc::new(config)), job, lease, holder.id))
+}
+
+/// Ce bail vient d'un worker à jour, dont la perte remet la tâche en file.
+pub(crate) async fn current_protocol(state: &AppState, job: Uuid) -> anyhow::Result<()> {
+    sqlx::query("UPDATE jobs SET lease_protocol=?2 WHERE id=?1")
+        .bind(job)
+        .bind(forgearr_shared::jobs::LeaseProtocol::LATEST.number())
+        .execute(&state.pool)
+        .await?;
+    Ok(())
 }
 
 #[tokio::test]

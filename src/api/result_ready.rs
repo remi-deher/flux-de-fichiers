@@ -3,7 +3,7 @@
 
 use super::{AppState, source_publication::publish_on_holder, transfers};
 use crate::{
-    domain::{Job, JobEventType, JobStatus, LeaseRequest, LibraryOutputPolicy},
+    domain::{Job, JobErrorCode, JobEventType, JobStatus, LeaseRequest, LibraryOutputPolicy},
     error::{AppError, AppResult},
     library_scan::central_writable_job_root,
     repository::{self, PublishedOutput, SourceHolder},
@@ -98,10 +98,17 @@ async fn complete_publication(
     if let Err(error) =
         repository::publish_succeeded(&s.pool, job.id, lease, output, async { Ok(()) }).await
     {
+        // Erreur ambiguë : la validation a pu aboutir.
+        if repository::completed_by_lease(&s.pool, job.id, lease).await? {
+            return Ok(());
+        }
         transfers::mark_publication_uncertain(s, job.id, lease.lease_epoch).await;
         return Err(error);
     }
-    repository::release_artifact(&s.pool, job.id, ArtifactKind::Result).await?;
+    // La tâche est réussie : un artefact resté déclaré sera ignoré, jamais une raison d'échouer.
+    if let Err(error) = repository::release_artifact(&s.pool, job.id, ArtifactKind::Result).await {
+        tracing::warn!(job_id=%job.id, %error, "artefact du résultat non libéré");
+    }
     tracing::info!(job_id=%job.id, worker_id=%lease.worker_id, bytes=output.bytes, "remux completed");
     let notified =
         crate::flows::publication::notify_after_publication(s, job, lease.worker_id, notified_path)
@@ -209,10 +216,20 @@ pub(crate) async fn finish_local_application(
             complete_publication(s, job, lease, output, path).await
         }
         SourcePublicationOutcome::SourceChanged => {
-            Err(transfers::abandon_publication(s, job, lease, AppError::SourceChanged).await)
+            repository::fail_changed_source(&s.pool, job.id, lease).await?;
+            let code = JobErrorCode::SourceChanged;
+            s.notify_job_event(
+                JobEventType::JobFailed,
+                job.id,
+                JobStatus::Failed,
+                Some(code),
+            );
+            Err(AppError::SourceChanged)
         }
         SourcePublicationOutcome::Failed => {
-            Err(transfers::abandon_publication(s, job, lease, AppError::CentralUnavailable).await)
+            let error = AppError::CentralUnavailable;
+            let name = &pending.output_name;
+            Err(transfers::abandon_publication(s, job, lease, name, error).await)
         }
     }
 }
@@ -277,18 +294,61 @@ pub(crate) async fn publish_pulled(
     match published {
         Ok(()) => {}
         Err(error) if in_output_dir => {
-            let output_file = s.config.data_dir.join("output").join(&output_name);
-            let _ = tokio::fs::remove_file(output_file).await;
+            discard_output(s, job.id, &output_name).await;
             return Err(error);
         }
-        Err(error) => return Err(transfers::abandon_publication(s, job, lease, error).await),
+        Err(error) => {
+            return Err(transfers::abandon_publication(s, job, lease, &output_name, error).await);
+        }
     }
     let notified_path = if in_output_dir {
         s.config.data_dir.join("output").join(&output_name)
     } else {
         std::path::PathBuf::from(&job.source_name)
     };
-    complete_publication(s, job, lease, output, &notified_path).await
+    let completed = complete_publication(s, job, lease, output, &notified_path).await;
+    if completed.is_err() && in_output_dir {
+        discard_output(s, job.id, &output_name).await;
+    }
+    completed
+}
+
+/// Supprime une sortie non publiée, jamais celle d'une tâche réussie (ni en cas de doute).
+async fn discard_output(s: &AppState, job: Uuid, output_name: &str) {
+    let published = repository::succeeded_output_name(&s.pool, job).await;
+    if matches!(&published, Ok(name) if name.as_deref() != Some(output_name)) {
+        let output_file = s.config.data_dir.join("output").join(output_name);
+        let _ = tokio::fs::remove_file(output_file).await;
+    }
+}
+
+/// Publication d'un résultat annoncé, sans connexion à attendre. Le bail et le journal sont relus ici,
+/// la publication déjà inscrite dans la carte : une exécution précédente est donc terminée.
+async fn publish_announced(
+    s: AppState,
+    id: Uuid,
+    lease: LeaseRequest,
+    ready: ResultReady,
+) -> AppResult<()> {
+    if repository::completed_by_lease(&s.pool, id, &lease).await? {
+        return Ok(());
+    }
+    // L'échéance, peut-être passée, ne doit plus conclure ce bail : le balayage a pu relever les
+    // publications avant que celle-ci ne s'inscrive.
+    if repository::renew_contact(&s.pool, id, &lease).await? {
+        s.notify_job_event(JobEventType::JobRestored, id, JobStatus::Running, None);
+    }
+    let job = repository::active(&s.pool, id, &lease).await?;
+    let epoch = lease.lease_epoch;
+    if repository::source_publication_in_progress(&s.pool, id, epoch)
+        .await?
+        .is_some()
+    {
+        // Inscrite avant un redémarrage du central : son exécutant travaille peut-être encore. La
+        // reprise conclura ; relancer ferait deux remplacements.
+        return Err(AppError::PublicationPending);
+    }
+    publish_pulled(&s, &job, &lease, &ready).await
 }
 
 /// Le worker annonce que son résultat est prêt et retenu chez lui (bail et clé de son worker).
@@ -300,15 +360,23 @@ pub async fn ready(
 ) -> AppResult<Json<ResultReadyResponse>> {
     let lease = transfers::lease(&headers)?;
     crate::auth::authorize_worker_identity(&s.pool, &headers, lease.worker_id).await?;
+    let key = (id, lease.lease_epoch);
+    if repository::completed_by_lease(&s.pool, id, &lease).await? {
+        return Ok(Json(ResultReadyResponse {
+            apply_locally: None,
+        }));
+    }
     let job = repository::active(&s.pool, id, &lease).await?;
     if ready.can_apply_locally
+        && !s.publications.contains(key)
         && let Some(local) = begin_local_application(&s, &job, &lease, &ready).await?
     {
         return Ok(Json(ResultReadyResponse {
             apply_locally: Some(local),
         }));
     }
-    publish_pulled(&s, &job, &lease, &ready).await?;
+    let publication = publish_announced(s.clone(), id, lease, ready);
+    s.publications.run(key, publication).await?;
     Ok(Json(ResultReadyResponse {
         apply_locally: None,
     }))
@@ -324,10 +392,49 @@ pub async fn authorize_application(
     crate::auth::authorize_worker_identity(&s.pool, &headers, lease.worker_id).await?;
     let job = repository::active(&s.pool, id, &lease).await?;
     pending_application(&s, &job, &lease).await?;
+    repository::require_publication_grant(&s.pool, id, &lease).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Le worker annonce l'issue du remplacement qu'il vient d'appliquer.
+/// Réponse à un rapport déjà traité par ce bail (la première s'était perdue).
+async fn repeated_outcome(
+    s: &AppState,
+    id: Uuid,
+    lease: &LeaseRequest,
+    outcome: SourcePublicationOutcome,
+) -> AppResult<Option<AppResult<()>>> {
+    let reported = match outcome {
+        SourcePublicationOutcome::Published => repository::completed_by_lease(&s.pool, id, lease)
+            .await?
+            .then_some(Ok(())),
+        SourcePublicationOutcome::SourceChanged => {
+            let code = JobErrorCode::SourceChanged;
+            repository::failed_by_lease(&s.pool, id, lease, code)
+                .await?
+                .then_some(Err(AppError::SourceChanged))
+        }
+        SourcePublicationOutcome::Failed => None,
+    };
+    Ok(reported)
+}
+
+/// Conclut un remplacement appliqué par le worker, sans connexion à attendre : succès, notification
+/// différée et artefact vont à leur terme. Une répétition retrouve l'issue inscrite.
+async fn conclude_application(
+    s: AppState,
+    id: Uuid,
+    lease: LeaseRequest,
+    outcome: SourcePublicationOutcome,
+) -> AppResult<()> {
+    if let Some(reported) = repeated_outcome(&s, id, &lease, outcome).await? {
+        return reported;
+    }
+    let job = repository::active(&s.pool, id, &lease).await?;
+    finish_local_application(&s, &job, &lease, outcome).await
+}
+
+/// Le worker annonce l'issue du remplacement qu'il vient d'appliquer. Une répétition rejoint la
+/// conclusion en cours.
 pub async fn applied(
     State(s): State<AppState>,
     headers: HeaderMap,
@@ -336,8 +443,9 @@ pub async fn applied(
 ) -> AppResult<StatusCode> {
     let lease = transfers::lease(&headers)?;
     crate::auth::authorize_worker_identity(&s.pool, &headers, lease.worker_id).await?;
-    let job = repository::active(&s.pool, id, &lease).await?;
-    finish_local_application(&s, &job, &lease, outcome).await?;
+    let key = (id, lease.lease_epoch);
+    let conclusion = conclude_application(s.clone(), id, lease, outcome);
+    s.publications.run(key, conclusion).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -2,6 +2,9 @@
 
 use super::system::{DetailGrid, DetailRow, duration_label};
 use crate::ui::SectionHeader;
+use forgearr_shared::jobs::{
+    MAX_UNREACHABLE_TIMEOUT_SECONDS, MIN_UNREACHABLE_TIMEOUT_SECONDS, valid_unreachable_timeout,
+};
 use forgearr_shared::system::{NetworkStatus, SystemStatus};
 use leptos::prelude::*;
 
@@ -77,6 +80,8 @@ fn trimmed_optional(raw: &str) -> Option<String> {
 struct SettingsFormInput<'a> {
     web_origin: &'a str,
     session_ttl: &'a str,
+    /// Vide : la valeur du central est conservée.
+    unreachable_timeout: &'a str,
     smtp_enabled: bool,
     smtp_host: &'a str,
     smtp_port: &'a str,
@@ -88,6 +93,21 @@ struct SettingsFormInput<'a> {
     allow_private_plugin_hosts: bool,
     block_private_integration_hosts: bool,
     check_updates_enabled: bool,
+}
+
+fn parse_unreachable_timeout(raw: &str) -> Result<Option<i64>, String> {
+    let Some(raw) = trimmed_optional(raw) else {
+        return Ok(None);
+    };
+    raw.parse::<i64>()
+        .ok()
+        .filter(|seconds| valid_unreachable_timeout(*seconds))
+        .map(Some)
+        .ok_or_else(|| {
+            format!(
+                "Le délai d'injoignabilité doit être compris entre {MIN_UNREACHABLE_TIMEOUT_SECONDS} et {MAX_UNREACHABLE_TIMEOUT_SECONDS} secondes."
+            )
+        })
 }
 
 fn build_settings_request(
@@ -103,6 +123,7 @@ fn build_settings_request(
             "La durée de session doit être comprise entre {MIN_SESSION_TTL_SECONDS} et {MAX_SESSION_TTL_SECONDS} secondes."
         ));
     }
+    let unreachable_timeout_seconds = parse_unreachable_timeout(input.unreachable_timeout)?;
     let parsed_port = match trimmed_optional(input.smtp_port) {
         Some(raw) => {
             let port: u16 = raw
@@ -136,6 +157,7 @@ fn build_settings_request(
         block_private_integration_hosts: input.block_private_integration_hosts,
         check_updates_enabled: input.check_updates_enabled,
         timezone: None,
+        unreachable_timeout_seconds,
     })
 }
 
@@ -143,6 +165,7 @@ fn build_settings_request(
 fn SettingsRuntimeForm(initial: SystemStatus, on_saved: Callback<()>) -> impl IntoView {
     let web_origin = RwSignal::new(initial.network.web_origin.clone().unwrap_or_default());
     let session_ttl = RwSignal::new(initial.network.session_ttl_seconds.to_string());
+    let unreachable_timeout = RwSignal::new(initial.unreachable_timeout_seconds.to_string());
     let smtp_enabled = RwSignal::new(initial.smtp.configured);
     let smtp_host = RwSignal::new(initial.smtp.host.clone().unwrap_or_default());
     let smtp_port = RwSignal::new(initial.smtp.port.to_string());
@@ -185,6 +208,7 @@ fn SettingsRuntimeForm(initial: SystemStatus, on_saved: Callback<()>) -> impl In
             match build_settings_request(&SettingsFormInput {
                 web_origin: &web_origin.get_untracked(),
                 session_ttl: &session_ttl.get_untracked(),
+                unreachable_timeout: &unreachable_timeout.get_untracked(),
                 smtp_enabled: smtp_enabled.get_untracked(),
                 smtp_host: &smtp_host.get_untracked(),
                 smtp_port: &smtp_port.get_untracked(),
@@ -216,6 +240,15 @@ fn SettingsRuntimeForm(initial: SystemStatus, on_saved: Callback<()>) -> impl In
                     <input id="cfg-session-ttl" class="form-input text-mono" type="number" min=MIN_SESSION_TTL_SECONDS max=MAX_SESSION_TTL_SECONDS
                         prop:value=move || session_ttl.get()
                         on:input=move |ev| session_ttl.set(event_target_value(&ev)) />
+                </div>
+                <div class="form-group">
+                    <label for="cfg-unreachable-timeout" class="form-label">"Délai d'injoignabilité d'un worker (secondes)"</label>
+                    <input id="cfg-unreachable-timeout" class="form-input text-mono" type="number"
+                        min=MIN_UNREACHABLE_TIMEOUT_SECONDS max=MAX_UNREACHABLE_TIMEOUT_SECONDS
+                        aria-describedby="cfg-unreachable-timeout-help"
+                        prop:value=move || unreachable_timeout.get()
+                        on:input=move |ev| unreachable_timeout.set(event_target_value(&ev)) />
+                    <p id="cfg-unreachable-timeout-help" class="form-help">"Sans nouvelle du worker pendant ce délai, sa tâche est remise en file."</p>
                 </div>
             </div>
 
@@ -355,6 +388,15 @@ mod tests {
     }
 
     #[test]
+    fn the_unreachable_timeout_is_bounded_and_optional() {
+        assert_eq!(parse_unreachable_timeout(" "), Ok(None));
+        assert_eq!(parse_unreachable_timeout(" 600 "), Ok(Some(600)));
+        for bad in ["59", "86401", "dix"] {
+            assert!(parse_unreachable_timeout(bad).is_err());
+        }
+    }
+
+    #[test]
     fn tls_is_described_either_way() {
         assert!(tls_label(true).contains("central"));
         assert!(tls_label(false).contains("HTTP simple"));
@@ -417,6 +459,8 @@ mod tests {
         assert_eq!(kept.smtp_password, None);
         assert!(kept.allow_private_plugin_hosts);
         assert!(!kept.block_private_integration_hosts);
+
+        assert_eq!(kept.unreachable_timeout_seconds, None);
 
         let cleared = build_settings_request(&SettingsFormInput {
             session_ttl: "3600",

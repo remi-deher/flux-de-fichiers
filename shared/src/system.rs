@@ -206,6 +206,13 @@ pub struct SystemStatus {
     /// Fuseau horaire IANA actif sur le central (`Europe/Paris`, `UTC`, `Etc/GMT`…).
     #[serde(default = "default_timezone")]
     pub timezone: String,
+    /// Délai d'injoignabilité avant la remise en file d'une tâche (ADR 0027).
+    #[serde(default = "default_unreachable_timeout")]
+    pub unreachable_timeout_seconds: i64,
+}
+
+fn default_unreachable_timeout() -> i64 {
+    crate::jobs::DEFAULT_UNREACHABLE_TIMEOUT_SECONDS
 }
 
 fn default_timezone() -> String {
@@ -245,6 +252,9 @@ pub struct UpdateSystemSettingsRequest {
     /// Fuseau horaire IANA optionnel (`None` conserve la valeur actuelle).
     #[serde(default)]
     pub timezone: Option<String>,
+    /// Délai d'injoignabilité (`None` conserve la valeur actuelle).
+    #[serde(default)]
+    pub unreachable_timeout_seconds: Option<i64>,
 }
 
 /// Charge matérielle du central, relevée à la demande (`GET /api/v1/system/hardware`).

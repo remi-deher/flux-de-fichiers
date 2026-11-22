@@ -21,6 +21,8 @@ mod variables;
 #[cfg(test)]
 mod engine_tests;
 #[cfg(test)]
+mod gate_flow_tests;
+#[cfg(test)]
 mod placement_flow_tests;
 #[cfg(test)]
 mod script_branch_flow_tests;
@@ -29,7 +31,12 @@ mod sub_flow_tests;
 #[cfg(test)]
 mod variables_flow_tests;
 
-use crate::{media::OutputSpec, tools_cache::ToolCacheManager};
+use crate::{
+    domain::IrreversibleAction,
+    job_runner::action_gate::{ActionGate, ActionRequest},
+    media::OutputSpec,
+    tools_cache::ToolCacheManager,
+};
 use chrono::Utc;
 use forgearr_shared::{
     capabilities::WorkerCapabilities,
@@ -68,6 +75,8 @@ pub use node_references::{
 };
 
 const MAX_FLOW_STEPS: usize = 32;
+/// Nœud du journal pour l'opération de repli, exécutée sans flux.
+const DEFAULT_NODE_ID: &str = "default";
 
 /// Callback thread-safe de progression `(pourcentage, ligne console)`.
 pub type FlowProgressCallback = Arc<dyn Fn(u32, &str) + Send + Sync>;
@@ -176,6 +185,9 @@ pub struct FlowEngine<'a> {
     pub run_info: FlowRunInfo<'a>,
     /// Sorties des nœuds exécutés avant le relais, transmises par le worker émetteur.
     pub resumed_outputs: &'a HashMap<String, RelayedNodeOutput>,
+    /// Accord du central avant une action irréversible ; absent : aucun n'est demandé (aperçu, flux
+    /// d'échec, ancien central).
+    pub action_gate: Option<&'a dyn ActionGate>,
 }
 
 impl<'a> FlowEngine<'a> {
@@ -226,6 +238,8 @@ impl<'a> FlowEngine<'a> {
                 media_info: &media_info,
                 step_index: 0,
                 on_progress,
+                node_id: DEFAULT_NODE_ID,
+                action_gate: self.action_gate,
             },
             op,
             bin_rt,
@@ -248,7 +262,7 @@ impl<'a> FlowEngine<'a> {
             media_info,
             steps: vec![crate::domain::JobStepEntry {
                 step_index: 0,
-                node_id: "default".to_owned(),
+                node_id: DEFAULT_NODE_ID.to_owned(),
                 block_kind: op.id.clone(),
                 operation_id: Some(op.id.clone()),
                 status: crate::domain::JobStepStatus::Succeeded,
@@ -555,6 +569,8 @@ impl<'a> FlowEngine<'a> {
                             media_info: &ctx.media_info,
                             step_index,
                             on_progress: on_progress.clone(),
+                            node_id: &node.id,
+                            action_gate: self.action_gate,
                         },
                         op,
                         bin_rt,
@@ -608,6 +624,17 @@ impl<'a> FlowEngine<'a> {
                     step_variables = Some(ctx.variables.custom.clone());
                 }
                 OperationRuntime::Http(http_rt) => {
+                    if !http_rt.is_safe()
+                        && let Some(gate) = self.action_gate
+                        && let Err(refusal) = gate
+                            .authorize(ActionRequest::block(IrreversibleAction::HttpCall, &node.id))
+                            .await
+                    {
+                        let message = refusal.message();
+                        return Err(operation_failure(
+                            steps, step_index, &node, &op.id, message, None,
+                        ));
+                    }
                     let outbound_policy = crate::net_policy::OutboundPolicy {
                         allow_private_hosts: self.allow_private_integrations.unwrap_or_else(|| {
                             crate::net_policy::OutboundPolicy::integration_from_env()

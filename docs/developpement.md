@@ -10,7 +10,9 @@ Ce guide se consulte à la demande. Le README reste la référence d'utilisation
 | Travail | Lire d'abord | Compléter si nécessaire |
 |---|---|---|
 | API, authentification | `src/api.rs`, `src/auth.rs`, `src/api/jobs.rs` | Route concernée dans `docs/openapi.yaml`, `tests/api_security.rs` |
-| Baux, attribution, reprises | `src/repository.rs`, `src/domain.rs` | `migrations/`, `src/worker.rs` |
+| Baux, état injoignable, remise en file (ADR 0027) | `src/repository/leases/` (`contact`, `sweep`, `restart`, `end`, `view`), `src/repository/irreversible_actions.rs`, `src/lease_sweeper.rs`, `src/api/leases.rs`, `shared/src/jobs/lease.rs` | `docs/adr/0027-etat-injoignable-et-remise-en-file.md` ; tests (CI) : `lease_*`, `worker_boot`, `irreversible_actions` |
+| Worker : contact, accord, arrêt propre (ADR 0027) | `src/worker.rs`, `src/worker/lease_calls.rs`, `src/worker/contact.rs`, `src/job_runner/action_gate.rs`, `src/supervision.rs`, `src/local_worker.rs`, `src/local_worker/lease_gate.rs` | `src/worker/timing.rs` (tous les délais), `src/worker/startup_purge.rs`, `src/flows/gate_flow_tests.rs`, `client/src/jobs/lease.rs` |
+| Attribution | `src/repository/jobs.rs`, `src/domain.rs` | `migrations/`, `src/worker.rs` |
 | Transferts, intégrité, publication | `src/api/transfers.rs`, `src/storage.rs` | `src/media.rs`, `src/worker.rs` |
 | Variables de script, modèles `{$…}`, exposition par les plugins (ADR 0025, 0026) | `shared/src/script_variables.rs`, `src/flows/header_secrets.rs` (secrets `config.secrets`), `src/repository/flow_samples.rs` (échantillon de métadonnées du dernier job), `src/plugins/highlight.rs`, `src/plugins/highlight/powershell.rs`, `shared/src/exposed_variables.rs`, `shared/src/flows/template_scope.rs` (portée et rendu uniques `{$…}`), `shared/src/flows/legacy_references.rs` (conversion `{{…}}` → `{$…}`), `src/flows/substitution.rs`, `src/flows/variables.rs` (`NodeScope`), `src/flows/node_references.rs`, `shared/src/flows/node_references.rs`, `client/src/flows/template_input.rs` (sélecteur unique), `client/src/flows/variables_form.rs`, `src/plugins/script_requirements.rs`, `src/plugins/exposures.rs`, `client/src/plugins/exposed_variables.rs`, `client/src/libraries/requirements_editor.rs`, `client/src/libraries/rows.rs`, `src/plugins/local/write.rs`, `client/src/libraries/variables_editor.rs`, `client/src/ui/variables_table.rs` | `docs/adr/0025-variables-de-script-et-exposition-par-les-plugins.md` ; tests (CI) : `script_variables`, `template_scope`, `legacy_references`, `node_references` |
 | Aperçu et coloration du code d'un script de dépôt | `src/plugins/script_preview.rs`, `src/plugins/highlight.rs`, `client/src/plugins/script_preview.rs` | `shared/src/highlight.rs` |
@@ -41,10 +43,16 @@ libres, puis la tâche admissible de plus haute `priority`, la plus ancienne à 
 Les places viennent de `WorkerSlots` (`shared/src/workers/slots.rs`) : sans `max_cpu_jobs` ni
 `max_gpu_jobs`, `max_concurrency` places communes (mode historique) ; sinon places par classe
 (GPU à 0 par défaut). La classe d'une tâche (`jobs.resource_class`) est figée à sa création :
-GPU si un bloc du flux figé porte `acceleration` = `nvenc` ou `vaapi`
+GPU si un bloc du flux figé ou de ses flux liés porte `acceleration` = `nvenc` ou `vaapi`
 (`shared/src/flows/resources.rs`). Une tâche sans priorité explicite prend
 `libraries.default_priority`. Ces colonnes sont lues en SQLx runtime
 (`src/repository/resource_slots.rs`), les macros existantes restant inchangées.
+
+Baux (ADR 0027), pièges : un bail vaut tant que (worker, jeton, époque, `running`) est inscrit, l'échéance
+seule ne le retire pas ; toute écriture d'un titulaire passe par `ensure_held` dans sa transaction. Côté
+worker, seul `lease_lost` prouve la perte : une erreur réseau n'arrête rien. Un arrêt (`TaskStop`) ne se
+déclare jamais en échec. Un nouveau bloc aux effets externes demande l'accord (`ActionGate`) juste avant ;
+un nouveau processus externe se lance par `SupervisedChild`, une étape à ne pas couper par `critical`.
 
 ## Vérifier selon le changement
 

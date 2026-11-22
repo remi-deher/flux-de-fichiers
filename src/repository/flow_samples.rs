@@ -1,7 +1,7 @@
 //! Métadonnées du dernier vrai job de chaque flux (échantillon de simulation de l'éditeur).
 
 use crate::{
-    domain::{JobStatus, LeaseRequest},
+    domain::LeaseRequest,
     error::{AppError, AppResult},
 };
 use forgearr_shared::flow_analysis::FlowMediaSample;
@@ -23,20 +23,8 @@ pub async fn save_flow_media_sample(
     if empty || json.len() > FlowMediaSample::MAX_BYTES {
         return Ok(());
     }
-    let active: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM jobs WHERE id=?1 AND worker_id=?2 AND lease_token=?3 \
-         AND lease_epoch=?4 AND status=?5 AND leased_until > datetime('now'))",
-    )
-    .bind(job_id)
-    .bind(lease.worker_id)
-    .bind(lease.lease_token)
-    .bind(lease.lease_epoch)
-    .bind(JobStatus::Running)
-    .fetch_one(pool)
-    .await?;
-    if !active {
-        return Err(AppError::Conflict);
-    }
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    super::leases::ensure_held(&mut tx, job_id, lease).await?;
     sqlx::query(
         "INSERT INTO flow_media_samples(flow_id, job_id, source_name, media_info_json) \
          SELECT flow_id, id, source_name, ?2 FROM jobs WHERE id=?1 AND flow_id IS NOT NULL \
@@ -46,8 +34,9 @@ pub async fn save_flow_media_sample(
     )
     .bind(job_id)
     .bind(json)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(())
 }
 

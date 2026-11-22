@@ -104,6 +104,7 @@ pub async fn reprocess(
     if exists {
         return Err(AppError::Conflict);
     }
+    ensure_no_unresolved_publication(&mut tx, library_id, &previous.source_name).await?;
     let mut job = super::jobs::create_job(
         &mut tx,
         &previous.source_name,
@@ -149,6 +150,27 @@ pub async fn reprocess(
     }
     tx.commit().await?;
     Ok(job)
+}
+
+/// Un remplacement de cette source à l'issue inconnue peut encore aboutir chez son exécutant : pas de
+/// nouvelle tâche tant que l'administrateur ne l'a pas levé (suppression du résultat ou de la tâche).
+async fn ensure_no_unresolved_publication(
+    conn: &mut sqlx::SqliteConnection,
+    library: Uuid,
+    source_name: &str,
+) -> AppResult<()> {
+    let unresolved: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM source_publication_journal p JOIN jobs j ON j.id=p.job_id \
+         WHERE j.library_id=?1 AND j.source_name=?2)",
+    )
+    .bind(library)
+    .bind(source_name)
+    .fetch_one(conn)
+    .await?;
+    if unresolved {
+        return Err(AppError::Conflict);
+    }
+    Ok(())
 }
 
 pub async fn placement(

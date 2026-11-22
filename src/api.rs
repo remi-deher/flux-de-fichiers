@@ -7,10 +7,12 @@ pub(crate) mod flows;
 pub(crate) mod installation;
 pub(crate) mod jobs;
 mod keys;
+pub(crate) mod leases;
 pub(crate) mod libraries;
 pub(crate) mod local;
 mod password_reset;
 pub(crate) mod plugins;
+pub(crate) mod publications_in_flight;
 pub(crate) mod recovery_kit;
 pub(crate) mod result_ready;
 pub(crate) mod session;
@@ -33,6 +35,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     routing::{get, post, put},
 };
+use forgearr_shared::jobs::LeaseProtocol;
 use sqlx::{
     SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
@@ -125,6 +128,8 @@ pub struct AppState {
     pub browse_broker: crate::filesystem_browser::RemoteBrowseBroker,
     pub source_publication: crate::source_publication_broker::SourcePublicationBroker,
     pub source_inspection: crate::source_publication_broker::SourcePublicationBroker,
+    /// Publications menées par ce processus, par tâche et époque (ADR 0027).
+    pub publications: publications_in_flight::PublicationsInFlight,
     pub pending_worker_setup: Arc<tokio::sync::Mutex<Option<installation::PendingWorkerSetup>>>,
     pub ai_runs: crate::ai::run::AiRuns,
     pub ai_health: crate::ai::health::AiHealthTracker,
@@ -152,6 +157,7 @@ impl AppState {
             source_publication: crate::source_publication_broker::SourcePublicationBroker::default(
             ),
             source_inspection: crate::source_publication_broker::SourcePublicationBroker::default(),
+            publications: publications_in_flight::PublicationsInFlight::default(),
             pending_worker_setup: Arc::new(tokio::sync::Mutex::new(None)),
             ai_runs: crate::ai::run::AiRuns::new(),
             ai_health: crate::ai::health::AiHealthTracker::new(),
@@ -531,7 +537,13 @@ fn json_routes() -> Router<AppState> {
             put(jobs::update_worker_settings),
         )
         .route("/api/v1/claims", post(claim))
-        .route("/api/v1/jobs/{id}/heartbeat", post(jobs::heartbeat))
+        .route("/api/v1/jobs/leases", get(leases::lease_infos))
+        .route("/api/v1/jobs/{id}/heartbeat", post(leases::heartbeat))
+        .route("/api/v1/jobs/{id}/release", post(leases::release))
+        .route(
+            "/api/v1/jobs/{id}/irreversible/authorize",
+            post(leases::authorize_action),
+        )
         .route("/api/v1/jobs/{id}/progress", post(jobs::progress))
         .route("/api/v1/jobs/{id}/failure", post(jobs::failure))
         .route("/api/v1/jobs/{id}/relay", post(jobs::relay))
@@ -770,7 +782,7 @@ async fn register(
     connect_info: Option<Extension<ConnectInfo<std::net::SocketAddr>>>,
     axum::Json(r): axum::Json<Register>,
 ) -> AppResult<axum::Json<Worker>> {
-    crate::auth::authorize_worker(&s.pool, &h).await?;
+    let principal = crate::auth::authorize_worker(&s.pool, &h).await?;
     if !crate::worker_settings::is_valid_worker_name(&r.name) {
         return Err(crate::error::AppError::Invalid);
     }
@@ -790,6 +802,15 @@ async fn register(
         .and_then(repository::valid_transfer_url);
     repository::set_transfer_url(&s.pool, worker.id, transfer_url.as_deref()).await?;
     worker.transfer_enabled = transfer_url.is_some();
+    if let Some(boot_id) = r.boot_id {
+        // Un démarrage reprend des tâches : seule la clé de ce worker peut l'annoncer.
+        if principal.name == worker.name {
+            let changes = repository::register_boot(&s.pool, worker.id, boot_id).await?;
+            leases::notify_lease_changes(&s, &changes);
+        } else {
+            tracing::warn!(worker_id=%worker.id, "démarrage ignoré : la clé n'est pas celle de ce worker");
+        }
+    }
     Ok(axum::Json(worker))
 }
 /// Enrichit un bail (`Claim`) avec les contrats d'opérations, outils requis et réglages nécessaires.
@@ -894,21 +915,26 @@ async fn claim(
 ) -> AppResult<axum::Json<Option<Claim>>> {
     crate::auth::authorize_worker(&s.pool, &h).await?;
     let remote_addr = client_remote_addr(&h, connect_info);
-    let mut claim_res = repository::claim(&s.pool, r.worker_id).await?;
-    if remote_addr.is_some() || r.telemetry.is_some() {
-        let _ = repository::touch_worker_telemetry(
-            &s.pool,
-            r.worker_id,
-            remote_addr.as_deref(),
-            r.telemetry.as_ref(),
-        )
-        .await;
+    let protocol = LeaseProtocol::from_number(r.lease_protocol.unwrap_or_default());
+    // D'abord : ce worker répond, il n'est pas « hors ligne » pour la reprise de ses tâches.
+    let _ = repository::touch_worker_telemetry(
+        &s.pool,
+        r.worker_id,
+        remote_addr.as_deref(),
+        r.telemetry.as_ref(),
+    )
+    .await;
+    if let Some(active_jobs) = &r.active_jobs
+        && protocol != LeaseProtocol::Legacy
+    {
+        crate::auth::authorize_worker_identity(&s.pool, &h, r.worker_id).await?;
+        let changes = repository::end_disowned_leases(&s.pool, r.worker_id, active_jobs).await?;
+        leases::notify_lease_changes(&s, &changes);
     }
+    let mut claim_res = repository::claim_with_protocol(&s.pool, r.worker_id, protocol).await?;
     if let Some(ref mut claim) = claim_res {
-        populate_claim_contracts(&s.pool, &s.config, &s.catalog_cache, r.worker_id, claim).await?;
-        repository::attach_source_ticket(&s.pool, r.worker_id, claim).await?;
-        if let Some(worker_key) = crate::auth::bearer_token(&h) {
-            crate::flows::seal_claim_secrets_for_worker(claim, worker_key)?;
+        if let Err(error) = prepare_claim(&s, &h, r.worker_id, claim).await {
+            return Err(undeliverable_claim(&s, r.worker_id, claim, error).await);
         }
         s.notify_job_event(
             JobEventType::JobClaimed,
@@ -918,6 +944,46 @@ async fn claim(
         );
     }
     Ok(axum::Json(claim_res))
+}
+
+/// Complète un bail réservé de tout ce que le worker doit recevoir.
+async fn prepare_claim(
+    s: &AppState,
+    headers: &HeaderMap,
+    worker_id: uuid::Uuid,
+    claim: &mut Claim,
+) -> AppResult<()> {
+    populate_claim_contracts(&s.pool, &s.config, &s.catalog_cache, worker_id, claim).await?;
+    repository::attach_source_ticket(&s.pool, worker_id, claim).await?;
+    if let Some(worker_key) = crate::auth::bearer_token(headers) {
+        crate::flows::seal_claim_secrets_for_worker(claim, worker_key)?;
+    }
+    Ok(())
+}
+
+/// Un bail réservé mais impossible à remettre n'a pas d'exécutant : il est rendu aussitôt. La cause
+/// (base occupée, clé absente du trousseau, stockage) tient au central plus qu'à la tâche : elle revient
+/// en file, puis échoue en `lease_expired`, relançable, si l'erreur persiste.
+pub(crate) async fn undeliverable_claim(
+    s: &AppState,
+    worker_id: uuid::Uuid,
+    claim: &Claim,
+    error: crate::error::AppError,
+) -> crate::error::AppError {
+    tracing::warn!(job_id=%claim.job_id, ?error, "bail impossible à remettre au worker");
+    let lease = LeaseRequest {
+        worker_id,
+        lease_token: claim.lease_token,
+        lease_epoch: claim.lease_epoch,
+        telemetry: None,
+    };
+    match repository::undeliver_lease(&s.pool, claim.job_id, &lease).await {
+        Ok(change) => leases::notify_lease_changes(s, &[change]),
+        Err(undelivered) => {
+            tracing::error!(job_id=%claim.job_id, error=%undelivered, "bail non remis et non rendu");
+        }
+    }
+    error
 }
 
 /// Intervalle entre deux synchronisations automatiques des dépôts de plugins.
@@ -969,7 +1035,9 @@ pub async fn connect_database(config: &Config) -> anyhow::Result<SqlitePool> {
     }
     .create_if_missing(true)
     .journal_mode(SqliteJournalMode::Wal)
-    .synchronous(SqliteSynchronous::Normal)
+    // FULL : un accord, une attribution ou une intention validés survivent à une coupure de courant
+    // (ADR 0027), ce que NORMAL ne garantit pas en WAL.
+    .synchronous(SqliteSynchronous::Full)
     .foreign_keys(true)
     .busy_timeout(Duration::from_secs(SQLITE_BUSY_TIMEOUT_SECS))
     .pragma("temp_store", "MEMORY")
@@ -995,11 +1063,29 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     let addr = config.bind;
     let tls = config.tls.clone();
     let state = AppState::new(pool.clone(), Arc::new(config));
+    // Aucun worker n'a pu joindre le central arrêté : compteurs à zéro avant toute expiration.
+    repository::restart_contacts(&state.pool).await?;
     source_recovery::recover(&state).await?;
     let pending_publications = repository::pending_source_publications(&state.pool).await?;
     if state.config.local_worker {
-        tokio::spawn(crate::local_worker::run(state.clone()));
+        // Son dernier contact date d'avant l'arrêt, alors qu'il démarre avec le central.
+        crate::local_worker::announce_start(&state.pool).await;
     }
+    let orphans = repository::end_integrated_leases(&state.pool).await?;
+    for change in &orphans {
+        // Les publications différées sont reprises plus bas avec les autres.
+        state.notify_job_event(
+            change.event,
+            change.job_id,
+            change.status,
+            change.error_code,
+        );
+    }
+    let lease_sweeper = tokio::spawn(crate::lease_sweeper::run(state.clone()));
+    let local_worker = state
+        .config
+        .local_worker
+        .then(|| tokio::spawn(crate::local_worker::run(state.clone())));
     // Flux d'échec des tâches échouées hors worker (perte de bail, refus du central, ADR 0026).
     tokio::spawn(crate::failure_flow_runner::run(state.clone()));
     match crate::secrets::SecretBox::open(&state.config.config_dir) {
@@ -1091,6 +1177,15 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     lib_scans.abort();
     ai_diagnosis.abort();
     source_recovery.abort();
+    // Le worker intégré rend ses tâches avant que la base ne se ferme.
+    if let Some(local_worker) = local_worker
+        && tokio::time::timeout(crate::worker::timing::SHUTDOWN_TIMEOUT, local_worker)
+            .await
+            .is_err()
+    {
+        tracing::warn!("arrêt : le worker intégré n'a pas rendu toutes ses tâches");
+    }
+    lease_sweeper.abort();
     pool.close().await;
     Ok(())
 }

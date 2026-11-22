@@ -4,6 +4,8 @@ Statut : proposé (20 nov. 2026), principe validé par l'utilisateur en session.
 le central de l'[ADR 0019](0019-partage-des-sources-entre-workers.md) (point 6) et la remise via le
 central de l'[ADR 0020](0020-blocs-de-transfert-dans-le-flux.md) (points 4 à 6). Précise l'[ADR 0021](0021-modes-d-acces-des-workers-aux-bibliotheques.md).
 
+> Voir l'[ADR 0027](0027-etat-injoignable-et-remise-en-file.md) : table des pannes tranchée.
+
 ## Contexte
 
 Le transfert de fichiers entre workers repose aujourd'hui sur quatre mécanismes distincts :
@@ -77,8 +79,9 @@ quand le résultat du remplacement n'est pas connu.
 
 | Panne | Effet |
 | --- | --- |
-| B tombe avant la fin du flux | Bail expiré, tâche remise en file ; l'original de A est intact. |
-| B tombe avant que A ait tiré le résultat | A n'a rien remplacé ; la tâche repart de l'original (échec borné `transfer_failed` si plus aucune cible). |
+| B tombe avant la fin du flux | Tâche injoignable, puis remise en file à l'échéance ou au redémarrage de B, depuis la source (ADR 0027) ; l'original de A est intact. |
+| B coupé du central puis revenu avant l'échéance | Bail rétabli, rien n'est perdu ; un résultat prêt attend le retour. |
+| B tombe avant que A ait tiré le résultat | A n'a rien remplacé ; une publication en cours est conclue par le journal (ADR 0027), sinon la tâche repart de l'original. |
 | A tombe avant le point de commit | B conserve le résultat jusqu'à une durée de vie maximale (constante nommée), A le tire à sa reconnexion. |
 | Détenteur d'un fichier de travail disparu (remise B vers C) | Les fichiers retenus survivent au redémarrage (dossier du worker) ; passé la durée bornée, la tâche repart de la source d'origine chez A. |
 | Accusé perdu après remplacement | Répétition idempotente (point commit). |

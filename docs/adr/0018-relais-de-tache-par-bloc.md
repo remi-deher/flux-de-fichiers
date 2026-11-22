@@ -6,6 +6,8 @@ sondes `hardware_probe.rs` (`lspci`, `nvidia-smi`, `vainfo`), blocs `worker-capa
 table `job_relays`, filtre de capacité dans `claim`, plafond de relais nommé, code `no_capable_worker`,
 événement `job_relayed`, route `GET /api/v1/jobs/relays`. Le relais en cours de flux reste reporté.
 
+> Voir l'[ADR 0027](0027-etat-injoignable-et-remise-en-file.md) : point 5 précisé.
+
 ## Contexte
 
 Un worker peut ne pas avoir la capacité d'exécuter une tâche, par exemple encoder en H.265 alors

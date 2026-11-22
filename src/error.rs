@@ -20,6 +20,12 @@ pub enum AppError {
     NotFound,
     #[error("lease expired or conflict")]
     Conflict,
+    /// L'appelant n'est plus titulaire du bail : refus définitif (ADR 0027).
+    #[error("lease lost")]
+    LeaseLost,
+    /// Publication inscrite dont l'issue est en cours de vérification : répéter plus tard.
+    #[error("publication pending")]
+    PublicationPending,
     #[error("source changed since discovery")]
     SourceChanged,
     #[error("installation already completed")]
@@ -75,6 +81,8 @@ impl IntoResponse for AppError {
             Self::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             Self::NotFound => (StatusCode::NOT_FOUND, "not_found"),
             Self::Conflict => (StatusCode::CONFLICT, "lease_expired_or_conflict"),
+            Self::LeaseLost => (StatusCode::CONFLICT, "lease_lost"),
+            Self::PublicationPending => (StatusCode::SERVICE_UNAVAILABLE, "publication_pending"),
             Self::SourceChanged => (StatusCode::CONFLICT, "source_changed"),
             Self::AlreadyConfigured => (StatusCode::CONFLICT, "already_configured"),
             Self::RateLimited => (StatusCode::TOO_MANY_REQUESTS, "too_many_attempts"),
@@ -161,6 +169,18 @@ mod tests {
         let (_, body) = answer(AppError::RepositoryUnavailable(long)).await;
         let message = body["error"]["message"].as_str().unwrap_or_default();
         assert_eq!(message.chars().count(), DETAIL_MAX_CHARS);
+    }
+
+    #[tokio::test]
+    async fn a_lost_lease_is_told_apart_from_any_other_conflict() {
+        let (status, body) = answer(AppError::LeaseLost).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["error"]["code"], "lease_lost");
+        let (status, body) = answer(AppError::Conflict).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["error"]["code"], "lease_expired_or_conflict");
+        let (status, _) = answer(AppError::PublicationPending).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]

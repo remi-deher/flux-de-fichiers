@@ -375,6 +375,21 @@ paths:
                 type: array
                 items: {$ref: '#/components/schemas/JobResourceInfo'}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/leases:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Lire l'état du bail des tâches indiquées (ADR 0027)
+      parameters:
+        - {in: query, name: ids, required: true, schema: {type: string}, description: "UUID séparés par une virgule (200 au plus)."}
+      responses:
+        '200':
+          description: Tâches en cours, et tâches en file pour un worker désigné hors ligne
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/JobLeaseInfo'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/jobs/{id}/placement:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
@@ -562,9 +577,12 @@ paths:
     post:
       security: [{ApiKey: []}, {WebSession: []}]
       summary: >-
-        Relancer à la main une tâche échouée après perte de bail (`lease_expired`).
-        Un bail expiré n'est jamais remis en file automatiquement ; la relance est
-        refusée (409) pour un autre échec ou après trois tentatives.
+        Relancer à la main une tâche échouée après perte de bail (`lease_expired`)
+        que la remise en file automatique n'a pas reprise (ADR 0027).
+      description: >-
+        Refusée (409) pour un autre échec, ou tant qu'un remplacement de la source a une issue
+        inconnue. Tentatives épuisées, le compte repart à zéro. Le registre des actions
+        irréversibles est effacé : l'appelant assume leur répétition.
       responses:
         '200':
           description: Tâche remise en file
@@ -1342,6 +1360,7 @@ paths:
                     properties:
                       policy: {type: string, enum: [replace_with_backup, replace_in_place]}
                       root: {type: string, description: Racine du montage inscriptible de la source chez ce worker}
+        '503': {description: "publication_pending : intention inscrite en cours de vérification, répéter"}
         '502': {description: "result_undeliverable : aucun détenteur actif ou adresse de transfert pour recevoir le résultat"}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/jobs/{id}/result/authorize:
@@ -1597,6 +1616,7 @@ paths:
                   version: {type: string}
                   keyId: {type: string}
                   keySource: {type: string, enum: [local, external]}
+                  unreachableTimeoutSeconds: {type: integer, minimum: 60, maximum: 86400, description: "Délai d'injoignabilité avant remise en file (aussi accepté, facultatif, par PUT /api/v1/system/settings)."}
                   databaseBytes: {type: [integer, 'null']}
                   network:
                     type: object
@@ -1826,6 +1846,7 @@ paths:
               required: [name]
               properties:
                 name: {type: string, minLength: 1, maxLength: 80, pattern: '^[A-Za-z0-9_.-]+$'}
+                boot_id: {type: string, format: uuid, description: "Démarrage du processus, au premier enregistrement seulement ; nouveau, il reprend les tâches que l'ancien processus exécutait. Ignoré si la clé n'est pas celle de ce worker."}
       responses:
         '200':
           description: Worker enregistré
@@ -1870,9 +1891,11 @@ paths:
               required: [worker_id]
               properties:
                 worker_id: {type: string, format: uuid}
+                lease_protocol: {type: integer, description: "Protocole de bail : 0 ou absent pour un worker antérieur à l'ADR 0027, 1 ensuite."}
+                active_jobs: {type: array, items: {type: string, format: uuid}, description: "Tâches réellement tenues (protocole 1, clé de ce worker exigée) ; celles que le central lui attribue, absentes de la liste et sans contact depuis 30 s, sont reprises."}
       responses:
         '200':
-          description: Bail de 120 secondes, ou null si aucune tâche ; trois tentatives maximum
+          description: Bail (120 s au protocole 0 ; 30 s plus le délai d'injoignabilité au protocole 1), ou null si aucune tâche ; trois tentatives enchaînées au plus
           content:
             application/json:
               schema:
@@ -1884,10 +1907,51 @@ paths:
     parameters: [{$ref: '#/components/parameters/JobId'}]
     post:
       security: [{ApiKey: []}]
-      summary: Renouveler un bail actif ; worker configuré à un renouvellement toutes les 20 s
+      summary: Renouveler un bail ; seul un refus 409 de code `lease_lost` prouve qu'il est perdu
       requestBody: {$ref: '#/components/requestBodies/Lease'}
       responses:
-        '204': {description: Bail prolongé de 120 secondes}
+        '204':
+          description: Bail prolongé ; une tâche injoignable est rétablie
+          headers:
+            x-unreachable-timeout-seconds:
+              description: Délai d'injoignabilité courant, en secondes
+              schema: {type: integer}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/release:
+    parameters: [{$ref: '#/components/parameters/JobId'}]
+    post:
+      security: [{ApiKey: []}]
+      summary: Rendre une tâche à l'arrêt propre du worker, processus déjà terminé (clé de ce worker)
+      requestBody: {$ref: '#/components/requestBodies/Lease'}
+      responses:
+        '204': {description: "Tâche remise en file, ou en échec si la reprise automatique est exclue"}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/{id}/irreversible/authorize:
+    parameters: [{$ref: '#/components/parameters/JobId'}]
+    post:
+      security: [{ApiKey: []}]
+      summary: Demander l'accord du central juste avant une action irréversible (clé de ce worker)
+      description: "L'accord est inscrit avant la réponse et redonné au même bail. `lease_lost` : arrêter ; `lease_expired_or_conflict` : le bail vaut, mais l'action est exclue (publication en cours, flux d'échec déjà autorisé)."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/Lease'}
+                - type: object
+                  required: [lease_epoch, action, node_id]
+                  properties:
+                    lease_epoch: {type: integer}
+                    action: {type: string, enum: [in_place, http_call, failure_flow]}
+                    node_id: {type: string, maxLength: 128, description: "Bloc concerné ; ignoré pour failure_flow."}
+                    error_code: {type: string, description: "Code de l'échec, exigé pour failure_flow."}
+      responses:
+        '204': {description: Accord inscrit}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/jobs/{id}/failure:
@@ -1952,7 +2016,7 @@ components:
     Error:
       description: >-
         Erreur applicative JSON : 400 entrée invalide, 401 clé absente/invalide ou mauvais rôle,
-        404 ressource absente, 409 bail expiré ou conflit, 413 taille dépassée,
+        404 ressource absente, 409 bail perdu (`lease_lost`) ou conflit (`lease_expired_or_conflict`), 413 taille dépassée,
         500 défaillance interne. Les erreurs d'extraction HTTP (JSON/UUID) sont
         également normalisées. x-request-id permet de retrouver la requête dans les journaux.
       content:
@@ -2036,6 +2100,14 @@ components:
         max_cpu_jobs: {type: integer, minimum: 0, maximum: 16, description: "Absent avec max_gpu_jobs : max_concurrency places communes. Sinon places CPU (défaut max_concurrency)."}
         max_gpu_jobs: {type: integer, minimum: 0, maximum: 16, description: "Places GPU (défaut 0 dès que max_cpu_jobs est renseigné). Total = CPU + GPU."}
         schedule: {type: [object, 'null']}
+    JobLeaseInfo:
+      type: object
+      required: [job_id, reachability]
+      properties:
+        job_id: {type: string, format: uuid}
+        reachability: {type: string, enum: [reachable, unreachable, awaiting_worker]}
+        unreachable_since: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time, description: Reprise de la tâche si son titulaire ne revient pas.}
     JobResourceInfo:
       type: object
       required: [job_id, resource_class]
@@ -2111,6 +2183,11 @@ components:
             properties:
               message: {type: string, nullable: true}
               nextPort: {type: string, nullable: true}
+        lease_terms:
+          type: object
+          description: Règles du bail ; absentes d'un central antérieur à l'ADR 0027.
+          properties:
+            unreachable_timeout_seconds: {type: integer}
         prior_warning: {type: boolean, default: false, description: Avertissement accumulé avant la remise.}
         linked_flows:
           type: array

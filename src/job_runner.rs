@@ -1,12 +1,18 @@
 //! Exécuteur partagé d'un bail de tâche entre worker local et worker distant.
 
+pub mod action_gate;
+
 use crate::{
-    domain::{Claim, FlowRecord, JobErrorCode, JobStepEntry, JobStepStatus, ToolRequirement},
+    domain::{
+        Claim, FlowRecord, IrreversibleAction, JobErrorCode, JobStepEntry, JobStepStatus,
+        ToolRequirement,
+    },
     flows::{FailureInfo, FlowEngine, FlowProgressCallback, FlowRunInfo, OperationRegistry},
     media::OutputSpec,
     plugins::{self, ProbeContract},
     tools_cache::ToolCacheManager,
 };
+use action_gate::{ActionGate, ActionRefusal, ActionRequest};
 use forgearr_shared::flows::{LinkedFlowRole, first_linked};
 use std::{
     collections::HashMap,
@@ -137,6 +143,8 @@ pub fn ensure_probe_ready(cache: &ToolCacheManager, claim: &Claim) -> Result<(),
 }
 
 /// Exécute le flow figé du bail ou, à défaut, l'opération `defaultFallback` déclarée dans les contrats.
+///
+/// L'erreur est un [`JobRunError`] à déclarer, ou un [`action_gate::TaskStop`] qui ne se déclare pas.
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_claim_processing(
     claim: &Claim,
@@ -147,18 +155,22 @@ pub async fn execute_claim_processing(
     source_snapshot: &Path,
     work_dir: &Path,
     progress_cb: FlowProgressCallback,
-) -> Result<JobExecutionResult, JobRunError> {
+    gate: Option<&dyn ActionGate>,
+) -> anyhow::Result<JobExecutionResult> {
     let mut claim_registry = None;
     let registry = resolve_registry(claim, registry_override, &mut claim_registry);
     let context = WorkerContext::for_claim(claim);
-    let engine = claim_engine(
-        claim,
-        &context,
-        registry,
-        cache_mgr,
-        http_client,
-        secrets_dir,
-    );
+    let engine = FlowEngine {
+        action_gate: gate,
+        ..claim_engine(
+            claim,
+            &context,
+            registry,
+            cache_mgr,
+            http_client,
+            secrets_dir,
+        )
+    };
 
     let outcome = match claim.frozen_flow.as_ref() {
         Some(flow) => {
@@ -189,11 +201,17 @@ pub async fn execute_claim_processing(
             relay: res.relay,
         }),
         Err(error) => {
+            if let Some(stop) = gate.and_then(|gate| gate.halt()) {
+                return Err(stop.into());
+            }
             let mut failed = JobRunError {
                 code: error.code,
                 message: error.message,
                 steps: error.steps,
             };
+            if !failure_flow_allowed(claim, gate, failed.code).await? {
+                return Err(failed.into());
+            }
             let failure = FailureInfo {
                 code: failed.code.as_str(),
                 message: &failed.message,
@@ -206,7 +224,34 @@ pub async fn execute_claim_processing(
             let failure_steps =
                 run_failure_flow(engine, claim, failure, input, &failed.steps).await;
             failed.steps.extend(failure_steps);
-            Err(failed)
+            Err(failed.into())
+        }
+    }
+}
+
+/// Le worker peut-il exécuter le flux d'échec ? Le central l'accorde à un seul exécutant (ADR 0027).
+async fn failure_flow_allowed(
+    claim: &Claim,
+    gate: Option<&dyn ActionGate>,
+    code: JobErrorCode,
+) -> Result<bool, action_gate::TaskStop> {
+    if first_linked(&claim.linked_flows, LinkedFlowRole::Failure).is_none() {
+        return Ok(false);
+    }
+    let Some(gate) = gate else {
+        return Ok(true);
+    };
+    let request = ActionRequest {
+        action: IrreversibleAction::FailureFlow,
+        node_id: FAILURE_FLOW_STEP_NODE,
+        error_code: Some(code),
+    };
+    match gate.authorize(request).await {
+        Ok(()) => Ok(true),
+        Err(ActionRefusal::Stop(stop)) => Err(stop),
+        Err(ActionRefusal::Excluded(reason)) => {
+            tracing::warn!(job_id = %claim.job_id, %reason, "flux d'échec non accordé à ce worker");
+            Ok(false)
         }
     }
 }
@@ -309,6 +354,7 @@ fn claim_engine<'a>(
             failure: None,
         },
         resumed_outputs: &claim.resumed_outputs,
+        action_gate: None,
     }
 }
 
@@ -328,6 +374,8 @@ async fn run_failure_flow(
     let failure_engine = FlowEngine {
         resume_node_id: None,
         resumed_outputs: &no_resumed_outputs,
+        // L'accord du flux d'échec couvre tous ses blocs.
+        action_gate: None,
         run_info: FlowRunInfo {
             resume_variables: None,
             failure: Some(failure),
@@ -456,6 +504,7 @@ mod tests {
             worker_name: None,
             resume_variables: serde_json::Map::new(),
             linked_flows: Vec::new(),
+            lease_terms: None,
         }
     }
 
@@ -685,6 +734,39 @@ mod tests {
         let steps =
             execute_pending_failure_flow(&claim, &cache, &client, None, None, failure, input).await;
         assert!(steps.is_empty());
+        Ok(())
+    }
+
+    fn claim_with_failure_flow() -> Claim {
+        let mut claim = sample_claim(None, Vec::new());
+        claim.linked_flows.push(forgearr_shared::flows::LinkedFlow {
+            role: LinkedFlowRole::Failure,
+            flow: failure_flow(),
+        });
+        claim
+    }
+
+    #[tokio::test]
+    async fn the_failure_flow_needs_the_central_agreement() -> anyhow::Result<()> {
+        use action_gate::{TaskStop, test_support::FakeGate};
+        let code = JobErrorCode::OperationFailed;
+        let claim = claim_with_failure_flow();
+        // Ancien central : comme avant.
+        assert!(failure_flow_allowed(&claim, None, code).await?);
+        let granted = FakeGate::new(Ok(()));
+        assert!(failure_flow_allowed(&claim, Some(&granted), code).await?);
+        let node = FAILURE_FLOW_STEP_NODE.to_owned();
+        assert_eq!(granted.asked(), [(IrreversibleAction::FailureFlow, node)]);
+        let excluded = FakeGate::new(Err(ActionRefusal::Excluded("déjà accordé".into())));
+        assert!(!failure_flow_allowed(&claim, Some(&excluded), code).await?);
+        let lost = FakeGate::new(Err(ActionRefusal::Stop(TaskStop::LeaseLost)));
+        let refused = failure_flow_allowed(&claim, Some(&lost), code).await;
+        assert_eq!(refused, Err(TaskStop::LeaseLost));
+        // Sans flux d'échec, rien n'est demandé.
+        let without = sample_claim(None, Vec::new());
+        let unasked = FakeGate::new(Ok(()));
+        assert!(!failure_flow_allowed(&without, Some(&unasked), code).await?);
+        assert!(unasked.asked().is_empty());
         Ok(())
     }
 }

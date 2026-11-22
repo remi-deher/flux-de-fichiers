@@ -1,8 +1,9 @@
 # 0026 — Variables de flux, flux d'échec et sous-flux
 
-Statut : proposé (21 nov. 2026). Implémenté sur la branche `feat/flux-variables-conditions-ordonnancement`,
-non vérifié par la CI au moment de la rédaction. Précise l'[ADR 0012](0012-perimetre-perte-de-bail-et-versions-de-flows.md)
+Statut : accepté (21 nov. 2026), publié en v0.79.0. Précise l'[ADR 0012](0012-perimetre-perte-de-bail-et-versions-de-flows.md)
 (versions figées à la création de la tâche) et l'[ADR 0018](0018-relais-de-tache-par-bloc.md) (relais).
+
+> Voir l'[ADR 0027](0027-etat-injoignable-et-remise-en-file.md) : exécution unique du flux d'échec (§2) précisée.
 
 ## Contexte
 
@@ -41,12 +42,16 @@ blocs commune à plusieurs flux.
   ajoutées au journal. **La tâche reste échouée.**
 - Pas de boucle : le flux d'échec d'un flux d'échec n'est jamais exécuté, et l'échec du flux d'échec est
   seulement journalisé.
-- Échecs hors exécution sur le worker (perte de bail constatée par `claim`, refus de publication,
+- Échecs définitifs hors exécution sur le worker (bail perdu sans reprise possible, refus de publication,
   `source_changed`, publication incertaine, aucun worker capable d'un relais, échec signalé par le
   worker avant ou après le flux) : la colonne `jobs.failure_flow_state` (migration 0048) passe à
   `pending` par un déclencheur SQLite, à chaque passage d'une tâche à `failed` qui a un flux d'échec
-  figé. `fail` la fixe directement à `done` quand le journal contient déjà l'étape `failure-flow`
-  (le worker l'a exécuté) : pas de seconde exécution.
+  figé. Le même déclencheur pose directement `done` quand le journal contient déjà l'étape
+  `failure-flow` (identifiant de nœud réservé, refusé dans un flux). Il n'agit que sur un état NULL :
+  l'accord donné à un worker (ADR 0027) l'a déjà passé à `done`. Une remise en file ne passe pas par
+  `failed` et ne déclenche rien.
+- Un worker n'exécute le flux d'échec qu'avec l'accord atomique du central, donné à un seul exécutant
+  par échec (ADR 0027).
 - Le central exécute les flux en attente (`failure_flow_runner`, toujours actif, worker intégré ou
   non) : il passe la tâche à `done` **avant** l'exécution (au plus une exécution par échec, même
   après un redémarrage), exécute le flux d'échec figé avec `error.code` = `error.message` = code
@@ -56,8 +61,9 @@ blocs commune à plusieurs flux.
   l'échec précédent.
 - Limites restantes : le flux d'échec exécuté par le central utilise les outils et plugins du
   central (pas ceux d'un worker spécialisé) et ne voit pas une source détenue par un autre worker ;
-  si un worker exécute le flux d'échec puis perd son bail avant d'enregistrer son journal, le
-  central l'exécute une seconde fois.
+  il s'exécute au plus une fois par échec : un arrêt au mauvais moment peut l'empêcher d'aller au bout,
+  et son journal peut être perdu. Seul un worker antérieur à l'ADR 0027 peut encore causer deux
+  exécutions.
 
 ### 3. Sous-flux
 
@@ -73,7 +79,8 @@ blocs commune à plusieurs flux.
   /api/v1/flows/{id}`, la restauration de version et `POST /api/v1/flows/validate`, qui refuse aussi un
   sous-flux ou un flux d'échec introuvable) et à l'exécution (flux déjà en cours d'appel).
 - Un relais est refusé dans un sous-flux : le nœud de reprise ne saurait désigner un sous-flux.
-- La classe de ressource CPU/GPU reste calculée sur le flux principal seulement.
+- La classe de ressource CPU/GPU est calculée sur le flux principal et ses flux liés (sous-flux, flux
+  d'échec) : GPU dès qu'un seul l'exige.
 
 ### 4. Modèle unique `{$expr|défaut}`
 
@@ -106,7 +113,8 @@ manifestes) s'écrivent `{$expr|défaut}` et passent par **une portée, un analy
      espace de noms inconnu, fait échouer le bloc
      (`MissingReference`, message en `{$…}`), après repli sur le défaut du schéma ; `required` reste
      contrôlé ensuite ;
-  3. ailleurs (autres clés, blocs binaires, HTTP) : texte vide.
+  3. ailleurs (autres clés, blocs binaires) : texte vide ; un bloc HTTP garde tel quel un jeton inconnu
+     de la portée, que son exécuteur résout ou signale.
      L'enregistrement refuse les expressions inconnues des variables déclarées, et l'éditeur les signale.
 - **Types** : une chaîne réduite à un seul jeton garde le type JSON de sa valeur. Changement de
   comportement : dans un texte, `null` donne désormais un texte vide (l'ancien dialecte écrivait `null`).

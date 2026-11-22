@@ -71,14 +71,15 @@ pub(super) async fn save_class_slots(
     Ok(())
 }
 
-/// Tâches en cours (bail valide) d'un worker, par classe.
+/// Places occupées d'un worker, par classe : toute tâche en cours, injoignable comprise, sauf celle
+/// dont le processus a disparu et qui n'attend plus que la conclusion de sa publication.
 pub(super) async fn running_jobs(
     conn: &mut SqliteConnection,
     worker: Uuid,
 ) -> AppResult<RunningJobs> {
     let rows = sqlx::query_as::<_, (String, i64)>(
         "SELECT resource_class, COUNT(*) FROM jobs
-         WHERE worker_id=?1 AND status=?2 AND leased_until > datetime('now')
+         WHERE worker_id=?1 AND status=?2 AND lease_orphaned=0
          GROUP BY resource_class",
     )
     .bind(worker)

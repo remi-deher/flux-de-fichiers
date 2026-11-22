@@ -3,14 +3,14 @@ use crate::{
     domain::{
         Claim, JOB_PRIORITY_MAX, JOB_PRIORITY_MIN, Job, JobBatchAction, JobBatchResult,
         JobErrorCode, JobEventType, JobStatus, JobStepEntry, JobStepLog, JobStepStatus,
-        JobStorageStats, LEASE_SECONDS, LeaseRequest, LibraryJobStats, MAX_ATTEMPTS,
+        JobStorageStats, LeaseRequest, LeaseTerms, LibraryJobStats, MAX_ATTEMPTS,
         WORKER_MAX_CONCURRENCY, WORKER_MIN_CONCURRENCY, Worker, WorkerSchedule,
     },
     error::{AppError, AppResult},
     telemetry::TelemetrySnapshot,
 };
 use chrono::{DateTime, Utc};
-use forgearr_shared::jobs::LIBRARY_DEFAULT_JOB_PRIORITY;
+use forgearr_shared::jobs::{LIBRARY_DEFAULT_JOB_PRIORITY, LeaseProtocol};
 use forgearr_shared::workers::{WorkerTelemetry, worker_slots};
 use sqlx::SqlitePool;
 use std::future::Future;
@@ -628,7 +628,21 @@ pub async fn list_jobs(pool: &SqlitePool, before: Option<Uuid>, limit: i64) -> A
 /// tâche admissible de plus haute priorité, la plus ancienne à priorité égale
 /// (`priority DESC, created_at ASC, id ASC`). Les capacités d'encodage exigées par un relais
 /// restent filtrées à part : les places ne font que limiter le nombre de tâches.
+///
+/// Réservation d'un worker antérieur à l'ADR 0027 (voir [`claim_with_protocol`]).
 pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> {
+    claim_with_protocol(pool, worker, LeaseProtocol::Legacy).await
+}
+
+/// [`claim`] selon le protocole de bail annoncé. L'attribution est atomique (un seul écrivain, époque
+/// et jeton neufs) ; elle n'expire aucun bail, c'est le rôle du balayage (`leases::sweep`).
+pub async fn claim_with_protocol(
+    pool: &SqlitePool,
+    worker: Uuid,
+    protocol: LeaseProtocol,
+) -> AppResult<Option<Claim>> {
+    let unreachable_timeout = crate::runtime_settings::load_unreachable_timeout(pool).await;
+    let lease_seconds = super::leases::lease_window_seconds(protocol, unreachable_timeout);
     let timezone = crate::runtime_settings::load_timezone(pool).await;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let worker_cfg = sqlx::query_as::<_, (i32, Option<i32>, Option<i32>, Option<String>)>(
@@ -640,24 +654,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
     let Some((max_concurrency, max_cpu_jobs, max_gpu_jobs, schedule_json)) = worker_cfg else {
         return Err(AppError::NotFound);
     };
-    // Bail expiré : échec explicite, jamais de remise en file silencieuse (relance : `retry_job`).
-    let failed_status = JobStatus::Failed;
-    let lease_expired_code = JobErrorCode::LeaseExpired;
     let running_status = JobStatus::Running;
-    sqlx::query!(
-        "UPDATE jobs \
-         SET status=?1, error_code=?2, lease_token=NULL, lease_epoch=lease_epoch+1, \
-             leased_until=NULL, updated_at=datetime('now') \
-         WHERE status=?3 AND leased_until <= datetime('now')",
-        failed_status,
-        lease_expired_code,
-        running_status,
-    )
-    .execute(&mut *tx)
-    .await?;
-
-    super::source_publication_journal::reconcile_expired_publications(&mut tx).await?;
-
     if let Some(sched) = schedule_json
         .as_deref()
         .and_then(|raw| serde_json::from_str::<WorkerSchedule>(raw).ok())
@@ -735,7 +732,7 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
             running_status,
             worker,
             lease_token,
-            LEASE_SECONDS,
+            lease_seconds,
         )
         .fetch_optional(&mut *tx)
         .await?
@@ -743,59 +740,89 @@ pub async fn claim(pool: &SqlitePool, worker: Uuid) -> AppResult<Option<Claim>> 
         None
     };
     if let Some(job) = &job {
+        super::leases::start_lease(&mut tx, job.id, protocol).await?;
         super::failure_flows::reset_for_new_attempt(&mut tx, job.id).await?;
     }
     tx.commit().await?;
-    match job {
-        None => Ok(None),
-        Some(j) => {
-            let frozen_flow = match (&j.flow_id, j.flow_version) {
-                (Some(flow_id), Some(version)) => {
-                    Some(super::get_flow_version(pool, flow_id, version).await?)
-                }
-                _ => None,
-            };
-            let local_source_root = job_source(pool, j.id).await?.and_then(|source| {
-                (source.source_worker_id == Some(worker)).then_some(source.source_root)
-            });
-            let resume = super::relays::resume_state(pool, j.id).await?;
-            let library_name = super::step_context::library_name(pool, j.library_id).await?;
-            let worker_name = super::step_context::worker_name(pool, worker).await?;
-            let handoff_input = super::relays::artifact_input(pool, j.id, worker).await?;
-            Ok(Some(Claim {
-                job_id: j.id,
-                lease_token: j.lease_token.ok_or(AppError::Internal)?,
-                lease_epoch: j.lease_epoch,
-                source_name: j.source_name,
-                source_sha256: j.source_sha256.ok_or(AppError::Internal)?,
-                source_bytes: j.source_bytes.ok_or(AppError::Internal)?,
-                library_id: j.library_id,
-                probe_tool_id: None,
-                probe_version: None,
-                required_tools: Vec::new(),
-                frozen_flow,
-                operations: Default::default(),
-                block_operations: Default::default(),
-                plugin_configs: Default::default(),
-                sealed_secrets: None,
-                allow_private_integrations: None,
-                media_root: None,
-                local_source_root,
-                resume_node_id: resume.node_id,
-                resumed_outputs: resume.outputs,
-                handoff_input,
-                prior_warning: j.warning,
-                source_ticket: None,
-                library_name,
-                worker_name,
-                resume_variables: resume.variables,
-                linked_flows: super::linked_flows::frozen_linked_flows(pool, j.id).await?,
-            }))
+    let Some(job) = job else {
+        return Ok(None);
+    };
+    let lease = LeaseRequest {
+        worker_id: worker,
+        lease_token: job.lease_token.ok_or(AppError::Internal)?,
+        lease_epoch: job.lease_epoch,
+        telemetry: None,
+    };
+    let job_id = job.id;
+    match build_claim(pool, job, &lease, unreachable_timeout).await {
+        Ok(claim) => Ok(Some(claim)),
+        Err(error) => {
+            // Réservée mais jamais remise : elle n'a pas d'exécutant.
+            if let Err(undelivered) = super::undeliver_lease(pool, job_id, &lease).await {
+                tracing::error!(%job_id, error=%undelivered, "bail non remis et non rendu");
+            }
+            Err(error)
         }
     }
 }
 
-/// Relance manuelle d'une tâche échouée après perte de bail, dans la limite de `MAX_ATTEMPTS`.
+/// Relit tout ce que le bail transmet à son titulaire, attribution déjà validée.
+async fn build_claim(
+    pool: &SqlitePool,
+    job: Job,
+    lease: &LeaseRequest,
+    unreachable_timeout: i64,
+) -> AppResult<Claim> {
+    let worker = lease.worker_id;
+    let frozen_flow = match (&job.flow_id, job.flow_version) {
+        (Some(flow_id), Some(version)) => {
+            Some(super::get_flow_version(pool, flow_id, version).await?)
+        }
+        _ => None,
+    };
+    let local_source_root = job_source(pool, job.id)
+        .await?
+        .and_then(|source| (source.source_worker_id == Some(worker)).then_some(source.source_root));
+    let resume = super::relays::resume_state(pool, job.id).await?;
+    let library_name = super::step_context::library_name(pool, job.library_id).await?;
+    let worker_name = super::step_context::worker_name(pool, worker).await?;
+    let handoff_input = super::relays::artifact_input(pool, job.id, worker).await?;
+    Ok(Claim {
+        job_id: job.id,
+        lease_token: lease.lease_token,
+        lease_epoch: lease.lease_epoch,
+        source_name: job.source_name,
+        source_sha256: job.source_sha256.ok_or(AppError::Internal)?,
+        source_bytes: job.source_bytes.ok_or(AppError::Internal)?,
+        library_id: job.library_id,
+        probe_tool_id: None,
+        probe_version: None,
+        required_tools: Vec::new(),
+        frozen_flow,
+        operations: Default::default(),
+        block_operations: Default::default(),
+        plugin_configs: Default::default(),
+        sealed_secrets: None,
+        allow_private_integrations: None,
+        media_root: None,
+        local_source_root,
+        resume_node_id: resume.node_id,
+        resumed_outputs: resume.outputs,
+        handoff_input,
+        prior_warning: job.warning,
+        source_ticket: None,
+        library_name,
+        worker_name,
+        resume_variables: resume.variables,
+        linked_flows: super::linked_flows::frozen_linked_flows(pool, job.id).await?,
+        lease_terms: Some(LeaseTerms {
+            unreachable_timeout_seconds: unreachable_timeout,
+        }),
+    })
+}
+
+/// Relance manuelle d'une tâche échouée après perte de bail. Tentatives épuisées, le compte repart
+/// à zéro ; les actions irréversibles inscrites sont oubliées : l'administrateur assume la répétition.
 pub async fn retry_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let exists = sqlx::query_scalar!(
@@ -819,88 +846,29 @@ pub async fn retry_job(pool: &SqlitePool, id: Uuid) -> AppResult<Job> {
     let queued_status = JobStatus::Queued;
     let failed_status = JobStatus::Failed;
     let lease_expired_code = JobErrorCode::LeaseExpired;
-    let job = sqlx::query_as!(
-        Job,
-        r#"UPDATE jobs SET status=?2, worker_id=NULL, lease_token=NULL, lease_epoch=lease_epoch+1, leased_until=NULL, error_code=NULL, updated_at=datetime('now') WHERE id=?1 AND status=?3 AND error_code=?4 AND attempts < ?5 RETURNING id AS "id!: Uuid", source_name, source_sha256, source_bytes, output_sha256, output_bytes, warning AS "warning: bool", target_worker_id AS "target_worker_id: Uuid", worker_id AS "worker_id: Uuid", status AS "status: JobStatus", attempts AS "attempts: i32", lease_epoch, lease_token AS "lease_token: Uuid", leased_until AS "leased_until: DateTime<Utc>", output_name, error_code AS "error_code: JobErrorCode", library_id AS "library_id: Uuid", flow_id, flow_version, priority AS "priority: i32", created_at AS "created_at: DateTime<Utc>", updated_at AS "updated_at: DateTime<Utc>""#,
-        id,
-        queued_status,
-        failed_status,
-        lease_expired_code,
-        MAX_ATTEMPTS,
+    let job: Option<Job> = sqlx::query_as(
+        "UPDATE jobs SET status=?2, worker_id=NULL, lease_token=NULL, lease_epoch=lease_epoch+1, \
+         leased_until=NULL, error_code=NULL, free_releases=0, ungated_lease=0, \
+         attempts=CASE WHEN attempts >= ?5 THEN 0 ELSE attempts END, \
+         updated_at=datetime('now') \
+         WHERE id=?1 AND status=?3 AND error_code=?4 RETURNING *",
     )
+    .bind(id)
+    .bind(queued_status)
+    .bind(failed_status)
+    .bind(lease_expired_code)
+    .bind(MAX_ATTEMPTS)
     .fetch_optional(&mut *tx)
     .await?;
     let mut job = job.ok_or(AppError::Conflict)?;
-    // Une relance manuelle après perte du repreneur doit repartir de la source :
-    // sa copie intermédiaire ne peut plus être considérée comme disponible.
-    let had_handoff: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM job_relays WHERE job_id=?1 AND artifact_relay=1)",
-    )
-    .bind(id)
-    .fetch_one(&mut *tx)
-    .await?;
-    if had_handoff {
-        sqlx::query("UPDATE jobs SET target_worker_id=NULL,warning=0 WHERE id=?1")
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
+    super::irreversible_actions::clear(&mut tx, id).await?;
+    super::failure_flows::forget_failure(&mut tx, id).await?;
+    if super::relays::restart_from_source(&mut tx, id).await? {
         job.target_worker_id = None;
         job.warning = false;
-        sqlx::query("DELETE FROM job_relays WHERE job_id=?1")
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM job_handoff_steps WHERE job_id=?1")
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM job_artifacts WHERE job_id=?1")
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
     }
     tx.commit().await?;
     Ok(job)
-}
-
-pub async fn active(pool: &SqlitePool, id: Uuid, lease: &LeaseRequest) -> AppResult<Job> {
-    let running_status = JobStatus::Running;
-    sqlx::query_as!(
-        Job,
-        r#"SELECT id AS "id!: Uuid", source_name, source_sha256, source_bytes, output_sha256, output_bytes, warning AS "warning: bool", target_worker_id AS "target_worker_id: Uuid", worker_id AS "worker_id: Uuid", status AS "status: JobStatus", attempts AS "attempts: i32", lease_epoch, lease_token AS "lease_token: Uuid", leased_until AS "leased_until: DateTime<Utc>", output_name, error_code AS "error_code: JobErrorCode", library_id AS "library_id: Uuid", flow_id, flow_version, priority AS "priority: i32", created_at AS "created_at: DateTime<Utc>", updated_at AS "updated_at: DateTime<Utc>" FROM jobs WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 AND status=?5 AND leased_until > datetime('now')"#,
-        id,
-        lease.worker_id,
-        lease.lease_token,
-        lease.lease_epoch,
-        running_status,
-    )
-    .fetch_optional(pool)
-    .await?
-    .ok_or(AppError::Conflict)
-}
-
-pub async fn heartbeat(pool: &SqlitePool, id: Uuid, lease: &LeaseRequest) -> AppResult<()> {
-    let running_status = JobStatus::Running;
-    let count = sqlx::query!(
-        "UPDATE jobs \
-         SET leased_until=datetime('now', '+' || ?5 || ' seconds'), updated_at=datetime('now') \
-         WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 \
-           AND status=?6 AND leased_until > datetime('now')",
-        id,
-        lease.worker_id,
-        lease.lease_token,
-        lease.lease_epoch,
-        LEASE_SECONDS,
-        running_status,
-    )
-    .execute(pool)
-    .await?
-    .rows_affected();
-    if count != 1 {
-        return Err(AppError::Conflict);
-    }
-    touch_worker_telemetry(pool, lease.worker_id, None, lease.telemetry.as_ref()).await?;
-    Ok(())
 }
 
 pub async fn fail(
@@ -909,25 +877,16 @@ pub async fn fail(
     lease: &LeaseRequest,
     code: JobErrorCode,
 ) -> AppResult<()> {
-    let failed_status = JobStatus::Failed;
-    let running_status = JobStatus::Running;
-    let count = sqlx::query(
-        "UPDATE jobs \
-         SET status=?5, error_code=?6, lease_token=NULL, lease_epoch=lease_epoch+1, \
-             leased_until=NULL, updated_at=datetime('now') \
-         WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 \
-           AND status=?7 AND leased_until > datetime('now') \
-           AND NOT EXISTS(SELECT 1 FROM source_publication_journal p WHERE p.job_id=jobs.id AND p.lease_epoch=jobs.lease_epoch AND p.state=?8)",
-    )
-    .bind(id).bind(lease.worker_id).bind(lease.lease_token).bind(lease.lease_epoch)
-    .bind(failed_status).bind(code).bind(running_status)
-    .bind(super::source_publication_journal::PublicationState::InProgress.as_str())
-    .execute(pool)
-    .await?
-    .rows_affected();
-    if count != 1 {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    super::leases::ensure_held(&mut tx, id, lease).await?;
+    let publishing =
+        super::source_publication_journal::publication_in_progress(&mut tx, id, lease.lease_epoch)
+            .await?;
+    if publishing.is_some() {
         return Err(AppError::Conflict);
     }
+    super::leases::set_failed(&mut tx, id, code).await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -969,20 +928,8 @@ pub async fn publish_succeeded(
     link_output: impl Future<Output = AppResult<()>>,
 ) -> AppResult<()> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let running_status = JobStatus::Running;
-    let active: Option<Uuid> = sqlx::query_scalar!(
-        r#"SELECT id AS "id!: Uuid" FROM jobs WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 AND status=?5 AND leased_until > datetime('now')"#,
-        id,
-        lease.worker_id,
-        lease.lease_token,
-        lease.lease_epoch,
-        running_status,
-    )
-    .fetch_optional(&mut *tx)
-    .await?;
-    if active.is_none() {
-        return Err(AppError::Conflict);
-    }
+    super::leases::ensure_held(&mut tx, id, lease).await?;
+    super::irreversible_actions::ensure_no_failure_flow(&mut tx, id).await?;
     link_output.await?;
     let succeeded_status = JobStatus::Succeeded;
     // Un nom vide (résultat remplacé chez le détenteur) n'a pas de fichier au central.
@@ -1037,12 +984,7 @@ async fn save_job_steps_inner(
 ) -> AppResult<()> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     if let Some(lease) = lease {
-        let active: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM jobs WHERE id=?1 AND worker_id=?2 AND lease_token=?3 AND lease_epoch=?4 AND status=?5 AND leased_until > datetime('now'))")
-            .bind(job_id).bind(lease.worker_id).bind(lease.lease_token).bind(lease.lease_epoch).bind(JobStatus::Running)
-            .fetch_one(&mut *tx).await?;
-        if !active {
-            return Err(AppError::Conflict);
-        }
+        super::leases::ensure_held(&mut tx, job_id, lease).await?;
     }
     let exists = sqlx::query_scalar!(
         r#"SELECT EXISTS(SELECT 1 FROM jobs WHERE id=?1) AS "exists!: bool""#,
@@ -1053,11 +995,7 @@ async fn save_job_steps_inner(
     if !exists {
         return Err(AppError::NotFound);
     }
-    sqlx::query!("DELETE FROM job_steps WHERE job_id=?1", job_id)
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("INSERT INTO job_steps(job_id,step_index,node_id,block_kind,operation_id,status,message,output_excerpt,created_at,variables_json) SELECT job_id,step_index,node_id,block_kind,operation_id,status,message,output_excerpt,created_at,variables_json FROM job_handoff_steps WHERE job_id=?1")
-        .bind(job_id).execute(&mut *tx).await?;
+    super::relays::reset_steps(&mut tx, job_id).await?;
     let prefix: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(step_index), 0) FROM job_handoff_steps WHERE job_id=?1",
     )

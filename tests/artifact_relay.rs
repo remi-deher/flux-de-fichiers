@@ -155,7 +155,7 @@ async fn the_receiver_pulls_the_working_file_from_its_holder() -> anyhow::Result
 
     // Seul le repreneur confirme la réception ; la confirmation est répétable.
     let by_origin = repository::confirm_artifact_received(&pool, job, &origin_lease).await;
-    assert!(matches!(by_origin, Err(AppError::Conflict)));
+    assert!(matches!(by_origin, Err(AppError::LeaseLost)));
     let confirmed = repository::confirm_artifact_received(&pool, job, &taker_lease).await?;
     assert!(confirmed);
     let repeated = repository::confirm_artifact_received(&pool, job, &taker_lease).await?;

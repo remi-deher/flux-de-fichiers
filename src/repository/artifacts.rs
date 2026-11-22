@@ -55,7 +55,8 @@ pub async fn declare_artifact(
     if !valid_declaration(declaration, max_bytes) {
         return Err(AppError::Invalid);
     }
-    super::active(pool, job_id, lease).await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    super::leases::ensure_held(&mut tx, job_id, lease).await?;
     sqlx::query(
         "INSERT INTO job_artifacts(job_id, kind, holder_worker_id, lease_epoch, root, name, \
              sha256, bytes) \
@@ -72,8 +73,9 @@ pub async fn declare_artifact(
     .bind(&declaration.name)
     .bind(declaration.sha256.to_ascii_lowercase())
     .bind(declaration.bytes)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -139,12 +141,21 @@ pub async fn confirm_artifact_received(
     job_id: Uuid,
     lease: &LeaseRequest,
 ) -> AppResult<bool> {
-    super::active(pool, job_id, lease).await?;
-    let input = super::relays::artifact_input(pool, job_id, lease.worker_id).await?;
-    if input.is_none() {
-        return Ok(false);
-    }
-    release_artifact(pool, job_id, ArtifactKind::Working).await
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    super::leases::ensure_held(&mut tx, job_id, lease).await?;
+    // Seul un fichier à tirer chez un autre worker (relais par artefact) se confirme.
+    let confirmed = sqlx::query(
+        "DELETE FROM job_artifacts WHERE job_id=?1 AND kind=?2 AND holder_worker_id<>?3 \
+         AND EXISTS(SELECT 1 FROM job_relays r WHERE r.job_id=?1 AND r.artifact_relay=1)",
+    )
+    .bind(job_id)
+    .bind(ArtifactKind::Working.as_str())
+    .bind(lease.worker_id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    tx.commit().await?;
+    Ok(confirmed > 0)
 }
 
 /// Oublie l'artefact (le détenteur peut alors purger son fichier) ; `false` s'il n'existait pas.

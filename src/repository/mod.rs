@@ -4,7 +4,9 @@ mod failure_flows;
 mod flow_samples;
 mod flows;
 mod identity;
+mod irreversible_actions;
 mod jobs;
+mod leases;
 mod libraries;
 mod library_access;
 pub mod library_history;
@@ -29,7 +31,7 @@ pub use enrollment::{
 };
 
 pub use failure_flows::{
-    FailureFlowState, append_job_steps, failure_flow_not_run_message, failure_flow_state,
+    FailureFlowState, append_failure_steps, failure_flow_not_run_message, failure_flow_state,
     record_failure_flow_not_run, take_pending_failure_flow,
 };
 pub use flow_samples::{latest_flow_media_sample, save_flow_media_sample};
@@ -44,15 +46,24 @@ pub use identity::{
     revoke_worker_keys, set_account_email, set_setting, touch_api_key, update_account,
     update_password,
 };
+pub use irreversible_actions::authorize_action;
 pub use jobs::{
-    JobSource, PublishedOutput, active, batch_jobs, cancel_job, claim, clear_job_output_name,
-    count_jobs_for_worker, delete_job, delete_worker, downloadable_output_name,
-    enqueue_library_source, fail, filtered_jobs, find_worker_by_name, get_job, get_worker,
-    has_library_file_job, heartbeat, insert_job, insert_job_with_options, insert_job_with_priority,
-    job_source, job_storage_stats, known_library_file_signatures, list_job_steps, list_jobs,
-    list_jobs_for_worker, list_workers, ping, publish_succeeded, register, register_with_metadata,
-    retry_job, save_job_steps, save_job_steps_for_lease, succeeded_output_name,
-    touch_worker_telemetry, update_job_priority, update_worker_settings, worker_exists,
+    JobSource, PublishedOutput, batch_jobs, cancel_job, claim, claim_with_protocol,
+    clear_job_output_name, count_jobs_for_worker, delete_job, delete_worker,
+    downloadable_output_name, enqueue_library_source, fail, filtered_jobs, find_worker_by_name,
+    get_job, get_worker, has_library_file_job, insert_job, insert_job_with_options,
+    insert_job_with_priority, job_source, job_storage_stats, known_library_file_signatures,
+    list_job_steps, list_jobs, list_jobs_for_worker, list_workers, ping, publish_succeeded,
+    register, register_with_metadata, retry_job, save_job_steps, save_job_steps_for_lease,
+    succeeded_output_name, touch_worker_telemetry, update_job_priority, update_worker_settings,
+    worker_exists,
+};
+pub use leases::{
+    LEASE_STEP, LeaseChange, LeaseEnd, LeaseKey, LeaseOutcome, MAX_FREE_RELEASES,
+    SWEEP_PAUSE_SECONDS, SweepPass, active, completed_by_lease, end_disowned_leases,
+    end_integrated_leases, end_orphaned_lease, failed_by_lease, heartbeat, lease_infos,
+    lease_orphaned, register_boot, release_lease, renew_contact, restart_contacts, sweep,
+    sweep_with_clock, undeliver_lease,
 };
 pub use libraries::{
     delete_library, due_scheduled_libraries, get_library, insert_library,
@@ -77,9 +88,11 @@ pub use plugins::{
 pub use relays::{RelayOutcome, list_relays, relay_job};
 pub use resource_slots::{job_resource_class, job_resource_classes};
 pub use source_publication_journal::{
-    PendingSourcePublication, begin_local_publication, begin_pulled_publication,
-    begin_source_publication, clear_source_publication, mark_source_publication_uncertain,
-    pending_source_publications, recover_source_publications,
+    PendingSourcePublication, abandon_unauthorized_publication, authorize_source_publication,
+    begin_local_publication, begin_pulled_publication, begin_source_publication,
+    clear_source_publication, fail_changed_source, mark_source_publication_uncertain,
+    pending_source_publications, recover_source_publications, require_publication_grant,
+    source_publication_in_progress,
 };
 pub use source_tickets::{
     SourceHolder, attach_source_ticket, can_serve, issue_artifact_ticket, redeem_central_ticket,

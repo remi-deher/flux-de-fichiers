@@ -1,5 +1,6 @@
 //! Exécution déclarative d'un outil externe avec progression, codes de sortie et extrait borné.
 
+use crate::supervision::SupervisedChild;
 use serde::{Deserialize, Serialize};
 use std::{path::Path, process::Stdio, time::Duration};
 use thiserror::Error;
@@ -287,24 +288,22 @@ async fn spawn_tool(
     args: &[String],
     pipe_stdout: bool,
     path_env: Option<&std::ffi::OsStr>,
-) -> std::io::Result<tokio::process::Child> {
+) -> std::io::Result<SupervisedChild> {
     let mut attempt = 0;
     loop {
         let mut command = Command::new(bin);
         if let Some(path) = path_env {
             command.env("PATH", path);
         }
-        let spawned = command
+        command
             .args(args)
             .stdout(if pipe_stdout {
                 Stdio::piped()
             } else {
                 Stdio::null()
             })
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn();
-        match spawned {
+            .stderr(Stdio::piped());
+        match SupervisedChild::spawn(&mut command) {
             Err(error)
                 if error.kind() == std::io::ErrorKind::ExecutableFileBusy
                     && attempt < SPAWN_BUSY_RETRIES =>
@@ -332,11 +331,11 @@ where
             tool: spec.tool_label.to_owned(),
             source,
         })?;
-    let stderr = child.stderr.take().ok_or_else(|| ToolRunError::Spawn {
+    let stderr = child.take_stderr().ok_or_else(|| ToolRunError::Spawn {
         tool: spec.tool_label.to_owned(),
         source: std::io::Error::other("stderr indisponible"),
     })?;
-    let stdout = child.stdout.take();
+    let stdout = child.take_stdout();
 
     let (status, stdout_bytes, excerpt) = tokio::time::timeout(spec.timeout, async {
         let read_streams = async {
@@ -401,6 +400,7 @@ where
                 source,
             })
     })?;
+    child.finished();
 
     if spec.capture_stdout && stdout_bytes.len() > MAX_STDOUT_CAPTURE_BYTES {
         return Err(ToolRunError::Failed {

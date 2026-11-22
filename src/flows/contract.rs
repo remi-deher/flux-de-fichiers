@@ -485,6 +485,21 @@ pub struct HttpRuntime {
     pub steps: Vec<HttpStep>,
 }
 
+/// Méthodes HTTP en lecture seule.
+const SAFE_HTTP_METHODS: [&str; 3] = ["GET", "HEAD", "OPTIONS"];
+
+impl HttpRuntime {
+    /// Toutes les étapes sont-elles en lecture seule ? Une méthode calculée ne l'est jamais.
+    pub fn is_safe(&self) -> bool {
+        self.steps.iter().all(|step| {
+            let method = step.method.trim();
+            SAFE_HTTP_METHODS
+                .iter()
+                .any(|safe| method.eq_ignore_ascii_case(safe))
+        })
+    }
+}
+
 /// Charge le fichier `entrypoint` d'une opération `kind: "script"` depuis le dossier du manifeste
 /// afin de le transporter dans `Claim` vers les workers distants, sans jamais sortir de `manifest_dir`.
 fn resolve_script_entrypoint(manifest_dir: &Path, raw: &mut Value) {
@@ -1875,6 +1890,22 @@ mod tests {
             repository: None,
         }];
         assert!(reg.exposures_bound_by(&unknown_variable).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn only_literal_read_methods_are_safe() -> Result<(), serde_json::Error> {
+        let runtime = |methods: &[&str]| -> Result<HttpRuntime, serde_json::Error> {
+            let steps: Vec<Value> = methods
+                .iter()
+                .map(|method| json!({"url": "https://example.invalid", "method": method}))
+                .collect();
+            serde_json::from_value(json!({ "steps": steps }))
+        };
+        assert!(runtime(&["GET", " head ", "options"])?.is_safe());
+        assert!(!runtime(&["GET", "POST"])?.is_safe());
+        assert!(!runtime(&["{config.method}"])?.is_safe());
+        assert!(!runtime(&["{$vars.method}"])?.is_safe());
         Ok(())
     }
 }

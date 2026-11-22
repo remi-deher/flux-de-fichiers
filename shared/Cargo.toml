@@ -1,6 +1,6 @@
 [package]
 name = "forgearr-shared"
-version = "0.78.0"
+version = "0.78.1"
 edition = "2024"
 rust-version = "1.99"
 description = "Types partagés entre le central et l'interface : rôles, droits, contrat des tâches."

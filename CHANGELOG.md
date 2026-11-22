@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.78.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.78.0...v0.78.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **flux:** flux d'échec hors worker, classe GPU des flux liés, simulateur set-variable ([d1dba8d](https://github.com/remi-deher/flux-de-fichiers/commit/d1dba8d9b695f8bd58412225c4c7d682bb4584a3))
+* **flux:** flux d'échec hors worker, classe GPU des flux liés, simulateur set-variable ([f7514a2](https://github.com/remi-deher/flux-de-fichiers/commit/f7514a27f432e15d5b24bc938d62c3fca95dce27))
+
 ## [0.78.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.77.0...v0.78.0) (2026-11-21)
 
 

@@ -6,6 +6,7 @@ use crate::{
     api::{self, AppState},
     domain::{Job, LeaseRequest},
     error::{AppError, AppResult},
+    job_runner::action_gate::TaskStop,
     repository,
     retained::{prune_retained, retained_name},
     storage,
@@ -59,7 +60,7 @@ pub(crate) async fn publish_retained(
     lease: &LeaseRequest,
     file: &Path,
     ready: &ResultReady,
-) -> anyhow::Result<bool> {
+) -> AppResult<bool> {
     if !repository::can_serve(&state.pool, lease.worker_id).await? {
         return Ok(false);
     }
@@ -88,12 +89,14 @@ pub(crate) async fn relay_working_file(
     let (working_file, work_dir) = working;
     let file = storage::verified_working_path(working_file, work_dir).await?;
     let retained = retain(state, job, lease, ArtifactKind::Working, &file).await?;
-    let relayed = api::jobs::relay_task(state, job, lease, request, warning).await;
-    if !matches!(&relayed, Ok(response) if response.relayed) {
-        let _ = tokio::fs::remove_file(retained).await;
+    // Sur une erreur ambiguë le relais a pu aboutir : la purge périodique tranchera.
+    let relayed = api::jobs::relay_task(state, job, lease, request, warning).await?;
+    if relayed.relayed {
+        return Ok(());
     }
-    anyhow::ensure!(relayed?.relayed, "relay refused: no eligible worker");
-    Ok(())
+    // Aucun worker capable : le central a déjà inscrit l'échec.
+    let _ = tokio::fs::remove_file(retained).await;
+    Err(TaskStop::Concluded.into())
 }
 
 /// Purge les fichiers retenus que le central ne réclame plus.

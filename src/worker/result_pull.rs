@@ -1,7 +1,10 @@
 //! Lecture, par le détenteur de la bibliothèque, du résultat à appliquer : chez le worker qui le
 //! retient, avec le billet de la demande (ADR 0022).
 
-use super::{REMOTE_BROWSE_HTTP_TIMEOUT, WorkerLoop};
+use super::{
+    REMOTE_BROWSE_HTTP_TIMEOUT, WorkerLoop, contact::CentralReply,
+    timing::PUBLICATION_REPORT_PATIENCE,
+};
 use crate::{
     error::{AppError, AppResult},
     worker_transfer,
@@ -51,13 +54,16 @@ impl WorkerLoop {
         worker_id: Uuid,
     ) -> anyhow::Result<Option<SourceTicket>> {
         let path = format!("{prefix}/ticket?worker_id={worker_id}");
-        Ok(self
-            .request(reqwest::Method::POST, &path)
-            .timeout(REMOTE_BROWSE_HTTP_TIMEOUT)
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<Option<SourceTicket>>()
-            .await?)
+        let attempt = self
+            .attempt_for(PUBLICATION_REPORT_PATIENCE, || {
+                self.request(reqwest::Method::POST, &path)
+                    .timeout(REMOTE_BROWSE_HTTP_TIMEOUT)
+            })
+            .await;
+        anyhow::ensure!(
+            attempt.reply == CentralReply::Accepted,
+            "result ticket refused"
+        );
+        attempt.json()
     }
 }

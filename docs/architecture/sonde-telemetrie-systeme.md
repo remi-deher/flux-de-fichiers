@@ -170,9 +170,9 @@ Lors de son premier enregistrement ou après redémarrage, le worker déclare sa
 - Emplacement et taille de son cache d'outils local.
 
 ### 4.2 Signal de vie périodique (`POST /api/v1/workers/{id}/heartbeat`)
-Toutes les 20 secondes (pendant le renouvellement du bail de travail ou en veille), le worker transmet son dernier `NodeTelemetrySnapshot` :
+Régulièrement (pendant le renouvellement du bail de travail ou en veille), le worker transmet son dernier `NodeTelemetrySnapshot` :
 - Le coordinateur met à jour la table PostgreSQL `workers` (ou une table d'historique court `node_telemetry`) avec les valeurs instantanées.
-- Si le heartbeat d'un worker expire (absence de signal pendant plus de 120 secondes), le worker est considéré comme hors ligne et ses baux sont libérés pour réattribution.
+- Si le heartbeat d'un worker expire (absence de signal pendant plus de 120 secondes), le worker est considéré comme hors ligne. Ses tâches en cours suivent leurs propres baux : injoignables après 30 s sans contact, reprises au délai réglable ([ADR 0027](../adr/0027-etat-injoignable-et-remise-en-file.md)).
 
 ---
 

@@ -150,6 +150,7 @@ fn build_system_status(effective: &EffectiveRuntimeSettings, secrets: &SecretBox
         outbound: effective.outbound,
         check_updates_enabled: effective.check_updates_enabled,
         timezone: effective.timezone.clone(),
+        unreachable_timeout_seconds: effective.unreachable_timeout_seconds,
     }
 }
 

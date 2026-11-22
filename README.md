@@ -109,9 +109,10 @@ Créer une tâche : `POST /api/v1/jobs`, corps `{"source_name":"exemple.mkv","ta
 Lire son état avec `GET /api/v1/jobs/{id}` et télécharger le résultat avec
 `GET /api/v1/jobs/{id}/output` lorsqu'il est `succeeded`.
 
-Les tâches ont un bail de 120 s renouvelé toutes les 20 s. Un bail expiré fait échouer la
-tâche (`lease_expired`) sans la remettre en file ; un administrateur peut la relancer avec
-`POST /api/v1/jobs/{id}/retry`, trois tentatives au maximum.
+Sans contact de son worker pendant 30 s, une tâche en cours devient injoignable ; passé un délai
+réglable (10 minutes par défaut), elle est remise en file, trois tentatives au plus, sauf si une action
+irréversible a été autorisée ([ADR 0027](docs/adr/0027-etat-injoignable-et-remise-en-file.md)). Au-delà
+elle échoue (`lease_expired`) ; un administrateur peut la relancer avec `POST /api/v1/jobs/{id}/retry`.
 Les erreurs média sont terminales. Les transferts sont diffusés en flux, limités par
 `MAX_FILE_BYTES`. Un remux dure au plus une heure ; les codes MKVToolNix 0 et 1 sont
 acceptés (1 est conservé en avertissement), 2 échoue. Les empreintes source et résultat

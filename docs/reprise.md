@@ -32,8 +32,8 @@ ce qui **reste à faire**. À mettre à jour (ou supprimer) quand l'état change
 
 1. **Périmètre** : encodage par plugins (le remux seul servait aux essais) ; IA et MCP dans le
    périmètre ; installation neuve uniquement (pas de reprise d'une base `encoding-central`).
-2. **Perte de bail** : échec `lease_expired`, jamais de remise en file automatique ; relance
-   manuelle `POST /api/v1/jobs/{id}/retry`, 3 tentatives au plus.
+2. **Perte de bail** (remplacé par l'[ADR 0027](adr/0027-etat-injoignable-et-remise-en-file.md) : remise en file) : échec `lease_expired` ; relance
+   manuelle `POST /api/v1/jobs/{id}/retry` (tentatives épuisées : le compte repart à zéro).
 3. **Flux versionnés** : table `flow_versions` immuable ; une tâche fige le flux par défaut et
    sa version à sa création.
 4. **Vocabulaire** : central / worker / installation ; « nœud » réservé aux blocs d'un graphe.

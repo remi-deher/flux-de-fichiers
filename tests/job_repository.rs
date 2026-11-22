@@ -20,6 +20,11 @@ async fn pool() -> anyhow::Result<sqlx::SqlitePool> {
     Ok(pool)
 }
 
+async fn sweep(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
+    repository::sweep(pool, None, &Default::default()).await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn job_lease_publication_and_flow_queries() -> anyhow::Result<()> {
     let pool = pool().await?;
@@ -73,14 +78,20 @@ async fn job_lease_publication_and_flow_queries() -> anyhow::Result<()> {
         .bind(job.id)
         .execute(&pool)
         .await?;
-    // Bail expiré : échec explicite, aucune remise en file automatique.
+    // `claim` n'expire plus rien ; le balayage conclut. Ce worker d'ancien protocole n'a demandé
+    // aucun accord : échec explicite, jamais de remise en file automatique.
     assert!(repository::claim(&pool, worker.id).await?.is_none());
+    assert_eq!(
+        repository::get_job(&pool, job.id).await?.status,
+        JobStatus::Running
+    );
+    sweep(&pool).await?;
     let lost = repository::get_job(&pool, job.id).await?;
     assert_eq!(lost.status, JobStatus::Failed);
     assert_eq!(lost.error_code, Some(JobErrorCode::LeaseExpired));
     assert!(matches!(
         repository::heartbeat(&pool, job.id, &lease).await,
-        Err(AppError::Conflict)
+        Err(AppError::LeaseLost)
     ));
     assert!(matches!(
         repository::retry_job(&pool, Uuid::nil()).await,
@@ -108,14 +119,14 @@ async fn job_lease_publication_and_flow_queries() -> anyhow::Result<()> {
     .bind(job.id)
     .execute(&pool)
     .await?;
-    assert!(repository::claim(&pool, worker.id).await?.is_none());
+    sweep(&pool).await?;
     let expired = repository::get_job(&pool, job.id).await?;
     assert_eq!(expired.status, JobStatus::Failed);
     assert_eq!(expired.error_code, Some(JobErrorCode::LeaseExpired));
-    assert!(matches!(
-        repository::retry_job(&pool, job.id).await,
-        Err(AppError::Conflict)
-    ));
+    // Tentatives épuisées : la relance manuelle repart de zéro.
+    let restarted = repository::retry_job(&pool, job.id).await?;
+    assert_eq!(restarted.attempts, 0);
+    repository::cancel_job(&pool, job.id).await?;
 
     let second =
         repository::insert_job(&pool, "autre.mkv", Some(worker.id), &"cd".repeat(32), 8).await?;
@@ -137,7 +148,7 @@ async fn job_lease_publication_and_flow_queries() -> anyhow::Result<()> {
     };
     assert!(matches!(
         repository::heartbeat(&pool, second.id, &stale).await,
-        Err(AppError::Conflict)
+        Err(AppError::LeaseLost)
     ));
     let linked = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&linked);
@@ -158,7 +169,7 @@ async fn job_lease_publication_and_flow_queries() -> anyhow::Result<()> {
             },
         )
         .await,
-        Err(AppError::Conflict)
+        Err(AppError::LeaseLost)
     ));
     assert!(!linked.load(Ordering::SeqCst));
 
@@ -205,11 +216,11 @@ async fn job_lease_publication_and_flow_queries() -> anyhow::Result<()> {
     );
     assert!(matches!(
         repository::fail(&pool, third.id, &lease, JobErrorCode::TransferFailed).await,
-        Err(AppError::Conflict)
+        Err(AppError::LeaseLost)
     ));
     assert!(matches!(
         repository::active(&pool, third.id, &lease).await,
-        Err(AppError::Conflict)
+        Err(AppError::LeaseLost)
     ));
 
     assert!(repository::default_flow(&pool).await?.is_none());
@@ -581,7 +592,7 @@ async fn priority_cancellation_batch_concurrency_schedule_and_stats() -> anyhow:
     };
     assert!(matches!(
         repository::heartbeat(&pool, third.id, &stale_lease).await,
-        Err(AppError::Conflict)
+        Err(AppError::LeaseLost)
     ));
 
     // Changer la priorité d'une tâche en attente puis la publier en succès.
@@ -819,6 +830,6 @@ async fn empty_oversized_or_unleased_metadata_is_never_kept() -> anyhow::Result<
         ..lease
     };
     let refused = repository::save_flow_media_sample(&pool, job, &stale, &json!({"a": 1})).await;
-    assert!(matches!(refused, Err(AppError::Conflict)));
+    assert!(matches!(refused, Err(AppError::LeaseLost)));
     Ok(())
 }

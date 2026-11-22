@@ -180,7 +180,7 @@ pub async fn delete_job(
     repository::delete_job(&s.pool, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
-/// Relance manuelle d'une tâche échouée après perte de bail (aucune relance automatique).
+/// Relance manuelle d'une tâche échouée après perte de bail.
 pub async fn retry(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
@@ -270,18 +270,6 @@ pub async fn delete_worker(
     repository::delete_worker(&s.pool, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
-pub async fn heartbeat(
-    State(s): State<AppState>,
-    h: HeaderMap,
-    Path(id): Path<Uuid>,
-    Json(r): Json<LeaseRequest>,
-) -> AppResult<StatusCode> {
-    crate::auth::authorize_worker(&s.pool, &h).await?;
-    repository::heartbeat(&s.pool, id, &r).await?;
-    s.notify_job_event(JobEventType::JobHeartbeat, id, JobStatus::Running, None);
-    Ok(StatusCode::NO_CONTENT)
-}
-
 /// Progression éphémère d'un worker distant → bus SSE `job_progress` (même contrat que le local).
 pub async fn progress(
     State(s): State<AppState>,
@@ -350,7 +338,7 @@ const MAX_DETAIL_IDS: usize = 200;
 
 impl RelayInfoQuery {
     /// Identifiants séparés par une virgule (les `MAX_DETAIL_IDS` premiers).
-    fn parse_ids(&self) -> AppResult<Vec<Uuid>> {
+    pub(super) fn parse_ids(&self) -> AppResult<Vec<Uuid>> {
         self.ids
             .split(',')
             .take(MAX_DETAIL_IDS)

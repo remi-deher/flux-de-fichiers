@@ -1,10 +1,12 @@
 //! Exécuteur déclaratif de contrats d'opérations binaires (`probe`, `in-place`, `staged-output`).
 
 use crate::{
+    domain::IrreversibleAction,
     flows::contract::{
         BinaryExecutionMode, BinaryRuntime, OperationContract, OperationRegistry, OperationRuntime,
         ToolRef, apply_derived, build_binary_argv, evaluate_condition, merge_params,
     },
+    job_runner::action_gate::{ActionGate, ActionRequest},
     media::{
         PostValidateMode, PostValidateSpec, ProbeCommand, ensure_non_empty_file,
         extract_duration_secs, merge_probe_enrichment, run_probe_json, validate_magic_bytes,
@@ -212,6 +214,9 @@ pub struct BinaryExecContext<'a> {
     pub media_info: &'a Value,
     pub step_index: i32,
     pub on_progress: ProgressCallback,
+    /// Bloc exécuté, et accord à demander avant une opération en place.
+    pub node_id: &'a str,
+    pub action_gate: Option<&'a dyn ActionGate>,
 }
 
 /// Exécute une opération binaire déclarative (`ProbeEnrich`, `InPlace` ou `StagedOutput`).
@@ -276,6 +281,16 @@ pub async fn execute_binary_operation(
                     message: Some("aucune modification demandée".to_owned()),
                     excerpt: None,
                 });
+            }
+            if let Some(gate) = ctx.action_gate {
+                let request = ActionRequest::block(IrreversibleAction::InPlace, ctx.node_id);
+                gate.authorize(request)
+                    .await
+                    .map_err(|refusal| BinaryStepError {
+                        code: error_code,
+                        message: refusal.message(),
+                        excerpt: None,
+                    })?;
             }
             let bin = resolve_contract_binary(ctx.cache_mgr, rt, ctx.tool_versions);
             let path_env = tool_search_path(ctx.cache_mgr, ctx.tool_versions, &rt.path_tools, None);

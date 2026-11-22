@@ -248,6 +248,7 @@ async fn remux_mp4_contract_runs_mp4box_and_reports_progress()
         resume_node_id: None,
         run_info: FlowRunInfo::default(),
         resumed_outputs: &HashMap::new(),
+        action_gate: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -314,6 +315,7 @@ exit 2
         resume_node_id: None,
         run_info: FlowRunInfo::default(),
         resumed_outputs: &HashMap::new(),
+        action_gate: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -406,6 +408,7 @@ exit 9
         resume_node_id: None,
         run_info: FlowRunInfo::default(),
         resumed_outputs: &HashMap::new(),
+        action_gate: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -449,6 +452,7 @@ async fn mkvpropedit_skips_when_unchanged_and_fails_cleanly_on_error()
         resume_node_id: None,
         run_info: FlowRunInfo::default(),
         resumed_outputs: &HashMap::new(),
+        action_gate: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, dir.path(), progress)
     .await
@@ -642,6 +646,7 @@ async fn local_script_executes_end_to_end_across_registry_routing_and_claim_payl
         resume_node_id: None,
         run_info: FlowRunInfo::default(),
         resumed_outputs: &HashMap::new(),
+        action_gate: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -727,6 +732,7 @@ async fn local_script_stop_pipeline_halts_execution_before_output()
         resume_node_id: None,
         run_info: FlowRunInfo::default(),
         resumed_outputs: &HashMap::new(),
+        action_gate: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -853,6 +859,7 @@ async fn unified_script_block_supports_inline_library_ref_and_strict_next_port()
         resume_node_id: None,
         run_info: FlowRunInfo::default(),
         resumed_outputs: &HashMap::new(),
+        action_gate: None,
     }
     .execute_flow(Uuid::new_v4(), &flow, &source, &work, progress)
     .await
@@ -981,6 +988,7 @@ async fn non_media_input_is_accepted_then_the_extracted_file_is_probed()
                 resume_node_id: None,
                 run_info: FlowRunInfo::default(),
                 resumed_outputs: &HashMap::new(),
+                action_gate: None,
             }
             .execute_flow(Uuid::new_v4(), flow, source, work, progress)
             .await
@@ -1046,6 +1054,7 @@ async fn arr_notification_is_deferred_until_publication() -> anyhow::Result<()> 
             ..FlowRunInfo::default()
         },
         resumed_outputs: &HashMap::new(),
+        action_gate: None,
     };
     let outcome = engine
         .execute_flow(
@@ -1090,6 +1099,7 @@ fn variable_flow_engine<'a>(
         worker_capabilities: None,
         resume_node_id: None,
         resumed_outputs,
+        action_gate: None,
         run_info: FlowRunInfo::default(),
     }
 }

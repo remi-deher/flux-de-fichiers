@@ -149,6 +149,9 @@ pub async fn authorize_commit(
     if !writable {
         return Err(AppError::Forbidden);
     }
+    // Accord inscrit avec le contrôle du bail. Un dossier de sortie n'a qu'un détenteur, le worker
+    // intégré, qui ne passe pas par ici : sans intention inscrite, rien ne se remplace.
+    repository::require_publication_grant(&s.pool, access.job_id, &access.lease).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -751,6 +751,7 @@ async fn system_settings_can_be_updated_and_smtp_password_stays_hidden() -> anyh
         block_private_integration_hosts: true,
         check_updates_enabled: false,
         timezone: None,
+        unreachable_timeout_seconds: None,
     };
 
     // Un worker ne peut pas modifier les réglages système.
@@ -1522,6 +1523,7 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
         lease_epoch: claim.lease_epoch,
         telemetry: None,
     };
+    let held = lease.clone();
     let broker = h.publication.clone();
     let waiting = tokio::spawn(async move {
         broker
@@ -1543,13 +1545,36 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
     assert_eq!(tasks[0]["request_id"], request_id.to_string());
     let authorize =
         format!("/api/v1/worker/source-publications/{request_id}/authorize?worker_id={holder}");
+    // Sans intention inscrite au journal, aucun accord (ADR 0027).
+    assert_eq!(
+        json_call(&h.app, "GET", &authorize, Some(common::WORKER_KEY), None)
+            .await?
+            .0,
+        StatusCode::CONFLICT
+    );
+    let output = repository::PublishedOutput {
+        name: "",
+        sha256: &"bb".repeat(32),
+        bytes: 6,
+        warning: false,
+    };
+    repository::begin_pulled_publication(
+        &h.pool,
+        job.id,
+        &held,
+        output,
+        "mkv",
+        LibraryOutputPolicy::ReplaceWithBackup,
+    )
+    .await?;
     assert_eq!(
         json_call(&h.app, "GET", &authorize, Some(common::WORKER_KEY), None)
             .await?
             .0,
         StatusCode::NO_CONTENT
     );
-    sqlx::query("UPDATE jobs SET leased_until=datetime('now', '-1 minute') WHERE id=?1")
+    // Bail repris par le central : ni accord ni rapport.
+    sqlx::query("UPDATE jobs SET lease_epoch=lease_epoch+1 WHERE id=?1")
         .bind(claim.job_id)
         .execute(&h.pool)
         .await?;
@@ -1577,7 +1602,7 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
         .0,
         StatusCode::CONFLICT
     );
-    sqlx::query("UPDATE jobs SET leased_until=datetime('now', '+2 minutes') WHERE id=?1")
+    sqlx::query("UPDATE jobs SET lease_epoch=lease_epoch-1 WHERE id=?1")
         .bind(claim.job_id)
         .execute(&h.pool)
         .await?;

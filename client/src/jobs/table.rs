@@ -1,11 +1,12 @@
 //! Registre des tâches filtrées, avec la progression reçue en direct.
 
+use super::lease::{LEASES_PATH, lease_label};
 use super::model::{
     error_label, priority_label, relay_label, resolve_library_label, status_label, status_tone,
 };
 use crate::format;
 use crate::ui::{ProgressBar, Registre, RegistreMessage, StatusBadge, Tag, TagTone, on_activate};
-use forgearr_shared::jobs::{Job, JobResourceClass, JobResourceInfo, JobStatus};
+use forgearr_shared::jobs::{Job, JobLeaseInfo, JobResourceClass, JobResourceInfo, JobStatus};
 use forgearr_shared::relay::JobRelayInfo;
 use leptos::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -113,6 +114,9 @@ pub fn JobsTable(
     );
     let relays = job_details::<JobRelayInfo>(jobs, "/api/v1/jobs/relays", |_| true);
     let resources = job_details::<JobResourceInfo>(jobs, "/api/v1/jobs/resources", |_| true);
+    let leases = job_details::<JobLeaseInfo>(jobs, LEASES_PATH, |job| {
+        matches!(job.status, JobStatus::Running | JobStatus::Queued)
+    });
     let span = headers.len();
     view! {
         <Registre aria_label="Tâches" headers=headers>
@@ -127,6 +131,7 @@ pub fn JobsTable(
                     let failures = failures.get().unwrap_or_default();
                     let relays = relays.get().unwrap_or_default();
                     let resources = resources.get().unwrap_or_default();
+                    let leases = leases.get().unwrap_or_default();
                     list.into_iter().map(|job| {
                         let id = job.id;
                         let status = job.status;
@@ -135,6 +140,10 @@ pub fn JobsTable(
                             .iter()
                             .find(|entry| entry.job_id == id)
                             .map(|entry| relay_label(entry, status, &workers_map));
+                        let lease = leases
+                            .iter()
+                            .find(|entry| entry.job_id == id)
+                            .and_then(|entry| lease_label(entry, format::datetime));
                         let priority = job.priority;
                         // Seule la classe GPU est signalée : CPU est le cas ordinaire.
                         let gpu = resources.iter().any(|entry| {
@@ -202,6 +211,9 @@ pub fn JobsTable(
                                 <td>
                                     <div class="cluster">
                                         <StatusBadge label=status_label(job.status) variant=status_tone(job.status) />
+                                        {lease.map(|label| view! {
+                                            <Tag label=label tone=TagTone::Warning />
+                                        })}
                                         {job.warning.then(|| view! {
                                             <Tag label="Avertissement" tone=TagTone::Warning />
                                         })}

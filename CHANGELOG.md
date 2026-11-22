@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.82.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.82.0...v0.82.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **central:** fermer les flux d'événements à l'arrêt ([2b09ff5](https://github.com/remi-deher/flux-de-fichiers/commit/2b09ff5913c3a3ca7c9a74a7568b7a51299130d7))
+* **central:** fermer les flux d'événements à l'arrêt et borner l'attente des connexions ([08a6bfc](https://github.com/remi-deher/flux-de-fichiers/commit/08a6bfc75b6030980d5a9493b6c16e63311d1c23))
+
 ## [0.82.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.81.1...v0.82.0) (2026-11-22)
 
 

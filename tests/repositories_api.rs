@@ -101,6 +101,21 @@ async fn test_repositories_lifecycle_and_official_protection() -> anyhow::Result
     let unsafe_id_res = app.clone().oneshot(unsafe_id_req).await?;
     assert_eq!(unsafe_id_res.status(), StatusCode::BAD_REQUEST);
 
+    for reserved in ["local", "dev", "installed"] {
+        let reserved_req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/plugins/repositories")
+            .header("authorization", format!("Bearer {TEST_ADMIN_KEY}"))
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&serde_json::json!({
+                "id": reserved,
+                "name": "Identifiant réservé",
+                "indexUrl": "https://example.com/custom/index.json"
+            }))?))?;
+        let reserved_res = app.clone().oneshot(reserved_req).await?;
+        assert_eq!(reserved_res.status(), StatusCode::BAD_REQUEST, "{reserved}");
+    }
+
     let valid_req = Request::builder()
         .method("POST")
         .uri("/api/v1/plugins/repositories")

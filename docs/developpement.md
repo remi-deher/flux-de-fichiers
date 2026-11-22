@@ -51,7 +51,8 @@ GPU si un bloc du flux figé ou de ses flux liés porte `acceleration` = `nvenc`
 
 Temps réel (ADR 0028), pièges : sur le central, un cache d'outils vient de `AppState::tool_cache()`, jamais de
 `ToolCacheManager::new` ; une écriture de la librairie locale passe par `write_local`, une synchronisation de
-dépôt par `sync_and_signal` ; `notify` suit toujours l'écriture validée.
+dépôt par `sync_and_signal`, son ajout et son retrait par `plugins::add_repository` et `delete_repository` (copie
+sur disque comprise) ; `notify` suit toujours l'écriture validée.
 Client : lire par `live::load`, signaler une écriture de la page par `LiveEvents::touch`, placer saisie et actions
 en cours hors des fermetures qui lisent une ressource.
 

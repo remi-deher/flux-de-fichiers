@@ -10,6 +10,7 @@ use std::{
 
 mod blocks;
 mod cache;
+mod declared_files;
 mod dependencies;
 mod exposures;
 mod highlight;
@@ -20,6 +21,7 @@ mod local;
 mod packs;
 mod probe;
 mod readiness;
+mod repository_copy;
 mod script_preview;
 mod script_requirements;
 mod secret_settings;
@@ -53,8 +55,9 @@ pub use packs::{
 pub use probe::{ProbeContract, file_job_may_start, probe_is_ready, required_probe};
 pub use readiness::{attach_dependency_statuses, compute_entry_runtime, is_plugin_configured};
 pub use sources::{
-    catalog_roots, is_valid_repository_id, local_catalog_dir, repository_dir, sync_and_signal,
-    sync_enabled_repositories,
+    add_repository, catalog_roots, delete_repository, is_reserved_repository_id,
+    is_valid_repository_id, local_catalog_dir, recover_repository_copies, repository_dir,
+    sync_and_signal, sync_enabled_repositories,
 };
 pub use sync::{
     REQUIRE_IMMUTABLE_RELEASES_ENV, SyncError, SyncPolicy, SyncReport, is_mutable_branch_url,

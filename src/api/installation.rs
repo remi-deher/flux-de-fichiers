@@ -183,7 +183,9 @@ pub async fn enroll(
     if account.role != Role::Admin {
         return Err(AppError::Forbidden);
     }
-    let issued = crate::api_keys::issue(&state.pool, &request.worker_name, Role::Worker).await?;
+    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let issued = crate::api_keys::issue_for_worker(&mut tx, &request.worker_name).await?;
+    tx.commit().await?;
     let body = Json(enrollment::EnrolledWorker { key: issued.raw });
     Ok(([(header::CACHE_CONTROL, "no-store")], body).into_response())
 }

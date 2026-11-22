@@ -4,6 +4,7 @@ pub(crate) mod forms;
 mod recovery;
 
 use crate::api::{self, ApiError};
+use forgearr_shared::InstanceKind;
 use forgearr_shared::session::{Me, SessionInfo};
 use forgearr_shared::system::SetupStatus;
 use forms::{CentralSetupForm, GateCard, LoginForm, RoleChoice, WorkerSetupForm};
@@ -20,7 +21,10 @@ pub enum Gate {
     /// Installation vierge : choisir le rôle.
     ChooseRole,
     SetupCentral,
-    SetupWorker,
+    /// Enrôlement ; sans retour au choix du rôle quand l'installation est réservée à un worker.
+    SetupWorker {
+        can_choose_role: bool,
+    },
     Login {
         instance_name: Option<String>,
         /// Le central sait-il envoyer un lien de réinitialisation par courriel ?
@@ -78,11 +82,21 @@ pub async fn identity_after(session: SessionInfo) -> Result<Me, ApiError> {
     api::get::<Me>(ME_PATH).await
 }
 
+/// Écran d'une installation vierge : choix du rôle, ou enrôlement si elle est réservée à un worker.
+pub fn setup_gate(kind: InstanceKind) -> Gate {
+    match kind {
+        InstanceKind::Central => Gate::ChooseRole,
+        InstanceKind::Worker => Gate::SetupWorker {
+            can_choose_role: false,
+        },
+    }
+}
+
 /// Installation à faire, sinon session existante, sinon connexion.
 pub async fn initial_gate() -> Result<Gate, ApiError> {
     let status = api::get::<SetupStatus>(SETUP_STATUS_PATH).await?;
     if status.needs_setup {
-        return Ok(Gate::ChooseRole);
+        return Ok(setup_gate(status.instance_kind));
     }
     match api::get::<SessionInfo>(SESSION_PATH).await {
         Ok(session) => identity_after(session).await.map(Gate::Ready),
@@ -130,7 +144,9 @@ pub fn AccessGate(children: ChildrenFn) -> impl IntoView {
         Some(Ok(Gate::SetupCentral)) => {
             view! { <CentralSetupForm on_open=open goto=goto /> }.into_any()
         }
-        Some(Ok(Gate::SetupWorker)) => view! { <WorkerSetupForm goto=goto /> }.into_any(),
+        Some(Ok(Gate::SetupWorker { can_choose_role })) => {
+            view! { <WorkerSetupForm goto=goto can_choose_role=can_choose_role /> }.into_any()
+        }
         Some(Ok(Gate::Login {
             instance_name,
             password_reset_enabled,
@@ -151,6 +167,17 @@ pub fn AccessGate(children: ChildrenFn) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_blank_installation_reserved_for_a_worker_skips_the_role_choice() {
+        assert_eq!(setup_gate(InstanceKind::Central), Gate::ChooseRole);
+        assert_eq!(
+            setup_gate(InstanceKind::Worker),
+            Gate::SetupWorker {
+                can_choose_role: false
+            }
+        );
+    }
 
     #[test]
     fn the_reset_token_is_read_from_the_fragment_only() {

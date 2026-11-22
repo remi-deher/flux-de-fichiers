@@ -420,6 +420,22 @@ pub async fn touch_api_key(pool: &SqlitePool, id: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Révoque les clés actives d'un worker, désigné par son nom.
+pub async fn revoke_worker_keys<'e, E>(executor: E, worker_name: &str) -> AppResult<()>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    sqlx::query(
+        "UPDATE api_keys SET revoked_at = datetime('now') \
+         WHERE role = ?1 AND name = ?2 AND revoked_at IS NULL",
+    )
+    .bind(Role::Worker.as_str())
+    .bind(worker_name)
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
 pub async fn revoke_api_key(pool: &SqlitePool, id: &str) -> AppResult<()> {
     let revoked = sqlx::query!(
         "UPDATE api_keys SET revoked_at = datetime('now') WHERE id = ?1 AND revoked_at IS NULL",

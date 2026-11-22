@@ -2,6 +2,7 @@
 //! identifiants administrateur (ADR 0011).
 
 use crate::{
+    config,
     error::{AppError, AppResult},
     opaque_token::{random_hex, sha256_hex},
 };
@@ -61,12 +62,16 @@ pub fn error_for_status(status: StatusCode) -> Option<AppError> {
 }
 
 fn build_client() -> AppResult<reqwest::Client> {
-    reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|_| AppError::Internal)
+        .redirect(reqwest::redirect::Policy::none());
+    config::trust_ca(builder, config::central_ca().as_deref())
+        .and_then(|builder| Ok(builder.build()?))
+        .map_err(|error| {
+            tracing::error!(error = %error, "client d'enrôlement indisponible");
+            AppError::Internal
+        })
 }
 
 /// Demande au central la clé d'API d'un nouveau worker (voie directe ADR 0011). Aucune redirection

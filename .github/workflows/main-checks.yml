@@ -21,6 +21,11 @@ env:
   LOCAL_IMAGE_TAG: ci
   # Durée maximale d'attente du démarrage des conteneurs, en secondes.
   START_TIMEOUT_SECONDS: 90
+  # Adresses publiées par compose.yaml (aussi l'en-tête Origin exigé) et nom du worker d'essai.
+  CENTRAL: http://localhost:3000
+  WORKER: http://localhost:3001
+  WORKER_LAB_NAME: lab-worker
+  COOKIES: /tmp/forgearr-ci-cookies.txt
 
 jobs:
   # Nom stable : destiné aux checks requis de la protection de main.
@@ -57,32 +62,71 @@ jobs:
           # L'image est construite sur la tête de la PR dev → test : son commit doit être ancêtre de test.
           git merge-base --is-ancestor "$revision" "$HEAD_SHA" \
             || { echo "::error::L'image ne correspond pas au commit livré ($revision)."; exit 1; }
-      - name: Démarrer le central, l'installer et enrôler le worker
-        # Depuis l'ADR 0011 le central ne crée plus de clé de worker : on l'installe (compte de
-        # test jetable) puis on enrôle le worker, dont la clé est écrite pour `WORKER_KEY_FILE`.
+      - name: Démarrer le central et l'installer
+        # Compte jetable. Les cookies de session servent ensuite à approuver le worker.
         run: |
           mkdir -p var/config var/input
           chmod 777 var/config var/input
           IMAGE_TAG="$LOCAL_IMAGE_TAG" docker compose up -d --no-build central
           for second in $(seq 1 "$START_TIMEOUT_SECONDS"); do
-            [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/health)" = "204" ] && break
+            [ "$(curl -s -o /dev/null -w '%{http_code}' "$CENTRAL/health")" = "204" ] && break
             sleep 1
           done
-          credentials='"username":"ci-admin","password":"ci-mot-de-passe-jetable"'
-          post() {
-            curl -fsS -X POST "http://localhost:3000$1" \
-              -H 'Content-Type: application/json' -H 'Origin: http://localhost:3000' -d "$2"
-          }
-          post /api/v1/setup/central "{\"name\":\"CI\",$credentials}" >/dev/null
-          key=$(post /api/v1/workers/enroll "{$credentials,\"worker_name\":\"lab-worker\"}" | jq -r .key)
-          case "$key" in fdf_*) ;; *) echo "::error::Enrôlement du worker refusé."; exit 1 ;; esac
-          printf '%s' "$key" > var/config/worker_key
-          chmod 644 var/config/worker_key
+          curl -fsS -o /dev/null -c "$COOKIES" -X POST "$CENTRAL/api/v1/setup/central" \
+            -H 'Content-Type: application/json' -H "Origin: $CENTRAL" \
+            -d '{"name":"CI","username":"ci-admin","password":"ci-mot-de-passe-jetable"}'
+      - name: Enrôler le worker depuis sa propre page, par approbation (ADR 0016)
+        run: |
+          # Sans enrôlement, la commande « worker » sert la page d'installation du worker.
           IMAGE_TAG="$LOCAL_IMAGE_TAG" docker compose up -d --no-build worker
+          waiting=""
+          for second in $(seq 1 "$START_TIMEOUT_SECONDS"); do
+            waiting=$(curl -fsS "$WORKER/api/v1/setup/status" 2>/dev/null \
+              | jq -r 'select(.needsSetup) | .instanceKind' || true)
+            [ "$waiting" = "worker" ] && break
+            sleep 1
+          done
+          [ "$waiting" = "worker" ] \
+            || { echo "::error::Le worker non enrôlé ne sert pas sa page d'installation."; exit 1; }
+          csrf=$(awk '$6 == "flux_csrf" { print $7 }' "$COOKIES")
+          as_admin() {
+            curl -fsS -b "$COOKIES" -H "Origin: $CENTRAL" -H "X-CSRF-Token: $csrf" \
+              -H 'Content-Type: application/json' "$@"
+          }
+          as_admin -o /dev/null -X POST "$CENTRAL/api/v1/workers/enrollment-window" -d '{"open":true}'
+          # Le worker joint le central par le réseau compose, jamais par le port publié.
+          curl -fsS -o /dev/null -X POST "$WORKER/api/v1/setup/worker-request" \
+            -H 'Content-Type: application/json' -H "Origin: $WORKER" \
+            -d "{\"centralUrl\":\"http://central:3000\",\"workerName\":\"$WORKER_LAB_NAME\"}"
+          request=$(as_admin "$CENTRAL/api/v1/workers/requests" \
+            | jq -er --arg name "$WORKER_LAB_NAME" '.requests[] | select(.workerName == $name) | .id')
+          as_admin -o /dev/null -X POST "$CENTRAL/api/v1/workers/requests/$request/approve"
+      - name: Vérifier que le worker est enregistré, avant et après redémarrage
+        run: |
+          wait_registered() {
+            for second in $(seq 1 "$START_TIMEOUT_SECONDS"); do
+              state=$(curl -fsS "$WORKER/api/v1/instance/status" 2>/dev/null \
+                | jq -r 'select(.instanceKind == "worker" and .registered) | .name' || true)
+              if [ "$state" = "$WORKER_LAB_NAME" ]; then
+                echo "✅ Worker enregistré auprès du central en ${second}s ($1)"
+                return 0
+              fi
+              sleep 1
+            done
+            echo "::error::Worker non enregistré auprès du central ($1)."
+            return 1
+          }
+          wait_registered "après l'enrôlement"
+          curl -fsS -b "$COOKIES" "$CENTRAL/api/v1/workers" \
+            | jq -e --arg name "$WORKER_LAB_NAME" 'any(.[]; .name == $name)' >/dev/null \
+            || { echo "::error::Le central ne connaît pas le worker."; exit 1; }
+          # Le rôle et la clé gardés dans /config suffisent à repartir.
+          docker compose restart worker
+          wait_registered "après redémarrage"
       - name: Sonde /health et santé du worker
         run: |
           for second in $(seq 1 "$START_TIMEOUT_SECONDS"); do
-            status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health || true)
+            status=$(curl -s -o /dev/null -w "%{http_code}" "$CENTRAL/health" || true)
             worker=$(docker compose ps --format '{{.Service}} {{.Health}}' worker)
             if { [ "$status" = "200" ] || [ "$status" = "204" ]; } && [ "$worker" = "worker healthy" ]; then
               echo "✅ Central (HTTP $status) et worker opérationnels en ${second}s"
@@ -91,8 +135,15 @@ jobs:
             sleep 1
           done
           echo "::error::Démarrage incomplet : /health=$status, $worker"
-          docker compose logs --no-color
           exit 1
+      - if: failure()
+        name: Journaux du laboratoire
+        run: |
+          docker compose logs --no-color
+          # Les journaux applicatifs sont écrits dans /logs, pas sur la sortie du conteneur.
+          for service in central worker; do
+            docker compose exec -T "$service" sh -c 'tail -n 100 /logs/*' || true
+          done
       - if: always()
         name: Arrêter le laboratoire
         run: docker compose down --volumes

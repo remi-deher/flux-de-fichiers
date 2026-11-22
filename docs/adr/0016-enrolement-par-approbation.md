@@ -1,6 +1,7 @@
 # 0016 — Enrôlement d'un worker par demande à approuver
 
-Statut : proposé (14 nov. 2026), orientation validée par l'utilisateur ; à implémenter.
+Statut : accepté et implémenté (22 nov. 2026), sauf les écarts listés dans « Vérification point par
+point » ; proposé le 14 nov. 2026, orientation validée par l'utilisateur.
 
 ## Contexte
 
@@ -65,3 +66,59 @@ chercher dans les journaux** ; préférence pour une **demande à approuver**.
 - L'écran Workers gagne « Demandes en attente » et le bouton « Ajouter un worker » (le bloc
   `compose` du lot A du réseau devient une simple explication sans valeur à copier).
 - Le contrat `forgearr-shared` expose le statut d'une demande (enum Serde).
+
+## Vérification point par point (22 nov. 2026)
+
+Vérification faite dans le code et les tests natifs ; le parcours complet en conteneurs est contrôlé
+par `main-checks.yml`.
+
+| Point | État |
+| --- | --- |
+| 1. Demande du worker, approbation au central | Fait |
+| 2. Parcours | Fait. La page d'une installation vierge propose le choix central ou worker ; avec la commande `worker`, seulement l'enrôlement |
+| 3. Fenêtre de 15 minutes fermée par défaut | Fait (403 hors fenêtre, sans état créé) |
+| 4. Garde-fous | Fait : 20 demandes en attente, 5 par minute et par adresse, expiration, retrait unique. Une demande refusée n'est effacée qu'à la lecture suivante du worker ou à l'expiration |
+| 5. Clés de nœud invisibles | **Partiel** : la clé n'est ni affichée ni créée à la main, mais elle reste listée et révocable dans « Clés d'API » ; retirer un worker de l'écran Workers ne révoque pas sa clé |
+| 6. Secours par identifiants | Fait |
+| 7. Découverte mDNS | **Non fait** (facultatif) |
+
+## Suppression du mode manuel (22 nov. 2026)
+
+Décision de l'utilisateur : l'enrôlement devient le seul moyen d'ajouter un worker.
+
+- `WorkerConfig::load` ne lit l'identité que dans `/config`. `WORKER_KEY`, `WORKER_KEY_FILE`,
+  `WORKER_NAME` et `CENTRAL_URL` ne sont plus lues. La clé **par worker**, créée à l'enrôlement et rangée
+  dans `/config/worker.key`, demeure.
+- La commande `worker` sans enrôlement sert la page d'enrôlement, sans worker intégré ni installation
+  possible en central. Si `WORKER_KEY` ou `WORKER_KEY_FILE` est encore renseignée, un avertissement qui
+  nomme la variable (jamais sa valeur) est écrit dans les journaux et sur la sortie du conteneur.
+  `/config` non inscriptible, ou contenant un central installé, arrête le démarrage avec une erreur explicite.
+  Avant l'enrôlement, rien n'est créé dans `/data` ni `/input` : les dossiers de travail sont sous `/config/worker-setup`.
+- L'image n'a plus de commande par défaut : `central` l'emportait sur le rôle conservé, et un worker
+  enrôlé sans commande redevenait un central vierge au redémarrage du conteneur.
+- L'API refuse de créer une clé de rôle worker ; celles qui existent restent visibles et révocables.
+- Remettre une clé à un worker révoque, dans la même transaction, ses autres clés actives (même nom, rôle
+  worker). Conséquence : approuver une demande qui porte le nom d'un worker en service le déconnecte ;
+  l'écran Workers le signale sur la demande et demande confirmation.
+- L'enrôlement fait confiance à l'autorité privée `CA_CERT`, comme le worker.
+
+### Migrer un worker déployé à la main
+
+1. Relever son nom exact dans l'écran Workers et attendre la fin de ses tâches, puis mettre à jour le
+   **central**. Les clés en place continuent de fonctionner avec les workers non mis à jour.
+2. Dans le déploiement du worker : retirer `WORKER_KEY`, `WORKER_KEY_FILE`, `WORKER_NAME`, `CENTRAL_URL` et le
+   secret monté ; monter un volume **persistant, inscriptible par l'utilisateur 10001 et propre au worker**
+   sur `/config` ; publier le port 3000. Garder les autres volumes et les chemins des médias.
+3. Mettre à jour l'image et démarrer : le worker affiche sa page d'enrôlement.
+4. Sur le central, écran Workers, « Ajouter un worker » : ouvrir la fenêtre (15 minutes).
+5. Sur la page du worker, saisir l'adresse du central et **le même nom** (casse comprise), puis
+   approuver la demande sur le central.
+6. Vérifier que le worker est en ligne avec ses dossiers : l'enregistrement se fait par nom, donc son
+   identifiant, ses réglages, ses bibliothèques et son historique sont conservés. Son ancienne clé est révoquée si
+   elle portait ce nom ; sinon la révoquer dans « Clés d'API ».
+7. Supprimer l'ancien fichier de clé de l'hôte.
+
+Retour arrière avant l'étape 5 : remettre l'ancienne image et l'ancienne configuration. Après, l'ancienne
+clé est révoquée et ne peut plus être recréée à la main : il faut enrôler.
+Pour enrôler de nouveau un worker (clé révoquée, central remplacé) : l'arrêter, supprimer `worker.json` et
+`worker.key` de son `/config`, redémarrer.

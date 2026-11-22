@@ -5,7 +5,6 @@ use crate::{
     error::{AppError, AppResult},
 };
 use chrono::{DateTime, Duration, Utc};
-use forgearr_shared::Role;
 use forgearr_shared::workers::{
     EnrollmentRequestStatus, EnrollmentWindowStatus, WorkerEnrollmentCreated, WorkerEnrollmentList,
     WorkerEnrollmentPollResponse, WorkerEnrollmentSummary,
@@ -269,9 +268,7 @@ pub async fn poll_enrollment_request(
             if deleted == 0 {
                 return Err(AppError::NotFound);
             }
-            let issued =
-                api_keys::issue_with_executor(&mut *tx, &row.worker_name, Role::Worker, None)
-                    .await?;
+            let issued = api_keys::issue_for_worker(&mut tx, &row.worker_name).await?;
             tx.commit().await?;
             Ok(WorkerEnrollmentPollResponse {
                 status: EnrollmentRequestStatus::Approved,

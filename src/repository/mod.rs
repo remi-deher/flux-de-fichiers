@@ -43,7 +43,8 @@ pub use identity::{
     Account, ApiKeyRecord, INSTANCE_NAME_KEY, account_count, create_account, create_first_account,
     find_account_by_email, find_account_by_username, find_active_api_key, get_account, get_setting,
     insert_api_key, list_account_copies, list_accounts, list_api_keys, revoke_api_key,
-    set_account_email, set_setting, touch_api_key, update_account, update_password,
+    revoke_worker_keys, set_account_email, set_setting, touch_api_key, update_account,
+    update_password,
 };
 pub use irreversible_actions::authorize_action;
 pub use jobs::{

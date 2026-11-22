@@ -41,20 +41,18 @@ services:
     <<: *app
     pull_policy: never
     command: [worker]
-    environment:
-      CENTRAL_URL: http://central:3000
-      # Le nom doit être celui de la clé enrôlée (voir .github/workflows/main-checks.yml).
-      WORKER_NAME: lab-worker
-      WORKER_KEY_FILE: /config/worker_key
+    # Enrôlement depuis http://localhost:3001 (voir .github/workflows/main-checks.yml) : le nom et la
+    # clé du worker sont gardés dans son propre /config, distinct de celui du central.
     volumes:
-      - ./var/config:/config:ro
+      - worker_config:/config
       - work:/work
       - logs:/logs
+    ports: ["127.0.0.1:3001:3000"]
     healthcheck:
-      test: [CMD-SHELL, "grep -qa worker /proc/1/cmdline"]
+      test: [CMD, curl, --fail, --silent, http://localhost:3000/health]
       interval: 2s
       timeout: 2s
-      retries: 10
+      retries: 15
     depends_on:
       central: {condition: service_healthy}
 
@@ -72,5 +70,6 @@ services:
 volumes:
   data:
   central_logs:
+  worker_config:
   work:
   logs:

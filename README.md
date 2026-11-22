@@ -49,10 +49,13 @@ Le secret n'est jamais affiché ; pour le fournir par fichier, `SECRET_KEY_FILE`
 Pour ne pas perdre les secrets lors d'une restauration, créez depuis Paramètres → Système un
 **kit de récupération** (fichier protégé par une phrase de passe) et rangez-le avec vos sauvegardes.
 
-Un worker distant utilise la même image : `docker run … worker` avec `CENTRAL_URL`,
-`WORKER_KEY_FILE` (clé d'API de rôle worker créée dans Réglages → Clés d'API),
-`WORKER_NAME`, `WORK_DIR` (voir
-[deploy/worker.compose.yaml](deploy/worker.compose.yaml)).
+Un worker distant utilise la même image, avec la commande `worker` facultative et un volume
+`/config` persistant et inscriptible par l'utilisateur 10001, où l'enrôlement range son nom et sa
+clé ([deploy/worker.compose.yaml](deploy/worker.compose.yaml)). Ouvrez « Ajouter un worker » sur le
+central, puis l'interface du worker : saisissez l'adresse du central et approuvez la demande
+([ADR 0016](docs/adr/0016-enrolement-par-approbation.md)). `WORKER_KEY`, `WORKER_KEY_FILE`,
+`WORKER_NAME` et `CENTRAL_URL` ne sont plus lues : pour un worker déployé ainsi, voir la
+[migration](docs/adr/0016-enrolement-par-approbation.md#migrer-un-worker-déployé-à-la-main).
 
 ## Configuration
 
@@ -101,8 +104,8 @@ webhooks sont chiffrés au repos et ne sont jamais renvoyés par l'API. Détails
 
 Contrat : [docs/openapi.yaml](docs/openapi.yaml). Une machine utilise
 `Authorization: Bearer fdf_…` : une clé d'API de rôle admin crée et lit les tâches et
-administre la plateforme, une clé de rôle worker enregistre les workers et exécute les baux
-(clés nommées, révocables, affichées une seule fois). Le navigateur utilise un compte et une
+administre la plateforme (clés nommées, révocables, affichées une seule fois). La clé d'un worker,
+créée à son enrôlement, ne sert qu'à l'enregistrer et à exécuter ses baux. Le navigateur utilise un compte et une
 session cookie avec CSRF ([docs/api/session-web.md](docs/api/session-web.md)).
 
 Créer une tâche : `POST /api/v1/jobs`, corps `{"source_name":"exemple.mkv","target_worker_id":null}`.

@@ -108,6 +108,16 @@ where
     })
 }
 
+/// Crée la clé d'un worker qui s'enrôle et révoque celles qu'il portait sous ce nom : une seule clé
+/// active par worker. À appeler dans une transaction.
+pub async fn issue_for_worker(
+    connection: &mut sqlx::SqliteConnection,
+    worker_name: &str,
+) -> AppResult<IssuedKey> {
+    repository::revoke_worker_keys(&mut *connection, worker_name).await?;
+    issue_with_executor(&mut *connection, worker_name, Role::Worker, None).await
+}
+
 /// Installe une clé dont la valeur est imposée (tests, banc d'essai) ; le format doit être valide.
 pub async fn install_known_key(
     pool: &SqlitePool,

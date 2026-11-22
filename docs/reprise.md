@@ -213,7 +213,8 @@ Essai en conditions réelles : central `flux-essai` sur `truenas_admin@192.168.1
 `midclt call -j app.update` avec `custom_compose_config` ; procédure détaillée et retour arrière
 dans [deploiement-essai-0011.md](deploiement-essai-0011.md). Points propres à ce lot :
 
-- le worker lit `CENTRAL_URL` (et non plus `COORDINATOR_URL`, ADR 0013) ;
+- le worker lit l'adresse du central dans `/config` depuis son enrôlement (ADR 0016) ; `CENTRAL_URL`,
+  `WORKER_NAME` et `WORKER_KEY_FILE` ne sont plus lues ;
 - le central sert l'interface depuis le volume `…/essai25/frontend` (lecture seule) : y recopier
   `index.html` **et** le dossier `pkg/` de l'image ;
 - migrations 0012 (versions de flux) et 0013 (`library_workers`) appliquées au démarrage ;

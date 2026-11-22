@@ -67,14 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Démarrage de Docker Compose sur http://localhost:3000 ...");
     let mut child = Command::new("docker")
-        .args([
-            "compose",
-            "up",
-            "--build",
-            "--remove-orphans",
-            "--scale",
-            "worker=3",
-        ])
+        .args(["compose", "up", "--build", "--remove-orphans"])
         .current_dir(&root)
         .spawn()?;
 

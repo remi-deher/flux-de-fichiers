@@ -1,16 +1,20 @@
 //! Enrôlement des workers et choix du rôle worker (ADR 0011, phase 2).
 
+#[path = "common/installation.rs"]
+mod installation;
+
 use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
 use forgearr::{
-    api::{AppState, router},
-    config::Config,
-    worker_settings,
+    api::router,
+    api_keys,
+    domain::{LibraryAccess, LibraryWorkerPath, LibraryWrite},
+    repository, worker_settings,
 };
-use sqlx::sqlite::SqlitePoolOptions;
-use std::{path::Path, sync::Arc};
+use forgearr_shared::Role;
+use std::path::Path;
 use tower::ServiceExt;
 
 const HOST: &str = "localhost:3000";
@@ -20,28 +24,7 @@ const GOOD_PASSWORD: &str = "un-bon-mot-de-passe";
 const ADMIN: &str = "admin-central";
 
 async fn app_in(config_dir: &Path) -> anyhow::Result<axum::Router> {
-    let config = Config {
-        bind: "127.0.0.1:3000".parse()?,
-        database_url: "sqlite::memory:".into(),
-        data_dir: "var".into(),
-        input_dir: "var/input".into(),
-        config_dir: config_dir.to_path_buf(),
-        tools_cache_dir: "var/tools-cache".into(),
-        plugins_dir: None,
-        static_dir: "frontend/dist".into(),
-        max_file_bytes: 1024,
-        local_worker: false,
-        web_origin: None,
-        web_session_ttl_seconds: 28_800,
-        tls: None,
-        smtp: None,
-    };
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect(&config.database_url)
-        .await?;
-    sqlx::migrate!().run(&pool).await?;
-    Ok(router(AppState::new(pool, Arc::new(config))))
+    Ok(router(installation::blank_state(config_dir).await?))
 }
 
 async fn post(
@@ -575,5 +558,90 @@ async fn test_blank_installation_enrolls_via_approval_against_live_central() -> 
     let key = worker_settings::load_worker_key(worker_dir.path())?;
     assert!(key.starts_with("fdf_"));
     server.abort();
+    Ok(())
+}
+
+const LEGACY_WORKER: &str = "nas-historique";
+
+/// Migration d'un worker déployé à la main (ADR 0016, 22 nov. 2026) : enrôlé sous le même nom, il garde
+/// son identité, ses réglages et ses dossiers ; son ancienne clé est révoquée, les autres restent.
+#[tokio::test]
+async fn test_enrolling_a_known_worker_keeps_its_identity_and_revokes_its_old_key()
+-> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let state = installation::blank_state(dir.path()).await?;
+    let pool = state.pool.clone();
+    let central = router(state);
+    let legacy = api_keys::issue(&pool, LEGACY_WORKER, Role::Worker).await?;
+    let other = api_keys::issue(&pool, "autre", Role::Worker).await?;
+    let homonym = api_keys::issue(&pool, LEGACY_WORKER, Role::Viewer).await?;
+    let known = repository::register(&pool, LEGACY_WORKER).await?;
+    let library = repository::insert_library(
+        &pool,
+        LibraryWrite {
+            name: "Films".into(),
+            workers: vec![LibraryWorkerPath {
+                source_key: None,
+                worker_id: known.id,
+                local_path: "/mnt/films".into(),
+                access: LibraryAccess::Read,
+            }],
+            ..Default::default()
+        },
+    )
+    .await?;
+
+    repository::set_enrollment_window(&pool, true).await?;
+    let (secret, secret_hash) = forgearr::enrollment::generate_secret_and_hash();
+    let request =
+        repository::create_enrollment_request(&pool, LEGACY_WORKER, None, None, &secret_hash)
+            .await?;
+    // Tant que la clé n'est pas retirée, l'ancien conteneur continue de travailler.
+    repository::decide_enrollment_request(&pool, request.id, true).await?;
+    assert!(api_keys::authenticate(&pool, &legacy.raw).await?.is_some());
+    let key = repository::poll_enrollment_request(&pool, request.id, &secret)
+        .await?
+        .key
+        .unwrap_or_default();
+
+    assert!(api_keys::authenticate(&pool, &legacy.raw).await?.is_none());
+    assert!(api_keys::authenticate(&pool, &other.raw).await?.is_some());
+    assert!(api_keys::authenticate(&pool, &homonym.raw).await?.is_some());
+
+    let request = Request::post("/api/v1/workers")
+        .header("host", HOST)
+        .header("authorization", format!("Bearer {key}"))
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({"name": LEGACY_WORKER}).to_string(),
+        ))?;
+    let (status, registered) = reply(central.oneshot(request).await?).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(registered["id"], known.id.to_string());
+    let folders = repository::get_library(&pool, library.id).await?.workers;
+    assert_eq!(folders.len(), 1);
+    assert_eq!(folders[0].worker_id, known.id);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_direct_enrollment_replaces_the_key_of_the_same_worker() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let central = installed_central(dir.path()).await?;
+    let mut keys = Vec::new();
+    for _ in 0..2 {
+        let (status, body) = post(
+            &central,
+            "/api/v1/workers/enroll",
+            enroll_body(GOOD_PASSWORD, LEGACY_WORKER),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK);
+        keys.push(body["key"].as_str().unwrap_or_default().to_owned());
+    }
+    let (status, _) = get(&central, "/api/v1/me", Some(&keys[0])).await?;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = get(&central, "/api/v1/me", Some(&keys[1])).await?;
+    assert_eq!(status, StatusCode::OK);
     Ok(())
 }

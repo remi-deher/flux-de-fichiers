@@ -910,6 +910,27 @@ async fn plugin_icon_is_served_as_an_inert_svg_image() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn a_plugin_named_scripts_keeps_its_own_routes() -> anyhow::Result<()> {
+    let harness = harness().await?;
+    let index = harness._dirs.0.path().join("index.json");
+    let renamed = std::fs::read_to_string(&index)?.replace(PLUGIN_ID, "scripts");
+    std::fs::write(&index, renamed)?;
+    let (status, _, body) = get_icon(&harness.app, "/api/v1/plugins/scripts/icon").await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, DEMO_ICON.as_bytes());
+    let (status, _) = call_with_key(
+        &harness.app,
+        TEST_ADMIN_KEY,
+        "GET",
+        "/api/v1/plugins/scripts/settings",
+        None,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    Ok(())
+}
+
+#[tokio::test]
 async fn an_unsafe_icon_is_never_served() -> anyhow::Result<()> {
     let harness = harness().await?;
     let icon = harness._dirs.0.path().join(ICON_FILE);

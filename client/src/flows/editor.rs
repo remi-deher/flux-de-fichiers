@@ -722,7 +722,7 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
         }
     });
 
-    let _shortcuts = window_event_listener(ev::keydown, move |event| {
+    crate::ui::listen_window(ev::keydown, move |event| {
         let ctrl = event.ctrl_key() || event.meta_key();
         let key = event.key();
         let in_input = is_text_input_target(event.target());

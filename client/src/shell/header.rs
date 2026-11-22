@@ -134,7 +134,7 @@ fn HeaderMenu(
     children: Children,
 ) -> impl IntoView {
     let open = RwSignal::new(false);
-    let _escape = window_event_listener(leptos::ev::keydown, move |event| {
+    crate::ui::listen_window(leptos::ev::keydown, move |event| {
         if event.key() == "Escape" {
             open.set(false);
         }

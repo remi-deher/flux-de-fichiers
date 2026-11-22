@@ -482,7 +482,7 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
         })
     });
 
-    let _window_move = window_event_listener(leptos::ev::pointermove, move |event| {
+    crate::ui::listen_window(leptos::ev::pointermove, move |event| {
         if !event.is_primary() {
             return;
         }
@@ -567,7 +567,7 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
 
     // Geste interrompu par le navigateur (appel entrant, défilement système) : tout s'arrête,
     // le déplacement déjà fait est gardé, la liaison en cours est abandonnée.
-    let _window_cancel = window_event_listener(leptos::ev::pointercancel, move |event| {
+    crate::ui::listen_window(leptos::ev::pointercancel, move |event| {
         if !event.is_primary() {
             return;
         }
@@ -580,7 +580,7 @@ pub fn GraphCanvas(editor: Editor, can_manage: bool) -> impl IntoView {
         editor.pending_wire.set(None);
     });
 
-    let _window_up = window_event_listener(leptos::ev::pointerup, move |event| {
+    crate::ui::listen_window(leptos::ev::pointerup, move |event| {
         if !event.is_primary() {
             return;
         }

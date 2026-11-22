@@ -346,11 +346,11 @@ fn json_routes() -> Router<AppState> {
             get(plugins::repository_script),
         )
         .route(
-            "/api/v1/plugins/scripts/{entry_id}",
+            "/api/v1/catalog-scripts/{entry_id}",
             get(plugins::catalog_script),
         )
         .route(
-            "/api/v1/plugins/scripts/{entry_id}/import",
+            "/api/v1/catalog-scripts/{entry_id}/import",
             post(plugins::import_catalog_script),
         )
         .route(

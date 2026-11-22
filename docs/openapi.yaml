@@ -161,7 +161,7 @@ paths:
               schema: {$ref: '#/components/schemas/DefaultFailureFlow'}
         '400': {description: Flux inconnu}
         default: {$ref: '#/components/responses/Error'}
-  /api/v1/plugins/scripts/{entry_id}:
+  /api/v1/catalog-scripts/{entry_id}:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
       summary: >-
@@ -173,7 +173,7 @@ paths:
       responses:
         '200': {description: Aperçu du script.}
         '404': {description: Script inconnu.}
-  /api/v1/plugins/scripts/{entry_id}/import:
+  /api/v1/catalog-scripts/{entry_id}/import:
     post:
       security: [{ApiKey: []}, {WebSession: []}]
       summary: >-

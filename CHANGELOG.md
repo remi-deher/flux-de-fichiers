@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.81.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.80.0...v0.81.0) (2026-11-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* **workers:** un worker configuré par WORKER_KEY, WORKER_KEY_FILE, WORKER_NAME ou CENTRAL_URL doit être enrôlé (volume /config inscriptible, port 3000 accessible) ; voir l'ADR 0016.
+
+### Features
+
+* **workers:** enrôlement seul, suppression de la clé manuelle ([3a3981c](https://github.com/remi-deher/flux-de-fichiers/commit/3a3981c0e0a6f33cab139076f8a142248764b44c))
+
 ## [0.80.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.79.0...v0.80.0) (2026-11-22)
 
 

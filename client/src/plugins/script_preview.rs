@@ -31,14 +31,32 @@ pub fn catalog_script_import_path(entry_id: &str) -> String {
     format!("{}/import", catalog_script_path(entry_id))
 }
 
-/// Message affiché quand l'ajout d'un script à la librairie échoue.
-fn import_error_message(error: &ApiError) -> String {
-    match error {
+/// Un script de ce nom est-il déjà dans la librairie ?
+fn is_already_imported(error: &ApiError) -> bool {
+    matches!(
+        error,
         ApiError::Rejected {
             status: CONFLICT_STATUS,
             ..
-        } => "Ce script est déjà dans votre librairie (un script porte déjà ce nom).".to_owned(),
-        other => other.message(),
+        }
+    )
+}
+
+/// Message affiché quand l'ajout d'un script à la librairie échoue.
+fn import_error_message(error: &ApiError) -> String {
+    if is_already_imported(error) {
+        "Ce script est déjà dans votre librairie (un script porte déjà ce nom).".to_owned()
+    } else {
+        error.message()
+    }
+}
+
+/// Libellé du bouton d'ajout à la librairie.
+fn import_label(imported: bool) -> &'static str {
+    if imported {
+        "Dans ma collection"
+    } else {
+        "Ajouter à ma collection"
     }
 }
 
@@ -46,24 +64,34 @@ fn import_error_message(error: &ApiError) -> String {
 #[component]
 fn ImportButton(import_path: String) -> impl IntoView {
     let pending = RwSignal::new(false);
+    let imported = RwSignal::new(false);
     let import = move |_| {
         let path = import_path.clone();
         pending.set(true);
         leptos::task::spawn_local(async move {
             match api::post::<(), LocalScriptSummary>(&path, None).await {
-                Ok(saved) => Toasts::notify_success(format!(
-                    "« {} » ajouté à votre librairie (section Scripts).",
-                    saved.name
-                )),
-                Err(error) => Toasts::notify_error(import_error_message(&error)),
+                Ok(saved) => {
+                    let _ = imported.try_set(true);
+                    Toasts::notify_success(format!(
+                        "« {} » ajouté à votre librairie (section Scripts).",
+                        saved.name
+                    ));
+                }
+                Err(error) => {
+                    if is_already_imported(&error) {
+                        let _ = imported.try_set(true);
+                    }
+                    Toasts::notify_error(import_error_message(&error));
+                }
             }
-            pending.set(false);
+            // Le tiroir a pu se fermer pendant l'appel.
+            let _ = pending.try_set(false);
         });
     };
     view! {
-        <button type="button" class="btn btn-primary btn-sm" disabled=move || pending.get()
+        <button type="button" class="btn btn-primary btn-sm" disabled=move || pending.get() || imported.get()
             on:click=import>
-            "Ajouter à ma collection"
+            {move || import_label(imported.get())}
         </button>
     }
 }
@@ -194,10 +222,17 @@ mod tests {
             detail: None,
         };
         assert!(import_error_message(&conflict).contains("déjà dans votre librairie"));
+        assert!(is_already_imported(&conflict));
+        assert!(!is_already_imported(&ApiError::Network));
         assert_eq!(
             import_error_message(&ApiError::Network),
             ApiError::Network.message()
         );
+    }
+
+    #[test]
+    fn the_import_button_tells_when_the_script_is_in_the_collection() {
+        assert_ne!(import_label(true), import_label(false));
     }
 
     #[test]

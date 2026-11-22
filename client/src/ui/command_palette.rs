@@ -164,7 +164,7 @@ pub fn CommandPalette(me: Me) -> impl IntoView {
         }
     });
 
-    let _shortcut = window_event_listener(leptos::ev::keydown, move |event| {
+    crate::ui::listen_window(leptos::ev::keydown, move |event| {
         let key = event.key();
         if (event.ctrl_key() || event.meta_key()) && key.eq_ignore_ascii_case("k") {
             event.prevent_default();

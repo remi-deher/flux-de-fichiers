@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.80.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.79.0...v0.80.0) (2026-11-22)
+
+
+### Features
+
+* **jobs:** état injoignable, remise en file sûre et accord avant action irréversible ([5f1aef8](https://github.com/remi-deher/flux-de-fichiers/commit/5f1aef86734419fa78b368e118e8dd577b6f7447))
+* **jobs:** état injoignable, remise en file sûre et accord avant action irréversible ([2443ad6](https://github.com/remi-deher/flux-de-fichiers/commit/2443ad65d790e0cb6946de23d192a23d76eb397d))
+
+
+### Bug Fixes
+
+* **tests:** annuler la tâche pendant que le battement local avance ([7b71023](https://github.com/remi-deher/flux-de-fichiers/commit/7b71023c968a8ccb9e46b5b7bc744c2fc0171b88))
+* **tests:** annuler la tâche pendant que le battement local avance ([3681a49](https://github.com/remi-deher/flux-de-fichiers/commit/3681a49edcbf53347559c1cd2d9e63d44faa7305))
+* **tests:** clippy clone superflu dans gate_flow_tests ([dc7996a](https://github.com/remi-deher/flux-de-fichiers/commit/dc7996ac853d1dfbd4f7da31dbd4bb1cbe491d2c))
+* **tests:** intention de publication inscrite avant l'accord du détenteur ([fc32d72](https://github.com/remi-deher/flux-de-fichiers/commit/fc32d722d5787266fe0c36d0025057e1268fac1f))
+
 ## [0.79.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.78.1...v0.79.0) (2026-11-22)
 
 

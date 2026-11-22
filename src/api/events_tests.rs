@@ -48,7 +48,8 @@ async fn stream(
     scope: Scope,
     check_every: Duration,
 ) -> AppResult<BodyDataStream> {
-    let sse = open(state.clone(), headers, caller, scope, check_every).await?;
+    let never = std::future::pending();
+    let sse = open(state.clone(), headers, caller, scope, check_every, never).await?;
     Ok(sse.into_response().into_body().into_data_stream())
 }
 
@@ -172,6 +173,34 @@ async fn a_revoked_caller_loses_its_stream() -> anyhow::Result<()> {
     state.event_history.publish(job_event()).await;
     read_until(&mut body, "event: job_created").await?;
     crate::repository::revoke_api_key(&state.pool, &key.record.id).await?;
+    let closed = tokio::time::timeout(LIMIT, async { while body.next().await.is_some() {} });
+    closed.await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_stream_ends_when_the_server_stops() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, _, _, _) = setup(dir.path()).await?;
+    let (stop, stopping) = tokio::sync::oneshot::channel::<()>();
+    let until = async move {
+        let _ = stopping.await;
+    };
+    let admin = principal(Role::Admin, None);
+    let sse = open(
+        state.clone(),
+        HeaderMap::new(),
+        admin,
+        Scope::All,
+        LIMIT,
+        until,
+    )
+    .await
+    .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+    let mut body = sse.into_response().into_body().into_data_stream();
+    state.event_history.publish(job_event()).await;
+    read_until(&mut body, "event: job_created").await?;
+    let _ = stop.send(());
     let closed = tokio::time::timeout(LIMIT, async { while body.next().await.is_some() {} });
     closed.await?;
     Ok(())

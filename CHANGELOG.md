@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.82.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.81.1...v0.82.0) (2026-11-22)
+
+
+### Features
+
+* **client:** mise à jour en temps réel des plugins, scripts, applications et dépôts ([32e1f1b](https://github.com/remi-deher/flux-de-fichiers/commit/32e1f1bb57e75601fc5b031b0172ad0efdff5da9))
+* **client:** mise à jour en temps réel des plugins, scripts, applications et dépôts ([0291c4f](https://github.com/remi-deher/flux-de-fichiers/commit/0291c4f171e59114168d8674d36334584d7c0858))
+
 ## [0.81.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.81.0...v0.81.1) (2026-11-22)
 
 

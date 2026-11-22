@@ -171,6 +171,9 @@ impl Role {
     /// Rôles qu'un compte humain peut porter (worker et mcp sont réservés aux clés d'API).
     pub const ACCOUNT_ROLES: [Self; 2] = [Self::Admin, Self::Viewer];
 
+    /// Rôles d'une clé créée à la main ; celle d'un worker ne vient que de son enrôlement (ADR 0016).
+    pub const CREATABLE_KEY_ROLES: [Self; 3] = [Self::Admin, Self::Mcp, Self::Viewer];
+
     pub fn is_account_role(self) -> bool {
         Self::ACCOUNT_ROLES.contains(&self)
     }

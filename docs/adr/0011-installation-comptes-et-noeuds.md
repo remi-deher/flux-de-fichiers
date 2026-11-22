@@ -2,6 +2,11 @@
 
 Statut : conception validée par l'utilisateur (13 nov. 2026) ; implémentation en quatre phases.
 
+> **22 nov. 2026** : le parcours normal d'ajout d'un worker est la demande approuvée de
+> l'[ADR 0016](0016-enrolement-par-approbation.md) ; la décision 5 en est le secours. Le mode manuel (clé
+> par l'environnement) est supprimé : la commande `worker` ne fait que réserver l'installation à un worker, et une
+> clé de rôle worker ne se crée plus dans « Clés d'API ».
+
 ## Contexte
 
 L'accès repose aujourd'hui sur deux secrets partagés (`ADMIN_KEY`, `WORKER_KEY`) générés en clair dans

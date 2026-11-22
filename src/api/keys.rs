@@ -26,7 +26,10 @@ pub async fn create(
     _auth: ManageApiKeysAuth,
     Json(request): Json<CreateKeyRequest>,
 ) -> AppResult<Json<CreatedKey>> {
-    let role = Role::parse(&request.role).ok_or(AppError::Invalid)?;
+    // La clé d'un worker ne vient que de son enrôlement (ADR 0016).
+    let role = Role::parse(&request.role)
+        .filter(|role| Role::CREATABLE_KEY_ROLES.contains(role))
+        .ok_or(AppError::Invalid)?;
     let issued =
         api_keys::issue_with_scopes(&state.pool, &request.name, role, request.scopes.as_deref())
             .await?;

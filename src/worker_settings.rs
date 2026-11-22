@@ -9,6 +9,9 @@ const SETTINGS_FILE: &str = "worker.json";
 const WORKER_KEY_FILE: &str = "worker.key";
 const TEMPORARY_SUFFIX: &str = ".tmp";
 const NODE_NAME_MAX_LEN: usize = 80;
+const WRITE_PROBE_FILE: &str = ".forgearr-write-probe";
+/// Variables de l'ancien mode manuel : elles ne sont plus lues, seulement signalées.
+const RETIRED_KEY_VARIABLES: [&str; 2] = ["WORKER_KEY", "WORKER_KEY_FILE"];
 #[cfg(unix)]
 const PRIVATE_FILE_MODE: u32 = 0o600;
 
@@ -27,6 +30,28 @@ pub fn is_valid_worker_name(name: &str) -> bool {
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
+}
+
+/// Variables de l'ancien mode manuel encore renseignées. Seuls les noms sont renvoyés, jamais les valeurs.
+pub fn retired_key_variables(variable: impl Fn(&str) -> Option<String>) -> Vec<&'static str> {
+    RETIRED_KEY_VARIABLES
+        .into_iter()
+        .filter(|name| variable(name).is_some_and(|value| !value.trim().is_empty()))
+        .collect()
+}
+
+/// Vérifie que le rôle et la clé pourront être conservés dans `config_dir`.
+pub fn ensure_writable(config_dir: &Path) -> anyhow::Result<()> {
+    let probe = config_dir.join(WRITE_PROBE_FILE);
+    std::fs::create_dir_all(config_dir)
+        .and_then(|()| std::fs::write(&probe, []))
+        .and_then(|()| std::fs::remove_file(&probe))
+        .with_context(|| {
+            format!(
+                "le dossier de configuration {} n'est pas inscriptible par l'utilisateur du conteneur : montez-y un volume persistant en écriture",
+                config_dir.display()
+            )
+        })
 }
 
 /// Écrit `contents` dans `path` de façon atomique (fichier temporaire puis renommage).
@@ -105,6 +130,31 @@ mod tests {
         for bad in ["", "a b", "é", "a/b", &"x".repeat(NODE_NAME_MAX_LEN + 1)] {
             assert!(!is_valid_worker_name(bad), "{bad}");
         }
+    }
+
+    #[test]
+    fn test_retired_variables_are_named_only_when_filled() {
+        let filled = |name: &str| (name == "WORKER_KEY_FILE").then(|| "/run/secrets/k".to_owned());
+        assert_eq!(retired_key_variables(filled), ["WORKER_KEY_FILE"]);
+        assert!(retired_key_variables(|_| Some(" ".into())).is_empty());
+        assert!(retired_key_variables(|_| None).is_empty());
+    }
+
+    #[test]
+    fn test_writable_check_leaves_nothing_and_explains_a_failure() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let config = dir.path().join("config");
+        ensure_writable(&config)?;
+        assert_eq!(std::fs::read_dir(&config)?.count(), 0);
+
+        let blocked = dir.path().join("fichier");
+        std::fs::write(&blocked, "x")?;
+        let message = ensure_writable(&blocked.join("config"))
+            .err()
+            .map(|error| error.to_string())
+            .unwrap_or_default();
+        assert!(message.contains("n'est pas inscriptible"), "{message}");
+        Ok(())
     }
 
     #[test]

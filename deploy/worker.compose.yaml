@@ -1,4 +1,6 @@
 # Worker-only deployment on an additional Docker host.
+# Au premier démarrage, ouvrez http://<hôte>:${WORKER_PORT:-3001} pour l'enrôler (ADR 0016) : son nom et sa
+# clé sont gardés dans le volume /config, à conserver. Aucune clé ni adresse à renseigner ici.
 services:
   worker:
     image: ${FLUX_IMAGE:?Provide an immutable Forgearr image tag or digest}
@@ -7,12 +9,9 @@ services:
     restart: unless-stopped
     read_only: true
     environment:
-      CENTRAL_URL: ${CENTRAL_URL:?Provide the HTTP or HTTPS central origin}
-      WORKER_NAME: ${WORKER_NAME:?Provide a unique worker name}
-      WORKER_KEY: ${WORKER_KEY:-}
-      WORKER_KEY_FILE: ${WORKER_KEY_FILE:-/run/secrets/worker_key}
       MAX_FILE_BYTES: ${MAX_FILE_BYTES:-536870912}
-    volumes: [work:/work, logs:/logs]
+    ports: ["${WORKER_PORT:-3001}:3000"]
+    volumes: [config:/config, work:/work, logs:/logs]
     tmpfs: ["/tmp:size=64m,mode=1777"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
@@ -20,5 +19,6 @@ services:
     cpus: 1.0
     pids_limit: 128
 volumes:
+  config:
   work:
   logs:

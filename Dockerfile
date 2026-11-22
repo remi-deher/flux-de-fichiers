@@ -63,5 +63,5 @@ VOLUME ["/config", "/data", "/work", "/logs"]
 USER 10001
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 CMD grep -qa worker /proc/1/cmdline || curl -fsS http://localhost:3000/health || exit 1
+# Sans commande : le rôle conservé dans /config décide (un worker enrôlé reste un worker au redémarrage).
 ENTRYPOINT ["forgearr"]
-CMD ["central"]

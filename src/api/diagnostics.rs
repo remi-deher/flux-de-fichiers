@@ -223,7 +223,7 @@ pub fn check_event_stream(input: &DiagnosticInput) -> DiagnosticCheck {
 }
 
 pub fn check_workers(input: &DiagnosticInput) -> DiagnosticCheck {
-    const FIX: &str = "Vérifiez que le worker tourne, qu'il joint CENTRAL_URL et que sa clé d'API n'est pas révoquée (journaux du conteneur worker).";
+    const FIX: &str = "Vérifiez que le worker tourne, qu'il joint l'adresse du central donnée à l'enrôlement et que sa clé n'est pas révoquée (journaux du conteneur worker).";
     let remote: Vec<&Worker> = input
         .workers
         .iter()

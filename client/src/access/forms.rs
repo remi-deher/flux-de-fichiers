@@ -79,7 +79,9 @@ impl RoleTarget {
     const fn to_gate(self) -> Gate {
         match self {
             Self::Central => Gate::SetupCentral,
-            Self::Worker => Gate::SetupWorker,
+            Self::Worker => Gate::SetupWorker {
+                can_choose_role: true,
+            },
         }
     }
 }
@@ -191,6 +193,7 @@ async fn wait_for_worker() -> Option<String> {
     for _ in 0..WORKER_START_MAX_POLLS {
         sleep(WORKER_START_POLL_MS).await;
         if let Ok(status) = api::get::<SetupStatus>(SETUP_STATUS_PATH).await
+            && !status.needs_setup
             && status.instance_kind == InstanceKind::Worker
         {
             return Some(status.instance_name.unwrap_or_default());
@@ -200,7 +203,7 @@ async fn wait_for_worker() -> Option<String> {
 }
 
 #[component]
-pub fn WorkerSetupForm(goto: Callback<Gate>) -> impl IntoView {
+pub fn WorkerSetupForm(goto: Callback<Gate>, can_choose_role: bool) -> impl IntoView {
     let (central_url, worker_name) = (RwSignal::new(String::new()), RwSignal::new(String::new()));
     let (legacy_username, legacy_password) =
         (RwSignal::new(String::new()), RwSignal::new(String::new()));
@@ -380,7 +383,9 @@ pub fn WorkerSetupForm(goto: Callback<Gate>) -> impl IntoView {
                                 <button type="submit" class="btn btn-primary auth-gate__submit" disabled=move || submit_approval.pending().get()>
                                     {move || if submit_approval.pending().get() { "Envoi de la demande…" } else { "Demander l'enrôlement" }}
                                 </button>
-                                <button type="button" class="btn btn-secondary auth-gate__submit" on:click=move |_| goto.run(Gate::ChooseRole)>"Retour"</button>
+                                {can_choose_role.then(|| view! {
+                                    <button type="button" class="btn btn-secondary auth-gate__submit" on:click=move |_| goto.run(Gate::ChooseRole)>"Retour"</button>
+                                })}
                             </form>
                             <details class="auth-gate__fallback">
                                 <summary class="form-help">"Enrôlement direct avec identifiants administrateur (secours)"</summary>

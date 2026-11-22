@@ -252,7 +252,7 @@ async fn test_repeated_failures_lock_the_account_temporarily() -> anyhow::Result
 async fn test_a_session_needs_csrf_to_change_anything_but_not_to_read() -> anyhow::Result<()> {
     let app = fresh_app(false).await?;
     let cookies = setup(&app, "csrf-admin").await?;
-    let body = Some(serde_json::json!({"name": "Mon worker", "role": "worker"}));
+    let body = Some(serde_json::json!({"name": "Ma sauvegarde", "role": "viewer"}));
 
     let without = call(
         &app,
@@ -294,33 +294,37 @@ async fn test_api_keys_are_shown_once_scoped_by_role_and_revocable() -> anyhow::
         "POST",
         "/api/v1/api-keys",
         Auth::Bearer(admin),
-        Some(serde_json::json!({"name": "Worker NAS", "role": "worker"})),
+        Some(serde_json::json!({"name": "Supervision", "role": "viewer"})),
     )
     .await?;
     assert_eq!(created.status, StatusCode::OK);
-    let worker_key = created.body["key"].as_str().unwrap_or_default().to_owned();
-    let key_id = created.body["id"].as_str().unwrap_or_default().to_owned();
-    assert!(worker_key.starts_with("fdf_"));
-    assert_eq!(created.body["role"], "worker");
+    let viewer_key = created.body["key"].as_str().unwrap_or_default().to_owned();
+    assert!(viewer_key.starts_with("fdf_"));
+    assert_eq!(created.body["role"], "viewer");
 
     let listed = call(&app, "GET", "/api/v1/api-keys", Auth::Bearer(admin), None).await?;
     let text = listed.body.to_string();
-    assert!(!text.contains(&worker_key));
+    assert!(!text.contains(&viewer_key));
     assert!(!text.contains("keyHash") && !text.contains("key_hash"));
-    assert!(text.contains("Worker NAS"));
+    assert!(text.contains("Supervision"));
+    // Une clé de worker déjà en place reste visible, puis révocable.
+    let worker_key = common::WORKER_KEY;
+    assert!(text.contains("test-worker"));
+    let (key_id, _) = forgearr::api_keys::parse(worker_key)
+        .ok_or_else(|| anyhow::anyhow!("clé de test invalide"))?;
 
     // Un worker n'administre rien ; un administrateur n'est pas un worker.
     let as_worker = call(
         &app,
         "GET",
         "/api/v1/api-keys",
-        Auth::Bearer(&worker_key),
+        Auth::Bearer(worker_key),
         None,
     )
     .await?;
     assert_eq!(as_worker.status, StatusCode::FORBIDDEN);
     let agent_route = "/api/v1/worker/tools/app.absent/distribution";
-    let agent_ok = call(&app, "GET", agent_route, Auth::Bearer(&worker_key), None).await?;
+    let agent_ok = call(&app, "GET", agent_route, Auth::Bearer(worker_key), None).await?;
     assert_eq!(agent_ok.status, StatusCode::NOT_FOUND);
     let agent_by_admin = call(&app, "GET", agent_route, Auth::Bearer(admin), None).await?;
     assert_eq!(agent_by_admin.status, StatusCode::FORBIDDEN);
@@ -336,7 +340,7 @@ async fn test_api_keys_are_shown_once_scoped_by_role_and_revocable() -> anyhow::
     )
     .await?;
     assert_eq!(revoked.status, StatusCode::NO_CONTENT);
-    let after = call(&app, "GET", agent_route, Auth::Bearer(&worker_key), None).await?;
+    let after = call(&app, "GET", agent_route, Auth::Bearer(worker_key), None).await?;
     assert_eq!(after.status, StatusCode::UNAUTHORIZED);
     let again = call(
         &app,
@@ -355,8 +359,9 @@ async fn test_api_key_creation_validates_role_and_name() -> anyhow::Result<()> {
     let app = fresh_app(true).await?;
     for body in [
         serde_json::json!({"name": "Clé", "role": "root"}),
-        serde_json::json!({"name": "", "role": "worker"}),
-        serde_json::json!({"name": "x".repeat(81), "role": "worker"}),
+        serde_json::json!({"name": "Mon worker", "role": "worker"}),
+        serde_json::json!({"name": "", "role": "viewer"}),
+        serde_json::json!({"name": "x".repeat(81), "role": "viewer"}),
     ] {
         let reply = call(
             &app,

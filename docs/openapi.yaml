@@ -1053,7 +1053,7 @@ paths:
   /api/v1/setup/status:
     get:
       security: []
-      summary: Indiquer si le central attend son installation
+      summary: Indiquer si l'installation est à faire
       responses:
         '200':
           description: État d'installation et nom du central une fois installé
@@ -1065,6 +1065,10 @@ paths:
                 properties:
                   needsSetup: {type: boolean}
                   instanceName: {type: [string, 'null']}
+                  instanceKind:
+                    type: string
+                    enum: [central, worker]
+                    description: "`worker` avec `needsSetup` : commande `worker` sans enrôlement, seul l'enrôlement est proposé."
                   passwordResetEnabled:
                     type: boolean
                     description: Le central peut envoyer un lien de réinitialisation par courriel (SMTP et WEB_ORIGIN configurés).
@@ -1140,10 +1144,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [central_url, worker_name]
+              required: [centralUrl]
               properties:
-                central_url: {type: string}
-                worker_name: {type: string}
+                centralUrl: {type: string}
+                workerName: {type: string, description: Nom d'hôte par défaut}
       responses:
         '202': {description: Demande soumise au central, attente d'approbation administrateur}
         '403': {$ref: '#/components/responses/Error'}
@@ -1188,11 +1192,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [worker_name, secret_hash]
+              required: [workerName, secretHash]
               properties:
-                worker_name: {type: string}
-                worker_version: {type: [string, 'null']}
-                secret_hash: {type: string}
+                workerName: {type: string}
+                version: {type: [string, 'null']}
+                secretHash: {type: string}
       responses:
         '201': {description: Demande enregistrée}
         '403': {$ref: '#/components/responses/Error'}
@@ -1201,6 +1205,7 @@ paths:
     get:
       security: []
       summary: Relever l'état d'une demande et récupérer la clé à usage unique si approuvée
+      description: La remise de la clé révoque les autres clés actives du worker de même nom.
       parameters: [{in: path, name: id, required: true, schema: {type: string, format: uuid}}]
       responses:
         '200': {description: État de la demande (avec clé unique si approved)}
@@ -1227,7 +1232,8 @@ paths:
       summary: Créer la clé d'API d'un worker
       description: >-
         Réservé aux identifiants d'un administrateur (essais limités). Renvoie une clé de rôle
-        worker, affichée une seule fois. Sans cookie : appel de machine à machine.
+        worker, affichée une seule fois, et révoque les autres clés actives du worker de même nom.
+        Sans cookie : appel de machine à machine.
       requestBody:
         required: true
         content:
@@ -1747,6 +1753,7 @@ paths:
     post:
       security: [{ApiKey: []}, {WebSession: []}]
       summary: Créer une clé d'API ; sa valeur n'est renvoyée qu'ici
+      description: Le rôle `worker` est refusé (400) ; la clé d'un worker ne vient que de son enrôlement.
       requestBody:
         required: true
         content:
@@ -1756,7 +1763,7 @@ paths:
               required: [name, role]
               properties:
                 name: {type: string}
-                role: {type: string, enum: [admin, worker]}
+                role: {type: string, enum: [admin, mcp, viewer]}
       responses:
         '200':
           description: Clé créée (format fdf_<id>_<secret>)
@@ -2066,7 +2073,7 @@ components:
       properties:
         id: {type: string}
         name: {type: string}
-        role: {type: string, enum: [admin, worker]}
+        role: {type: string, enum: [admin, mcp, worker, viewer]}
         createdAt: {type: string}
         lastUsedAt: {type: [string, 'null']}
         revokedAt: {type: [string, 'null']}

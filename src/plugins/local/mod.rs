@@ -7,7 +7,8 @@ mod write;
 #[cfg(test)]
 mod tests;
 
-pub use index::rebuild_local_index;
+pub(super) use index::INSTALLED_SCRIPTS_FOLDER;
+pub use index::{rebuild_local_index, repair_local_index};
 pub(super) use snapshot::read_local_script;
 pub use snapshot::{build_local_snapshot, local_resource_file};
 pub use write::{

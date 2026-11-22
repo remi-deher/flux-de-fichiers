@@ -27,6 +27,7 @@ async fn test_app_serving(static_dir: std::path::PathBuf) -> anyhow::Result<axum
         config_dir: "var/config".into(),
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
+        detected_plugins_dir: None,
         static_dir,
         max_file_bytes: 10_000_000,
         local_worker: false,

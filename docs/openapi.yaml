@@ -779,6 +779,7 @@ paths:
       parameters: [{in: path, name: id, required: true, schema: {type: string}}]
       responses:
         '200': {description: Dépôt supprimé}
+        '409': {description: 'store_migrating : des éléments utilisés de ce dépôt ne sont pas encore tous repris'}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins/repositories/{id}/scripts/{entryId}:
     get:
@@ -905,6 +906,7 @@ paths:
       summary: Lister les versions d'outils actives dans le catalogue pour la purge du cache worker
       responses:
         '200': {description: Couples (tool_id, version) actifs}
+        '502': {description: Reprise des dépôts en cours ou élément installé à réparer ; rien ne doit être purgé}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/worker/tools/{id}/distribution:
     get:

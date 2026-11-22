@@ -46,6 +46,9 @@ pub enum AppError {
     InvalidFlowVariables(String),
     #[error("repository unavailable: {0}")]
     RepositoryUnavailable(String),
+    /// Les éléments installés ne sont pas encore tous repris des dépôts (ADR 0029).
+    #[error("store migrating: {0}")]
+    StoreMigrating(String),
     #[error("central unavailable")]
     CentralUnavailable,
     #[error("no reachable worker can receive the result")]
@@ -92,6 +95,7 @@ impl IntoResponse for AppError {
             | Self::InvalidManifest(_) => (StatusCode::BAD_REQUEST, "invalid_tool_artifact"),
             Self::InvalidFlowVariables(_) => (StatusCode::BAD_REQUEST, "invalid_flow_variables"),
             Self::RepositoryUnavailable(_) => (StatusCode::BAD_GATEWAY, "repository_unavailable"),
+            Self::StoreMigrating(_) => (StatusCode::CONFLICT, "store_migrating"),
             Self::CentralUnavailable => (StatusCode::BAD_GATEWAY, "central_unavailable"),
             Self::ResultUndeliverable => (StatusCode::BAD_GATEWAY, "result_undeliverable"),
             Self::TooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "file_too_large"),
@@ -101,7 +105,10 @@ impl IntoResponse for AppError {
             }
         };
         let mut error = json!({"code": code});
-        if let Self::InvalidFlowVariables(detail) | Self::RepositoryUnavailable(detail) = &self {
+        if let Self::InvalidFlowVariables(detail)
+        | Self::RepositoryUnavailable(detail)
+        | Self::StoreMigrating(detail) = &self
+        {
             let message = bounded_detail(detail);
             tracing::warn!(code, %message, "détail d'erreur transmis au client");
             error["message"] = json!(message);

@@ -26,6 +26,7 @@ async fn test_app() -> anyhow::Result<axum::Router> {
         config_dir: "var/config".into(),
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
+        detected_plugins_dir: None,
         static_dir: "frontend/dist".into(),
         max_file_bytes: MAX_TEST_FILE_BYTES,
         local_worker: false,

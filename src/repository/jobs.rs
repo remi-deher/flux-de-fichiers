@@ -1,4 +1,7 @@
-use super::flows::default_flow_with;
+use super::{
+    flow_usage::{TaskFlow, held_json, not_held_sql},
+    flows::default_flow_with,
+};
 use crate::{
     domain::{
         Claim, JOB_PRIORITY_MAX, JOB_PRIORITY_MIN, Job, JobBatchAction, JobBatchResult,
@@ -641,6 +644,18 @@ pub async fn claim_with_protocol(
     worker: Uuid,
     protocol: LeaseProtocol,
 ) -> AppResult<Option<Claim>> {
+    claim_except(pool, worker, protocol, &[]).await
+}
+
+/// [`claim_with_protocol`], sauf les tâches qui se servent d'une version retenue : elles restent en file sans
+/// y perdre de tentative.
+pub async fn claim_except(
+    pool: &SqlitePool,
+    worker: Uuid,
+    protocol: LeaseProtocol,
+    held: &[TaskFlow],
+) -> AppResult<Option<Claim>> {
+    let held = held_json(held)?;
     let unreachable_timeout = crate::runtime_settings::load_unreachable_timeout(pool).await;
     let lease_seconds = super::leases::lease_window_seconds(protocol, unreachable_timeout);
     let timezone = crate::runtime_settings::load_timezone(pool).await;
@@ -694,9 +709,11 @@ pub async fn claim_with_protocol(
                            AND (json_extract(r.requirement_json, '$.acceleration') IS NULL
                                 OR json_extract(r.requirement_json, '$.acceleration')=?4)))
          AND resource_class IN (SELECT value FROM json_each(?5))
+         AND {not_held}
          AND {access}
          AND ({readable} OR EXISTS (SELECT 1 FROM job_relays r WHERE r.job_id=jobs.id AND r.artifact_relay=1))
          ORDER BY priority DESC, created_at ASC, id ASC LIMIT 1",
+        not_held = not_held_sql("?6"),
         access = super::library_access::job_access_sql("?3"),
         readable = super::library_access::source_readable_sql("?3", &online_seconds),
     );
@@ -706,6 +723,7 @@ pub async fn claim_with_protocol(
         .bind(worker)
         .bind(forgearr_shared::capabilities::EncodeAcceleration::Cpu.as_str())
         .bind(admitted_json)
+        .bind(held)
         .fetch_optional(&mut *tx)
         .await?;
     let job: Option<Job> = if let Some(id) = next_id {

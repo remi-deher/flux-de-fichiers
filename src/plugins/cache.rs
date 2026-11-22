@@ -1,14 +1,16 @@
-//! Cache en mémoire du catalogue de plugins, invalidé lors des synchronisations et mutations de dépôts.
+//! Cache en mémoire du catalogue de plugins, une lecture gardée par jeu de dossiers (moteur, chaque
+//! dépôt du Store), invalidé lors des synchronisations, installations et mutations de dépôts.
 
 use super::{
     CatalogEntry, CatalogItemType, PluginDetailView, SettingsField, ToolStatusSummary,
     build_plugin_detail, catalog_with_roots, exposure_views, flow_block_catalog,
-    is_tool_installable, load_manifest, parse_distribution, read_distribution,
-    settings_fields as load_settings_fields, summarize_tool,
+    is_tool_installable, load_manifest, resolve_tool_version,
+    settings_fields as load_settings_fields, summarize_tool, tool_version,
 };
 use crate::{flows::OperationRegistry, live::ChangeNotifier, tools_cache::ToolCacheManager};
 use forgearr_shared::{flows::OwnedBlockSpec, live::ChangeTopic};
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{
         Arc,
@@ -17,19 +19,39 @@ use std::{
 };
 use tokio::sync::RwLock;
 
-#[derive(Clone)]
+struct CachedTool {
+    entry: CatalogEntry,
+    description: String,
+    installable: bool,
+    /// Version du contrat de distribution, sinon celle du catalogue.
+    version: String,
+}
+
+impl CachedTool {
+    fn summary(&self, cache_mgr: &ToolCacheManager) -> ToolStatusSummary {
+        summarize_tool(
+            self.entry.clone(),
+            self.description.clone(),
+            self.installable,
+            cache_mgr,
+        )
+    }
+}
+
 struct CachedSnapshot {
-    roots: Vec<PathBuf>,
     entries: Vec<(PathBuf, CatalogEntry)>,
     blocks: Vec<OwnedBlockSpec>,
     operations: OperationRegistry,
-    tool_descriptions: Vec<(CatalogEntry, String, bool)>,
+    tools: Vec<CachedTool>,
 }
+
+/// Une lecture par jeu de dossiers, dans leur ordre de priorité.
+type Snapshots = HashMap<Vec<PathBuf>, Arc<CachedSnapshot>>;
 
 /// Cache thread-safe des métadonnées du catalogue lues depuis les dépôts synchronisés.
 #[derive(Clone, Default)]
 pub struct CatalogCache {
-    inner: Arc<RwLock<Option<CachedSnapshot>>>,
+    inner: Arc<RwLock<Snapshots>>,
     /// Nombre d'invalidations : une lecture commencée avant la dernière n'est pas gardée.
     generation: Arc<AtomicU64>,
     changes: ChangeNotifier,
@@ -53,40 +75,43 @@ impl CatalogCache {
         {
             let mut guard = self.inner.write().await;
             self.generation.fetch_add(1, Ordering::SeqCst);
-            *guard = None;
+            guard.clear();
         }
         self.changes.notify(ChangeTopic::Catalog);
     }
 
-    async fn snapshot(&self, roots: &[PathBuf]) -> CachedSnapshot {
-        if let Some(cached) = self.inner.read().await.as_ref()
-            && cached.roots == roots
-        {
-            return cached.clone();
+    async fn snapshot(&self, roots: &[PathBuf]) -> Arc<CachedSnapshot> {
+        if let Some(cached) = self.inner.read().await.get(roots) {
+            return Arc::clone(cached);
         }
         let generation = self.generation.load(Ordering::SeqCst);
         let owned_roots = roots.to_vec();
-        let loaded = tokio::task::spawn_blocking(move || build_snapshot(owned_roots))
+        let loaded = tokio::task::spawn_blocking(move || build_snapshot(&owned_roots))
             .await
-            .unwrap_or_else(|_| build_snapshot(roots.to_vec()));
+            .unwrap_or_else(|_| build_snapshot(roots));
+        let loaded = Arc::new(loaded);
         let mut guard = self.inner.write().await;
-        if let Some(cached) = guard.as_ref()
-            && cached.roots == roots
-        {
-            return cached.clone();
+        if let Some(cached) = guard.get(roots) {
+            return Arc::clone(cached);
         }
         if self.generation.load(Ordering::SeqCst) == generation {
-            *guard = Some(loaded.clone());
+            guard.insert(roots.to_vec(), Arc::clone(&loaded));
         }
         loaded
+    }
+
+    /// Toutes les entrées du catalogue, blocs compris, avec le dossier qui porte chacune.
+    pub async fn entries(&self, roots: &[PathBuf]) -> Vec<(PathBuf, CatalogEntry)> {
+        self.snapshot(roots).await.entries.clone()
     }
 
     pub async fn exposed_catalog(&self, roots: &[PathBuf]) -> Vec<CatalogEntry> {
         self.snapshot(roots)
             .await
             .entries
-            .into_iter()
-            .filter_map(|(_, entry)| entry.entry_type.section().map(|_| entry))
+            .iter()
+            .filter(|(_, entry)| entry.entry_type.section().is_some())
+            .map(|(_, entry)| entry.clone())
             .collect()
     }
 
@@ -95,15 +120,14 @@ impl CatalogCache {
         &self,
         roots: &[PathBuf],
         cache_mgr: &ToolCacheManager,
-        saved_settings: &std::collections::HashMap<String, String>,
+        saved_settings: &HashMap<String, String>,
     ) -> Vec<CatalogEntry> {
         let snapshot = self.snapshot(roots).await;
-        let tool_statuses: std::collections::HashMap<String, super::ToolStatus> = snapshot
-            .tool_descriptions
+        let tool_statuses: HashMap<String, super::ToolStatus> = snapshot
+            .tools
             .iter()
-            .map(|(entry, description, installable)| {
-                let summary =
-                    summarize_tool(entry.clone(), description.clone(), *installable, cache_mgr);
+            .map(|tool| {
+                let summary = tool.summary(cache_mgr);
                 (summary.id, summary.status)
             })
             .collect();
@@ -112,19 +136,21 @@ impl CatalogCache {
         tokio::task::spawn_blocking(move || {
             snapshot
                 .entries
-                .into_iter()
-                .filter_map(|(root, mut entry)| {
+                .iter()
+                .filter_map(|(root, entry)| {
                     entry.entry_type.section()?;
                     let runtime = super::compute_entry_runtime(
                         &owned_roots,
-                        &root,
-                        &entry,
+                        root,
+                        entry,
                         &snapshot.blocks,
                         &tool_statuses,
                         &saved,
                     );
-                    entry.runtime = Some(runtime);
-                    Some(entry)
+                    Some(CatalogEntry {
+                        runtime: Some(runtime),
+                        ..entry.clone()
+                    })
                 })
                 .collect()
         })
@@ -133,7 +159,7 @@ impl CatalogCache {
     }
 
     pub async fn blocks(&self, roots: &[PathBuf]) -> Vec<OwnedBlockSpec> {
-        self.snapshot(roots).await.blocks
+        self.snapshot(roots).await.blocks.clone()
     }
 
     pub async fn plugin_detail(
@@ -155,17 +181,17 @@ impl CatalogCache {
             .into_iter()
             .filter(|view| view.provider == plugin_id)
             .collect();
-        let blocks = snapshot.blocks;
-        let mut detail =
-            tokio::task::spawn_blocking(move || build_plugin_detail(&root, &entry, &blocks))
-                .await
-                .ok()?;
+        let mut detail = tokio::task::spawn_blocking(move || {
+            build_plugin_detail(&root, &entry, &snapshot.blocks)
+        })
+        .await
+        .ok()?;
         detail.exposures = exposures;
         Some(detail)
     }
 
     pub async fn operations(&self, roots: &[PathBuf]) -> OperationRegistry {
-        self.snapshot(roots).await.operations
+        self.snapshot(roots).await.operations.clone()
     }
 
     pub async fn tools_status(
@@ -175,11 +201,9 @@ impl CatalogCache {
     ) -> Vec<ToolStatusSummary> {
         self.snapshot(roots)
             .await
-            .tool_descriptions
-            .into_iter()
-            .map(|(entry, description, installable)| {
-                summarize_tool(entry, description, installable, cache_mgr)
-            })
+            .tools
+            .iter()
+            .map(|tool| tool.summary(cache_mgr))
             .collect()
     }
 
@@ -209,44 +233,40 @@ impl CatalogCache {
 
     pub async fn resolve_tool_version(&self, roots: &[PathBuf], tool_id: &str) -> String {
         let snapshot = self.snapshot(roots).await;
-        if let Ok(value) = read_distribution(roots, tool_id)
-            && let Ok(dist) = parse_distribution(&value.to_string())
-            && !dist.tool_version.trim().is_empty()
-        {
-            return dist.tool_version;
-        }
         snapshot
-            .entries
+            .tools
             .iter()
-            .find(|(_, entry)| entry.id == tool_id)
-            .map(|(_, entry)| entry.version.clone())
-            .filter(|version| !version.trim().is_empty())
-            .unwrap_or_else(|| "1.0.0".to_owned())
+            .find(|tool| tool.entry.id == tool_id)
+            .map_or_else(
+                // Contrat sans fiche d'application : lu sur disque.
+                || resolve_tool_version(roots, tool_id),
+                |tool| tool.version.clone(),
+            )
     }
 }
 
-fn build_snapshot(roots: Vec<PathBuf>) -> CachedSnapshot {
-    let entries = catalog_with_roots(&roots);
-    let blocks = flow_block_catalog(&roots);
-    let operations = OperationRegistry::load_from_roots(&roots);
-    let tool_descriptions = entries
+fn build_snapshot(roots: &[PathBuf]) -> CachedSnapshot {
+    let entries = catalog_with_roots(roots);
+    let blocks = flow_block_catalog(roots);
+    let operations = OperationRegistry::load_from_roots(roots);
+    let tools = entries
         .iter()
         .filter(|(_, entry)| entry.entry_type == CatalogItemType::App)
-        .map(|(root, entry)| {
-            let description = load_manifest(root, &entry.manifest_path)
+        .map(|(root, entry)| CachedTool {
+            entry: entry.clone(),
+            description: load_manifest(root, &entry.manifest_path)
                 .ok()
                 .and_then(|manifest| manifest.description)
-                .unwrap_or_default();
-            let installable = is_tool_installable(&roots, &entry.id);
-            (entry.clone(), description, installable)
+                .unwrap_or_default(),
+            installable: is_tool_installable(roots, &entry.id),
+            version: tool_version(roots, &entry.id, Some(&entry.version)),
         })
         .collect();
     CachedSnapshot {
-        roots,
         entries,
         blocks,
         operations,
-        tool_descriptions,
+        tools,
     }
 }
 
@@ -283,6 +303,48 @@ mod tests {
             cache.resolve_tool_version(&roots, "mkvtoolnix").await,
             "2.1.0"
         );
+        Ok(())
+    }
+
+    fn write_plugin(dir: &std::path::Path, id: &str) -> std::io::Result<()> {
+        std::fs::write(
+            dir.join("index.json"),
+            format!(
+                r#"{{"schemaVersion":"1.0.0","entries":[{{"id":"{id}","type":"plugin","version":"1.0.0","name":"{id}","manifestPath":"a.json"}}]}}"#
+            ),
+        )
+    }
+
+    async fn ids(cache: &CatalogCache, roots: &[PathBuf]) -> Vec<String> {
+        cache
+            .entries(roots)
+            .await
+            .into_iter()
+            .map(|(_, entry)| entry.id)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn two_sets_of_roots_do_not_evict_each_other() -> anyhow::Result<()> {
+        let (engine, store) = (tempfile::tempdir()?, tempfile::tempdir()?);
+        write_plugin(engine.path(), "installe")?;
+        write_plugin(store.path(), "vitrine")?;
+        let cache = CatalogCache::default();
+        let engine_roots = [engine.path().to_path_buf()];
+        let store_roots = [store.path().to_path_buf()];
+        assert_eq!(ids(&cache, &engine_roots).await, ["installe"]);
+        assert_eq!(ids(&cache, &store_roots).await, ["vitrine"]);
+
+        // Les deux lectures sont gardées malgré les changements sur disque…
+        write_plugin(engine.path(), "installe.2")?;
+        write_plugin(store.path(), "vitrine.2")?;
+        assert_eq!(ids(&cache, &engine_roots).await, ["installe"]);
+        assert_eq!(ids(&cache, &store_roots).await, ["vitrine"]);
+
+        // … et l'invalidation les vide toutes deux.
+        cache.invalidate().await;
+        assert_eq!(ids(&cache, &engine_roots).await, ["installe.2"]);
+        assert_eq!(ids(&cache, &store_roots).await, ["vitrine.2"]);
         Ok(())
     }
 }

@@ -2,8 +2,11 @@
 //! `capability` ; la catégorie appartient à Flux.
 
 use chrono::NaiveDate;
-use serde::Deserializer;
-use serde::{Deserialize, Serialize};
+use serde::de::{
+    IntoDeserializer,
+    value::{Error as ValueError, StrDeserializer},
+};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 /// Nature d'une pièce du catalogue (`type` du manifeste et de l'index).
@@ -60,6 +63,12 @@ impl CatalogItemType {
             Self::Pack => "pack",
             Self::Block => "block",
         }
+    }
+
+    /// Lit le nom sérialisé ; `None` pour un type inconnu.
+    pub fn parse(raw: &str) -> Option<Self> {
+        let deserializer: StrDeserializer<'_, ValueError> = raw.into_deserializer();
+        Self::deserialize(deserializer).ok()
     }
 }
 
@@ -137,6 +146,17 @@ impl CatalogItemType {
     /// Une pièce peut-elle vivre seule dans un dépôt ? Un bloc appartient à un plugin.
     pub fn can_stand_alone(self) -> bool {
         self != Self::Block
+    }
+
+    /// Une pièce s'installe-t-elle pour elle-même ? Un pack se réduit à ses composants, un bloc à son
+    /// propriétaire (ADR 0029).
+    pub fn is_installed_by_itself(self) -> bool {
+        !matches!(self, Self::Pack | Self::Block)
+    }
+
+    /// Le moteur lit-il la copie figée ? D'un flux ou d'un script, il lit la copie modifiable.
+    pub fn runs_from_frozen_copy(self) -> bool {
+        self.is_installed_by_itself() && !matches!(self, Self::Flow | Self::Script)
     }
 
     /// Règle de dépendance : un plugin dépend d'applications, un flow de plugins, scripts ou
@@ -421,6 +441,24 @@ mod tests {
         assert!(!CatalogCapability::new("transcode").is_probe());
         assert!(serde_json::from_str::<CatalogCapability>("\"   \"").is_err());
         Ok(())
+    }
+
+    #[test]
+    fn item_types_are_read_back_from_their_name() {
+        use CatalogItemType::{App, Block, Flow, Pack, Plugin, Preset, ResourceFont, Script};
+        for kind in [App, Block, Flow, Pack, Plugin, Preset, ResourceFont, Script] {
+            assert_eq!(CatalogItemType::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(CatalogItemType::parse("inconnu"), None);
+        for kind in [App, Plugin, Preset, ResourceFont] {
+            assert!(kind.runs_from_frozen_copy(), "{kind:?}");
+        }
+        for kind in [Flow, Script] {
+            assert!(kind.is_installed_by_itself() && !kind.runs_from_frozen_copy());
+        }
+        for kind in [Pack, Block] {
+            assert!(!kind.is_installed_by_itself() && !kind.runs_from_frozen_copy());
+        }
     }
 
     #[test]

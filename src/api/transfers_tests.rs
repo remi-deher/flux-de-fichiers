@@ -21,6 +21,7 @@ pub(crate) async fn setup(root: &Path) -> anyhow::Result<(AppState, Job, LeaseRe
         config_dir: config_dir.clone(),
         tools_cache_dir: config_dir.join("tools"),
         plugins_dir: None,
+        detected_plugins_dir: None,
         static_dir: root.join("static"),
         max_file_bytes: 1024 * 1024,
         local_worker: false,

@@ -13,7 +13,7 @@ use std::{
     sync::{Arc, PoisonError},
 };
 
-const DISTRIBUTION_FILE_NAME: &str = "distribution.v1.json";
+pub(super) const DISTRIBUTION_FILE_NAME: &str = "distribution.v1.json";
 
 /// Outils dont l'installation est en cours sur ce worker (en file d'attente ou en téléchargement).
 static INSTALLING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());

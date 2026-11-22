@@ -144,6 +144,7 @@ pub async fn delete_plugin_repository(
             )
             .execute(&mut *tx)
             .await?;
+            super::store_migration::forget_pending_repository(&mut tx, id).await?;
             tx.commit().await?;
             changes.notify(ChangeTopic::Repositories);
             Ok(())

@@ -2,6 +2,7 @@
 
 use crate::{
     error::{AppError, AppResult},
+    plugins::{CatalogEntry, CatalogItemType},
     tools_cache::{ToolCacheManager, ToolDistribution, host_arch},
 };
 use forgearr_shared::capabilities::VideoCodec;
@@ -48,44 +49,48 @@ struct ProbeDeclaration {
     encoders: Vec<SoftwareEncoderMapping>,
 }
 
+/// Déclarations de sonde lisibles d'un plugin ; vide pour tout autre élément.
+fn probe_declarations(root: &Path, entry: &CatalogEntry) -> Vec<ProbeDeclaration> {
+    if entry.entry_type != CatalogItemType::Plugin
+        || !ToolCacheManager::is_safe_relative_path(Path::new(&entry.manifest_path))
+    {
+        return Vec::new();
+    }
+    let Ok(manifest) = crate::plugins::load_manifest(root, &entry.manifest_path) else {
+        return Vec::new();
+    };
+    let Some(parent) = Path::new(&entry.manifest_path).parent() else {
+        return Vec::new();
+    };
+    manifest
+        .files
+        .iter()
+        .filter(|file| file.role.as_deref() == Some(CAPABILITY_PROBE_ROLE))
+        .filter(|file| ToolCacheManager::is_safe_relative_path(Path::new(&file.path)))
+        .filter_map(|file| {
+            let canonical_root = std::fs::canonicalize(root).ok()?;
+            let path = std::fs::canonicalize(root.join(parent).join(&file.path)).ok()?;
+            if !path.starts_with(canonical_root) {
+                return None;
+            }
+            serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+        })
+        .collect()
+}
+
+/// Outils que les sondes de capacités d'un plugin interrogent ; vide s'il n'en porte pas.
+pub fn declared_probe_tools(root: &Path, entry: &CatalogEntry) -> Vec<String> {
+    probe_declarations(root, entry)
+        .into_iter()
+        .map(|declaration| declaration.tool_id)
+        .collect()
+}
+
 /// Résout les sondes déclarées dans les plugins en artefacts par architecture.
 pub fn discover_software_probes(roots: &[PathBuf]) -> Vec<SoftwareEncoderProbe> {
     let mut probes = Vec::new();
     for (root, entry) in crate::plugins::catalog_with_roots(roots) {
-        if entry.entry_type != crate::plugins::CatalogItemType::Plugin
-            || !ToolCacheManager::is_safe_relative_path(Path::new(&entry.manifest_path))
-        {
-            continue;
-        }
-        let Ok(manifest) = crate::plugins::load_manifest(&root, &entry.manifest_path) else {
-            continue;
-        };
-        let Some(parent) = Path::new(&entry.manifest_path).parent() else {
-            continue;
-        };
-        for file in manifest
-            .files
-            .iter()
-            .filter(|file| file.role.as_deref() == Some(CAPABILITY_PROBE_ROLE))
-        {
-            if !ToolCacheManager::is_safe_relative_path(Path::new(&file.path)) {
-                continue;
-            }
-            let path = root.join(parent).join(&file.path);
-            let (Ok(canonical_root), Ok(canonical_path)) =
-                (std::fs::canonicalize(&root), std::fs::canonicalize(&path))
-            else {
-                continue;
-            };
-            if !canonical_path.starts_with(canonical_root) {
-                continue;
-            }
-            let Ok(raw) = std::fs::read_to_string(canonical_path) else {
-                continue;
-            };
-            let Ok(declaration) = serde_json::from_str::<ProbeDeclaration>(&raw) else {
-                continue;
-            };
+        for declaration in probe_declarations(&root, &entry) {
             let Ok(raw_distribution) =
                 crate::plugins::read_distribution(roots, &declaration.tool_id)
             else {

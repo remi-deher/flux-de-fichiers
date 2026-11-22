@@ -37,8 +37,17 @@ const LOCAL_TRANSFER_PORT_VAR: &str = "LOCAL_WORKER_TRANSFER_PORT";
 /// Attente d'une demande de publication avant de redemander (le courtier réveille dès qu'une arrive).
 const PUBLICATION_WAIT: Duration = Duration::from_secs(15);
 
+/// Attente entre deux essais de publication quand la sonde du résultat est à réparer.
+const REPAIR_POLL_INTERVAL: Duration = Duration::from_secs(5);
+
 async fn refresh_software_capabilities(state: &AppState) {
-    let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
+    let roots = match crate::plugins::engine_roots(&state.pool, &state.config).await {
+        Ok(roots) => roots,
+        Err(error) => {
+            tracing::warn!(%error, "capacités logicielles non relevées : catalogue illisible");
+            return;
+        }
+    };
     let probes = crate::software_probe::discover_software_probes(&roots);
     let cache = state.tool_cache();
     crate::software_probe::refresh_software_capabilities(&cache, &probes).await;
@@ -192,9 +201,7 @@ async fn claim_until_stopped(
             .map(|w| w.slots().total)
             .unwrap_or(worker.slots().total);
         while (active.len() as i32) < max_concurrency && !*shutdown.borrow() {
-            let claim =
-                repository::claim_with_protocol(&state.pool, worker.id, LeaseProtocol::LATEST);
-            match claim.await {
+            match api::claim_ready(state, worker.id, LeaseProtocol::LATEST).await {
                 Ok(Some(claim)) => {
                     let (st, wid, shutdown) = (state.clone(), worker.id, shutdown.clone());
                     active.spawn(async move { execute(&st, wid, claim, shutdown).await });
@@ -475,11 +482,14 @@ async fn process(
         &mut claim,
     )
     .await;
-    if let Err(error) = prepared {
-        api::undeliverable_claim(state, worker_id, &claim, error).await;
-        return Err(TaskStop::Concluded.into());
-    }
-    let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
+    // Les dossiers dont viennent les contrats du bail, même si une installation les a remplacés depuis.
+    let roots = match prepared {
+        Ok(roots) => roots,
+        Err(error) => {
+            api::undeliverable_claim(state, worker_id, &claim, error).await;
+            return Err(TaskStop::Concluded.into());
+        }
+    };
     let cache = state.tool_cache();
     let wanted = job_runner::collect_wanted_tools(&claim);
     crate::plugins::ensure_tools_for_requirements(
@@ -615,6 +625,15 @@ async fn publish(
     snapshot: Option<std::path::PathBuf>,
 ) -> AppResult<()> {
     let key = (job.id, lease.lease_epoch);
+    // Une sonde à réparer ou une panne de la base retarde la publication : le résultat n'est pas refusé.
+    let spec = &execution.output_spec;
+    while snapshot.is_some()
+        && let Err(error) =
+            api::transfers::output_probes(state, spec, &execution.working_file).await
+    {
+        tracing::warn!(job_id=%job.id, %error, "publication retardée");
+        tokio::time::sleep(REPAIR_POLL_INTERVAL).await;
+    }
     let (st, lease) = (state.clone(), lease.clone());
     let token = crate::supervision::current_token();
     let publication = async move {

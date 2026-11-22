@@ -1,7 +1,11 @@
 //! Reconstruction atomique de `index.json` pour le catalogue local.
 
-use super::write_json_pretty;
-use crate::{error::AppResult, opaque_token::sha256_hex, tools_cache::ToolCacheManager};
+use crate::{
+    error::{AppError, AppResult},
+    opaque_token::sha256_hex,
+    plugins::{installed::replace_file, load_catalog, sources::INDEX_RELATIVE_PATH},
+    tools_cache::ToolCacheManager,
+};
 use serde_json::{Map, Value, json};
 use std::{
     collections::HashMap,
@@ -9,7 +13,17 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const LOCAL_FOLDERS: &[&str] = &["scripts", "resources", "templates/blocks", "flows", "packs"];
+/// Dossier des scripts installés (ADR 0029), à part : un script de l'utilisateur peut porter le même nom.
+pub(in crate::plugins) const INSTALLED_SCRIPTS_FOLDER: &str = "installed-scripts";
+
+const LOCAL_FOLDERS: &[&str] = &[
+    "scripts",
+    INSTALLED_SCRIPTS_FOLDER,
+    "resources",
+    "templates/blocks",
+    "flows",
+    "packs",
+];
 
 fn collect_manifests(dir: &Path, out: &mut Vec<(PathBuf, Value)>) {
     let Ok(read_dir) = fs::read_dir(dir) else {
@@ -187,8 +201,51 @@ pub fn rebuild_local_index(local_dir: &Path) -> AppResult<()> {
         "filesSha256": files_sha256,
         "entries": entries,
     });
-    let tmp = local_dir.join("index.json.tmp");
-    write_json_pretty(&tmp, &index_json)?;
-    fs::rename(tmp, local_dir.join("index.json"))?;
+    let text = serde_json::to_string_pretty(&index_json)
+        .map_err(|error| AppError::InvalidManifest(error.to_string()))?;
+    // Durable : un script installé n'est dans le moteur que par cet index.
+    replace_file(&local_dir.join(INDEX_RELATIVE_PATH), text.as_bytes())?;
     Ok(())
+}
+
+/// Régénère un index absent ou illisible ; `true` s'il l'a été.
+pub fn repair_local_index(local_dir: &Path) -> AppResult<bool> {
+    let has_items = LOCAL_FOLDERS
+        .iter()
+        .any(|folder| local_dir.join(folder).is_dir());
+    if !has_items || load_catalog(local_dir).is_ok() {
+        return Ok(false);
+    }
+    rebuild_local_index(local_dir)?;
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_missing_or_unreadable_index_is_repaired() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let index = dir.path().join(INDEX_RELATIVE_PATH);
+        assert!(!repair_local_index(dir.path())?);
+        assert!(!index.exists());
+
+        fs::create_dir_all(dir.path().join("scripts/demo"))?;
+        fs::write(
+            dir.path().join("scripts/demo/manifest.json"),
+            r#"{"id":"script.demo","type":"script","version":"1.0.0","name":"Demo"}"#,
+        )?;
+        for damage in [None, Some("{")] {
+            if let Some(text) = damage {
+                fs::write(&index, text)?;
+            }
+            assert!(repair_local_index(dir.path())?, "{damage:?}");
+            assert_eq!(load_catalog(dir.path())?.entries.len(), 1);
+            assert!(!repair_local_index(dir.path())?);
+        }
+        // Aucun reste d'écriture.
+        assert_eq!(fs::read_dir(dir.path())?.count(), 2);
+        Ok(())
+    }
 }

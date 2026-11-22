@@ -48,6 +48,7 @@ async fn test_app() -> anyhow::Result<TestApp> {
         config_dir: config_dir.path().to_path_buf(),
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: Some(plugins_dir.path().to_path_buf()),
+        detected_plugins_dir: None,
         static_dir: "frontend/dist".into(),
         max_file_bytes: MAX_TEST_FILE_BYTES,
         local_worker: false,

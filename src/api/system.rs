@@ -17,7 +17,10 @@ pub use forgearr_shared::system::{
     HardwareStatus, KeySource, NetworkStatus, StorageStatus, SystemStatus, UpdateCheckStatus,
     UpdateSystemSettingsRequest, VolumeSpace,
 };
-use forgearr_shared::timezone::{ClockInfo, UpdateTimezoneRequest, describe_instant};
+use forgearr_shared::{
+    timezone::{ClockInfo, UpdateTimezoneRequest, describe_instant},
+    version::is_newer_version,
+};
 use std::{
     path::{Path, PathBuf},
     sync::LazyLock,
@@ -37,22 +40,6 @@ struct CachedUpdateCheck {
 
 static UPDATE_CACHE: LazyLock<tokio::sync::Mutex<Option<CachedUpdateCheck>>> =
     LazyLock::new(|| tokio::sync::Mutex::new(None));
-
-/// Compare deux étiquettes semver (`v0.41.0` et `0.42.0`) ; retourne `true` si `latest > current`.
-pub fn is_newer_version(current: &str, latest: &str) -> bool {
-    let parse = |raw: &str| -> Option<(u64, u64, u64)> {
-        let clean = raw.trim().trim_start_matches('v').split('-').next()?;
-        let mut parts = clean.split('.');
-        let major = parts.next()?.parse().ok()?;
-        let minor = parts.next()?.parse().ok()?;
-        let patch = parts.next()?.parse().ok()?;
-        Some((major, minor, patch))
-    };
-    match (parse(current), parse(latest)) {
-        (Some(cur), Some(lat)) => lat > cur,
-        _ => false,
-    }
-}
 
 /// Chemin du fichier SQLite d'une URL de base (`sqlite:///config/flux.db?mode=rwc`) ; `None` en mémoire.
 pub fn database_file(database_url: &str) -> Option<PathBuf> {
@@ -335,14 +322,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_is_newer_version_compares_semver_triplets() {
-        assert!(is_newer_version("0.41.0", "0.42.0"));
-        assert!(is_newer_version("v0.41.0", "0.41.1"));
-        assert!(!is_newer_version("0.41.0", "0.41.0"));
-        assert!(!is_newer_version("0.42.0", "0.41.9"));
-    }
-
-    #[test]
     fn test_database_file_is_read_from_sqlite_urls() {
         for (url, expected) in [
             ("sqlite:///config/flux.db", Some("/config/flux.db")),
@@ -366,6 +345,7 @@ mod tests {
             config_dir: dir.join("config"),
             tools_cache_dir: dir.join("tools"),
             plugins_dir: None,
+            detected_plugins_dir: None,
             static_dir: "frontend/dist".into(),
             max_file_bytes: 2048,
             local_worker: false,

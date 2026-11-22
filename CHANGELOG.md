@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.79.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.78.1...v0.79.0) (2026-11-22)
+
+
+### Features
+
+* **flux:** syntaxe de modèle unique {$…}, identifiant failure-flow réservé ([9aa49da](https://github.com/remi-deher/flux-de-fichiers/commit/9aa49dad9faf9fa159b58190e9aa104dead4c324))
+
+
+### Bug Fixes
+
+* **flux:** le rendu strict garde un texte vide malgré un défaut ([38d47d4](https://github.com/remi-deher/flux-de-fichiers/commit/38d47d41d9d302808e86de2773df22b1d09032eb))
+
 ## [0.78.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.78.0...v0.78.1) (2026-11-22)
 
 

@@ -7,7 +7,11 @@ use crate::{
 };
 use reqwest::Url;
 use sqlx::SqlitePool;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::{Arc, PoisonError},
+};
 
 const DISTRIBUTION_FILE_NAME: &str = "distribution.v1.json";
 
@@ -51,8 +55,27 @@ impl Drop for InstallingGuard {
     }
 }
 
-/// Une seule installation à la fois : deux téléchargements du même outil seraient inutiles.
-static INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// Identifiant, version et architecture d'un outil.
+type ToolKey = (String, String, String);
+type ToolLocks = BTreeMap<ToolKey, Arc<tokio::sync::Mutex<()>>>;
+
+/// Un verrou par outil : deux téléchargements du même outil seraient inutiles, mais un serveur lent ne
+/// retient pas les autres outils.
+static INSTALL_LOCKS: std::sync::Mutex<ToolLocks> = std::sync::Mutex::new(BTreeMap::new());
+
+/// Chaque archive est gardée en mémoire : leur nombre est borné.
+const MAX_CONCURRENT_DOWNLOADS: usize = 3;
+static DOWNLOAD_SLOTS: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(MAX_CONCURRENT_DOWNLOADS);
+
+fn install_lock(tool_id: &str, version: &str, arch: &str) -> Arc<tokio::sync::Mutex<()>> {
+    INSTALL_LOCKS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .entry((tool_id.to_owned(), version.to_owned(), arch.to_owned()))
+        .or_default()
+        .clone()
+}
 
 pub fn parse_distribution(raw: &str) -> AppResult<ToolDistribution> {
     serde_json::from_str(raw).map_err(|error| AppError::InvalidManifest(error.to_string()))
@@ -148,11 +171,20 @@ pub async fn install_from_distribution(
         return Ok(binary);
     }
     let _installing = InstallingGuard::start(&distribution.tool_id, cache);
-    let _guard = INSTALL_LOCK.lock().await;
+    let lock = install_lock(
+        &distribution.tool_id,
+        &distribution.tool_version,
+        &artifact.arch,
+    );
+    let _guard = lock.lock().await;
     // Une autre installation a pu l'achever pendant l'attente.
     if let Some(binary) = ready_binary() {
         return Ok(binary);
     }
+    let _slot = DOWNLOAD_SLOTS
+        .acquire()
+        .await
+        .map_err(|_| AppError::Internal)?;
     let archive = fetch_archive(&url, policy)
         .await
         .map_err(|error| AppError::RepositoryUnavailable(error.to_string()))?;
@@ -519,6 +551,57 @@ mod tests {
         install_from_distribution(&cache, &contract, &policy).await?;
         assert!(watcher.await?);
         assert!(!is_installing("suivi"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_silent_server_does_not_hold_back_another_tool() -> anyhow::Result<()> {
+        use axum::{Router, routing::get};
+        use std::time::Duration;
+        const TEST_LIMIT: Duration = Duration::from_secs(20);
+
+        let reached = Arc::new(tokio::sync::Notify::new());
+        let server_reached = reached.clone();
+        let router = Router::new().route(
+            "/outil.tar.gz",
+            get(move || async move {
+                server_reached.notify_one();
+                std::future::pending::<&'static str>().await
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let silent = listener.local_addr()?;
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        let archive = archive_with("demo", b"#!/bin/sh\nexit 0\n")?;
+        let address = serve_archive(archive.clone()).await?;
+        let dir = tempfile::tempdir()?;
+        let cache = ToolCacheManager::new(dir.path());
+        let policy = SyncPolicy {
+            allow_private_hosts: true,
+            ..SyncPolicy::default()
+        };
+        let mut stalled = distribution(silent, "0".repeat(64));
+        stalled.tool_id = "muet".into();
+        let stalled_cache = cache.clone();
+        let waiting = tokio::spawn(async move {
+            install_from_distribution(&stalled_cache, &stalled, &policy)
+                .await
+                .is_ok()
+        });
+        tokio::time::timeout(TEST_LIMIT, reached.notified()).await?;
+
+        let mut other = distribution(address, sha256_hex(&archive));
+        other.tool_id = "autre".into();
+        tokio::time::timeout(
+            TEST_LIMIT,
+            install_from_distribution(&cache, &other, &policy),
+        )
+        .await??;
+        assert!(cache.is_ready("autre", "1.0.0", host_arch()));
+        assert!(is_installing("muet"));
+        waiting.abort();
         Ok(())
     }
 

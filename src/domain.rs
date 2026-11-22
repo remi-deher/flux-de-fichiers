@@ -3,9 +3,9 @@ use uuid::Uuid;
 
 pub use forgearr_shared::flows::{FlowRecord, FlowVersionSummary, UpdateFlowRequest};
 pub use forgearr_shared::jobs::{
-    JOB_PRIORITY_MAX, JOB_PRIORITY_MIN, Job, JobBatchAction, JobBatchRequest, JobBatchResult,
-    JobErrorCode, JobEvent, JobEventType, JobStatus, JobStepLog, JobStepStatus, JobStorageStats,
-    LibraryJobStats, MAX_ATTEMPTS, MediaFile, NewJob, UpdateJobPriorityRequest,
+    IrreversibleAction, JOB_PRIORITY_MAX, JOB_PRIORITY_MIN, Job, JobBatchAction, JobBatchRequest,
+    JobBatchResult, JobErrorCode, JobEvent, JobEventType, JobStatus, JobStepLog, JobStepStatus,
+    JobStorageStats, LibraryJobStats, MAX_ATTEMPTS, MediaFile, NewJob, UpdateJobPriorityRequest,
 };
 
 pub use forgearr_shared::libraries::{
@@ -18,6 +18,7 @@ pub use forgearr_shared::workers::{
     Worker, WorkerSchedule,
 };
 
+/// Durée du bail d'un worker antérieur à l'ADR 0027 (et repli d'un worker face à un ancien central).
 pub const LEASE_SECONDS: i64 = 120;
 
 /// Outil et version attendue pour exécuter une tâche (dérivés du flux figé).
@@ -132,6 +133,16 @@ pub struct Claim {
     /// Versions figées des sous-flux et du flux d'échec de la tâche (ADR 0026).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub linked_flows: Vec<forgearr_shared::flows::LinkedFlow>,
+    /// Règles du bail ; absentes d'un ancien central (ADR 0027).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_terms: Option<LeaseTerms>,
+}
+
+/// Règles du bail annoncées au worker (ADR 0027).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeaseTerms {
+    /// Délai d'injoignabilité avant la remise en file.
+    pub unreachable_timeout_seconds: i64,
 }
 
 impl Claim {
@@ -169,6 +180,9 @@ pub struct Register {
     /// Adresse du serveur de transfert de ce worker, si elle est annoncée (ADR 0019).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transfer_url: Option<String>,
+    /// Identifiant de démarrage du processus, envoyé seulement au premier enregistrement (ADR 0027).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -176,6 +190,37 @@ pub struct ClaimRequest {
     pub worker_id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<crate::telemetry::TelemetrySnapshot>,
+    /// Protocole de bail du worker ; absent : worker antérieur à l'ADR 0027.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_protocol: Option<i64>,
+    /// Tâches que ce worker tient réellement (jusqu'à l'accusé de fin) ; absent : inconnu.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_jobs: Option<Vec<Uuid>>,
+}
+
+/// Demande d'accord avant une action irréversible (ADR 0027).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AuthorizeAction {
+    pub worker_id: Uuid,
+    pub lease_token: Uuid,
+    #[serde(default)]
+    pub lease_epoch: i64,
+    pub action: IrreversibleAction,
+    pub node_id: String,
+    /// Code de l'échec dont le flux d'échec va s'exécuter (exigé pour `failure_flow`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<JobErrorCode>,
+}
+
+impl AuthorizeAction {
+    pub fn lease(&self) -> LeaseRequest {
+        LeaseRequest {
+            worker_id: self.worker_id,
+            lease_token: self.lease_token,
+            lease_epoch: self.lease_epoch,
+            telemetry: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -245,6 +290,9 @@ mod tests {
             (JobEventType::JobSucceeded, "job_succeeded"),
             (JobEventType::JobFailed, "job_failed"),
             (JobEventType::JobCanceled, "job_canceled"),
+            (JobEventType::JobUnreachable, "job_unreachable"),
+            (JobEventType::JobRestored, "job_restored"),
+            (JobEventType::JobRequeued, "job_requeued"),
         ];
         for (event_type, label) in cases {
             assert_eq!(event_type.as_str(), label);
@@ -355,6 +403,7 @@ mod tests {
             worker_name: None,
             resume_variables: serde_json::Map::new(),
             linked_flows: Vec::new(),
+            lease_terms: None,
         };
         let encoded = serde_json::to_value(&with_flow)?;
         assert_eq!(encoded["frozen_flow"]["id"], "flow.x");

@@ -155,7 +155,11 @@ pub(super) async fn recover(s: &AppState) -> AppResult<()> {
             }
             Ok(false)
             | Err(
-                AppError::NotFound | AppError::Invalid | AppError::Conflict | AppError::Storage(_),
+                AppError::NotFound
+                | AppError::Invalid
+                | AppError::Conflict
+                | AppError::LeaseLost
+                | AppError::Storage(_),
             ) => {
                 let lease = job
                     .worker_id
@@ -224,6 +228,7 @@ mod tests {
             LibraryOutputPolicy::ReplaceWithBackup,
         )
         .await?;
+        repository::authorize_source_publication(&s.pool, job.id, lease).await?;
         Ok(())
     }
 
@@ -274,7 +279,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_backup_or_expired_lease_never_infers_success() -> anyhow::Result<()> {
+    async fn a_missing_backup_never_infers_success_but_an_unswept_lease_still_concludes()
+    -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         let (state, job, lease, _) = super::super::transfers::tests::setup(dir.path()).await?;
         interrupted(&state, &job, &lease, "result.mkv", b"result").await?;
@@ -300,9 +306,10 @@ mod tests {
             .execute(&state.pool)
             .await?;
         recover(&state).await?;
+        // Échéance passée mais bail non repris : le titulaire est toujours l'unique titulaire.
         assert_eq!(
-            repository::get_job(&state.pool, job.id).await?.error_code,
-            Some(JobErrorCode::LeaseExpired)
+            repository::get_job(&state.pool, job.id).await?.status,
+            JobStatus::Succeeded
         );
         Ok(())
     }

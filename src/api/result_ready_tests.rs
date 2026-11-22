@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    api::transfers::tests::setup,
+    api::transfers::tests::{current_protocol, setup},
     domain::JobErrorCode,
     storage,
     worker_transfer::{TransferState, transfer_router},
@@ -164,6 +164,7 @@ async fn an_unanswered_publication_is_uncertain_and_never_reported_as_a_success(
     let (state, job, lease, holder) = setup(dir.path()).await?;
     retain_result(&state, &job, &lease).await?;
     let (publishing, task) = start_publication(&state, &job, &lease, holder).await?;
+    assert!(repository::authorize_source_publication(&state.pool, job.id, &lease).await?);
     answer(&state, holder, &task, SourcePublicationOutcome::Failed).await?;
     assert!(publishing.await?.is_err());
     let failed = repository::get_job(&state.pool, job.id).await?;
@@ -411,8 +412,14 @@ async fn a_holding_worker_applies_the_result_itself_and_confirms() -> anyhow::Re
         [(String::new(), "mkv".to_owned())]
     );
 
+    // La réponse à l'annonce s'était perdue : la répétition retrouve l'intention inscrite.
+    let again = begin_local_application(&state, &job, &own, &ready_request()).await?;
+    assert!(again.is_some());
+
     let published = SourcePublicationOutcome::Published;
     finish_local_application(&state, &job, &own, published).await?;
+    let repeated = repeated_outcome(&state, job.id, &own, published).await?;
+    assert!(matches!(repeated, Some(Ok(_))));
     let done = repository::get_job(&state.pool, job.id).await?;
     assert_eq!(done.status, JobStatus::Succeeded);
     assert!(done.output_name.is_none(), "aucune copie au central");
@@ -432,10 +439,18 @@ async fn a_changed_source_or_a_failure_closes_the_local_application() -> anyhow:
     let refused = finish_local_application(&state, &job, &own, changed).await;
     assert!(matches!(refused, Err(AppError::SourceChanged)));
     assert!(pending_journal(&state).await?.is_empty());
-    let running = repository::get_job(&state.pool, job.id).await?;
-    assert_eq!(running.status, JobStatus::Running);
+    let closed = repository::get_job(&state.pool, job.id).await?;
+    assert_eq!(closed.status, JobStatus::Failed);
+    assert_eq!(closed.error_code, Some(JobErrorCode::SourceChanged));
+    // Le rapport répété (réponse perdue) retrouve la même issue.
+    let repeated = repeated_outcome(&state, job.id, &own, changed).await?;
+    assert!(matches!(repeated, Some(Err(AppError::SourceChanged))));
 
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, holder) = setup(dir.path()).await?;
+    let own = processing_holder(&state, &job, &lease, holder).await?;
     begin_local_application(&state, &job, &own, &ready_request()).await?;
+    assert!(repository::authorize_source_publication(&state.pool, job.id, &own).await?);
     let failed = SourcePublicationOutcome::Failed;
     let unknown = finish_local_application(&state, &job, &own, failed).await;
     assert!(unknown.is_err());
@@ -600,5 +615,220 @@ async fn a_pulled_publication_cannot_be_concluded_by_the_processing_worker() -> 
 
     answer(&state, holder, &task, SourcePublicationOutcome::Published).await?;
     publishing.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn after_a_central_restart_a_repeated_announce_never_publishes_twice() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, holder) = setup(dir.path()).await?;
+    retain_result(&state, &job, &lease).await?;
+    let (publishing, task) = start_publication(&state, &job, &lease, holder).await?;
+    // Le détenteur obtient l'accord, puis le central redémarre : la demande en mémoire est perdue.
+    assert!(repository::authorize_source_publication(&state.pool, job.id, &lease).await?);
+    publishing.abort();
+    let _ = publishing.await;
+    let announced = publish_announced(state.clone(), job.id, lease.clone(), ready_request()).await;
+    assert!(matches!(announced, Err(AppError::PublicationPending)));
+    let offered = state
+        .source_publication
+        .take_for_worker(holder, Duration::ZERO)
+        .await;
+    assert!(offered.is_empty(), "aucune seconde exécution");
+    let report = SourcePublicationReport {
+        request_id: task.request_id,
+        worker_id: holder,
+        outcome: SourcePublicationOutcome::SourceChanged,
+    };
+    assert!(!state.source_publication.report(report).await);
+    assert_eq!(pending_journal(&state).await?.len(), 1);
+    // La reprise conclut par un succès : la répétition suivante le constate.
+    let output = PublishedOutput {
+        name: "",
+        sha256: &task.result_sha256,
+        bytes: task.result_bytes,
+        warning: false,
+    };
+    repository::publish_succeeded(&state.pool, job.id, &lease, output, async { Ok(()) }).await?;
+    publish_announced(state.clone(), job.id, lease.clone(), ready_request()).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_intent_never_authorized_is_dropped_and_announced_again() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, holder) = setup(dir.path()).await?;
+    retain_result(&state, &job, &lease).await?;
+    let (publishing, _) = start_publication(&state, &job, &lease, holder).await?;
+    publishing.abort();
+    let _ = publishing.await;
+    let epoch = lease.lease_epoch;
+    assert!(repository::abandon_unauthorized_publication(&state.pool, job.id, epoch).await?);
+    // Plus d'intention : plus d'accord possible pour l'exécutant disparu.
+    assert!(!repository::authorize_source_publication(&state.pool, job.id, &lease).await?);
+    let (again, task) = start_publication(&state, &job, &lease, holder).await?;
+    answer(&state, holder, &task, SourcePublicationOutcome::Published).await?;
+    again.await??;
+    let done = repository::get_job(&state.pool, job.id).await?;
+    assert_eq!(done.status, JobStatus::Succeeded);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_failure_before_the_grant_leaves_the_lease_to_its_holder() -> anyhow::Result<()> {
+    let failed = SourcePublicationOutcome::Failed;
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, holder) = setup(dir.path()).await?;
+    retain_result(&state, &job, &lease).await?;
+    let (publishing, task) = start_publication(&state, &job, &lease, holder).await?;
+    answer(&state, holder, &task, failed).await?;
+    assert!(publishing.await?.is_err());
+    assert!(pending_journal(&state).await?.is_empty());
+    // Le titulaire déclare un échec ordinaire.
+    let code = JobErrorCode::TransferFailed;
+    repository::fail(&state.pool, job.id, &lease, code).await?;
+
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, holder) = setup(dir.path()).await?;
+    let own = processing_holder(&state, &job, &lease, holder).await?;
+    begin_local_application(&state, &job, &own, &ready_request()).await?;
+    let refused = finish_local_application(&state, &job, &own, failed).await;
+    assert!(refused.is_err());
+    assert!(pending_journal(&state).await?.is_empty());
+    repository::active(&state.pool, job.id, &own).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_failure_before_the_grant_requeues_the_job_of_a_restarted_holder() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, holder) = setup(dir.path()).await?;
+    current_protocol(&state, job.id).await?;
+    retain_result(&state, &job, &lease).await?;
+    let (publishing, task) = start_publication(&state, &job, &lease, holder).await?;
+    let boot = Uuid::new_v4();
+    let changes = repository::register_boot(&state.pool, lease.worker_id, boot).await?;
+    assert!(changes.iter().all(|change| change.deferred));
+    answer(&state, holder, &task, SourcePublicationOutcome::Failed).await?;
+    assert!(publishing.await?.is_err());
+    let queued = repository::get_job(&state.pool, job.id).await?;
+    assert_eq!(queued.status, JobStatus::Queued);
+    assert!(pending_journal(&state).await?.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_dropped_intent_can_no_longer_be_granted() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, holder) = setup(dir.path()).await?;
+    let own = processing_holder(&state, &job, &lease, holder).await?;
+    begin_local_application(&state, &job, &own, &ready_request()).await?;
+    let epoch = own.lease_epoch;
+    repository::abandon_unauthorized_publication(&state.pool, job.id, epoch).await?;
+    let refused = repository::require_publication_grant(&state.pool, job.id, &own).await;
+    assert!(matches!(refused, Err(AppError::Conflict)));
+    Ok(())
+}
+
+const HOLDER_KEY: &str = "fdf_d0000001_0123456789abcdef0123456789abcdef0123456789abcdef";
+
+/// En-têtes du titulaire `own`, enregistré sous le nom `holder`.
+async fn lease_headers(state: &AppState, own: &LeaseRequest) -> anyhow::Result<HeaderMap> {
+    let role = forgearr_shared::Role::Worker;
+    crate::api_keys::install_known_key(&state.pool, HOLDER_KEY, "holder", role).await?;
+    let mut headers = HeaderMap::new();
+    for (name, value) in [
+        ("authorization", format!("Bearer {HOLDER_KEY}")),
+        ("x-worker-id", own.worker_id.to_string()),
+        ("x-lease-token", own.lease_token.to_string()),
+        ("x-lease-epoch", own.lease_epoch.to_string()),
+    ] {
+        headers.insert(name, value.parse()?);
+    }
+    Ok(headers)
+}
+
+#[tokio::test]
+async fn a_repeated_outcome_joins_the_running_conclusion() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, holder) = setup(dir.path()).await?;
+    let own = processing_holder(&state, &job, &lease, holder).await?;
+    begin_local_application(&state, &job, &own, &ready_request()).await?;
+    let headers = lease_headers(&state, &own).await?;
+    let report = || {
+        let published = Json(SourcePublicationOutcome::Published);
+        applied(
+            State(state.clone()),
+            headers.clone(),
+            Path(job.id),
+            published,
+        )
+    };
+    // Une conclusion court déjà pour ce bail.
+    let key = (job.id, own.lease_epoch);
+    let (release, gate) = tokio::sync::oneshot::channel::<()>();
+    let publications = state.publications.clone();
+    let running = tokio::spawn(async move {
+        let conclusion = async move {
+            let _ = gate.await;
+            Ok(())
+        };
+        publications.run(key, conclusion).await
+    });
+    while !state.publications.contains(key) {
+        tokio::task::yield_now().await;
+    }
+    let repeated = tokio::spawn(report());
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!repeated.is_finished(), "la répétition attend");
+    let _ = release.send(());
+    running.await??;
+    assert_eq!(repeated.await??, StatusCode::NO_CONTENT);
+    let status = repository::get_job(&state.pool, job.id).await?.status;
+    assert_eq!(status, JobStatus::Running, "jointe, pas exécutée à part");
+
+    for _ in 0..2 {
+        assert_eq!(report().await?, StatusCode::NO_CONTENT);
+    }
+    let status = repository::get_job(&state.pool, job.id).await?.status;
+    assert_eq!(status, JobStatus::Succeeded);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_announce_renews_an_overdue_lease_before_the_sweep() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, _) = setup(dir.path()).await?;
+    sqlx::query("UPDATE jobs SET leased_until=datetime('now', '-1 second') WHERE id=?1")
+        .bind(job.id)
+        .execute(&state.pool)
+        .await?;
+    // Refusée faute d'artefact déclaré, l'annonce vaut déjà contact.
+    let announced = publish_announced(state.clone(), job.id, lease.clone(), ready_request()).await;
+    assert!(matches!(announced, Err(AppError::Invalid)));
+    repository::sweep(&state.pool, None, &Default::default()).await?;
+    repository::active(&state.pool, job.id, &lease).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn only_an_unpublished_output_is_discarded() -> anyhow::Result<()> {
+    const NAME: &str = "resultat.mkv";
+    let dir = tempfile::tempdir()?;
+    let (state, job, lease, _) = setup(dir.path()).await?;
+    let file = state.config.data_dir.join("output").join(NAME);
+    std::fs::write(&file, b"nouveau")?;
+    discard_output(&state, job.id, NAME).await;
+    assert!(!file.exists());
+    std::fs::write(&file, b"nouveau")?;
+    let output = PublishedOutput {
+        name: NAME,
+        sha256: &"cd".repeat(32),
+        bytes: 7,
+        warning: false,
+    };
+    repository::publish_succeeded(&state.pool, job.id, &lease, output, async { Ok(()) }).await?;
+    discard_output(&state, job.id, NAME).await;
+    assert!(file.exists(), "sortie d'une tâche réussie");
     Ok(())
 }

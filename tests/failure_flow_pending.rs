@@ -57,13 +57,13 @@ async fn leased_job(pool: &SqlitePool, name: &str) -> anyhow::Result<(Uuid, Leas
     Ok((job.id, lease))
 }
 
-/// Fait expirer le bail ; la prochaine réservation constate la perte.
-async fn expire_lease(pool: &SqlitePool, job: Uuid, worker: Uuid) -> anyhow::Result<()> {
+/// Fait expirer le bail ; le balayage constate la perte.
+async fn expire_lease(pool: &SqlitePool, job: Uuid) -> anyhow::Result<()> {
     sqlx::query("UPDATE jobs SET leased_until=datetime('now', '-1 seconds') WHERE id=?1")
         .bind(job)
         .execute(pool)
         .await?;
-    repository::claim(pool, worker).await?;
+    repository::sweep(pool, None, &Default::default()).await?;
     Ok(())
 }
 
@@ -84,10 +84,10 @@ fn summary_step(index: i32) -> JobStepEntry {
 async fn a_lost_lease_leaves_the_failure_flow_pending_once() -> anyhow::Result<()> {
     let pool = pool().await?;
     with_global_failure_flow(&pool).await?;
-    let (job, lease) = leased_job(&pool, "perdu.mkv").await?;
+    let (job, _) = leased_job(&pool, "perdu.mkv").await?;
     assert_eq!(repository::failure_flow_state(&pool, job).await?, None);
 
-    expire_lease(&pool, job, lease.worker_id).await?;
+    expire_lease(&pool, job).await?;
     let failed = repository::get_job(&pool, job).await?;
     assert_eq!(failed.status, JobStatus::Failed);
     assert_eq!(failed.error_code, Some(JobErrorCode::LeaseExpired));
@@ -144,7 +144,7 @@ async fn a_flow_run_by_the_worker_before_losing_its_lease_is_not_repeated() -> a
     with_global_failure_flow(&pool).await?;
     let (job, lease) = leased_job(&pool, "bail-perdu.mkv").await?;
     repository::save_job_steps_for_lease(&pool, job, &lease, &[summary_step(1)]).await?;
-    expire_lease(&pool, job, lease.worker_id).await?;
+    expire_lease(&pool, job).await?;
     assert_eq!(
         repository::get_job(&pool, job).await?.status,
         JobStatus::Failed
@@ -166,7 +166,9 @@ async fn an_aborted_central_failure_flow_stays_visible_in_the_journal() -> anyho
     let pool = pool().await?;
     let (job, lease) = leased_job(&pool, "abandon.mkv").await?;
     repository::save_job_steps_for_lease(&pool, job, &lease, &[summary_step(1)]).await?;
-    repository::record_failure_flow_not_run(&pool, job, "catalogue indisponible").await?;
+    repository::fail(&pool, job, &lease, JobErrorCode::OperationFailed).await?;
+    let failed = (job, lease.lease_epoch + 1);
+    repository::record_failure_flow_not_run(&pool, failed, "catalogue indisponible").await?;
     let steps = repository::list_job_steps(&pool, job).await?;
     let last = steps
         .last()
@@ -197,8 +199,8 @@ async fn a_worker_failure_outside_the_flow_is_left_pending() -> anyhow::Result<(
 #[tokio::test]
 async fn a_job_without_failure_flow_is_never_marked() -> anyhow::Result<()> {
     let pool = pool().await?;
-    let (job, lease) = leased_job(&pool, "simple.mkv").await?;
-    expire_lease(&pool, job, lease.worker_id).await?;
+    let (job, _) = leased_job(&pool, "simple.mkv").await?;
+    expire_lease(&pool, job).await?;
     assert_eq!(
         repository::get_job(&pool, job).await?.status,
         JobStatus::Failed
@@ -217,9 +219,10 @@ async fn a_new_attempt_resets_the_failure_flow_state() -> anyhow::Result<()> {
     let pool = pool().await?;
     with_global_failure_flow(&pool).await?;
     let (job, lease) = leased_job(&pool, "relance.mkv").await?;
-    expire_lease(&pool, job, lease.worker_id).await?;
+    expire_lease(&pool, job).await?;
     repository::take_pending_failure_flow(&pool).await?;
-    repository::append_job_steps(&pool, job, &[summary_step(1)]).await?;
+    let failed = (job, lease.lease_epoch + 1);
+    assert!(repository::append_failure_steps(&pool, failed, &[summary_step(1)]).await?);
 
     repository::retry_job(&pool, job).await?;
     let claim = repository::claim(&pool, lease.worker_id)
@@ -239,12 +242,41 @@ async fn central_steps_are_appended_after_the_journal() -> anyhow::Result<()> {
     let mut first = summary_step(1);
     first.node_id = "in".into();
     repository::save_job_steps_for_lease(&pool, job, &lease, &[first]).await?;
-    repository::append_job_steps(&pool, job, &[summary_step(1), summary_step(2)]).await?;
+    repository::fail(&pool, job, &lease, JobErrorCode::OperationFailed).await?;
+    let failed = (job, lease.lease_epoch + 1);
+    let added = [summary_step(1), summary_step(2)];
+    assert!(repository::append_failure_steps(&pool, failed, &added).await?);
     let indexes: Vec<i64> = repository::list_job_steps(&pool, job)
         .await?
         .iter()
         .map(|step| i64::from(step.step_index))
         .collect();
     assert_eq!(indexes, vec![1, 2, 3]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn steps_of_an_old_failure_flow_never_reach_the_new_attempt() -> anyhow::Result<()> {
+    let pool = pool().await?;
+    with_global_failure_flow(&pool).await?;
+    let (job, lease) = leased_job(&pool, "course.mkv").await?;
+    expire_lease(&pool, job).await?;
+    // Le central prend le flux d'échec, puis l'administrateur relance pendant son exécution.
+    let (taken, _) = repository::take_pending_failure_flow(&pool)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("flux d'échec attendu"))?;
+    repository::retry_job(&pool, job).await?;
+    assert_eq!(repository::failure_flow_state(&pool, job).await?, None);
+    repository::claim(&pool, lease.worker_id).await?;
+    let late = (taken.id, taken.lease_epoch);
+    assert!(!repository::append_failure_steps(&pool, late, &[summary_step(1)]).await?);
+    assert!(repository::list_job_steps(&pool, job).await?.is_empty());
+    // Le nouvel échec garde son propre flux d'échec.
+    expire_lease(&pool, job).await?;
+    assert!(!repository::append_failure_steps(&pool, late, &[summary_step(1)]).await?);
+    assert_eq!(
+        repository::failure_flow_state(&pool, job).await?,
+        Some(FailureFlowState::Pending)
+    );
     Ok(())
 }

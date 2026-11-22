@@ -108,7 +108,9 @@ pub fn error_label(code: JobErrorCode) -> &'static str {
         }
         JobErrorCode::TransferFailed => "Transfert interrompu",
         JobErrorCode::ProbeUnavailable => "Sonde requise absente sur le worker",
-        JobErrorCode::LeaseExpired => "Serveur déconnecté en cours de traitement",
+        JobErrorCode::LeaseExpired => {
+            "Worker perdu en cours de traitement, reprise automatique impossible"
+        }
         JobErrorCode::MissingSourceFingerprint => "Empreinte de la source manquante",
         JobErrorCode::NoCapableWorker => "Aucun worker capable pour le relais",
     }
@@ -155,7 +157,7 @@ pub fn progress_of(event: &JobEvent) -> Option<(uuid::Uuid, u32)> {
 }
 
 /// Noms d'événements du flux `/api/v1/jobs/events`, un par type.
-pub const EVENT_NAMES: [JobEventType; 9] = [
+pub const EVENT_NAMES: [JobEventType; 12] = [
     JobEventType::JobCreated,
     JobEventType::JobClaimed,
     JobEventType::JobHeartbeat,
@@ -165,6 +167,9 @@ pub const EVENT_NAMES: [JobEventType; 9] = [
     JobEventType::JobCanceled,
     JobEventType::JobRetried,
     JobEventType::JobRelayed,
+    JobEventType::JobUnreachable,
+    JobEventType::JobRestored,
+    JobEventType::JobRequeued,
 ];
 
 /// Tâches lues par page : le maximum que le central sert.
@@ -232,6 +237,9 @@ mod tests {
     fn only_state_changes_reload_the_list() {
         assert!(needs_reload(JobEventType::JobRetried));
         assert!(needs_reload(JobEventType::JobFailed));
+        assert!(needs_reload(JobEventType::JobUnreachable));
+        assert!(needs_reload(JobEventType::JobRestored));
+        assert!(needs_reload(JobEventType::JobRequeued));
         assert!(!needs_reload(JobEventType::JobProgress));
         assert!(!needs_reload(JobEventType::JobHeartbeat));
     }

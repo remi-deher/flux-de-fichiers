@@ -4,6 +4,7 @@
 mod detail;
 pub(crate) use detail::JobDetail;
 mod diagnosis;
+mod lease;
 mod live;
 mod logs;
 pub mod model;

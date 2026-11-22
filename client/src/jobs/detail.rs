@@ -1,6 +1,7 @@
 //! Fiche d'une tâche : onglet Information (cartes Détails / Traitement / Stockage + aperçu
 //! des étapes) et onglet Étapes exécutées (journal détaillé).
 
+use super::lease::LeaseTag;
 use super::model::{
     error_label, format_size_delta, priority_label, resolve_library_label, short_digest,
     status_label, status_tone, step_status_label, step_status_tone,
@@ -230,6 +231,8 @@ pub fn JobDetail(
                 0 => view! {
                     <div class="inspection-banner">
                         <StatusBadge label=status_label(job_status) variant=status_tone(job_status) />
+                        {matches!(job_status, JobStatus::Queued | JobStatus::Running)
+                            .then(|| view! { <LeaseTag job_id=job_id /> })}
                         {job_warning.then(|| view! {
                             <Tag label="Avertissement / repli" tone=TagTone::Warning />
                         })}

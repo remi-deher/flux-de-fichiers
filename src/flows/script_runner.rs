@@ -6,6 +6,7 @@ use crate::{
         contract::{OperationContract, ScriptInterpreter, ScriptRuntime, merge_params},
         variables::secret_values,
     },
+    supervision::SupervisedChild,
     tool_run::{
         MAX_STDOUT_CAPTURE_BYTES, ProgressParser, TailBuffer, for_each_segment, mask_log_secrets,
         read_bounded_bytes,
@@ -330,7 +331,8 @@ pub async fn execute_script_operation(
         Some(safe_path.clone()),
     )
     .unwrap_or(safe_path);
-    let mut child = Command::new(&program)
+    let mut command = Command::new(&program);
+    command
         .args(&args)
         .current_dir(work_dir)
         .env_clear()
@@ -338,26 +340,24 @@ pub async fn execute_script_operation(
         .env("TMPDIR", work_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|err| ScriptStepError {
-            code: error_code,
-            message: format!("lancement du script « {} » impossible : {err}", op.id),
-            excerpt: None,
-        })?;
+        .stderr(Stdio::piped());
+    let mut child = SupervisedChild::spawn(&mut command).map_err(|err| ScriptStepError {
+        code: error_code,
+        message: format!("lancement du script « {} » impossible : {err}", op.id),
+        excerpt: None,
+    })?;
 
-    if let Some(mut stdin) = child.stdin.take() {
+    if let Some(mut stdin) = child.take_stdin() {
         let _ = stdin.write_all(&stdin_bytes).await;
         let _ = stdin.shutdown().await;
     }
 
-    let stdout_reader = child.stdout.take().ok_or_else(|| ScriptStepError {
+    let stdout_reader = child.take_stdout().ok_or_else(|| ScriptStepError {
         code: error_code,
         message: "stdout indisponible pour le script".into(),
         excerpt: None,
     })?;
-    let stderr_reader = child.stderr.take().ok_or_else(|| ScriptStepError {
+    let stderr_reader = child.take_stderr().ok_or_else(|| ScriptStepError {
         code: error_code,
         message: "stderr indisponible pour le script".into(),
         excerpt: None,
@@ -384,7 +384,7 @@ pub async fn execute_script_operation(
     let (stdout_res, excerpt, status_res) = match outcome {
         Ok(res) => res,
         Err(_) => {
-            let _ = child.kill().await;
+            // Le groupe est tué à l'abandon de `child`.
             return Err(ScriptStepError {
                 code: error_code,
                 message: format!("délai dépassé pour le script « {} »", op.id),
@@ -399,6 +399,7 @@ pub async fn execute_script_operation(
         message: format!("attente du script « {} » impossible : {err}", op.id),
         excerpt: excerpt.clone(),
     })?;
+    child.finished();
     let stdout_bytes = stdout_res.map_err(|err| ScriptStepError {
         code: error_code,
         message: format!("lecture stdout du script impossible : {err}"),

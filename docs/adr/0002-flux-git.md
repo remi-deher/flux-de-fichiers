@@ -79,6 +79,10 @@ PR de release sur `main` (version de `Cargo.toml`, `Cargo.lock`,
 - Les PR et pushes faits par `GITHUB_TOKEN` ne déclenchent pas d'autre workflow :
   d'où `RELEASE_TOKEN`. Si le secret est absent ou expiré, les PR de la chaîne
   restent sans vérifications ; le renouveler dans les secrets du dépôt.
+- release-please peut ignorer un commit `feat:` ou `fix:` daté d'avant la dernière release, même fusionné
+  après elle (22 nov. 2026, #456 : `main` à jour mais aucune PR de release). Avant de fusionner dans `dev`
+  une branche commencée avant une release, vérifier que la PR de release s'ouvre ; sinon, pousser un
+  commit conventionnel récent qui porte le même message de version.
 - Image amd64 uniquement.
 
 ## Prérequis

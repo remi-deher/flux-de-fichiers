@@ -4,8 +4,9 @@
 use super::script_inspector::update_node_config;
 use super::state::Editor;
 use crate::api;
-use forgearr_shared::flow_variables::{
-    NodeVariablesRequest, NodeVariablesView, ReferenceSource, ReferenceSuggestion,
+use forgearr_shared::flows::node_references::{
+    NodeVariablesRequest, NodeVariablesView, REFERENCE_CLOSE, REFERENCE_OPEN, ReferenceSource,
+    ReferenceSuggestion,
 };
 use forgearr_shared::script_variables::{
     SECRETS_CONFIG_KEY, ScriptVariable, VariableKind, default_from_text, default_to_text,
@@ -14,8 +15,6 @@ use leptos::prelude::*;
 use serde_json::{Map, Value};
 
 const NODE_VARIABLES_PATH: &str = "/api/v1/flows/node-variables";
-const REFERENCE_OPEN: &str = "{{";
-const REFERENCE_CLOSE: &str = "}}";
 const BOOLEAN_TRUE: &str = "true";
 const BOOLEAN_FALSE: &str = "false";
 const SECRET_STORED_HINT: &str = "Secret enregistré — laisser vide pour le conserver";

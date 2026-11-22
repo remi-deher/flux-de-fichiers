@@ -7,7 +7,11 @@
 use crate::secrets::is_encrypted;
 use forgearr_shared::{
     exposed_variables::ExposedVariables,
-    flows::extract_json_values,
+    flows::{
+        extract_json_values, map_strings,
+        node_references::{REFERENCE_CLOSE, REFERENCE_OPEN},
+        scalar_to_string,
+    },
     relay::{MAX_RELAYED_MESSAGE_CHARS, RelayedNodeOutput},
     script_variables::{
         SECRET_PLACEHOLDER, SECRETS_CONFIG_KEY, ScriptVariable, VariableKind, default_from_text,
@@ -22,8 +26,8 @@ const ROOT_SOURCE_FILE: &str = "sourceFile";
 const ROOT_WORK_DIR: &str = "workDir";
 const ROOT_MEDIA_INFO: &str = "mediaInfo";
 const ROOT_NODES: &str = "nodes";
-const TEMPLATE_OPEN: &str = "{{";
-const TEMPLATE_CLOSE: &str = "}}";
+/// Texte d'un `null` inséré dans une référence `{{…}}`.
+const NULL_TEXT: &str = "null";
 
 /// Ce qu'un nœud déjà exécuté expose aux suivants (`{{nodes.<id>.message|nextPort|workingFile}}`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -242,10 +246,10 @@ fn parse_template(text: &str) -> Vec<Segment<'_>> {
     let mut segments = Vec::new();
     let mut literal_from = 0;
     let mut cursor = 0;
-    while let Some(open_offset) = text[cursor..].find(TEMPLATE_OPEN) {
+    while let Some(open_offset) = text[cursor..].find(REFERENCE_OPEN) {
         let open = cursor + open_offset;
-        let inner_start = open + TEMPLATE_OPEN.len();
-        let Some(close_offset) = text[inner_start..].find(TEMPLATE_CLOSE) else {
+        let inner_start = open + REFERENCE_OPEN.len();
+        let Some(close_offset) = text[inner_start..].find(REFERENCE_CLOSE) else {
             break;
         };
         let close = inner_start + close_offset;
@@ -255,7 +259,7 @@ fn parse_template(text: &str) -> Vec<Segment<'_>> {
                 segments.push(Segment::Text(&text[literal_from..open]));
             }
             segments.push(Segment::Reference(reference));
-            literal_from = close + TEMPLATE_CLOSE.len();
+            literal_from = close + REFERENCE_CLOSE.len();
             cursor = literal_from;
         } else {
             cursor = inner_start;
@@ -267,48 +271,36 @@ fn parse_template(text: &str) -> Vec<Segment<'_>> {
     segments
 }
 
+/// Texte d'une valeur insérée dans un texte ; `null` s'écrit `null` (contrairement aux modèles `{$…}`).
 pub(super) fn as_text(value: &Value) -> String {
     match value {
-        Value::String(text) => text.clone(),
-        other => other.to_string(),
+        Value::Null => NULL_TEXT.to_owned(),
+        other => scalar_to_string(Some(other)),
     }
 }
 
 /// Remplace les références d'une valeur ; `Err` porte la première référence sans valeur.
 fn resolve_value(value: &Value, context: &VariableContext) -> Result<Value, String> {
-    match value {
-        Value::String(text) => {
-            let segments = parse_template(text);
-            if let [Segment::Reference(path)] = segments.as_slice() {
-                return context
-                    .lookup(path)
-                    .cloned()
-                    .ok_or_else(|| (*path).to_owned());
-            }
-            let mut out = String::new();
-            for segment in segments {
-                match segment {
-                    Segment::Text(literal) => out.push_str(literal),
-                    Segment::Reference(path) => {
-                        let found = context.lookup(path).ok_or_else(|| path.to_owned())?;
-                        out.push_str(&as_text(found));
-                    }
+    map_strings(value, &mut |text| {
+        let segments = parse_template(text);
+        if let [Segment::Reference(path)] = segments.as_slice() {
+            return context
+                .lookup(path)
+                .cloned()
+                .ok_or_else(|| (*path).to_owned());
+        }
+        let mut out = String::new();
+        for segment in segments {
+            match segment {
+                Segment::Text(literal) => out.push_str(literal),
+                Segment::Reference(path) => {
+                    let found = context.lookup(path).ok_or_else(|| path.to_owned())?;
+                    out.push_str(&as_text(found));
                 }
             }
-            Ok(Value::String(out))
         }
-        Value::Array(items) => items
-            .iter()
-            .map(|item| resolve_value(item, context))
-            .collect::<Result<Vec<_>, _>>()
-            .map(Value::Array),
-        Value::Object(map) => map
-            .iter()
-            .map(|(key, item)| resolve_value(item, context).map(|resolved| (key.clone(), resolved)))
-            .collect::<Result<Map<_, _>, _>>()
-            .map(Value::Object),
-        other => Ok(other.clone()),
-    }
+        Ok(Value::String(out))
+    })
 }
 
 fn number_in_range(variable: &ScriptVariable, number: &Number) -> bool {
@@ -533,6 +525,54 @@ mod tests {
             kind,
             ..ScriptVariable::default()
         }
+    }
+
+    #[test]
+    fn as_text_keeps_null_visible_unlike_flow_templates() {
+        assert_eq!(as_text(&Value::Null), "null");
+        assert_eq!(as_text(&json!("a")), "a");
+        assert_eq!(as_text(&json!(2)), "2");
+        assert_eq!(as_text(&json!(true)), "true");
+        assert_eq!(as_text(&json!([1])), "[1]");
+    }
+
+    /// Ordre réel de l'exécuteur : modèles de flux `{$…}` d'abord, puis références `{{…}}`.
+    fn flow_then_node_references(text: &str) -> Result<Value, String> {
+        let mut vars = forgearr_shared::flows::FlowVariables::default();
+        vars.set_custom("codec", json!("hevc"))
+            .map_err(|err| format!("{err:?}"))?;
+        vars.set_custom("ref", json!("{{workDir}}"))
+            .map_err(|err| format!("{err:?}"))?;
+        let rendered =
+            crate::flows::substitution::substitute_node_config(&json!({"target": text}), &vars);
+        let resolved = resolve_node_config(
+            &[variable("target", VariableKind::Text)],
+            &rendered,
+            &context(),
+        )
+        .map_err(|err| err.to_string())?;
+        resolved
+            .get("target")
+            .cloned()
+            .ok_or_else(|| "target absent".to_owned())
+    }
+
+    #[test]
+    fn flow_templates_render_before_node_references() -> Result<(), String> {
+        assert_eq!(
+            flow_then_node_references("{$vars.codec}-{{workDir}}")?,
+            json!("hevc-/work")
+        );
+        assert_eq!(
+            flow_then_node_references("{{$vars.codec}")?,
+            json!("{$vars.codec}")
+        );
+        assert_eq!(
+            flow_then_node_references("{{$vars.codec}}")?,
+            json!("{$vars.codec}}")
+        );
+        assert_eq!(flow_then_node_references("{$vars.ref}")?, json!("/work"));
+        Ok(())
     }
 
     fn resolve(variables: &[ScriptVariable], config: Value) -> Result<Value, VariableError> {

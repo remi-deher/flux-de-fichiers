@@ -17,7 +17,6 @@ pub mod script_runner;
 mod sub_flow;
 pub mod substitution;
 mod variables;
-mod variables_step;
 
 #[cfg(test)]
 mod engine_tests;
@@ -510,7 +509,10 @@ impl<'a> FlowEngine<'a> {
                         }
                     }
                     PrimitiveKind::SetVariable => {
-                        match variables_step::apply_set_variable(&node_config, &mut ctx.variables) {
+                        match forgearr_shared::flows::apply_set_variable(
+                            &node_config,
+                            &mut ctx.variables,
+                        ) {
                             Ok(message) => step_message = Some(message),
                             Err(message) => {
                                 steps.push(failed_step(

@@ -12,7 +12,7 @@ pub mod capabilities;
 pub mod diagnostics;
 pub mod exposed_variables;
 pub mod flow_analysis;
-pub mod flow_variables;
+/// Ancien chemin des références de nœud, conservé le temps de la migration.
 pub mod flows;
 pub mod format;
 pub mod highlight;

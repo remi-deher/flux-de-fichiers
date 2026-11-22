@@ -148,47 +148,17 @@ pub async fn execute_claim_processing(
     work_dir: &Path,
     progress_cb: FlowProgressCallback,
 ) -> Result<JobExecutionResult, JobRunError> {
-    let claim_registry;
-    let registry = match registry_override {
-        Some(reg) if claim.operations.is_empty() => reg,
-        _ => {
-            claim_registry = OperationRegistry::from_raw(
-                claim.operations.clone(),
-                claim.block_operations.clone(),
-            );
-            &claim_registry
-        }
-    };
-    let tool_versions: HashMap<String, String> = claim
-        .required_tools
-        .iter()
-        .map(|req| (req.tool_id.clone(), req.version.clone()))
-        .collect();
-
-    let mut worker_capabilities = crate::hardware_probe::detected_capabilities();
-    worker_capabilities.software_encoders = crate::software_probe::software_capabilities();
-    let engine = FlowEngine {
+    let mut claim_registry = None;
+    let registry = resolve_registry(claim, registry_override, &mut claim_registry);
+    let context = WorkerContext::for_claim(claim);
+    let engine = claim_engine(
+        claim,
+        &context,
         registry,
         cache_mgr,
         http_client,
         secrets_dir,
-        plugin_configs: &claim.plugin_configs,
-        tool_versions: &tool_versions,
-        media_root: claim.media_root.as_deref(),
-        logical_source_name: Some(&claim.source_name),
-        allow_private_integrations: claim.allow_private_integrations,
-        worker_capabilities: Some(&worker_capabilities),
-        resume_node_id: claim.resume_node_id.as_deref(),
-        run_info: FlowRunInfo {
-            library_id: claim.library_id,
-            library_name: claim.library_name.as_deref(),
-            worker_name: claim.worker_name.as_deref(),
-            resume_variables: Some(&claim.resume_variables),
-            linked_flows: &claim.linked_flows,
-            failure: None,
-        },
-        resumed_outputs: &claim.resumed_outputs,
-    };
+    );
 
     let outcome = match claim.frozen_flow.as_ref() {
         Some(flow) => {
@@ -224,50 +194,197 @@ pub async fn execute_claim_processing(
                 message: error.message,
                 steps: error.steps,
             };
-            if let Some(failure_flow) = first_linked(&claim.linked_flows, LinkedFlowRole::Failure) {
-                let no_resumed_outputs = HashMap::new();
-                let failure_engine = FlowEngine {
-                    resume_node_id: None,
-                    resumed_outputs: &no_resumed_outputs,
-                    run_info: FlowRunInfo {
-                        resume_variables: None,
-                        failure: Some(FailureInfo {
-                            code: failed.code.as_str(),
-                            message: &failed.message,
-                        }),
-                        ..engine.run_info
-                    },
-                    ..engine
-                };
-                let failure_outcome = failure_engine
-                    .execute_flow(
-                        claim.job_id,
-                        failure_flow,
-                        source_snapshot,
-                        work_dir,
-                        progress_cb,
-                    )
-                    .await
-                    .map(|res| res.steps)
-                    .map_err(|err| (err.message, err.steps));
-                append_failure_flow_steps(&mut failed.steps, failure_flow, failure_outcome);
-            }
+            let failure = FailureInfo {
+                code: failed.code.as_str(),
+                message: &failed.message,
+            };
+            let input = FlowInput {
+                source: source_snapshot,
+                work_dir,
+                progress_cb,
+            };
+            let failure_steps =
+                run_failure_flow(engine, claim, failure, input, &failed.steps).await;
+            failed.steps.extend(failure_steps);
             Err(failed)
         }
     }
 }
 
+/// Fichier d'entrée, dossier de travail et suivi de progression d'une exécution de flux.
+pub struct FlowInput<'a> {
+    pub source: &'a Path,
+    pub work_dir: &'a Path,
+    pub progress_cb: FlowProgressCallback,
+}
+
+/// Exécute hors bail le flux d'échec figé de la tâche, pour un échec décidé par le central ou une
+/// perte de bail (ADR 0026). Retourne les étapes à ajouter au journal ; aucune sans flux d'échec.
+pub async fn execute_pending_failure_flow(
+    claim: &Claim,
+    cache_mgr: &ToolCacheManager,
+    http_client: &reqwest::Client,
+    secrets_dir: Option<&Path>,
+    registry_override: Option<&OperationRegistry>,
+    failure: FailureInfo<'_>,
+    input: FlowInput<'_>,
+) -> Vec<JobStepEntry> {
+    let mut claim_registry = None;
+    let registry = resolve_registry(claim, registry_override, &mut claim_registry);
+    let context = WorkerContext::for_claim(claim);
+    let engine = claim_engine(
+        claim,
+        &context,
+        registry,
+        cache_mgr,
+        http_client,
+        secrets_dir,
+    );
+    run_failure_flow(engine, claim, failure, input, &[]).await
+}
+
+/// Contrats du bail s'il en porte, sinon registre fourni par l'appelant.
+fn resolve_registry<'a>(
+    claim: &Claim,
+    registry_override: Option<&'a OperationRegistry>,
+    claim_registry: &'a mut Option<OperationRegistry>,
+) -> &'a OperationRegistry {
+    match registry_override {
+        Some(reg) if claim.operations.is_empty() => reg,
+        _ => claim_registry.insert(OperationRegistry::from_raw(
+            claim.operations.clone(),
+            claim.block_operations.clone(),
+        )),
+    }
+}
+
+/// Données propres au worker qui exécute : versions d'outils du bail et capacités détectées.
+struct WorkerContext {
+    tool_versions: HashMap<String, String>,
+    capabilities: forgearr_shared::capabilities::WorkerCapabilities,
+}
+
+impl WorkerContext {
+    fn for_claim(claim: &Claim) -> Self {
+        let mut capabilities = crate::hardware_probe::detected_capabilities();
+        capabilities.software_encoders = crate::software_probe::software_capabilities();
+        Self {
+            tool_versions: claim
+                .required_tools
+                .iter()
+                .map(|req| (req.tool_id.clone(), req.version.clone()))
+                .collect(),
+            capabilities,
+        }
+    }
+}
+
+/// Moteur de flux configuré pour le bail (reprise de relais comprise).
+fn claim_engine<'a>(
+    claim: &'a Claim,
+    context: &'a WorkerContext,
+    registry: &'a OperationRegistry,
+    cache_mgr: &'a ToolCacheManager,
+    http_client: &'a reqwest::Client,
+    secrets_dir: Option<&'a Path>,
+) -> FlowEngine<'a> {
+    FlowEngine {
+        registry,
+        cache_mgr,
+        http_client,
+        secrets_dir,
+        plugin_configs: &claim.plugin_configs,
+        tool_versions: &context.tool_versions,
+        media_root: claim.media_root.as_deref(),
+        logical_source_name: Some(&claim.source_name),
+        allow_private_integrations: claim.allow_private_integrations,
+        worker_capabilities: Some(&context.capabilities),
+        resume_node_id: claim.resume_node_id.as_deref(),
+        run_info: FlowRunInfo {
+            library_id: claim.library_id,
+            library_name: claim.library_name.as_deref(),
+            worker_name: claim.worker_name.as_deref(),
+            resume_variables: Some(&claim.resume_variables),
+            linked_flows: &claim.linked_flows,
+            failure: None,
+        },
+        resumed_outputs: &claim.resumed_outputs,
+    }
+}
+
+/// Exécute le flux d'échec figé du bail à partir de la source, avec `error.code` et
+/// `error.message`, et retourne ses étapes numérotées après `previous`. Sans flux d'échec, rien.
+async fn run_failure_flow(
+    engine: FlowEngine<'_>,
+    claim: &Claim,
+    failure: FailureInfo<'_>,
+    input: FlowInput<'_>,
+    previous: &[JobStepEntry],
+) -> Vec<JobStepEntry> {
+    let Some(failure_flow) = first_linked(&claim.linked_flows, LinkedFlowRole::Failure) else {
+        return Vec::new();
+    };
+    let no_resumed_outputs = HashMap::new();
+    let failure_engine = FlowEngine {
+        resume_node_id: None,
+        resumed_outputs: &no_resumed_outputs,
+        run_info: FlowRunInfo {
+            resume_variables: None,
+            failure: Some(failure),
+            ..engine.run_info
+        },
+        ..engine
+    };
+    let outcome = failure_engine
+        .execute_flow(
+            claim.job_id,
+            failure_flow,
+            input.source,
+            input.work_dir,
+            input.progress_cb,
+        )
+        .await
+        .map(|res| res.steps)
+        .map_err(|err| (err.message, err.steps));
+    let first_index = previous
+        .iter()
+        .map(|step| step.step_index)
+        .max()
+        .unwrap_or(0);
+    failure_flow_steps(first_index, failure_flow, outcome)
+}
+
 /// Nœud du journal qui résume l'exécution du flux d'échec.
 pub const FAILURE_FLOW_STEP_NODE: &str = "failure-flow";
 
-/// Ajoute au journal de la tâche les étapes du flux d'échec et une étape de synthèse.
+/// Étape de synthèse du flux d'échec, au rang `step_index`.
+pub fn failure_flow_summary_step(
+    step_index: i32,
+    status: JobStepStatus,
+    message: String,
+) -> JobStepEntry {
+    JobStepEntry {
+        step_index,
+        node_id: FAILURE_FLOW_STEP_NODE.to_owned(),
+        block_kind: FAILURE_FLOW_STEP_NODE.to_owned(),
+        operation_id: None,
+        status,
+        message: Some(message),
+        output_excerpt: None,
+        variables: None,
+    }
+}
+
+/// Étapes du flux d'échec précédées d'une étape de synthèse.
 /// Un échec du flux d'échec est seulement journalisé : aucun autre flux n'est déclenché.
-fn append_failure_flow_steps(
-    steps: &mut Vec<JobStepEntry>,
+/// Les étapes sont numérotées après `last_index`, dernier rang du journal existant.
+fn failure_flow_steps(
+    last_index: i32,
     failure_flow: &FlowRecord,
     outcome: Result<Vec<JobStepEntry>, (String, Vec<JobStepEntry>)>,
-) {
-    let mut next_index = steps.iter().map(|step| step.step_index).max().unwrap_or(0);
+) -> Vec<JobStepEntry> {
+    let mut steps = Vec::new();
+    let mut next_index = last_index;
     let (status, message, flow_steps) = match outcome {
         Ok(flow_steps) => (
             JobStepStatus::Succeeded,
@@ -294,21 +411,13 @@ fn append_failure_flow_steps(
         }
     };
     next_index += 1;
-    steps.push(JobStepEntry {
-        step_index: next_index,
-        node_id: FAILURE_FLOW_STEP_NODE.to_owned(),
-        block_kind: FAILURE_FLOW_STEP_NODE.to_owned(),
-        operation_id: None,
-        status,
-        message: Some(message),
-        output_excerpt: None,
-        variables: None,
-    });
+    steps.push(failure_flow_summary_step(next_index, status, message));
     for mut step in flow_steps {
         next_index += 1;
         step.step_index = next_index;
         steps.push(step);
     }
+    steps
 }
 
 #[cfg(test)]
@@ -524,7 +633,7 @@ mod tests {
             step(2, "encode", JobStepStatus::Failed),
         ];
         let flow_steps = vec![step(1, "in", JobStepStatus::Succeeded)];
-        append_failure_flow_steps(&mut steps, &failure_flow(), Ok(flow_steps));
+        steps.extend(failure_flow_steps(2, &failure_flow(), Ok(flow_steps)));
         let indexes: Vec<i32> = steps.iter().map(|entry| entry.step_index).collect();
         assert_eq!(indexes, vec![1, 2, 3, 4]);
         assert_eq!(steps[2].node_id, FAILURE_FLOW_STEP_NODE);
@@ -540,7 +649,7 @@ mod tests {
         let mut steps = vec![step(1, "encode", JobStepStatus::Failed)];
         let flow_steps = vec![step(1, "hook", JobStepStatus::Failed)];
         let outcome = Err(("webhook refusé".to_owned(), flow_steps));
-        append_failure_flow_steps(&mut steps, &failure_flow(), outcome);
+        steps.extend(failure_flow_steps(1, &failure_flow(), outcome));
         assert_eq!(steps.len(), 3);
         assert_eq!(steps[1].status, JobStepStatus::Failed);
         assert!(
@@ -549,5 +658,33 @@ mod tests {
                 .as_deref()
                 .is_some_and(|message| message.contains("webhook refusé"))
         );
+    }
+
+    #[test]
+    fn central_failure_flow_steps_start_after_the_existing_journal() {
+        let steps = failure_flow_steps(0, &failure_flow(), Ok(Vec::new()));
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].step_index, 1);
+        assert_eq!(steps[0].node_id, FAILURE_FLOW_STEP_NODE);
+    }
+
+    #[tokio::test]
+    async fn no_failure_flow_means_no_central_steps() -> anyhow::Result<()> {
+        let claim = sample_claim(None, Vec::new());
+        let cache = ToolCacheManager::new(std::env::temp_dir().join("forgearr-no-failure-flow"));
+        let input = FlowInput {
+            source: Path::new("absent.mkv"),
+            work_dir: Path::new("."),
+            progress_cb: std::sync::Arc::new(|_, _| {}),
+        };
+        let failure = FailureInfo {
+            code: JobErrorCode::LeaseExpired.as_str(),
+            message: JobErrorCode::LeaseExpired.as_str(),
+        };
+        let client = reqwest::Client::new();
+        let steps =
+            execute_pending_failure_flow(&claim, &cache, &client, None, None, failure, input).await;
+        assert!(steps.is_empty());
+        Ok(())
     }
 }

@@ -6,9 +6,15 @@ use super::{
     is_tool_installable, load_manifest, parse_distribution, read_distribution,
     settings_fields as load_settings_fields, summarize_tool,
 };
-use crate::{flows::OperationRegistry, tools_cache::ToolCacheManager};
-use forgearr_shared::flows::OwnedBlockSpec;
-use std::{path::PathBuf, sync::Arc};
+use crate::{flows::OperationRegistry, live::ChangeNotifier, tools_cache::ToolCacheManager};
+use forgearr_shared::{flows::OwnedBlockSpec, live::ChangeTopic};
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 use tokio::sync::RwLock;
 
 #[derive(Clone)]
@@ -24,16 +30,32 @@ struct CachedSnapshot {
 #[derive(Clone, Default)]
 pub struct CatalogCache {
     inner: Arc<RwLock<Option<CachedSnapshot>>>,
+    /// Nombre d'invalidations : une lecture commencée avant la dernière n'est pas gardée.
+    generation: Arc<AtomicU64>,
+    changes: ChangeNotifier,
 }
 
 impl CatalogCache {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(changes: ChangeNotifier) -> Self {
+        Self {
+            changes,
+            ..Self::default()
+        }
     }
 
-    /// Vide le cache afin que la prochaine lecture recharge les dépôts depuis le disque.
+    pub fn changes(&self) -> &ChangeNotifier {
+        &self.changes
+    }
+
+    /// Vide le cache afin que la prochaine lecture recharge les dépôts depuis le disque, puis signale
+    /// le changement. À appeler après l'écriture.
     pub async fn invalidate(&self) {
-        *self.inner.write().await = None;
+        {
+            let mut guard = self.inner.write().await;
+            self.generation.fetch_add(1, Ordering::SeqCst);
+            *guard = None;
+        }
+        self.changes.notify(ChangeTopic::Catalog);
     }
 
     async fn snapshot(&self, roots: &[PathBuf]) -> CachedSnapshot {
@@ -42,6 +64,7 @@ impl CatalogCache {
         {
             return cached.clone();
         }
+        let generation = self.generation.load(Ordering::SeqCst);
         let owned_roots = roots.to_vec();
         let loaded = tokio::task::spawn_blocking(move || build_snapshot(owned_roots))
             .await
@@ -52,7 +75,9 @@ impl CatalogCache {
         {
             return cached.clone();
         }
-        *guard = Some(loaded.clone());
+        if self.generation.load(Ordering::SeqCst) == generation {
+            *guard = Some(loaded.clone());
+        }
         loaded
     }
 
@@ -238,7 +263,7 @@ mod tests {
                 {"id":"plugin.a","type":"plugin","version":"1.0.0","name":"A","manifestPath":"a.json"}
             ]}"#,
         )?;
-        let cache = CatalogCache::new();
+        let cache = CatalogCache::default();
         let roots = [dir.path().to_path_buf()];
         assert_eq!(cache.exposed_catalog(&roots).await.len(), 1);
 

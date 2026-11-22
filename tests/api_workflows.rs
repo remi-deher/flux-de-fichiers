@@ -298,6 +298,7 @@ async fn json_routes_reject_oversized_bodies_and_transfers_do_not() -> anyhow::R
     assert!(TRANSFER_TIMEOUT > JSON_API_TIMEOUT);
     assert_eq!(JSON_BODY_LIMIT, 16 * 1024);
     assert!(is_long_running_route("/api/v1/jobs/events"));
+    assert!(is_long_running_route("/api/v1/events"));
     assert!(is_long_running_route("/api/v1/ai/runs/abc/events"));
     assert!(!is_long_running_route("/api/v1/ai/runs/abc"));
     assert!(!is_long_running_route("/api/v1/ai/runs//events"));
@@ -448,7 +449,11 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
             error_code: None,
         })
         .await;
-    let (replayed, _) = state.event_history.subscribe_from(Some(first_seq)).await;
+    let replayed = state
+        .event_history
+        .subscribe_from(Some(first_seq))
+        .await
+        .replay;
     assert_eq!(replayed.len(), 1);
     assert_eq!(replayed[0].0, second_seq);
 

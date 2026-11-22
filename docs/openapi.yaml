@@ -167,7 +167,7 @@ paths:
       summary: >-
         Code d'un script du catalogue (tous dépôts confondus, le premier dépôt qui porte l'identifiant l'emporte),
         en lecture seule : métadonnées, variables, lignes de jetons colorés et état de ses dépendances. Affiché dans
-        le tiroir de l'entrée du catalogue.
+        le tiroir de l'entrée du catalogue. `inCollection` dit si l'import serait refusé (script déjà local ou nom pris).
       parameters:
         - {name: entry_id, in: path, required: true, schema: {type: string}}
       responses:
@@ -324,6 +324,35 @@ paths:
                 flowVersion: {type: [integer, 'null'], minimum: 1}
       responses:
         '201': {description: Nouveau traitement mis en file}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/events:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: >-
+        Flux SSE unique de l'interface (ADR 0028) : événements de tâches (droit `view_jobs`), `changed`
+        (`{"topic":"catalog|tools|repositories|settings"}`, sans donnée métier, selon le droit de lire le sujet) et
+        `resync` (des événements sont perdus : tout relire une fois). Reprise par `Last-Event-ID`. Le flux est fermé
+        au plus 30 s après la perte de l'accès. 404 sur un worker.
+      parameters:
+        - {name: Last-Event-ID, in: header, required: false, schema: {type: string}}
+      responses:
+        '200':
+          description: Flux d'événements.
+          content:
+            text/event-stream: {schema: {type: string}}
+        '403': {description: Aucun sujet consultable.}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/jobs/events:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Flux SSE des tâches seules (droit `view_jobs`), avec `resync` si des événements sont perdus.
+      parameters:
+        - {name: Last-Event-ID, in: header, required: false, schema: {type: string}}
+      responses:
+        '200':
+          description: Flux d'événements.
+          content:
+            text/event-stream: {schema: {type: string}}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/jobs/failures:
     get:

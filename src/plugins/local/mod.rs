@@ -18,7 +18,10 @@ pub use write::{
 use super::is_valid_repository_id;
 use crate::error::{AppError, AppResult};
 use serde_json::Value;
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 pub(super) const MAX_SCRIPT_BYTES: usize = 512 * 1024;
 pub(super) const MAX_RESOURCE_BYTES: usize = 5 * 1024 * 1024;
@@ -122,8 +125,26 @@ pub(super) fn resolve_slug(
     }
 }
 
+fn has_manifest(base_dir: &Path) -> bool {
+    base_dir.join("manifest.json").exists()
+}
+
+/// Préfixe des identifiants de scripts locaux.
+pub(super) const SCRIPT_ID_PREFIX: &str = "script.";
+
+/// Dossier d'un script local.
+pub(super) fn script_dir(local_dir: &Path, slug: &str) -> PathBuf {
+    local_dir.join("scripts").join(slug)
+}
+
+/// Créer un script de ce nom serait-il refusé, un autre l'occupant déjà ?
+pub(in crate::plugins) fn script_name_taken(local_dir: &Path, name: &str) -> bool {
+    resolve_slug(None, SCRIPT_ID_PREFIX, name)
+        .is_ok_and(|(slug, _)| has_manifest(&script_dir(local_dir, &slug)))
+}
+
 pub(super) fn ensure_new_target_absent(base_dir: &Path, is_update: bool) -> AppResult<()> {
-    if !is_update && base_dir.join("manifest.json").exists() {
+    if !is_update && has_manifest(base_dir) {
         return Err(AppError::Conflict);
     }
     Ok(())

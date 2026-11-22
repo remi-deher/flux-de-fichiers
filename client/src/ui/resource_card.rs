@@ -48,6 +48,9 @@ pub fn Tag(
 /// Tuile de ressource unifiée : liseré gauche d'état, icône, titre, sous-titre, badge, contenu et pied.
 #[component]
 pub fn ResourceCard(
+    /// Identité de la carte, pour lui rendre le focus après une relecture.
+    #[prop(optional, into)]
+    focus_key: Option<String>,
     #[prop(into)] title: String,
     #[prop(optional_no_strip)] subtitle: Option<String>,
     icon: IconName,
@@ -67,6 +70,7 @@ pub fn ResourceCard(
             class:is-open=move || active.is_some_and(|sig| sig.get())
             data-tone=tone.as_attr()
             tabindex=clickable.then_some("0")
+            data-focus-key=focus_key
             on:click=move |_| {
                 if let Some(cb) = on_click {
                     cb.run(());

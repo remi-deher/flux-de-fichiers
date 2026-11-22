@@ -1,9 +1,10 @@
 //! Prévisualisation en lecture seule du code d'un script exposé par un dépôt synchronisé.
 
 use super::{
-    CatalogEntry, CatalogItemType, catalog_with_roots, highlight::highlight_code,
-    local::read_local_script, parse_index_tolerant, read_script_requirements, repository_dir,
-    requirement_statuses,
+    CatalogEntry, CatalogItemType, catalog_with_roots,
+    highlight::highlight_code,
+    local::{read_local_script, script_name_taken},
+    parse_index_tolerant, read_script_requirements, repository_dir, requirement_statuses,
 };
 use crate::flows::OperationRegistry;
 use forgearr_shared::{
@@ -44,22 +45,24 @@ fn find_catalog_script(roots: &[PathBuf], entry_id: &str) -> Option<(PathBuf, Ca
 /// dépendances d'après les plugins chargés par `registry`.
 pub fn read_repository_script_preview(
     repos_dir: &Path,
+    local_dir: &Path,
     repository_id: &str,
     entry_id: &str,
     registry: &OperationRegistry,
 ) -> Option<ScriptPreviewView> {
     let (dir, entry) = find_script_entry(repos_dir, repository_id, entry_id)?;
-    preview_of(&dir, &entry, registry)
+    preview_of(&dir, local_dir, &entry, registry)
 }
 
 /// Aperçu d'un script du catalogue, sans connaître son dépôt.
 pub fn read_catalog_script_preview(
     roots: &[PathBuf],
+    local_dir: &Path,
     entry_id: &str,
     registry: &OperationRegistry,
 ) -> Option<ScriptPreviewView> {
     let (dir, entry) = find_catalog_script(roots, entry_id)?;
-    preview_of(&dir, &entry, registry)
+    preview_of(&dir, local_dir, &entry, registry)
 }
 
 /// Script du catalogue prêt à être enregistré dans la librairie locale (nouvel identifiant), avec le
@@ -92,6 +95,7 @@ fn import_request(script: LocalScriptSummary) -> UpsertLocalScriptRequest {
 
 fn preview_of(
     dir: &Path,
+    local_dir: &Path,
     entry: &CatalogEntry,
     registry: &OperationRegistry,
 ) -> Option<ScriptPreviewView> {
@@ -99,7 +103,10 @@ fn preview_of(
     let item_dir = dir.join(&entry.manifest_path).parent()?.to_path_buf();
     let declared = read_script_requirements(&item_dir);
     let lines = highlight_code(&script.code, script.interpreter.default_extension());
+    // Mêmes refus que l'import : script déjà local, ou nom déjà pris dans la librairie.
+    let in_collection = dir == local_dir || script_name_taken(local_dir, &script.name);
     Some(ScriptPreviewView {
+        in_collection,
         script,
         lines,
         requirements: requirement_statuses(&declared.requires, registry),
@@ -113,6 +120,7 @@ mod tests {
     use crate::plugins::{local::rebuild_local_index, save_local_script};
     use forgearr_shared::local::{LocalScriptSummary, ScriptInterpreter, UpsertLocalScriptRequest};
 
+    const LOCAL_DIR: &str = "local";
     const SCRIPT_CODE: &str = "cat >/dev/null\nprintf '{\"status\":\"ok\"}'";
 
     /// Script d'un dépôt, d'après l'aperçu (sans fournisseur chargé).
@@ -123,6 +131,7 @@ mod tests {
     ) -> Option<LocalScriptSummary> {
         read_repository_script_preview(
             repos_dir,
+            &repos_dir.join(LOCAL_DIR),
             repository_id,
             entry_id,
             &OperationRegistry::new(),
@@ -168,6 +177,7 @@ mod tests {
         let (repos_dir, script_id) = repository_with_script()?;
         let preview = read_repository_script_preview(
             repos_dir.path(),
+            &repos_dir.path().join(LOCAL_DIR),
             "repo.test",
             &script_id,
             &OperationRegistry::new(),
@@ -175,6 +185,30 @@ mod tests {
         .ok_or_else(|| anyhow::anyhow!("aperçu introuvable"))?;
         assert_eq!(preview.lines.len(), SCRIPT_CODE.lines().count());
         assert_eq!(preview.script.code, SCRIPT_CODE);
+        Ok(())
+    }
+
+    #[test]
+    fn preview_tells_whether_the_script_is_already_in_the_collection() -> anyhow::Result<()> {
+        let (repos_dir, script_id) = repository_with_script()?;
+        let local_dir = repos_dir.path().join(LOCAL_DIR);
+        let roots = [repos_dir.path().join("repo.test")];
+        let in_collection = || {
+            read_catalog_script_preview(&roots, &local_dir, &script_id, &OperationRegistry::new())
+                .map(|preview| preview.in_collection)
+        };
+        assert_eq!(in_collection(), Some(false));
+        let (_, request) = catalog_script_import(&roots, &script_id)
+            .ok_or_else(|| anyhow::anyhow!("script introuvable"))?;
+        save_local_script(&local_dir, request)?;
+        assert_eq!(in_collection(), Some(true));
+        let local = read_catalog_script_preview(
+            std::slice::from_ref(&local_dir),
+            &local_dir,
+            &script_id,
+            &OperationRegistry::new(),
+        );
+        assert!(local.is_some_and(|preview| preview.in_collection));
         Ok(())
     }
 
@@ -202,6 +236,7 @@ mod tests {
 
         let preview = read_repository_script_preview(
             repos_dir.path(),
+            &repos_dir.path().join(LOCAL_DIR),
             "repo.test",
             &script_id,
             &OperationRegistry::new(),

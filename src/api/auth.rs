@@ -3,13 +3,23 @@
 use super::AppState;
 use crate::{
     auth::{self, Principal},
-    error::AppError,
+    error::{AppError, AppResult},
 };
 use axum::{
     extract::{FromRef, FromRequestParts},
-    http::request::Parts,
+    http::{HeaderMap, Method, request::Parts},
 };
 use forgearr_shared::Permission;
+
+/// Identifie l'auteur d'une requête d'après ses en-têtes et les réglages en vigueur.
+pub(super) async fn authenticate_request(
+    state: &AppState,
+    headers: &HeaderMap,
+    method: &Method,
+) -> AppResult<Principal> {
+    let effective = crate::runtime_settings::load_effective(&state.pool, &state.config).await;
+    auth::authenticate(&state.pool, &effective.config, headers, method).await
+}
 
 /// Appelant authentifié, quel que soit son rôle (compte connecté ou clé d'API).
 #[derive(Debug, Clone)]
@@ -24,16 +34,9 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let app_state = AppState::from_ref(state);
-        let effective =
-            crate::runtime_settings::load_effective(&app_state.pool, &app_state.config).await;
-        auth::authenticate(
-            &app_state.pool,
-            &effective.config,
-            &parts.headers,
-            &parts.method,
-        )
-        .await
-        .map(AnyAuth)
+        authenticate_request(&app_state, &parts.headers, &parts.method)
+            .await
+            .map(AnyAuth)
     }
 }
 

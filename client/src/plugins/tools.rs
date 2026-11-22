@@ -1,8 +1,8 @@
 //! Onglet Outils de la page Plugins : état d'installation et déploiement des binaires (grille App Store).
 
 use super::metadata::{StoreCard, tool_status_tag};
-use super::{SelectedItem, TOOLS_PATH, bump, install_with_dependencies_action};
-use crate::api;
+use super::{SelectedItem, TOOLS_PATH, install_with_dependencies_action};
+use crate::live::Loaded;
 use crate::ui::search::{matches, query};
 use crate::ui::{EmptyState, IconName, MetricTone, StatItem, StatStrip, Tag, TagTone};
 use forgearr_shared::plugins::{ToolStatus, ToolStatusSummary};
@@ -77,9 +77,7 @@ pub fn filter_tools(
 
 #[component]
 pub fn ToolsSection(
-    tools: LocalResource<Result<Vec<ToolStatusSummary>, api::ApiError>>,
-    reload_tools: RwSignal<u32>,
-    reload_catalog: RwSignal<u32>,
+    tools: Loaded<Vec<ToolStatusSummary>>,
     can_install: bool,
     active_tool_id: Signal<Option<String>>,
     on_open_tool: Callback<SelectedItem>,
@@ -87,10 +85,7 @@ pub fn ToolsSection(
     let active_filter = RwSignal::new(ToolStateFilter::All);
     let installing_id = RwSignal::new(None::<String>);
     let feedback = RwSignal::new(None::<String>);
-    let install = install_with_dependencies_action(TOOLS_PATH, feedback, move || {
-        bump(reload_tools);
-        bump(reload_catalog);
-    });
+    let install = install_with_dependencies_action(TOOLS_PATH, feedback);
     Effect::new(move |_| {
         if !install.pending().get() {
             installing_id.set(None);
@@ -249,6 +244,7 @@ pub fn ToolsSection(
                                 };
                                 view! {
                                     <StoreCard
+                                        focus_key=tool.id
                                         title=tool.name
                                         description=description
                                         icon=IconName::Package

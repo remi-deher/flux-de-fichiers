@@ -104,12 +104,29 @@ pub fn host_arch() -> &'static str {
 #[derive(Clone, Debug)]
 pub struct ToolCacheManager {
     cache_root: PathBuf,
+    /// Présent sur le central seulement : ses interfaces suivent l'état des outils.
+    changes: Option<crate::live::ChangeNotifier>,
 }
 
 impl ToolCacheManager {
     pub fn new(cache_root: impl Into<PathBuf>) -> Self {
         Self {
             cache_root: cache_root.into(),
+            changes: None,
+        }
+    }
+
+    /// Signale les changements d'état des outils à `changes`.
+    #[must_use]
+    pub fn with_changes(mut self, changes: crate::live::ChangeNotifier) -> Self {
+        self.changes = Some(changes);
+        self
+    }
+
+    /// Signale que l'état d'un outil a changé (installation, purge).
+    pub fn notify_changed(&self) {
+        if let Some(changes) = &self.changes {
+            changes.notify(forgearr_shared::live::ChangeTopic::Tools);
         }
     }
 
@@ -243,6 +260,7 @@ impl ToolCacheManager {
                     remaining += 1;
                 } else if std::fs::remove_dir_all(&ver_path).is_ok() {
                     pruned += 1;
+                    self.notify_changed();
                 } else {
                     remaining += 1;
                 }
@@ -306,6 +324,7 @@ impl ToolCacheManager {
                     let _ = fs::remove_dir_all(&tmp_dir);
                     return Err(AppError::Storage(e));
                 }
+                self.notify_changed();
                 let binary_path = Self::resolve_bin_candidate(
                     &target_dir.join("bin"),
                     &artifact.binary_relative_path,

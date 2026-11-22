@@ -1,6 +1,6 @@
 //! Gestionnaires HTTP de la librairie locale (`/api/v1/local`) : scripts, ressources, modèles et packs maison.
 
-use super::{AnyAuth, AppState, ManagePluginsAuth, ViewLibrariesAuth, transfers};
+use super::{AnyAuth, AppState, ManagePluginsAuth, ViewLibrariesAuth, to_completion, transfers};
 use crate::{
     error::{AppError, AppResult},
     plugins,
@@ -21,6 +21,24 @@ use forgearr_shared::{
     plugins::CatalogEntry,
 };
 use serde_json::{Value, json};
+
+/// Écrit dans la librairie locale puis vide le cache du catalogue, qui signale le changement.
+pub(super) async fn write_local<T, W>(s: &AppState, write: W) -> AppResult<T>
+where
+    T: Send + 'static,
+    W: FnOnce(&std::path::Path) -> AppResult<T> + Send + 'static,
+{
+    let local_dir = plugins::local_catalog_dir(&s.config);
+    let cache = s.catalog_cache.clone();
+    to_completion(async move {
+        let written = tokio::task::spawn_blocking(move || write(&local_dir))
+            .await
+            .map_err(|_| AppError::Internal)??;
+        cache.invalidate().await;
+        Ok(written)
+    })
+    .await
+}
 
 pub async fn snapshot(
     State(s): State<AppState>,
@@ -61,11 +79,7 @@ pub async fn upsert_script(
     _auth: ManagePluginsAuth,
     Json(req): Json<UpsertLocalScriptRequest>,
 ) -> AppResult<Json<LocalScriptSummary>> {
-    let local_dir = plugins::local_catalog_dir(&s.config);
-    let saved = tokio::task::spawn_blocking(move || plugins::save_local_script(&local_dir, req))
-        .await
-        .map_err(|_| crate::error::AppError::Internal)??;
-    s.catalog_cache.invalidate().await;
+    let saved = write_local(&s, move |dir| plugins::save_local_script(dir, req)).await?;
     Ok(Json(saved))
 }
 
@@ -74,12 +88,7 @@ pub async fn upload_resource(
     _auth: ManagePluginsAuth,
     Json(req): Json<UploadLocalResourceRequest>,
 ) -> AppResult<Json<LocalResourceSummary>> {
-    let local_dir = plugins::local_catalog_dir(&s.config);
-    let saved =
-        tokio::task::spawn_blocking(move || plugins::upload_local_resource(&local_dir, req))
-            .await
-            .map_err(|_| crate::error::AppError::Internal)??;
-    s.catalog_cache.invalidate().await;
+    let saved = write_local(&s, move |dir| plugins::upload_local_resource(dir, req)).await?;
     Ok(Json(saved))
 }
 
@@ -88,12 +97,7 @@ pub async fn create_block_template(
     _auth: ManagePluginsAuth,
     Json(req): Json<CreateBlockTemplateRequest>,
 ) -> AppResult<Json<LocalBlockTemplate>> {
-    let local_dir = plugins::local_catalog_dir(&s.config);
-    let saved =
-        tokio::task::spawn_blocking(move || plugins::save_local_block_template(&local_dir, req))
-            .await
-            .map_err(|_| crate::error::AppError::Internal)??;
-    s.catalog_cache.invalidate().await;
+    let saved = write_local(&s, move |dir| plugins::save_local_block_template(dir, req)).await?;
     Ok(Json(saved))
 }
 
@@ -102,12 +106,7 @@ pub async fn create_flow_template(
     _auth: ManagePluginsAuth,
     Json(req): Json<CreateFlowTemplateRequest>,
 ) -> AppResult<Json<LocalFlowTemplate>> {
-    let local_dir = plugins::local_catalog_dir(&s.config);
-    let saved =
-        tokio::task::spawn_blocking(move || plugins::save_local_flow_template(&local_dir, req))
-            .await
-            .map_err(|_| crate::error::AppError::Internal)??;
-    s.catalog_cache.invalidate().await;
+    let saved = write_local(&s, move |dir| plugins::save_local_flow_template(dir, req)).await?;
     Ok(Json(saved))
 }
 
@@ -116,11 +115,7 @@ pub async fn create_pack(
     _auth: ManagePluginsAuth,
     Json(req): Json<CreateLocalPackRequest>,
 ) -> AppResult<Json<CatalogEntry>> {
-    let local_dir = plugins::local_catalog_dir(&s.config);
-    let saved = tokio::task::spawn_blocking(move || plugins::save_local_pack(&local_dir, req))
-        .await
-        .map_err(|_| crate::error::AppError::Internal)??;
-    s.catalog_cache.invalidate().await;
+    let saved = write_local(&s, move |dir| plugins::save_local_pack(dir, req)).await?;
     Ok(Json(saved))
 }
 
@@ -129,11 +124,7 @@ pub async fn delete_item(
     _auth: ManagePluginsAuth,
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
-    let local_dir = plugins::local_catalog_dir(&s.config);
     let deleted_id = id.clone();
-    tokio::task::spawn_blocking(move || plugins::delete_local_item(&local_dir, &id))
-        .await
-        .map_err(|_| crate::error::AppError::Internal)??;
-    s.catalog_cache.invalidate().await;
+    write_local(&s, move |dir| plugins::delete_local_item(dir, &id)).await?;
     Ok(Json(json!({ "id": deleted_id, "deleted": true })))
 }

@@ -3,10 +3,12 @@
 
 use super::{CATALOG_SCRIPTS_PATH, REPOSITORIES_PATH};
 use crate::api::{self, ApiError};
+use crate::live::{load, use_live};
 use crate::route::encode_segment;
 use crate::ui::{Tag, TagTone, Toasts, VariablesTable};
 use forgearr_shared::exposed_variables::RequirementStatus;
 use forgearr_shared::highlight::{CodeToken, ScriptPreviewView};
+use forgearr_shared::live::ChangeTopic;
 use forgearr_shared::local::LocalScriptSummary;
 use leptos::prelude::*;
 
@@ -51,6 +53,11 @@ fn import_error_message(error: &ApiError) -> String {
     }
 }
 
+/// Le script est-il dans la collection ? `None` tant que le central n'a pas répondu.
+fn in_collection(script: Option<&Result<ScriptPreviewView, ApiError>>) -> Option<bool> {
+    script.map(|read| read.as_ref().is_ok_and(|view| view.in_collection))
+}
+
 /// Libellé du bouton d'ajout à la librairie.
 fn import_label(imported: bool) -> &'static str {
     if imported {
@@ -62,16 +69,24 @@ fn import_label(imported: bool) -> &'static str {
 
 /// Bouton qui copie le script dans la librairie locale, où il devient modifiable.
 #[component]
-fn ImportButton(import_path: String) -> impl IntoView {
+fn ImportButton(import_path: String, in_collection: Signal<Option<bool>>) -> impl IntoView {
     let pending = RwSignal::new(false);
-    let imported = RwSignal::new(false);
+    let live = use_live();
+    // Ajout de cette page, en attendant que le central le confirme ; ensuite seul le central fait foi.
+    let just_added = RwSignal::new(false);
+    Effect::new(move |_| {
+        if in_collection.get() == Some(true) {
+            just_added.set(false);
+        }
+    });
+    let imported = move || just_added.get() || in_collection.get() == Some(true);
     let import = move |_| {
         let path = import_path.clone();
         pending.set(true);
         leptos::task::spawn_local(async move {
             match api::post::<(), LocalScriptSummary>(&path, None).await {
                 Ok(saved) => {
-                    let _ = imported.try_set(true);
+                    let _ = just_added.try_set(true);
                     Toasts::notify_success(format!(
                         "« {} » ajouté à votre librairie (section Scripts).",
                         saved.name
@@ -79,19 +94,20 @@ fn ImportButton(import_path: String) -> impl IntoView {
                 }
                 Err(error) => {
                     if is_already_imported(&error) {
-                        let _ = imported.try_set(true);
+                        let _ = just_added.try_set(true);
                     }
                     Toasts::notify_error(import_error_message(&error));
                 }
             }
+            live.touch(&[ChangeTopic::Catalog]);
             // Le tiroir a pu se fermer pendant l'appel.
             let _ = pending.try_set(false);
         });
     };
     view! {
-        <button type="button" class="btn btn-primary btn-sm" disabled=move || pending.get() || imported.get()
+        <button type="button" class="btn btn-primary btn-sm" disabled=move || pending.get() || in_collection.get().is_none() || imported()
             on:click=import>
-            {move || import_label(imported.get())}
+            {move || import_label(imported())}
         </button>
     }
 }
@@ -167,10 +183,8 @@ pub fn ScriptPreview(
     #[prop(optional_no_strip)] on_back: Option<Callback<()>>,
     #[prop(optional_no_strip)] import_path: Option<String>,
 ) -> impl IntoView {
-    let script = LocalResource::new(move || {
-        let path = path.clone();
-        async move { api::get::<ScriptPreviewView>(&path).await }
-    });
+    let script = load::<ScriptPreviewView>(&[ChangeTopic::Catalog], path);
+    let in_collection = Memo::new(move |_| in_collection(script.read().as_ref()));
     view! {
         <div class="pack-components">
             {on_back.map(|on_back| view! {
@@ -178,11 +192,11 @@ pub fn ScriptPreview(
                     "← Retour au contenu"
                 </button>
             })}
-            {import_path.map(|import_path| view! { <ImportButton import_path=import_path /> })}
+            {import_path.map(|import_path| view! { <ImportButton import_path=import_path in_collection=in_collection.into() /> })}
             {move || match script.get() {
                 None => view! { <p class="text-dim">"Chargement du script…"</p> }.into_any(),
                 Some(Err(error)) => view! { <p class="text-danger">{error.message()}</p> }.into_any(),
-                Some(Ok(ScriptPreviewView { script, lines, requirements, dependencies_unverified })) => view! {
+                Some(Ok(ScriptPreviewView { script, lines, requirements, dependencies_unverified, .. })) => view! {
                     <h3 class="form-label">{script.name}</h3>
                     <div class="cluster">
                         <Tag label=script.interpreter.executable() tone=TagTone::Primary />
@@ -228,6 +242,34 @@ mod tests {
             import_error_message(&ApiError::Network),
             ApiError::Network.message()
         );
+    }
+
+    #[test]
+    fn the_collection_state_is_known_from_the_server_answer() {
+        let view = |in_collection| ScriptPreviewView {
+            script: LocalScriptSummary {
+                id: "script.x".into(),
+                slug: "x".into(),
+                name: "X".into(),
+                description: None,
+                interpreter: Default::default(),
+                entrypoint: "run.sh".into(),
+                code: String::new(),
+                category: None,
+                tags: Vec::new(),
+                variables: Vec::new(),
+                requires: Vec::new(),
+                dependencies_unverified: false,
+            },
+            lines: Vec::new(),
+            requirements: Vec::new(),
+            dependencies_unverified: false,
+            in_collection,
+        };
+        assert_eq!(in_collection(None), None);
+        assert_eq!(in_collection(Some(&Ok(view(true)))), Some(true));
+        assert_eq!(in_collection(Some(&Ok(view(false)))), Some(false));
+        assert_eq!(in_collection(Some(&Err(ApiError::Network))), Some(false));
     }
 
     #[test]

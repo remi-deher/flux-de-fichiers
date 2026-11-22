@@ -120,7 +120,7 @@ async fn an_in_place_edit_runs_only_with_the_grant() -> anyhow::Result<()> {
     assert!(!launched);
     assert_eq!(refusing.halt(), Some(TaskStop::LeaseLost));
     let edit = (IrreversibleAction::InPlace, EDIT_NODE.to_owned());
-    assert_eq!(refusing.asked(), [edit.clone()]);
+    assert_eq!(refusing.asked(), std::slice::from_ref(&edit));
 
     let granting = FakeGate::new(Ok(()));
     let (_, launched) = run_edit(change, &granting).await?;

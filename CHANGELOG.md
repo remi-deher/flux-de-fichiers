@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.82.2](https://github.com/remi-deher/flux-de-fichiers/compare/v0.82.1...v0.82.2) (2026-11-22)
+
+
+### Bug Fixes
+
+* **plugins:** prérequis du store (copie des scripts, téléchargements, purge) ([bf587b1](https://github.com/remi-deher/flux-de-fichiers/commit/bf587b19c9468f7b386127d9e514e9278b7f91b8))
+
 ## [0.82.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.82.0...v0.82.1) (2026-11-22)
 
 

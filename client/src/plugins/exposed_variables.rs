@@ -1,13 +1,14 @@
-//! Variables qu'un plugin expose aux scripts, dans sa fiche : référence `{{espace.nom}}`, type et chemin lu (ADR 0025).
+//! Variables qu'un plugin expose aux scripts, dans sa fiche : référence `{$espace.nom}`, type et chemin lu (ADR 0025, modèles de l'ADR 0026).
 
 use super::metadata::{StatusBanner, StoreTone};
 use crate::ui::{Tag, TagTone};
 use forgearr_shared::exposed_variables::{ExposedNamespaceView, ExposedVariable, ExposedVariables};
+use forgearr_shared::flows::template_scope::template_token;
 use leptos::prelude::*;
 
 /// Référence à écrire dans la valeur d'une variable de script.
 pub fn reference_text(exposed: &ExposedVariables, variable: &ExposedVariable) -> String {
-    format!("{{{{{}}}}}", exposed.reference(variable))
+    template_token(&exposed.reference(variable))
 }
 
 /// Intitulé d'une variable : son libellé, sinon son nom.
@@ -23,7 +24,7 @@ fn variable_title(variable: &ExposedVariable) -> &str {
 pub fn deprecation_text(exposed: &ExposedVariables, variable: &ExposedVariable) -> Option<String> {
     let message = variable.deprecated.as_ref()?;
     Some(match exposed.replacement_reference(variable) {
-        Some(target) => format!("{message} Utilisez {{{{{target}}}}}."),
+        Some(target) => format!("{message} Utilisez {}.", template_token(&target)),
         None => message.clone(),
     })
 }
@@ -149,7 +150,7 @@ mod tests {
         let exposure = exposed();
         assert_eq!(
             reference_text(&exposure, &exposure.variables[0]),
-            "{{mediainfo.video.codec}}"
+            "{$mediainfo.video.codec}"
         );
     }
 
@@ -188,7 +189,7 @@ mod tests {
         exposure.variables[0].replaced_by = Some("video.codec_name".into());
         assert_eq!(
             deprecation_text(&exposure, &exposure.variables[0]).as_deref(),
-            Some("Renommée. Utilisez {{mediainfo.video.codec_name}}.")
+            Some("Renommée. Utilisez {$mediainfo.video.codec_name}.")
         );
     }
 }

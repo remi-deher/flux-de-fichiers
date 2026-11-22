@@ -8,8 +8,6 @@ use crate::script_variables::{MAX_VARIABLE_NAME_LEN, VariableKind};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Espaces de noms interdits : ils désignent des racines de référence du moteur.
-pub const RESERVED_NAMESPACES: &[&str] = &["nodes"];
 /// Nombre maximal de variables exposées par un plugin.
 pub const MAX_EXPOSED_VARIABLES: usize = 128;
 /// Nombre maximal de dépendances déclarées par un script.
@@ -69,7 +67,7 @@ impl ExposedVariables {
             .map(|name| format!("{}.{name}", self.namespace))
     }
 
-    /// Référence complète d'une variable : `espace.nom`.
+    /// Expression complète d'une variable dans un modèle `{$…}` : `espace.nom`.
     pub fn reference(&self, variable: &ExposedVariable) -> String {
         format!("{}.{}", self.namespace, variable.name)
     }
@@ -294,7 +292,7 @@ pub fn validate_exposed(exposed: &ExposedVariables) -> Result<(), ExposeError> {
     if !is_identifier(&exposed.namespace) {
         return Err(ExposeError::InvalidNamespace(exposed.namespace.clone()));
     }
-    if RESERVED_NAMESPACES.contains(&exposed.namespace.as_str()) {
+    if crate::flows::template_scope::is_reserved_namespace(&exposed.namespace) {
         return Err(ExposeError::ReservedNamespace(exposed.namespace.clone()));
     }
     if exposed.contract_major().is_none() {
@@ -451,11 +449,15 @@ mod tests {
                 Err(ExposeError::InvalidNamespace(bad.into()))
             );
         }
-        exposed.namespace = "nodes".into();
-        assert_eq!(
-            validate_exposed(&exposed),
-            Err(ExposeError::ReservedNamespace("nodes".into()))
-        );
+        for reserved in [
+            "nodes", "media", "file", "source", "work", "vars", "setting",
+        ] {
+            exposed.namespace = reserved.into();
+            assert_eq!(
+                validate_exposed(&exposed),
+                Err(ExposeError::ReservedNamespace(reserved.into()))
+            );
+        }
         exposed.namespace = "mediainfo".into();
         for bad in ["", "1", "1.0", "1.0.0.0", "a.b.c", "1.0.x"] {
             exposed.contract_version = bad.into();

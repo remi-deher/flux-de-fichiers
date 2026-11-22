@@ -1,19 +1,32 @@
-//! Références disponibles pour le nœud script d'un flux, contrôle à l'enregistrement et aperçu résolu (ADR 0025, phase D).
+//! Références disponibles pour le nœud script d'un flux, contrôle à l'enregistrement et aperçu
+//! résolu (ADR 0025, phase D ; modèle unique `{$…}` de l'ADR 0026).
+//!
+//! L'aperçu passe par la même portée ([`NodeScope`]) et la même fonction
+//! ([`resolve_node_config`]) que l'exécution : ce qu'il montre est ce que le script recevrait.
 
 use super::{
     OperationRegistry, OperationRuntime, ScriptRuntime,
+    substitution::{set_file_variables, set_location_variables},
     variables::{
-        NODE_OUTPUT_FIELDS, NodeOutput, VariableContext, as_text, exposed_value,
-        mask_secrets_for_preview, references_in, resolve_node_config, split_node_reference,
+        NodeOutput, NodeScope, exposed_value, mask_secrets_for_preview, resolve_node_config,
     },
 };
 use forgearr_shared::{
     exposed_variables::{ExposedVariable, ExposedVariables},
     flows::{
-        FlowGraph, FlowNode,
+        FlowGraph, FlowNode, FlowVariables, TEMPLATE_CLOSE, TEMPLATE_OPEN, apply_set_variable,
+        is_set_variable_kind,
+        legacy_references::{LegacyConversion, upgrade_legacy_references, upgrade_legacy_value},
         node_references::{
             NodeVariablesRequest, NodeVariablesView, ReferenceSource, ReferenceSuggestion,
+            flow_variable_suggestions,
         },
+        scalar_to_string,
+        template_scope::{
+            MEDIA_NAMESPACE, NODES_NAMESPACE, NodeOutputField, PATH_SEPARATOR, ScopeNamespace,
+            TemplateScope, node_reference, render_in_scope, split_node_reference,
+        },
+        template_tokens,
     },
 };
 use serde_json::Value;
@@ -88,23 +101,33 @@ fn collect_leaves(value: &Value, prefix: &str, depth: usize, out: &mut Vec<(Stri
     match value {
         Value::Object(map) => {
             for (key, item) in map {
-                collect_leaves(item, &format!("{prefix}.{key}"), depth + 1, out);
+                collect_leaves(
+                    item,
+                    &format!("{prefix}{PATH_SEPARATOR}{key}"),
+                    depth + 1,
+                    out,
+                );
             }
         }
         Value::Array(items) => {
             for (index, item) in items.iter().take(MAX_SAMPLE_ARRAY_ITEMS).enumerate() {
-                collect_leaves(item, &format!("{prefix}.{index}"), depth + 1, out);
+                collect_leaves(
+                    item,
+                    &format!("{prefix}{PATH_SEPARATOR}{index}"),
+                    depth + 1,
+                    out,
+                );
             }
         }
         Value::Null => {}
-        scalar => out.push((prefix.to_owned(), as_text(scalar))),
+        scalar => out.push((prefix.to_owned(), scalar_to_string(Some(scalar)))),
     }
 }
 
-/// Chemins `mediaInfo.…` des valeurs d'un exemple de métadonnées, avec leur valeur.
+/// Expressions `media.…` des valeurs d'un exemple de métadonnées, avec leur valeur.
 fn media_info_leaves(media_info: &Value) -> Vec<(String, String)> {
     let mut leaves = Vec::new();
-    collect_leaves(media_info, "mediaInfo", 0, &mut leaves);
+    collect_leaves(media_info, MEDIA_NAMESPACE, 0, &mut leaves);
     leaves
 }
 
@@ -124,41 +147,61 @@ fn upstream_operation_ids<'a>(
         .collect()
 }
 
-/// Références utilisables au nœud `node_id` : valeurs du flux, métadonnées, nœuds en amont et
-/// variables exposées par les plugins qui s'exécutent avant lui (sondes comprises).
+/// Expositions lues au nœud : celles que désigne son script, puis celles des sondes et des plugins
+/// en amont pour les espaces de noms qu'il ne lie pas.
+fn suggested_exposures<'a>(
+    graph: &FlowGraph,
+    node_id: &str,
+    registry: &'a OperationRegistry,
+) -> Vec<&'a ExposedVariables> {
+    let providers = upstream_operation_ids(graph, node_id, registry);
+    let requires = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == node_id)
+        .and_then(|node| script_runtime_for_node(registry, node))
+        .map(|runtime| runtime.requires)
+        .unwrap_or_default();
+    let mut exposures = registry.exposures_bound_by(&requires);
+    for fallback in registry.exposed_variables_where(|op| {
+        OperationRegistry::is_probe(op) || providers.contains(op.id.as_str())
+    }) {
+        if !exposures
+            .iter()
+            .any(|known| known.namespace == fallback.namespace)
+        {
+            exposures.push(fallback);
+        }
+    }
+    exposures
+}
+
+/// Expressions utilisables au nœud `node_id` : variables du flux, métadonnées, nœuds en amont et
+/// variables exposées par les plugins qui s'exécutent avant lui (sondes comprises). `scope` donne
+/// les valeurs d'exemple.
 pub fn reference_suggestions(
     graph: &FlowGraph,
     node_id: &str,
     registry: &OperationRegistry,
     sample_media: &Value,
+    scope: &dyn TemplateScope,
 ) -> Vec<ReferenceSuggestion> {
+    // Valeur d'exemple connue, sinon celle que donne la portée de l'aperçu.
     let suggestion =
-        |reference: String, label: String, source, sample: Option<String>| ReferenceSuggestion {
+        |reference: String, label: String, source, known: Option<String>| ReferenceSuggestion {
+            sample: known.or_else(|| {
+                scope
+                    .resolve(&reference)
+                    .map(|value| scalar_to_string(Some(&value)))
+            }),
             reference,
             label,
             source,
-            sample,
         };
-    let mut out = vec![
-        suggestion(
-            "workingFile".into(),
-            "Fichier courant".into(),
-            ReferenceSource::Flow,
-            Some(SAMPLE_WORKING_FILE.into()),
-        ),
-        suggestion(
-            "sourceFile".into(),
-            "Fichier source".into(),
-            ReferenceSource::Flow,
-            Some(SAMPLE_SOURCE_FILE.into()),
-        ),
-        suggestion(
-            "workDir".into(),
-            "Dossier de travail".into(),
-            ReferenceSource::Flow,
-            Some(SAMPLE_WORK_DIR.into()),
-        ),
-    ];
+    let mut out: Vec<ReferenceSuggestion> = flow_variable_suggestions(graph)
+        .into_iter()
+        .map(|known| suggestion(known.reference, known.label, known.source, None))
+        .collect();
     for (path, sample) in media_info_leaves(sample_media) {
         out.push(suggestion(
             path.clone(),
@@ -173,39 +216,17 @@ pub fn reference_suggestions(
         .iter()
         .filter(|node| upstream.contains(&node.id))
     {
-        for (field, label) in NODE_OUTPUT_FIELDS {
+        for field in NodeOutputField::ALL {
             out.push(suggestion(
-                format!("nodes.{}.{field}", node.id),
-                format!("{} — {label}", node.name),
+                node_reference(&node.id, field),
+                format!("{} — {}", node.name, field.label()),
                 ReferenceSource::Node,
                 None,
             ));
         }
     }
-    let providers = upstream_operation_ids(graph, node_id, registry);
-    let requires = graph
-        .nodes
-        .iter()
-        .find(|node| node.id == node_id)
-        .and_then(|node| script_runtime_for_node(registry, node))
-        .map(|runtime| runtime.requires)
-        .unwrap_or_default();
-    // Les expositions que désigne le script d'abord, puis celles des sondes et des plugins en amont
-    // pour les espaces de noms qu'il ne lie pas.
-    let mut exposures = registry.exposures_bound_by(&requires);
-    for fallback in registry.exposed_variables_where(|op| {
-        OperationRegistry::is_probe(op) || providers.contains(op.id.as_str())
-    }) {
-        if !exposures
-            .iter()
-            .any(|known| known.namespace == fallback.namespace)
-        {
-            exposures.push(fallback);
-        }
-    }
-    for exposed in exposures {
+    for exposed in suggested_exposures(graph, node_id, registry) {
         for variable in &exposed.variables {
-            let sample = exposed_value(sample_media, &variable.path).map(as_text);
             let base_label = if variable.label.trim().is_empty() {
                 exposed.reference(variable)
             } else {
@@ -216,6 +237,8 @@ pub fn reference_suggestions(
             } else {
                 base_label
             };
+            let sample = exposed_value(sample_media, &variable.path)
+                .map(|value| scalar_to_string(Some(value)));
             out.push(suggestion(
                 exposed.reference(variable),
                 label,
@@ -236,30 +259,58 @@ fn strings_in(value: &Value, out: &mut Vec<String>) {
     }
 }
 
-/// Pourquoi une référence n'est pas valable à cet endroit du flux (`None` si elle l'est).
+/// Expressions `{$…}` citées par les variables déclarées d'un nœud, anciennes références converties.
+fn declared_expressions(node: &FlowNode, runtime: &ScriptRuntime) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    for variable in &runtime.variables {
+        let mut texts = Vec::new();
+        if let Some(value) = node.config.get(&variable.name) {
+            strings_in(value, &mut texts);
+        }
+        for text in &texts {
+            for expr in
+                template_tokens(&upgrade_legacy_references(text, LegacyConversion::AllPaths))
+            {
+                found.push((variable.name.clone(), expr));
+            }
+        }
+    }
+    found
+}
+
+/// Texte d'une expression tel qu'il s'écrit dans un modèle.
+fn token_text(expr: &str) -> String {
+    format!("{TEMPLATE_OPEN}{expr}{TEMPLATE_CLOSE}")
+}
+
+/// Pourquoi une expression n'est pas valable à cet endroit du flux (`None` si elle l'est).
 fn reference_problem(
-    reference: &str,
+    expr: &str,
     upstream: &HashSet<&str>,
     plugin_references: &HashSet<String>,
 ) -> Option<&'static str> {
-    let mut parts = reference.split('.');
-    match parts.next() {
-        Some("workingFile" | "sourceFile" | "workDir") => {
-            parts.next().map(|_| "cette valeur n'a pas de sous-champ")
+    match ScopeNamespace::builtin(expr) {
+        Some(ScopeNamespace::Intrinsic | ScopeNamespace::Custom | ScopeNamespace::Media) => None,
+        Some(ScopeNamespace::Node) => split_node_reference(expr).and_then(|(id, _)| {
+            (!upstream.contains(id)).then_some("ce nœud ne s'exécute pas avant celui-ci")
+        }),
+        Some(ScopeNamespace::Http) => Some("réservée aux blocs HTTP"),
+        Some(ScopeNamespace::Plugin) | None
+            if expr
+                .strip_prefix(NODES_NAMESPACE)
+                .is_some_and(|rest| rest.starts_with(PATH_SEPARATOR)) =>
+        {
+            Some("forme attendue : nodes.<id>.message, nextPort ou file")
         }
-        Some("mediaInfo") => None,
-        Some("nodes") => match split_node_reference(reference) {
-            Some((id, _)) => {
-                (!upstream.contains(id)).then_some("ce nœud ne s'exécute pas avant celui-ci")
-            }
-            None => Some("forme attendue : nodes.<id>.message, nextPort ou workingFile"),
-        },
-        _ => (!plugin_references.contains(reference)).then_some("variable inconnue"),
+        Some(ScopeNamespace::Plugin) | None => {
+            (!plugin_references.contains(expr)).then_some("variable inconnue")
+        }
     }
 }
 
-/// Références invalides dans les variables déclarées des nœuds script du graphe ; vide si tout est valable.
-/// Seules les clés du schéma sont examinées : le code en ligne et les autres clés ne le sont jamais.
+/// Expressions invalides dans les variables déclarées des nœuds script du graphe ; vide si tout
+/// est valable. Seules les clés du schéma sont examinées : le code en ligne et les autres clés ne
+/// le sont jamais. Les anciennes références `{{…}}` sont contrôlées après conversion.
 pub fn check_references(graph: &FlowGraph, registry: &OperationRegistry) -> Vec<String> {
     let mut problems = Vec::new();
     for node in &graph.nodes {
@@ -278,31 +329,32 @@ pub fn check_references(graph: &FlowGraph, registry: &OperationRegistry) -> Vec<
             .collect();
         let upstream_ids = upstream_node_ids(graph, &node.id);
         let upstream: HashSet<&str> = upstream_ids.iter().map(String::as_str).collect();
-        for variable in &runtime.variables {
-            let mut texts = Vec::new();
-            if let Some(value) = node.config.get(&variable.name) {
-                strings_in(value, &mut texts);
-            }
-            for text in &texts {
-                for reference in references_in(text) {
-                    if let Some(problem) =
-                        reference_problem(reference, &upstream, &plugin_references)
-                    {
-                        problems.push(format!(
-                            "Nœud {} : variable « {} » : référence {{{{{reference}}}}} refusée ({problem})",
-                            node.id, variable.name
-                        ));
-                    }
-                }
+        for (variable, expr) in declared_expressions(node, &runtime) {
+            if let Some(problem) = reference_problem(&expr, &upstream, &plugin_references) {
+                problems.push(format!(
+                    "Nœud {} : variable « {variable} » : référence {} refusée ({problem})",
+                    node.id,
+                    token_text(&expr)
+                ));
             }
         }
     }
     problems
 }
 
-/// Avertissements d'un nœud : références, dans ses variables déclarées, à des variables exposées
-/// dépréciées (celles que son script lit). Sans effet sur l'exécution ; chacun cite le message du
-/// plugin et la variable de remplacement quand il en désigne une.
+/// Avertissement d'un nœud dont la configuration contient encore l'ancienne syntaxe `{{…}}`.
+fn legacy_syntax_warning(node: &FlowNode) -> Option<String> {
+    (upgrade_legacy_value(&node.config) != node.config).then(|| {
+        format!(
+            "Nœud {} : ancienne syntaxe {{{{…}}}} : elle sera réécrite en {TEMPLATE_OPEN}…{TEMPLATE_CLOSE} à l'enregistrement",
+            node.id
+        )
+    })
+}
+
+/// Avertissements d'un nœud script : références, dans ses variables déclarées, à des variables
+/// exposées dépréciées (celles que son script lit). Sans effet sur l'exécution ; chacun cite le
+/// message du plugin et la variable de remplacement quand il en désigne une.
 fn node_deprecation_warnings(
     node: &FlowNode,
     runtime: &ScriptRuntime,
@@ -323,45 +375,66 @@ fn node_deprecation_warnings(
     if deprecated.is_empty() {
         return warnings;
     }
-    for variable in &runtime.variables {
-        let mut texts = Vec::new();
-        if let Some(value) = node.config.get(&variable.name) {
-            strings_in(value, &mut texts);
-        }
-        for text in &texts {
-            for reference in references_in(text) {
-                let Some((exposed, exposure)) = deprecated.get(reference) else {
-                    continue;
-                };
-                let message = exposure.deprecated.as_deref().unwrap_or_default();
-                let replacement = exposed
-                    .replacement_reference(exposure)
-                    .map(|target| format!(" ; utilisez {{{{{target}}}}}"))
-                    .unwrap_or_default();
-                let warning = format!(
-                    "Nœud {} : variable « {} » : la référence {{{{{reference}}}}} est dépréciée ({message}){replacement}",
-                    node.id, variable.name
-                );
-                if !warnings.contains(&warning) {
-                    warnings.push(warning);
-                }
-            }
+    for (variable, expr) in declared_expressions(node, runtime) {
+        let Some((exposed, exposure)) = deprecated.get(&expr) else {
+            continue;
+        };
+        let message = exposure.deprecated.as_deref().unwrap_or_default();
+        let replacement = exposed
+            .replacement_reference(exposure)
+            .map(|target| format!(" ; utilisez {}", token_text(&target)))
+            .unwrap_or_default();
+        let warning = format!(
+            "Nœud {} : variable « {variable} » : la référence {} est dépréciée ({message}){replacement}",
+            node.id,
+            token_text(&expr)
+        );
+        if !warnings.contains(&warning) {
+            warnings.push(warning);
         }
     }
     warnings
 }
 
-/// Avertissements de tout le graphe : références à des variables exposées dépréciées.
+/// Avertissements d'un nœud : ancienne syntaxe, puis références dépréciées de son script.
+fn node_warnings(node: &FlowNode, registry: &OperationRegistry) -> Vec<String> {
+    let mut warnings: Vec<String> = legacy_syntax_warning(node).into_iter().collect();
+    if let Some(runtime) = script_runtime_for_node(registry, node) {
+        warnings.extend(node_deprecation_warnings(node, &runtime, registry));
+    }
+    warnings
+}
+
+/// Avertissements de tout le graphe : ancienne syntaxe et références à des variables exposées
+/// dépréciées.
 pub fn reference_warnings(graph: &FlowGraph, registry: &OperationRegistry) -> Vec<String> {
     graph
         .nodes
         .iter()
-        .filter_map(|node| {
-            script_runtime_for_node(registry, node)
-                .map(|runtime| node_deprecation_warnings(node, &runtime, registry))
-        })
-        .flatten()
+        .flat_map(|node| node_warnings(node, registry))
         .collect()
+}
+
+/// Variables de flux d'exemple au nœud : fichier, emplacements, puis `vars.*` écrites par les
+/// blocs « Définir une variable » en amont, appliqués dans l'ordre comme le moteur.
+fn sample_variables(graph: &FlowGraph, upstream: &[String]) -> FlowVariables {
+    let mut variables = FlowVariables::default();
+    set_location_variables(
+        &mut variables,
+        Path::new(SAMPLE_SOURCE_FILE),
+        Path::new(SAMPLE_WORK_DIR),
+    );
+    set_file_variables(&mut variables, Path::new(SAMPLE_WORKING_FILE));
+    for node in graph
+        .nodes
+        .iter()
+        .filter(|node| upstream.contains(&node.id) && is_set_variable_kind(node.kind.as_str()))
+    {
+        let config = render_in_scope(&upgrade_legacy_value(&node.config), &variables);
+        // Un bloc mal configuré est signalé par la validation ; l'aperçu l'ignore.
+        apply_set_variable(&config, &mut variables).ok();
+    }
+    variables
 }
 
 /// Schéma du script du nœud, références disponibles et `config` résolue avec des valeurs d'exemple.
@@ -398,23 +471,17 @@ pub fn node_variables_view(
             )
         })
         .collect();
-    let context = VariableContext::new(
-        Path::new(SAMPLE_WORKING_FILE),
-        Path::new(SAMPLE_SOURCE_FILE),
-        Path::new(SAMPLE_WORK_DIR),
-        &sample_media,
-        &outputs,
-        &registry.exposures_for_requirements(&runtime.requires),
-    );
+    let variables = sample_variables(graph, &upstream);
+    let exposures = registry.exposures_for_requirements(&runtime.requires);
+    let scope = NodeScope::new(&variables, &sample_media, &outputs, &exposures);
     let preview_config = mask_secrets_for_preview(&runtime.variables, &node.config);
-    let (resolved, error) = match resolve_node_config(&runtime.variables, &preview_config, &context)
-    {
+    let (resolved, error) = match resolve_node_config(&runtime.variables, &preview_config, &scope) {
         Ok(config) => (Some(config), None),
         Err(err) => (None, Some(err.to_string())),
     };
     NodeVariablesView {
-        references: reference_suggestions(graph, &node.id, registry, &sample_media),
-        warnings: node_deprecation_warnings(node, &runtime, registry),
+        references: reference_suggestions(graph, &node.id, registry, &sample_media, &scope),
+        warnings: node_warnings(node, registry),
         variables: runtime.variables,
         resolved,
         error,
@@ -483,17 +550,28 @@ mod tests {
         let reg = registry()?;
         let g = graph(json!({}));
         let media = json!({"video": {"codec": "hevc"}, "streams": [{"lang": "fr"}]});
-        let refs = reference_suggestions(&g, "enc", &reg, &media);
+        let mut variables = FlowVariables::default();
+        set_location_variables(&mut variables, Path::new("/in/a.mkv"), Path::new("/w"));
+        let refs = reference_suggestions(&g, "enc", &reg, &media, &variables);
         let find = |reference: &str| refs.iter().find(|r| r.reference == reference);
         assert_eq!(
-            find("workingFile").map(|r| r.source),
+            find("file.path").map(|r| r.source),
             Some(ReferenceSource::Flow)
         );
         assert_eq!(
-            find("mediaInfo.video.codec").and_then(|r| r.sample.clone()),
+            find("work.dir").and_then(|r| r.sample.clone()),
+            Some("/w".into())
+        );
+        assert_eq!(
+            find("job.id").map(|r| r.source),
+            Some(ReferenceSource::Variables)
+        );
+        assert_eq!(
+            find("media.video.codec").and_then(|r| r.sample.clone()),
             Some("hevc".into())
         );
-        assert!(find("mediaInfo.streams.0.lang").is_some());
+        assert!(find("media.streams.0.lang").is_some());
+        assert!(find("nodes.mi.file").is_some());
         assert_eq!(
             find("nodes.mi.message").map(|r| r.source),
             Some(ReferenceSource::Node)
@@ -503,7 +581,7 @@ mod tests {
         assert_eq!(plugin.map(|r| r.label.as_str()), Some("Codec vidéo"));
         assert_eq!(plugin.and_then(|r| r.sample.clone()), Some("hevc".into()));
         // Avant le nœud MediaInfo, le plugin n'est pas encore disponible.
-        let before = reference_suggestions(&g, "mi", &reg, &media);
+        let before = reference_suggestions(&g, "mi", &reg, &media, &variables);
         assert!(before.iter().all(|r| r.source != ReferenceSource::Plugin));
         Ok(())
     }
@@ -525,28 +603,40 @@ mod tests {
     #[test]
     fn valid_references_pass_and_each_invalid_kind_is_reported() -> anyhow::Result<()> {
         let reg = registry()?;
-        let ok = graph(json!({
-            "cible": "{{workingFile}} {{mediaInfo.video.codec}} {{nodes.mi.message}}",
+        let legacy = graph(json!({
+            "cible": "{{workingFile}} {{mediaInfo.video.codec}} {{nodes.mi.workingFile}}",
             "codec": "{{mediainfo.video.codec}}"
         }));
-        assert!(check_references(&ok, &reg).is_empty());
+        assert!(check_references(&legacy, &reg).is_empty());
+        let current = graph(json!({
+            "cible": "{$file.path} {$media.video.codec} {$nodes.mi.file} {$vars.x|d}",
+            "codec": "{$mediainfo.video.codec}"
+        }));
+        assert!(check_references(&current, &reg).is_empty());
 
         let bad = graph(json!({
-            "cible": "{{workingFile.x}} {{nodes.apres.message}} {{nodes.mi}} {{inconnue.var}}",
-            "codec": "{{nodes.mi.autre}}"
+            "cible": "{$file.path.x} {$nodes.apres.message} {$nodes.mi} {$inconnue.var}",
+            "codec": "{$nodes.mi.autre} {$setting.url}"
         }));
         let problems = check_references(&bad, &reg);
-        assert_eq!(problems.len(), 5);
+        assert_eq!(problems.len(), 6, "{problems:?}");
         assert!(problems.iter().all(|p| p.contains("Nœud enc")));
-        assert!(problems.iter().any(|p| p.contains("sous-champ")));
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("{$nodes.apres.message}")
+                    && p.contains("ne s'exécute pas avant"))
+        );
+        assert!(problems.iter().any(|p| p.contains("forme attendue")));
         assert!(problems.iter().any(|p| p.contains("variable inconnue")));
+        assert!(problems.iter().any(|p| p.contains("blocs HTTP")));
         Ok(())
     }
 
     #[test]
     fn only_declared_variables_are_checked() -> anyhow::Result<()> {
         let reg = registry()?;
-        let g = graph(json!({"code": "echo {{n'importe.quoi}}", "autre": "{{inconnue.var}}"}));
+        let g = graph(json!({"code": "echo {$n'importe.quoi}", "autre": "{$inconnue.var}"}));
         assert!(check_references(&g, &reg).is_empty());
         Ok(())
     }
@@ -561,7 +651,7 @@ mod tests {
             media_info: json!({"video": {"codec": "hevc"}}),
         };
         let view = node_variables_view(
-            &request(json!({"cible": "{{workingFile}}", "codec": "{{mediainfo.video.codec}}"})),
+            &request(json!({"cible": "{$file.path}", "codec": "{$mediainfo.video.codec}"})),
             &reg,
         );
         assert_eq!(view.error, None);
@@ -574,7 +664,7 @@ mod tests {
         assert_eq!(view.variables.len(), 3);
         assert!(!view.references.is_empty());
 
-        let failing = node_variables_view(&request(json!({"cible": "{{mediaInfo.absent}}"})), &reg);
+        let failing = node_variables_view(&request(json!({"cible": "{$media.absent}"})), &reg);
         assert!(failing.resolved.is_none());
         assert!(failing.error.is_some_and(|e| e.contains("cible")));
 
@@ -701,11 +791,11 @@ mod tests {
         let graph: FlowGraph = serde_json::from_value(json!({
             "nodes": [
                 {"id": "ancien", "type": "block.script.dep", "name": "Ancien",
-                 "config": {"codec": "{{mediainfo.video.codec}} {{mediainfo.video.codec}}"}},
+                 "config": {"codec": "{$mediainfo.video.codec} {$mediainfo.video.codec}"}},
                 {"id": "sans", "type": "block.script.dep", "name": "Sans remplaçante",
-                 "config": {"codec": "{{mediainfo.video.height}}"}},
+                 "config": {"codec": "{$mediainfo.video.height}"}},
                 {"id": "neuf", "type": "block.script.dep", "name": "Récent",
-                 "config": {"codec": "{{mediainfo.video.codec_name}}"}}
+                 "config": {"codec": "{$mediainfo.video.codec_name}"}}
             ],
             "connections": []
         }))?;
@@ -714,9 +804,9 @@ mod tests {
         assert_eq!(warnings.len(), 2, "{warnings:?}");
         assert!(
             warnings[0].contains("Nœud ancien")
-                && warnings[0].contains("{{mediainfo.video.codec}}")
+                && warnings[0].contains("{$mediainfo.video.codec}")
                 && warnings[0].contains("Renommée en video.codec_name.")
-                && warnings[0].contains("utilisez {{mediainfo.video.codec_name}}")
+                && warnings[0].contains("utilisez {$mediainfo.video.codec_name}")
         );
         assert!(
             warnings[1].contains("Nœud sans")
@@ -757,6 +847,86 @@ mod tests {
             &reg,
         );
         assert!(current.warnings.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_syntax_is_reported_as_a_warning() -> anyhow::Result<()> {
+        let reg = registry()?;
+        let legacy = graph(json!({"cible": "{{workingFile}}"}));
+        let warnings = reference_warnings(&legacy, &reg);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("Nœud enc") && warnings[0].contains("ancienne syntaxe"));
+        assert!(reference_warnings(&graph(json!({"cible": "{$file.path}"})), &reg).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn the_preview_of_a_legacy_graph_matches_the_execution_path() -> anyhow::Result<()> {
+        let reg = registry()?;
+        let legacy = json!({"cible": "{{workDir}}/{{nodes.mi.message}}", "codec": "{{mediaInfo.video.codec}}"});
+        let request = NodeVariablesRequest {
+            graph: graph(legacy.clone()),
+            node_id: "enc".into(),
+            media_info: json!({"video": {"codec": "hevc"}}),
+        };
+        let view = node_variables_view(&request, &reg);
+        let mut variables = FlowVariables::default();
+        set_location_variables(
+            &mut variables,
+            Path::new(SAMPLE_SOURCE_FILE),
+            Path::new(SAMPLE_WORK_DIR),
+        );
+        set_file_variables(&mut variables, Path::new(SAMPLE_WORKING_FILE));
+        let outputs = HashMap::from([(
+            "mi".to_owned(),
+            NodeOutput {
+                message: Some("‹message de mi›".into()),
+                ..NodeOutput::default()
+            },
+        )]);
+        let runtime = graph(legacy.clone())
+            .nodes
+            .iter()
+            .find(|node| node.id == "enc")
+            .and_then(|node| script_runtime_for_node(&reg, node))
+            .ok_or_else(|| anyhow::anyhow!("script introuvable"))?;
+        let exposures = reg.exposures_for_requirements(&runtime.requires);
+        let executed = resolve_node_config(
+            &runtime.variables,
+            &legacy,
+            &NodeScope::new(&variables, &request.media_info, &outputs, &exposures),
+        )?;
+        assert_eq!(view.resolved, Some(executed.clone()));
+        assert_eq!(executed["cible"], json!("/travail/‹message de mi›"));
+        assert_eq!(executed["codec"], json!("hevc"));
+        Ok(())
+    }
+
+    #[test]
+    fn the_preview_sees_variables_set_upstream() -> anyhow::Result<()> {
+        let reg = registry()?;
+        let mut g = graph(json!({"cible": "{$vars.suffixe}"}));
+        g.nodes.push(serde_json::from_value(json!({
+            "id": "set", "type": "set-variable", "name": "Suffixe",
+            "config": {"name": "suffixe", "value": "{$file.stem}-x"}
+        }))?);
+        g.connections
+            .push(serde_json::from_value(json!({"from": "mi", "to": "set"}))?);
+        g.connections
+            .push(serde_json::from_value(json!({"from": "set", "to": "enc"}))?);
+        let view = node_variables_view(
+            &NodeVariablesRequest {
+                graph: g,
+                node_id: "enc".into(),
+                media_info: Value::Null,
+            },
+            &reg,
+        );
+        assert_eq!(
+            view.resolved.map(|config| config["cible"].clone()),
+            Some(json!("fichier-x"))
+        );
         Ok(())
     }
 }

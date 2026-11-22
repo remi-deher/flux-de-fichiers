@@ -113,10 +113,11 @@ paths:
     post:
       security: [{ApiKey: []}, {WebSession: []}]
       summary: >-
-        Valider la structure d'un graphe de flux avant sauvegarde ; les références `{{…}}` des
-        variables déclarées des nœuds script (inconnues, ou vers un nœud qui ne précède pas) sont
-        aussi signalées dans `errors` ; une référence à une variable exposée dépréciée l'est dans `warnings`
-        (ADR 0025)
+        Valider la structure d'un graphe de flux avant sauvegarde ; les expressions `{$…}` des
+        variables déclarées des nœuds script (inconnues, réservées aux blocs HTTP, ou vers un nœud qui
+        ne précède pas) sont aussi signalées dans `errors` ; une référence à une variable exposée
+        dépréciée et l'ancienne syntaxe `{{…}}` (convertie, puis réécrite à l'enregistrement) le sont
+        dans `warnings` (ADR 0025, 0026)
       requestBody:
         required: true
         content:
@@ -210,9 +211,10 @@ paths:
     post:
       security: [{ApiKey: []}, {WebSession: []}]
       summary: >-
-        Variables du script d'un nœud (ADR 0025) : schéma, références `{{…}}` disponibles à cet endroit
-        du graphe (flux, métadonnées d'exemple, nœuds en amont, plugins qui s'exécutent avant) et
-        `config` résolue avec des valeurs d'exemple. Le graphe peut ne pas être enregistré. `warnings` liste les
+        Variables du script d'un nœud (ADR 0025, 0026) : schéma, expressions `{$…}` disponibles à cet
+        endroit du graphe (variables du flux, métadonnées d'exemple `media.*`, nœuds en amont
+        `nodes.<id>.*`, plugins qui s'exécutent avant) et `config` résolue avec des valeurs d'exemple,
+        par le même chemin que l'exécution (ancienne syntaxe `{{…}}` convertie). Le graphe peut ne pas être enregistré. `warnings` liste les
         références à des variables exposées dépréciées (absent s'il n'y en a pas). Les secrets présents dans `config.secrets` n'y apparaissent jamais (remplacés par `••••••••`).
       requestBody:
         required: true
@@ -228,8 +230,10 @@ paths:
       responses:
         '200':
           description: >-
-            `variables`, `references` (`reference`, `label`, `source` : flow, media_info, node, plugin,
-            `sample`), `resolved` (absent si la résolution échoue) et `error`
+            `variables`, `references` (`reference` : expression sans délimiteurs, par exemple
+            `media.video.codec` à insérer en `{$media.video.codec}` ; `label` ; `source` : variables,
+            flow, media_info, node, plugin ; `sample`), `resolved` (absent si la résolution échoue),
+            `error` et `warnings`
         default: {$ref: '#/components/responses/Error'}
   /api/v1/flows/{id}/versions/{version}/restore:
     post:
@@ -2094,7 +2098,7 @@ components:
         resume_node_id: {type: string, description: Identifiant du nœud où reprendre le flux figé.}
         resumed_outputs:
           type: object
-          description: "Sorties des nœuds exécutés avant le relais (`message`, `nextPort`), lues par `{{nodes.<id>.…}}` à la reprise (ADR 0025)."
+          description: "Sorties des nœuds exécutés avant le relais (`message`, `nextPort`), lues par `{$nodes.<id>.…}` à la reprise (ADR 0026)."
           additionalProperties:
             type: object
             properties:

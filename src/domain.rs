@@ -107,7 +107,7 @@ pub struct Claim {
     /// Nœud du flux où reprendre une tâche relayée par un autre worker (ADR 0018).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_node_id: Option<String>,
-    /// Sorties des nœuds exécutés avant le relais, lues par `{{nodes.<id>.…}}` à la reprise.
+    /// Sorties des nœuds exécutés avant le relais, lues par `{$nodes.<id>.…}` à la reprise.
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub resumed_outputs:
         std::collections::HashMap<String, forgearr_shared::relay::RelayedNodeOutput>,

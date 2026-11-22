@@ -3,8 +3,10 @@
 //! Une seule syntaxe sert à tous les blocs (binaire, script, HTTP) : `{$expr}` est remplacé par
 //! la valeur de `expr`, `{$expr|défaut}` utilise `défaut` si la valeur est absente ou vide, et
 //! `{{$` produit le littéral `{$`. Les variables personnalisées sont lues sous le préfixe `vars.`,
-//! les variables intrinsèques par leur clé (`file.name`, `job.id`…).
+//! les variables intrinsèques par leur clé (`file.name`, `job.id`…). La portée complète (métadonnées,
+//! nœuds, plugins) est décrite dans `template_scope`.
 
+use crate::script_variables::SECRETS_CONFIG_KEY;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::{convert::Infallible, fmt};
@@ -29,6 +31,9 @@ pub const MAX_VARIABLE_NAME_LEN: usize = 64;
 pub const MAX_VARIABLE_VALUE_BYTES: usize = 4096;
 /// Identifiant du bloc primitif « Définir une variable » (suffixe des types de bloc associés).
 pub const SET_VARIABLE_BLOCK: &str = "set-variable";
+/// Clés de configuration jamais rendues ni converties : le code d'un script et ses secrets
+/// stockés sont transmis tels quels.
+pub const RAW_CONFIG_KEYS: [&str; 2] = ["code", SECRETS_CONFIG_KEY];
 /// Espaces de noms propres aux blocs HTTP (`var.` : variables locales extraites entre étapes).
 pub const HTTP_NAMESPACES: [&str; 4] = ["context.", "var.", "setting.", "config."];
 
@@ -45,8 +50,17 @@ pub enum IntrinsicVariable {
     FileDir,
     #[serde(rename = "file.size")]
     FileSize,
+    /// Chemin complet du fichier de travail (ancien `{{workingFile}}`).
+    #[serde(rename = "file.path")]
+    FilePath,
     #[serde(rename = "source.name")]
     SourceName,
+    /// Chemin complet du fichier source (ancien `{{sourceFile}}`).
+    #[serde(rename = "source.path")]
+    SourcePath,
+    /// Dossier de travail de la tâche (ancien `{{workDir}}`).
+    #[serde(rename = "work.dir")]
+    WorkDir,
     #[serde(rename = "library.name")]
     LibraryName,
     #[serde(rename = "library.id")]
@@ -66,13 +80,16 @@ pub enum IntrinsicVariable {
 }
 
 impl IntrinsicVariable {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 16] = [
         Self::FileName,
         Self::FileStem,
         Self::FileExt,
         Self::FileDir,
         Self::FileSize,
+        Self::FilePath,
         Self::SourceName,
+        Self::SourcePath,
+        Self::WorkDir,
         Self::LibraryName,
         Self::LibraryId,
         Self::WorkerName,
@@ -90,7 +107,10 @@ impl IntrinsicVariable {
             Self::FileExt => "file.ext",
             Self::FileDir => "file.dir",
             Self::FileSize => "file.size",
+            Self::FilePath => "file.path",
             Self::SourceName => "source.name",
+            Self::SourcePath => "source.path",
+            Self::WorkDir => "work.dir",
             Self::LibraryName => "library.name",
             Self::LibraryId => "library.id",
             Self::WorkerName => "worker.name",
@@ -109,7 +129,10 @@ impl IntrinsicVariable {
             Self::FileExt => "Extension du fichier (sans le point)",
             Self::FileDir => "Dossier du fichier de travail",
             Self::FileSize => "Taille du fichier (octets)",
+            Self::FilePath => "Chemin du fichier de travail",
             Self::SourceName => "Nom logique de la source",
+            Self::SourcePath => "Chemin du fichier source",
+            Self::WorkDir => "Dossier de travail",
             Self::LibraryName => "Nom de la bibliothèque",
             Self::LibraryId => "Identifiant de la bibliothèque",
             Self::WorkerName => "Nom du worker",
@@ -332,13 +355,6 @@ pub fn render_template_with(
     rendered
 }
 
-/// Rend une chaîne ; un jeton inconnu donne sa valeur par défaut ou une chaîne vide.
-pub fn render_template(template: &str, resolve: &dyn Fn(&str) -> Option<Value>) -> String {
-    render_template_with(template, &mut |token: &TemplateToken<'_>| {
-        render_piece(resolve(token.expr).as_ref(), token.default)
-    })
-}
-
 /// Expression d'une chaîne réduite à un seul jeton (`"{$x}"`), dont le type JSON est conservé.
 pub fn exact_token(text: &str) -> Option<&str> {
     let inner = text
@@ -381,15 +397,6 @@ pub fn map_strings_infallible(value: &Value, map: &mut dyn FnMut(&str) -> Value)
         .unwrap_or_else(|never| match never {})
 }
 
-/// Résout récursivement un JSON ; une chaîne réduite à un seul jeton résolu garde son type.
-pub fn render_value(value: &Value, resolve: &dyn Fn(&str) -> Option<Value>) -> Value {
-    map_strings_infallible(value, &mut |text| {
-        exact_token(text)
-            .and_then(resolve)
-            .unwrap_or_else(|| Value::String(render_template(text, resolve)))
-    })
-}
-
 /// Expressions citées par un modèle (validation et aide de saisie de l'éditeur).
 pub fn template_tokens(template: &str) -> Vec<String> {
     let mut tokens = Vec::new();
@@ -400,19 +407,10 @@ pub fn template_tokens(template: &str) -> Vec<String> {
     tokens
 }
 
-/// Vrai si un exécuteur sait résoudre l'expression : variable intrinsèque, `vars.<nom>` valide
-/// ou espace de noms HTTP.
+/// Vrai si le moteur sait résoudre l'expression sans dépendre des plugins chargés : variable
+/// intrinsèque, `vars.<nom>` valide, `media.<chemin>`, `nodes.<id>.<champ>` ou espace HTTP.
 pub fn is_known_expression(expr: &str) -> bool {
-    let expr = expr.trim();
-    match expr.strip_prefix(CUSTOM_PREFIX) {
-        Some(name) => is_valid_variable_name(name),
-        None => {
-            IntrinsicVariable::from_key(expr).is_some()
-                || HTTP_NAMESPACES
-                    .iter()
-                    .any(|namespace| expr.starts_with(namespace))
-        }
-    }
+    super::template_scope::ScopeNamespace::builtin(expr).is_some()
 }
 
 #[cfg(test)]
@@ -435,6 +433,7 @@ mod tests {
         assert_eq!(failed, Err("x".to_owned()));
         assert_eq!(seen, 1);
     }
+    use crate::flows::template_scope::render_in_scope;
     use serde_json::json;
 
     fn sample() -> FlowVariables {
@@ -445,44 +444,55 @@ mod tests {
         vars
     }
 
-    fn resolve_with(vars: &FlowVariables) -> impl Fn(&str) -> Option<Value> + '_ {
-        move |expr: &str| vars.lookup(expr).cloned()
-    }
-
     #[test]
     fn renders_tokens_defaults_and_unknowns() {
         let vars = sample();
-        let resolve = resolve_with(&vars);
-        assert_eq!(render_template("a.{$file.ext}", &resolve), "a.mkv");
-        assert_eq!(render_template("{$vars.codec}-x", &resolve), "hevc-x");
-        assert_eq!(render_template("{$vars.absent|h264}", &resolve), "h264");
-        assert_eq!(render_template("[{$vars.absent}]", &resolve), "[]");
+        assert_eq!(
+            render_in_scope(&json!("a.{$file.ext}"), &vars),
+            json!("a.mkv")
+        );
+        assert_eq!(
+            render_in_scope(&json!("{$vars.codec}-x"), &vars),
+            json!("hevc-x")
+        );
+        assert_eq!(
+            render_in_scope(&json!("{$vars.absent|h264}"), &vars),
+            json!("h264")
+        );
+        assert_eq!(
+            render_in_scope(&json!("[{$vars.absent}]"), &vars),
+            json!("[]")
+        );
     }
 
     #[test]
     fn escapes_and_keeps_unclosed_tokens() {
         let vars = sample();
-        let resolve = resolve_with(&vars);
-        assert_eq!(render_template("{{$file.ext}", &resolve), "{$file.ext}");
-        assert_eq!(render_template("x {$file.ext", &resolve), "x {$file.ext");
+        assert_eq!(
+            render_in_scope(&json!("{{$file.ext}"), &vars),
+            json!("{$file.ext}")
+        );
+        assert_eq!(
+            render_in_scope(&json!("x {$file.ext"), &vars),
+            json!("x {$file.ext")
+        );
     }
 
     #[test]
     fn exact_token_keeps_json_type_and_recurses() {
         let vars = sample();
-        let resolve = resolve_with(&vars);
         let input = json!({
             "size": "{$file.size}",
             "list": ["{$vars.codec}", 3],
             "text": "n={$file.size}"
         });
-        let rendered = render_value(&input, &resolve);
+        let rendered = render_in_scope(&input, &vars);
         assert_eq!(
             rendered,
             json!({"size": 1234, "list": ["hevc", 3], "text": "n=1234"})
         );
         assert_eq!(
-            render_value(&json!("{$vars.absent|d}"), &resolve),
+            render_in_scope(&json!("{$vars.absent|d}"), &vars),
             json!("d")
         );
     }

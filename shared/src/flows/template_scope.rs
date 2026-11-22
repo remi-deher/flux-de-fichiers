@@ -8,7 +8,7 @@
 use super::variables::{
     CUSTOM_NAMESPACE, CUSTOM_PREFIX, FlowVariables, HTTP_NAMESPACES, IntrinsicVariable,
     TemplateToken, exact_token, is_valid_variable_name, map_strings, map_strings_infallible,
-    render_piece, render_template_with,
+    render_piece, render_template_with, scalar_to_string,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -177,6 +177,14 @@ impl RenderMode {
         })
     }
 
+    /// Texte d'un jeton : en mode strict, le défaut ne remplace qu'une valeur absente.
+    fn piece(self, value: Option<&Value>, default: &str) -> String {
+        match (self, value) {
+            (Self::Strict, Some(value)) => scalar_to_string(Some(value)),
+            _ => render_piece(value, default),
+        }
+    }
+
     /// Vrai si une expression sans valeur ni défaut doit être signalée.
     fn reports(self, scope: &dyn TemplateScope, expr: &str) -> bool {
         self == Self::Strict || scope.namespace_of(expr).is_some()
@@ -206,7 +214,7 @@ fn render_text(
         if value.is_none() && token.default.is_empty() && mode.reports(scope, token.expr) {
             missing(token.expr);
         }
-        render_piece(value.as_ref(), token.default)
+        mode.piece(value.as_ref(), token.default)
     }))
 }
 

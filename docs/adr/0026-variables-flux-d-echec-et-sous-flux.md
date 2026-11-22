@@ -100,12 +100,13 @@ manifestes) s'écrivent `{$expr|défaut}` et passent par **une portée, un analy
   `CUSTOM_NAMESPACE` et `HTTP_NAMESPACES` (`is_reserved_namespace`). Les conditions ne lisent toujours
   comme variables que les intrinsèques et `vars.*`.
 - **Référence absente** :
-  1. avec `|défaut`, le défaut s'applique quand la valeur est absente, nulle ou vide, partout ;
-  2. sans défaut, dans une variable déclarée d'un script, une expression d'une famille connue
-     (intrinsèque, `vars`, `media`, `nodes`, variable exposée déclarée) sans valeur fait échouer le bloc
+  1. avec `|défaut`, le défaut s'applique quand la valeur est absente ou nulle ; un texte vide y retombe
+     aussi, sauf dans une variable déclarée d'un script, où il compte comme une valeur ;
+  2. sans défaut, dans une variable déclarée d'un script, toute expression sans valeur, même d'un
+     espace de noms inconnu, fait échouer le bloc
      (`MissingReference`, message en `{$…}`), après repli sur le défaut du schéma ; `required` reste
      contrôlé ensuite ;
-  3. ailleurs (autres clés, blocs binaires, HTTP, expression d'un espace inconnu) : texte vide.
+  3. ailleurs (autres clés, blocs binaires, HTTP) : texte vide.
      L'enregistrement refuse les expressions inconnues des variables déclarées, et l'éditeur les signale.
 - **Types** : une chaîne réduite à un seul jeton garde le type JSON de sa valeur. Changement de
   comportement : dans un texte, `null` donne désormais un texte vide (l'ancien dialecte écrivait `null`).

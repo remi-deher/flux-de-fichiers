@@ -28,13 +28,20 @@ jobs:
       - name: Installer la toolchain de rust-toolchain.toml
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        id: mise-en-place
+      # Vérifications indépendantes : chacune s'exécute même si une précédente échoue (le job reste
+      # en échec), mais aucune sans mise en place achevée ni après une annulation.
       - run: cargo fmt --check
-      - run: cargo clippy --all-targets --locked -- -D warnings
-      - run: cargo test --locked
+      - if: ${{ !cancelled() && steps.mise-en-place.outcome == 'success' }}
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - if: ${{ !cancelled() && steps.mise-en-place.outcome == 'success' }}
+        run: cargo test --locked
       - name: Contrat partagé, client WASM et page (ADR 0014)
+        if: ${{ !cancelled() && steps.mise-en-place.outcome == 'success' }}
         run: |
           cargo clippy -p forgearr-shared -p forgearr-client -p forgearr-frontend --all-targets --locked -- -D warnings
           cargo clippy -p forgearr-client --target wasm32-unknown-unknown --locked -- -D warnings
           cargo test -p forgearr-shared -p forgearr-client -p forgearr-frontend --locked
       - name: La page se génère (frontend/dist/index.html n'est pas versionnée)
+        if: ${{ !cancelled() && steps.mise-en-place.outcome == 'success' }}
         run: cargo run -p forgearr-frontend --locked

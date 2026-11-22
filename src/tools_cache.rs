@@ -220,9 +220,10 @@ impl ToolCacheManager {
     }
 
     /// Supprime du cache les versions d'outils qui ne figurent plus dans `keep` (`(tool_id, version)`).
+    /// Une liste vide ne purge rien : elle vient d'un catalogue indisponible, pas d'un besoin nul.
     /// Ignore les répertoires temporaires (`.tmp-*`) modifiés récemment afin de ne pas gêner une extraction en cours.
     pub fn prune_unused(&self, keep: &[(String, String)]) -> std::io::Result<usize> {
-        if !self.cache_root.is_dir() {
+        if keep.is_empty() || !self.cache_root.is_dir() {
             return Ok(0);
         }
         let mut pruned = 0usize;
@@ -824,6 +825,9 @@ mod tests {
         std::fs::create_dir_all(manager.tool_dir("ffmpeg", "7.1.0", "x86_64"))?;
         std::fs::create_dir_all(manager.tool_dir("app.old", "1.0.0", "x86_64"))?;
         std::fs::create_dir_all(tmp.path().join(".tmp-active"))?;
+
+        assert_eq!(manager.prune_unused(&[])?, 0);
+        assert!(tmp.path().join("app.old").is_dir());
 
         let pruned = manager.prune_unused(&[("ffmpeg".into(), "7.1.0".into())])?;
         assert_eq!(pruned, 2);

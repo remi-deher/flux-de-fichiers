@@ -66,14 +66,15 @@ pub fn read_catalog_script_preview(
 }
 
 /// Script du catalogue prêt à être enregistré dans la librairie locale (nouvel identifiant), avec le
-/// dossier du dépôt qui le porte.
+/// dossier du dépôt qui le porte. `None` si son code manque à la copie du dépôt : l'aperçu reste
+/// possible, pas l'import.
 pub fn catalog_script_import(
     roots: &[PathBuf],
     entry_id: &str,
 ) -> Option<(PathBuf, UpsertLocalScriptRequest)> {
     let (dir, entry) = find_catalog_script(roots, entry_id)?;
     let script = read_local_script(&dir, &entry)?;
-    Some((dir, import_request(script)))
+    (!script.code.trim().is_empty()).then(|| (dir, import_request(script)))
 }
 
 /// Requête de création d'un script local qui reproduit `script` sous un identifiant neuf.
@@ -209,6 +210,17 @@ mod tests {
             &OperationRegistry::new(),
         );
         assert!(local.is_some_and(|preview| preview.in_collection));
+        Ok(())
+    }
+
+    #[test]
+    fn a_script_without_its_code_can_be_previewed_but_not_imported() -> anyhow::Result<()> {
+        let (repos_dir, script_id) = repository_with_script()?;
+        let roots = [repos_dir.path().join("repo.test")];
+        assert!(catalog_script_import(&roots, &script_id).is_some());
+        fs::remove_file(roots[0].join("scripts/tag-mkv/run.sh"))?;
+        assert!(read_repository_script(repos_dir.path(), "repo.test", &script_id).is_some());
+        assert!(catalog_script_import(&roots, &script_id).is_none());
         Ok(())
     }
 

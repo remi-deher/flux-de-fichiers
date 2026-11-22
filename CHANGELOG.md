@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.81.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.81.0...v0.81.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **client:** panic après navigation, icône du plugin scripts et bouton d'import ([7e72fe8](https://github.com/remi-deher/flux-de-fichiers/commit/7e72fe8d157b97b4e0532dbfaca2091ef3cb2069))
+* **client:** retirer les écouteurs de fenêtre au démontage et rendre ses routes au plugin scripts ([554f5d4](https://github.com/remi-deher/flux-de-fichiers/commit/554f5d438a08d7e90cfe2f80c76b7e1bb5247e15))
+
 ## [0.81.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.80.0...v0.81.0) (2026-11-22)
 
 

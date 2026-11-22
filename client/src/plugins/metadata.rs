@@ -155,6 +155,9 @@ pub fn CommonInfoRows(
 /// Carte style App Store respectant la règle des 3 signaux max (identité, statut, contexte).
 #[component]
 pub fn StoreCard(
+    /// Identité de la carte, pour lui rendre le focus après une relecture.
+    #[prop(into)]
+    focus_key: String,
     #[prop(into)] title: String,
     #[prop(into)] description: String,
     icon: IconName,
@@ -174,6 +177,7 @@ pub fn StoreCard(
             class:is-open=move || active.is_some_and(|sig| sig.get())
             data-tone=tone.as_attr()
             tabindex="0"
+            data-focus-key=focus_key
             on:click=move |_| on_open.run(())
             on:keydown=on_activate(move || on_open.run(()))
         >

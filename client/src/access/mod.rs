@@ -79,6 +79,11 @@ pub fn clear_address_fragment() {
 /// Lit l'identité après ouverture d'une session (jeton CSRF retenu).
 pub async fn identity_after(session: SessionInfo) -> Result<Me, ApiError> {
     api::set_csrf_token(&session.csrf_token);
+    identity().await
+}
+
+/// Identité de la session ouverte.
+pub(crate) async fn identity() -> Result<Me, ApiError> {
     api::get::<Me>(ME_PATH).await
 }
 

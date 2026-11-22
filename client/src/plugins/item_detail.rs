@@ -21,7 +21,29 @@ fn usage_hint(entry: &CatalogEntry) -> &'static str {
 }
 
 #[component]
-pub fn CatalogItemDetail(entry: CatalogEntry, can_manage: bool) -> impl IntoView {
+pub fn CatalogItemDetail(entry: Memo<CatalogEntry>, can_manage: bool) -> impl IntoView {
+    let opened = entry.get_untracked();
+    // Hors des fiches relues : l'aperçu ne se recharge pas quand une autre donnée de la pièce change.
+    let script_preview = (opened.entry_type == CatalogItemType::Script).then(|| {
+        view! {
+            <ScriptPreview
+                path=catalog_script_path(&opened.id)
+                import_path=can_manage.then(|| catalog_script_import_path(&opened.id))
+            />
+        }
+    });
+    view! {
+        <div class="inspection-panel">
+            {move || view! { <ItemSummary entry=entry.get() /> }}
+            {script_preview}
+            {move || view! { <ItemInfo entry=entry.get() /> }}
+        </div>
+    }
+}
+
+/// Bandeau, action et description d'une pièce.
+#[component]
+fn ItemSummary(entry: CatalogEntry) -> impl IntoView {
     let router = use_router();
     let badge = section_badge_label(entry.entry_type);
     let description = card_description(&entry);
@@ -54,62 +76,58 @@ pub fn CatalogItemDetail(entry: CatalogEntry, can_manage: bool) -> impl IntoView
         .into_any()
     });
 
-    let script_preview = (entry.entry_type == CatalogItemType::Script).then(|| {
-        view! {
-            <ScriptPreview
-                path=catalog_script_path(&entry.id)
-                import_path=can_manage.then(|| catalog_script_import_path(&entry.id))
-            />
-        }
-    });
+    view! {
+        <StatusBanner
+            title=format!("{badge} disponible")
+            text=Some(hint.to_owned())
+            tone=StoreTone::Neutral
+            action=flow_action
+        />
+        <p class="text-sm">{description}</p>
+    }
+}
 
+/// Aperçu du flux et métadonnées d'une pièce.
+#[component]
+fn ItemInfo(entry: CatalogEntry) -> impl IntoView {
+    let badge = section_badge_label(entry.entry_type);
     let flow_preview = entry
         .runtime
         .as_ref()
         .and_then(|runtime| runtime.flow_preview.clone());
 
     view! {
-        <div class="inspection-panel">
-            <StatusBanner
-                title=format!("{badge} disponible")
-                text=Some(hint.to_owned())
-                tone=StoreTone::Neutral
-                action=flow_action
+        {flow_preview.map(|preview| view! {
+            <FlowDiagram preview=preview />
+        })}
+        <div class="detail-grid">
+            <CommonInfoRows
+                id=entry.id
+                version=entry.version
+                updated_at=entry.updated_at
+                author=None
+                license=None
+                app_min=None
+                platforms=Vec::new()
+                tags=entry.tags
             />
-            <p class="text-sm">{description}</p>
-            {script_preview}
-            {flow_preview.map(|preview| view! {
-                <FlowDiagram preview=preview />
-            })}
-            <div class="detail-grid">
-                <CommonInfoRows
-                    id=entry.id
-                    version=entry.version
-                    updated_at=entry.updated_at
-                    author=None
-                    license=None
-                    app_min=None
-                    platforms=Vec::new()
-                    tags=entry.tags
-                />
-                <MetaRow term="Type">
-                    <Tag label=badge tone=TagTone::Primary />
+            <MetaRow term="Type">
+                <Tag label=badge tone=TagTone::Primary />
+            </MetaRow>
+            {entry.capability.map(|cap| view! {
+                <MetaRow term="Capacité">
+                    <Tag label=cap.as_str().to_owned() tone=TagTone::Success />
                 </MetaRow>
-                {entry.capability.map(|cap| view! {
-                    <MetaRow term="Capacité">
-                        <Tag label=cap.as_str().to_owned() tone=TagTone::Success />
-                    </MetaRow>
-                })}
-                {entry.category.filter(|cat| cat.shows_badge()).map(|cat| view! {
-                    <MetaRow term="Catégorie">
-                        <Tag label=cat.as_str() tone=TagTone::Neutral />
-                    </MetaRow>
-                })}
-                {entry.distribution.map(|dist| view! {
-                    <MetaRow term="Distribution" mono=true>{dist}</MetaRow>
-                })}
-                <MetaRow term="Manifeste" mono=true>{entry.manifest_path}</MetaRow>
-            </div>
+            })}
+            {entry.category.filter(|cat| cat.shows_badge()).map(|cat| view! {
+                <MetaRow term="Catégorie">
+                    <Tag label=cat.as_str() tone=TagTone::Neutral />
+                </MetaRow>
+            })}
+            {entry.distribution.map(|dist| view! {
+                <MetaRow term="Distribution" mono=true>{dist}</MetaRow>
+            })}
+            <MetaRow term="Manifeste" mono=true>{entry.manifest_path}</MetaRow>
         </div>
     }
 }

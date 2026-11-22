@@ -1,6 +1,11 @@
 //! Dossiers de catalogue : un dossier par dépôt synchronisé, plus un dossier local de développement.
 
-use crate::{config::Config, repository};
+use super::{CatalogCache, PluginRepository, SyncPolicy, SyncReport};
+use crate::{
+    config::Config,
+    error::{AppError, AppResult},
+    repository,
+};
 use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
 
@@ -52,8 +57,25 @@ pub async fn catalog_roots(pool: &SqlitePool, config: &Config) -> Vec<PathBuf> {
     roots
 }
 
+/// Synchronise un dépôt, vide le cache du catalogue, puis date la synchronisation : seul chemin qui
+/// publie une copie de dépôt, il signale donc chaque changement.
+pub async fn sync_and_signal(
+    pool: &SqlitePool,
+    cache: &CatalogCache,
+    repo: &PluginRepository,
+    repos_dir: &Path,
+    policy: &SyncPolicy,
+) -> AppResult<SyncReport> {
+    let report = super::sync_repository_verified(pool, repo, repos_dir, policy)
+        .await
+        .map_err(|error| AppError::RepositoryUnavailable(error.to_string()))?;
+    cache.invalidate().await;
+    repository::touch_plugin_repository_sync(pool, cache.changes(), &repo.id).await?;
+    Ok(report)
+}
+
 /// Synchronise chaque dépôt activé ; un échec est journalisé sans interrompre les autres.
-pub async fn sync_enabled_repositories(pool: &SqlitePool, config: &Config) {
+pub async fn sync_enabled_repositories(pool: &SqlitePool, config: &Config, cache: &CatalogCache) {
     let Ok(repositories) = repository::list_plugin_repositories(pool).await else {
         return;
     };
@@ -62,13 +84,12 @@ pub async fn sync_enabled_repositories(pool: &SqlitePool, config: &Config) {
         .await
         .sync_policy();
     for repo in repositories.into_iter().filter(|repo| repo.enabled) {
-        match super::sync_repository_verified(pool, &repo, &repos_dir, &policy).await {
+        match sync_and_signal(pool, cache, &repo, &repos_dir, &policy).await {
             Ok(report) => {
                 tracing::info!(repository = %repo.id, entries = report.entries, files = report.files, "dépôt de plugins synchronisé");
-                let _ = repository::touch_plugin_repository_sync(pool, &repo.id).await;
             }
             Err(error) => {
-                tracing::warn!(repository = %repo.id, error = %error, "synchronisation du dépôt impossible");
+                tracing::warn!(repository = %repo.id, ?error, "synchronisation du dépôt impossible");
             }
         }
     }

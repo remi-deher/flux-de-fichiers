@@ -2,8 +2,9 @@
 
 use super::flow_preview::FlowMiniPreview;
 use super::metadata::{CommonInfoRows, MetaRow, StatusBanner, StoreTone};
-use super::{SelectedItem, section_badge_label};
+use super::{CATALOG_TOPICS, SelectedItem, TOOL_TOPICS, section_badge_label};
 use crate::api;
+use crate::live::{load, use_live};
 use crate::route::encode_segment;
 use crate::ui::{Icon, IconName, Tag, TagTone, Toasts};
 use forgearr_shared::plugins::vocab::CatalogItemType;
@@ -125,7 +126,7 @@ fn OverviewTab(
             let entry_id = entry.id.clone();
             let entry_preview = catalog_entries.and_then(|entries| {
                 entries
-                    .get_untracked()
+                    .get()
                     .into_iter()
                     .find(|item| item.id == entry_id)
                     .and_then(|item| item.runtime)
@@ -237,7 +238,6 @@ pub fn PackDetail(
     pack_id: String,
     tab: RwSignal<usize>,
     can_install: bool,
-    on_installed: Callback<()>,
     #[prop(optional)] on_open_plugin: Option<Callback<SelectedItem>>,
     #[prop(optional)] on_open_tool: Option<Callback<SelectedItem>>,
     #[prop(optional)] catalog_entries: Option<Signal<Vec<CatalogEntry>>>,
@@ -246,10 +246,8 @@ pub fn PackDetail(
     let spec_path = format!("/api/v1/packs/{encoded}");
     let install_path = format!("/api/v1/packs/{encoded}/install");
 
-    let detail = LocalResource::new(move || {
-        let path = spec_path.clone();
-        async move { api::get::<PackDetailView>(&path).await }
-    });
+    let live = use_live();
+    let detail = load::<PackDetailView>(CATALOG_TOPICS, spec_path);
     let feedback = RwSignal::new(None::<String>);
     let last_result = RwSignal::new(None::<PackInstallResult>);
 
@@ -267,7 +265,7 @@ pub fn PackDetail(
             } else {
                 Toasts::set_error(feedback, summary);
             }
-            on_installed.run(());
+            live.touch(TOOL_TOPICS);
         }
         Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}

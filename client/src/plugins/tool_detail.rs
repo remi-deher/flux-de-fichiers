@@ -1,11 +1,12 @@
 //! Tiroir d'inspection à onglets d'un outil distribué : distribution, utilisation (liens croisés) et informations.
 
 use super::metadata::{CommonInfoRows, MetaRow, StatusBanner, meta_date_row, tool_status_tag};
-use super::{SelectedItem, TOOLS_PATH, bump, install_with_dependencies_action};
-use crate::api;
+use super::{SelectedItem, TOOL_TOPICS, TOOLS_PATH, install_with_dependencies_action};
+use crate::api::ApiError;
+use crate::live::load;
 use crate::route::encode_segment;
 use crate::ui::{Icon, IconName, Tag, TagTone};
-use forgearr_shared::plugins::{ToolDetailView, ToolStatus};
+use forgearr_shared::plugins::{DependencyInstallResult, ToolDetailView, ToolStatus};
 use leptos::prelude::*;
 
 const INSTALL_ICON_SIZE: u32 = 15;
@@ -44,9 +45,8 @@ pub fn short_sha(sha: &str) -> String {
 fn ToolActionBanner(
     detail: ToolDetailView,
     can_install: bool,
-    reload_tools: RwSignal<u32>,
-    reload_catalog: RwSignal<u32>,
-    reload_detail: RwSignal<u32>,
+    install: Action<String, Result<DependencyInstallResult, ApiError>>,
+    feedback: RwSignal<Option<String>>,
 ) -> impl IntoView {
     let tool_id = detail.summary.id.clone();
     let (status_label, _, banner_tone) = tool_status_tag(detail.summary.status);
@@ -54,12 +54,6 @@ fn ToolActionBanner(
         && detail.summary.installable
         && detail.summary.status == ToolStatus::NotInstalled
         && detail.release_status.as_deref() != Some("contract-only");
-    let feedback = RwSignal::new(None::<String>);
-    let install = install_with_dependencies_action(TOOLS_PATH, feedback, move || {
-        bump(reload_tools);
-        bump(reload_catalog);
-        bump(reload_detail);
-    });
 
     let subtitle = match detail.summary.status {
         ToolStatus::Ready => format!(
@@ -230,17 +224,13 @@ pub fn ToolDetail(
     tool_id: String,
     tab: RwSignal<usize>,
     can_install: bool,
-    reload_tools: RwSignal<u32>,
-    reload_catalog: RwSignal<u32>,
     on_open_plugin: Callback<SelectedItem>,
 ) -> impl IntoView {
-    let reload_detail = RwSignal::new(0_u32);
+    // Hors de la fiche relue : l'installation en cours garde son état et son bilan.
+    let feedback = RwSignal::new(None::<String>);
+    let install = install_with_dependencies_action(TOOLS_PATH, feedback);
     let path = format!("{TOOLS_PATH}/{}", encode_segment(&tool_id));
-    let detail = LocalResource::new(move || {
-        reload_detail.track();
-        let path = path.clone();
-        async move { api::get::<ToolDetailView>(&path).await }
-    });
+    let detail = load::<ToolDetailView>(TOOL_TOPICS, path);
 
     view! {
         <div class="inspection-panel">
@@ -255,9 +245,8 @@ pub fn ToolDetail(
                             <ToolActionBanner
                                 detail=banner_data
                                 can_install=can_install
-                                reload_tools=reload_tools
-                                reload_catalog=reload_catalog
-                                reload_detail=reload_detail
+                                install=install
+                                feedback=feedback
                             />
                             {match active_tab {
                                 ToolDrawerTab::Distribution => view! {

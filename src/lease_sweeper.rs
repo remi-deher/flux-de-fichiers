@@ -55,9 +55,12 @@ mod tests {
             .bind(job.id)
             .execute(&state.pool)
             .await?;
-        let (_, mut events) = state.event_history.subscribe_from(None).await;
+        let mut events = state.event_history.subscribe_from(None).await.rx;
         sweep_once(state.clone(), None).await;
         let (_, event) = tokio::time::timeout(EVENT_LIMIT, events.recv()).await??;
+        let crate::live::LiveEvent::Job(event) = event else {
+            anyhow::bail!("événement de tâche attendu");
+        };
         assert_eq!(event.job_id, job.id);
         assert_eq!(event.event_type, JobEventType::JobFailed);
         assert_eq!(event.error_code, Some(JobErrorCode::LeaseExpired));

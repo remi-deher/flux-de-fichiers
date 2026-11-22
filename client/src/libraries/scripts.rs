@@ -2,8 +2,9 @@
 
 use super::requirements_editor::{RequirementsEditor, requirement_rows_from, rows_to_requirements};
 use super::variables_editor::{VariablesEditor, rows_from, rows_to_variables};
-use super::{LOCAL_SCRIPTS_PATH, LocalDeleteButton, bump, use_local_delete};
+use super::{LOCAL_SCRIPTS_PATH, LOCAL_TOPICS, LocalDeleteButton, use_local_delete};
 use crate::api;
+use crate::live::{ChangedElsewhere, Loaded, use_live};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
@@ -79,7 +80,7 @@ fn parse_category(raw: &str) -> Option<PluginCategory> {
     }
 }
 
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct ScriptDraft {
     id: Option<String>,
     name: String,
@@ -129,12 +130,60 @@ impl ScriptDraft {
     }
 }
 
+/// Ce que le script ouvert est devenu dans la librairie relue.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum OpenedScript {
+    Unchanged,
+    Changed(Box<ScriptDraft>),
+    Removed,
+}
+
+impl OpenedScript {
+    /// `opened` est l'état à l'ouverture, sans la saisie ; un nouveau script n'a rien à comparer.
+    fn of(opened: &ScriptDraft, scripts: &[LocalScriptSummary]) -> Self {
+        let Some(id) = opened.id.as_deref() else {
+            return Self::Unchanged;
+        };
+        match scripts.iter().find(|script| script.id == id) {
+            None => Self::Removed,
+            Some(script) => {
+                let current = ScriptDraft::from_summary(script);
+                if current == *opened {
+                    Self::Unchanged
+                } else {
+                    Self::Changed(Box::new(current))
+                }
+            }
+        }
+    }
+}
+
+/// Avertissement affiché au-dessus du script ouvert ; `on_reload` remplace la saisie.
+fn opened_script_warning(state: OpenedScript, on_reload: Callback<ScriptDraft>) -> Option<AnyView> {
+    match state {
+        OpenedScript::Unchanged => None,
+        OpenedScript::Changed(current) => {
+            let reload = Callback::new(move |()| on_reload.run((*current).clone()));
+            Some(
+                view! {
+                    <ChangedElsewhere
+                        text="Ce script a changé depuis son ouverture. Recharger remplace votre saisie ; enregistrer remplace ces changements."
+                        on_reload=Some(reload)
+                    />
+                }
+                .into_any(),
+            )
+        }
+        OpenedScript::Removed => Some(
+            view! { <ChangedElsewhere text="Ce script a été supprimé de la librairie." /> }
+                .into_any(),
+        ),
+    }
+}
+
 #[component]
-pub fn ScriptsSection(
-    snapshot: LocalResource<Result<LocalLibrarySnapshot, api::ApiError>>,
-    reload: RwSignal<u32>,
-    can_manage: bool,
-) -> impl IntoView {
+pub fn ScriptsSection(snapshot: Loaded<LocalLibrarySnapshot>, can_manage: bool) -> impl IntoView {
+    let live = use_live();
     let editing = RwSignal::new(None::<ScriptDraft>);
     let drawer_open = RwSignal::new(false);
     let feedback = RwSignal::new(None::<String>);
@@ -160,13 +209,13 @@ pub fn ScriptsSection(
         Some(Ok(_)) => {
             drawer_open.set(false);
             Toasts::notify_success("Script enregistré dans la librairie locale.");
-            bump(reload);
+            live.touch(LOCAL_TOPICS);
         }
         Some(Err(err)) => Toasts::set_error(feedback, err.message()),
         None => {}
     });
 
-    let remove = use_local_delete(reload, "Script supprimé.");
+    let remove = use_local_delete("Script supprimé.");
 
     if can_manage {
         provide_topbar_action(ActionSpec {
@@ -194,6 +243,15 @@ pub fn ScriptsSection(
             },
         )]
     });
+
+    let opened_state = Memo::new(move |_| {
+        let (editing, snapshot) = (editing.read(), snapshot.read());
+        match (editing.as_ref(), snapshot.as_ref()) {
+            (Some(opened), Some(Ok(data))) => OpenedScript::of(opened, &data.scripts),
+            _ => OpenedScript::Unchanged,
+        }
+    });
+    let on_reload = Callback::new(move |current: ScriptDraft| editing.set(Some(current)));
 
     let drawer_title = Signal::derive(move || match editing.get() {
         Some(d) if d.id.is_some() => d.name,
@@ -260,6 +318,7 @@ pub fn ScriptsSection(
                                 });
                                 view! {
                                     <ResourceCard
+                                        focus_key=script.id.clone()
                                         title=script.name
                                         subtitle=script.description
                                         icon=IconName::Command
@@ -288,6 +347,9 @@ pub fn ScriptsSection(
             }
         }}
         <Drawer open=drawer_open eyebrow="Script local" title=drawer_title>
+            {move || (!save.pending().get())
+                .then(|| opened_script_warning(opened_state.get(), on_reload))
+                .flatten()}
             {move || editing.get().map(|draft| {
                 let id = draft.id;
                 let name = RwSignal::new(draft.name);
@@ -443,6 +505,33 @@ mod tests {
         assert!(starter_script_code(ScriptInterpreter::Deno).contains("Deno.stdin"));
         assert!(starter_script_code(ScriptInterpreter::Pwsh).contains("ConvertFrom-Json"));
         assert!(!is_starter_code("echo custom script"));
+    }
+
+    #[test]
+    fn an_opened_script_notices_changes_and_removal() -> Result<(), serde_json::Error> {
+        let script: LocalScriptSummary = serde_json::from_value(serde_json::json!({
+            "id": "script.x", "slug": "x", "name": "X", "interpreter": ScriptInterpreter::Sh,
+            "entrypoint": "run.sh", "code": "true"
+        }))?;
+        let opened = ScriptDraft::from_summary(&script);
+        let edited = LocalScriptSummary {
+            code: "false".into(),
+            ..script.clone()
+        };
+        assert_eq!(
+            OpenedScript::of(&opened, std::slice::from_ref(&script)),
+            OpenedScript::Unchanged
+        );
+        assert_eq!(
+            OpenedScript::of(&opened, std::slice::from_ref(&edited)),
+            OpenedScript::Changed(Box::new(ScriptDraft::from_summary(&edited)))
+        );
+        assert_eq!(OpenedScript::of(&opened, &[]), OpenedScript::Removed);
+        assert_eq!(
+            OpenedScript::of(&ScriptDraft::blank(), &[]),
+            OpenedScript::Unchanged
+        );
+        Ok(())
     }
 
     #[test]

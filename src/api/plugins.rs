@@ -1,11 +1,10 @@
 //! Gestionnaires HTTP pour les plugins, le catalogue et les outils distribués.
 
-use super::{AppState, ManagePluginsAuth, ViewPluginsAuth};
+use super::{AppState, ManagePluginsAuth, ViewPluginsAuth, local::write_local, to_completion};
 use crate::{
     error::{AppError, AppResult},
     plugins::{self, CatalogEntry, ToolStatusSummary},
     secrets::SecretBox,
-    tools_cache::ToolCacheManager,
 };
 use axum::{
     Json,
@@ -32,7 +31,7 @@ pub async fn catalog(
     _auth: ViewPluginsAuth,
 ) -> AppResult<Json<Vec<CatalogEntry>>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
+    let cache_mgr = s.tool_cache();
     let saved_settings = crate::repository::list_all_plugin_settings(&s.pool)
         .await
         .unwrap_or_default();
@@ -58,7 +57,7 @@ pub async fn plugin_detail(
         .plugin_detail(&roots, &id)
         .await
         .ok_or(AppError::NotFound)?;
-    let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
+    let cache_mgr = s.tool_cache();
     let tool_statuses: std::collections::HashMap<String, plugins::ToolStatus> = s
         .catalog_cache
         .tools_status(&roots, &cache_mgr)
@@ -109,7 +108,7 @@ pub async fn tools(
     State(s): State<AppState>,
     _auth: ViewPluginsAuth,
 ) -> AppResult<Json<Vec<ToolStatusSummary>>> {
-    let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
+    let cache_mgr = s.tool_cache();
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     Ok(Json(s.catalog_cache.tools_status(&roots, &cache_mgr).await))
 }
@@ -178,7 +177,7 @@ async fn install_catalog_item(
     {
         return Err(AppError::NotFound);
     }
-    let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
+    let cache_mgr = s.tool_cache();
     let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
         .await
         .sync_policy();
@@ -186,6 +185,15 @@ async fn install_catalog_item(
         plugins::install_with_dependencies(Some(&s.pool), &roots, &cache_mgr, &sync_policy, id)
             .await?;
     Ok(Json(result))
+}
+
+/// Enregistre les réglages d'un plugin et le signale, même si le client coupe la connexion.
+async fn store_settings(s: &AppState, id: &str, settings_json: String) -> AppResult<()> {
+    let (pool, changes, id) = (s.pool.clone(), s.changes.clone(), id.to_owned());
+    to_completion(async move {
+        crate::repository::set_plugin_settings(&pool, &changes, &id, &settings_json).await
+    })
+    .await
 }
 
 fn parse_saved(raw: Option<&str>) -> Value {
@@ -218,7 +226,7 @@ pub async fn get_settings(
     // Anciens enregistrements en clair : chiffrés à la première lecture.
     if let Some(migrated) = plugins::migrate_plaintext(&secrets, &id, &saved, &names)? {
         let migrated_str = serde_json::to_string(&migrated).map_err(|_| AppError::Invalid)?;
-        crate::repository::set_plugin_settings(&s.pool, &id, &migrated_str).await?;
+        store_settings(&s, &id, migrated_str).await?;
         saved = migrated;
     }
     let (public, set) = plugins::mask(&saved, &names);
@@ -263,7 +271,7 @@ pub async fn save_settings(
     let names = plugins::secret_names(&schema_fields, keys.iter());
     let sealed = plugins::seal(&secrets, &id, &payload, &existing, &names)?;
     let sealed_str = serde_json::to_string(&sealed).map_err(|_| AppError::Invalid)?;
-    crate::repository::set_plugin_settings(&s.pool, &id, &sealed_str).await?;
+    store_settings(&s, &id, sealed_str).await?;
     let (public, _) = plugins::mask(&sealed, &names);
     Ok(Json(serde_json::json!({
         "pluginId": id,
@@ -419,7 +427,7 @@ pub async fn worker_active_tools(
 ) -> AppResult<Json<Vec<crate::domain::ToolRequirement>>> {
     crate::auth::authorize_worker(&s.pool, &headers).await?;
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
+    let cache_mgr = s.tool_cache();
     let list = s
         .catalog_cache
         .tools_status(&roots, &cache_mgr)
@@ -467,10 +475,11 @@ pub async fn repository_script(
     _auth: ViewPluginsAuth,
 ) -> AppResult<Json<forgearr_shared::highlight::ScriptPreviewView>> {
     let repos_dir = s.config.plugin_repos_dir();
+    let local_dir = plugins::local_catalog_dir(&s.config);
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     let registry = s.catalog_cache.operations(&roots).await;
     let script = tokio::task::spawn_blocking(move || {
-        plugins::read_repository_script_preview(&repos_dir, &id, &entry_id, &registry)
+        plugins::read_repository_script_preview(&repos_dir, &local_dir, &id, &entry_id, &registry)
     })
     .await
     .map_err(|_| AppError::Internal)?;
@@ -484,9 +493,10 @@ pub async fn catalog_script(
     _auth: ViewPluginsAuth,
 ) -> AppResult<Json<forgearr_shared::highlight::ScriptPreviewView>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let local_dir = plugins::local_catalog_dir(&s.config);
     let registry = s.catalog_cache.operations(&roots).await;
     let preview = tokio::task::spawn_blocking(move || {
-        plugins::read_catalog_script_preview(&roots, &entry_id, &registry)
+        plugins::read_catalog_script_preview(&roots, &local_dir, &entry_id, &registry)
     })
     .await
     .map_err(|_| AppError::Internal)?;
@@ -502,18 +512,15 @@ pub async fn import_catalog_script(
     _auth: ManagePluginsAuth,
 ) -> AppResult<Json<forgearr_shared::local::LocalScriptSummary>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    let local_dir = plugins::local_catalog_dir(&s.config);
-    let saved = tokio::task::spawn_blocking(move || {
+    let saved = write_local(&s, move |local_dir| {
         let (source_dir, request) =
             plugins::catalog_script_import(&roots, &entry_id).ok_or(AppError::NotFound)?;
         if source_dir == local_dir {
             return Err(AppError::Conflict);
         }
-        plugins::save_local_script(&local_dir, request)
+        plugins::save_local_script(local_dir, request)
     })
-    .await
-    .map_err(|_| AppError::Internal)??;
-    s.catalog_cache.invalidate().await;
+    .await?;
     Ok(Json(saved))
 }
 
@@ -523,10 +530,10 @@ pub async fn add_repository(
     _auth: ManagePluginsAuth,
     Json(payload): Json<plugins::CreateRepositoryRequest>,
 ) -> AppResult<Json<plugins::PluginRepository>> {
-    let url = payload.index_url.trim();
-    plugins::validate_index_url(url)
+    let url = payload.index_url.trim().to_owned();
+    plugins::validate_index_url(&url)
         .map_err(|error| AppError::InvalidManifest(error.to_string()))?;
-    let name = payload.name.trim();
+    let name = payload.name.trim().to_owned();
     if name.is_empty() {
         return Err(AppError::InvalidManifest(
             "Le nom du dépôt ne peut pas être vide".to_string(),
@@ -542,8 +549,14 @@ pub async fn add_repository(
         ));
     }
 
-    let repo = crate::repository::add_plugin_repository(&s.pool, &id, name, url).await?;
-    Ok(Json(repo))
+    to_completion(async move {
+        let repo =
+            crate::repository::add_plugin_repository(&s.pool, &s.changes, &id, &name, &url).await?;
+        // Une copie locale d'un ancien dépôt de même identifiant rejoint aussitôt le catalogue.
+        s.catalog_cache.invalidate().await;
+        Ok(Json(repo))
+    })
+    .await
 }
 
 /// Active ou désactive une source de dépôt.
@@ -552,12 +565,16 @@ pub async fn toggle_repository(
     Path(id): Path<String>,
     _auth: ManagePluginsAuth,
 ) -> AppResult<Json<Value>> {
-    let new_state = crate::repository::toggle_plugin_repository(&s.pool, &id).await?;
-    s.catalog_cache.invalidate().await;
-    Ok(Json(serde_json::json!({
-        "id": id,
-        "enabled": new_state,
-    })))
+    to_completion(async move {
+        let new_state =
+            crate::repository::toggle_plugin_repository(&s.pool, &s.changes, &id).await?;
+        s.catalog_cache.invalidate().await;
+        Ok(Json(serde_json::json!({
+            "id": id,
+            "enabled": new_state,
+        })))
+    })
+    .await
 }
 
 /// Supprime un dépôt tiers (interdit sur le catalogue officiel).
@@ -566,12 +583,15 @@ pub async fn delete_repository(
     Path(id): Path<String>,
     _auth: ManagePluginsAuth,
 ) -> AppResult<Json<Value>> {
-    crate::repository::delete_plugin_repository(&s.pool, &id).await?;
-    s.catalog_cache.invalidate().await;
-    Ok(Json(serde_json::json!({
-        "id": id,
-        "deleted": true,
-    })))
+    to_completion(async move {
+        crate::repository::delete_plugin_repository(&s.pool, &s.changes, &id).await?;
+        s.catalog_cache.invalidate().await;
+        Ok(Json(serde_json::json!({
+            "id": id,
+            "deleted": true,
+        })))
+    })
+    .await
 }
 
 /// Synchronise un dépôt : copie atomique de son index, de ses manifestes et de ses contrats de distribution.
@@ -584,16 +604,17 @@ pub async fn sync_repository(
     let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
         .await
         .sync_policy();
-    let report = plugins::sync_repository_verified(
-        &s.pool,
-        &repo,
-        &s.config.plugin_repos_dir(),
-        &sync_policy,
-    )
-    .await
-    .map_err(|error| AppError::RepositoryUnavailable(error.to_string()))?;
-    crate::repository::touch_plugin_repository_sync(&s.pool, &id).await?;
-    s.catalog_cache.invalidate().await;
+    let report = to_completion(async move {
+        plugins::sync_and_signal(
+            &s.pool,
+            &s.catalog_cache,
+            &repo,
+            &s.config.plugin_repos_dir(),
+            &sync_policy,
+        )
+        .await
+    })
+    .await?;
     Ok(Json(serde_json::json!({
         "id": id,
         "status": "synced",
@@ -638,7 +659,7 @@ pub async fn tool_detail(
         return Err(AppError::NotFound);
     }
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
+    let cache_mgr = s.tool_cache();
     let detail =
         tokio::task::spawn_blocking(move || plugins::build_tool_detail(&roots, &cache_mgr, &id))
             .await
@@ -654,7 +675,7 @@ pub async fn install_pack(
     _auth: ManagePluginsAuth,
 ) -> AppResult<Json<plugins::PackInstallResult>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
-    let cache_mgr = ToolCacheManager::new(&s.config.tools_cache_dir);
+    let cache_mgr = s.tool_cache();
     let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
         .await
         .sync_policy();

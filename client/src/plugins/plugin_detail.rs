@@ -3,15 +3,18 @@
 use super::exposed_variables::ExposedVariablesSection;
 use super::metadata::{CommonInfoRows, MetaRow, StatusBanner, StoreTone, tool_status_tag};
 use super::settings::PluginSettings;
-use super::{CATALOG_PATH, SelectedItem, bump, install_with_dependencies_action};
-use crate::api;
+use super::{CATALOG_PATH, CATALOG_TOPICS, SelectedItem, install_with_dependencies_action};
+use crate::api::ApiError;
 use crate::flows::NodeDomain;
+use crate::live::load;
 use crate::route::encode_segment;
 use crate::ui::{Icon, IconName, Tag, TagTone};
 use forgearr_shared::flows::OwnedBlockSpec;
 #[cfg(test)]
 use forgearr_shared::flows::{OwnedFieldKind, OwnedFieldSpec};
-use forgearr_shared::plugins::{PluginDependency, PluginDetailView, ToolStatus};
+use forgearr_shared::plugins::{
+    DependencyInstallResult, PluginDependency, PluginDetailView, ToolStatus,
+};
 use leptos::prelude::*;
 
 const BLOCK_CARD_ICON_SIZE: u32 = 16;
@@ -85,20 +88,13 @@ pub fn count_missing_dependencies(deps: &[PluginDependency]) -> usize {
 fn PluginActionBanner(
     detail: PluginDetailView,
     can_configure: bool,
-    reload_tools: RwSignal<u32>,
-    reload_catalog: RwSignal<u32>,
-    reload_detail: RwSignal<u32>,
+    install: Action<String, Result<DependencyInstallResult, ApiError>>,
+    feedback: RwSignal<Option<String>>,
     tab: RwSignal<usize>,
 ) -> impl IntoView {
     let plugin_id = detail.id.clone();
     let missing = count_missing_dependencies(&detail.dependencies);
     let has_deps = !detail.dependencies.is_empty();
-    let feedback = RwSignal::new(None::<String>);
-    let install = install_with_dependencies_action(CATALOG_PATH, feedback, move || {
-        bump(reload_tools);
-        bump(reload_catalog);
-        bump(reload_detail);
-    });
 
     let (title, text, tone) = if missing > 0 {
         (
@@ -352,23 +348,30 @@ pub fn PluginDetail(
     plugin_id: String,
     tab: RwSignal<usize>,
     can_configure: bool,
-    reload_tools: RwSignal<u32>,
-    reload_catalog: RwSignal<u32>,
     on_open_tool: Callback<SelectedItem>,
 ) -> impl IntoView {
-    let reload_detail = RwSignal::new(0_u32);
+    // Hors de la fiche relue : l'installation en cours garde son état et son bilan.
+    let feedback = RwSignal::new(None::<String>);
+    let install = install_with_dependencies_action(CATALOG_PATH, feedback);
     let path = format!("/api/v1/plugins/{}", encode_segment(&plugin_id));
-    let detail = LocalResource::new(move || {
-        reload_detail.track();
-        let path = path.clone();
-        async move { api::get::<PluginDetailView>(&path).await }
+    let detail = load::<PluginDetailView>(CATALOG_TOPICS, path);
+    let active_tab = Memo::new(move |_| PluginDrawerTab::from_index(tab.get(), can_configure));
+    // Une fois connus, les réglages restent : une relecture, même en échec, ne retire pas la saisie.
+    let has_settings = Memo::new(move |known: Option<&bool>| {
+        known.copied().unwrap_or_default()
+            || detail
+                .read()
+                .as_ref()
+                .and_then(|read| read.as_ref().ok())
+                .is_some_and(|data| data.has_settings)
     });
-    let settings_id = plugin_id.clone();
+    let settings_shown =
+        Memo::new(move |_| has_settings.get() && active_tab.get() == PluginDrawerTab::Settings);
 
     view! {
         <div class="inspection-panel">
             {move || {
-                let active_tab = PluginDrawerTab::from_index(tab.get(), can_configure);
+                let active_tab = active_tab.get();
                 match detail.get() {
                     None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),
                     Some(Err(error)) => view! { <p class="text-danger">{error.message()}</p> }.into_any(),
@@ -378,9 +381,8 @@ pub fn PluginDetail(
                             <PluginActionBanner
                                 detail=banner_data
                                 can_configure=can_configure
-                                reload_tools=reload_tools
-                                reload_catalog=reload_catalog
-                                reload_detail=reload_detail
+                                install=install
+                                feedback=feedback
                                 tab=tab
                             />
                             {match active_tab {
@@ -392,13 +394,9 @@ pub fn PluginDetail(
                                     />
                                 }.into_any(),
                                 PluginDrawerTab::Settings => {
-                                    if data.has_settings {
-                                        view! {
-                                            <PluginSettings
-                                                plugin_id=settings_id.clone()
-                                                on_saved=Callback::new(move |()| bump(reload_catalog))
-                                            />
-                                        }.into_any()
+                                    // Le formulaire est rendu à part, après la fiche.
+                                    if has_settings.get() {
+                                        ().into_any()
                                     } else {
                                         view! {
                                             <p class="text-dim">
@@ -415,6 +413,9 @@ pub fn PluginDetail(
                     }
                 }
             }}
+            {move || settings_shown.get().then(|| view! {
+                <PluginSettings plugin_id=plugin_id.clone() />
+            })}
         </div>
     }
 }

@@ -10,6 +10,7 @@ pub mod flows;
 pub mod format;
 pub mod jobs;
 pub mod libraries;
+mod live;
 mod overview;
 mod plugins;
 mod prefs;

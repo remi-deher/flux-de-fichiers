@@ -204,7 +204,7 @@ pub fn check_proxy_headers(input: &DiagnosticInput) -> DiagnosticCheck {
 /// Le flux SSE ne peut pas être éprouvé depuis une requête ordinaire : derrière un proxy,
 /// on rappelle la réglage qui le casse (mise en tampon des réponses).
 pub fn check_event_stream(input: &DiagnosticInput) -> DiagnosticCheck {
-    const FIX: &str = "Désactivez la mise en tampon pour /api/v1/jobs/events (nginx : proxy_buffering off ; proxy_read_timeout 1h) et gardez la connexion HTTP/1.1 ouverte.";
+    const FIX: &str = "Désactivez la mise en tampon pour /api/v1/events (nginx : proxy_buffering off ; proxy_read_timeout 1h) et gardez la connexion HTTP/1.1 ouverte.";
     if input.proxy.proxied {
         check(
             CheckId::EventStream,

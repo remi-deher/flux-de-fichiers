@@ -1,7 +1,11 @@
+//! Réglages et dépôts de plugins. Toute écriture visible exige de quoi la signaler (ADR 0028).
+
 use crate::{
     error::{AppError, AppResult},
+    live::ChangeNotifier,
     plugins::PluginRepository,
 };
+use forgearr_shared::live::ChangeTopic;
 use sqlx::SqlitePool;
 
 pub async fn get_plugin_settings(pool: &SqlitePool, plugin_id: &str) -> AppResult<Option<String>> {
@@ -27,6 +31,7 @@ pub async fn list_all_plugin_settings(
 
 pub async fn set_plugin_settings(
     pool: &SqlitePool,
+    changes: &ChangeNotifier,
     plugin_id: &str,
     settings_json: &str,
 ) -> AppResult<()> {
@@ -39,6 +44,9 @@ pub async fn set_plugin_settings(
     )
     .execute(pool)
     .await?;
+    changes.notify(ChangeTopic::Settings);
+    // L'état « à configurer » des pièces du catalogue en dépend.
+    changes.notify(ChangeTopic::Catalog);
     Ok(())
 }
 
@@ -65,6 +73,7 @@ pub async fn get_plugin_repository(pool: &SqlitePool, id: &str) -> AppResult<Plu
 
 pub async fn add_plugin_repository(
     pool: &SqlitePool,
+    changes: &ChangeNotifier,
     id: &str,
     name: &str,
     index_url: &str,
@@ -78,10 +87,15 @@ pub async fn add_plugin_repository(
     )
     .fetch_one(pool)
     .await?;
+    changes.notify(ChangeTopic::Repositories);
     Ok(repo)
 }
 
-pub async fn toggle_plugin_repository(pool: &SqlitePool, id: &str) -> AppResult<bool> {
+pub async fn toggle_plugin_repository(
+    pool: &SqlitePool,
+    changes: &ChangeNotifier,
+    id: &str,
+) -> AppResult<bool> {
     let current: Option<bool> = sqlx::query_scalar!(
         r#"SELECT enabled AS "enabled: bool" FROM plugin_repositories WHERE id = ?1"#,
         id
@@ -99,10 +113,15 @@ pub async fn toggle_plugin_repository(pool: &SqlitePool, id: &str) -> AppResult<
     )
     .execute(pool)
     .await?;
+    changes.notify(ChangeTopic::Repositories);
     Ok(new_state)
 }
 
-pub async fn delete_plugin_repository(pool: &SqlitePool, id: &str) -> AppResult<()> {
+pub async fn delete_plugin_repository(
+    pool: &SqlitePool,
+    changes: &ChangeNotifier,
+    id: &str,
+) -> AppResult<()> {
     let is_official: Option<bool> = sqlx::query_scalar!(
         r#"SELECT is_official AS "is_official: bool" FROM plugin_repositories WHERE id = ?1"#,
         id
@@ -114,23 +133,30 @@ pub async fn delete_plugin_repository(pool: &SqlitePool, id: &str) -> AppResult<
             "Le catalogue officiel ne peut pas être supprimé.".to_string(),
         )),
         Some(false) => {
+            let mut tx = pool.begin().await?;
             sqlx::query!("DELETE FROM plugin_repositories WHERE id = ?1", id)
-                .execute(pool)
+                .execute(&mut *tx)
                 .await?;
             let repo_scope = format!("repo:{id}");
             sqlx::query!(
                 "DELETE FROM plugin_release_pins WHERE scope = ?1",
                 repo_scope
             )
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
+            tx.commit().await?;
+            changes.notify(ChangeTopic::Repositories);
             Ok(())
         }
         None => Err(AppError::NotFound),
     }
 }
 
-pub async fn touch_plugin_repository_sync(pool: &SqlitePool, id: &str) -> AppResult<()> {
+pub async fn touch_plugin_repository_sync(
+    pool: &SqlitePool,
+    changes: &ChangeNotifier,
+    id: &str,
+) -> AppResult<()> {
     let rows = sqlx::query!(
         "UPDATE plugin_repositories SET last_synced_at = datetime('now') WHERE id = ?1",
         id
@@ -141,6 +167,7 @@ pub async fn touch_plugin_repository_sync(pool: &SqlitePool, id: &str) -> AppRes
     if rows == 0 {
         Err(AppError::NotFound)
     } else {
+        changes.notify(ChangeTopic::Repositories);
         Ok(())
     }
 }

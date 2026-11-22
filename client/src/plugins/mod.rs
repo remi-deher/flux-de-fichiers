@@ -38,7 +38,7 @@ use tool_detail::{ToolDetail, ToolDrawerTab};
 use tools::ToolsSection;
 
 const REPOSITORIES_PATH: &str = "/api/v1/plugins/repositories";
-const CATALOG_SCRIPTS_PATH: &str = "/api/v1/plugins/scripts";
+const CATALOG_SCRIPTS_PATH: &str = "/api/v1/catalog-scripts";
 const CATALOG_PATH: &str = "/api/v1/plugins";
 const TOOLS_PATH: &str = "/api/v1/tools";
 

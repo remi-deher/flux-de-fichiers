@@ -882,7 +882,7 @@ async fn the_media_sample_route_serves_the_last_job_metadata_or_not_found() -> a
 async fn a_catalog_script_is_previewed_by_its_id_whatever_its_repository() -> anyhow::Result<()> {
     let app = test_app().await?;
     let script_id = save_encoder_script(app.plugins_dir.path())?;
-    let uri = format!("/api/v1/plugins/scripts/{script_id}");
+    let uri = format!("/api/v1/catalog-scripts/{script_id}");
 
     let (status, body) = send(&app, authorized("GET", &uri, None)?).await?;
     assert_eq!(status, StatusCode::OK);
@@ -894,7 +894,7 @@ async fn a_catalog_script_is_previewed_by_its_id_whatever_its_repository() -> an
             .is_some_and(|lines| !lines.is_empty())
     );
 
-    let unknown = "/api/v1/plugins/scripts/script.absent";
+    let unknown = "/api/v1/catalog-scripts/script.absent";
     let (status, _) = send(&app, authorized("GET", unknown, None)?).await?;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
@@ -908,7 +908,7 @@ async fn a_catalog_script_is_previewed_by_its_id_whatever_its_repository() -> an
 async fn a_catalog_script_is_copied_into_the_local_library_once() -> anyhow::Result<()> {
     let app = test_app().await?;
     let script_id = save_encoder_script(app.plugins_dir.path())?;
-    let uri = format!("/api/v1/plugins/scripts/{script_id}/import");
+    let uri = format!("/api/v1/catalog-scripts/{script_id}/import");
 
     let (status, saved) = send(&app, authorized("POST", &uri, None)?).await?;
     assert_eq!(status, StatusCode::OK, "{saved}");
@@ -927,7 +927,7 @@ async fn a_catalog_script_is_copied_into_the_local_library_once() -> anyhow::Res
 
     let (status, _) = send(
         &app,
-        authorized("POST", "/api/v1/plugins/scripts/script.absent/import", None)?,
+        authorized("POST", "/api/v1/catalog-scripts/script.absent/import", None)?,
     )
     .await?;
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -958,7 +958,7 @@ async fn a_script_already_in_the_local_library_is_not_copied_onto_itself() -> an
         &app,
         authorized(
             "POST",
-            &format!("/api/v1/plugins/scripts/{id}/import"),
+            &format!("/api/v1/catalog-scripts/{id}/import"),
             None,
         )?,
     )

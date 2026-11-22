@@ -1,6 +1,6 @@
 //! Flux SSE des événements : `/api/v1/events` (tout) et `/api/v1/jobs/events` (tâches seulement).
 
-use super::{AnyAuth, AppState, ViewJobsAuth, auth::authenticate_request};
+use super::{AnyAuth, AppState, ViewJobsAuth, auth::authenticate_request, shutdown_signal};
 use crate::{
     auth::Principal,
     error::{AppError, AppResult},
@@ -14,8 +14,8 @@ use axum::{
 use forgearr_shared::live::{
     CHANGED_EVENT, ChangeTopic, ChangedEvent, JOB_EVENTS_PERMISSION, RESYNC_EVENT,
 };
-use futures_util::stream::Stream;
-use std::{convert::Infallible, time::Duration};
+use futures_util::{StreamExt, stream::Stream};
+use std::{convert::Infallible, future::Future, time::Duration};
 use tokio::{
     sync::broadcast::error::RecvError,
     time::{Instant, Interval, MissedTickBehavior},
@@ -146,12 +146,14 @@ fn opening_event(subscription: &Subscription) -> Event {
     event.id(subscription.position.to_string())
 }
 
+/// Ouvre un flux, fermé dès que `until` se termine : un flux sans fin retiendrait l'arrêt du serveur.
 async fn open(
     state: AppState,
     headers: HeaderMap,
     principal: Principal,
     scope: Scope,
     check_every: Duration,
+    until: impl Future<Output = ()> + Send + 'static,
 ) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     if !scope.admits(&principal) {
         return Err(AppError::Forbidden);
@@ -176,7 +178,7 @@ async fn open(
         subscription,
         access_check,
     };
-    let stream = futures_util::stream::unfold(cursor, Cursor::next);
+    let stream = futures_util::stream::unfold(cursor, Cursor::next).take_until(until);
     Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(SSE_KEEP_ALIVE_INTERVAL)))
 }
 
@@ -186,7 +188,15 @@ pub async fn all(
     headers: HeaderMap,
     AnyAuth(principal): AnyAuth,
 ) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
-    open(s, headers, principal, Scope::All, ACCESS_CHECK_INTERVAL).await
+    open(
+        s,
+        headers,
+        principal,
+        Scope::All,
+        ACCESS_CHECK_INTERVAL,
+        shutdown_signal(),
+    )
+    .await
 }
 
 /// Flux des tâches seules, pour les clients existants.
@@ -195,7 +205,15 @@ pub async fn jobs(
     headers: HeaderMap,
     ViewJobsAuth(principal): ViewJobsAuth,
 ) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
-    open(s, headers, principal, Scope::Jobs, ACCESS_CHECK_INTERVAL).await
+    open(
+        s,
+        headers,
+        principal,
+        Scope::Jobs,
+        ACCESS_CHECK_INTERVAL,
+        shutdown_signal(),
+    )
+    .await
 }
 
 #[cfg(test)]

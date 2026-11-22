@@ -779,8 +779,13 @@ mod tests {
         tokio::pin!(beating);
         let early = tokio::time::timeout(HEARTBEAT_INTERVAL * 5, &mut beating).await;
         assert!(early.is_err(), "bail tenu");
-        repository::cancel_job(&state.pool, job.id).await?;
-        tokio::time::timeout(TEST_LIMIT, beating).await?;
+        // Ensemble : suspendu, le battement pourrait garder l'unique connexion de la base de test.
+        let (cancelled, ended) = tokio::join!(
+            repository::cancel_job(&state.pool, job.id),
+            tokio::time::timeout(TEST_LIMIT, beating),
+        );
+        cancelled?;
+        ended?;
         Ok(())
     }
 

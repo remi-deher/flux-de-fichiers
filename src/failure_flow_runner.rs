@@ -69,7 +69,7 @@ async fn execute(state: &AppState, job: &Job, mut claim: Claim) {
         return;
     }
     let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
-    let cache = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
+    let cache = state.tool_cache();
     crate::plugins::ensure_tools_for_requirements(
         &roots,
         &cache,

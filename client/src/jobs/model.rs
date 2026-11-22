@@ -156,7 +156,7 @@ pub fn progress_of(event: &JobEvent) -> Option<(uuid::Uuid, u32)> {
     }
 }
 
-/// Noms d'événements du flux `/api/v1/jobs/events`, un par type.
+/// Noms des événements de tâches du flux en direct, un par type.
 pub const EVENT_NAMES: [JobEventType; 12] = [
     JobEventType::JobCreated,
     JobEventType::JobClaimed,

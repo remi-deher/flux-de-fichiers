@@ -128,7 +128,7 @@ pub async fn save_flow(
 
     let mut headers = axum::http::HeaderMap::new();
     if !registry.is_empty() {
-        let cache_mgr = crate::tools_cache::ToolCacheManager::new(&s.config.tools_cache_dir);
+        let cache_mgr = s.tool_cache();
         let mut configured = std::collections::HashSet::new();
         for plugin_id in registry.required_settings_plugins_for_flow(Some(&flow)) {
             if let Ok(Some(raw)) = repository::get_plugin_settings(&s.pool, &plugin_id).await

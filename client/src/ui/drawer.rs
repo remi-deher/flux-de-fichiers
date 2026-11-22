@@ -1,10 +1,11 @@
 //! Tiroir d'inspection : le gabarit `inspection-drawer` du thème, piloté par un signal.
 
-use super::focus::{trap_tab, use_modal_focus};
+use super::focus::{FocusKeeper, trap_tab, use_modal_focus};
 use super::icon::{Icon, IconName};
 use leptos::ev;
 use leptos::prelude::*;
 use std::sync::atomic::{AtomicU64, Ordering};
+use wasm_bindgen::JsCast;
 
 static DRAWER_SEQ: AtomicU64 = AtomicU64::new(1);
 
@@ -37,6 +38,11 @@ pub fn Drawer(
         if let Some(panel) = panel_ref.get() {
             let _ = panel.focus();
         }
+    });
+    let keeper = StoredValue::new_local(None::<FocusKeeper>);
+    Effect::new(move |_| {
+        let panel = panel_ref.get().filter(|_| open.get());
+        keeper.set_value(panel.and_then(|panel| FocusKeeper::watch(panel.unchecked_into(), open)));
     });
     let has_tabs = tabs.len() > 1;
     view! {

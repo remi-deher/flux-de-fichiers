@@ -2,6 +2,7 @@ mod accounts;
 mod artifacts;
 pub mod auth;
 pub mod diagnostics;
+mod events;
 mod flow_links;
 pub(crate) mod flows;
 pub(crate) mod installation;
@@ -23,7 +24,13 @@ pub(crate) mod source_recovery_remote;
 pub(crate) mod system;
 pub(crate) mod transfers;
 mod worker_view;
-use crate::{config::Config, domain::*, error::AppResult, repository};
+use crate::{
+    config::Config,
+    domain::*,
+    error::{AppError, AppResult},
+    live::{ChangeNotifier, EventHistory},
+    repository,
+};
 pub use auth::{
     AdminAuth, AnyAuth, ManageAccountsAuth, ManageApiKeysAuth, ManageFlowsAuth, ManageJobsAuth,
     ManageLibrariesAuth, ManagePluginsAuth, ManageWorkersAuth, ViewFlowsAuth, ViewJobsAuth,
@@ -35,88 +42,22 @@ use axum::{
     http::{HeaderMap, StatusCode},
     routing::{get, post, put},
 };
-use forgearr_shared::jobs::LeaseProtocol;
+use forgearr_shared::{jobs::LeaseProtocol, live::EVENTS_PATH};
 use sqlx::{
     SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
 };
-use std::{
-    collections::VecDeque,
-    str::FromStr,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
-    time::Duration,
-};
+use std::{str::FromStr, sync::Arc, time::Duration};
 use tower_http::{
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     trace::TraceLayer,
 };
 
-const SSE_REPLAY_CAPACITY: usize = 256;
-const SSE_BROADCAST_CAPACITY: usize = 256;
+/// Flux des tâches seules, conservé pour les clients existants.
+const JOB_EVENTS_PATH: &str = "/api/v1/jobs/events";
 const OUTBOUND_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 /// Délai accordé aux requêtes en cours à l'arrêt du serveur TLS avant de les couper.
 const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(15);
-
-/// Tampon d'historique borné pour la reprise SSE via `Last-Event-ID`.
-#[derive(Clone)]
-pub struct EventHistory {
-    next_seq: Arc<AtomicU64>,
-    buffer: Arc<tokio::sync::Mutex<VecDeque<(u64, JobEvent)>>>,
-    tx: tokio::sync::broadcast::Sender<(u64, JobEvent)>,
-}
-
-impl Default for EventHistory {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl EventHistory {
-    pub fn new() -> Self {
-        let (tx, _) = tokio::sync::broadcast::channel(SSE_BROADCAST_CAPACITY);
-        Self {
-            next_seq: Arc::new(AtomicU64::new(1)),
-            buffer: Arc::new(tokio::sync::Mutex::new(VecDeque::with_capacity(
-                SSE_REPLAY_CAPACITY,
-            ))),
-            tx,
-        }
-    }
-
-    pub async fn publish(&self, event: JobEvent) -> u64 {
-        let mut guard = self.buffer.lock().await;
-        let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
-        guard.push_back((seq, event.clone()));
-        while guard.len() > SSE_REPLAY_CAPACITY {
-            guard.pop_front();
-        }
-        let _ = self.tx.send((seq, event));
-        seq
-    }
-
-    pub async fn subscribe_from(
-        &self,
-        last_event_id: Option<u64>,
-    ) -> (
-        Vec<(u64, JobEvent)>,
-        tokio::sync::broadcast::Receiver<(u64, JobEvent)>,
-    ) {
-        let guard = self.buffer.lock().await;
-        let rx = self.tx.subscribe();
-        let replay = match last_event_id {
-            Some(since) => guard
-                .iter()
-                .filter(|(seq, _)| *seq > since)
-                .cloned()
-                .collect(),
-            None => Vec::new(),
-        };
-        (replay, rx)
-    }
-}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -125,6 +66,8 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub catalog_cache: crate::plugins::CatalogCache,
     pub event_history: EventHistory,
+    /// Signalement des changements à relire par les interfaces ouvertes (ADR 0028).
+    pub changes: ChangeNotifier,
     pub browse_broker: crate::filesystem_browser::RemoteBrowseBroker,
     pub source_publication: crate::source_publication_broker::SourcePublicationBroker,
     pub source_inspection: crate::source_publication_broker::SourcePublicationBroker,
@@ -147,12 +90,15 @@ impl AppState {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .unwrap_or_default();
+        let event_history = EventHistory::new();
+        let changes = ChangeNotifier::new(event_history.clone());
         Self {
             pool,
             config,
             http_client,
-            catalog_cache: crate::plugins::CatalogCache::new(),
-            event_history: EventHistory::new(),
+            catalog_cache: crate::plugins::CatalogCache::new(changes.clone()),
+            event_history,
+            changes,
             browse_broker: crate::filesystem_browser::RemoteBrowseBroker::new(),
             source_publication: crate::source_publication_broker::SourcePublicationBroker::default(
             ),
@@ -165,6 +111,12 @@ impl AppState {
             ai_diagnosis: crate::ai::diagnosis::DiagnosisStore::new(),
             local_worker_id: Arc::new(std::sync::OnceLock::new()),
         }
+    }
+
+    /// Cache d'outils du central : ses installations et ses purges sont signalées.
+    pub fn tool_cache(&self) -> crate::tools_cache::ToolCacheManager {
+        crate::tools_cache::ToolCacheManager::new(&self.config.tools_cache_dir)
+            .with_changes(self.changes.clone())
     }
 
     pub fn notify_job_event(
@@ -206,6 +158,13 @@ impl AppState {
     }
 }
 
+/// Mène une écriture à son terme, changement signalé compris, même si le client coupe la connexion.
+pub(crate) async fn to_completion<T: Send + 'static>(
+    work: impl Future<Output = AppResult<T>> + Send + 'static,
+) -> AppResult<T> {
+    tokio::spawn(work).await.map_err(|_| AppError::Internal)?
+}
+
 /// Budget des routes JSON, y compris l'empreinte SHA-256 de `POST /api/v1/jobs`.
 pub const JSON_API_TIMEOUT: Duration = Duration::from_secs(60);
 /// Budget de l'assistant IA intégré (boucles multi-tours et modèles locaux Ollama).
@@ -227,7 +186,7 @@ fn is_ai_run_events_route(path: &str) -> bool {
 
 /// Routes dont la réponse peut durer bien au-delà d'un appel JSON.
 pub fn is_long_running_route(path: &str) -> bool {
-    if path == "/api/v1/jobs/events" || is_ai_run_events_route(path) {
+    if matches!(path, EVENTS_PATH | JOB_EVENTS_PATH) || is_ai_run_events_route(path) {
         return true;
     }
     let Some(rest) = path.strip_prefix("/api/v1/jobs/") else {
@@ -557,7 +516,8 @@ fn json_routes() -> Router<AppState> {
 fn transfer_routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/libraries/{id}/scan", post(libraries::scan))
-        .route("/api/v1/jobs/events", get(jobs::events))
+        .route(EVENTS_PATH, get(events::all))
+        .route(JOB_EVENTS_PATH, get(events::jobs))
         .route("/api/v1/ai/runs/{id}/events", get(crate::ai::run_events))
         .route(
             "/api/v1/jobs/{id}/output",
@@ -994,10 +954,11 @@ const LIBRARY_SCAN_TICK: Duration = Duration::from_secs(60);
 /// Synchronise les dépôts de plugins au démarrage, puis à intervalle régulier.
 async fn plugin_sync_loop(state: AppState) {
     loop {
-        crate::plugins::sync_enabled_repositories(&state.pool, &state.config).await;
+        crate::plugins::sync_enabled_repositories(&state.pool, &state.config, &state.catalog_cache)
+            .await;
         state.catalog_cache.invalidate().await;
         let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
-        let cache = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
+        let cache = state.tool_cache();
         let keep: Vec<(String, String)> = state
             .catalog_cache
             .tools_status(&roots, &cache)

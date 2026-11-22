@@ -1,13 +1,28 @@
 //! Réglages d'un plugin, générés depuis son `settingsSchema` (secrets jamais relus).
 
 use super::metadata::{StatusBanner, StoreTone};
+use super::settings_form::{Incoming, SettingsForm};
 use crate::api;
+use crate::live::{ChangedElsewhere, load, use_live};
 use crate::route::encode_segment;
+use forgearr_shared::live::ChangeTopic;
 use forgearr_shared::plugins::{
     PluginConnectionTestResult, PluginSettingsView, ResolvedSettingsField, SettingsFieldType,
 };
 use leptos::prelude::*;
 use serde_json::{Map, Value};
+
+/// Le schéma des champs vient du catalogue.
+const SETTINGS_TOPICS: &[ChangeTopic] = &[ChangeTopic::Settings, ChangeTopic::Catalog];
+
+const SECRET_SET_PLACEHOLDER: &str = "Défini — laisser vide pour conserver";
+
+/// Saisie envoyée, et dernier contenu du central lu à cet instant.
+#[derive(Clone)]
+struct Submission {
+    entries: Vec<(ResolvedSettingsField, String)>,
+    seen: Option<PluginSettingsView>,
+}
 
 /// Corps envoyé : un secret laissé vide est conservé par le central.
 pub fn settings_body(fields: &[(ResolvedSettingsField, String)]) -> Map<String, Value> {
@@ -26,22 +41,36 @@ fn input_kind(field: &ResolvedSettingsField) -> &'static str {
 }
 
 #[component]
-pub fn PluginSettings(
-    plugin_id: String,
-    #[prop(optional)] on_saved: Option<Callback<()>>,
-) -> impl IntoView {
+pub fn PluginSettings(plugin_id: String) -> impl IntoView {
     let path = format!("/api/v1/plugins/{}/settings", encode_segment(&plugin_id));
-    let load_path = path.clone();
-    let view_data = LocalResource::new(move || {
-        let path = load_path.clone();
-        async move { api::get::<PluginSettingsView>(&path).await }
+    let live = use_live();
+    let loaded = load::<PluginSettingsView>(SETTINGS_TOPICS, path.clone());
+    let form = RwSignal::new(SettingsForm::default());
+    let shape = Memo::new(move |_| form.read().shape());
+    let incoming = Memo::new(move |_| match loaded.read().as_ref() {
+        Some(Ok(fresh)) => form.read().incoming(fresh),
+        _ => Incoming::Keep,
+    });
+    let fresh = move || loaded.get_untracked().and_then(Result::ok);
+    Effect::new(move |_| {
+        // Suit aussi `loaded` : deux contenus successifs peuvent être adoptés.
+        loaded.track();
+        if incoming.get() == Incoming::Adopt
+            && let Some(fresh) = fresh()
+        {
+            form.update(|form| form.adopt(fresh));
+        }
     });
     let test_path = format!("/api/v1/plugins/{}/test", encode_segment(&plugin_id));
     let feedback = RwSignal::new(None::<(bool, String)>);
     let test_feedback = RwSignal::new(None::<(bool, String)>);
-    let save = Action::new_local(move |body: &Map<String, Value>| {
-        let (path, body) = (path.clone(), body.clone());
-        async move { api::put::<Map<String, Value>, Value>(&path, &body).await }
+    let save = Action::new_local(move |submission: &Submission| {
+        let (path, submission) = (path.clone(), submission.clone());
+        async move {
+            api::put::<Map<String, Value>, Value>(&path, &settings_body(&submission.entries))
+                .await
+                .map(|_| submission)
+        }
     });
     let test_conn = Action::new_local(move |body: &Map<String, Value>| {
         let (path, body) = (test_path.clone(), body.clone());
@@ -50,11 +79,10 @@ pub fn PluginSettings(
         }
     });
     Effect::new(move |_| match save.value().get() {
-        Some(Ok(_)) => {
+        Some(Ok(submitted)) => {
             feedback.set(Some((true, "Réglages enregistrés.".into())));
-            if let Some(cb) = on_saved {
-                cb.run(());
-            }
+            form.update(|form| form.saved(&submitted.entries, submitted.seen));
+            live.touch(SETTINGS_TOPICS);
         }
         Some(Err(error)) => feedback.set(Some((false, error.message()))),
         None => {}
@@ -80,42 +108,46 @@ pub fn PluginSettings(
                     tone=if ok { StoreTone::Success } else { StoreTone::Danger }
                 />
             })}
-            {move || match view_data.get() {
+            {move || (incoming.get() == Incoming::Warn && !save.pending().get()).then(|| view! {
+                <ChangedElsewhere
+                    text="Ces réglages ont changé pendant votre saisie. Recharger remplace votre saisie ; enregistrer remplace ces changements."
+                    on_reload=Some(Callback::new(move |()| {
+                        if let Some(fresh) = fresh() {
+                            form.update(|form| form.reset(fresh));
+                        }
+                    }))
+                />
+            })}
+            {move || match loaded.get() {
+                Some(Err(error)) => Some(view! { <p class="text-danger">{error.message()}</p> }),
+                _ => None,
+            }}
+            {move || match shape.get() {
+                None if loaded.read().is_some() => ().into_any(),
                 None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),
-                Some(Err(error)) => view! { <p class="text-danger">{error.message()}</p> }.into_any(),
-                Some(Ok(data)) if data.fields.is_empty() => view! { <p class="text-dim">"Ce plugin n'a pas de réglage."</p> }.into_any(),
-                Some(Ok(data)) => {
-                    let has_url_field = data
-                        .fields
+                Some(fields) if fields.is_empty() => view! { <p class="text-dim">"Ce plugin n'a pas de réglage."</p> }.into_any(),
+                Some(fields) => {
+                    let has_url_field = fields
                         .iter()
                         .any(|field| field.field_type == SettingsFieldType::Url);
-                    let values: Vec<(ResolvedSettingsField, RwSignal<String>)> = data
-                        .fields
-                        .into_iter()
-                        .map(|field| { let value = RwSignal::new(field.value.clone()); (field, value) })
-                        .collect();
-                    let stored = StoredValue::new(values.clone());
-                    let stored_for_test = stored;
                     view! {
                         <form on:submit=move |event| {
                             event.prevent_default();
-                            let current: Vec<(ResolvedSettingsField, String)> = stored
-                                .read_value()
-                                .iter()
-                                .map(|(field, value)| (field.clone(), value.get_untracked()))
-                                .collect();
-                            save.dispatch(settings_body(&current));
+                            save.dispatch(Submission {
+                                entries: form.read_untracked().entries(),
+                                seen: fresh(),
+                            });
                         }>
-                            {values.into_iter().map(|(field, value)| {
+                            {fields.into_iter().enumerate().map(|(index, field)| {
                                 let id = format!("plugin-setting-{}", field.name);
-                                let placeholder = if field.is_set { "Défini — laisser vide pour conserver" } else { "" };
+                                let placeholder = move || if form.read().is_set(index) { SECRET_SET_PLACEHOLDER } else { "" };
                                 let label = if field.required { format!("{} *", field.label) } else { field.label.clone() };
                                 view! {
                                     <div class="form-group">
                                         <label for=id.clone() class="form-label">{label}</label>
                                         <input id=id class="form-input" type=input_kind(&field) autocomplete="off" placeholder=placeholder
-                                            prop:value=move || value.get()
-                                            on:input=move |event| value.set(event_target_value(&event)) />
+                                            prop:value=move || form.read().draft(index)
+                                            on:input=move |event| form.update(|form| form.type_in(index, event_target_value(&event))) />
                                         {field.description.clone().map(|text| view! { <p class="form-help">{text}</p> })}
                                     </div>
                                 }
@@ -126,12 +158,7 @@ pub fn PluginSettings(
                                     <button type="button" class="btn btn-secondary"
                                         disabled=move || test_conn.pending().get()
                                         on:click=move |_| {
-                                            let current: Vec<(ResolvedSettingsField, String)> = stored_for_test
-                                                .read_value()
-                                                .iter()
-                                                .map(|(field, value)| (field.clone(), value.get_untracked()))
-                                                .collect();
-                                            test_conn.dispatch(settings_body(&current));
+                                            test_conn.dispatch(settings_body(&form.read_untracked().entries()));
                                         }>
                                         {move || if test_conn.pending().get() { "Test…" } else { "Tester la connexion" }}
                                     </button>

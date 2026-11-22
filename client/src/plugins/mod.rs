@@ -12,17 +12,20 @@ mod repo_detail;
 mod repos;
 mod script_preview;
 mod settings;
+mod settings_form;
 mod subcategory_groups;
 mod tool_detail;
 mod tools;
 
 use crate::api;
+use crate::live::{load, use_live};
 use crate::route::encode_segment;
 use crate::ui::{Drawer, IconName, Toasts};
 use catalog::{CatalogSectionView, summarize_catalog};
 pub(crate) use flow_preview::{
     FlowMiniPreview, preview_from_definition_json, preview_from_job_steps,
 };
+use forgearr_shared::live::ChangeTopic;
 use forgearr_shared::plugins::vocab::{CatalogItemType, CatalogSection};
 use forgearr_shared::plugins::{
     CatalogEntry, DependencyInstallResult, PluginRepository, ToolStatusSummary,
@@ -31,6 +34,7 @@ use forgearr_shared::session::Me;
 use forgearr_shared::{InstanceKind, Permission};
 use item_detail::CatalogItemDetail;
 use leptos::prelude::*;
+pub(crate) use metadata::{StatusBanner, StoreTone};
 pub(crate) use pack_detail::{PackDetail, PackDrawerTab};
 use plugin_detail::{PluginDetail, PluginDrawerTab};
 use repos::ReposSection;
@@ -42,9 +46,13 @@ const CATALOG_SCRIPTS_PATH: &str = "/api/v1/catalog-scripts";
 const CATALOG_PATH: &str = "/api/v1/plugins";
 const TOOLS_PATH: &str = "/api/v1/tools";
 
-pub(super) fn bump(signal: RwSignal<u32>) {
-    signal.update(|count| *count = count.wrapping_add(1));
-}
+/// Sujets lus par le catalogue et la fiche d'un plugin ou d'un pack.
+pub(super) const CATALOG_TOPICS: &[ChangeTopic] = &[ChangeTopic::Catalog, ChangeTopic::Tools];
+/// Sujets lus par les applications : leur liste vient aussi du catalogue.
+pub(super) const TOOL_TOPICS: &[ChangeTopic] = CATALOG_TOPICS;
+/// Sujets lus par les dépôts.
+pub(super) const REPOSITORY_TOPICS: &[ChangeTopic] =
+    &[ChangeTopic::Repositories, ChangeTopic::Catalog];
 
 pub(super) fn section_icon(entry_type: CatalogItemType) -> IconName {
     match entry_type.section() {
@@ -88,12 +96,12 @@ pub(super) fn dependency_install_summary(result: &DependencyInstallResult) -> (b
 }
 
 /// Action d'installation d'une pièce (`{base}/{id}/install`) et de ses outils requis ;
-/// le bilan est affiché dans `feedback` puis `on_done` est appelé.
+/// le bilan est affiché dans `feedback`, puis catalogue et applications sont relus.
 pub(super) fn install_with_dependencies_action(
     base: &'static str,
     feedback: RwSignal<Option<String>>,
-    on_done: impl Fn() + 'static,
 ) -> Action<String, Result<DependencyInstallResult, api::ApiError>> {
+    let live = use_live();
     let action = Action::new_local(move |id: &String| {
         let path = format!("{base}/{}/install", encode_segment(id));
         async move { api::post::<(), DependencyInstallResult>(&path, None).await }
@@ -106,7 +114,7 @@ pub(super) fn install_with_dependencies_action(
             } else {
                 Toasts::set_error(feedback, msg);
             }
-            on_done();
+            live.touch(TOOL_TOPICS);
         }
         Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
@@ -218,14 +226,20 @@ impl InspectionTarget {
     }
 }
 
+/// Fiche à jour d'une pièce ouverte ; retirée du catalogue, elle reste affichée telle quelle.
+fn current_entry(entries: &[CatalogEntry], opened: &CatalogEntry) -> CatalogEntry {
+    entries
+        .iter()
+        .find(|entry| entry.id == opened.id)
+        .unwrap_or(opened)
+        .clone()
+}
+
 #[component]
 pub fn PluginsPage(me: Me) -> impl IntoView {
     let central = me.instance_kind == InstanceKind::Central;
     let can_manage = central && me.allows(Permission::ManagePlugins);
     let active_tab = RwSignal::new(PluginsTab::Catalog);
-    let reload_catalog = RwSignal::new(0_u32);
-    let reload_tools = RwSignal::new(0_u32);
-    let reload_repos = RwSignal::new(0_u32);
     let adding_repo = RwSignal::new(false);
 
     // Tiroir d'inspection unifié permettant la navigation croisée Plugin <-> Outil.
@@ -284,24 +298,10 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
 
     let drawer_title = Signal::derive(move || target.get().map(|t| t.title()).unwrap_or_default());
 
-    let catalog = LocalResource::new(move || {
-        reload_catalog.track();
-        api::get::<Vec<CatalogEntry>>(CATALOG_PATH)
-    });
-    let tools = LocalResource::new(move || {
-        reload_tools.track();
-        api::get::<Vec<ToolStatusSummary>>(TOOLS_PATH)
-    });
-    let repositories = can_manage.then(|| {
-        LocalResource::new(move || {
-            reload_repos.track();
-            api::get::<Vec<PluginRepository>>(REPOSITORIES_PATH)
-        })
-    });
-    let on_pack_installed = Callback::new(move |()| {
-        bump(reload_tools);
-        bump(reload_catalog);
-    });
+    let catalog = load::<Vec<CatalogEntry>>(CATALOG_TOPICS, CATALOG_PATH);
+    let tools = load::<Vec<ToolStatusSummary>>(TOOL_TOPICS, TOOLS_PATH);
+    let repositories =
+        can_manage.then(|| load::<Vec<PluginRepository>>(REPOSITORY_TOPICS, REPOSITORIES_PATH));
     let catalog_entries =
         Signal::derive(move || catalog.get().and_then(Result::ok).unwrap_or_default());
 
@@ -355,8 +355,6 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
                             plugin_id=item.id
                             tab=plugin_tab
                             can_configure=can_manage
-                            reload_tools=reload_tools
-                            reload_catalog=reload_catalog
                             on_open_tool=open_tool
                         />
                     }.into_any(),
@@ -376,7 +374,6 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
                             pack_id=item.id
                             tab=pack_tab
                             can_install=can_manage
-                            on_installed=on_pack_installed
                             on_open_plugin=open_plugin
                             on_open_tool=open_tool
                             catalog_entries=catalog_entries
@@ -398,8 +395,6 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
                             tool_id=item.id
                             tab=tool_tab
                             can_install=can_manage
-                            reload_tools=reload_tools
-                            reload_catalog=reload_catalog
                             on_open_plugin=open_plugin
                         />
                     }.into_any(),
@@ -408,9 +403,10 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
             </Drawer>
             <Drawer open=item_open eyebrow="Catalogue" title=drawer_title>
                 {move || match target.get() {
-                    Some(InspectionTarget::Item(entry)) => view! {
-                        <CatalogItemDetail entry=*entry can_manage=can_manage />
-                    }.into_any(),
+                    Some(InspectionTarget::Item(opened)) => {
+                        let entry = Memo::new(move |_| current_entry(&catalog_entries.read(), &opened));
+                        view! { <CatalogItemDetail entry=entry can_manage=can_manage /> }.into_any()
+                    }
                     _ => ().into_any(),
                 }}
             </Drawer>
@@ -429,8 +425,6 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
                 PluginsTab::Tools => view! {
                     <ToolsSection
                         tools=tools
-                        reload_tools=reload_tools
-                        reload_catalog=reload_catalog
                         can_install=can_manage
                         active_tool_id=active_tool_id
                         on_open_tool=open_tool
@@ -440,8 +434,6 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
                     Some(repos) => view! {
                         <ReposSection
                             repositories=repos
-                            reload_repos=reload_repos
-                            reload_catalog=reload_catalog
                             adding=adding_repo
                         />
                     }.into_any(),
@@ -493,6 +485,21 @@ mod tests {
             updated_at: None,
             runtime: None,
         }
+    }
+
+    #[test]
+    fn an_open_item_follows_the_catalog_and_survives_its_removal() {
+        let opened = entry("script.x", CatalogItemType::Script);
+        let updated = CatalogEntry {
+            version: "2.0.0".to_owned(),
+            ..opened.clone()
+        };
+        let other = entry("script.y", CatalogItemType::Script);
+        assert_eq!(
+            current_entry(&[other.clone(), updated.clone()], &opened),
+            updated
+        );
+        assert_eq!(current_entry(&[other], &opened), opened);
     }
 
     #[test]

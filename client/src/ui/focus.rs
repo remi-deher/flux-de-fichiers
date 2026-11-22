@@ -3,12 +3,17 @@
 //! fermeture, le focus revient sur l'élément qui a ouvert le dialogue (WCAG 2.4.3).
 
 use leptos::prelude::*;
-use wasm_bindgen::JsCast;
-use web_sys::{Element, HtmlElement, KeyboardEvent};
+use wasm_bindgen::{JsCast, closure::Closure};
+use web_sys::{
+    Element, HtmlElement, KeyboardEvent, MutationObserver, MutationObserverInit, NodeList,
+};
 
 /// Éléments pouvant recevoir le focus clavier dans un dialogue.
 const FOCUSABLE: &str = "a[href], button:not([disabled]), input:not([disabled]), \
      select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
+
+/// Identité d'une carte : elle retrouve celle qu'une relecture a recréée (`data-focus-key`).
+const FOCUS_KEY_ATTRIBUTE: &str = "data-focus-key";
 
 /// Touche qui déplace le focus.
 const TAB_KEY: &str = "Tab";
@@ -57,13 +62,17 @@ pub fn wrap_for(position: Option<usize>, count: usize, backwards: bool) -> Optio
     }
 }
 
+fn html_elements(list: NodeList) -> impl Iterator<Item = HtmlElement> {
+    (0..list.length())
+        .filter_map(move |index| list.item(index))
+        .filter_map(|node| node.dyn_into::<HtmlElement>().ok())
+}
+
 fn focusables(container: &Element) -> Vec<HtmlElement> {
     let Ok(list) = container.query_selector_all(FOCUSABLE) else {
         return Vec::new();
     };
-    (0..list.length())
-        .filter_map(|index| list.item(index))
-        .filter_map(|node| node.dyn_into::<HtmlElement>().ok())
+    html_elements(list)
         .filter(|element| element.offset_parent().is_some())
         .collect()
 }
@@ -91,24 +100,103 @@ pub fn trap_tab(event: &KeyboardEvent, container: &Element) {
     }
 }
 
+/// Élément qui a ouvert le dialogue, et la carte qui le porte.
+#[derive(Clone)]
+struct Opener {
+    element: HtmlElement,
+    key: Option<String>,
+}
+
+impl Opener {
+    fn current() -> Option<Self> {
+        let element = document()
+            .active_element()?
+            .dyn_into::<HtmlElement>()
+            .ok()?;
+        let key = element
+            .closest(&format!("[{FOCUS_KEY_ATTRIBUTE}]"))
+            .ok()
+            .flatten()
+            .and_then(|card| card.get_attribute(FOCUS_KEY_ATTRIBUTE));
+        Some(Self { element, key })
+    }
+
+    /// Rend le focus à l'élément, ou à la carte recréée entre-temps.
+    fn restore(&self) {
+        let target = if self.element.is_connected() {
+            Some(self.element.clone())
+        } else {
+            self.recreated()
+        };
+        if let Some(target) = target {
+            let _ = target.focus();
+        }
+    }
+
+    fn recreated(&self) -> Option<HtmlElement> {
+        let key = self.key.as_ref()?;
+        let cards = document()
+            .query_selector_all(&format!("[{FOCUS_KEY_ATTRIBUTE}]"))
+            .ok()?;
+        html_elements(cards)
+            .find(|card| card.get_attribute(FOCUS_KEY_ATTRIBUTE).as_ref() == Some(key))
+    }
+}
+
+/// Le navigateur a-t-il rendu le focus à la page (élément actif retiré) ?
+fn focus_is_lost() -> bool {
+    match (document().active_element(), document().body()) {
+        (Some(active), Some(body)) => active == *body.unchecked_ref::<Element>(),
+        (active, _) => active.is_none(),
+    }
+}
+
+/// Garde le focus dans un dialogue ouvert dont le contenu relu retire l'élément actif.
+pub struct FocusKeeper {
+    observer: MutationObserver,
+    _on_mutation: Closure<dyn FnMut()>,
+}
+
+impl FocusKeeper {
+    pub fn watch(panel: HtmlElement, open: RwSignal<bool>) -> Option<Self> {
+        let target = panel.clone();
+        let on_mutation = Closure::<dyn FnMut()>::new(move || {
+            if open.try_get_untracked() == Some(true) && focus_is_lost() {
+                let _ = target.focus();
+            }
+        });
+        let observer = MutationObserver::new(on_mutation.as_ref().unchecked_ref()).ok()?;
+        let options = MutationObserverInit::new();
+        options.set_child_list(true);
+        options.set_subtree(true);
+        observer.observe_with_options(&panel, &options).ok()?;
+        Some(Self {
+            observer,
+            _on_mutation: on_mutation,
+        })
+    }
+}
+
+impl Drop for FocusKeeper {
+    fn drop(&mut self) {
+        self.observer.disconnect();
+    }
+}
+
 /// Mémorise l'élément actif à l'ouverture et lance `focus_inside` ; rend le focus à la fermeture.
 pub fn use_modal_focus(open: Signal<bool>, focus_inside: impl Fn() + 'static) {
-    let previous = StoredValue::new_local(None::<HtmlElement>);
+    let previous = StoredValue::new_local(None::<Opener>);
     Effect::new(move |was_open: Option<bool>| {
         let is_open = open.get();
         let was_open = was_open.unwrap_or(false);
         if is_open && !was_open {
-            previous.set_value(
-                document()
-                    .active_element()
-                    .and_then(|element| element.dyn_into::<HtmlElement>().ok()),
-            );
+            previous.set_value(Opener::current());
             focus_inside();
         } else if !is_open
             && was_open
-            && let Some(element) = previous.get_value()
+            && let Some(opener) = previous.get_value()
         {
-            let _ = element.focus();
+            opener.restore();
         }
         is_open
     });

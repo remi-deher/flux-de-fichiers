@@ -151,7 +151,7 @@ async fn validate_staged_output(
     }
     let roots = crate::plugins::catalog_roots(&s.pool, &s.config).await;
     let registry = s.catalog_cache.operations(&roots).await;
-    let cache_mgr = crate::tools_cache::ToolCacheManager::new(&s.config.tools_cache_dir);
+    let cache_mgr = s.tool_cache();
     let mut versions = std::collections::HashMap::new();
     for probe in registry.all_probes() {
         if let crate::flows::OperationRuntime::Binary(bin) = &probe.runtime

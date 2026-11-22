@@ -13,6 +13,7 @@ mod transfer_workers;
 mod variables_editor;
 
 use crate::flows::FlowsSection;
+use crate::live::{load, use_live};
 use crate::route::encode_segment;
 use crate::ui::filters::{Filters, LibraryFilter, library_filter};
 use crate::ui::search::{matches, query};
@@ -26,6 +27,7 @@ use draft::{LibraryDraft, access_label, is_ready, library_counts};
 use forgearr_shared::Permission;
 use forgearr_shared::flows::FlowRecord;
 use forgearr_shared::libraries::{Library, LibraryOutputPolicy};
+use forgearr_shared::live::ChangeTopic;
 use forgearr_shared::local::LocalLibrarySnapshot;
 use forgearr_shared::session::Me;
 use forgearr_shared::workers::Worker;
@@ -51,10 +53,13 @@ pub(super) fn bump(signal: RwSignal<u32>) {
     signal.update(|count| *count = count.wrapping_add(1));
 }
 
+/// Sujets lus par la librairie locale.
+pub(super) const LOCAL_TOPICS: &[ChangeTopic] = &[ChangeTopic::Catalog];
+
 pub(super) fn use_local_delete(
-    reload: RwSignal<u32>,
     success_msg: &'static str,
 ) -> Action<String, Result<(), api::ApiError>> {
+    let live = use_live();
     let remove = Action::new_local(move |id: &String| {
         let path = format!("{LOCAL_ITEMS_PATH}/{}", encode_segment(id));
         async move { api::delete(&path).await }
@@ -62,7 +67,7 @@ pub(super) fn use_local_delete(
     Effect::new(move |_| match remove.value().get() {
         Some(Ok(())) => {
             Toasts::notify_success(success_msg);
-            bump(reload);
+            live.touch(LOCAL_TOPICS);
         }
         Some(Err(err)) => Toasts::notify_error(err.message()),
         None => {}
@@ -403,22 +408,23 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
     let can_manage_local = me.allows(Permission::ManageSettings);
     let active_tab = RwSignal::new(LibraryTab::Libraries);
     let reload_libs = RwSignal::new(0_u32);
-    let reload_local = RwSignal::new(0_u32);
+    let reload_flows = RwSignal::new(0_u32);
+    let live = use_live();
 
     let libraries = LocalResource::new(move || {
         reload_libs.track();
         api::get::<Vec<Library>>(LIBRARIES_PATH)
     });
     let flows = LocalResource::new(move || {
-        reload_local.track();
+        reload_flows.track();
         api::get::<Vec<FlowRecord>>(FLOWS_PATH)
     });
     let workers = LocalResource::new(|| api::get::<Vec<Worker>>(WORKERS_PATH));
-    let snapshot = LocalResource::new(move || {
-        reload_local.track();
-        api::get::<LocalLibrarySnapshot>(LOCAL_PATH)
+    let snapshot = load::<LocalLibrarySnapshot>(LOCAL_TOPICS, LOCAL_PATH);
+    let on_flow_changed = Callback::new(move |()| {
+        bump(reload_flows);
+        live.touch(LOCAL_TOPICS);
     });
-    let on_flow_changed = Callback::new(move |()| bump(reload_local));
     let tabs = LibraryTab::visible_tabs(&me);
 
     view! {
@@ -454,18 +460,17 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
                     <FlowsSection me=me.clone() on_changed=on_flow_changed />
                 }.into_any(),
                 LibraryTab::Scripts => view! {
-                    <ScriptsSection snapshot=snapshot reload=reload_local can_manage=can_manage_local />
+                    <ScriptsSection snapshot=snapshot can_manage=can_manage_local />
                 }.into_any(),
                 LibraryTab::Resources => view! {
                     <ResourcesSection
                         snapshot=snapshot
                         flows=flows
-                        reload=reload_local
                         can_manage=can_manage_local
                     />
                 }.into_any(),
                 LibraryTab::Packs => view! {
-                    <LocalPacksSection snapshot=snapshot reload=reload_local can_manage=can_manage_local />
+                    <LocalPacksSection snapshot=snapshot can_manage=can_manage_local />
                 }.into_any(),
             }}
         </div>

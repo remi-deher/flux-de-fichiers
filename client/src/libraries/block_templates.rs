@@ -1,8 +1,9 @@
 //! Cartes et tiroir d'édition / inspection des modèles de blocs réutilisables.
 
 use super::scripts::parse_tags;
-use super::{LOCAL_BLOCK_TEMPLATES_PATH, LocalDeleteButton, bump};
+use super::{LOCAL_BLOCK_TEMPLATES_PATH, LOCAL_TOPICS, LocalDeleteButton};
 use crate::api;
+use crate::live::use_live;
 use crate::ui::{Drawer, IconName, MetricTone, ResourceCard, Tag, TagTone, Toasts};
 use forgearr_shared::flows::{FlowGraph, FlowRecord};
 use forgearr_shared::local::{CreateBlockTemplateRequest, LocalBlockTemplate};
@@ -118,6 +119,7 @@ pub fn BlockTemplateCard(
 
     view! {
         <ResourceCard
+            focus_key=tpl.id.clone()
             title=tpl.name
             subtitle=tpl.description
             icon=IconName::Layers
@@ -142,9 +144,9 @@ pub fn BlockTemplateDrawer(
     open: RwSignal<bool>,
     draft_sig: RwSignal<Option<BlockTemplateDraft>>,
     flows: LocalResource<Result<Vec<FlowRecord>, api::ApiError>>,
-    reload: RwSignal<u32>,
     feedback: RwSignal<Option<String>>,
 ) -> impl IntoView {
+    let live = use_live();
     Effect::new(move |_| {
         if !open.get() {
             draft_sig.set(None);
@@ -166,7 +168,7 @@ pub fn BlockTemplateDrawer(
         Some(Ok(_)) => {
             open.set(false);
             Toasts::notify_success("Modèle de blocs enregistré.");
-            bump(reload);
+            live.touch(LOCAL_TOPICS);
         }
         Some(Err(err)) => Toasts::set_error(feedback, err.message()),
         None => {}

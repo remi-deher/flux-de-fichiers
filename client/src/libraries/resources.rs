@@ -1,8 +1,11 @@
 //! Onglet Ressources & Blocs de la Librairie : import de fichiers locaux et modèles de blocs.
 
 use super::block_templates::{BlockTemplateCard, BlockTemplateDraft, BlockTemplateDrawer};
-use super::{LOCAL_ITEMS_PATH, LOCAL_RESOURCES_PATH, LocalDeleteButton, bump, use_local_delete};
+use super::{
+    LOCAL_ITEMS_PATH, LOCAL_RESOURCES_PATH, LOCAL_TOPICS, LocalDeleteButton, use_local_delete,
+};
 use crate::api;
+use crate::live::{Loaded, use_live};
 use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_actions};
@@ -64,11 +67,11 @@ fn format_bytes(size: u64) -> String {
 
 #[component]
 pub fn ResourcesSection(
-    snapshot: LocalResource<Result<LocalLibrarySnapshot, api::ApiError>>,
+    snapshot: Loaded<LocalLibrarySnapshot>,
     flows: LocalResource<Result<Vec<FlowRecord>, api::ApiError>>,
-    reload: RwSignal<u32>,
     can_manage: bool,
 ) -> impl IntoView {
+    let live = use_live();
     let filter = RwSignal::new(ResourcesKindFilter::All);
     let upload_open = RwSignal::new(false);
     let template_open = RwSignal::new(false);
@@ -110,13 +113,13 @@ pub fn ResourcesSection(
         Some(Ok(_)) => {
             upload_open.set(false);
             Toasts::notify_success("Fichier enregistré dans la librairie locale.");
-            bump(reload);
+            live.touch(LOCAL_TOPICS);
         }
         Some(Err(err)) => Toasts::set_error(feedback, err.message()),
         None => {}
     });
 
-    let remove = use_local_delete(reload, "Élément supprimé.");
+    let remove = use_local_delete("Élément supprimé.");
 
     let stats = Signal::derive(move || {
         let (files_count, blocks_count) = snapshot
@@ -274,6 +277,7 @@ pub fn ResourcesSection(
                                 }.into_any();
                                 view! {
                                     <ResourceCard
+                                        focus_key=res.id.clone()
                                         title=res.name
                                         subtitle=res.description
                                         icon=IconName::Package
@@ -400,7 +404,6 @@ pub fn ResourcesSection(
             open=template_open
             draft_sig=template_draft
             flows=flows
-            reload=reload
             feedback=feedback
         />
     }

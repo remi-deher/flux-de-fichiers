@@ -2,8 +2,9 @@
 
 use super::metadata::{StoreCard, StoreTone};
 use super::repo_detail::{RepoDetail, RepoDrawerTab};
-use super::{REPOSITORIES_PATH, SelectedItem, bump};
+use super::{REPOSITORIES_PATH, REPOSITORY_TOPICS, SelectedItem};
 use crate::api;
+use crate::live::{Loaded, use_live};
 use crate::route::encode_segment;
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
@@ -96,9 +97,7 @@ pub fn format_sync_label(last_synced_at: Option<&str>) -> String {
 
 #[component]
 pub fn ReposSection(
-    repositories: LocalResource<Result<Vec<PluginRepository>, api::ApiError>>,
-    reload_repos: RwSignal<u32>,
-    reload_catalog: RwSignal<u32>,
+    repositories: Loaded<Vec<PluginRepository>>,
     adding: RwSignal<bool>,
 ) -> impl IntoView {
     provide_topbar_action(ActionSpec {
@@ -109,7 +108,7 @@ pub fn ReposSection(
     let selected_repo = RwSignal::new(None::<SelectedItem>);
     let detail_open = RwSignal::new(false);
     let detail_tab = RwSignal::new(0_usize);
-    let reload_detail = RwSignal::new(0_u32);
+    let live = use_live();
     let detail_title = Signal::derive(move || {
         selected_repo
             .get()
@@ -133,9 +132,7 @@ pub fn ReposSection(
         Some(Ok(())) => {
             feedback.set(None);
             Toasts::notify_success("Opération sur le dépôt effectuée.");
-            bump(reload_repos);
-            bump(reload_catalog);
-            bump(reload_detail);
+            live.touch(REPOSITORY_TOPICS);
         }
         Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
@@ -144,9 +141,7 @@ pub fn ReposSection(
         Some(Ok(())) => {
             feedback.set(None);
             Toasts::notify_success("Tous les dépôts actifs ont été synchronisés.");
-            bump(reload_repos);
-            bump(reload_catalog);
-            bump(reload_detail);
+            live.touch(REPOSITORY_TOPICS);
         }
         Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
@@ -175,7 +170,7 @@ pub fn ReposSection(
             url.set(String::new());
             adding.set(false);
             Toasts::notify_success("Dépôt ajouté.");
-            bump(reload_repos);
+            live.touch(REPOSITORY_TOPICS);
         }
         Some(Err(error)) => Toasts::set_error(feedback, error.message()),
         None => {}
@@ -249,7 +244,6 @@ pub fn ReposSection(
                     <RepoDetail
                         repo_id=item.id
                         tab=detail_tab
-                        reload_key=reload_detail
                         on_action=on_repo_action
                         action_pending=action_pending
                     />
@@ -365,6 +359,7 @@ pub fn ReposSection(
                                     });
                                     view! {
                                         <StoreCard
+                                            focus_key=repo.id
                                             title=repo.name
                                             description=repo.index_url
                                             icon=IconName::Layers

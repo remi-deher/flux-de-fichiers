@@ -16,6 +16,7 @@ pub mod instance;
 pub mod job_runner;
 pub mod lease_sweeper;
 pub mod library_scan;
+pub mod live;
 pub mod local_worker;
 pub mod logs;
 pub mod mail;

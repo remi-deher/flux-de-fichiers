@@ -261,12 +261,20 @@ mod tests {
         let secrets = SecretBox::open(dir.path())?;
         let sealed =
             secrets.encrypt("cle-radarr", &plugin_secret_aad("plugin.radarr", "apiKey"))?;
+        let changes = crate::live::ChangeNotifier::default();
         let legacy = json!({ "url": "http://radarr:7878", "apiKey": sealed }).to_string();
-        crate::repository::set_plugin_settings(&pool, "plugin.radarr", &legacy).await?;
+        crate::repository::set_plugin_settings(&pool, &changes, "plugin.radarr", &legacy).await?;
         // Réglage déjà refait sous le nouvel identifiant : il n'est jamais écrasé.
-        crate::repository::set_plugin_settings(&pool, "sonarr", r#"{"url":"http://neuf"}"#).await?;
         crate::repository::set_plugin_settings(
             &pool,
+            &changes,
+            "sonarr",
+            r#"{"url":"http://neuf"}"#,
+        )
+        .await?;
+        crate::repository::set_plugin_settings(
+            &pool,
+            &changes,
             "plugin.sonarr",
             r#"{"url":"http://ancien"}"#,
         )

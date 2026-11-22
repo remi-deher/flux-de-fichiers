@@ -3,7 +3,7 @@
 use super::metadata::{StoreCard, StoreTone, readiness_badge};
 use super::subcategory_groups::group_by_subcategory;
 use super::{SelectedItem, card_description, section_badge_label, section_icon};
-use crate::api;
+use crate::live::Loaded;
 use crate::ui::filters::{Filters, PluginKindFilter, plugin_kind};
 use crate::ui::focus::on_activate;
 use crate::ui::search::{matches, query};
@@ -346,6 +346,7 @@ fn CatalogGridSection(
 
                     view! {
                         <StoreCard
+                            focus_key=entry.id
                             title=entry.name
                             description=desc
                             icon=icon
@@ -408,7 +409,7 @@ fn GroupedCatalogSections(
 
 #[component]
 pub fn CatalogSectionView(
-    catalog: LocalResource<Result<Vec<CatalogEntry>, api::ApiError>>,
+    catalog: Loaded<Vec<CatalogEntry>>,
     can_configure: bool,
     active_item_id: Signal<Option<String>>,
     on_open_plugin: Callback<SelectedItem>,

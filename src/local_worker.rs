@@ -40,7 +40,7 @@ const PUBLICATION_WAIT: Duration = Duration::from_secs(15);
 async fn refresh_software_capabilities(state: &AppState) {
     let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
     let probes = crate::software_probe::discover_software_probes(&roots);
-    let cache = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
+    let cache = state.tool_cache();
     crate::software_probe::refresh_software_capabilities(&cache, &probes).await;
 }
 
@@ -480,7 +480,7 @@ async fn process(
         return Err(TaskStop::Concluded.into());
     }
     let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
-    let cache = crate::tools_cache::ToolCacheManager::new(&state.config.tools_cache_dir);
+    let cache = state.tool_cache();
     let wanted = job_runner::collect_wanted_tools(&claim);
     crate::plugins::ensure_tools_for_requirements(
         &roots,

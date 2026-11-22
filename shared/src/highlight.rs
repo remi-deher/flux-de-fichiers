@@ -55,6 +55,9 @@ pub struct ScriptPreviewView {
     /// Script intégré sans ses dépendances : elles ne sont pas contrôlées.
     #[serde(default)]
     pub dependencies_unverified: bool,
+    /// Script déjà local, ou nom déjà pris dans la librairie locale : l'import serait refusé.
+    #[serde(default)]
+    pub in_collection: bool,
 }
 
 #[cfg(test)]

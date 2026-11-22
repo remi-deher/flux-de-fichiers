@@ -296,8 +296,8 @@ pub async fn validate_flow(
 pub async fn node_variables(
     State(s): State<AppState>,
     _auth: ViewFlowsAuth,
-    Json(payload): Json<forgearr_shared::flow_variables::NodeVariablesRequest>,
-) -> AppResult<Json<forgearr_shared::flow_variables::NodeVariablesView>> {
+    Json(payload): Json<forgearr_shared::flows::node_references::NodeVariablesRequest>,
+) -> AppResult<Json<forgearr_shared::flows::node_references::NodeVariablesView>> {
     let roots = plugins::catalog_roots(&s.pool, &s.config).await;
     let registry = s.catalog_cache.operations(&roots).await;
     Ok(Json(crate::flows::node_variables_view(&payload, &registry)))

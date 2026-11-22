@@ -137,20 +137,15 @@ pub async fn reprocess(
             .execute(&mut *tx)
             .await?;
         job.flow_version = Some(version);
-        // La classe de ressource suit la version figée relancée, pas la dernière version.
-        let class = super::resource_slots::frozen_flow_class(
-            &mut tx,
-            job.flow_id.as_deref().map(|id| (id, version)),
-        )
-        .await?;
-        super::resource_slots::set_job_class(&mut tx, job.id, class).await?;
-        // Les flux liés suivent aussi la version relancée.
+        // Les flux liés suivent la version relancée, puis la classe de ressource (CPU/GPU)
+        // est recalculée sur l'ensemble figé, pas sur la dernière version.
         super::linked_flows::freeze_linked_flows(
             &mut tx,
             job.id,
             job.flow_id.as_deref().map(|id| (id, version)),
         )
         .await?;
+        super::resource_slots::refresh_job_class(&mut tx, job.id).await?;
     }
     tx.commit().await?;
     Ok(job)

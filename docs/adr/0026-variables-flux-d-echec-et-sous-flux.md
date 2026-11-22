@@ -24,7 +24,7 @@ blocs commune à plusieurs flux.
 - Variables personnalisées `vars.<nom>` : écrites par le bloc « Définir une variable » ou par la sortie
   `variables` d'un script ; 64 au plus, scalaires, 4 Kio par valeur. Elles suivent la tâche lors d'un relais.
 - Les conditions lisent les mêmes variables (propriété `vars.nom`, `file.ext`, `error.code`…).
-- Code : `shared/src/flows/variables.rs`, `src/flows/substitution.rs`, `src/flows/variables_step.rs`.
+- Code : `shared/src/flows/variables.rs`, `src/flows/substitution.rs`, `shared/src/flows/set_variable.rs`, `shared/src/flows/node_references.rs`.
 
 ### 2. Flux d'échec
 
@@ -33,15 +33,30 @@ blocs commune à plusieurs flux.
 - Un flux d'échec global (`GET`/`PUT /api/v1/flows/failure-default`, réglage d'instance
   `default_failure_flow_id`) s'applique aux tâches dont le flux n'en désigne aucun, y compris sans flux.
 - À la création de la tâche, la version courante du flux d'échec est figée dans `job_linked_flows`
-  (migration 0038, rôle `failure`), comme celle du flux principal. Une relance d'une version précise
+  (migration 0046, rôle `failure`), comme celle du flux principal. Une relance d'une version précise
   refige les flux liés.
 - Quand l'exécution échoue sur le worker, le flux d'échec s'exécute sur la même tâche, à partir de la
   source, avec `error.code` et `error.message`. Ses étapes et une étape de synthèse `failure-flow` sont
   ajoutées au journal. **La tâche reste échouée.**
 - Pas de boucle : le flux d'échec d'un flux d'échec n'est jamais exécuté, et l'échec du flux d'échec est
   seulement journalisé.
-- Limite : seuls les échecs d'exécution du flux sur le worker déclenchent le flux d'échec ; une perte de
-  bail ou un refus côté central ne le déclenchent pas.
+- Échecs hors exécution sur le worker (perte de bail constatée par `claim`, refus de publication,
+  `source_changed`, publication incertaine, aucun worker capable d'un relais, échec signalé par le
+  worker avant ou après le flux) : la colonne `jobs.failure_flow_state` (migration 0048) passe à
+  `pending` par un déclencheur SQLite, à chaque passage d'une tâche à `failed` qui a un flux d'échec
+  figé. `fail` la fixe directement à `done` quand le journal contient déjà l'étape `failure-flow`
+  (le worker l'a exécuté) : pas de seconde exécution.
+- Le central exécute les flux en attente (`failure_flow_runner`, toujours actif, worker intégré ou
+  non) : il passe la tâche à `done` **avant** l'exécution (au plus une exécution par échec, même
+  après un redémarrage), exécute le flux d'échec figé avec `error.code` = `error.message` = code
+  d'erreur de la tâche, sur une copie vérifiée de la source si le central la lit, sinon sur un
+  fichier vide du même nom, puis ajoute ses étapes à la fin du journal. La tâche reste échouée.
+- Une nouvelle tentative (réservation) remet l'état à NULL et retire la synthèse `failure-flow` de
+  l'échec précédent.
+- Limites restantes : le flux d'échec exécuté par le central utilise les outils et plugins du
+  central (pas ceux d'un worker spécialisé) et ne voit pas une source détenue par un autre worker ;
+  si un worker exécute le flux d'échec puis perd son bail avant d'enregistrer son journal, le
+  central l'exécute une seconde fois.
 
 ### 3. Sous-flux
 
@@ -61,7 +76,8 @@ blocs commune à plusieurs flux.
 
 ## Conséquences
 
-- Nouvelle table additive `job_linked_flows` ; aucune migration de données.
+- Nouvelle table additive `job_linked_flows`, colonne `jobs.failure_flow_state` et déclencheur
+  (migration 0048) ; aucune migration de données.
 - Le bail grossit des définitions liées ; seules celles réellement atteignables sont figées.
 - Le budget d'étapes d'une exécution augmente du nombre de blocs de chaque sous-flux appelé.
 - Interface : choix du flux d'échec (propre et global) dans les réglages du flux, choix du sous-flux

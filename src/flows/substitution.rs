@@ -2,13 +2,16 @@
 
 use forgearr_shared::flows::{
     DEFAULT_SEPARATOR, FlowVariables, IntrinsicVariable, TEMPLATE_CLOSE, TEMPLATE_OPEN,
-    TemplateToken, exact_token, render_piece, render_template_with, render_value,
+    TemplateToken, exact_token, map_strings_infallible, render_piece, render_template_with,
+    render_value,
 };
+use forgearr_shared::script_variables::SECRETS_CONFIG_KEY;
 use serde_json::Value;
 use std::{ffi::OsStr, path::Path};
 
-/// Clés de configuration jamais réécrites : le code d'un script est transmis tel quel.
-const RAW_CONFIG_KEYS: [&str; 1] = ["code"];
+/// Clés de configuration jamais réécrites : le code d'un script et ses secrets stockés sont
+/// transmis tels quels.
+const RAW_CONFIG_KEYS: [&str; 2] = ["code", SECRETS_CONFIG_KEY];
 
 /// Identité d'une exécution, source des variables intrinsèques qui ne dépendent pas du fichier.
 #[derive(Clone, Copy, Debug, Default)]
@@ -98,38 +101,23 @@ fn verbatim_token(token: &TemplateToken<'_>) -> String {
 
 /// Rend une valeur en ne remplaçant que les variables de flux ; les autres jetons restent.
 fn render_flow_variables_only(value: &Value, vars: &FlowVariables) -> Value {
-    match value {
-        Value::String(text) => {
-            if let Some(resolved) = exact_token(text)
-                .filter(|expr| FlowVariables::is_variable_property(expr))
-                .and_then(|expr| vars.lookup(expr))
-            {
-                return resolved.clone();
-            }
-            Value::String(render_template_with(text, &mut |token: &TemplateToken<
-                '_,
-            >| {
-                if FlowVariables::is_variable_property(token.expr) {
-                    render_piece(vars.lookup(token.expr), token.default)
-                } else {
-                    verbatim_token(token)
-                }
-            }))
+    map_strings_infallible(value, &mut |text| {
+        if let Some(resolved) = exact_token(text)
+            .filter(|expr| FlowVariables::is_variable_property(expr))
+            .and_then(|expr| vars.lookup(expr))
+        {
+            return resolved.clone();
         }
-        Value::Array(items) => Value::Array(
-            items
-                .iter()
-                .map(|item| render_flow_variables_only(item, vars))
-                .collect(),
-        ),
-        Value::Object(fields) => Value::Object(
-            fields
-                .iter()
-                .map(|(key, item)| (key.clone(), render_flow_variables_only(item, vars)))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
+        Value::String(render_template_with(text, &mut |token: &TemplateToken<
+            '_,
+        >| {
+            if FlowVariables::is_variable_property(token.expr) {
+                render_piece(vars.lookup(token.expr), token.default)
+            } else {
+                verbatim_token(token)
+            }
+        }))
+    })
 }
 
 /// Variante pour les blocs HTTP : les jetons propres au runner (`{$context.*}`,
@@ -230,5 +218,20 @@ mod tests {
                 "code": "{$file.name}"
             })
         );
+    }
+
+    #[test]
+    fn stored_secrets_are_never_rendered() {
+        let vars = sample();
+        let config = json!({
+            "secrets": {"token": "{$file.name}"},
+            "output": "{$file.name}"
+        });
+        let expected = json!({
+            "secrets": {"token": "{$file.name}"},
+            "output": "Film.2024.mkv"
+        });
+        assert_eq!(substitute_node_config(&config, &vars), expected);
+        assert_eq!(substitute_flow_variables_only(&config, &vars), expected);
     }
 }

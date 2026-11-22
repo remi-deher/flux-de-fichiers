@@ -1,5 +1,6 @@
 mod artifacts;
 mod enrollment;
+mod failure_flows;
 mod flow_samples;
 mod flows;
 mod identity;
@@ -27,6 +28,10 @@ pub use enrollment::{
     set_enrollment_window,
 };
 
+pub use failure_flows::{
+    FailureFlowState, append_job_steps, failure_flow_not_run_message, failure_flow_state,
+    record_failure_flow_not_run, take_pending_failure_flow,
+};
 pub use flow_samples::{latest_flow_media_sample, save_flow_media_sample};
 pub use flows::{
     DEFINITION_STORES, DefinitionStore, default_flow, delete_flow, get_flow, get_flow_version,

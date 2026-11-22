@@ -4,6 +4,11 @@ use crate::{flows::FlowGraph, script_variables::ScriptVariable};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Ouverture d'une référence de nœud `{{chemin}}` (distincte des modèles de flux `{$…}`).
+pub const REFERENCE_OPEN: &str = "{{";
+/// Fermeture d'une référence de nœud.
+pub const REFERENCE_CLOSE: &str = "}}";
+
 /// D'où vient une référence proposée dans le sélecteur.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -73,6 +78,12 @@ pub struct NodeVariablesView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reference_delimiters_differ_from_flow_templates() {
+        assert_ne!(REFERENCE_OPEN, crate::flows::TEMPLATE_OPEN);
+        assert_eq!(REFERENCE_CLOSE.len(), REFERENCE_OPEN.len());
+    }
 
     #[test]
     fn sources_have_distinct_labels_and_serialize_to_snake_case() -> Result<(), serde_json::Error> {

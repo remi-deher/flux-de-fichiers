@@ -1,6 +1,8 @@
 //! Bloc primitif « Définir une variable » : écrit `vars.<nom>` dans le contexte de la tâche.
+//! Partagé par le moteur et le simulateur de l'éditeur pour qu'ils appliquent la même règle.
 
-use forgearr_shared::flows::{FlowVariables, scalar_to_string};
+use super::linked::is_block_kind;
+use super::variables::{FlowVariables, SET_VARIABLE_BLOCK, scalar_to_string};
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
 
@@ -50,6 +52,11 @@ fn convert(value: &Value, value_type: VariableValueType) -> Result<Value, String
     }
 }
 
+/// Vrai si `kind` désigne le bloc « Définir une variable » (`set-variable` ou `<espace>.set-variable`).
+pub fn is_set_variable_kind(kind: &str) -> bool {
+    is_block_kind(kind, SET_VARIABLE_BLOCK)
+}
+
 /// Applique le bloc ; renvoie le message de l'étape (le nom seul, jamais la valeur).
 pub fn apply_set_variable(config: &Value, vars: &mut FlowVariables) -> Result<String, String> {
     let config: SetVariableConfig = serde_json::from_value(config.clone())
@@ -86,6 +93,14 @@ mod tests {
         assert_eq!(vars.lookup("vars.hdr"), Some(&json!(true)));
         let (_, vars) = apply(json!({"name": "taille", "value": 42}));
         assert_eq!(vars.lookup("vars.taille"), Some(&json!("42")));
+    }
+
+    #[test]
+    fn recognises_set_variable_kinds() {
+        assert!(is_set_variable_kind("set-variable"));
+        assert!(is_set_variable_kind("essentiel.set-variable"));
+        assert!(!is_set_variable_kind("my-set-variable"));
+        assert!(!is_set_variable_kind("sub-flow"));
     }
 
     fn rejected(config: Value) -> bool {

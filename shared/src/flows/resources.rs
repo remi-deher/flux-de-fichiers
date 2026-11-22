@@ -5,7 +5,7 @@
 //! les relais. Le classement est pessimiste : un bloc GPU sur une branche conditionnelle classe
 //! toute la tâche en GPU, pour réserver la place au pire cas. Un bloc script n'est GPU que s'il
 //! déclare lui-même `acceleration`. Seule une valeur littérale compte : une variable non résolue
-//! (`{{…}}`) ou une valeur inconnue donne CPU. Les flux liés figés avec la tâche (sous-flux et
+//! (`{$…}`) ou une valeur inconnue donne CPU. Les flux liés figés avec la tâche (sous-flux et
 //! flux d'échec) comptent comme le flux principal : `flows_resource_class` les réunit.
 
 use super::FlowGraph;
@@ -87,7 +87,7 @@ mod tests {
     fn unknown_or_templated_values_are_cpu() -> Result<(), serde_json::Error> {
         for value in [
             json!("quantum"),
-            json!("{{custom.accel}}"),
+            json!("{$custom.accel}"),
             json!(42),
             json!(null),
         ] {

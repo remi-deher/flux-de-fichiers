@@ -14,7 +14,7 @@ pub const MAX_RELAYED_MESSAGE_CHARS: usize = 2000;
 /// Taille maximale des sorties de nœuds transmises avec un relais, une fois sérialisées.
 pub const MAX_RELAYED_OUTPUTS_BYTES: usize = 256 * 1024;
 
-/// Ce qu'un nœud déjà exécuté expose aux suivants (`{{nodes.<id>.message|nextPort}}`), transmis au
+/// Ce qu'un nœud déjà exécuté expose aux suivants (`{$nodes.<id>.message}`, `{$nodes.<id>.nextPort}`), transmis au
 /// worker repreneur. Le fichier de travail d'un nœud appartient au worker émetteur : il n'est pas transmis.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,7 +43,7 @@ pub struct RelayRequest {
     /// Variables personnalisées du flux (`vars.*`) restaurées chez le repreneur.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub variables: Map<String, Value>,
-    /// Sorties des nœuds exécutés avant le relais, pour que `{{nodes.<id>.…}}` reste lisible à la reprise.
+    /// Sorties des nœuds exécutés avant le relais, pour que `{$nodes.<id>.…}` reste lisible à la reprise.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub node_outputs: HashMap<String, RelayedNodeOutput>,
 }

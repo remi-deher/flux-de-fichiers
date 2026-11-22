@@ -335,6 +335,7 @@ impl<'a> FlowEngine<'a> {
                 worker_name: self.run_info.worker_name,
             },
         );
+        substitution::set_location_variables(&mut ctx.variables, source_file, work_dir);
         ctx.set_working_file(current_working_file.clone());
         if let Some(failure) = self.run_info.failure {
             substitution::set_failure_variables(&mut ctx.variables, failure.code, failure.message);
@@ -371,7 +372,7 @@ impl<'a> FlowEngine<'a> {
         let mut active_flow_id = flow.id.clone();
         let mut frames: Vec<sub_flow::SubFlowFrame> = Vec::new();
         let mut relay: Option<RelayRequest> = None;
-        // Sorties des nœuds déjà exécutés, lues par `{{nodes.<id>.…}}` (ADR 0025).
+        // Sorties des nœuds déjà exécutés, lues par `{$nodes.<id>.…}` (ADR 0026).
         // Après un relais, ceux des nœuds exécutés par le worker précédent sont repris (ADR 0018).
         let mut node_outputs: HashMap<String, variables::NodeOutput> = self
             .resumed_outputs
@@ -405,8 +406,19 @@ impl<'a> FlowEngine<'a> {
 
             let mut step_ctx = ctx.clone();
             step_ctx.current_step = node.name.clone();
-            // Configuration rendue avec les variables du flux (les nœuds HTTP rendent la leur).
-            let node_config = substitution::substitute_node_config(&node.config, &ctx.variables);
+            // Portée unique de l'étape (variables, métadonnées, nœuds, plugins) et configuration
+            // rendue en une seule passe ; les nœuds HTTP et script rendent la leur depuis la
+            // configuration brute.
+            let all_exposures = self.registry.exposed_variables();
+            let node_config = substitution::substitute_node_config(
+                &node.config,
+                &variables::NodeScope::new(
+                    &ctx.variables,
+                    &ctx.media_info,
+                    &node_outputs,
+                    &all_exposures,
+                ),
+            );
             let mut next_port: Option<String> = None;
             let mut stop_pipeline = false;
             let mut step_status = crate::domain::JobStepStatus::Succeeded;
@@ -603,8 +615,15 @@ impl<'a> FlowEngine<'a> {
                         }),
                         require_https: false,
                     };
-                    let http_config =
-                        substitution::substitute_flow_variables_only(&node.config, &ctx.variables);
+                    let http_config = substitution::substitute_flow_variables_only(
+                        &node.config,
+                        &variables::NodeScope::new(
+                            &ctx.variables,
+                            &ctx.media_info,
+                            &node_outputs,
+                            &all_exposures,
+                        ),
+                    );
                     match http_runner::execute_http_operation_with_policy(
                         http_rt,
                         &active_flow_id,
@@ -675,20 +694,18 @@ impl<'a> FlowEngine<'a> {
                             steps,
                         });
                     }
-                    let variable_context = variables::VariableContext::new(
-                        &current_working_file,
-                        source_file,
-                        work_dir,
-                        &ctx.media_info,
-                        &node_outputs,
-                        &self
-                            .registry
-                            .exposures_for_requirements(&effective_rt.requires),
-                    );
+                    let script_exposures = self
+                        .registry
+                        .exposures_for_requirements(&effective_rt.requires);
                     let script_config = match variables::resolve_node_config(
                         &effective_rt.variables,
-                        &node_config,
-                        &variable_context,
+                        &node.config,
+                        &variables::NodeScope::new(
+                            &ctx.variables,
+                            &ctx.media_info,
+                            &node_outputs,
+                            &script_exposures,
+                        ),
                     ) {
                         Ok(config) => config,
                         Err(err) => {

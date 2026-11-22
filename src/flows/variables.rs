@@ -1,40 +1,53 @@
-//! Résolution des variables déclarées d'un script au moment de l'exécution (ADR 0025, phase B).
+//! Résolution des variables déclarées d'un script au moment de l'exécution (ADR 0025, phase B ;
+//! modèle unique `{$…}` de l'ADR 0026).
 //!
-//! Seules les clés déclarées dans `runtime.variables` sont traitées : les valeurs par défaut du
-//! schéma comblent les clés absentes, les références `{{…}}` sont remplacées, puis chaque valeur
-//! est contrôlée selon son type. Le code du script et les autres clés du nœud restent intacts.
+//! Une seule portée ([`NodeScope`]) et une seule passe : la configuration brute du nœud est rendue
+//! une fois. Les clés déclarées dans `runtime.variables` sont rendues strictement (une expression
+//! connue sans valeur ni défaut fait échouer le bloc), comblées par les défauts du schéma, puis
+//! contrôlées selon leur type. Le code du script et ses secrets restent intacts.
 
+use super::substitution::substitute_node_config;
 use crate::secrets::is_encrypted;
 use forgearr_shared::{
-    exposed_variables::ExposedVariables,
+    exposed_variables::{ExposedVariable, ExposedVariables},
     flows::{
-        extract_json_values, map_strings,
-        node_references::{REFERENCE_CLOSE, REFERENCE_OPEN},
+        FlowVariables, extract_json_values,
+        legacy_references::{LegacyConversion, upgrade_legacy_strings},
         scalar_to_string,
+        template_scope::{
+            NodeOutputField, PATH_SEPARATOR, ScopeNamespace, TemplateScope, media_path,
+            render_in_scope_strict, split_node_reference,
+        },
     },
     relay::{MAX_RELAYED_MESSAGE_CHARS, RelayedNodeOutput},
     script_variables::{
         SECRET_PLACEHOLDER, SECRETS_CONFIG_KEY, ScriptVariable, VariableKind, default_from_text,
     },
 };
-use serde_json::{Map, Number, Value};
-use std::{collections::HashMap, path::Path};
+use serde_json::{Number, Value};
+use std::collections::HashMap;
 use thiserror::Error;
 
-const ROOT_WORKING_FILE: &str = "workingFile";
-const ROOT_SOURCE_FILE: &str = "sourceFile";
-const ROOT_WORK_DIR: &str = "workDir";
-const ROOT_MEDIA_INFO: &str = "mediaInfo";
-const ROOT_NODES: &str = "nodes";
-/// Texte d'un `null` inséré dans une référence `{{…}}`.
-const NULL_TEXT: &str = "null";
-
-/// Ce qu'un nœud déjà exécuté expose aux suivants (`{{nodes.<id>.message|nextPort|workingFile}}`).
+/// Ce qu'un nœud déjà exécuté expose aux suivants (`{$nodes.<id>.message|nextPort|file}`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NodeOutput {
     pub message: Option<String>,
     pub next_port: Option<String>,
     pub working_file: String,
+}
+
+impl NodeOutput {
+    /// Valeur d'un champ ; un fichier vide (nœud antérieur à un relais) n'a pas de valeur.
+    fn field(&self, field: NodeOutputField) -> Option<Value> {
+        match field {
+            NodeOutputField::Message => self.message.clone(),
+            NodeOutputField::NextPort => self.next_port.clone(),
+            NodeOutputField::File => {
+                (!self.working_file.is_empty()).then(|| self.working_file.clone())
+            }
+        }
+        .map(Value::String)
+    }
 }
 
 impl From<&RelayedNodeOutput> for NodeOutput {
@@ -60,99 +73,68 @@ impl From<&NodeOutput> for RelayedNodeOutput {
     }
 }
 
-/// Valeurs accessibles par les références d'un nœud, construites une fois par étape.
-#[derive(Clone, Debug)]
-pub struct VariableContext {
-    root: Value,
+/// Portée des modèles d'une étape : variables du flux, métadonnées, sorties des nœuds exécutés et
+/// variables exposées par les plugins chargés.
+#[derive(Clone, Copy, Debug)]
+pub struct NodeScope<'a> {
+    variables: &'a FlowVariables,
+    media_info: &'a Value,
+    nodes: &'a HashMap<String, NodeOutput>,
+    exposed: &'a [&'a ExposedVariables],
 }
 
-impl VariableContext {
-    /// `exposed` : ce que les plugins chargés exposent ; chaque variable se lit à son chemin de
-    /// `media_info` et devient accessible sous `espace.nom` quand une valeur y existe.
+impl<'a> NodeScope<'a> {
     pub fn new(
-        working_file: &Path,
-        source_file: &Path,
-        work_dir: &Path,
-        media_info: &Value,
-        nodes: &HashMap<String, NodeOutput>,
-        exposed: &[&ExposedVariables],
+        variables: &'a FlowVariables,
+        media_info: &'a Value,
+        nodes: &'a HashMap<String, NodeOutput>,
+        exposed: &'a [&'a ExposedVariables],
     ) -> Self {
-        let nodes_json: Map<String, Value> = nodes
-            .iter()
-            .map(|(id, output)| {
-                (
-                    id.clone(),
-                    serde_json::json!({
-                        "message": output.message,
-                        "nextPort": output.next_port,
-                        "workingFile": (!output.working_file.is_empty())
-                            .then_some(&output.working_file),
-                    }),
-                )
-            })
-            .collect();
-        let mut root = Map::new();
-        root.insert(ROOT_WORKING_FILE.into(), path_value(working_file));
-        root.insert(ROOT_SOURCE_FILE.into(), path_value(source_file));
-        root.insert(ROOT_WORK_DIR.into(), path_value(work_dir));
-        root.insert(ROOT_MEDIA_INFO.into(), media_info.clone());
-        root.insert(ROOT_NODES.into(), Value::Object(nodes_json));
-        for exposure in exposed {
-            for variable in &exposure.variables {
-                if let Some(value) = exposed_value(media_info, &variable.path) {
-                    insert_nested(
-                        &mut root,
-                        &exposure.namespace,
-                        &variable.name,
-                        value.clone(),
-                    );
-                }
-            }
-        }
         Self {
-            root: Value::Object(root),
+            variables,
+            media_info,
+            nodes,
+            exposed,
         }
     }
 
-    /// Valeur désignée par un chemin pointé ; `null` compte comme absente.
-    fn lookup(&self, path: &str) -> Option<&Value> {
-        let Some((node_id, field)) = split_node_reference(path) else {
-            return lookup_in(&self.root, path);
-        };
-        let value = self.root.get(ROOT_NODES)?.get(node_id)?.get(field)?;
-        (!value.is_null()).then_some(value)
+    /// Variable exposée désignée par `espace.nom`.
+    fn exposed_variable(&self, expr: &str) -> Option<&'a ExposedVariable> {
+        self.exposed.iter().find_map(|exposure| {
+            let name = expr
+                .strip_prefix(exposure.namespace.as_str())?
+                .strip_prefix(PATH_SEPARATOR)?;
+            exposure
+                .variables
+                .iter()
+                .find(|variable| variable.name == name)
+        })
     }
 }
 
-/// Champs qu'un nœud exécuté expose, avec leur libellé.
-pub(super) const NODE_OUTPUT_FIELDS: [(&str, &str); 3] = [
-    ("message", "message"),
-    ("nextPort", "port de sortie"),
-    ("workingFile", "fichier courant"),
-];
+impl TemplateScope for NodeScope<'_> {
+    fn resolve(&self, expr: &str) -> Option<Value> {
+        let expr = expr.trim();
+        match ScopeNamespace::builtin(expr) {
+            Some(ScopeNamespace::Intrinsic | ScopeNamespace::Custom) => {
+                TemplateScope::resolve(self.variables, expr)
+            }
+            Some(ScopeNamespace::Media) => lookup_in(self.media_info, media_path(expr)?).cloned(),
+            Some(ScopeNamespace::Node) => {
+                let (node_id, field) = split_node_reference(expr)?;
+                self.nodes.get(node_id)?.field(field)
+            }
+            Some(ScopeNamespace::Http | ScopeNamespace::Plugin) => None,
+            None => exposed_value(self.media_info, &self.exposed_variable(expr)?.path).cloned(),
+        }
+    }
 
-/// Sépare `nodes.<id>.<champ>` : le champ est le dernier segment, l'identifiant tout ce qui précède,
-/// points compris (un nœud peut s'appeler `encodage.v2`).
-pub(super) fn split_node_reference(path: &str) -> Option<(&str, &str)> {
-    let (node_id, field) = path
-        .strip_prefix(ROOT_NODES)?
-        .strip_prefix('.')?
-        .rsplit_once('.')?;
-    NODE_OUTPUT_FIELDS
-        .iter()
-        .any(|(name, _)| *name == field)
-        .then_some((node_id, field))
-}
-
-/// Références `{{chemin}}` d'un texte, dans l'ordre.
-pub(super) fn references_in(text: &str) -> Vec<&str> {
-    parse_template(text)
-        .into_iter()
-        .filter_map(|segment| match segment {
-            Segment::Reference(path) => Some(path),
-            Segment::Text(_) => None,
+    fn namespace_of(&self, expr: &str) -> Option<ScopeNamespace> {
+        ScopeNamespace::builtin(expr).or_else(|| {
+            self.exposed_variable(expr.trim())
+                .map(|_| ScopeNamespace::Plugin)
         })
-        .collect()
+    }
 }
 
 /// Valeur d'une variable exposée : première valeur non nulle de la requête `path` dans `media_info`.
@@ -169,7 +151,7 @@ pub(super) fn exposed_value<'a>(media_info: &'a Value, path: &str) -> Option<&'a
 /// Parcourt `root` selon un chemin pointé (clés d'objet, indices de tableau) ; `null` compte comme absente.
 pub(super) fn lookup_in<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
     let mut current = root;
-    for segment in path.split('.') {
+    for segment in path.split(PATH_SEPARATOR) {
         current = match current {
             Value::Object(map) => map.get(segment)?,
             Value::Array(items) => items.get(segment.parse::<usize>().ok()?)?,
@@ -179,37 +161,11 @@ pub(super) fn lookup_in<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
     (!current.is_null()).then_some(current)
 }
 
-/// Place `value` sous `espace.a.b` en créant les objets intermédiaires.
-fn insert_nested(root: &mut Map<String, Value>, namespace: &str, name: &str, value: Value) {
-    let segments: Vec<&str> = name.split('.').collect();
-    let Some((last, parents)) = segments.split_last() else {
-        return;
-    };
-    let mut current = root
-        .entry(namespace.to_owned())
-        .or_insert_with(|| Value::Object(Map::new()));
-    for segment in parents {
-        let Value::Object(map) = current else {
-            return;
-        };
-        current = map
-            .entry((*segment).to_owned())
-            .or_insert_with(|| Value::Object(Map::new()));
-    }
-    if let Value::Object(map) = current {
-        map.insert((*last).to_owned(), value);
-    }
-}
-
-fn path_value(path: &Path) -> Value {
-    Value::String(path.to_string_lossy().into_owned())
-}
-
 /// Raison pour laquelle les variables d'un nœud n'ont pas pu être résolues.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum VariableError {
     #[error(
-        "variable « {variable} » : la référence {{{{{reference}}}}} n'a pas de valeur à cette étape"
+        "variable « {variable} » : la référence {{${reference}}} n'a pas de valeur à cette étape"
     )]
     MissingReference { variable: String, reference: String },
     #[error("variable « {0} » requise : aucune valeur")]
@@ -225,82 +181,6 @@ pub enum VariableError {
     NotAnOption(String),
     #[error("variable « {0} » : le secret n'a pas été déchiffré avant l'exécution")]
     SecretNotDecrypted(String),
-}
-
-/// Fragment d'un texte : littéral, ou référence `{{chemin}}`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Segment<'a> {
-    Text(&'a str),
-    Reference(&'a str),
-}
-
-fn is_reference(candidate: &str) -> bool {
-    !candidate.is_empty()
-        && candidate
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-}
-
-/// Découpe un texte ; `{{…}}` dont le contenu n'est pas un chemin valide reste littéral.
-fn parse_template(text: &str) -> Vec<Segment<'_>> {
-    let mut segments = Vec::new();
-    let mut literal_from = 0;
-    let mut cursor = 0;
-    while let Some(open_offset) = text[cursor..].find(REFERENCE_OPEN) {
-        let open = cursor + open_offset;
-        let inner_start = open + REFERENCE_OPEN.len();
-        let Some(close_offset) = text[inner_start..].find(REFERENCE_CLOSE) else {
-            break;
-        };
-        let close = inner_start + close_offset;
-        let reference = text[inner_start..close].trim();
-        if is_reference(reference) {
-            if literal_from < open {
-                segments.push(Segment::Text(&text[literal_from..open]));
-            }
-            segments.push(Segment::Reference(reference));
-            literal_from = close + REFERENCE_CLOSE.len();
-            cursor = literal_from;
-        } else {
-            cursor = inner_start;
-        }
-    }
-    if literal_from < text.len() {
-        segments.push(Segment::Text(&text[literal_from..]));
-    }
-    segments
-}
-
-/// Texte d'une valeur insérée dans un texte ; `null` s'écrit `null` (contrairement aux modèles `{$…}`).
-pub(super) fn as_text(value: &Value) -> String {
-    match value {
-        Value::Null => NULL_TEXT.to_owned(),
-        other => scalar_to_string(Some(other)),
-    }
-}
-
-/// Remplace les références d'une valeur ; `Err` porte la première référence sans valeur.
-fn resolve_value(value: &Value, context: &VariableContext) -> Result<Value, String> {
-    map_strings(value, &mut |text| {
-        let segments = parse_template(text);
-        if let [Segment::Reference(path)] = segments.as_slice() {
-            return context
-                .lookup(path)
-                .cloned()
-                .ok_or_else(|| (*path).to_owned());
-        }
-        let mut out = String::new();
-        for segment in segments {
-            match segment {
-                Segment::Text(literal) => out.push_str(literal),
-                Segment::Reference(path) => {
-                    let found = context.lookup(path).ok_or_else(|| path.to_owned())?;
-                    out.push_str(&as_text(found));
-                }
-            }
-        }
-        Ok(Value::String(out))
-    })
 }
 
 fn number_in_range(variable: &ScriptVariable, number: &Number) -> bool {
@@ -329,7 +209,7 @@ fn coerce(variable: &ScriptVariable, value: Value) -> Result<Value, VariableErro
     match variable.kind {
         VariableKind::Text | VariableKind::Multiline | VariableKind::Secret => match value {
             Value::String(_) => Ok(value),
-            Value::Number(_) | Value::Bool(_) => Ok(Value::String(as_text(&value))),
+            Value::Number(_) | Value::Bool(_) => Ok(Value::String(scalar_to_string(Some(&value)))),
             _ => Err(wrong("texte")),
         },
         VariableKind::Number => {
@@ -368,7 +248,7 @@ fn coerce(variable: &ScriptVariable, value: Value) -> Result<Value, VariableErro
     }
 }
 
-/// Un secret est une valeur littérale : jamais de référence `{{…}}`, jamais de valeur par défaut.
+/// Un secret est une valeur littérale : jamais de modèle `{$…}`, jamais de valeur par défaut.
 fn resolve_secret(
     variable: &ScriptVariable,
     stored: Option<&Value>,
@@ -422,26 +302,30 @@ fn is_blank(value: &Value) -> bool {
     matches!(value, Value::String(text) if text.trim().is_empty())
 }
 
-/// Résout une variable : valeur du nœud, sinon défaut du schéma ; une référence sans valeur
-/// retombe sur le défaut quand il existe.
+/// Résout une variable : valeur du nœud, sinon défaut du schéma ; une expression sans valeur
+/// retombe sur le défaut quand il existe. Les anciennes références `{{…}}` (valeurs stockées,
+/// défauts des manifestes installés) sont converties avant le rendu.
 fn resolve_variable(
     variable: &ScriptVariable,
     provided: Option<&Value>,
-    context: &VariableContext,
+    scope: &dyn TemplateScope,
 ) -> Result<Option<Value>, VariableError> {
-    let missing = |reference: String| VariableError::MissingReference {
-        variable: variable.name.clone(),
-        reference,
+    let render = |value: &Value| {
+        render_in_scope_strict(
+            &upgrade_legacy_strings(value, LegacyConversion::AllPaths),
+            scope,
+        )
     };
     let resolved = match (provided, &variable.default_value) {
-        (Some(value), Some(default)) => {
-            resolve_value(value, context).or_else(|_| resolve_value(default, context))
-        }
-        (Some(value), None) => resolve_value(value, context),
-        (None, Some(default)) => resolve_value(default, context),
+        (Some(value), Some(default)) => render(value).or_else(|_| render(default)),
+        (Some(value), None) => render(value),
+        (None, Some(default)) => render(default),
         (None, None) => return finish(variable, None),
     }
-    .map_err(missing)?;
+    .map_err(|reference| VariableError::MissingReference {
+        variable: variable.name.clone(),
+        reference,
+    })?;
     finish(variable, Some(resolved))
 }
 
@@ -456,33 +340,36 @@ fn finish(variable: &ScriptVariable, value: Option<Value>) -> Result<Option<Valu
     }
 }
 
-/// Config du nœud avec les variables déclarées résolues et contrôlées. Les secrets viennent de
-/// `config.secrets` (valeurs littérales) et sont rangés sous le nom de leur variable.
-///
-/// Les clés non déclarées (code en ligne, `interpreter`, `scriptId`…) sont conservées telles quelles.
+/// Config du nœud rendue en une seule passe, avec les variables déclarées résolues et contrôlées.
+/// Les secrets viennent de `config.secrets` (valeurs littérales) et sont rangés sous le nom de
+/// leur variable. `raw_config` est la configuration stockée du nœud, jamais une config déjà rendue :
+/// la valeur d'une variable n'est donc jamais interprétée comme un modèle (pas d'injection de
+/// second ordre).
 pub fn resolve_node_config(
     variables: &[ScriptVariable],
-    node_config: &Value,
-    context: &VariableContext,
+    raw_config: &Value,
+    scope: &dyn TemplateScope,
 ) -> Result<Value, VariableError> {
+    let rendered = substitute_node_config(raw_config, scope);
     if variables.is_empty() {
-        return Ok(node_config.clone());
+        return Ok(rendered);
     }
-    let mut config = node_config.as_object().cloned().unwrap_or_default();
-    let stored_secrets = config.remove(SECRETS_CONFIG_KEY);
+    let mut config = rendered.as_object().cloned().unwrap_or_default();
+    config.remove(SECRETS_CONFIG_KEY);
+    let stored_secrets = raw_config.get(SECRETS_CONFIG_KEY);
     for variable in variables {
         if variable.kind == VariableKind::Secret {
-            let stored = stored_secrets
-                .as_ref()
-                .and_then(|map| map.get(&variable.name));
+            let stored = stored_secrets.and_then(|map| map.get(&variable.name));
             match resolve_secret(variable, stored)? {
                 Some(value) => config.insert(variable.name.clone(), value),
                 None => config.remove(&variable.name),
             };
             continue;
         }
-        let provided = config.get(&variable.name).filter(|value| !value.is_null());
-        match resolve_variable(variable, provided, context)? {
+        let provided = raw_config
+            .get(&variable.name)
+            .filter(|value| !value.is_null());
+        match resolve_variable(variable, provided, scope)? {
             Some(value) => {
                 config.insert(variable.name.clone(), value);
             }
@@ -497,26 +384,53 @@ pub fn resolve_node_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use forgearr_shared::flows::IntrinsicVariable;
     use serde_json::json;
 
-    fn context() -> VariableContext {
-        let mut nodes = HashMap::new();
-        nodes.insert(
-            "probe".to_owned(),
-            NodeOutput {
-                message: Some("ok".into()),
-                next_port: Some("hevc".into()),
-                working_file: "/work/film.mkv".into(),
-            },
-        );
-        VariableContext::new(
-            Path::new("/work/film.mkv"),
-            Path::new("/in/source.mkv"),
-            Path::new("/work"),
-            &json!({"video": {"codec": "hevc", "width": 1920}, "streams": [{"lang": "fr"}]}),
-            &nodes,
-            &[],
-        )
+    struct Fixture {
+        variables: FlowVariables,
+        media: Value,
+        nodes: HashMap<String, NodeOutput>,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let mut variables = FlowVariables::default();
+            variables.set_intrinsic(IntrinsicVariable::FilePath, json!("/work/film.mkv"));
+            variables.set_intrinsic(IntrinsicVariable::SourcePath, json!("/in/source.mkv"));
+            variables.set_intrinsic(IntrinsicVariable::WorkDir, json!("/work"));
+            variables.set_intrinsic(IntrinsicVariable::WorkerName, Value::Null);
+            let mut nodes = HashMap::new();
+            nodes.insert(
+                "probe".to_owned(),
+                NodeOutput {
+                    message: Some("ok".into()),
+                    next_port: Some("hevc".into()),
+                    working_file: "/work/film.mkv".into(),
+                },
+            );
+            Self {
+                variables,
+                media: json!({"video": {"codec": "hevc", "width": 1920}, "streams": [{"lang": "fr"}]}),
+                nodes,
+            }
+        }
+
+        fn scope<'a>(&'a self, exposed: &'a [&'a ExposedVariables]) -> NodeScope<'a> {
+            NodeScope::new(&self.variables, &self.media, &self.nodes, exposed)
+        }
+
+        fn resolve(
+            &self,
+            variables: &[ScriptVariable],
+            config: Value,
+        ) -> Result<Value, VariableError> {
+            resolve_node_config(variables, &config, &self.scope(&[]))
+        }
+    }
+
+    fn resolve(variables: &[ScriptVariable], config: Value) -> Result<Value, VariableError> {
+        Fixture::new().resolve(variables, config)
     }
 
     fn variable(name: &str, kind: VariableKind) -> ScriptVariable {
@@ -528,78 +442,29 @@ mod tests {
     }
 
     #[test]
-    fn as_text_keeps_null_visible_unlike_flow_templates() {
-        assert_eq!(as_text(&Value::Null), "null");
-        assert_eq!(as_text(&json!("a")), "a");
-        assert_eq!(as_text(&json!(2)), "2");
-        assert_eq!(as_text(&json!(true)), "true");
-        assert_eq!(as_text(&json!([1])), "[1]");
-    }
-
-    /// Ordre réel de l'exécuteur : modèles de flux `{$…}` d'abord, puis références `{{…}}`.
-    fn flow_then_node_references(text: &str) -> Result<Value, String> {
-        let mut vars = forgearr_shared::flows::FlowVariables::default();
-        vars.set_custom("codec", json!("hevc"))
-            .map_err(|err| format!("{err:?}"))?;
-        vars.set_custom("ref", json!("{{workDir}}"))
-            .map_err(|err| format!("{err:?}"))?;
-        let rendered =
-            crate::flows::substitution::substitute_node_config(&json!({"target": text}), &vars);
-        let resolved = resolve_node_config(
-            &[variable("target", VariableKind::Text)],
-            &rendered,
-            &context(),
-        )
-        .map_err(|err| err.to_string())?;
-        resolved
-            .get("target")
-            .cloned()
-            .ok_or_else(|| "target absent".to_owned())
-    }
-
-    #[test]
-    fn flow_templates_render_before_node_references() -> Result<(), String> {
-        assert_eq!(
-            flow_then_node_references("{$vars.codec}-{{workDir}}")?,
-            json!("hevc-/work")
-        );
-        assert_eq!(
-            flow_then_node_references("{{$vars.codec}")?,
-            json!("{$vars.codec}")
-        );
-        assert_eq!(
-            flow_then_node_references("{{$vars.codec}}")?,
-            json!("{$vars.codec}}")
-        );
-        assert_eq!(flow_then_node_references("{$vars.ref}")?, json!("/work"));
+    fn a_variable_value_is_never_rendered_a_second_time() -> Result<(), String> {
+        let mut fixture = Fixture::new();
+        fixture
+            .variables
+            .set_custom("ref", json!("{$work.dir}"))
+            .map_err(|err| err.to_string())?;
+        fixture
+            .variables
+            .set_custom("codec", json!("hevc"))
+            .map_err(|err| err.to_string())?;
+        let target = [variable("target", VariableKind::Text)];
+        let render = |text: &str| -> Result<Value, String> {
+            resolve_node_config(&target, &json!({"target": text}), &fixture.scope(&[]))
+                .map_err(|err| err.to_string())?
+                .get("target")
+                .cloned()
+                .ok_or_else(|| "target absent".to_owned())
+        };
+        assert_eq!(render("{$vars.ref}")?, json!("{$work.dir}"));
+        assert_eq!(render("{$vars.codec}-{$work.dir}")?, json!("hevc-/work"));
+        assert_eq!(render("{$vars.codec}-{{workDir}}")?, json!("hevc-/work"));
+        assert_eq!(render("{{$vars.codec}")?, json!("{$vars.codec}"));
         Ok(())
-    }
-
-    fn resolve(variables: &[ScriptVariable], config: Value) -> Result<Value, VariableError> {
-        resolve_node_config(variables, &config, &context())
-    }
-
-    #[test]
-    fn template_parsing_keeps_literals_and_invalid_markers() {
-        assert_eq!(
-            parse_template("a {{ workDir }}/b {{x}}"),
-            vec![
-                Segment::Text("a "),
-                Segment::Reference("workDir"),
-                Segment::Text("/b "),
-                Segment::Reference("x"),
-            ]
-        );
-        assert_eq!(
-            parse_template("{{ pas une ref }}"),
-            vec![Segment::Text("{{ pas une ref }}")]
-        );
-        assert_eq!(
-            parse_template("ouvert {{ sans fin"),
-            vec![Segment::Text("ouvert {{ sans fin")]
-        );
-        assert_eq!(parse_template("{{}}"), vec![Segment::Text("{{}}")]);
-        assert!(parse_template("").is_empty());
     }
 
     #[test]
@@ -610,17 +475,26 @@ mod tests {
             variable("fichier", VariableKind::Text),
             variable("titre", VariableKind::Text),
         ];
-        let resolved = resolve(
-            &variables,
-            json!({
-                "largeur": "{{mediaInfo.video.width}}",
-                "fichier": "{{workingFile}}",
-                "titre": "{{mediaInfo.video.codec}}-{{mediaInfo.video.width}}",
-            }),
-        )?;
-        assert_eq!(resolved["largeur"], json!(1920));
-        assert_eq!(resolved["fichier"], json!("/work/film.mkv"));
-        assert_eq!(resolved["titre"], json!("hevc-1920"));
+        for (largeur, fichier, titre) in [
+            (
+                "{{mediaInfo.video.width}}",
+                "{{workingFile}}",
+                "{{mediaInfo.video.codec}}-{{mediaInfo.video.width}}",
+            ),
+            (
+                "{$media.video.width}",
+                "{$file.path}",
+                "{$media.video.codec}-{$media.video.width}",
+            ),
+        ] {
+            let resolved = resolve(
+                &variables,
+                json!({"largeur": largeur, "fichier": fichier, "titre": titre}),
+            )?;
+            assert_eq!(resolved["largeur"], json!(1920));
+            assert_eq!(resolved["fichier"], json!("/work/film.mkv"));
+            assert_eq!(resolved["titre"], json!("hevc-1920"));
+        }
         Ok(())
     }
 
@@ -633,15 +507,17 @@ mod tests {
             variable("langue", VariableKind::Text),
             variable("port", VariableKind::Text),
             variable("precedent", VariableKind::Text),
+            variable("ancien", VariableKind::Text),
         ];
         let resolved = resolve(
             &variables,
             json!({
-                "source": "{{sourceFile}}",
-                "dossier": "{{workDir}}",
-                "langue": "{{mediaInfo.streams.0.lang}}",
-                "port": "{{nodes.probe.nextPort}}",
-                "precedent": "{{nodes.probe.workingFile}}",
+                "source": "{$source.path}",
+                "dossier": "{$work.dir}",
+                "langue": "{$media.streams.0.lang}",
+                "port": "{$nodes.probe.nextPort}",
+                "precedent": "{$nodes.probe.file}",
+                "ancien": "{{nodes.probe.workingFile}}",
             }),
         )?;
         assert_eq!(resolved["source"], json!("/in/source.mkv"));
@@ -649,59 +525,122 @@ mod tests {
         assert_eq!(resolved["langue"], json!("fr"));
         assert_eq!(resolved["port"], json!("hevc"));
         assert_eq!(resolved["precedent"], json!("/work/film.mkv"));
+        assert_eq!(resolved["ancien"], json!("/work/film.mkv"));
         Ok(())
     }
 
     #[test]
-    fn references_are_resolved_inside_nested_values() {
-        let resolved = resolve_value(
-            &json!({"liste": ["{{workDir}}", 3], "texte": "x"}),
-            &context(),
-        );
-        assert_eq!(resolved, Ok(json!({"liste": ["/work", 3], "texte": "x"})));
-        assert_eq!(
-            resolve_value(&json!(["{{absent.chemin}}"]), &context()),
-            Err("absent.chemin".to_owned())
-        );
-    }
-
-    #[test]
-    fn a_missing_reference_fails_unless_the_variable_has_a_default() -> Result<(), VariableError> {
+    fn a_missing_reference_fails_unless_a_default_exists() -> Result<(), VariableError> {
         let plain = variable("langue", VariableKind::Text);
         assert_eq!(
-            resolve(&[plain], json!({"langue": "{{mediaInfo.audio.lang}}"})),
+            resolve(
+                std::slice::from_ref(&plain),
+                json!({"langue": "{$media.audio.lang}"})
+            ),
             Err(VariableError::MissingReference {
                 variable: "langue".into(),
-                reference: "mediaInfo.audio.lang".into(),
+                reference: "media.audio.lang".into(),
             })
+        );
+        assert_eq!(
+            resolve(
+                std::slice::from_ref(&plain),
+                json!({"langue": "{$worker.name}"})
+            ),
+            Err(VariableError::MissingReference {
+                variable: "langue".into(),
+                reference: "worker.name".into(),
+            }),
+            "une valeur nulle compte comme absente"
+        );
+        assert_eq!(
+            resolve(
+                std::slice::from_ref(&plain),
+                json!({"langue": "{$media.audio.lang|en}"})
+            )?["langue"],
+            json!("en")
+        );
+        assert_eq!(
+            resolve(&[plain], json!({"langue": "x{$inconnu.y}"})),
+            Err(VariableError::MissingReference {
+                variable: "langue".into(),
+                reference: "inconnu.y".into(),
+            }),
+            "une expression d'un espace inconnu est manquante, comme dans l'ancien moteur"
         );
         let mut with_default = variable("langue", VariableKind::Text);
         with_default.default_value = Some(json!("fr"));
-        let resolved = resolve(
-            &[with_default],
-            json!({"langue": "{{mediaInfo.audio.lang}}"}),
-        )?;
+        let resolved = resolve(&[with_default], json!({"langue": "{$media.audio.lang}"}))?;
         assert_eq!(resolved["langue"], json!("fr"));
         Ok(())
     }
 
     #[test]
-    fn a_null_value_counts_as_missing() {
-        let nodes = HashMap::from([("a".to_owned(), NodeOutput::default())]);
-        let context = VariableContext::new(
-            Path::new("f"),
-            Path::new("s"),
-            Path::new("w"),
-            &json!({}),
-            &nodes,
-            &[],
+    fn a_legacy_reference_to_an_empty_node_message_gives_empty_text() -> Result<(), VariableError> {
+        let mut fixture = Fixture::new();
+        fixture.nodes.insert(
+            "a".to_owned(),
+            NodeOutput {
+                message: Some(String::new()),
+                next_port: Some(String::new()),
+                working_file: String::new(),
+            },
         );
-        assert!(context.lookup("nodes.a.message").is_none());
+        let variables = [
+            variable("message", VariableKind::Text),
+            variable("port", VariableKind::Text),
+        ];
+        let resolved = fixture.resolve(
+            &variables,
+            json!({"message": "{{nodes.a.message}}", "port": "[{{nodes.a.nextPort}}]"}),
+        )?;
+        assert_eq!(resolved["message"], json!(""));
+        assert_eq!(resolved["port"], json!("[]"));
+        Ok(())
+    }
+
+    #[test]
+    fn a_legacy_reference_without_value_still_fails() {
+        let plain = variable("x", VariableKind::Text);
+        for (legacy, reference) in [
+            ("{{inconnu.x}}", "inconnu.x"),
+            ("{{plugin.var}}", "plugin.var"),
+        ] {
+            assert_eq!(
+                resolve(std::slice::from_ref(&plain), json!({"x": legacy})),
+                Err(VariableError::MissingReference {
+                    variable: "x".into(),
+                    reference: reference.into(),
+                }),
+                "{legacy}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_legacy_manifest_default_is_resolved() -> Result<(), VariableError> {
+        let mut codec = variable("codec", VariableKind::Text);
+        codec.default_value = Some(json!("{{mediaInfo.video.codec}}"));
+        assert_eq!(resolve(&[codec], json!({}))?["codec"], json!("hevc"));
+        Ok(())
+    }
+
+    #[test]
+    fn missing_node_values_have_no_value() {
+        let nodes = HashMap::from([("a".to_owned(), NodeOutput::default())]);
+        let variables = FlowVariables::default();
+        let media = json!({});
+        let scope = NodeScope::new(&variables, &media, &nodes, &[]);
+        assert!(scope.resolve("nodes.a.message").is_none());
         assert!(
-            context.lookup("nodes.a.workingFile").is_none(),
+            scope.resolve("nodes.a.file").is_none(),
             "un fichier vide (nœud antérieur à un relais) n'a pas de valeur"
         );
-        assert!(context.lookup("nodes.absent.message").is_none());
+        assert!(scope.resolve("nodes.absent.message").is_none());
+        assert_eq!(
+            scope.namespace_of("nodes.absent.message"),
+            Some(ScopeNamespace::Node)
+        );
     }
 
     #[test]
@@ -768,19 +707,27 @@ mod tests {
     }
 
     #[test]
-    fn undeclared_keys_and_inline_code_are_never_touched() -> Result<(), VariableError> {
+    fn undeclared_keys_are_rendered_once_and_inline_code_is_never_touched()
+    -> Result<(), VariableError> {
         let variables = [variable("titre", VariableKind::Text)];
         let config = json!({
             "titre": "{{workDir}}",
-            "code": "echo '{{workingFile}}'",
+            "code": "echo '{{workingFile}}' {$file.path}",
             "interpreter": "sh",
+            "autre": "{$work.dir}",
         });
         let resolved = resolve(&variables, config)?;
         assert_eq!(resolved["titre"], json!("/work"));
-        assert_eq!(resolved["code"], json!("echo '{{workingFile}}'"));
+        assert_eq!(
+            resolved["code"],
+            json!("echo '{{workingFile}}' {$file.path}")
+        );
         assert_eq!(resolved["interpreter"], json!("sh"));
-        let untouched = json!({"x": "{{workDir}}"});
-        assert_eq!(resolve(&[], untouched.clone())?, untouched);
+        assert_eq!(resolved["autre"], json!("/work"));
+        assert_eq!(
+            resolve(&[], json!({"x": "{{workDir}}"}))?,
+            json!({"x": "/work"})
+        );
         Ok(())
     }
 
@@ -795,13 +742,13 @@ mod tests {
     }
 
     #[test]
-    fn errors_name_the_variable_in_french() {
+    fn errors_use_the_single_template_syntax() {
         let message = VariableError::MissingReference {
             variable: "langue".into(),
-            reference: "mediaInfo.audio.lang".into(),
+            reference: "media.audio.lang".into(),
         }
         .to_string();
-        assert!(message.contains("langue") && message.contains("{{mediaInfo.audio.lang}}"));
+        assert!(message.contains("langue") && message.contains("{$media.audio.lang}"));
     }
 
     fn exposure() -> ExposedVariables {
@@ -836,16 +783,10 @@ mod tests {
 
     #[test]
     fn exposed_variables_are_readable_under_their_namespace() -> Result<(), VariableError> {
-        let media = json!({"video": {"codec": "hevc", "width": 1920}, "streams": [{"lang": "fr"}]});
+        let fixture = Fixture::new();
         let exposed = exposure();
-        let context = VariableContext::new(
-            Path::new("f"),
-            Path::new("s"),
-            Path::new("w"),
-            &media,
-            &HashMap::new(),
-            &[&exposed],
-        );
+        let exposures = [&exposed];
+        let scope = fixture.scope(&exposures);
         let variables = [
             variable("codec", VariableKind::Text),
             variable("largeur", VariableKind::Number),
@@ -855,11 +796,11 @@ mod tests {
         let resolved = resolve_node_config(
             &variables[..3],
             &json!({
-                "codec": "{{mediainfo.video.codec}}",
+                "codec": "{$mediainfo.video.codec}",
                 "largeur": "{{mediainfo.video.largeur}}",
-                "langue": "{{mediainfo.audio.langue}}",
+                "langue": "{$mediainfo.audio.langue}",
             }),
-            &context,
+            &scope,
         )?;
         assert_eq!(resolved["codec"], json!("hevc"));
         assert_eq!(resolved["largeur"], json!(1920));
@@ -867,8 +808,8 @@ mod tests {
         assert_eq!(
             resolve_node_config(
                 &variables[3..],
-                &json!({"absente": "{{mediainfo.absente}}"}),
-                &context
+                &json!({"absente": "{$mediainfo.absente}"}),
+                &scope
             ),
             Err(VariableError::MissingReference {
                 variable: "absente".into(),
@@ -879,15 +820,61 @@ mod tests {
     }
 
     #[test]
-    fn insert_nested_builds_intermediate_objects_without_overwriting_siblings() {
-        let mut root = Map::new();
-        insert_nested(&mut root, "ns", "a.b", json!(1));
-        insert_nested(&mut root, "ns", "a.c", json!(2));
-        insert_nested(&mut root, "ns", "d", json!(3));
-        assert_eq!(
-            Value::Object(root),
-            json!({"ns": {"a": {"b": 1, "c": 2}, "d": 3}})
+    fn exposed_variables_read_engine_query_paths_with_selectors() -> Result<(), VariableError> {
+        let mut fixture = Fixture::new();
+        fixture.media = json!({"mediainfo": {"media": {"track": [
+            {"@type": "General", "Format": "Matroska"},
+            {"@type": "Video", "Format": "HEVC", "Width": "1920"},
+            {"@type": "Audio", "Format": "AAC"},
+            {"@type": "Audio", "Format": "E-AC-3"},
+        ]}}});
+        let exposed = selector_exposure();
+        let exposures = [&exposed];
+        let scope = fixture.scope(&exposures);
+        let names = [
+            ("codec", VariableKind::Text, "{$mediainfo.video.codec}"),
+            ("largeur", VariableKind::Number, "{$mediainfo.video.width}"),
+            ("audio", VariableKind::Text, "{$mediainfo.audio.codec}"),
+            (
+                "conteneur",
+                VariableKind::Text,
+                "{$mediainfo.general.format}",
+            ),
+            ("premier", VariableKind::Text, "{$mediainfo.any.format}"),
+        ];
+        let variables: Vec<ScriptVariable> = names
+            .iter()
+            .map(|(name, kind, _)| variable(name, *kind))
+            .collect();
+        let config = Value::Object(
+            names
+                .iter()
+                .map(|(name, _, reference)| ((*name).to_owned(), json!(reference)))
+                .collect(),
         );
+        let resolved = resolve_node_config(&variables, &config, &scope)?;
+        assert_eq!(resolved["codec"], json!("HEVC"));
+        assert_eq!(resolved["largeur"], json!(1920));
+        assert_eq!(
+            resolved["audio"],
+            json!("AAC"),
+            "la première piste audio l'emporte"
+        );
+        assert_eq!(resolved["conteneur"], json!("Matroska"));
+        assert_eq!(resolved["premier"], json!("Matroska"));
+        assert_eq!(
+            resolve_node_config(
+                &[variable("sous_titres", VariableKind::Text)],
+                &json!({"sous_titres": "{$mediainfo.text.format}"}),
+                &scope,
+            ),
+            Err(VariableError::MissingReference {
+                variable: "sous_titres".into(),
+                reference: "mediainfo.text.format".into(),
+            }),
+            "une requête sans résultat n'a pas de valeur"
+        );
+        Ok(())
     }
 
     fn selector_exposure() -> ExposedVariables {
@@ -909,69 +896,6 @@ mod tests {
                 track("text.format", "Format", "[@type=Text]"),
             ],
         }
-    }
-
-    #[test]
-    fn exposed_variables_read_engine_query_paths_with_selectors() -> Result<(), VariableError> {
-        let media = json!({"mediainfo": {"media": {"track": [
-            {"@type": "General", "Format": "Matroska"},
-            {"@type": "Video", "Format": "HEVC", "Width": "1920"},
-            {"@type": "Audio", "Format": "AAC"},
-            {"@type": "Audio", "Format": "E-AC-3"},
-        ]}}});
-        let exposed = selector_exposure();
-        let context = VariableContext::new(
-            Path::new("f"),
-            Path::new("s"),
-            Path::new("w"),
-            &media,
-            &HashMap::new(),
-            &[&exposed],
-        );
-        let names = [
-            ("codec", VariableKind::Text, "{{mediainfo.video.codec}}"),
-            ("largeur", VariableKind::Number, "{{mediainfo.video.width}}"),
-            ("audio", VariableKind::Text, "{{mediainfo.audio.codec}}"),
-            (
-                "conteneur",
-                VariableKind::Text,
-                "{{mediainfo.general.format}}",
-            ),
-            ("premier", VariableKind::Text, "{{mediainfo.any.format}}"),
-        ];
-        let variables: Vec<ScriptVariable> = names
-            .iter()
-            .map(|(name, kind, _)| variable(name, *kind))
-            .collect();
-        let config = Value::Object(
-            names
-                .iter()
-                .map(|(name, _, reference)| ((*name).to_owned(), json!(reference)))
-                .collect(),
-        );
-        let resolved = resolve_node_config(&variables, &config, &context)?;
-        assert_eq!(resolved["codec"], json!("HEVC"));
-        assert_eq!(resolved["largeur"], json!(1920));
-        assert_eq!(
-            resolved["audio"],
-            json!("AAC"),
-            "la première piste audio l'emporte"
-        );
-        assert_eq!(resolved["conteneur"], json!("Matroska"));
-        assert_eq!(resolved["premier"], json!("Matroska"));
-        assert_eq!(
-            resolve_node_config(
-                &[variable("sous_titres", VariableKind::Text)],
-                &json!({"sous_titres": "{{mediainfo.text.format}}"}),
-                &context,
-            ),
-            Err(VariableError::MissingReference {
-                variable: "sous_titres".into(),
-                reference: "mediainfo.text.format".into(),
-            }),
-            "une requête sans résultat n'a pas de valeur"
-        );
-        Ok(())
     }
 
     #[test]
@@ -997,11 +921,11 @@ mod tests {
     fn a_secret_is_read_literally_from_the_secrets_object_and_never_resolved() {
         let config = resolve(
             &[secret("jeton", true)],
-            json!({"secrets": {"jeton": "{{workingFile}}"}, "jeton": "ignoré", "autre": 1}),
+            json!({"secrets": {"jeton": "{$file.path}"}, "jeton": "ignoré", "autre": 1}),
         );
         assert_eq!(
             config,
-            Ok(json!({"jeton": "{{workingFile}}", "autre": 1})),
+            Ok(json!({"jeton": "{$file.path}", "autre": 1})),
             "littéral, hors `secrets`, clé de premier niveau écrasée"
         );
     }
@@ -1066,29 +990,21 @@ mod tests {
         assert_eq!(restored.next_port.as_deref(), Some("hevc"));
         assert!(restored.working_file.is_empty());
 
-        let mut nodes = HashMap::new();
-        nodes.insert("probe".to_owned(), restored);
-        let context = VariableContext::new(
-            Path::new("/work/film.mkv"),
-            Path::new("/in/source.mkv"),
-            Path::new("/work"),
-            &json!({}),
-            &nodes,
-            &[],
-        );
+        let mut fixture = Fixture::new();
+        fixture.nodes.insert("probe".to_owned(), restored);
         let config = resolve_node_config(
             &[
                 variable("a", VariableKind::Text),
                 variable("b", VariableKind::Text),
             ],
-            &json!({"a": "{{nodes.probe.message}}", "b": "{{nodes.probe.workingFile}}"}),
-            &context,
+            &json!({"a": "{$nodes.probe.message}", "b": "{$nodes.probe.file}"}),
+            &fixture.scope(&[]),
         );
         assert_eq!(
             config,
             Err(VariableError::MissingReference {
                 variable: "b".into(),
-                reference: "nodes.probe.workingFile".into()
+                reference: "nodes.probe.file".into()
             }),
             "le fichier d'un nœud antérieur au relais n'a pas de valeur"
         );
@@ -1111,14 +1027,6 @@ mod tests {
 
     #[test]
     fn a_node_id_may_contain_dots() {
-        assert_eq!(
-            split_node_reference("nodes.encodage.v2.message"),
-            Some(("encodage.v2", "message"))
-        );
-        assert_eq!(split_node_reference("nodes.a.autre"), None);
-        assert_eq!(split_node_reference("nodes.message"), None);
-        assert_eq!(split_node_reference("mediaInfo.a.message"), None);
-
         let nodes = HashMap::from([(
             "encodage.v2".to_owned(),
             NodeOutput {
@@ -1127,22 +1035,17 @@ mod tests {
                 working_file: "/w/x.mkv".into(),
             },
         )]);
-        let context = VariableContext::new(
-            Path::new("f"),
-            Path::new("s"),
-            Path::new("w"),
-            &json!({}),
-            &nodes,
-            &[],
+        let variables = FlowVariables::default();
+        let media = json!({});
+        let scope = NodeScope::new(&variables, &media, &nodes, &[]);
+        assert_eq!(
+            scope.resolve("nodes.encodage.v2.message"),
+            Some(json!("fini"))
         );
         assert_eq!(
-            context.lookup("nodes.encodage.v2.message"),
-            Some(&json!("fini"))
+            scope.resolve("nodes.encodage.v2.file"),
+            Some(json!("/w/x.mkv"))
         );
-        assert_eq!(
-            context.lookup("nodes.encodage.v2.workingFile"),
-            Some(&json!("/w/x.mkv"))
-        );
-        assert!(context.lookup("nodes.encodage.v2.nextPort").is_none());
+        assert!(scope.resolve("nodes.encodage.v2.nextPort").is_none());
     }
 }

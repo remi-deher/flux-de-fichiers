@@ -1,17 +1,12 @@
 //! Variables de flux côté moteur : contexte intrinsèque et substitution dans la configuration.
 
 use forgearr_shared::flows::{
-    DEFAULT_SEPARATOR, FlowVariables, IntrinsicVariable, TEMPLATE_CLOSE, TEMPLATE_OPEN,
-    TemplateToken, exact_token, map_strings_infallible, render_piece, render_template_with,
-    render_value,
+    FlowVariables, IntrinsicVariable, RAW_CONFIG_KEYS,
+    legacy_references::upgrade_legacy_value,
+    template_scope::{TemplateScope, render_in_scope, render_in_scope_keeping_runner_tokens},
 };
-use forgearr_shared::script_variables::SECRETS_CONFIG_KEY;
 use serde_json::Value;
 use std::{ffi::OsStr, path::Path};
-
-/// Clés de configuration jamais réécrites : le code d'un script et ses secrets stockés sont
-/// transmis tels quels.
-const RAW_CONFIG_KEYS: [&str; 2] = ["code", SECRETS_CONFIG_KEY];
 
 /// Identité d'une exécution, source des variables intrinsèques qui ne dépendent pas du fichier.
 #[derive(Clone, Copy, Debug, Default)]
@@ -50,8 +45,21 @@ pub fn set_failure_variables(vars: &mut FlowVariables, code: &str, message: &str
     vars.set_intrinsic(IntrinsicVariable::ErrorMessage, text(Some(message)));
 }
 
+/// Renseigne `source.path` et `work.dir`, fixes pendant toute l'exécution.
+pub fn set_location_variables(vars: &mut FlowVariables, source_file: &Path, work_dir: &Path) {
+    vars.set_intrinsic(
+        IntrinsicVariable::SourcePath,
+        os_text(Some(source_file.as_os_str())),
+    );
+    vars.set_intrinsic(
+        IntrinsicVariable::WorkDir,
+        os_text(Some(work_dir.as_os_str())),
+    );
+}
+
 /// Recalcule `file.*` pour le fichier de travail courant (taille nulle s'il est illisible).
 pub fn set_file_variables(vars: &mut FlowVariables, file: &Path) {
+    vars.set_intrinsic(IntrinsicVariable::FilePath, os_text(Some(file.as_os_str())));
     vars.set_intrinsic(IntrinsicVariable::FileName, os_text(file.file_name()));
     vars.set_intrinsic(IntrinsicVariable::FileStem, os_text(file.file_stem()));
     vars.set_intrinsic(IntrinsicVariable::FileExt, os_text(file.extension()));
@@ -63,9 +71,11 @@ pub fn set_file_variables(vars: &mut FlowVariables, file: &Path) {
     vars.set_intrinsic(IntrinsicVariable::FileSize, size);
 }
 
-/// Applique `render` à chaque valeur de premier niveau, sauf aux clés brutes (`code`).
+/// Applique `render` à chaque valeur de premier niveau, sauf aux clés brutes (`code`, `secrets`),
+/// après conversion des anciennes références `{{…}}` des seules racines du moteur (un `{{id}}`
+/// destiné à l'outil appelé reste littéral) : une seule passe de rendu par valeur.
 fn map_config(config: &Value, render: &dyn Fn(&Value) -> Value) -> Value {
-    match config {
+    match &upgrade_legacy_value(config) {
         Value::Object(fields) => Value::Object(
             fields
                 .iter()
@@ -83,47 +93,18 @@ fn map_config(config: &Value, render: &dyn Fn(&Value) -> Value) -> Value {
     }
 }
 
-/// Rend les modèles `{$…}` de la configuration d'un nœud avec les variables du flux.
-pub fn substitute_node_config(config: &Value, vars: &FlowVariables) -> Value {
-    let resolve = |expr: &str| vars.lookup(expr).cloned();
-    map_config(config, &|value| render_value(value, &resolve))
-}
-
-/// Réécrit un jeton tel qu'il a été saisi (`{$expr|défaut}`).
-fn verbatim_token(token: &TemplateToken<'_>) -> String {
-    let default = if token.default.is_empty() {
-        String::new()
-    } else {
-        format!("{DEFAULT_SEPARATOR}{}", token.default)
-    };
-    format!("{TEMPLATE_OPEN}{}{default}{TEMPLATE_CLOSE}", token.expr)
-}
-
-/// Rend une valeur en ne remplaçant que les variables de flux ; les autres jetons restent.
-fn render_flow_variables_only(value: &Value, vars: &FlowVariables) -> Value {
-    map_strings_infallible(value, &mut |text| {
-        if let Some(resolved) = exact_token(text)
-            .filter(|expr| FlowVariables::is_variable_property(expr))
-            .and_then(|expr| vars.lookup(expr))
-        {
-            return resolved.clone();
-        }
-        Value::String(render_template_with(text, &mut |token: &TemplateToken<
-            '_,
-        >| {
-            if FlowVariables::is_variable_property(token.expr) {
-                render_piece(vars.lookup(token.expr), token.default)
-            } else {
-                verbatim_token(token)
-            }
-        }))
-    })
+/// Rend les modèles `{$…}` de la configuration d'un nœud avec la portée de l'étape.
+pub fn substitute_node_config(config: &Value, scope: &dyn TemplateScope) -> Value {
+    map_config(config, &|value| render_in_scope(value, scope))
 }
 
 /// Variante pour les blocs HTTP : les jetons propres au runner (`{$context.*}`,
-/// `{$setting.*}`, `{$config.*}`…) sont conservés pour qu'il les résolve lui-même.
-pub fn substitute_flow_variables_only(config: &Value, vars: &FlowVariables) -> Value {
-    map_config(config, &|value| render_flow_variables_only(value, vars))
+/// `{$setting.*}`, `{$config.*}`…) et ceux que la portée ne connaît pas sont conservés pour
+/// qu'il les résolve lui-même.
+pub fn substitute_flow_variables_only(config: &Value, scope: &dyn TemplateScope) -> Value {
+    map_config(config, &|value| {
+        render_in_scope_keeping_runner_tokens(value, scope)
+    })
 }
 
 #[cfg(test)]
@@ -152,9 +133,54 @@ mod tests {
         assert_eq!(vars.lookup("file.stem"), Some(&json!("Film.2024")));
         assert_eq!(vars.lookup("file.ext"), Some(&json!("mkv")));
         assert_eq!(vars.lookup("file.dir"), Some(&json!("/media/films")));
+        assert_eq!(
+            vars.lookup("file.path"),
+            Some(&json!("/media/films/Film.2024.mkv"))
+        );
         assert_eq!(vars.lookup("file.size"), Some(&Value::Null));
         assert_eq!(vars.lookup("library.name"), Some(&json!("Films")));
         assert_eq!(vars.lookup("worker.name"), Some(&Value::Null));
+    }
+
+    #[test]
+    fn sets_location_variables() {
+        let mut vars = FlowVariables::default();
+        set_location_variables(&mut vars, Path::new("/in/a.mkv"), Path::new("/work"));
+        assert_eq!(vars.lookup("source.path"), Some(&json!("/in/a.mkv")));
+        assert_eq!(vars.lookup("work.dir"), Some(&json!("/work")));
+    }
+
+    #[test]
+    fn legacy_references_are_converted_before_the_single_pass() {
+        let vars = sample();
+        let config = json!({
+            "output": "{{workingFile}}",
+            "code": "echo {{workingFile}}",
+            "secrets": {"t": "{{workingFile}}"}
+        });
+        assert_eq!(
+            substitute_node_config(&config, &vars),
+            json!({
+                "output": "/media/films/Film.2024.mkv",
+                "code": "echo {{workingFile}}",
+                "secrets": {"t": "{{workingFile}}"}
+            })
+        );
+    }
+
+    #[test]
+    fn foreign_mustaches_of_a_binary_or_http_node_stay_literal() {
+        let vars = sample();
+        let config = json!({
+            "args": ["--id", "{{id}}", "{{workingFile}}"],
+            "body": "{\"tpl\": \"{{user.name}}\"}"
+        });
+        let expected = json!({
+            "args": ["--id", "{{id}}", "/media/films/Film.2024.mkv"],
+            "body": "{\"tpl\": \"{{user.name}}\"}"
+        });
+        assert_eq!(substitute_node_config(&config, &vars), expected);
+        assert_eq!(substitute_flow_variables_only(&config, &vars), expected);
     }
 
     #[test]

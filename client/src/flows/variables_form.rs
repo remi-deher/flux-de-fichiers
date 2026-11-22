@@ -1,12 +1,13 @@
 //! Formulaire des variables du script d'un nœud, généré depuis son schéma (ADR 0025, phase D) :
-//! champs typés, sélecteur de références disponibles en amont et aperçu de la configuration résolue.
+//! champs typés, sélecteur unique d'expressions `{$…}` (ADR 0026) et aperçu de la configuration résolue.
 
 use super::script_inspector::update_node_config;
 use super::state::Editor;
+use super::template_input::{TemplatePicker, append_token};
 use crate::api;
+use forgearr_shared::flows::TEMPLATE_OPEN;
 use forgearr_shared::flows::node_references::{
-    NodeVariablesRequest, NodeVariablesView, REFERENCE_CLOSE, REFERENCE_OPEN, ReferenceSource,
-    ReferenceSuggestion,
+    NodeVariablesRequest, NodeVariablesView, ReferenceSuggestion,
 };
 use forgearr_shared::script_variables::{
     SECRETS_CONFIG_KEY, ScriptVariable, VariableKind, default_from_text, default_to_text,
@@ -28,7 +29,7 @@ pub fn value_from_input(kind: VariableKind, raw: &str) -> Option<Value> {
         return None;
     }
     let typed = match kind {
-        VariableKind::Number | VariableKind::Boolean if !raw.contains(REFERENCE_OPEN) => {
+        VariableKind::Number | VariableKind::Boolean if !raw.contains(TEMPLATE_OPEN) => {
             default_from_text(kind, raw).ok().flatten()
         }
         _ => None,
@@ -58,44 +59,6 @@ pub fn apply_secret(config: &mut Map<String, Value>, name: &str, value: Value) {
 /// Texte affiché dans le champ pour la valeur enregistrée.
 pub fn input_text(value: Option<&Value>) -> String {
     default_to_text(value)
-}
-
-/// Ajoute `{{référence}}` au texte courant du champ.
-pub fn append_reference(current: &str, reference: &str) -> String {
-    format!("{current}{REFERENCE_OPEN}{reference}{REFERENCE_CLOSE}")
-}
-
-/// Références regroupées par source, dans l'ordre d'affichage du sélecteur ; les groupes vides sont omis.
-pub fn group_references(
-    references: &[ReferenceSuggestion],
-) -> Vec<(ReferenceSource, Vec<&ReferenceSuggestion>)> {
-    [
-        ReferenceSource::Flow,
-        ReferenceSource::MediaInfo,
-        ReferenceSource::Node,
-        ReferenceSource::Plugin,
-    ]
-    .into_iter()
-    .map(|source| {
-        let group: Vec<&ReferenceSuggestion> = references
-            .iter()
-            .filter(|suggestion| suggestion.source == source)
-            .collect();
-        (source, group)
-    })
-    .filter(|(_, group)| !group.is_empty())
-    .collect()
-}
-
-/// Libellé d'une option du sélecteur : la référence, son intitulé et sa valeur d'exemple.
-fn reference_option_label(suggestion: &ReferenceSuggestion) -> String {
-    match &suggestion.sample {
-        Some(sample) => format!(
-            "{} — {} (ex. {sample})",
-            suggestion.reference, suggestion.label
-        ),
-        None => format!("{} — {}", suggestion.reference, suggestion.label),
-    }
 }
 
 fn set_variable(editor: Editor, node_id: &str, name: &str, value: Option<Value>) {
@@ -133,33 +96,6 @@ fn current_value(editor: Editor, node_id: &str, name: &str) -> Option<Value> {
             .find(|node| node.id == node_id)
             .and_then(|node| node.config.get(name).cloned())
     })
-}
-
-#[component]
-fn ReferencePicker(
-    references: Vec<ReferenceSuggestion>,
-    on_pick: Callback<String>,
-    disabled: bool,
-) -> impl IntoView {
-    view! {
-        <select class="form-input" disabled=disabled aria-label="Insérer une référence"
-            prop:value=""
-            on:change=move |event| {
-                let reference = event_target_value(&event);
-                if !reference.is_empty() {
-                    on_pick.run(reference);
-                }
-            }>
-            <option value="">"Insérer une référence…"</option>
-            {group_references(&references).into_iter().map(|(source, group)| view! {
-                <optgroup label=source.label()>
-                    {group.into_iter().map(|suggestion| view! {
-                        <option value=suggestion.reference.clone()>{reference_option_label(suggestion)}</option>
-                    }).collect_view()}
-                </optgroup>
-            }).collect_view()}
-        </select>
-    }
 }
 
 /// Champ d'un secret : jamais pré-rempli, la valeur saisie n'est pas réaffichée.
@@ -281,11 +217,11 @@ fn VariableField(
         let value_text = value_text.clone();
         let commit = commit.clone();
         view! {
-            <ReferencePicker
-                references=references.clone()
+            <TemplatePicker
+                suggestions=Signal::stored(references.clone())
                 disabled=read_only
-                on_pick=Callback::new(move |reference: String| {
-                    commit(append_reference(&value_text(), &reference));
+                on_pick=Callback::new(move |expr: String| {
+                    commit(append_token(&value_text(), &expr));
                 })
             />
         }
@@ -428,19 +364,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn suggestion(
-        reference: &str,
-        source: ReferenceSource,
-        sample: Option<&str>,
-    ) -> ReferenceSuggestion {
-        ReferenceSuggestion {
-            reference: reference.into(),
-            label: "libellé".into(),
-            source,
-            sample: sample.map(str::to_owned),
-        }
-    }
-
     #[test]
     fn typed_input_becomes_the_matching_json_value() {
         assert_eq!(
@@ -472,8 +395,8 @@ mod tests {
     #[test]
     fn references_and_unparsable_numbers_stay_text_and_empty_input_removes_the_key() {
         assert_eq!(
-            value_from_input(VariableKind::Number, "{{mediaInfo.video.width}}"),
-            Some(json!("{{mediaInfo.video.width}}"))
+            value_from_input(VariableKind::Number, "{$media.video.width}"),
+            Some(json!("{$media.video.width}"))
         );
         assert_eq!(
             value_from_input(VariableKind::Number, "beaucoup"),
@@ -510,52 +433,5 @@ mod tests {
         assert!(is_secret_stored(Some(&json!("t0k"))));
         assert!(!is_secret_stored(Some(&Value::Null)));
         assert!(!is_secret_stored(None));
-    }
-
-    #[test]
-    fn a_picked_reference_is_appended_in_braces() {
-        assert_eq!(append_reference("", "workingFile"), "{{workingFile}}");
-        assert_eq!(
-            append_reference("dossier/", "workDir"),
-            "dossier/{{workDir}}"
-        );
-    }
-
-    #[test]
-    fn references_are_grouped_by_source_in_display_order_without_empty_groups() {
-        let all = [
-            suggestion("mediainfo.video.codec", ReferenceSource::Plugin, None),
-            suggestion("workingFile", ReferenceSource::Flow, None),
-            suggestion("nodes.a.message", ReferenceSource::Node, None),
-            suggestion("workDir", ReferenceSource::Flow, None),
-        ];
-        let groups = group_references(&all);
-        let sources: Vec<ReferenceSource> = groups.iter().map(|(source, _)| *source).collect();
-        assert_eq!(
-            sources,
-            [
-                ReferenceSource::Flow,
-                ReferenceSource::Node,
-                ReferenceSource::Plugin
-            ]
-        );
-        assert_eq!(groups[0].1.len(), 2);
-        assert!(group_references(&[]).is_empty());
-    }
-
-    #[test]
-    fn option_labels_show_the_sample_when_known() {
-        assert_eq!(
-            reference_option_label(&suggestion(
-                "mediaInfo.video.codec",
-                ReferenceSource::MediaInfo,
-                Some("hevc")
-            )),
-            "mediaInfo.video.codec — libellé (ex. hevc)"
-        );
-        assert_eq!(
-            reference_option_label(&suggestion("nodes.a.message", ReferenceSource::Node, None)),
-            "nodes.a.message — libellé"
-        );
     }
 }

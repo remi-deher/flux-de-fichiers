@@ -21,10 +21,10 @@ Ce guide se consulte à la demande. Le README reste la référence d'utilisation
 | Paramètres (compte, thème, comptes, clés, système) | `client/src/settings/`, `client/src/theme.rs` | `src/api/system.rs`, `tests/system_status.rs` |
 | Journal applicatif (onglet Activité > Journal) | `src/logs.rs`, `shared/src/logs.rs`, `client/src/jobs/logs.rs` | `src/main.rs` (écriture `tracing`), `docs/adr/0015-ia-et-mcp.md` ; tests : `cargo test -p forgearr-shared -p forgearr --lib logs` |
 | Assistant IA (fournisseurs, connexion OAuth, outils MCP) | `src/ai/` (`provider.rs`, `oauth.rs`, `settings.rs`, `run.rs`, `history.rs`, `preview.rs`, `usage.rs`, `health.rs`, `diagnosis.rs`, `streaming.rs`), `shared/src/ai.rs`, `client/src/ai/` (tiroir, `run.rs`, `history.rs`), `client/src/settings/ai.rs`, `client/src/settings/ai_status.rs`, `client/src/jobs/diagnosis.rs` | `src/mcp/`, `docs/adr/0015-ia-et-mcp.md` ; tests : `cargo test -p forgearr-shared -p forgearr --lib ai` |
-| Rôle de l'installation, enrôlement d'un worker | `src/instance.rs`, `src/worker_settings.rs`, `src/api/installation.rs` | `src/worker_http.rs`, `src/api/worker_view.rs`, `tests/installation_api.rs`, `tests/worker_web.rs`, `docs/adr/0011-installation-comptes-et-noeuds.md` |
+| Rôle de l'installation, enrôlement d'un worker | `src/instance.rs`, `src/worker_settings.rs`, `src/api/installation.rs` | `src/worker_http.rs`, `src/api/worker_view.rs`, `tests/installation_api.rs`, `tests/worker_setup_only.rs`, `tests/worker_web.rs`, `docs/adr/0011-installation-comptes-et-noeuds.md`, `docs/adr/0016-enrolement-par-approbation.md` |
 | Secrets chiffrés, rotation de clé, mot de passe oublié | `src/secrets.rs`, `src/secret_rotation.rs`, `src/account_admin.rs` | `tests/secret_rotation.rs`, `tests/password_reset.rs`, `docs/adr/0011-installation-comptes-et-noeuds.md` |
 | Configuration, TLS | `src/config.rs`, `tests/configuration.rs` | `compose.yaml`, `deploy/` ; déploiement dans le README |
-| Laboratoire Docker | `package.json`, `scripts/dev.py`, `compose.yaml` | Scénarios du README, `deploy/fixtures.Dockerfile` |
+| Laboratoire Docker | `src/bin/dev.rs`, `compose.yaml` (un worker, à enrôler depuis http://localhost:3001) | Scénarios du README, `deploy/fixtures.Dockerfile` |
 | CI, branches, publication | `docs/adr/0002-flux-git.md` | Workflow concerné dans `.github/workflows/`, `scripts/ci/` |
 
 Un seul crate et un seul binaire, deux modes : central ou worker. Les façades
@@ -61,7 +61,8 @@ GPU si un bloc du flux figé porte `acceleration` = `nvenc` ou `vaapi`
   l'image `:test` / `:test-<sha12>` n'est construite et poussée qu'à la fusion
   `dev → test` (job `docker-publish`, action `.github/actions/build-image`).
   Sur la PR `test → main`, `main-checks.yml` tire l'image `test-<sha12>` à promouvoir
-  et démarre central et worker avec `compose.yaml`. Sans changement de code,
+  et démarre central et worker avec `compose.yaml`, puis enrôle le worker par approbation et
+  vérifie qu'il s'enregistre, y compris après redémarrage. Sans changement de code,
   les étapes de `test.yml` sont sautées et le check reste vert ; cela ne constitue
   pas une nouvelle exécution.
 

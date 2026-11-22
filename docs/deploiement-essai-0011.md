@@ -1,5 +1,10 @@
 # Déploiement de l'installation de test (ADR 0011, phases 1 à 5)
 
+> **Note du 22 nov. 2026** : la méthode manuelle d'ajout du worker décrite ici (clé créée dans « Clés
+> d'API », `WORKER_KEY_FILE`, `WORKER_NAME`, `COORDINATOR_URL` ou `CENTRAL_URL`) est supprimée et remplacée par
+> l'enrôlement : voir [ADR 0016](adr/0016-enrolement-par-approbation.md#migrer-un-worker-déployé-à-la-main).
+> Le reste de ce document est conservé comme journal.
+
 Procédure pour `flux-essai` (centrale, `192.168.1.50`) et `flux-essai-worker` (worker `artemis-essai`,
 `192.168.1.51`). Chaque étape modifiante demande une confirmation.
 

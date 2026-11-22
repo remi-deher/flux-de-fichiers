@@ -118,10 +118,22 @@ pub fn value(name: &str) -> anyhow::Result<String> {
     })
 }
 
-pub fn secret(name: &str) -> anyhow::Result<String> {
-    let value = value(name)?;
-    anyhow::ensure!(value.len() >= 32, "{name} must have at least 32 characters");
-    Ok(value)
+/// Autorité privée du central (`CA_CERT`), facultative.
+pub fn central_ca() -> Option<PathBuf> {
+    env::var("CA_CERT").ok().map(Into::into)
+}
+
+/// Ajoute l'autorité privée `ca` à un client HTTP du central, pour l'enrôlement comme pour le travail.
+pub fn trust_ca(
+    builder: reqwest::ClientBuilder,
+    ca: Option<&Path>,
+) -> anyhow::Result<reqwest::ClientBuilder> {
+    Ok(match ca {
+        Some(path) => {
+            builder.add_root_certificate(reqwest::Certificate::from_pem(&std::fs::read(path)?)?)
+        }
+        None => builder,
+    })
 }
 
 /// Dossier de configuration persistant (`/config` en conteneur).
@@ -285,6 +297,18 @@ mod tests {
             .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
             .collect();
         SmtpConfig::from_variables(|name| map.get(name).cloned(), password.map(str::to_owned))
+    }
+
+    #[test]
+    fn test_private_ca_is_optional_and_must_be_readable() {
+        assert!(trust_ca(reqwest::Client::builder(), None).is_ok());
+        assert!(
+            trust_ca(
+                reqwest::Client::builder(),
+                Some(Path::new("/absent/ca.pem"))
+            )
+            .is_err()
+        );
     }
 
     #[test]

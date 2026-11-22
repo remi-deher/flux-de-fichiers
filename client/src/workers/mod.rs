@@ -3,7 +3,6 @@
 mod library_modes;
 mod slots_field;
 
-use crate::route::{Link, Route};
 use crate::settings::duration_label;
 use crate::sleep::sleep;
 use crate::ui::filters::{Filters, Presence, presence};
@@ -34,6 +33,7 @@ const WORKER_REQUESTS_PATH: &str = "/api/v1/workers/requests";
 const WORKER_ENROLLMENT_WINDOW_PATH: &str = "/api/v1/workers/enrollment-window";
 const LIBRARIES_PATH: &str = "/api/v1/libraries";
 const JOBS_PATH: &str = "/api/v1/jobs?limit=200";
+const REPLACEMENT_EFFECT: &str = "la demande remplace ce worker, sa clé actuelle sera révoquée et ses tâches en cours interrompues.";
 const REQUESTS_POLL_MS: i32 = 3000;
 
 #[derive(Serialize)]
@@ -63,24 +63,16 @@ pub fn remaining_label(expires_at: DateTime<Utc>, now: DateTime<Utc>) -> String 
     duration_label(secs)
 }
 
-/// Service `compose` d'un worker distant ; la clé vient d'un fichier, jamais d'une valeur en clair.
-pub fn enroll_compose(origin: &str) -> String {
-    format!(
-        "services:
-  forgearr-worker:
-    image: mrcryllix/forgearr:latest
-    command: worker
-    restart: unless-stopped
-    environment:
-      CENTRAL_URL: {origin}
-      WORKER_KEY_FILE: /config/worker_key
-    volumes:
-      - forgearr-worker:/config
-      - /chemin/data:/data
-volumes:
-  forgearr-worker:
-"
-    )
+/// Question à poser avant d'approuver une demande qui porte le nom exact d'un worker existant.
+fn replacement_prompt(workers: &[Worker], requested_name: &str) -> Option<String> {
+    workers
+        .iter()
+        .any(|worker| worker.name == requested_name)
+        .then(|| {
+            format!(
+                "Un worker « {requested_name} » existe déjà : {REPLACEMENT_EFFECT} Approuver quand même ?"
+            )
+        })
 }
 
 pub fn origin() -> String {
@@ -850,6 +842,7 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
             _ => "Fenêtre d'acceptation fermée".to_owned(),
         };
         let reqs = state.requests;
+        let known_workers = list.get();
         let header_actions = if can_manage {
             view! {
                 <div class="cluster">
@@ -902,9 +895,16 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                                             let version_tag = req.worker_version.unwrap_or_else(|| "—".to_owned());
                                             let addr_tag = req.source_addr.unwrap_or_else(|| "—".to_owned());
                                             let exp_label = remaining_label(req.expires_at, now);
+                                            let replaces = replacement_prompt(&known_workers, &req.worker_name).is_some();
+                                            let requested_name = req.worker_name.clone();
                                             view! {
                                                 <tr>
-                                                    <td class="text-strong">{req.worker_name}</td>
+                                                    <td>
+                                                        <span class="text-strong">{req.worker_name}</span>
+                                                        {replaces.then(|| view! {
+                                                            <p class="form-help text-danger">{format!("Nom déjà utilisé : {REPLACEMENT_EFFECT}")}</p>
+                                                        })}
+                                                    </td>
                                                     <td class="text-dim">{addr_tag}</td>
                                                     <td class="text-dim">{version_tag}</td>
                                                     <td class="text-dim">{format!("dans {exp_label}")}</td>
@@ -913,7 +913,13 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                                                             <div class="cluster">
                                                                 <button type="button" class="btn btn-primary btn-sm"
                                                                     disabled=move || approve_request.pending().get() || reject_request.pending().get()
-                                                                    on:click=move |_| { approve_request.dispatch(req_id); }>
+                                                                    on:click=move |_| {
+                                                                        let confirmed = replacement_prompt(&list.get_untracked(), &requested_name)
+                                                                            .is_none_or(|prompt| window().confirm_with_message(&prompt).unwrap_or(false));
+                                                                        if confirmed {
+                                                                            approve_request.dispatch(req_id);
+                                                                        }
+                                                                    }>
                                                                     "Approuver"
                                                                 </button>
                                                                 <button type="button" class="btn btn-danger-quiet btn-sm"
@@ -954,11 +960,12 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
             <Drawer open=enroll_open eyebrow="Infrastructure" title="Ajouter un worker">
                 <div class="inspection-panel">
                     <div class="inspection-panel__section">
-                        <p class="inspection-panel__title">"Enrôlement par approbation (recommandé)"</p>
+                        <p class="inspection-panel__title">"Enrôlement par approbation"</p>
                         <ol class="form-help">
                             <li>"Ouvrez la fenêtre d'acceptation ci-dessous (valable 15 minutes)."</li>
                             <li>"Démarrez un conteneur vierge, ouvrez son interface et choisissez « Enrôler un worker »."</li>
                             <li>"Saisissez l'adresse de ce central ("<code>{origin()}</code>") puis approuvez la demande affichée ici."</li>
+                            <li>"Le volume "<code>"/config"</code>" du worker doit être persistant et inscriptible : il garde son nom et sa clé."</li>
                         </ol>
                         <div class="inspection-drawer__actions">
                             <button type="button" class="btn btn-primary"
@@ -969,21 +976,6 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                         </div>
                         <pre class="code-block-wrapper"><code>{enroll_approval_compose()}</code></pre>
                     </div>
-                    <details class="inspection-panel__section">
-                        <summary class="form-help">"Méthode manuelle avec clé d'API (`compose` / `/config/worker_key`)"</summary>
-                        <ol class="form-help">
-                            <li>"Créez une clé d'API de rôle worker (Paramètres → Clés d'API) ; elle ne s'affiche qu'une fois."</li>
-                            <li>"Enregistrez-la dans le fichier "<code>"/config/worker_key"</code>" du volume de configuration du worker."</li>
-                            <li>"Démarrez le service suivant sur l'hôte distant :"</li>
-                        </ol>
-                        <pre class="code-block-wrapper"><code>{enroll_compose(&origin())}</code></pre>
-                        <div class="inspection-drawer__actions">
-                            <Link to=Route::Settings class="btn btn-secondary">
-                                <Icon name=IconName::Key size=15 />
-                                <span>"Ouvrir Paramètres & Clés d'API"</span>
-                            </Link>
-                        </div>
-                    </details>
                 </div>
             </Drawer>
         </div>
@@ -999,14 +991,13 @@ mod tests {
     };
 
     #[test]
-    fn compose_snippet_targets_this_central_without_any_secret() {
-        let compose = enroll_compose("https://flux.example");
-        assert!(compose.contains("CENTRAL_URL: https://flux.example"));
-        assert!(compose.contains("WORKER_KEY_FILE: /config/worker_key"));
-        assert!(!compose.contains("WORKER_KEY:"));
-        let approval_compose = enroll_approval_compose();
-        assert!(!approval_compose.contains("WORKER_KEY"));
-        assert!(!approval_compose.contains("ADMIN"));
+    fn compose_snippet_keeps_the_identity_without_any_secret() {
+        let compose = enroll_approval_compose();
+        assert!(compose.contains("- forgearr-worker:/config\n"));
+        assert!(compose.contains(":3000"));
+        for secret in ["KEY", "ADMIN", "PASSWORD", "environment"] {
+            assert!(!compose.contains(secret), "{secret}");
+        }
     }
 
     #[test]
@@ -1097,6 +1088,11 @@ mod tests {
             created_at: now,
             updated_at: now,
         }];
+        let prompt = replacement_prompt(&workers, "nas-offline").unwrap_or_default();
+        assert!(prompt.contains("nas-offline"), "{prompt}");
+        assert!(prompt.contains(REPLACEMENT_EFFECT), "{prompt}");
+        assert_eq!(replacement_prompt(&workers, "NAS-offline"), None);
+        assert_eq!(replacement_prompt(&workers, "nouveau"), None);
         let summary = summarize_workers(&workers, &jobs, now);
         assert_eq!(
             summary,

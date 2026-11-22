@@ -92,7 +92,7 @@ fn transfer_settings() -> (Option<String>, Option<u16>) {
 }
 
 impl WorkerConfig {
-    /// Un worker enrôlé lit adresse, nom et clé dans `/config` ; sinon (automatisation) dans l'environnement.
+    /// Adresse du central, nom et clé viennent de `/config`, écrits par l'enrôlement (ADR 0016).
     pub fn load(config_dir: &Path) -> anyhow::Result<Self> {
         let work_dir: PathBuf = env::var("WORK_DIR")
             .unwrap_or_else(|_| "var/work".into())
@@ -100,26 +100,20 @@ impl WorkerConfig {
         let tools_cache_dir = env::var("TOOLS_CACHE_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| work_dir.join("tools-cache"));
-        let (url, key, name) = match worker_settings::load_worker(config_dir)? {
-            Some(enrolled) => (
-                config::central_url(&enrolled.central_url)?,
-                worker_settings::load_worker_key(config_dir)?,
-                enrolled.name,
-            ),
-            None => (
-                config::central_url(&env::var("CENTRAL_URL")?)?,
-                config::secret("WORKER_KEY")?,
-                env::var("WORKER_NAME").or_else(|_| env::var("HOSTNAME"))?,
-            ),
-        };
+        let enrolled = worker_settings::load_worker(config_dir)?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "worker non enrôlé : aucun rôle dans {}",
+                config_dir.display()
+            )
+        })?;
         let (transfer_url, transfer_port) = transfer_settings();
         Ok(Self {
-            url,
-            key,
-            name,
+            url: config::central_url(&enrolled.central_url)?,
+            key: worker_settings::load_worker_key(config_dir)?,
+            name: enrolled.name,
             work_dir,
             tools_cache_dir,
-            ca: env::var("CA_CERT").ok().map(Into::into),
+            ca: config::central_ca(),
             max_bytes: env::var("MAX_FILE_BYTES")
                 .unwrap_or_else(|_| "536870912".into())
                 .parse()?,
@@ -548,7 +542,7 @@ impl WorkerLoop {
 pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
     anyhow::ensure!(
         worker_settings::is_valid_worker_name(&config.name),
-        "Invalid WORKER_NAME"
+        "nom de worker invalide dans les réglages d'enrôlement"
     );
     anyhow::ensure!(config.max_bytes > 0, "MAX_FILE_BYTES must be positive");
     tokio::fs::create_dir_all(&config.work_dir).await?;
@@ -556,10 +550,7 @@ pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
         .connect_timeout(CENTRAL_CONNECT_TIMEOUT)
         .timeout(forgearr_shared::transfer::FILE_TRANSFER_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none());
-    if let Some(ref ca) = config.ca {
-        builder = builder
-            .add_root_certificate(reqwest::Certificate::from_pem(&tokio::fs::read(ca).await?)?);
-    }
+    builder = config::trust_ca(builder, config.ca.as_deref())?;
     let status = WorkerState::new(&config.name, config.url.as_str().trim_end_matches('/'));
     let client = builder.build()?;
     let central = CentralClient::new(client.clone(), config.url.clone(), config.key.clone());

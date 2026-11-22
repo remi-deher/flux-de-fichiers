@@ -10,8 +10,8 @@ use forgearr_shared::{Permission, Role};
 use leptos::prelude::*;
 
 const KEYS_PATH: &str = "/api/v1/api-keys";
-/// Rôles possibles d'une clé : `worker` pour les nœuds, `mcp` pour l'automatisation MCP.
-const KEY_ROLES: [Role; 4] = [Role::Admin, Role::Mcp, Role::Worker, Role::Viewer];
+/// Rôle proposé d'abord : le moindre privilège.
+const DEFAULT_KEY_ROLE: Role = Role::Viewer;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RevealedKey {
@@ -55,9 +55,12 @@ pub fn KeysSection() -> impl IntoView {
     let feedback = RwSignal::new(None::<String>);
     let revealed = RwSignal::new(None::<RevealedKey>);
     let creating = RwSignal::new(false);
-    let (name, role) = (RwSignal::new(String::new()), RwSignal::new(Role::Worker));
+    let (name, role) = (
+        RwSignal::new(String::new()),
+        RwSignal::new(DEFAULT_KEY_ROLE),
+    );
     let full_scope = RwSignal::new(true);
-    let selected_scopes = RwSignal::new(Role::Worker.permissions());
+    let selected_scopes = RwSignal::new(DEFAULT_KEY_ROLE.permissions());
     let create = Action::new_local(move |request: &CreateKeyRequest| {
         let request = request.clone();
         async move { api::post::<CreateKeyRequest, CreatedKey>(KEYS_PATH, Some(&request)).await }
@@ -96,7 +99,7 @@ pub fn KeysSection() -> impl IntoView {
     });
     let header_actions = view! {
         <button type="button" class="btn btn-primary btn-sm" on:click=move |_| creating.set(true)>
-            <Icon name=IconName::Plus size=14 />
+            <Icon name=IconName::Key size=14 />
             <span>"Créer une clé"</span>
         </button>
     }
@@ -138,7 +141,7 @@ pub fn KeysSection() -> impl IntoView {
         }>
             <SectionHeader
                 title="Clés d'API"
-                subtitle="Jetons d'authentification des workers et accès automatisés."
+                subtitle="Accès automatisés. Les clés des workers, créées à l'enrôlement, se révoquent ici."
                 actions=header_actions
             />
             <div class="registre">
@@ -194,7 +197,7 @@ pub fn KeysSection() -> impl IntoView {
             <form class="inspection-panel" on:submit=move |event| {
                 event.prevent_default();
                 let current_role = role.get_untracked();
-                let scopes = if full_scope.get_untracked() || current_role == Role::Worker {
+                let scopes = if full_scope.get_untracked() {
                     None
                 } else {
                     let chosen: Vec<Permission> = selected_scopes
@@ -216,23 +219,22 @@ pub fn KeysSection() -> impl IntoView {
             }>
                 <div class="form-group">
                     <label for="key-name" class="form-label">"Nom de la clé"</label>
-                    <input id="key-name" class="form-input" required=true autocomplete="off" placeholder="nas-salon"
+                    <input id="key-name" class="form-input" required=true autocomplete="off" placeholder="sauvegarde"
                         prop:value=move || name.get() on:input=move |event| name.set(event_target_value(&event)) />
-                    <p class="form-help">"Pour un worker, le nom de la clé devient son nom."</p>
                 </div>
                 <div class="form-group">
                     <label for="key-role" class="form-label">"Rôle"</label>
                     <select id="key-role" class="form-select" on:change=move |event| {
-                        let next = Role::parse(&event_target_value(&event)).unwrap_or(Role::Worker);
+                        let next = Role::parse(&event_target_value(&event)).unwrap_or(DEFAULT_KEY_ROLE);
                         role.set(next);
                         selected_scopes.set(next.permissions());
                     }>
-                        {KEY_ROLES.into_iter().map(|choice| view! {
-                            <option value=choice.as_str() selected=choice == Role::Worker>{role_label(choice)}</option>
+                        {Role::CREATABLE_KEY_ROLES.into_iter().map(|choice| view! {
+                            <option value=choice.as_str() selected=choice == DEFAULT_KEY_ROLE>{role_label(choice)}</option>
                         }).collect_view()}
                     </select>
                 </div>
-                {move || (role.get() != Role::Worker).then(|| {
+                {move || {
                     let role_perms = role.get().permissions();
                     view! {
                         <div class="form-group">
@@ -280,7 +282,7 @@ pub fn KeysSection() -> impl IntoView {
                             })}
                         </div>
                     }
-                })}
+                }}
                 <div class="inspection-drawer__actions">
                     <button type="submit" class="btn btn-primary" disabled=move || create.pending().get()>"Créer la clé"</button>
                 </div>
@@ -295,6 +297,12 @@ pub fn KeysSection() -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_worker_key_is_never_created_by_hand() {
+        assert!(!Role::CREATABLE_KEY_ROLES.contains(&Role::Worker));
+        assert!(Role::CREATABLE_KEY_ROLES.contains(&DEFAULT_KEY_ROLE));
+    }
 
     #[test]
     fn mcp_client_snippet_embeds_origin_and_bearer_token() {

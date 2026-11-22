@@ -86,11 +86,26 @@ fn validate_pack_component(component: &PackComponent) -> AppResult<()> {
     Ok(())
 }
 
+/// Réécrit au format `{$…}` les défauts des variables qui citent encore l'ancienne syntaxe
+/// `{{…}}` (ADR 0026) ; un secret n'a jamais de défaut et n'est pas concerné.
+fn upgrade_legacy_defaults(variables: &mut [forgearr_shared::script_variables::ScriptVariable]) {
+    for default in variables
+        .iter_mut()
+        .filter_map(|variable| variable.default_value.as_mut())
+    {
+        *default = forgearr_shared::flows::legacy_references::upgrade_legacy_strings(
+            default,
+            forgearr_shared::flows::legacy_references::LegacyConversion::AllPaths,
+        );
+    }
+}
+
 /// Enregistre ou met à jour un script local et génère son contrat d'opération + bloc palette.
 pub fn save_local_script(
     local_dir: &Path,
-    req: UpsertLocalScriptRequest,
+    mut req: UpsertLocalScriptRequest,
 ) -> AppResult<LocalScriptSummary> {
+    upgrade_legacy_defaults(&mut req.variables);
     let name = req.name.trim();
     if name.is_empty() {
         return Err(AppError::InvalidManifest(
@@ -350,6 +365,9 @@ pub fn save_local_flow_template(
         ));
     }
     validate_flow_graph(&req.definition)?;
+    let definition =
+        forgearr_shared::flows::legacy_references::upgrade_legacy_definition_value(&req.definition)
+            .unwrap_or_else(|| req.definition.clone());
     let (slug, is_update) = resolve_slug(req.id.as_deref(), "flow.template.", name)?;
     let id = format!("flow.template.{slug}");
     let base_dir = local_dir.join("flows").join(&slug);
@@ -375,7 +393,7 @@ pub fn save_local_flow_template(
         "author": "local",
         "license": "UNLICENSED",
         "fileMask": file_mask,
-        "definition": req.definition,
+        "definition": definition,
     });
     write_json_pretty(&base_dir.join("manifest.json"), &manifest_json)?;
     rebuild_local_index(local_dir)?;
@@ -386,7 +404,7 @@ pub fn save_local_flow_template(
         description,
         file_mask,
         version: "1.0.0".to_owned(),
-        definition: req.definition,
+        definition,
         is_local: true,
     })
 }

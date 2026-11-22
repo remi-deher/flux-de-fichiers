@@ -353,6 +353,24 @@ fn script_variables_round_trip_through_the_manifest_and_the_snapshot() -> anyhow
 }
 
 #[test]
+fn legacy_variable_defaults_are_saved_in_the_single_template_syntax() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let local_dir = dir.path().join("local");
+    let cible = ScriptVariable {
+        name: "cible".into(),
+        kind: VariableKind::Text,
+        default_value: Some(json!("{{workDir}}/{{mediaInfo.title}}")),
+        ..ScriptVariable::default()
+    };
+    let saved = save_local_script(&local_dir, variable_script_request(vec![cible]))?;
+    assert_eq!(
+        saved.variables[0].default_value,
+        Some(json!("{$work.dir}/{$media.title}"))
+    );
+    Ok(())
+}
+
+#[test]
 fn script_with_an_invalid_variable_schema_is_refused_and_writes_nothing() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let local_dir = dir.path().join("local");

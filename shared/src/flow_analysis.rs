@@ -3,7 +3,8 @@
 use crate::flows::{
     ConditionConfig, FlowConnection, FlowGraph, FlowNode, FlowVariables, IntrinsicVariable,
     OwnedBlockSpec, apply_set_variable, describe_condition, evaluate_condition_with_variables,
-    find_owned, is_set_variable_kind, is_sub_flow_kind, render_value, sub_flow_target,
+    find_owned, is_set_variable_kind, is_sub_flow_kind, legacy_references::upgrade_legacy_value,
+    sub_flow_target, template_scope::render_in_scope,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -227,6 +228,7 @@ fn simulation_variables(file_name: &str) -> FlowVariables {
     variables.set_intrinsic(IntrinsicVariable::FileName, text(path.file_name()));
     variables.set_intrinsic(IntrinsicVariable::FileStem, text(path.file_stem()));
     variables.set_intrinsic(IntrinsicVariable::FileExt, text(path.extension()));
+    variables.set_intrinsic(IntrinsicVariable::FilePath, text(Some(path.as_os_str())));
     variables
 }
 
@@ -237,8 +239,7 @@ fn simulate_set_variable(
     variables: &mut FlowVariables,
     warnings: &mut Vec<String>,
 ) -> Option<String> {
-    let resolve = |expr: &str| variables.lookup(expr).cloned();
-    let config = render_value(&node.config, &resolve);
+    let config = render_in_scope(&upgrade_legacy_value(&node.config), &*variables);
     match apply_set_variable(&config, variables) {
         Ok(message) => Some(message),
         Err(err) => {
@@ -699,6 +700,13 @@ mod tests {
         let other = simulate_flow_basic(&graph, &[], &input("autre.mkv"));
         assert_eq!(other.status, SimulationStatus::IncompletePath);
         assert_eq!(other.steps[2].port_taken.as_deref(), Some("false"));
+    }
+
+    #[test]
+    fn simulation_converts_legacy_references_before_rendering() {
+        let graph = variable_graph(json!({ "name": "cible", "value": "{{workingFile}}" }), None);
+        let report = simulate_flow_basic(&graph, &[], &input("film.mkv"));
+        assert_eq!(report.steps[2].port_taken.as_deref(), Some("true"));
     }
 
     #[test]

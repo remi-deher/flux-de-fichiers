@@ -6,7 +6,7 @@ use super::inspector::NodeInspector;
 use super::palette::Palette;
 use super::presentation::{DiagnosticLevel, FlowDiagnostic, diagnose_graph};
 use super::state::{Editor, incomplete_blocks};
-use super::versions::FlowVersions;
+use super::versions::{FlowVersions, editable_graph};
 use crate::ai::AiAssistantState;
 use crate::api;
 use crate::route::{Link, Route, encode_segment, use_router};
@@ -858,7 +858,7 @@ pub fn FlowEditor(me: Me, flow_id: Option<String>) -> impl IntoView {
             None => view! { <p class="text-dim">"Chargement du flux…"</p> }.into_any(),
             Some(Err(error)) => view! { <p class="settings-alert" role="alert">{error.message()}</p> }.into_any(),
             Some(Ok(record)) => {
-                let graph = FlowGraph::parse(&record.definition);
+                let graph = editable_graph(&record.definition);
                 view! { <Workspace me=me.clone() record=record graph=graph /> }.into_any()
             }
         }}

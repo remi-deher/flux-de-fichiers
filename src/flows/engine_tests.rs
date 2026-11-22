@@ -1336,7 +1336,7 @@ async fn node_outputs_survive_a_relay_so_the_taker_still_reads_earlier_nodes()
             {"id": "mark", "type": "block.script.marker", "name": "Marker"},
             {"id": "pass", "type": "relay", "name": "Relais", "config": {"mode": "capable", "codec": "hevc"}},
             {"id": "read", "type": "block.script.lecteur", "name": "Lecteur", "config": {
-                "precedent": "{{nodes.mark.message}}"
+                "precedent": "{$nodes.mark.message}"
             }},
             {"id": "n5", "type": "file-output", "name": "out"}
         ],

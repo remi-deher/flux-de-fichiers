@@ -8,6 +8,7 @@ use super::state::Editor;
 use crate::route::encode_segment;
 use crate::ui::{Registre, RegistreMessage};
 use crate::{api, format};
+use forgearr_shared::flows::legacy_references::upgrade_legacy_graph;
 use forgearr_shared::flows::{FlowGraph, FlowRecord, FlowVersionSummary};
 use leptos::prelude::*;
 
@@ -19,7 +20,15 @@ pub fn restore_into(current: &mut FlowRecord, version: &FlowRecord) -> FlowGraph
     current.name = version.name.clone();
     current.description = version.description.clone();
     current.file_mask = version.file_mask.clone();
-    FlowGraph::parse(&version.definition)
+    editable_graph(&version.definition)
+}
+
+/// Graphe ouvert dans l'éditeur : les références `{{…}}` (ADR 0025) sont converties en `{$…}`,
+/// si bien que l'enregistrement écrit le nouveau format ; la version stockée reste intacte.
+pub fn editable_graph(definition: &str) -> FlowGraph {
+    let mut graph = FlowGraph::parse(definition);
+    upgrade_legacy_graph(&mut graph);
+    graph
 }
 
 #[component]
@@ -102,6 +111,28 @@ mod tests {
             created_at: DateTime::<Utc>::UNIX_EPOCH,
             updated_at: DateTime::<Utc>::UNIX_EPOCH,
         }
+    }
+
+    #[test]
+    fn an_opened_graph_has_its_legacy_references_rewritten() {
+        let graph = editable_graph(
+            r#"{"nodes":[{"id":"s","type":"script","name":"S","config":{"cible":"{{workDir}}/{{mediaInfo.video.codec}}","code":"{{workDir}}"}}],"connections":[]}"#,
+        );
+        let config = graph.nodes.first().map(|node| node.config.clone());
+        assert_eq!(
+            config
+                .as_ref()
+                .and_then(|config| config.get("cible"))
+                .and_then(|v| v.as_str()),
+            Some("{$work.dir}/{$media.video.codec}")
+        );
+        assert_eq!(
+            config
+                .as_ref()
+                .and_then(|config| config.get("code"))
+                .and_then(|v| v.as_str()),
+            Some("{{workDir}}")
+        );
     }
 
     #[test]

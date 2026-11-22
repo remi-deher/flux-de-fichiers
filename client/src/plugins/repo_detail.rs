@@ -3,8 +3,8 @@
 use super::metadata::{MetaRow, StatusBanner, StoreTone};
 use super::repos::RepoAction;
 use super::script_preview::{ScriptPreview, script_preview_path};
-use super::{REPOSITORIES_PATH, section_badge_label};
-use crate::api;
+use super::{REPOSITORIES_PATH, REPOSITORY_TOPICS, section_badge_label};
+use crate::live::load;
 use crate::route::encode_segment;
 use crate::ui::{Tag, TagTone};
 use forgearr_shared::plugins::RepositoryDetailView;
@@ -28,22 +28,6 @@ impl RepoDrawerTab {
             1 => Self::Sync,
             _ => Self::Info,
         }
-    }
-}
-
-/// Onglet Contenu : liste des pièces, ou aperçu du code du script sélectionné.
-#[component]
-fn ContentTab(detail: RepositoryDetailView, previewed: RwSignal<Option<String>>) -> impl IntoView {
-    let repo_id = detail.repository.id.clone();
-    move || match previewed.get() {
-        Some(entry_id) => view! {
-            <ScriptPreview
-                path=script_preview_path(&repo_id, &entry_id)
-                on_back=Some(Callback::new(move |()| previewed.set(None)))
-            />
-        }
-        .into_any(),
-        None => view! { <ContentList detail=detail.clone() previewed=previewed /> }.into_any(),
     }
 }
 
@@ -198,16 +182,17 @@ fn InfoTab(detail: RepositoryDetailView) -> impl IntoView {
 pub fn RepoDetail(
     repo_id: String,
     tab: RwSignal<usize>,
-    reload_key: RwSignal<u32>,
     on_action: Callback<(String, RepoAction)>,
     action_pending: Signal<bool>,
 ) -> impl IntoView {
     let path = format!("{REPOSITORIES_PATH}/{}", encode_segment(&repo_id));
     let previewed = RwSignal::new(None::<String>);
-    let detail = LocalResource::new(move || {
-        reload_key.track();
-        let path = path.clone();
-        async move { api::get::<RepositoryDetailView>(&path).await }
+    let detail = load::<RepositoryDetailView>(REPOSITORY_TOPICS, path);
+    // Hors de la fiche relue : l'aperçu garde son défilement quand le dépôt change.
+    let shown_script = Memo::new(move |_| {
+        previewed
+            .get()
+            .filter(|_| RepoDrawerTab::from_index(tab.get()) == RepoDrawerTab::Content)
     });
 
     view! {
@@ -266,7 +251,8 @@ pub fn RepoDetail(
                                 action=Some(sync_btn)
                             />
                             {match active_tab {
-                                RepoDrawerTab::Content => view! { <ContentTab detail=data previewed=previewed /> }.into_any(),
+                                RepoDrawerTab::Content if shown_script.read().is_some() => ().into_any(),
+                                RepoDrawerTab::Content => view! { <ContentList detail=data previewed=previewed /> }.into_any(),
                                 RepoDrawerTab::Sync => view! {
                                     <SyncTab detail=data on_action=on_action action_pending=action_pending />
                                 }
@@ -278,6 +264,12 @@ pub fn RepoDetail(
                     }
                 }
             }}
+            {move || shown_script.get().map(|entry_id| view! {
+                <ScriptPreview
+                    path=script_preview_path(&repo_id, &entry_id)
+                    on_back=Some(Callback::new(move |()| previewed.set(None)))
+                />
+            })}
         </div>
     }
 }

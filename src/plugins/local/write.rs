@@ -1,8 +1,9 @@
 //! Opérations d'écriture et de suppression dans le catalogue local.
 
 use super::{
-    BLOCK_TEMPLATE_TAG, MAX_RESOURCE_BYTES, MAX_SCRIPT_BYTES, ensure_new_target_absent,
-    is_safe_filename, normalize_description, rebuild_local_index, resolve_slug, write_json_pretty,
+    BLOCK_TEMPLATE_TAG, MAX_RESOURCE_BYTES, MAX_SCRIPT_BYTES, SCRIPT_ID_PREFIX,
+    ensure_new_target_absent, is_safe_filename, normalize_description, rebuild_local_index,
+    resolve_slug, script_dir, write_json_pretty,
 };
 use crate::{
     error::{AppError, AppResult},
@@ -119,7 +120,7 @@ pub fn save_local_script(
         .map_err(|err| AppError::InvalidManifest(err.to_string()))?;
     forgearr_shared::exposed_variables::validate_requirements(&req.requires)
         .map_err(|err| AppError::InvalidManifest(err.to_string()))?;
-    let (slug, is_update) = resolve_slug(req.id.as_deref(), "script.", name)?;
+    let (slug, is_update) = resolve_slug(req.id.as_deref(), SCRIPT_ID_PREFIX, name)?;
     let id = format!("script.{slug}");
     let entrypoint = match req
         .filename
@@ -136,7 +137,7 @@ pub fn save_local_script(
         None => format!("run.{}", req.interpreter.default_extension()),
     };
 
-    let base_dir = local_dir.join("scripts").join(&slug);
+    let base_dir = script_dir(local_dir, &slug);
     ensure_new_target_absent(&base_dir, is_update)?;
     let previous_entrypoint = read_previous_script_entrypoint(&base_dir);
 

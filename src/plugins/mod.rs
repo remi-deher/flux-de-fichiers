@@ -53,7 +53,7 @@ pub use packs::{
 pub use probe::{ProbeContract, file_job_may_start, probe_is_ready, required_probe};
 pub use readiness::{attach_dependency_statuses, compute_entry_runtime, is_plugin_configured};
 pub use sources::{
-    catalog_roots, is_valid_repository_id, local_catalog_dir, repository_dir,
+    catalog_roots, is_valid_repository_id, local_catalog_dir, repository_dir, sync_and_signal,
     sync_enabled_repositories,
 };
 pub use sync::{

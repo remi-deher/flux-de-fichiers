@@ -18,6 +18,7 @@ pub mod format;
 pub mod highlight;
 pub mod jobs;
 pub mod libraries;
+pub mod live;
 pub mod local;
 pub mod logs;
 pub mod mcp;

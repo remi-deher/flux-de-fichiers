@@ -7,8 +7,8 @@ use crate::route::{Route, Router, use_router};
 use crate::settings::SettingsPage;
 use crate::shell::{Shell, allowed};
 use crate::{flows, jobs::JobsPage, libraries, workers};
+use forgearr_shared::InstanceKind;
 use forgearr_shared::session::Me;
-use forgearr_shared::{InstanceKind, Permission};
 use leptos::prelude::*;
 
 #[component]
@@ -41,13 +41,11 @@ fn Screen(me: Me) -> impl IntoView {
 #[component]
 fn Session() -> impl IntoView {
     let me = expect_context::<Me>();
-    // Le flux d'événements des tâches et le fuseau horaire central n'existent que sur le central.
+    // Le fuseau horaire central n'existe que sur le central.
     if me.instance_kind == InstanceKind::Central {
         crate::timezone::sync_from_server();
-        if me.allows(Permission::ViewJobs) {
-            crate::jobs::LiveJobs::install();
-        }
     }
+    crate::live::LiveEvents::install(&me);
     view! { <Shell me=me.clone()><Screen me=me /></Shell> }
 }
 

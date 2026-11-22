@@ -1,7 +1,8 @@
 //! Onglet Packs de la Librairie : assembler, inspecter et gérer des packs locaux sans dépôt GitHub.
 
-use super::{LOCAL_PACKS_PATH, LocalDeleteButton, bump, use_local_delete};
+use super::{LOCAL_PACKS_PATH, LOCAL_TOPICS, LocalDeleteButton, use_local_delete};
 use crate::api;
+use crate::live::{Loaded, use_live};
 use crate::plugins::{PackDetail, PackDrawerTab};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
@@ -49,15 +50,50 @@ fn available_components(snapshot: &LocalLibrarySnapshot) -> Vec<PackComponent> {
             });
         }
     }
-    out
+    distinct(out)
+}
+
+/// Une pièce n'est proposée qu'une fois, même listée à deux titres.
+fn distinct(mut components: Vec<PackComponent>) -> Vec<PackComponent> {
+    let mut known = HashSet::new();
+    components.retain(|component| known.insert(component_key(component)));
+    components
+}
+
+fn component_key(component: &PackComponent) -> (&'static str, String) {
+    (component.kind.as_str(), component.id.clone())
+}
+
+/// Case à cocher d'un composant à inclure dans le pack.
+#[component]
+fn ComponentChoice(component: PackComponent, selected: RwSignal<HashSet<String>>) -> impl IntoView {
+    let id = component.id.clone();
+    let toggled = component.id.clone();
+    view! {
+        <li class="step-item">
+            <label class="step-item__head">
+                <input type="checkbox"
+                    prop:checked=move || selected.read().contains(&id)
+                    on:change=move |_| {
+                        selected.update(|set| {
+                            if !set.remove(&toggled) {
+                                set.insert(toggled.clone());
+                            }
+                        });
+                    } />
+                <span class="text-mono text-strong">{component.id}</span>
+                <Tag label=component.kind.as_str() tone=TagTone::Neutral />
+            </label>
+        </li>
+    }
 }
 
 #[component]
 pub fn LocalPacksSection(
-    snapshot: LocalResource<Result<LocalLibrarySnapshot, api::ApiError>>,
-    reload: RwSignal<u32>,
+    snapshot: Loaded<LocalLibrarySnapshot>,
     can_manage: bool,
 ) -> impl IntoView {
+    let live = use_live();
     let create_open = RwSignal::new(false);
     let pack_name = RwSignal::new(String::new());
     let pack_desc = RwSignal::new(String::new());
@@ -93,13 +129,21 @@ pub fn LocalPacksSection(
         Some(Ok(_)) => {
             create_open.set(false);
             Toasts::notify_success("Pack local créé.");
-            bump(reload);
+            live.touch(LOCAL_TOPICS);
         }
         Some(Err(err)) => Toasts::set_error(feedback, err.message()),
         None => {}
     });
 
-    let remove = use_local_delete(reload, "Pack local supprimé.");
+    let choices = Memo::new(move |_| {
+        snapshot
+            .get()
+            .and_then(Result::ok)
+            .map(|known| available_components(&known))
+            .unwrap_or_default()
+    });
+
+    let remove = use_local_delete("Pack local supprimé.");
 
     let stats = Signal::derive(move || {
         let count = snapshot
@@ -193,6 +237,7 @@ pub fn LocalPacksSection(
                                 }.into_any();
                                 view! {
                                     <ResourceCard
+                                        focus_key=pack.id.clone()
                                         title=pack.name
                                         icon=IconName::Download
                                         tone=MetricTone::Success
@@ -214,93 +259,64 @@ pub fn LocalPacksSection(
             }
         }}
         <Drawer open=create_open eyebrow="Pack local" title="Assembler un pack".to_owned()>
-            {move || {
-                let choices = snapshot
-                    .get()
-                    .and_then(Result::ok)
-                    .map(|s| available_components(&s))
-                    .unwrap_or_default();
-                let choices_submit = choices.clone();
-                view! {
-                    <form class="inspection-panel" on:submit=move |ev| {
-                        ev.prevent_default();
-                        let chosen_ids = selected.get_untracked();
-                        let components: Vec<PackComponent> = choices_submit
-                            .iter()
-                            .filter(|c| chosen_ids.contains(&c.id))
-                            .cloned()
-                            .collect();
-                        if components.is_empty() {
-                            Toasts::set_error(feedback, "Sélectionnez au moins un composant.");
-                            return;
-                        }
-                        save.dispatch(CreateLocalPackRequest {
-                            id: None,
-                            name: pack_name.get_untracked(),
-                            description: Some(pack_desc.get_untracked()),
-                            components,
-                            entrypoint: None,
-                        });
-                    }>
-                        <div class="form-group">
-                            <label class="form-label" for="lpack-name">"Nom du pack *"</label>
-                            <input id="lpack-name" class="form-input" required=true
-                                prop:value=move || pack_name.get()
-                                on:input=move |e| pack_name.set(event_target_value(&e)) />
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label" for="lpack-desc">"Description"</label>
-                            <input id="lpack-desc" class="form-input"
-                                prop:value=move || pack_desc.get()
-                                on:input=move |e| pack_desc.set(event_target_value(&e)) />
-                        </div>
-                        <div class="form-group">
-                            <span class="form-label">"Composants locaux à inclure *"</span>
-                            {if choices.is_empty() {
-                                view! {
-                                    <p class="text-dim text-sm">"Créez d'abord un script, une ressource ou un modèle de flow."</p>
-                                }.into_any()
-                            } else {
-                                view! {
-                                    <ul class="step-list">
-                                        {choices.into_iter().map(|comp| {
-                                            let cid = comp.id.clone();
-                                            let cid_check = cid.clone();
-                                            let cid_toggle = cid.clone();
-                                            view! {
-                                                <li class="step-item">
-                                                    <label class="step-item__head">
-                                                        <input type="checkbox"
-                                                            prop:checked=move || selected.get().contains(&cid_check)
-                                                            on:change=move |_| {
-                                                                selected.update(|set| {
-                                                                    if !set.remove(&cid_toggle) {
-                                                                        set.insert(cid_toggle.clone());
-                                                                    }
-                                                                });
-                                                            } />
-                                                        <span class="text-mono text-strong">{cid}</span>
-                                                        <Tag label=comp.kind.as_str() tone=TagTone::Neutral />
-                                                    </label>
-                                                </li>
-                                            }
-                                        }).collect_view()}
-                                    </ul>
-                                }.into_any()
-                            }}
-                        </div>
-                        <div class="inspection-drawer__actions">
-                            <button type="submit" class="btn btn-primary" disabled=move || save.pending().get()>
-                                "Créer le pack"
-                            </button>
-                            <button type="button" class="btn btn-secondary" on:click=move |_| create_open.set(false)>
-                                "Annuler"
-                            </button>
-                        </div>
-                        <p class="form-error text-sm" role="status">{move || feedback.get()}</p>
-                    </form>
+            <form class="inspection-panel" on:submit=move |ev| {
+                ev.prevent_default();
+                let chosen_ids = selected.get_untracked();
+                let mut components = choices.get_untracked();
+                components.retain(|component| chosen_ids.contains(&component.id));
+                if components.is_empty() {
+                    Toasts::set_error(feedback, "Sélectionnez au moins un composant.");
+                    return;
                 }
-            }}
+                save.dispatch(CreateLocalPackRequest {
+                    id: None,
+                    name: pack_name.get_untracked(),
+                    description: Some(pack_desc.get_untracked()),
+                    components,
+                    entrypoint: None,
+                });
+            }>
+                <div class="form-group">
+                    <label class="form-label" for="lpack-name">"Nom du pack *"</label>
+                    <input id="lpack-name" class="form-input" required=true
+                        prop:value=move || pack_name.get()
+                        on:input=move |e| pack_name.set(event_target_value(&e)) />
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="lpack-desc">"Description"</label>
+                    <input id="lpack-desc" class="form-input"
+                        prop:value=move || pack_desc.get()
+                        on:input=move |e| pack_desc.set(event_target_value(&e)) />
+                </div>
+                <div class="form-group">
+                    <span class="form-label">"Composants locaux à inclure *"</span>
+                    <Show
+                        when=move || !choices.read().is_empty()
+                        fallback=|| view! {
+                            <p class="text-dim text-sm">"Créez d'abord un script, une ressource ou un modèle de flow."</p>
+                        }
+                    >
+                        <ul class="step-list">
+                            <For
+                                each=move || choices.get()
+                                key=component_key
+                                children=move |component| view! {
+                                    <ComponentChoice component=component selected=selected />
+                                }
+                            />
+                        </ul>
+                    </Show>
+                </div>
+                <div class="inspection-drawer__actions">
+                    <button type="submit" class="btn btn-primary" disabled=move || save.pending().get()>
+                        "Créer le pack"
+                    </button>
+                    <button type="button" class="btn btn-secondary" on:click=move |_| create_open.set(false)>
+                        "Annuler"
+                    </button>
+                </div>
+                <p class="form-error text-sm" role="status">{move || feedback.get()}</p>
+            </form>
         </Drawer>
         <Drawer
             open=inspect_open
@@ -314,9 +330,28 @@ pub fn LocalPacksSection(
                     pack_id=id
                     tab=inspect_tab
                     can_install=can_manage
-                    on_installed=Callback::new(move |()| bump(reload))
                 />
             })}
         </Drawer>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_component_is_offered_once_per_kind() {
+        let component = |id: &str, kind| PackComponent {
+            id: id.into(),
+            version: "1.0.0".into(),
+            kind,
+        };
+        let script = component("a", CatalogItemType::Script);
+        let flow = component("a", CatalogItemType::Flow);
+        assert_eq!(
+            distinct(vec![script.clone(), flow.clone(), script.clone()]),
+            vec![script, flow]
+        );
     }
 }

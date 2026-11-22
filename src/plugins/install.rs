@@ -22,24 +22,32 @@ pub fn is_installing(tool_id: &str) -> bool {
 }
 
 /// Marque un outil « en cours » le temps de l'installation, même en cas d'échec ou d'annulation.
-struct InstallingGuard(String);
+struct InstallingGuard {
+    tool_id: String,
+    cache: ToolCacheManager,
+}
 
 impl InstallingGuard {
-    fn start(tool_id: &str) -> Self {
+    fn start(tool_id: &str, cache: &ToolCacheManager) -> Self {
         if let Ok(mut installing) = INSTALLING.lock()
             && !installing.iter().any(|id| id == tool_id)
         {
             installing.push(tool_id.to_owned());
         }
-        Self(tool_id.to_owned())
+        cache.notify_changed();
+        Self {
+            tool_id: tool_id.to_owned(),
+            cache: cache.clone(),
+        }
     }
 }
 
 impl Drop for InstallingGuard {
     fn drop(&mut self) {
         if let Ok(mut installing) = INSTALLING.lock() {
-            installing.retain(|id| id != &self.0);
+            installing.retain(|id| id != &self.tool_id);
         }
+        self.cache.notify_changed();
     }
 }
 
@@ -127,23 +135,22 @@ pub async fn install_from_distribution(
             distribution.tool_id
         )));
     }
-    let _installing = InstallingGuard::start(&distribution.tool_id);
-    let _guard = INSTALL_LOCK.lock().await;
-    let binary = ToolCacheManager::resolve_bin_candidate(
-        &cache
-            .tool_dir(
-                &distribution.tool_id,
-                &distribution.tool_version,
-                &artifact.arch,
+    let ready_binary = || {
+        let (id, version) = (&distribution.tool_id, &distribution.tool_version);
+        cache.is_ready(id, version, &artifact.arch).then(|| {
+            ToolCacheManager::resolve_bin_candidate(
+                &cache.tool_dir(id, version, &artifact.arch).join("bin"),
+                &artifact.binary_relative_path,
             )
-            .join("bin"),
-        &artifact.binary_relative_path,
-    );
-    if cache.is_ready(
-        &distribution.tool_id,
-        &distribution.tool_version,
-        &artifact.arch,
-    ) {
+        })
+    };
+    if let Some(binary) = ready_binary() {
+        return Ok(binary);
+    }
+    let _installing = InstallingGuard::start(&distribution.tool_id, cache);
+    let _guard = INSTALL_LOCK.lock().await;
+    // Une autre installation a pu l'achever pendant l'attente.
+    if let Some(binary) = ready_binary() {
         return Ok(binary);
     }
     let archive = fetch_archive(&url, policy)
@@ -338,6 +345,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_installation_signals_its_end_even_when_it_fails() -> anyhow::Result<()> {
+        use crate::live::{CHANGE_WINDOW, ChangeNotifier, EventHistory, LiveEvent};
+        use forgearr_shared::live::ChangeTopic;
+        let archive = archive_with("demo", b"#!/bin/sh\nexit 0\n")?;
+        let address = serve_archive(archive.clone()).await?;
+        let dir = tempfile::tempdir()?;
+        let history = EventHistory::new();
+        let cache =
+            ToolCacheManager::new(dir.path()).with_changes(ChangeNotifier::new(history.clone()));
+        let policy = SyncPolicy {
+            allow_private_hosts: true,
+            ..SyncPolicy::default()
+        };
+        for digest in ["00".repeat(32), sha256_hex(&archive)] {
+            let mut rx = history.subscribe_from(None).await.rx;
+            let contract = distribution(address, digest);
+            let _ = install_from_distribution(&cache, &contract, &policy).await;
+            tokio::time::sleep(CHANGE_WINDOW * 3).await;
+            assert!(matches!(
+                rx.try_recv(),
+                Ok((_, LiveEvent::Changed(ChangeTopic::Tools)))
+            ));
+        }
+        assert!(cache.is_ready("demo", "1.0.0", host_arch()));
+        // Déjà prêt : rien n'a changé.
+        let mut rx = history.subscribe_from(None).await.rx;
+        let contract = distribution(address, sha256_hex(&archive));
+        install_from_distribution(&cache, &contract, &policy).await?;
+        tokio::time::sleep(CHANGE_WINDOW * 2).await;
+        assert!(rx.try_recv().is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_install_refuses_an_archive_with_a_wrong_digest() -> anyhow::Result<()> {
         let archive = archive_with("demo", b"contenu")?;
         let address = serve_archive(archive).await?;
@@ -443,10 +484,11 @@ mod tests {
 
     #[test]
     fn test_installing_guard_marks_the_tool_until_it_is_dropped() {
+        let cache = ToolCacheManager::new(std::env::temp_dir().join("flux-install-garde"));
         assert!(!is_installing("garde"));
         {
-            let _first = InstallingGuard::start("garde");
-            let _again = InstallingGuard::start("garde");
+            let _first = InstallingGuard::start("garde", &cache);
+            let _again = InstallingGuard::start("garde", &cache);
             assert!(is_installing("garde"));
         }
         assert!(!is_installing("garde"));

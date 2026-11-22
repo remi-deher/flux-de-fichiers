@@ -12,6 +12,7 @@ Ce guide se consulte à la demande. Le README reste la référence d'utilisation
 | API, authentification | `src/api.rs`, `src/auth.rs`, `src/api/jobs.rs` | Route concernée dans `docs/openapi.yaml`, `tests/api_security.rs` |
 | Baux, état injoignable, remise en file (ADR 0027) | `src/repository/leases/` (`contact`, `sweep`, `restart`, `end`, `view`), `src/repository/irreversible_actions.rs`, `src/lease_sweeper.rs`, `src/api/leases.rs`, `shared/src/jobs/lease.rs` | `docs/adr/0027-etat-injoignable-et-remise-en-file.md` ; tests (CI) : `lease_*`, `worker_boot`, `irreversible_actions` |
 | Worker : contact, accord, arrêt propre (ADR 0027) | `src/worker.rs`, `src/worker/lease_calls.rs`, `src/worker/contact.rs`, `src/job_runner/action_gate.rs`, `src/supervision.rs`, `src/local_worker.rs`, `src/local_worker/lease_gate.rs` | `src/worker/timing.rs` (tous les délais), `src/worker/startup_purge.rs`, `src/flows/gate_flow_tests.rs`, `client/src/jobs/lease.rs` |
+| Événements en temps réel (ADR 0028) | `shared/src/live.rs`, `src/live/` (historique, regroupement), `src/api/events.rs`, `src/plugins/cache.rs` (`invalidate`), `AppState::tool_cache` ; client : `client/src/live/`, `client/src/plugins/settings_form.rs` | `docs/adr/0028-evenements-en-temps-reel.md` ; tests (CI) : `live`, `events`, `live_events_api` |
 | Attribution | `src/repository/jobs.rs`, `src/domain.rs` | `migrations/`, `src/worker.rs` |
 | Transferts, intégrité, publication | `src/api/transfers.rs`, `src/storage.rs` | `src/media.rs`, `src/worker.rs` |
 | Variables de script, modèles `{$…}`, exposition par les plugins (ADR 0025, 0026) | `shared/src/script_variables.rs`, `src/flows/header_secrets.rs` (secrets `config.secrets`), `src/repository/flow_samples.rs` (échantillon de métadonnées du dernier job), `src/plugins/highlight.rs`, `src/plugins/highlight/powershell.rs`, `shared/src/exposed_variables.rs`, `shared/src/flows/template_scope.rs` (portée et rendu uniques `{$…}`), `shared/src/flows/legacy_references.rs` (conversion `{{…}}` → `{$…}`), `src/flows/substitution.rs`, `src/flows/variables.rs` (`NodeScope`), `src/flows/node_references.rs`, `shared/src/flows/node_references.rs`, `client/src/flows/template_input.rs` (sélecteur unique), `client/src/flows/variables_form.rs`, `src/plugins/script_requirements.rs`, `src/plugins/exposures.rs`, `client/src/plugins/exposed_variables.rs`, `client/src/libraries/requirements_editor.rs`, `client/src/libraries/rows.rs`, `src/plugins/local/write.rs`, `client/src/libraries/variables_editor.rs`, `client/src/ui/variables_table.rs` | `docs/adr/0025-variables-de-script-et-exposition-par-les-plugins.md` ; tests (CI) : `script_variables`, `template_scope`, `legacy_references`, `node_references` |
@@ -47,6 +48,12 @@ GPU si un bloc du flux figé ou de ses flux liés porte `acceleration` = `nvenc`
 (`shared/src/flows/resources.rs`). Une tâche sans priorité explicite prend
 `libraries.default_priority`. Ces colonnes sont lues en SQLx runtime
 (`src/repository/resource_slots.rs`), les macros existantes restant inchangées.
+
+Temps réel (ADR 0028), pièges : sur le central, un cache d'outils vient de `AppState::tool_cache()`, jamais de
+`ToolCacheManager::new` ; une écriture de la librairie locale passe par `write_local`, une synchronisation de
+dépôt par `sync_and_signal` ; `notify` suit toujours l'écriture validée.
+Client : lire par `live::load`, signaler une écriture de la page par `LiveEvents::touch`, placer saisie et actions
+en cours hors des fermetures qui lisent une ressource.
 
 Baux (ADR 0027), pièges : un bail vaut tant que (worker, jeton, époque, `running`) est inscrit, l'échéance
 seule ne le retire pas ; toute écriture d'un titulaire passe par `ensure_held` dans sa transaction. Côté

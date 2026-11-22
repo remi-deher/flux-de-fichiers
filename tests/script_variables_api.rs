@@ -266,7 +266,7 @@ async fn node_variables_return_the_schema_references_and_the_resolved_config() -
                 .collect()
         })
         .unwrap_or_default();
-    for expected in ["workingFile", "mediaInfo.video.codec", "nodes.in.message"] {
+    for expected in ["file.path", "media.video.codec", "nodes.in.message"] {
         assert!(
             references.contains(&expected),
             "{expected} absent de {references:?}"
@@ -292,7 +292,7 @@ async fn node_variables_explain_a_failed_resolution_and_ignore_non_script_nodes(
         )
     };
 
-    let (status, body) = send(&app, call(json!({"cible": "{{mediaInfo.absent}}"}), "enc")?).await?;
+    let (status, body) = send(&app, call(json!({"cible": "{$media.absent}"}), "enc")?).await?;
     assert_eq!(status, StatusCode::OK);
     assert!(body.get("resolved").is_none());
     assert!(
@@ -317,9 +317,9 @@ async fn saving_a_flow_refuses_unknown_or_downstream_references_and_accepts_vali
     save_encoder_script(app.plugins_dir.path())?;
 
     for (reference, expected) in [
-        ("{{inconnue.var}}", "inconnue.var"),
-        ("{{nodes.out.message}}", "nodes.out.message"),
-        ("{{workingFile.sous}}", "workingFile.sous"),
+        ("{$inconnue.var}", "{$inconnue.var}"),
+        ("{$nodes.out.message}", "{$nodes.out.message}"),
+        ("{{workingFile.sous}}", "{$file.path.sous}"),
     ] {
         let graph = encoder_graph(json!({"cible": reference}));
         let (status, body) = send(
@@ -337,13 +337,40 @@ async fn saving_a_flow_refuses_unknown_or_downstream_references_and_accepts_vali
         );
     }
 
-    let valid = encoder_graph(json!({"cible": "{{workingFile}} {{nodes.in.message}}"}));
+    let valid = encoder_graph(json!({"cible": "{$file.path} {$nodes.in.message}"}));
     let (status, _) = send(
         &app,
         authorized("PUT", "/api/v1/flows/flow.var", Some(&flow_payload(&valid)))?,
     )
     .await?;
     assert_eq!(status, StatusCode::OK);
+    Ok(())
+}
+
+#[tokio::test]
+async fn saving_a_flow_rewrites_legacy_references_to_the_single_template_syntax()
+-> anyhow::Result<()> {
+    let app = test_app().await?;
+    save_encoder_script(app.plugins_dir.path())?;
+    let legacy = encoder_graph(json!({"cible": "{{workingFile}} {{nodes.in.workingFile}}"}));
+    let (status, _) = send(
+        &app,
+        authorized(
+            "PUT",
+            "/api/v1/flows/flow.var",
+            Some(&flow_payload(&legacy)),
+        )?,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    let (status, flow) = send(&app, authorized("GET", "/api/v1/flows/flow.var", None)?).await?;
+    assert_eq!(status, StatusCode::OK);
+    let definition: Value = serde_json::from_str(flow["definition"].as_str().unwrap_or_default())?;
+    let cible = definition["nodes"]
+        .as_array()
+        .and_then(|nodes| nodes.iter().find(|node| node["id"] == json!("enc")))
+        .map(|node| node["config"]["cible"].clone());
+    assert_eq!(cible, Some(json!("{$file.path} {$nodes.in.file}")));
     Ok(())
 }
 
@@ -557,7 +584,7 @@ async fn deprecated_exposed_variables_warn_in_validation_the_node_preview_and_th
         ]),
     )?;
     append_index_entries(dir, vec![plugin])?;
-    let graph = encoder_graph(json!({"cible": "{{mediainfo.video.codec}}"}));
+    let graph = encoder_graph(json!({"cible": "{$mediainfo.video.codec}"}));
 
     let (status, report) = send(
         &app,
@@ -576,7 +603,7 @@ async fn deprecated_exposed_variables_warn_in_validation_the_node_preview_and_th
     assert!(
         warnings
             .iter()
-            .any(|w| w.contains("dépréciée") && w.contains("{{mediainfo.video.codec_name}}")),
+            .any(|w| w.contains("dépréciée") && w.contains("{$mediainfo.video.codec_name}")),
         "{warnings:?}"
     );
     assert!(report["errors"].as_array().is_some_and(|errors| {
@@ -621,7 +648,7 @@ async fn deprecated_exposed_variables_warn_in_validation_the_node_preview_and_th
         .unwrap_or_default();
     assert!(header.contains("dépréciée"), "{header}");
 
-    let current = encoder_graph(json!({"cible": "{{mediainfo.video.codec_name}}"}));
+    let current = encoder_graph(json!({"cible": "{$mediainfo.video.codec_name}"}));
     let (_, view) = send(
         &app,
         authorized(

@@ -10,6 +10,7 @@ use std::fmt;
 
 mod condition;
 mod graph;
+pub mod legacy_references;
 mod linked;
 pub mod node_references;
 mod owned;
@@ -17,6 +18,7 @@ mod resources;
 mod script_protocol;
 mod script_routing;
 mod set_variable;
+pub mod template_scope;
 mod variables;
 
 pub use condition::{
@@ -27,9 +29,9 @@ pub use condition::{
 };
 pub use graph::{GraphError, GraphPosition, layout};
 pub use linked::{
-    DefaultFailureFlow, FAILURE_FLOW_KEY, LinkError, LinkedFlow, LinkedFlowRole,
-    MAX_SUB_FLOW_DEPTH, SUB_FLOW_BLOCK, SUB_FLOW_CONFIG_KEY, check_sub_flow_links, find_linked,
-    first_linked, is_block_kind, is_sub_flow_kind, sub_flow_target,
+    DefaultFailureFlow, FAILURE_FLOW_KEY, FAILURE_FLOW_STEP_NODE, LinkError, LinkedFlow,
+    LinkedFlowRole, MAX_SUB_FLOW_DEPTH, SUB_FLOW_BLOCK, SUB_FLOW_CONFIG_KEY, check_sub_flow_links,
+    find_linked, first_linked, is_block_kind, is_sub_flow_kind, sub_flow_target,
 };
 pub use owned::{OwnedBlockSpec, OwnedFieldKind, OwnedFieldSpec, find_owned};
 pub use resources::{flow_resource_class, flows_resource_class};
@@ -42,10 +44,10 @@ pub use set_variable::{
 };
 pub use variables::{
     CUSTOM_PREFIX, DEFAULT_SEPARATOR, FlowVariables, HTTP_NAMESPACES, IntrinsicVariable,
-    MAX_CUSTOM_VARIABLES, MAX_VARIABLE_NAME_LEN, MAX_VARIABLE_VALUE_BYTES, SET_VARIABLE_BLOCK,
-    TEMPLATE_CLOSE, TEMPLATE_OPEN, TemplateToken, VariableError, exact_token, is_known_expression,
-    is_valid_variable_name, map_strings, map_strings_infallible, render_piece, render_template,
-    render_template_with, render_value, scalar_to_string, template_tokens,
+    MAX_CUSTOM_VARIABLES, MAX_VARIABLE_NAME_LEN, MAX_VARIABLE_VALUE_BYTES, RAW_CONFIG_KEYS,
+    SET_VARIABLE_BLOCK, TEMPLATE_CLOSE, TEMPLATE_OPEN, TemplateToken, VariableError, exact_token,
+    is_known_expression, is_valid_variable_name, map_strings, map_strings_infallible, render_piece,
+    render_template_with, scalar_to_string, template_tokens,
 };
 
 /// Flux enregistré, tel que l'API le renvoie (définition JSON en texte, secrets masqués).

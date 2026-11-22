@@ -2,60 +2,102 @@
 
 use super::fields::{current, set_field};
 use super::state::Editor;
+use forgearr_shared::flows::node_references::{
+    ReferenceSource, ReferenceSuggestion, flow_variable_suggestions,
+};
+use forgearr_shared::flows::template_scope::template_token;
 use forgearr_shared::flows::{
-    CUSTOM_PREFIX, FlowGraph, IntrinsicVariable, ProtocolField, SCRIPT_INPUT_FIELDS,
-    SCRIPT_OUTPUT_FIELDS, SCRIPT_SCHEMA_VERSION, SET_VARIABLE_BLOCK, is_known_expression,
-    template_tokens,
+    ProtocolField, SCRIPT_INPUT_FIELDS, SCRIPT_OUTPUT_FIELDS, SCRIPT_SCHEMA_VERSION,
+    is_known_expression, template_tokens,
 };
 use leptos::prelude::*;
 use serde_json::Value;
 
 /// Aide de syntaxe affichée sous chaque champ texte.
-const TEMPLATE_HELP: &str =
-    "Modèles : {$file.stem}, {$vars.nom|défaut} ; {{$ pour un « {$ » littéral.";
+const TEMPLATE_HELP: &str = "Modèles : {$file.stem}, {$file.path}, {$vars.nom|défaut}, \
+     {$media.video.codec}, {$nodes.<id>.message} ; {{$ pour un « {$ » littéral.";
 
-/// Variable proposée à l'insertion : expression et libellé.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct VariableSuggestion {
-    pub expr: String,
-    pub label: String,
+/// Ordre d'affichage des groupes du sélecteur.
+const SOURCE_ORDER: [ReferenceSource; 5] = [
+    ReferenceSource::Variables,
+    ReferenceSource::Flow,
+    ReferenceSource::MediaInfo,
+    ReferenceSource::Node,
+    ReferenceSource::Plugin,
+];
+
+/// Ajoute le jeton `{$expr}` au texte courant d'un champ.
+pub fn append_token(current: &str, expr: &str) -> String {
+    format!("{current}{}", template_token(expr))
 }
 
-/// Variables intrinsèques, puis `vars.<nom>` des blocs « Définir une variable » du graphe.
-pub fn variable_suggestions(graph: &FlowGraph) -> Vec<VariableSuggestion> {
-    let mut suggestions: Vec<VariableSuggestion> = IntrinsicVariable::ALL
+/// Expressions regroupées par source, dans l'ordre d'affichage ; les groupes vides sont omis.
+pub fn group_references(
+    references: &[ReferenceSuggestion],
+) -> Vec<(ReferenceSource, Vec<&ReferenceSuggestion>)> {
+    SOURCE_ORDER
         .into_iter()
-        .map(|var| VariableSuggestion {
-            expr: var.key().to_owned(),
-            label: var.label().to_owned(),
+        .map(|source| {
+            let group: Vec<&ReferenceSuggestion> = references
+                .iter()
+                .filter(|suggestion| suggestion.source == source)
+                .collect();
+            (source, group)
         })
-        .collect();
-    for node in &graph.nodes {
-        let name = node
-            .config
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let expr = format!("{CUSTOM_PREFIX}{}", name.trim());
-        if node.kind.as_str().ends_with(SET_VARIABLE_BLOCK)
-            && is_known_expression(&expr)
-            && !suggestions.iter().any(|known| known.expr == expr)
-        {
-            suggestions.push(VariableSuggestion {
-                expr,
-                label: format!("Variable définie par « {} »", node.name),
-            });
-        }
-    }
-    suggestions
+        .filter(|(_, group)| !group.is_empty())
+        .collect()
 }
 
-/// Expressions d'un modèle qu'aucun exécuteur ne sait résoudre.
-pub fn unknown_tokens(text: &str) -> Vec<String> {
+/// Libellé d'une option du sélecteur : l'expression, son intitulé et sa valeur d'exemple.
+pub fn reference_option_label(suggestion: &ReferenceSuggestion) -> String {
+    match &suggestion.sample {
+        Some(sample) => format!(
+            "{} — {} (ex. {sample})",
+            suggestion.reference, suggestion.label
+        ),
+        None => format!("{} — {}", suggestion.reference, suggestion.label),
+    }
+}
+
+/// Expressions d'un modèle que ni le moteur ni les suggestions disponibles ne connaissent.
+pub fn unknown_tokens(text: &str, suggestions: &[ReferenceSuggestion]) -> Vec<String> {
     template_tokens(text)
         .into_iter()
-        .filter(|expr| !is_known_expression(expr))
+        .filter(|expr| {
+            !is_known_expression(expr) && !suggestions.iter().any(|known| known.reference == *expr)
+        })
         .collect()
+}
+
+/// Sélecteur unique d'expressions `{$…}`, groupées par source ; rend l'expression choisie.
+#[component]
+pub fn TemplatePicker(
+    #[prop(into)] suggestions: Signal<Vec<ReferenceSuggestion>>,
+    on_pick: Callback<String>,
+    #[prop(optional)] disabled: bool,
+) -> impl IntoView {
+    view! {
+        <select class="form-input" disabled=disabled aria-label="Insérer une variable"
+            prop:value=""
+            on:change=move |event| {
+                let expr = event_target_value(&event);
+                if !expr.is_empty() {
+                    on_pick.run(expr);
+                }
+            }>
+            <option value="">"Insérer une variable…"</option>
+            {move || {
+                let suggestions = suggestions.get();
+                group_references(&suggestions).into_iter().map(|(source, group)| view! {
+                    <optgroup label=source.label()>
+                        {group.into_iter().map(|suggestion| view! {
+                            <option value=suggestion.reference.clone()>{reference_option_label(suggestion)}</option>
+                        }).collect_view()}
+                    </optgroup>
+                }).collect_view()
+            }}
+        </select>
+    }
 }
 
 /// Champ texte d'un bloc : saisie libre, insertion de variables et signalement des inconnues.
@@ -81,8 +123,8 @@ pub fn TemplateInput(
             Value::String(text),
         );
     };
-    let suggestions = Memo::new(move |_| editor.graph.with(variable_suggestions));
-    let unknown = move || unknown_tokens(&value());
+    let suggestions = Memo::new(move |_| editor.graph.with(flow_variable_suggestions));
+    let unknown = move || suggestions.with(|known| unknown_tokens(&value(), known));
     view! {
         <label for=input_id.clone() class="form-label">{label}</label>
         <input id=input_id class="form-input"
@@ -97,20 +139,8 @@ pub fn TemplateInput(
                 </p>
             })
         }}
-        <details>
-            <summary class="form-help">"Insérer une variable"</summary>
-            <div class="cluster">
-                {move || suggestions.get().into_iter().map(|suggestion| {
-                    let token = format!("{{${}}}", suggestion.expr);
-                    view! {
-                        <button type="button" class="btn btn-secondary btn-sm" title=suggestion.label
-                            on:click=move |_| write(format!("{}{token}", value()))>
-                            {suggestion.expr.clone()}
-                        </button>
-                    }
-                }).collect_view()}
-            </div>
-        </details>
+        <TemplatePicker suggestions=suggestions
+            on_pick=Callback::new(move |expr: String| write(append_token(&value(), &expr))) />
     }
 }
 
@@ -140,6 +170,7 @@ pub fn ScriptProtocolHelp() -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use forgearr_shared::flows::{FlowGraph, IntrinsicVariable};
     use serde_json::json;
 
     fn graph_with_set_variable(name: &str) -> Result<FlowGraph, serde_json::Error> {
@@ -152,25 +183,95 @@ mod tests {
         }))
     }
 
+    fn suggestion(
+        reference: &str,
+        source: ReferenceSource,
+        sample: Option<&str>,
+    ) -> ReferenceSuggestion {
+        ReferenceSuggestion {
+            reference: reference.into(),
+            label: "libellé".into(),
+            source,
+            sample: sample.map(str::to_owned),
+        }
+    }
+
     #[test]
     fn suggests_intrinsic_and_defined_variables() -> Result<(), serde_json::Error> {
-        let suggestions = variable_suggestions(&graph_with_set_variable("codec")?);
-        let exprs: Vec<&str> = suggestions.iter().map(|s| s.expr.as_str()).collect();
+        let suggestions = flow_variable_suggestions(&graph_with_set_variable("codec")?);
+        let exprs: Vec<&str> = suggestions.iter().map(|s| s.reference.as_str()).collect();
         assert!(exprs.contains(&"file.stem"));
+        assert!(exprs.contains(&"file.path"));
         assert!(exprs.contains(&"vars.codec"));
         assert!(!exprs.contains(&"vars.ignoré"));
         assert_eq!(exprs.len(), IntrinsicVariable::ALL.len() + 1);
-        let invalid = variable_suggestions(&graph_with_set_variable("nom invalide")?);
-        assert_eq!(invalid.len(), IntrinsicVariable::ALL.len());
         Ok(())
     }
 
     #[test]
+    fn a_picked_expression_is_appended_as_a_token() {
+        assert_eq!(append_token("", "file.path"), "{$file.path}");
+        assert_eq!(append_token("dossier/", "work.dir"), "dossier/{$work.dir}");
+    }
+
+    #[test]
     fn flags_unknown_tokens_only() {
-        assert!(unknown_tokens("{$file.stem}-{$vars.x}{$setting.url}{{$brut}").is_empty());
+        let plugin = [suggestion(
+            "mediainfo.video.codec",
+            ReferenceSource::Plugin,
+            None,
+        )];
+        assert!(
+            unknown_tokens(
+                "{$file.stem}-{$vars.x}{$setting.url}{$media.video.codec}{$nodes.a.message}{{$brut}",
+                &[]
+            )
+            .is_empty()
+        );
+        assert!(unknown_tokens("{$mediainfo.video.codec}", &plugin).is_empty());
         assert_eq!(
-            unknown_tokens("{$fichier.nom}"),
+            unknown_tokens("{$fichier.nom}", &plugin),
             vec!["fichier.nom".to_owned()]
+        );
+    }
+
+    #[test]
+    fn references_are_grouped_by_source_in_display_order_without_empty_groups() {
+        let all = [
+            suggestion("mediainfo.video.codec", ReferenceSource::Plugin, None),
+            suggestion("file.path", ReferenceSource::Flow, None),
+            suggestion("nodes.a.message", ReferenceSource::Node, None),
+            suggestion("vars.x", ReferenceSource::Variables, None),
+            suggestion("work.dir", ReferenceSource::Flow, None),
+        ];
+        let groups = group_references(&all);
+        let sources: Vec<ReferenceSource> = groups.iter().map(|(source, _)| *source).collect();
+        assert_eq!(
+            sources,
+            [
+                ReferenceSource::Variables,
+                ReferenceSource::Flow,
+                ReferenceSource::Node,
+                ReferenceSource::Plugin
+            ]
+        );
+        assert_eq!(groups.get(1).map(|(_, group)| group.len()), Some(2));
+        assert!(group_references(&[]).is_empty());
+    }
+
+    #[test]
+    fn option_labels_show_the_sample_when_known() {
+        assert_eq!(
+            reference_option_label(&suggestion(
+                "media.video.codec",
+                ReferenceSource::MediaInfo,
+                Some("hevc")
+            )),
+            "media.video.codec — libellé (ex. hevc)"
+        );
+        assert_eq!(
+            reference_option_label(&suggestion("nodes.a.message", ReferenceSource::Node, None)),
+            "nodes.a.message — libellé"
         );
     }
 }

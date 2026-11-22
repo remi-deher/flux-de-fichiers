@@ -98,6 +98,12 @@ pub async fn save_flow(
     }
     super::flow_links::ensure_valid_links(&s.pool, &id, &payload.definition).await?;
     let mut payload = payload;
+    // L'ancienne syntaxe `{{…}}` est réécrite en `{$…}` à l'enregistrement (ADR 0026).
+    if let Some(upgraded) =
+        forgearr_shared::flows::legacy_references::upgrade_legacy_definition(&payload.definition)
+    {
+        payload.definition = upgraded;
+    }
     if crate::flows::has_flow_secrets(&payload.definition) {
         let existing = repository::get_flow(&s.pool, &id)
             .await
@@ -315,7 +321,11 @@ pub async fn restore_version(
         name: frozen.name,
         description: frozen.description,
         file_mask: frozen.file_mask,
-        definition: frozen.definition,
+        // La version figée reste intacte ; la nouvelle version courante passe au format `{$…}`.
+        definition: forgearr_shared::flows::legacy_references::upgrade_legacy_definition(
+            &frozen.definition,
+        )
+        .unwrap_or(frozen.definition),
         is_default: frozen.is_default,
     };
     let mut restored = repository::save_flow(&s.pool, &id, &req).await?;

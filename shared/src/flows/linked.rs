@@ -150,6 +150,11 @@ impl FlowGraph {
     }
 }
 
+/// Identifiant du nœud de journal qui résume l'exécution du flux d'échec. Réservé : aucun bloc
+/// d'un flux ne peut le porter, car la migration 0048 s'en sert pour savoir si le flux d'échec a
+/// déjà tourné.
+pub const FAILURE_FLOW_STEP_NODE: &str = "failure-flow";
+
 /// Refus d'un enchaînement de sous-flux.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LinkError {
@@ -161,6 +166,8 @@ pub enum LinkError {
     Missing(String),
     /// Bloc « Aller au sous-flux » sans flux désigné.
     MissingTarget(String),
+    /// Bloc dont l'identifiant est réservé au journal (`FAILURE_FLOW_STEP_NODE`).
+    ReservedNodeId(String),
 }
 
 impl fmt::Display for LinkError {
@@ -174,6 +181,12 @@ impl fmt::Display for LinkError {
             ),
             Self::Missing(id) => write!(f, "sous-flux introuvable : {id}"),
             Self::MissingTarget(node) => write!(f, "le bloc {node} n'indique aucun sous-flux"),
+            Self::ReservedNodeId(node) => {
+                write!(
+                    f,
+                    "l'identifiant de bloc {node} est réservé au journal des tâches"
+                )
+            }
         }
     }
 }
@@ -187,6 +200,13 @@ pub fn check_sub_flow_links(
     root: &FlowGraph,
     load: &dyn Fn(&str) -> Option<FlowGraph>,
 ) -> Result<(), LinkError> {
+    if let Some(node) = root
+        .nodes
+        .iter()
+        .find(|node| node.id == FAILURE_FLOW_STEP_NODE)
+    {
+        return Err(LinkError::ReservedNodeId(node.id.clone()));
+    }
     if let Some(node) = root.sub_flow_nodes_without_target().first() {
         return Err(LinkError::MissingTarget((*node).to_owned()));
     }
@@ -363,5 +383,22 @@ mod tests {
         assert!(find_linked(&linked, LinkedFlowRole::SubFlow, "flow.a").is_some());
         assert!(find_linked(&linked, LinkedFlowRole::Failure, "flow.a").is_none());
         assert!(first_linked(&linked, LinkedFlowRole::Failure).is_none());
+    }
+
+    #[test]
+    fn a_node_cannot_use_the_reserved_failure_flow_identifier() {
+        let reserved = graph(
+            json!({"nodes": [{"id": FAILURE_FLOW_STEP_NODE, "type": "essentiel.condition", "name": "c"}]}),
+        );
+        assert_eq!(
+            check_sub_flow_links("racine", &reserved, &|_| None),
+            Err(LinkError::ReservedNodeId(FAILURE_FLOW_STEP_NODE.to_owned()))
+        );
+    }
+
+    #[test]
+    fn migration_0048_matches_the_reserved_identifier() {
+        let migration = include_str!("../../../migrations/0048_job_failure_flow_state.sql");
+        assert!(migration.contains(&format!("s.node_id = '{FAILURE_FLOW_STEP_NODE}'")));
     }
 }

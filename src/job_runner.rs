@@ -354,8 +354,8 @@ async fn run_failure_flow(
     failure_flow_steps(first_index, failure_flow, outcome)
 }
 
-/// Nœud du journal qui résume l'exécution du flux d'échec.
-pub const FAILURE_FLOW_STEP_NODE: &str = "failure-flow";
+/// Nœud du journal qui résume l'exécution du flux d'échec (identifiant réservé, voir `shared`).
+pub use forgearr_shared::flows::FAILURE_FLOW_STEP_NODE;
 
 /// Étape de synthèse du flux d'échec, au rang `step_index`.
 pub fn failure_flow_summary_step(

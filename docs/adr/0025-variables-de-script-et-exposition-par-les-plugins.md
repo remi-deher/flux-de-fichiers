@@ -24,22 +24,22 @@ réimplémenter ce travail.
 2. **Contrat `stdin` inchangé.** Le script lit les valeurs dans `config`. Aucune substitution dans
    le code du script, aucune évaluation shell : un aperçu « résolu » montre le JSON `config`
    que le script recevra, jamais une réécriture du code.
-3. **Références dynamiques.** Une valeur peut contenir `{{référence}}`, résolue côté central ou
-   worker avant d'écrire `config` : `workingFile`, `sourceFile`, `workDir`, `mediaInfo.…`,
-   `nodes.<id>.message|nextPort|workingFile` et les variables exposées par les plugins. Une
-   valeur qui est entièrement une référence garde son type JSON ; insérée dans un texte, elle
-   devient une chaîne. Une référence inconnue est refusée à l'enregistrement du flux ; sans valeur
-   à l'exécution, l'étape échoue avec un message clair, sauf si la variable a une valeur par défaut.
+3. **Références dynamiques.** *Remplacé par l'[ADR 0026 §4 « Modèle unique »](0026-variables-flux-d-echec-et-sous-flux.md#4-modèle-unique-exprdéfaut).*
+   La syntaxe `{{référence}}` d'origine n'est plus un dialecte : les mêmes données s'écrivent
+   `{$file.path}`, `{$source.path}`, `{$work.dir}`, `{$media.…}`, `{$nodes.<id>.message|nextPort|file}`
+   et `{$espace.nom}` pour les variables exposées. Les définitions stockées en `{{…}}` restent
+   exécutables (conversion à la lecture) et sont réécrites à l'enregistrement.
 4. **Exposition par les plugins.** Le contrat de l'opération d'un plugin déclare `exposes`
    (et non son manifeste : les workers ne reçoivent que les opérations, dans le claim, et jamais le
-   catalogue). `exposes` porte un `namespace` (`[a-z][a-z0-9_]*`, jamais `nodes`), une
+   catalogue). `exposes` porte un `namespace` (`[a-z][a-z0-9_]*`, jamais un espace réservé du moteur : `nodes`, `media`, `vars`, les espaces des
+   variables intrinsèques et ceux des blocs HTTP), une
    `contractVersion` (`MAJEUR.MINEUR.CORRECTIF`) et des variables typées (jamais de secret) : un nom
    relatif (`video.codec`) et la requête de sa valeur dans `mediaInfo` après l'opération du plugin,
    jamais du code arbitraire. La requête est celle des conditions du flux : clés pointées, `[n]`,
    `[*]` et `[clé=valeur]` (`mediainfo.media.track[@type=Video].Format`) ; la première valeur non
    nulle est retenue, et un chemin pointé à indices (`a.0.b`) reste lu. Un sélecteur est préférable à
    un indice : l'ordre des pistes d'un fichier varie. La référence complète est `namespace.nom`
-   (`{{mediainfo.video.codec}}`) ; le préfixe est imposé par construction, un plugin ne peut exposer
+   (`{$mediainfo.video.codec}`) ; le préfixe est imposé par construction, un plugin ne peut exposer
    que dans son espace de noms. Un nom ne peut pas être à la fois une valeur et un groupe
    (`video` et `video.codec`). Un renommage, un retrait ou un changement de type impose une montée
    de version majeure. Une variable n'a de valeur que si le plugin fournisseur l'a produite en amont
@@ -83,11 +83,11 @@ réimplémenter ce travail.
 ## Conséquences
 
 - Phase B (`src/flows/variables.rs`) : avant chaque script, les valeurs par défaut du schéma comblent
-  les clés absentes du nœud, les références `{{…}}` sont résolues, puis chaque valeur est contrôlée
+  les clés absentes du nœud, les modèles `{$…}` sont rendus (une seule passe, ADR 0026 §4), puis chaque valeur est contrôlée
   et convertie selon son type (nombre, booléen, choix, bornes, `required`). Seules les clés
   déclarées sont traitées : le code en ligne et les autres clés du nœud ne sont jamais modifiés.
-  Un `{{…}}` dont le contenu n'est pas un chemin valide reste littéral. Une référence sans valeur
-  retombe sur le défaut de la variable, sinon l'étape échoue en nommant la variable.
+  Une expression connue sans valeur ni `|défaut` retombe sur le défaut de la variable, sinon
+  l'étape échoue en nommant la variable (ADR 0026 §4).
 - Les sorties des nœuds (`nodes.<id>.…`) viennent des étapes exécutées avant le nœud courant. Après
   un relais de tâche (ADR 0018), elles sont transmises au worker repreneur (voir « Sorties de nœuds
   et relais » plus bas).
@@ -110,7 +110,7 @@ réimplémenter ce travail.
   toute l'opération (revalidation du central) ; un catalogue ne doit donc les utiliser qu'une fois les
   installations à jour.
 - Fiche d'un plugin : `GET /api/v1/plugins/{id}` renvoie `exposures` (espace de noms, version du contrat,
-  variables et chemin lu), affichées dans l'onglet Informations avec la référence `{{espace.nom}}` ;
+  variables et chemin lu), affichées dans l'onglet Informations avec l'expression `{$espace.nom}` ;
   `GET /api/v1/plugins/exposed-variables` liste toutes les expositions du catalogue. Chacune porte `active`
   et `conflictsWith` : à espace de noms égal, la première (par identifiant d'opération) est lue par le
   moteur, les autres sont signalées comme contestées.
@@ -137,7 +137,7 @@ réimplémenter ce travail.
   registre : il suit l'emplacement (`secrets`, `custom_headers`), jamais le schéma du script ; les noms
   `secrets` et `custom_headers` sont donc réservés et refusés pour une variable. Les flux existants
   n'ont aucun `secrets` : rien à migrer.
-- Résolution d'un secret : valeur littérale, jamais de référence `{{…}}` ni de valeur par défaut ; le
+- Résolution d'un secret : valeur littérale, jamais de modèle `{$…}` (ni d'ancienne référence `{{…}}`) ni de valeur par défaut ; le
   moteur la place sous le nom de la variable dans `config` (la clé `secrets` n'est pas transmise au
   script) et refuse un secret encore chiffré. Une variable `required` sans secret échoue l'étape. Le
   script reçoit le secret en clair dans `config` (contrat inchangé) mais le moteur retire sa valeur
@@ -149,11 +149,11 @@ réimplémenter ce travail.
   nœud exécuté, 2000 caractères de message au plus, 256 Kio au total sinon 400) est stocké avec le
   relais (`job_relays.node_outputs_json`, migration 0042) et renvoyé dans le claim du repreneur
   (`resumedOutputs`) ; le moteur les restaure avant de reprendre au nœud désigné. Le fichier de travail d'un
-  nœud antérieur appartient au worker émetteur : `nodes.<id>.workingFile` n'a plus de valeur après un relais
+  nœud antérieur appartient au worker émetteur : `nodes.<id>.file` (anciennement `workingFile`) n'a plus de valeur après un relais
   (la référence échoue avec son message habituel, sauf défaut de la variable). La reprise sans artefact
   (la tâche repart de la source) ne restaure rien, comme elle ne reprend pas le nœud.
-- Identifiants de nœud avec des points : `{{nodes.<id>.<champ>}}` lit le champ (`message`, `nextPort`,
-  `workingFile`) au dernier segment ; tout ce qui précède est l'identifiant (`nodes.encodage.v2.message`).
+- Identifiants de nœud avec des points : `{$nodes.<id>.<champ>}` lit le champ (`message`, `nextPort`,
+  `file`) au dernier segment ; tout ce qui précède est l'identifiant (`nodes.encodage.v2.message`).
   Un identifiant qui contient d'autres caractères que lettres, chiffres, `.`, `_` et `-` ne peut pas être référencé.
 - Échantillon de métadonnées : à la fin d'un job, le worker (local ou distant, `StepsReport.mediaInfo`)
   rapporte les métadonnées finales du fichier ; le central garde les dernières de chaque flux

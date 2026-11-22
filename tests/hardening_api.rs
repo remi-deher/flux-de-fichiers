@@ -1523,6 +1523,7 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
         lease_epoch: claim.lease_epoch,
         telemetry: None,
     };
+    let held = lease.clone();
     let broker = h.publication.clone();
     let waiting = tokio::spawn(async move {
         broker
@@ -1544,6 +1545,28 @@ async fn source_publication_routes_require_the_holder_and_active_lease() -> anyh
     assert_eq!(tasks[0]["request_id"], request_id.to_string());
     let authorize =
         format!("/api/v1/worker/source-publications/{request_id}/authorize?worker_id={holder}");
+    // Sans intention inscrite au journal, aucun accord (ADR 0027).
+    assert_eq!(
+        json_call(&h.app, "GET", &authorize, Some(common::WORKER_KEY), None)
+            .await?
+            .0,
+        StatusCode::CONFLICT
+    );
+    let output = repository::PublishedOutput {
+        name: "",
+        sha256: &"bb".repeat(32),
+        bytes: 6,
+        warning: false,
+    };
+    repository::begin_pulled_publication(
+        &h.pool,
+        job.id,
+        &held,
+        output,
+        "mkv",
+        LibraryOutputPolicy::ReplaceWithBackup,
+    )
+    .await?;
     assert_eq!(
         json_call(&h.app, "GET", &authorize, Some(common::WORKER_KEY), None)
             .await?

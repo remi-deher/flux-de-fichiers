@@ -56,8 +56,8 @@ use tower_http::{
 /// Flux des tâches seules, conservé pour les clients existants.
 const JOB_EVENTS_PATH: &str = "/api/v1/jobs/events";
 const OUTBOUND_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
-/// Délai accordé aux requêtes en cours à l'arrêt du serveur TLS avant de les couper.
-const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(15);
+/// Délai accordé aux requêtes en cours à l'arrêt avant de les couper, sous les 10 s laissées par Docker.
+const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 pub struct AppState {
@@ -1112,28 +1112,24 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     ));
     let app = router(state);
     tracing::info!(%addr, "central started");
-    if let Some((cert, key)) = tls {
+    let handle = axum_server::Handle::new();
+    let shutdown = handle.clone();
+    let signal = tokio::spawn(async move {
+        shutdown_signal().await;
+        shutdown.graceful_shutdown(Some(SHUTDOWN_GRACE_PERIOD));
+    });
+    let service = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
+    let served = if let Some((cert, key)) = tls {
         let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key).await?;
-        let handle = axum_server::Handle::new();
-        let shutdown = handle.clone();
-        let signal = tokio::spawn(async move {
-            shutdown_signal().await;
-            shutdown.graceful_shutdown(Some(SHUTDOWN_GRACE_PERIOD));
-        });
-        let result = axum_server::bind_rustls(addr, tls)
+        axum_server::bind_rustls(addr, tls)
             .handle(handle)
-            .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
-            .await;
-        signal.abort();
-        result?;
+            .serve(service)
+            .await
     } else {
-        axum::serve(
-            tokio::net::TcpListener::bind(addr).await?,
-            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-        )
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
-    }
+        axum_server::bind(addr).handle(handle).serve(service).await
+    };
+    signal.abort();
+    served?;
     plugin_sync.abort();
     lib_scans.abort();
     ai_diagnosis.abort();

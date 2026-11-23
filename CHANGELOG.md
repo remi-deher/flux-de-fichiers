@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.83.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.82.2...v0.83.0) (2026-11-23)
+
+
+### Features
+
+* **store:** store, éléments installés et dépôts (ADR 0029) ([ad5f621](https://github.com/remi-deher/flux-de-fichiers/commit/ad5f6216275b0b6aef526cb5accec786b620203e))
+
+
+### Bug Fixes
+
+* **flows,transfert:** fiabilise le moteur, les scripts et la voie directe ([3f903a4](https://github.com/remi-deher/flux-de-fichiers/commit/3f903a4d6ba45f0daaebbcbc5c5edf95b11bae7e))
+* **store:** corrections de la CI du socle ([4ea64d2](https://github.com/remi-deher/flux-de-fichiers/commit/4ea64d2afc748d1a05122f011d2f22e5d3a394d8))
+* **tests:** alias CoreRun sur une ligne, comme l'exige rustfmt ([f06c4b1](https://github.com/remi-deher/flux-de-fichiers/commit/f06c4b1009abaf255ca6ddb0e37e82fb807d8366))
+* **tests:** formatage et clippy des tests ajoutés ([172f2e7](https://github.com/remi-deher/flux-de-fichiers/commit/172f2e7fbd9cd85cbe2dad143da5688c68a64786))
+
 ## [0.82.2](https://github.com/remi-deher/flux-de-fichiers/compare/v0.82.1...v0.82.2) (2026-11-22)
 
 

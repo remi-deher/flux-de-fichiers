@@ -1396,22 +1396,25 @@ async fn node_outputs_survive_a_relay_so_the_taker_still_reads_earlier_nodes()
     Ok(())
 }
 
-/// Exécute `definition` avec les seuls blocs d'entrée et de sortie ; renvoie le message d'erreur.
-async fn run_core_graph(
-    definition: serde_json::Value,
-) -> Result<Vec<crate::domain::JobStepEntry>, (String, Vec<crate::domain::JobStepEntry>)> {
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+/// Résultat d'un flux exécuté avec les seuls blocs de base : les étapes, ou le message d'échec et
+/// les étapes exécutées avant lui.
+type CoreRun =
+    Result<Vec<crate::domain::JobStepEntry>, (String, Vec<crate::domain::JobStepEntry>)>;
+
+/// Exécute `definition` avec les seuls blocs d'entrée et de sortie.
+async fn run_core_graph(definition: serde_json::Value) -> anyhow::Result<CoreRun> {
+    let dir = tempfile::tempdir()?;
     let cache = ToolCacheManager::new(dir.path().join("cache"));
-    install_fake_probe(&cache).expect("sonde factice");
+    install_fake_probe(&cache)?;
     let mut reg = OperationRegistry::new();
-    register_core_and_probe(&mut reg).expect("contrats de base");
+    register_core_and_probe(&mut reg).map_err(|error| anyhow::anyhow!("{error}"))?;
     let source = dir.path().join("in.mkv");
-    std::fs::write(&source, "raw").expect("source");
+    std::fs::write(&source, "raw")?;
     let work = dir.path().join("work");
-    std::fs::create_dir(&work).expect("dossier de travail");
+    std::fs::create_dir(&work)?;
     let http = reqwest::Client::new();
     let (progress, _) = recording_progress();
-    FlowEngine {
+    let run = FlowEngine {
         registry: &reg,
         cache_mgr: &cache,
         http_client: &http,
@@ -1427,27 +1430,37 @@ async fn run_core_graph(
         resumed_outputs: &HashMap::new(),
         action_gate: None,
     }
-    .execute_flow(Uuid::new_v4(), &flow_record(definition), &source, &work, progress)
-    .await
-    .map(|outcome| outcome.steps)
-    .map_err(|error| (error.message, error.steps))
+    .execute_flow(
+        Uuid::new_v4(),
+        &flow_record(definition),
+        &source,
+        &work,
+        progress,
+    )
+    .await;
+    Ok(run
+        .map(|outcome| outcome.steps)
+        .map_err(|error| (error.message, error.steps)))
 }
 
 #[tokio::test]
-async fn a_connection_to_a_missing_node_fails_instead_of_ending_the_flow() {
-    let result = run_core_graph(json!({
+async fn a_connection_to_a_missing_node_fails_instead_of_ending_the_flow() -> anyhow::Result<()> {
+    let run = run_core_graph(json!({
         "nodes": [{"id": "n1", "type": "file-input", "name": "in"}],
         "connections": [{"from": "n1", "to": "fantome"}]
     }))
-    .await;
-    let (message, steps) = result.expect_err("un nœud cible absent est une erreur");
+    .await?;
+    let Err((message, steps)) = run else {
+        anyhow::bail!("un nœud cible absent est une erreur");
+    };
     assert!(message.contains("fantome"), "{message}");
     assert_eq!(steps.len(), 1);
+    Ok(())
 }
 
 #[tokio::test]
-async fn a_looping_flow_fails_when_the_step_budget_runs_out() {
-    let result = run_core_graph(json!({
+async fn a_looping_flow_fails_when_the_step_budget_runs_out() -> anyhow::Result<()> {
+    let run = run_core_graph(json!({
         "nodes": [
             {"id": "n0", "type": "file-input", "name": "in"},
             {"id": "n1", "type": "file-input", "name": "a"},
@@ -1459,22 +1472,28 @@ async fn a_looping_flow_fails_when_the_step_budget_runs_out() {
             {"from": "n2", "to": "n1"}
         ]
     }))
-    .await;
-    let (message, steps) = result.expect_err("une boucle épuise le budget d'étapes");
+    .await?;
+    let Err((message, steps)) = run else {
+        anyhow::bail!("une boucle épuise le budget d'étapes");
+    };
     assert!(message.contains(&MAX_FLOW_STEPS.to_string()), "{message}");
     assert_eq!(steps.len(), MAX_FLOW_STEPS);
+    Ok(())
 }
 
 #[tokio::test]
-async fn a_flow_reaching_its_terminal_node_still_succeeds() {
-    let steps = run_core_graph(json!({
+async fn a_flow_reaching_its_terminal_node_still_succeeds() -> anyhow::Result<()> {
+    let run = run_core_graph(json!({
         "nodes": [
             {"id": "n1", "type": "file-input", "name": "in"},
             {"id": "n2", "type": "file-output", "name": "out"}
         ],
         "connections": [{"from": "n1", "to": "n2"}]
     }))
-    .await
-    .expect("flux complet");
+    .await?;
+    let Ok(steps) = run else {
+        anyhow::bail!("un flux complet réussit");
+    };
     assert_eq!(steps.len(), 2);
+    Ok(())
 }

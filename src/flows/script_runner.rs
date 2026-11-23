@@ -615,9 +615,7 @@ mod tests {
     }
 
     /// Lance `code` (sh) avec un délai de 10 s, sans configuration ni variables.
-    async fn run_sh(
-        code: &str,
-    ) -> anyhow::Result<Result<ScriptStepOutcome, ScriptStepError>> {
+    async fn run_sh(code: &str) -> anyhow::Result<Result<ScriptStepOutcome, ScriptStepError>> {
         let dir = tempfile::tempdir()?;
         let cache = ToolCacheManager::new(dir.path().join("cache"));
         let source = dir.path().join("input.mkv");
@@ -664,7 +662,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_background_child_holding_the_pipes_does_not_delay_the_result() -> anyhow::Result<()> {
+    async fn a_background_child_holding_the_pipes_does_not_delay_the_result() -> anyhow::Result<()>
+    {
         // Le descendant garde stdout et stderr ouverts bien après la fin du script.
         const BACKGROUND_SECONDS: u64 = 6;
         const LIMIT: Duration = Duration::from_secs(5);

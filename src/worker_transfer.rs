@@ -438,7 +438,9 @@ where
             Ok(Some(fresh)) => fresh,
             Ok(None) => return Err(error),
             Err(failure) => {
-                return Err(failure.context("lecture directe interrompue, billet frais indisponible"));
+                return Err(
+                    failure.context("lecture directe interrompue, billet frais indisponible")
+                );
             }
         };
     }
@@ -581,7 +583,9 @@ mod tests {
         let busy = transfer_router(state.clone()).oneshot(busy).await?;
         assert_eq!(busy.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(
-            busy.headers().get(header::RETRY_AFTER).and_then(|v| v.to_str().ok()),
+            busy.headers()
+                .get(header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok()),
             Some(BUSY_RETRY_AFTER_SECONDS)
         );
         responses.pop();
@@ -865,7 +869,7 @@ mod tests {
             url: "http://127.0.0.1:1".into(),
             token: "peu-importe".into(),
         };
-        let error = download_direct_resuming(
+        let outcome = download_direct_resuming(
             &direct_client()?,
             dead,
             &dest,
@@ -874,11 +878,18 @@ mod tests {
             10,
             || async { Err::<Option<SourceTicket>, _>(anyhow::anyhow!("central injoignable")) },
         )
-        .await
-        .expect_err("sans billet frais la reprise échoue");
-        assert!(error.to_string().contains("billet frais indisponible"), "{error}");
+        .await;
+        let Err(error) = outcome else {
+            anyhow::bail!("sans billet frais la reprise échoue");
+        };
         assert!(
-            error.chain().any(|cause| cause.to_string() == "central injoignable"),
+            error.to_string().contains("billet frais indisponible"),
+            "{error}"
+        );
+        assert!(
+            error
+                .chain()
+                .any(|cause| cause.to_string() == "central injoignable"),
             "la cause du central reste dans la chaîne"
         );
         Ok(())
@@ -886,12 +897,9 @@ mod tests {
 
     #[test]
     fn integrity_errors_are_recognised_by_type_even_with_context() {
-        use anyhow::Context;
         let bare = anyhow::Error::new(SourceIntegrityError);
         assert!(is_source_integrity(&bare));
-        let wrapped = Err::<(), _>(SourceIntegrityError)
-            .context("lecture de la source")
-            .expect_err("erreur enveloppée");
+        let wrapped = anyhow::Error::new(SourceIntegrityError).context("lecture de la source");
         assert!(is_source_integrity(&wrapped));
         assert!(!is_source_integrity(&anyhow::anyhow!(SOURCE_INTEGRITY)));
         assert!(!is_source_integrity(&anyhow::anyhow!("délai dépassé")));

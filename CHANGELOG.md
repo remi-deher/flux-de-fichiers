@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.84.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.83.0...v0.84.0) (2026-11-23)
+
+
+### Features
+
+* **librairies:** éditeur de script en pleine page (ADR 0030, lot 1) ([fea541a](https://github.com/remi-deher/flux-de-fichiers/commit/fea541a6e9d39ab24bdb80935acc407717fe7358))
+* **librairies:** éditeur de script en pleine page (ADR 0030, lot 1) ([a838332](https://github.com/remi-deher/flux-de-fichiers/commit/a838332515e1b1a5e49198ba0c14332dca566daf))
+
+
+### Bug Fixes
+
+* **librairies:** import de parse_tags et mise en forme de l'éditeur de script ([cc77030](https://github.com/remi-deher/flux-de-fichiers/commit/cc7703078296d63320472b584aa0c589ec31f9b1))
+* **theme:** point de rupture déclaré pour l'éditeur de script ([a046c85](https://github.com/remi-deher/flux-de-fichiers/commit/a046c855a771970aad7b6cb69aea7f187e808cad))
+
 ## [0.83.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.82.2...v0.83.0) (2026-11-23)
 
 

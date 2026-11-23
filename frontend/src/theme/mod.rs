@@ -268,6 +268,7 @@ mod tests {
             ("COMPONENTS_CSS", COMPONENTS_CSS),
             ("PLUGINS_CSS", PLUGINS_CSS),
             ("FLOWS_CSS", FLOWS_CSS),
+            ("SCRIPTS_CSS", SCRIPTS_CSS),
             ("GRAPH_CSS", GRAPH_CSS),
             ("WIDGETS_CSS", WIDGETS_CSS),
             ("AUTH_CSS", AUTH_CSS),

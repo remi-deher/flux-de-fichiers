@@ -63,7 +63,7 @@ pub const SCRIPTS_CSS: &str = r#"
   display: none;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .script-workbench__body {
     grid-template-columns: 1fr;
     grid-auto-rows: minmax(0, auto);

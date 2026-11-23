@@ -1398,8 +1398,7 @@ async fn node_outputs_survive_a_relay_so_the_taker_still_reads_earlier_nodes()
 
 /// Résultat d'un flux exécuté avec les seuls blocs de base : les étapes, ou le message d'échec et
 /// les étapes exécutées avant lui.
-type CoreRun =
-    Result<Vec<crate::domain::JobStepEntry>, (String, Vec<crate::domain::JobStepEntry>)>;
+type CoreRun = Result<Vec<crate::domain::JobStepEntry>, (String, Vec<crate::domain::JobStepEntry>)>;
 
 /// Exécute `definition` avec les seuls blocs d'entrée et de sortie.
 async fn run_core_graph(definition: serde_json::Value) -> anyhow::Result<CoreRun> {

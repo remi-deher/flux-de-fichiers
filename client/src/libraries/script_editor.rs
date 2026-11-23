@@ -70,7 +70,11 @@ pub fn ScriptEditor(me: Me, script_id: Option<String>) -> impl IntoView {
                 return;
             }
             if let Some(Ok(data)) = snapshot.get() {
-                match data.scripts.iter().find(|s| Some(&s.id) == script_id.as_ref()) {
+                match data
+                    .scripts
+                    .iter()
+                    .find(|s| Some(&s.id) == script_id.as_ref())
+                {
                     Some(script) => draft.set(Some(ScriptDraft::from_summary(script))),
                     None => missing.set(true),
                 }

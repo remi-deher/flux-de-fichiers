@@ -31,7 +31,9 @@ fn Screen(me: Me) -> impl IntoView {
                 view! { <flows::FlowEditor me=me flow_id=Some(id) /> }.into_any()
             }
             Route::Libraries => view! { <libraries::LibrariesPage me=me /> }.into_any(),
-            Route::NewScript => view! { <libraries::ScriptEditor me=me script_id=None /> }.into_any(),
+            Route::NewScript => {
+                view! { <libraries::ScriptEditor me=me script_id=None /> }.into_any()
+            }
             Route::ScriptEditor(id) => {
                 view! { <libraries::ScriptEditor me=me script_id=Some(id) /> }.into_any()
             }

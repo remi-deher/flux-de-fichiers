@@ -1,6 +1,6 @@
 //! Cartes et tiroir d'édition / inspection des modèles de blocs réutilisables.
 
-use super::scripts::parse_tags;
+use super::script_draft::parse_tags;
 use super::{LOCAL_BLOCK_TEMPLATES_PATH, LOCAL_TOPICS, LocalDeleteButton};
 use crate::api;
 use crate::live::use_live;

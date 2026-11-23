@@ -6,7 +6,9 @@ use crate::live::Loaded;
 use crate::route::{Route, use_router};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
-use crate::ui::{EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone};
+use crate::ui::{
+    EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
+};
 use forgearr_shared::local::{LocalLibrarySnapshot, LocalScriptSummary};
 use leptos::prelude::*;
 

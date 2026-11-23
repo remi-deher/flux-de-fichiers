@@ -13,7 +13,7 @@ use crate::{
         ABANDONED_WORK_TIMEOUT, HEARTBEAT_INTERVAL, IDLE_POLL_INTERVAL, SHUTDOWN_TIMEOUT,
         SHUTDOWN_WORK_TIMEOUT, SOFTWARE_PROBE_REFRESH,
     },
-    worker_transfer::{SOURCE_INTEGRITY, TransferState},
+    worker_transfer::{SourceIntegrityError, TransferState, is_source_integrity},
 };
 use forgearr_shared::jobs::LeaseProtocol;
 use forgearr_shared::transfer::{
@@ -290,7 +290,15 @@ async fn apply_pulled_result(state: &AppState, task: &SourcePublicationTask) -> 
             },
         )
         .await
-        .map_err(|_| AppError::Invalid)?;
+        .map_err(|error| {
+            // Une altération se distingue d'une panne de transfert ; l'erreur brute n'est pas
+            // journalisée, ses URL peuvent porter un billet.
+            if is_source_integrity(&error) {
+                AppError::Invalid
+            } else {
+                AppError::ResultUndeliverable
+            }
+        })?;
         if task.policy == LibraryOutputPolicy::OutputDir {
             return install_in_output_dir(state, task, &access, &file).await;
         }
@@ -457,7 +465,7 @@ fn failure_code(error: &anyhow::Error) -> JobErrorCode {
     );
     if source_changed {
         JobErrorCode::SourceChanged
-    } else if error.to_string().contains(SOURCE_INTEGRITY) {
+    } else if is_source_integrity(error) {
         JobErrorCode::SourceIntegrity
     } else {
         JobErrorCode::TransferFailed
@@ -511,7 +519,13 @@ async fn process(
     let source = match central {
         Ok(Some(path)) => Some(path),
         Ok(None) if claim.source_ticket.is_some() => None,
-        _ => anyhow::bail!(SOURCE_INTEGRITY),
+        // Aucun billet : une panne de lecture du billet n'est pas une source altérée.
+        Ok(None) => {
+            let unreachable =
+                JobRunError::simple(JobErrorCode::TransferFailed, "source_unreachable");
+            return Err(unreachable.into());
+        }
+        Err(_) => anyhow::bail!(SourceIntegrityError),
     };
     let source_snapshot = work_dir.join(forgearr_shared::jobs::source_working_filename(
         &claim.source_name,
@@ -546,7 +560,7 @@ async fn process(
             )
             .await?;
         }
-        (None, None) => anyhow::bail!(SOURCE_INTEGRITY),
+        (None, None) => anyhow::bail!(SourceIntegrityError),
     }
 
     let working_snapshot = if let Some(handoff) = &claim.handoff_input {
@@ -729,14 +743,14 @@ pub(crate) async fn copy_verified_source(
         &mut snapshot_file,
     )
     .await?;
-    anyhow::ensure!(copied <= max_bytes, "source_integrity");
+    anyhow::ensure!(copied <= max_bytes, SourceIntegrityError);
     snapshot_file.flush().await?;
     snapshot_file.sync_all().await?;
     drop(snapshot_file);
     let (actual_hash, actual_bytes) = storage::fingerprint(snapshot, max_bytes).await?;
     anyhow::ensure!(
         actual_hash == expected_hash && actual_bytes as i64 == expected_bytes,
-        "source_integrity"
+        SourceIntegrityError
     );
     Ok(())
 }
@@ -779,8 +793,12 @@ mod tests {
             code(AppError::SourceChanged.into()),
             JobErrorCode::SourceChanged
         );
-        let altered = anyhow::anyhow!(SOURCE_INTEGRITY);
-        assert_eq!(code(altered), JobErrorCode::SourceIntegrity);
+        assert_eq!(
+            code(anyhow::Error::new(SourceIntegrityError)),
+            JobErrorCode::SourceIntegrity
+        );
+        let wrapped = anyhow::Error::new(SourceIntegrityError).context("copie de la source");
+        assert_eq!(code(wrapped), JobErrorCode::SourceIntegrity);
         assert_eq!(
             code(AppError::Internal.into()),
             JobErrorCode::TransferFailed

@@ -395,6 +395,9 @@ impl<'a> FlowEngine<'a> {
             .collect();
         let mut remaining_steps = MAX_FLOW_STEPS;
         let mut step_index: i32 = 0;
+        // Vrai seulement quand le flux atteint sa fin (terminal, relais ou absence de sortie) : une
+        // boucle qui épuise le budget ou un nœud introuvable ne sont pas une réussite.
+        let mut reached_end = false;
 
         while remaining_steps > 0 {
             remaining_steps -= 1;
@@ -404,7 +407,11 @@ impl<'a> FlowEngine<'a> {
                 .find(|candidate| candidate.id == current_node_id)
                 .cloned()
             else {
-                break;
+                return Err(FlowExecutionError {
+                    code: forgearr_shared::jobs::JobErrorCode::OperationFailed,
+                    message: format!("nœud introuvable dans le flux : {current_node_id}"),
+                    steps,
+                });
             };
             step_index += 1;
 
@@ -928,9 +935,20 @@ impl<'a> FlowEngine<'a> {
                     node_id = %current_node_id,
                     "terminal node or no outgoing connection, pipeline ending"
                 );
+                reached_end = true;
                 break;
             };
             current_node_id = next;
+        }
+
+        if !reached_end {
+            return Err(FlowExecutionError {
+                code: forgearr_shared::jobs::JobErrorCode::OperationFailed,
+                message: format!(
+                    "le flux dépasse {MAX_FLOW_STEPS} étapes : boucle probable, exécution arrêtée"
+                ),
+                steps,
+            });
         }
 
         if let Some(request) = relay.as_mut() {

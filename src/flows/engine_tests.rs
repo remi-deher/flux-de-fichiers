@@ -1395,3 +1395,86 @@ async fn node_outputs_survive_a_relay_so_the_taker_still_reads_earlier_nodes()
     assert_eq!(payload["config"]["precedent"], json!("marqué"));
     Ok(())
 }
+
+/// Exécute `definition` avec les seuls blocs d'entrée et de sortie ; renvoie le message d'erreur.
+async fn run_core_graph(
+    definition: serde_json::Value,
+) -> Result<Vec<crate::domain::JobStepEntry>, (String, Vec<crate::domain::JobStepEntry>)> {
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let cache = ToolCacheManager::new(dir.path().join("cache"));
+    install_fake_probe(&cache).expect("sonde factice");
+    let mut reg = OperationRegistry::new();
+    register_core_and_probe(&mut reg).expect("contrats de base");
+    let source = dir.path().join("in.mkv");
+    std::fs::write(&source, "raw").expect("source");
+    let work = dir.path().join("work");
+    std::fs::create_dir(&work).expect("dossier de travail");
+    let http = reqwest::Client::new();
+    let (progress, _) = recording_progress();
+    FlowEngine {
+        registry: &reg,
+        cache_mgr: &cache,
+        http_client: &http,
+        secrets_dir: None,
+        plugin_configs: &HashMap::new(),
+        tool_versions: &HashMap::new(),
+        media_root: None,
+        logical_source_name: None,
+        allow_private_integrations: None,
+        worker_capabilities: None,
+        resume_node_id: None,
+        run_info: FlowRunInfo::default(),
+        resumed_outputs: &HashMap::new(),
+        action_gate: None,
+    }
+    .execute_flow(Uuid::new_v4(), &flow_record(definition), &source, &work, progress)
+    .await
+    .map(|outcome| outcome.steps)
+    .map_err(|error| (error.message, error.steps))
+}
+
+#[tokio::test]
+async fn a_connection_to_a_missing_node_fails_instead_of_ending_the_flow() {
+    let result = run_core_graph(json!({
+        "nodes": [{"id": "n1", "type": "file-input", "name": "in"}],
+        "connections": [{"from": "n1", "to": "fantome"}]
+    }))
+    .await;
+    let (message, steps) = result.expect_err("un nœud cible absent est une erreur");
+    assert!(message.contains("fantome"), "{message}");
+    assert_eq!(steps.len(), 1);
+}
+
+#[tokio::test]
+async fn a_looping_flow_fails_when_the_step_budget_runs_out() {
+    let result = run_core_graph(json!({
+        "nodes": [
+            {"id": "n0", "type": "file-input", "name": "in"},
+            {"id": "n1", "type": "file-input", "name": "a"},
+            {"id": "n2", "type": "file-input", "name": "b"}
+        ],
+        "connections": [
+            {"from": "n0", "to": "n1"},
+            {"from": "n1", "to": "n2"},
+            {"from": "n2", "to": "n1"}
+        ]
+    }))
+    .await;
+    let (message, steps) = result.expect_err("une boucle épuise le budget d'étapes");
+    assert!(message.contains(&MAX_FLOW_STEPS.to_string()), "{message}");
+    assert_eq!(steps.len(), MAX_FLOW_STEPS);
+}
+
+#[tokio::test]
+async fn a_flow_reaching_its_terminal_node_still_succeeds() {
+    let steps = run_core_graph(json!({
+        "nodes": [
+            {"id": "n1", "type": "file-input", "name": "in"},
+            {"id": "n2", "type": "file-output", "name": "out"}
+        ],
+        "connections": [{"from": "n1", "to": "n2"}]
+    }))
+    .await
+    .expect("flux complet");
+    assert_eq!(steps.len(), 2);
+}

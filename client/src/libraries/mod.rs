@@ -8,6 +8,8 @@ mod packs;
 mod requirements_editor;
 mod resources;
 mod rows;
+mod script_draft;
+mod script_editor;
 mod scripts;
 mod transfer_workers;
 mod variables_editor;
@@ -35,8 +37,9 @@ use form::LibraryForm;
 use leptos::prelude::*;
 use packs::LocalPacksSection;
 use resources::ResourcesSection;
+pub(crate) use script_draft::starter_script_code;
+pub use script_editor::ScriptEditor;
 use scripts::ScriptsSection;
-pub(crate) use scripts::starter_script_code;
 
 const LIBRARIES_PATH: &str = "/api/v1/libraries";
 const FLOWS_PATH: &str = "/api/v1/flows";
@@ -93,6 +96,12 @@ pub(super) fn LocalDeleteButton(
             "Supprimer"
         </button>
     }
+}
+
+thread_local! {
+    /// Dernier onglet ouvert : on le retrouve en revenant d'un éditeur en pleine page (ADR 0030).
+    static LAST_TAB: std::cell::Cell<LibraryTab> =
+        const { std::cell::Cell::new(LibraryTab::Libraries) };
 }
 
 /// Sous-onglets de l'écran Librairie.
@@ -406,7 +415,8 @@ fn MediaLibrariesSection(
 #[component]
 pub fn LibrariesPage(me: Me) -> impl IntoView {
     let can_manage_local = me.allows(Permission::ManageSettings);
-    let active_tab = RwSignal::new(LibraryTab::Libraries);
+    let active_tab = RwSignal::new(LAST_TAB.get());
+    Effect::new(move |_| LAST_TAB.set(active_tab.get()));
     let reload_libs = RwSignal::new(0_u32);
     let reload_flows = RwSignal::new(0_u32);
     let live = use_live();

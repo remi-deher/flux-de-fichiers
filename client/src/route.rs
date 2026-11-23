@@ -13,6 +13,8 @@ pub enum Route {
     NewFlow,
     FlowEditor(String),
     Libraries,
+    NewScript,
+    ScriptEditor(String),
     Workers,
     Plugins,
     Settings,
@@ -28,6 +30,8 @@ impl Route {
             Self::NewFlow => app::NEW_FLOW.to_owned(),
             Self::FlowEditor(id) => format!("{}/{}", app::FLOWS, encode_segment(id)),
             Self::Libraries => app::LIBRARIES.to_owned(),
+            Self::NewScript => app::NEW_SCRIPT.to_owned(),
+            Self::ScriptEditor(id) => format!("{}/{}", app::SCRIPTS, encode_segment(id)),
             Self::Workers => app::WORKERS.to_owned(),
             Self::Plugins => app::PLUGINS.to_owned(),
             Self::Settings => app::SETTINGS.to_owned(),
@@ -41,7 +45,10 @@ impl Route {
             .unwrap_or(path)
             .trim_matches('/');
         let mut parts = rest.split('/');
-        match (parts.next(), parts.next(), parts.next()) {
+        let segments = (parts.next(), parts.next(), parts.next());
+        // Un segment de trop (`/libraries/scripts/a/b`) n'est pas un écran connu.
+        let extra = parts.next().is_some();
+        match segments {
             (Some("jobs"), None, _) => Self::Jobs,
             (Some("flows"), None, _) => Self::Flows,
             (Some("flows"), Some("new"), None) => Self::NewFlow,
@@ -49,6 +56,11 @@ impl Route {
                 Self::FlowEditor(decode_segment(id))
             }
             (Some("libraries"), None, _) => Self::Libraries,
+            (Some("libraries"), Some("scripts"), None) => Self::Libraries,
+            (Some("libraries"), Some("scripts"), Some("new")) if !extra => Self::NewScript,
+            (Some("libraries"), Some("scripts"), Some(id)) if !id.is_empty() && !extra => {
+                Self::ScriptEditor(decode_segment(id))
+            }
             (Some("workers"), None, _) => Self::Workers,
             (Some("plugins"), None, _) => Self::Plugins,
             (Some("settings"), None, _) => Self::Settings,
@@ -60,6 +72,7 @@ impl Route {
     pub fn section(&self) -> Self {
         match self {
             Self::FlowEditor(_) => Self::Flows,
+            Self::NewScript | Self::ScriptEditor(_) => Self::Libraries,
             other => other.clone(),
         }
     }
@@ -248,6 +261,9 @@ mod tests {
             Route::FlowEditor("flow.films-abc".into()),
             Route::FlowEditor("flux à part".into()),
             Route::Libraries,
+            Route::NewScript,
+            Route::ScriptEditor("script.mon-script".into()),
+            Route::ScriptEditor("script à part".into()),
             Route::Workers,
             Route::Plugins,
             Route::Settings,
@@ -288,5 +304,19 @@ mod tests {
         assert_eq!(Route::parse("/app"), Route::Overview);
         assert_eq!(Route::FlowEditor("x".into()).section(), Route::Flows);
         assert_eq!(Route::NewFlow.section(), Route::NewFlow);
+    }
+
+    #[test]
+    fn script_editor_routes_belong_to_the_libraries_section() {
+        assert_eq!(Route::NewScript.section(), Route::Libraries);
+        assert_eq!(Route::ScriptEditor("s".into()).section(), Route::Libraries);
+        assert_eq!(Route::parse("/libraries/scripts/new"), Route::NewScript);
+        assert_eq!(
+            Route::parse("/app/libraries/scripts/script.a"),
+            Route::ScriptEditor("script.a".into())
+        );
+        assert_eq!(Route::parse("/libraries/scripts"), Route::Libraries);
+        assert_eq!(Route::parse("/libraries/scripts/a/b"), Route::Overview);
+        assert_eq!(Route::parse("/libraries/scripts/new/x"), Route::Overview);
     }
 }

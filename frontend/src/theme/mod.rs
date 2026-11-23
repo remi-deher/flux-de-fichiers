@@ -6,6 +6,7 @@ pub mod components;
 pub mod flows;
 pub mod graph;
 pub mod plugins;
+pub mod scripts;
 pub mod styles;
 pub mod tokens;
 pub mod touch;
@@ -17,6 +18,7 @@ pub use components::COMPONENTS_CSS;
 pub use flows::FLOWS_CSS;
 pub use graph::GRAPH_CSS;
 pub use plugins::PLUGINS_CSS;
+pub use scripts::SCRIPTS_CSS;
 pub use styles::{generate_global_style, generate_global_tokens_css};
 pub use tokens::{DARK_THEME, LIGHT_THEME, ThemeTokens};
 pub use widgets::WIDGETS_CSS;
@@ -34,6 +36,8 @@ static ALL_STYLES: LazyLock<String> = LazyLock::new(|| {
     s.push_str(PLUGINS_CSS);
     s.push('\n');
     s.push_str(FLOWS_CSS);
+    s.push('\n');
+    s.push_str(SCRIPTS_CSS);
     s.push('\n');
     s.push_str(GRAPH_CSS);
     s.push('\n');
@@ -86,6 +90,7 @@ mod tests {
         assert!(styles.contains(".flow-canvas-controls {"));
         assert!(styles.contains(".mini-viewport {"));
         assert!(styles.contains(".flow-quick-add {"));
+        assert!(styles.contains(".script-workbench__body {"));
         assert!(styles.contains(".flow-canvas__marquee {"));
         assert!(styles.contains(".flow-wire__popover {"));
         assert!(styles.contains(".application-shell.is-workbench .app-topbar {"));
@@ -263,6 +268,7 @@ mod tests {
             ("COMPONENTS_CSS", COMPONENTS_CSS),
             ("PLUGINS_CSS", PLUGINS_CSS),
             ("FLOWS_CSS", FLOWS_CSS),
+            ("SCRIPTS_CSS", SCRIPTS_CSS),
             ("GRAPH_CSS", GRAPH_CSS),
             ("WIDGETS_CSS", WIDGETS_CSS),
             ("AUTH_CSS", AUTH_CSS),

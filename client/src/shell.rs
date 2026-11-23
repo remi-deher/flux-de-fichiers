@@ -153,6 +153,10 @@ pub fn allowed(me: &Me, route: &Route) -> bool {
     if section == Route::NewFlow {
         return me.instance_kind == InstanceKind::Central && me.allows(Permission::ManageFlows);
     }
+    // Écrire un script demande le droit qui gère la collection locale (onglet Scripts).
+    if *route == Route::NewScript {
+        return me.instance_kind == InstanceKind::Central && me.allows(Permission::ManageSettings);
+    }
     groups()
         .into_iter()
         .flat_map(|(_, screens)| screens)
@@ -168,6 +172,8 @@ pub fn screen_title(route: &Route) -> &'static str {
     match route {
         Route::NewFlow => "Nouveau flux",
         Route::FlowEditor(_) => "Éditeur de flux",
+        Route::NewScript => "Nouveau script",
+        Route::ScriptEditor(_) => "Éditeur de script",
         other => groups()
             .into_iter()
             .flat_map(|(_, screens)| screens)
@@ -279,7 +285,10 @@ fn screen_badge(
 
 /// La route courante appartient-elle à l'atelier plein écran de création/édition de flux ?
 pub fn is_workbench_route(route: &Route) -> bool {
-    matches!(route, Route::FlowEditor(_) | Route::NewFlow)
+    matches!(
+        route,
+        Route::FlowEditor(_) | Route::NewFlow | Route::NewScript | Route::ScriptEditor(_)
+    )
 }
 
 /// Écrans visibles pour ces droits sur cette installation.
@@ -528,6 +537,9 @@ mod tests {
         let central = me(Role::Admin, InstanceKind::Central);
         assert!(allowed(&central, &Route::FlowEditor("f".into())));
         assert!(allowed(&central, &Route::NewFlow));
+        assert!(!allowed(&worker, &Route::NewScript));
+        assert!(allowed(&central, &Route::NewScript));
+        assert!(allowed(&central, &Route::ScriptEditor("script.x".into())));
     }
 
     #[test]
@@ -586,6 +598,8 @@ mod tests {
     fn workbench_route_detection_matches_editor_screens_only() {
         assert!(is_workbench_route(&Route::NewFlow));
         assert!(is_workbench_route(&Route::FlowEditor("flow.1".into())));
+        assert!(is_workbench_route(&Route::NewScript));
+        assert!(is_workbench_route(&Route::ScriptEditor("script.1".into())));
         assert!(!is_workbench_route(&Route::Flows));
         assert!(!is_workbench_route(&Route::Overview));
     }

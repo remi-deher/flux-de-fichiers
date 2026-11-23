@@ -2,8 +2,10 @@ mod artifacts;
 mod enrollment;
 mod failure_flows;
 mod flow_samples;
+mod flow_usage;
 mod flows;
 mod identity;
+mod installed_items;
 mod irreversible_actions;
 mod jobs;
 mod leases;
@@ -16,9 +18,11 @@ mod password_reset;
 mod plugins;
 mod relays;
 mod resource_slots;
+mod settings_origin;
 mod source_publication_journal;
 mod source_tickets;
 mod step_context;
+mod store_migration;
 
 pub use artifacts::{
     JobArtifact, artifact_retained, confirm_artifact_received, declare_artifact, get_artifact,
@@ -32,9 +36,14 @@ pub use enrollment::{
 
 pub use failure_flows::{
     FailureFlowState, append_failure_steps, failure_flow_not_run_message, failure_flow_state,
-    record_failure_flow_not_run, take_pending_failure_flow,
+    give_back_failure_flow, record_failure_flow_not_run, take_failure_flow_except,
+    take_pending_failure_flow,
 };
 pub use flow_samples::{latest_flow_media_sample, save_flow_media_sample};
+pub use flow_usage::{
+    AwaitingFlow, FlowDefinition, TaskFlow, UnfinishedFlow, awaiting_flows, flow_definitions,
+    unfinished_flows,
+};
 pub use flows::{
     DEFINITION_STORES, DefinitionStore, default_flow, delete_flow, get_flow, get_flow_version,
     list_flow_versions, list_flows, save_flow,
@@ -46,9 +55,13 @@ pub use identity::{
     revoke_worker_keys, set_account_email, set_setting, touch_api_key, update_account,
     update_password,
 };
+pub use installed_items::{
+    Installation, InstallationRecord, delete_installation, delete_installation_of_copy,
+    finish_installation_copy, get_installation, list_installations, save_installation,
+};
 pub use irreversible_actions::authorize_action;
 pub use jobs::{
-    JobSource, PublishedOutput, batch_jobs, cancel_job, claim, claim_with_protocol,
+    JobSource, PublishedOutput, batch_jobs, cancel_job, claim, claim_except, claim_with_protocol,
     clear_job_output_name, count_jobs_for_worker, delete_job, delete_worker,
     downloadable_output_name, enqueue_library_source, fail, filtered_jobs, find_worker_by_name,
     get_job, get_worker, has_library_file_job, insert_job, insert_job_with_options,
@@ -87,6 +100,7 @@ pub use plugins::{
 };
 pub use relays::{RelayOutcome, list_relays, relay_job};
 pub use resource_slots::{job_resource_class, job_resource_classes};
+pub use settings_origin::{attach_settings_to_installed, set_settings_origin, settings_belong_to};
 pub use source_publication_journal::{
     PendingSourcePublication, abandon_unauthorized_publication, authorize_source_publication,
     begin_local_publication, begin_pulled_publication, begin_source_publication,
@@ -100,3 +114,6 @@ pub use source_tickets::{
     valid_transfer_url, writable_source_holders,
 };
 pub use step_context::{library_name, step_variables, worker_name};
+pub use store_migration::{
+    pending_store_repositories, set_pending_store_repositories, store_migration_is_done,
+};

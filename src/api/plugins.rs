@@ -30,7 +30,7 @@ pub async fn catalog(
     State(s): State<AppState>,
     _auth: ViewPluginsAuth,
 ) -> AppResult<Json<Vec<CatalogEntry>>> {
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     let cache_mgr = s.tool_cache();
     let saved_settings = crate::repository::list_all_plugin_settings(&s.pool)
         .await
@@ -51,7 +51,7 @@ pub async fn plugin_detail(
     if !plugins::is_valid_repository_id(&id) {
         return Err(AppError::NotFound);
     }
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     let mut detail = s
         .catalog_cache
         .plugin_detail(&roots, &id)
@@ -74,7 +74,7 @@ pub async fn exposed_variables(
     State(s): State<AppState>,
     _auth: ViewPluginsAuth,
 ) -> AppResult<Json<Vec<forgearr_shared::exposed_variables::ExposedNamespaceView>>> {
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     let registry = s.catalog_cache.operations(&roots).await;
     Ok(Json(plugins::exposure_views(&registry)))
 }
@@ -88,7 +88,7 @@ pub async fn plugin_icon(
     if !plugins::is_valid_repository_id(&id) {
         return Err(AppError::NotFound);
     }
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     let svg = tokio::task::spawn_blocking(move || plugins::plugin_icon_svg(&roots, &id))
         .await
         .ok()
@@ -109,7 +109,7 @@ pub async fn tools(
     _auth: ViewPluginsAuth,
 ) -> AppResult<Json<Vec<ToolStatusSummary>>> {
     let cache_mgr = s.tool_cache();
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     Ok(Json(s.catalog_cache.tools_status(&roots, &cache_mgr).await))
 }
 
@@ -119,7 +119,7 @@ pub async fn tool_distribution(
     Path(id): Path<String>,
     _auth: ManagePluginsAuth,
 ) -> AppResult<Json<Value>> {
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     Ok(Json(plugins::read_distribution(&roots, &id)?))
 }
 
@@ -130,7 +130,7 @@ pub async fn worker_tool_distribution(
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     crate::auth::authorize_worker(&s.pool, &headers).await?;
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     Ok(Json(plugins::read_distribution(&roots, &id)?))
 }
 
@@ -140,7 +140,7 @@ pub async fn worker_software_encoder_probes(
     headers: axum::http::HeaderMap,
 ) -> AppResult<Json<Vec<crate::software_probe::SoftwareEncoderProbe>>> {
     crate::auth::authorize_worker(&s.pool, &headers).await?;
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     Ok(Json(crate::software_probe::discover_software_probes(
         &roots,
     )))
@@ -172,7 +172,7 @@ async fn install_catalog_item(
     expected: plugins::CatalogItemType,
 ) -> AppResult<Json<plugins::DependencyInstallResult>> {
     to_completion(async move {
-        let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+        let roots = plugins::engine_roots(&s.pool, &s.config).await?;
         if !plugins::list_catalog(&roots)
             .iter()
             .any(|entry| entry.id == id && entry.entry_type == expected)
@@ -194,7 +194,8 @@ async fn install_catalog_item(
 async fn store_settings(s: &AppState, id: &str, settings_json: String) -> AppResult<()> {
     let (pool, changes, id) = (s.pool.clone(), s.changes.clone(), id.to_owned());
     to_completion(async move {
-        crate::repository::set_plugin_settings(&pool, &changes, &id, &settings_json).await
+        crate::repository::set_plugin_settings(&pool, &changes, &id, &settings_json).await?;
+        crate::repository::attach_settings_to_installed(&pool, &id).await
     })
     .await
 }
@@ -218,7 +219,7 @@ pub async fn get_settings(
     _auth: ManagePluginsAuth,
 ) -> AppResult<Json<plugins::PluginSettingsView>> {
     let secrets = SecretBox::open(&s.config.config_dir)?;
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     let schema_fields = s.catalog_cache.settings_fields(&roots, &id).await;
     let mut saved = parse_saved(
         crate::repository::get_plugin_settings(&s.pool, &id)
@@ -256,7 +257,9 @@ pub async fn save_settings(
     _auth: ManagePluginsAuth,
     Json(payload): Json<Value>,
 ) -> AppResult<Json<Value>> {
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    // Un plugin configuré compte comme utilisé : pas de reprise ni de retrait entre-temps.
+    let _installations = plugins::share_installations().await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     if !plugins::is_valid_repository_id(&id) || !s.catalog_cache.plugin_exists(&roots, &id).await {
         return Err(AppError::NotFound);
     }
@@ -298,7 +301,7 @@ pub async fn test_connection(
     _auth: ManagePluginsAuth,
     body: axum::body::Bytes,
 ) -> AppResult<Json<plugins::PluginConnectionTestResult>> {
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     if !plugins::is_valid_repository_id(&id) || !s.catalog_cache.plugin_exists(&roots, &id).await {
         return Err(AppError::NotFound);
     }
@@ -423,17 +426,21 @@ pub async fn test_connection(
     }
 }
 
-/// Retourne les couples `(tool_id, version)` actifs du catalogue pour la purge côté worker.
+/// Retourne les couples `(tool_id, version)` actifs du catalogue pour la purge côté worker. Une liste
+/// incomplète effacerait des outils encore utiles : elle est refusée, et le worker ne purge rien.
 pub async fn worker_active_tools(
     State(s): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> AppResult<Json<Vec<crate::domain::ToolRequirement>>> {
     crate::auth::authorize_worker(&s.pool, &headers).await?;
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let engine = plugins::engine_sources(&s.pool, &s.config).await?;
+    if !engine.is_complete() {
+        return Err(AppError::CentralUnavailable);
+    }
     let cache_mgr = s.tool_cache();
     let list = s
         .catalog_cache
-        .tools_status(&roots, &cache_mgr)
+        .tools_status(&engine.roots, &cache_mgr)
         .await
         .into_iter()
         .map(|tool| crate::domain::ToolRequirement {
@@ -479,7 +486,7 @@ pub async fn repository_script(
 ) -> AppResult<Json<forgearr_shared::highlight::ScriptPreviewView>> {
     let repos_dir = s.config.plugin_repos_dir();
     let local_dir = plugins::local_catalog_dir(&s.config);
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     let registry = s.catalog_cache.operations(&roots).await;
     let script = tokio::task::spawn_blocking(move || {
         plugins::read_repository_script_preview(&repos_dir, &local_dir, &id, &entry_id, &registry)
@@ -495,9 +502,11 @@ pub async fn catalog_script(
     Path(entry_id): Path<String>,
     _auth: ViewPluginsAuth,
 ) -> AppResult<Json<forgearr_shared::highlight::ScriptPreviewView>> {
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::legacy_store_roots(&s.pool, &s.config).await?;
     let local_dir = plugins::local_catalog_dir(&s.config);
-    let registry = s.catalog_cache.operations(&roots).await;
+    // Les dépendances d'un script s'apprécient sur ce que le moteur lit.
+    let engine_roots = plugins::engine_roots(&s.pool, &s.config).await?;
+    let registry = s.catalog_cache.operations(&engine_roots).await;
     let preview = tokio::task::spawn_blocking(move || {
         plugins::read_catalog_script_preview(&roots, &local_dir, &entry_id, &registry)
     })
@@ -514,7 +523,7 @@ pub async fn import_catalog_script(
     Path(entry_id): Path<String>,
     _auth: ManagePluginsAuth,
 ) -> AppResult<Json<forgearr_shared::local::LocalScriptSummary>> {
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::legacy_store_roots(&s.pool, &s.config).await?;
     let saved = write_local(&s, move |local_dir| {
         let (source_dir, request) =
             plugins::catalog_script_import(&roots, &entry_id).ok_or(AppError::NotFound)?;
@@ -558,8 +567,7 @@ pub async fn add_repository(
     }
 
     to_completion(async move {
-        let repos_dir = s.config.plugin_repos_dir();
-        plugins::add_repository(&s.pool, &s.catalog_cache, &repos_dir, &id, &name, &url)
+        plugins::add_repository(&s.pool, &s.catalog_cache, &s.config, &id, &name, &url)
             .await
             .map(Json)
     })
@@ -591,8 +599,7 @@ pub async fn delete_repository(
     _auth: ManagePluginsAuth,
 ) -> AppResult<Json<Value>> {
     to_completion(async move {
-        let repos_dir = s.config.plugin_repos_dir();
-        plugins::delete_repository(&s.pool, &s.catalog_cache, &repos_dir, &id).await?;
+        plugins::delete_repository(&s.pool, &s.catalog_cache, &s.config, &id).await?;
         Ok(Json(serde_json::json!({
             "id": id,
             "deleted": true,
@@ -612,14 +619,7 @@ pub async fn sync_repository(
         .await
         .sync_policy();
     let report = to_completion(async move {
-        plugins::sync_and_signal(
-            &s.pool,
-            &s.catalog_cache,
-            &repo,
-            &s.config.plugin_repos_dir(),
-            &sync_policy,
-        )
-        .await
+        plugins::sync_and_signal(&s.pool, &s.catalog_cache, &repo, &s.config, &sync_policy).await
     })
     .await?;
     Ok(Json(serde_json::json!({
@@ -636,7 +636,7 @@ pub async fn pack_installation(
     Path(id): Path<String>,
     _auth: ViewPluginsAuth,
 ) -> AppResult<Json<plugins::PackInstallation>> {
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::legacy_store_roots(&s.pool, &s.config).await?;
     Ok(Json(plugins::read_pack_installation(&roots, &id)?))
 }
 
@@ -649,7 +649,7 @@ pub async fn pack_detail(
     if !plugins::is_valid_repository_id(&id) {
         return Err(AppError::NotFound);
     }
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::legacy_store_roots(&s.pool, &s.config).await?;
     let detail = tokio::task::spawn_blocking(move || plugins::build_pack_detail(&roots, &id))
         .await
         .map_err(|_| AppError::Internal)??;
@@ -665,7 +665,7 @@ pub async fn tool_detail(
     if !plugins::is_valid_repository_id(&id) {
         return Err(AppError::NotFound);
     }
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     let cache_mgr = s.tool_cache();
     let detail =
         tokio::task::spawn_blocking(move || plugins::build_tool_detail(&roots, &cache_mgr, &id))
@@ -683,7 +683,7 @@ pub async fn install_pack(
     _auth: ManagePluginsAuth,
 ) -> AppResult<Json<plugins::PackInstallResult>> {
     to_completion(async move {
-        let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+        let roots = plugins::legacy_store_roots(&s.pool, &s.config).await?;
         let cache_mgr = s.tool_cache();
         let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
             .await

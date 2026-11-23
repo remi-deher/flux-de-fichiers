@@ -11,7 +11,7 @@ use forgearr_shared::flows::{FlowGraph, FlowNode};
 use std::path::Path;
 use uuid::Uuid;
 
-pub(super) const DEFERRED_MESSAGE: &str = "Notification en attente de publication";
+pub(crate) const DEFERRED_MESSAGE: &str = "Notification en attente de publication";
 
 pub(super) fn after_publication(node: &FlowNode) -> bool {
     node.config
@@ -57,7 +57,7 @@ async fn execute_notifications(
         return Ok(0);
     }
     let logs = repository::list_job_steps(&state.pool, job.id).await?;
-    let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
+    let roots = crate::plugins::engine_roots(&state.pool, &state.config).await?;
     let registry = state.catalog_cache.operations(&roots).await;
     let plugin_configs = super::load_flow_plugin_configs(
         &state.pool,

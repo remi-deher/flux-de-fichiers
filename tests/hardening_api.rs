@@ -139,6 +139,7 @@ async fn harness() -> anyhow::Result<Harness> {
         config_dir: config_dir.path().to_path_buf(),
         tools_cache_dir: config_dir.path().join("tools-cache"),
         plugins_dir: Some(catalog_dir.path().to_path_buf()),
+        detected_plugins_dir: None,
         static_dir: "frontend/dist".into(),
         max_file_bytes: 1024 * 1024,
         local_worker: false,

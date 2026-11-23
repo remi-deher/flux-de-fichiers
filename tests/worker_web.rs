@@ -30,6 +30,7 @@ fn config_in(dir: &Path) -> anyhow::Result<Config> {
         config_dir: dir.to_path_buf(),
         tools_cache_dir: dir.join("tools-cache"),
         plugins_dir: None,
+        detected_plugins_dir: None,
         static_dir: "frontend/dist".into(),
         max_file_bytes: 1024,
         local_worker: false,

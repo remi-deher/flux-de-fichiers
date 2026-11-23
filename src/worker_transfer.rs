@@ -30,13 +30,31 @@ const MAX_CONCURRENT_TRANSFERS: usize = 4;
 const DIRECT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Durée maximale d'une lecture directe, pour les très gros fichiers (6 heures).
 const DIRECT_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(6 * 60 * 60);
+/// Silence toléré d'un pair pendant une lecture directe, avant de la déclarer interrompue : la
+/// reprise par `Range` prend alors le relais au lieu d'attendre la fin des 6 heures.
+const DIRECT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Reprises d'une lecture directe interrompue, chacune avec un billet frais, avant le repli.
 const DIRECT_RESUME_ATTEMPTS: u32 = 3;
 /// Pause avant chaque reprise.
 const DIRECT_RESUME_DELAY: Duration = Duration::from_secs(2);
 /// Erreur d'un fichier reçu dont la taille ou l'empreinte ne correspond pas : jamais reprise.
 pub const SOURCE_INTEGRITY: &str = "source_integrity";
+
+/// Fichier reçu dont la taille ou l'empreinte ne correspond pas. Erreur typée : on la reconnaît par
+/// `is_source_integrity`, même enveloppée dans un contexte, jamais par son texte.
+#[derive(Debug, thiserror::Error)]
+#[error("source_integrity")]
+pub struct SourceIntegrityError;
+
+/// Vrai si `error`, ou l'une de ses causes, est une [`SourceIntegrityError`].
+pub fn is_source_integrity(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.is::<SourceIntegrityError>())
+}
 const REDEEM_TIMEOUT: Duration = Duration::from_secs(10);
+/// Attente conseillée (secondes) par `Retry-After` quand tous les transferts simultanés sont pris.
+const BUSY_RETRY_AFTER_SECONDS: &str = "2";
 
 /// Valide un billet auprès du central ; `Err` porte le statut HTTP à renvoyer.
 pub type RedeemFuture = Pin<Box<dyn Future<Output = Result<TransferGrant, StatusCode>> + Send>>;
@@ -80,7 +98,9 @@ pub fn spawn_listener(port: u16, state: TransferState) -> tokio::task::JoinHandl
         match tokio::net::TcpListener::bind(address).await {
             Ok(listener) => {
                 tracing::info!(%address, "serveur de transfert de sources démarré");
-                let _ = axum::serve(listener, transfer_router(state)).await;
+                if let Err(error) = axum::serve(listener, transfer_router(state)).await {
+                    tracing::error!(%error, "serveur de transfert de sources arrêté");
+                }
             }
             Err(error) => {
                 tracing::warn!(%address, error = %error, "serveur de transfert indisponible");
@@ -181,7 +201,11 @@ async fn serve_source(State(state): State<TransferState>, headers: HeaderMap) ->
     // Le permis n'est pris qu'après validation du billet : des requêtes sans billet valide ne
     // doivent pas épuiser les transferts simultanés des vrais preneurs.
     let Ok(permit) = state.permits.clone().try_acquire_owned() else {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::RETRY_AFTER, BUSY_RETRY_AFTER_SECONDS)],
+        )
+            .into_response();
     };
     let path = match library_scan::source_path(Path::new(&grant.root), &grant.source_name).await {
         Ok(path) => path,
@@ -262,7 +286,7 @@ async fn write_body(
         while let Some(chunk) = chunks.next().await {
             let chunk = chunk?;
             total += chunk.len() as u64;
-            anyhow::ensure!(total <= max_bytes, SOURCE_INTEGRITY);
+            anyhow::ensure!(total <= max_bytes, SourceIntegrityError);
             file.write_all(&chunk).await?;
         }
         anyhow::Ok(())
@@ -286,7 +310,7 @@ async fn verify_received(
     let (hash, bytes) = storage::fingerprint(dest, max_bytes).await?;
     anyhow::ensure!(
         hash == expected_sha256 && bytes as i64 == expected_bytes,
-        SOURCE_INTEGRITY
+        SourceIntegrityError
     );
     Ok(())
 }
@@ -403,19 +427,35 @@ where
             Err(error) => error,
         };
         resumes += 1;
-        if resumes > DIRECT_RESUME_ATTEMPTS || error.to_string() == SOURCE_INTEGRITY {
+        if resumes > DIRECT_RESUME_ATTEMPTS || is_source_integrity(&error) {
             return Err(error);
         }
         tracing::warn!(error = %error, resumes, "voie directe interrompue, reprise avec un billet frais");
         tokio::time::sleep(DIRECT_RESUME_DELAY).await;
-        ticket = reissue().await?.ok_or(error)?;
+        // L'interruption d'origine est journalisée ci-dessus ; une panne du central ne la remplace
+        // dans l'erreur renvoyée que par un message qui dit où la reprise a échoué.
+        ticket = match reissue().await {
+            Ok(Some(fresh)) => fresh,
+            Ok(None) => return Err(error),
+            Err(failure) => {
+                return Err(
+                    failure.context("lecture directe interrompue, billet frais indisponible")
+                );
+            }
+        };
     }
 }
 
 /// Client dédié à la voie directe : connexion courte pour basculer vite sur le repli.
 pub fn direct_client() -> reqwest::Result<reqwest::Client> {
+    client_with_idle_timeout(DIRECT_IDLE_TIMEOUT)
+}
+
+/// Client de la voie directe dont toute lecture silencieuse plus de `idle` est interrompue.
+fn client_with_idle_timeout(idle: Duration) -> reqwest::Result<reqwest::Client> {
     reqwest::Client::builder()
         .connect_timeout(DIRECT_CONNECT_TIMEOUT)
+        .read_timeout(idle)
         .build()
 }
 
@@ -536,8 +576,18 @@ mod tests {
             assert_eq!(response.status(), StatusCode::OK);
             responses.push(response);
         }
-        let (status, _) = get_source(state.clone(), Some("bon-billet"), None).await?;
-        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        let busy = Request::builder()
+            .uri(TRANSFER_SOURCE_PATH)
+            .header(TRANSFER_TICKET_HEADER, "bon-billet")
+            .body(Body::empty())?;
+        let busy = transfer_router(state.clone()).oneshot(busy).await?;
+        assert_eq!(busy.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            busy.headers()
+                .get(header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok()),
+            Some(BUSY_RETRY_AFTER_SECONDS)
+        );
         responses.pop();
         let (status, body) = get_source(state, Some("bon-billet"), None).await?;
         assert_eq!(status, StatusCode::OK);
@@ -762,6 +812,97 @@ mod tests {
             "jamais de concaténation d'un corps complet sur un partiel"
         );
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_silent_peer_interrupts_the_download_and_keeps_the_received_prefix()
+    -> anyhow::Result<()> {
+        const IDLE: Duration = Duration::from_millis(300);
+        const LIMIT: Duration = Duration::from_secs(10);
+        const STALL: Duration = Duration::from_secs(30);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let url = format!("http://{}", listener.local_addr()?);
+        // Annonce 10 octets, en envoie 5, puis se tait sans fermer la connexion.
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut request = [0u8; 1024];
+                let _ = socket.read(&mut request).await;
+                let head = "HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n01234";
+                let _ = socket.write_all(head.as_bytes()).await;
+                tokio::time::sleep(STALL).await;
+            }
+        });
+        let work_dir = tempfile::tempdir()?;
+        let dest = work_dir.path().join("muet.mkv");
+        let ticket = SourceTicket {
+            url,
+            token: "peu-importe".into(),
+        };
+        let client = client_with_idle_timeout(IDLE)?;
+        let outcome = tokio::time::timeout(
+            LIMIT,
+            download_direct(
+                &client,
+                &ticket,
+                &dest,
+                1 << 20,
+                &sha256_hex(b"0123456789"),
+                10,
+            ),
+        )
+        .await?;
+        assert!(outcome.is_err(), "un pair muet interrompt la lecture");
+        assert_eq!(
+            std::fs::read(&dest)?,
+            b"01234",
+            "le préfixe reçu reste pour la reprise"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_failing_ticket_reissue_says_where_the_resume_failed() -> anyhow::Result<()> {
+        let work_dir = tempfile::tempdir()?;
+        let dest = work_dir.path().join("coupe.mkv");
+        // Port fermé : la connexion est refusée aussitôt, la reprise demande un billet frais.
+        let dead = SourceTicket {
+            url: "http://127.0.0.1:1".into(),
+            token: "peu-importe".into(),
+        };
+        let outcome = download_direct_resuming(
+            &direct_client()?,
+            dead,
+            &dest,
+            1 << 20,
+            &sha256_hex(b"0123456789"),
+            10,
+            || async { Err::<Option<SourceTicket>, _>(anyhow::anyhow!("central injoignable")) },
+        )
+        .await;
+        let Err(error) = outcome else {
+            anyhow::bail!("sans billet frais la reprise échoue");
+        };
+        assert!(
+            error.to_string().contains("billet frais indisponible"),
+            "{error}"
+        );
+        assert!(
+            error
+                .chain()
+                .any(|cause| cause.to_string() == "central injoignable"),
+            "la cause du central reste dans la chaîne"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn integrity_errors_are_recognised_by_type_even_with_context() {
+        let bare = anyhow::Error::new(SourceIntegrityError);
+        assert!(is_source_integrity(&bare));
+        let wrapped = anyhow::Error::new(SourceIntegrityError).context("lecture de la source");
+        assert!(is_source_integrity(&wrapped));
+        assert!(!is_source_integrity(&anyhow::anyhow!(SOURCE_INTEGRITY)));
+        assert!(!is_source_integrity(&anyhow::anyhow!("délai dépassé")));
     }
 
     /// Reprise avec un fournisseur de billets factice qui compte ses appels.

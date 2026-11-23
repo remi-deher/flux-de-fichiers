@@ -65,8 +65,9 @@ pub async fn catalog(
     headers: HeaderMap,
 ) -> AppResult<Json<Vec<CatalogEntry>>> {
     calling_worker(&state, &headers).await?;
-    let roots = plugins::catalog_roots(&state.pool, &state.config).await;
-    Ok(Json(plugins::list_catalog(&roots)))
+    let roots = plugins::engine_roots(&state.pool, &state.config).await?;
+    let entries = state.catalog_cache.entries(&roots).await;
+    Ok(Json(entries.into_iter().map(|(_, entry)| entry).collect()))
 }
 
 /// Connexion déléguée : le central vérifie les identifiants saisis sur le worker, avec la même

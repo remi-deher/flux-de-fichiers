@@ -86,6 +86,7 @@ async fn harness() -> anyhow::Result<Harness> {
         config_dir: config_dir.path().to_path_buf(),
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: Some(catalog_dir.path().to_path_buf()),
+        detected_plugins_dir: None,
         static_dir: "frontend/dist".into(),
         max_file_bytes: MAX_TEST_FILE_BYTES,
         local_worker: false,
@@ -774,6 +775,18 @@ async fn test_local_library_limits_conflicts_and_role_permissions() -> anyhow::R
 #[tokio::test]
 async fn plugin_connection_test_and_worker_active_tools_work() -> anyhow::Result<()> {
     let h = harness().await?;
+
+    // Tant que la reprise des dépôts n'est pas finie, la liste n'est pas donnée : rien n'est purgé.
+    let (status, _) = call_with_key(
+        &h.app,
+        common::WORKER_KEY,
+        "GET",
+        "/api/v1/worker/tools",
+        None,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    common::mark_store_migrated(&h.pool).await?;
 
     // Worker récupère les couples outil/version actifs pour la purge de cache.
     let (status, tools_json) = call_with_key(

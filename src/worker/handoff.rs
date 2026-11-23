@@ -209,7 +209,7 @@ impl TaskLease {
         )
         .await
         .map_err(|error| {
-            if error.to_string() == worker_transfer::SOURCE_INTEGRITY {
+            if worker_transfer::is_source_integrity(&error) {
                 JobRunError::simple(JobErrorCode::SourceIntegrity, "handoff_integrity").into()
             } else {
                 error

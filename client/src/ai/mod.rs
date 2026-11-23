@@ -160,7 +160,7 @@ pub fn starter_prompts(route: &Route) -> Vec<(&'static str, String)> {
                 "Quels blocs de traitement et d'extension sont disponibles pour bâtir un flux ?".to_owned(),
             ),
         ],
-        Route::Libraries => vec![
+        Route::Libraries | Route::NewScript | Route::ScriptEditor(_) => vec![
             (
                 "Auditer les bibliothèques",
                 "Analyse la configuration des bibliothèques (filtres, flux associés, règles de sortie).".to_owned(),

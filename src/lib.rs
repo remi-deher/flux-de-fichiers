@@ -5,6 +5,7 @@ pub mod api_keys;
 pub mod auth;
 pub mod central_client;
 pub mod config;
+pub mod database_backup;
 pub mod domain;
 pub mod enrollment;
 pub mod error;

@@ -30,6 +30,7 @@ pub mod session;
 pub mod system;
 pub mod timezone;
 pub mod transfer;
+pub mod version;
 pub mod workers;
 
 use serde::{Deserialize, Serialize};

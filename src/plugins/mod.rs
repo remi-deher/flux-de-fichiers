@@ -12,10 +12,12 @@ mod blocks;
 mod cache;
 mod declared_files;
 mod dependencies;
+mod engine;
 mod exposures;
 mod highlight;
 mod icon;
 mod install;
+mod installed;
 mod legacy_ids;
 mod local;
 mod packs;
@@ -36,17 +38,25 @@ pub use dependencies::{
     DependencyInstallResult, DependencyPlan, RequiredTool, install_with_dependencies,
     resolve_dependencies,
 };
+pub use engine::{EngineSources, engine_roots, engine_sources};
 pub use install::{
     ensure_tool_installed, ensure_tool_installed_verified, ensure_tools_for_requirements,
     install_from_distribution, is_installing, parse_distribution, read_distribution,
+};
+pub use installed::{
+    DamagedItem, EngineCatalog, InstallationGuard, ItemContent, SyncedRepository, UsageSources,
+    UsedElements, elements_used_by, freeze_item, frozen_is_intact, held_flows, installed_root,
+    item_usage, lock_installations, read_item, resume_store, share_installations, sweep_orphans,
+    unreadable_item,
 };
 pub use legacy_ids::{
     legacy_plugin_id, migrate_legacy_block_kinds, migrate_legacy_plugin_secrets,
     rename_legacy_block_kinds,
 };
 pub use local::{
-    build_local_snapshot, delete_local_item, local_resource_file, save_local_block_template,
-    save_local_flow_template, save_local_pack, save_local_script, upload_local_resource,
+    build_local_snapshot, delete_local_item, local_resource_file, repair_local_index,
+    save_local_block_template, save_local_flow_template, save_local_pack, save_local_script,
+    upload_local_resource,
 };
 pub use packs::{
     PackInstallResult, PackInstallation, build_pack_detail, install_pack, install_pack_verified,
@@ -55,9 +65,9 @@ pub use packs::{
 pub use probe::{ProbeContract, file_job_may_start, probe_is_ready, required_probe};
 pub use readiness::{attach_dependency_statuses, compute_entry_runtime, is_plugin_configured};
 pub use sources::{
-    add_repository, catalog_roots, delete_repository, is_reserved_repository_id,
-    is_valid_repository_id, local_catalog_dir, recover_repository_copies, repository_dir,
-    sync_and_signal, sync_enabled_repositories,
+    StoreSource, add_repository, delete_repository, is_reserved_repository_id,
+    is_valid_repository_id, legacy_store_roots, local_catalog_dir, recover_repository_copies,
+    repository_dir, store_sources, sync_and_signal, sync_enabled_repositories,
 };
 pub use sync::{
     REQUIRE_IMMUTABLE_RELEASES_ENV, SyncError, SyncPolicy, SyncReport, is_mutable_branch_url,
@@ -90,20 +100,30 @@ pub use settings::{
     resolve_settings_fields,
 };
 
-/// Résout dynamiquement la version d'un outil depuis `distribution.v1.json`, sinon le catalogue.
-pub fn resolve_tool_version(roots: &[PathBuf], tool_id: &str) -> String {
+/// Version d'un outil que ni son contrat ni le catalogue ne donnent.
+const DEFAULT_TOOL_VERSION: &str = "1.0.0";
+
+/// Version du contrat de distribution d'un outil, sinon celle `listed` au catalogue.
+fn tool_version(roots: &[PathBuf], tool_id: &str, listed: Option<&str>) -> String {
     if let Ok(value) = read_distribution(roots, tool_id)
         && let Ok(dist) = parse_distribution(&value.to_string())
         && !dist.tool_version.trim().is_empty()
     {
         return dist.tool_version;
     }
-    catalog_with_roots(roots)
+    listed
+        .filter(|version| !version.trim().is_empty())
+        .unwrap_or(DEFAULT_TOOL_VERSION)
+        .to_owned()
+}
+
+/// Résout dynamiquement la version d'un outil depuis `distribution.v1.json`, sinon le catalogue.
+pub fn resolve_tool_version(roots: &[PathBuf], tool_id: &str) -> String {
+    let listed = catalog_with_roots(roots)
         .into_iter()
         .find(|(_, entry)| entry.id == tool_id)
-        .map(|(_, entry)| entry.version)
-        .filter(|version| !version.trim().is_empty())
-        .unwrap_or_else(|| "1.0.0".to_owned())
+        .map(|(_, entry)| entry.version);
+    tool_version(roots, tool_id, listed.as_deref())
 }
 
 /// Conteneur de l'index du catalogue.
@@ -294,7 +314,8 @@ pub fn load_manifest(plugins_root: &Path, manifest_path: &str) -> anyhow::Result
     Ok(manifest)
 }
 
-/// Entrées du catalogue avec le dossier qui les porte ; le premier dossier gagne sur un identifiant en double.
+/// Entrées du catalogue avec le dossier qui les porte ; le premier dossier gagne sur un identifiant en
+/// double, blocs compris.
 ///
 /// La catégorie et les tags viennent du document pointé par l'index. Une catégorie
 /// inconnue est déjà normalisée en `other` et n'est pas sérialisée (pas de pastille).
@@ -305,8 +326,20 @@ pub fn catalog_with_roots(roots: &[PathBuf]) -> Vec<(PathBuf, CatalogEntry)> {
         let Ok(catalog) = load_catalog(root) else {
             continue;
         };
+        // Un bloc suit son propriétaire : celui d'un élément masqué n'aurait pas d'opération.
+        let hidden: HashSet<String> = catalog
+            .entries
+            .iter()
+            .filter(|entry| entry.entry_type.can_stand_alone() && seen.contains(&entry.id))
+            .map(|entry| entry.id.clone())
+            .collect();
         for mut entry in catalog.entries {
-            if !seen.insert(entry.id.clone()) {
+            let follows_hidden = !entry.entry_type.can_stand_alone()
+                && entry
+                    .owner
+                    .as_ref()
+                    .is_some_and(|owner| hidden.contains(owner));
+            if follows_hidden || !seen.insert(entry.id.clone()) {
                 continue;
             }
             apply_document_metadata(root, &mut entry);
@@ -1036,6 +1069,30 @@ mod tests {
             .map(|entry| entry.id)
             .collect();
         assert_eq!(ids, vec!["plugin.a", "pack.x"]);
+        Ok(())
+    }
+
+    #[test]
+    fn a_block_follows_the_folder_of_its_owner() -> anyhow::Result<()> {
+        let index = |block: &str| {
+            format!(
+                r#"{{"schemaVersion":"1.0.0","entries":[
+                {{"id":"demo","type":"plugin","version":"1.0.0","name":"Demo","manifestPath":"a.json"}},
+                {{"id":"{block}","type":"block","owner":"demo","version":"1.0.0","name":"Bloc","manifestPath":"b.json"}}]}}"#
+            )
+        };
+        let (installed, repository) = (tempfile::tempdir()?, tempfile::tempdir()?);
+        std::fs::write(installed.path().join("index.json"), index("demo.ancien"))?;
+        std::fs::write(repository.path().join("index.json"), index("demo.nouveau"))?;
+        let roots = [
+            installed.path().to_path_buf(),
+            repository.path().to_path_buf(),
+        ];
+        let ids: Vec<_> = list_catalog(&roots)
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect();
+        assert_eq!(ids, ["demo", "demo.ancien"]);
         Ok(())
     }
 

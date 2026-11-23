@@ -274,6 +274,7 @@ fn config(smtp: bool) -> anyhow::Result<Config> {
         config_dir: "var/config".into(),
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
+        detected_plugins_dir: None,
         static_dir: "frontend/dist".into(),
         max_file_bytes: 1024,
         local_worker: false,

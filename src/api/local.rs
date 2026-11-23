@@ -22,7 +22,8 @@ use forgearr_shared::{
 };
 use serde_json::{Value, json};
 
-/// Écrit dans la librairie locale puis vide le cache du catalogue, qui signale le changement.
+/// Écrit dans la librairie locale puis vide le cache du catalogue, qui signale le changement. Une écriture
+/// à la fois : chacune réécrit l'index, comme l'installation d'un script.
 pub(super) async fn write_local<T, W>(s: &AppState, write: W) -> AppResult<T>
 where
     T: Send + 'static,
@@ -31,6 +32,7 @@ where
     let local_dir = plugins::local_catalog_dir(&s.config);
     let cache = s.catalog_cache.clone();
     to_completion(async move {
+        let _installations = plugins::lock_installations().await;
         let written = tokio::task::spawn_blocking(move || write(&local_dir))
             .await
             .map_err(|_| AppError::Internal)??;
@@ -47,7 +49,7 @@ pub async fn snapshot(
     if !principal.allows(Permission::ViewLibraries) && !principal.allows(Permission::ViewFlows) {
         return Err(AppError::Forbidden);
     }
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     let local_dir = plugins::local_catalog_dir(&s.config);
     let data =
         tokio::task::spawn_blocking(move || plugins::build_local_snapshot(&roots, &local_dir))

@@ -8,6 +8,7 @@
 use crate::{
     api::{self, AppState},
     domain::{Claim, Job, JobErrorCode, JobStepEntry},
+    error::{AppError, AppResult},
     flows::FailureInfo,
     job_runner::{self, FlowInput},
     repository,
@@ -31,10 +32,12 @@ pub async fn run(state: AppState) {
     })
     .await;
     loop {
-        match repository::take_pending_failure_flow(&state.pool).await {
+        match take_next(&state).await {
             Ok(Some((job, claim))) => {
-                execute(&state, &job, claim).await;
-                continue;
+                // Rendu, il attend comme les autres le prochain passage.
+                if execute(&state, &job, claim).await {
+                    continue;
+                }
             }
             Ok(None) => {}
             Err(error) => {
@@ -48,27 +51,39 @@ pub async fn run(state: AppState) {
     }
 }
 
+/// Prochain flux d'échec dont les éléments installés sont lisibles ; les autres attendent leur réparation.
+async fn take_next(state: &AppState) -> AppResult<Option<(Job, Claim)>> {
+    let held = crate::plugins::held_flows(&state.pool, &state.config, &state.catalog_cache).await?;
+    repository::take_failure_flow_except(&state.pool, &held).await
+}
+
 /// Code et message transmis au flux d'échec (`error.code`, `error.message`).
 pub fn failure_code(job: &Job) -> JobErrorCode {
     job.error_code.unwrap_or(JobErrorCode::OperationFailed)
 }
 
-async fn execute(state: &AppState, job: &Job, mut claim: Claim) {
+/// Exécute un flux d'échec pris en charge ; `false` s'il a été rendu pour un motif passager du central.
+async fn execute(state: &AppState, job: &Job, mut claim: Claim) -> bool {
     let worker_id = state.local_worker_id.get().copied().unwrap_or_default();
-    if let Err(error) = api::populate_claim_contracts(
+    let prepared = api::populate_claim_contracts(
         &state.pool,
         &state.config,
         &state.catalog_cache,
         worker_id,
         &mut claim,
     )
-    .await
-    {
-        tracing::warn!(job_id = %job.id, error = ?error, "contrats du flux d'échec indisponibles");
-        record_not_run(state, job, &format!("contrats indisponibles : {error:?}")).await;
-        return;
-    }
-    let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
+    .await;
+    let roots = match prepared {
+        Ok(roots) => roots,
+        Err(error) => {
+            tracing::warn!(job_id = %job.id, error = ?error, "contrats du flux d'échec indisponibles");
+            if is_passing(&error) && given_back(state, job).await {
+                return false;
+            }
+            record_not_run(state, job, &format!("contrats indisponibles : {error:?}")).await;
+            return true;
+        }
+    };
     let cache = state.tool_cache();
     crate::plugins::ensure_tools_for_requirements(
         &roots,
@@ -94,7 +109,7 @@ async fn execute(state: &AppState, job: &Job, mut claim: Claim) {
                 &format!("dossier de travail indisponible : {error}"),
             )
             .await;
-            return;
+            return true;
         }
     };
     let code = failure_code(job);
@@ -123,6 +138,26 @@ async fn execute(state: &AppState, job: &Job, mut claim: Claim) {
     .await;
     append_steps(state, job, &steps).await;
     cleanup(&work_dir).await;
+    true
+}
+
+/// Cause qui tient à l'état du central, pas à la tâche : un nouvel essai peut réussir.
+fn is_passing(error: &AppError) -> bool {
+    matches!(
+        error,
+        AppError::CentralUnavailable | AppError::Database(_) | AppError::Storage(_)
+    )
+}
+
+/// Remet le flux d'échec en attente ; `false` s'il n'a pas pu l'être.
+async fn given_back(state: &AppState, job: &Job) -> bool {
+    match repository::give_back_failure_flow(&state.pool, (job.id, job.lease_epoch)).await {
+        Ok(given_back) => given_back,
+        Err(error) => {
+            tracing::warn!(job_id = %job.id, %error, "flux d'échec non remis en attente");
+            false
+        }
+    }
 }
 
 /// Rend visible un flux d'échec abandonné avant son exécution (étape de synthèse en échec).
@@ -142,7 +177,7 @@ async fn append_steps(state: &AppState, job: &Job, steps: &[JobStepEntry]) {
     );
 }
 
-fn log_append(job: &Job, appended: crate::error::AppResult<bool>) {
+fn log_append(job: &Job, appended: AppResult<bool>) {
     match appended {
         Ok(true) => {}
         Ok(false) => {

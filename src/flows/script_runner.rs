@@ -9,7 +9,7 @@ use crate::{
     supervision::SupervisedChild,
     tool_run::{
         MAX_STDOUT_CAPTURE_BYTES, ProgressParser, TailBuffer, for_each_segment, mask_log_secrets,
-        read_bounded_bytes,
+        read_bounded_into,
     },
     tools_cache::ToolCacheManager,
 };
@@ -32,6 +32,9 @@ use tokio::{io::AsyncWriteExt, process::Command};
 
 const DEFAULT_SAFE_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 const MAX_SCRIPT_ARGS: usize = 64;
+/// Attente des sorties d'un script déjà terminé : un descendant resté en arrière-plan peut garder
+/// ses tubes ouverts, ce qui ne doit ni retenir la tâche ni masquer le résultat du script.
+const PIPE_DRAIN_GRACE: Duration = Duration::from_secs(2);
 
 /// Callback de progression émis pendant l'exécution d'un script.
 pub type ScriptProgressCallback = Arc<dyn Fn(u32, &str) + Send + Sync>;
@@ -178,6 +181,17 @@ fn resolve_program(
         message: "aucun interpréteur ni outil configuré pour le script".into(),
         excerpt: None,
     })
+}
+
+/// Écrit l'entrée du script puis ferme son stdin. Sous le délai du script : un script qui ne lit
+/// pas son entrée, plus grosse que le tampon du tube, ne doit pas bloquer la tâche sans fin. Un
+/// tube fermé (script déjà terminé) n'est pas une erreur.
+async fn send_stdin(stdin: Option<tokio::process::ChildStdin>, bytes: &[u8]) {
+    let Some(mut stdin) = stdin else {
+        return;
+    };
+    let _ = stdin.write_all(bytes).await;
+    let _ = stdin.shutdown().await;
 }
 
 fn resolve_script_working_file(work_dir: &Path, raw_path: &str) -> Result<PathBuf, String> {
@@ -347,10 +361,7 @@ pub async fn execute_script_operation(
         excerpt: None,
     })?;
 
-    if let Some(mut stdin) = child.take_stdin() {
-        let _ = stdin.write_all(&stdin_bytes).await;
-        let _ = stdin.shutdown().await;
-    }
+    let stdin = child.take_stdin();
 
     let stdout_reader = child.take_stdout().ok_or_else(|| ScriptStepError {
         code: error_code,
@@ -364,25 +375,48 @@ pub async fn execute_script_operation(
     })?;
 
     let timeout = Duration::from_secs(rt.timeout_seconds.max(1));
+    let mut stdout_bytes = Vec::new();
+    let mut stdout_res = Ok(());
+    let mut tail = TailBuffer::default();
+    let (exited_tx, exited_rx) = tokio::sync::oneshot::channel::<()>();
     let outcome = tokio::time::timeout(timeout, async {
-        let mut tail = TailBuffer::default();
-        let (stdout_res, (), status_res) = tokio::join!(
-            read_bounded_bytes(stdout_reader),
-            for_each_segment(stderr_reader, |segment| {
-                tail.push(segment);
-                if let Some((pct, line)) = ProgressParser::PercentLine.parse_progress(segment, None)
-                {
-                    on_progress(pct, &line);
-                }
-            }),
-            child.wait(),
-        );
-        (stdout_res, tail.finish(), status_res)
+        let io = async {
+            tokio::join!(
+                read_bounded_into(stdout_reader, &mut stdout_bytes),
+                for_each_segment(stderr_reader, |segment| {
+                    tail.push(segment);
+                    if let Some((pct, line)) =
+                        ProgressParser::PercentLine.parse_progress(segment, None)
+                    {
+                        on_progress(pct, &line);
+                    }
+                }),
+                send_stdin(stdin, &stdin_bytes),
+            )
+        };
+        // Les sorties se lisent jusqu'à leur fin, ou PIPE_DRAIN_GRACE après la sortie du script.
+        let drain = async {
+            let _ = exited_rx.await;
+            tokio::time::sleep(PIPE_DRAIN_GRACE).await;
+        };
+        let read = async {
+            tokio::select! {
+                (read, (), ()) = io => stdout_res = read,
+                () = drain => {}
+            }
+        };
+        let wait = async {
+            let status = child.wait().await;
+            let _ = exited_tx.send(());
+            status
+        };
+        let (status, ()) = tokio::join!(wait, read);
+        status
     })
     .await;
 
-    let (stdout_res, excerpt, status_res) = match outcome {
-        Ok(res) => res,
+    let status_res = match outcome {
+        Ok(status) => status,
         Err(_) => {
             // Le groupe est tué à l'abandon de `child`.
             return Err(ScriptStepError {
@@ -393,45 +427,32 @@ pub async fn execute_script_operation(
         }
     };
 
-    let excerpt = excerpt.map(|text| redact(&text, &secrets));
+    let excerpt = tail.finish().map(|text| redact(&text, &secrets));
     let status = status_res.map_err(|err| ScriptStepError {
         code: error_code,
         message: format!("attente du script « {} » impossible : {err}", op.id),
         excerpt: excerpt.clone(),
     })?;
     child.finished();
-    let stdout_bytes = stdout_res.map_err(|err| ScriptStepError {
+    stdout_res.map_err(|err| ScriptStepError {
         code: error_code,
         message: format!("lecture stdout du script impossible : {err}"),
         excerpt: excerpt.clone(),
     })?;
-    if stdout_bytes.len() > MAX_STDOUT_CAPTURE_BYTES {
-        return Err(ScriptStepError {
-            code: error_code,
-            message: format!("sortie stdout du script « {} » trop volumineuse", op.id),
-            excerpt,
-        });
-    }
-
+    let oversize = stdout_bytes.len() > MAX_STDOUT_CAPTURE_BYTES;
     let stdout_text = String::from_utf8_lossy(&stdout_bytes);
     let trimmed = stdout_text.trim();
-    let parsed_output: Option<ScriptOutput> = if trimmed.is_empty() {
+    let parsed = if trimmed.is_empty() || oversize {
         None
     } else {
-        match serde_json::from_str::<ScriptOutput>(trimmed) {
-            Ok(out) => Some(out),
-            Err(err) => {
-                return Err(ScriptStepError {
-                    code: error_code,
-                    message: format!("sortie JSON du script invalide : {err}"),
-                    excerpt,
-                });
-            }
-        }
+        Some(serde_json::from_str::<ScriptOutput>(trimmed))
     };
 
+    // Le code de sortie prime : un script qui plante n'écrit pas forcément du JSON, et son échec
+    // ne doit pas être remplacé par « sortie JSON invalide ».
     if !status.success() {
-        let msg = parsed_output
+        let msg = parsed
+            .and_then(Result::ok)
             .and_then(|out| out.message)
             .map(|m| scrub(&m, &secrets))
             .unwrap_or_else(|| format!("script « {} » en échec (code {:?})", op.id, status.code()));
@@ -441,6 +462,24 @@ pub async fn execute_script_operation(
             excerpt,
         });
     }
+
+    if oversize {
+        return Err(ScriptStepError {
+            code: error_code,
+            message: format!("sortie stdout du script « {} » trop volumineuse", op.id),
+            excerpt,
+        });
+    }
+    let parsed_output = match parsed.transpose() {
+        Ok(output) => output,
+        Err(err) => {
+            return Err(ScriptStepError {
+                code: error_code,
+                message: format!("sortie JSON du script invalide : {err}"),
+                excerpt,
+            });
+        }
+    };
 
     let Some(output) = parsed_output else {
         return Ok(ScriptStepOutcome::Succeeded {
@@ -535,6 +574,110 @@ mod tests {
             exposes: None,
         };
         (op, rt)
+    }
+
+    #[tokio::test]
+    async fn a_script_ignoring_a_large_stdin_times_out_instead_of_blocking() -> anyhow::Result<()> {
+        // Bien au-delà du tampon d'un tube (64 Kio) : l'écriture bloque tant que rien ne lit.
+        const PAYLOAD_BYTES: usize = 300_000;
+        let dir = tempfile::tempdir()?;
+        let cache = ToolCacheManager::new(dir.path().join("cache"));
+        let source = dir.path().join("input.mkv");
+        std::fs::write(&source, b"mkv")?;
+        let (op, rt) = test_op("sleep 30", 1);
+        let config = serde_json::json!({ "blob": "x".repeat(PAYLOAD_BYTES) });
+        let limit = Duration::from_secs(10);
+        let outcome = tokio::time::timeout(
+            limit,
+            execute_script_operation(
+                &op,
+                &rt,
+                &cache,
+                &HashMap::new(),
+                "flow-1",
+                "node-1",
+                &config,
+                dir.path(),
+                &source,
+                &source,
+                &Value::Null,
+                &FlowVariables::default(),
+                1,
+                Arc::new(|_, _| {}),
+            ),
+        )
+        .await?;
+        match outcome {
+            Err(error) => assert!(error.message.contains("délai dépassé"), "{}", error.message),
+            Ok(_) => anyhow::bail!("le script sans lecture de stdin doit dépasser son délai"),
+        }
+        Ok(())
+    }
+
+    /// Lance `code` (sh) avec un délai de 10 s, sans configuration ni variables.
+    async fn run_sh(code: &str) -> anyhow::Result<Result<ScriptStepOutcome, ScriptStepError>> {
+        let dir = tempfile::tempdir()?;
+        let cache = ToolCacheManager::new(dir.path().join("cache"));
+        let source = dir.path().join("input.mkv");
+        std::fs::write(&source, b"mkv")?;
+        let (op, rt) = test_op(code, 10);
+        Ok(execute_script_operation(
+            &op,
+            &rt,
+            &cache,
+            &HashMap::new(),
+            "flow-1",
+            "node-1",
+            &Value::Null,
+            dir.path(),
+            &source,
+            &source,
+            &Value::Null,
+            &FlowVariables::default(),
+            1,
+            Arc::new(|_, _| {}),
+        )
+        .await)
+    }
+
+    #[tokio::test]
+    async fn a_crashing_script_reports_its_exit_code_and_not_invalid_json() -> anyhow::Result<()> {
+        let outcome = run_sh("cat >/dev/null\necho 'Traceback: boom'\nexit 3").await?;
+        let Err(error) = outcome else {
+            anyhow::bail!("un script en échec doit échouer");
+        };
+        assert!(error.message.contains("en échec"), "{}", error.message);
+        assert!(!error.message.contains("JSON"), "{}", error.message);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_successful_script_with_invalid_json_still_fails_on_the_json() -> anyhow::Result<()> {
+        let outcome = run_sh("cat >/dev/null\necho 'pas du json'").await?;
+        let Err(error) = outcome else {
+            anyhow::bail!("une sortie illisible doit échouer");
+        };
+        assert!(error.message.contains("JSON"), "{}", error.message);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_background_child_holding_the_pipes_does_not_delay_the_result() -> anyhow::Result<()>
+    {
+        // Le descendant garde stdout et stderr ouverts bien après la fin du script.
+        const BACKGROUND_SECONDS: u64 = 6;
+        const LIMIT: Duration = Duration::from_secs(5);
+        let code = format!(
+            "cat >/dev/null\nsleep {BACKGROUND_SECONDS} &\nprintf '{{\"status\":\"ok\",\"message\":\"fini\"}}'"
+        );
+        let outcome = tokio::time::timeout(LIMIT, run_sh(&code)).await??;
+        match outcome {
+            Ok(ScriptStepOutcome::Succeeded { message, .. }) => {
+                assert_eq!(message.as_deref(), Some("fini"));
+            }
+            _ => anyhow::bail!("le script a réussi malgré son descendant"),
+        }
+        Ok(())
     }
 
     #[tokio::test]

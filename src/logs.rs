@@ -353,6 +353,7 @@ mod tests {
             config_dir: dir.path().to_path_buf(),
             tools_cache_dir: dir.path().join("tools"),
             plugins_dir: None,
+            detected_plugins_dir: None,
             static_dir: "frontend/dist".into(),
             max_file_bytes: 2048,
             local_worker: false,

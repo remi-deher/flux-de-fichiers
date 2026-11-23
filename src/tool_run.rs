@@ -276,11 +276,21 @@ pub(crate) async fn read_bounded_bytes<R: AsyncRead + Unpin>(
     reader: R,
 ) -> std::io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
+    read_bounded_into(reader, &mut bytes).await?;
+    Ok(bytes)
+}
+
+/// Lit jusqu'à la borne dans `bytes`. Abandonnée avant la fin, la lecture laisse dans `bytes` ce
+/// qui a déjà été reçu.
+pub(crate) async fn read_bounded_into<R: AsyncRead + Unpin>(
+    reader: R,
+    bytes: &mut Vec<u8>,
+) -> std::io::Result<()> {
     reader
         .take((MAX_STDOUT_CAPTURE_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .await?;
-    Ok(bytes)
+        .read_to_end(bytes)
+        .await
+        .map(|_| ())
 }
 
 async fn spawn_tool(

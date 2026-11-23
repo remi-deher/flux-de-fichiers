@@ -18,7 +18,7 @@ pub async fn list_blocks(
     State(s): State<AppState>,
     _auth: ViewFlowsAuth,
 ) -> AppResult<Json<Vec<OwnedBlockSpec>>> {
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     Ok(Json(s.catalog_cache.blocks(&roots).await))
 }
 
@@ -113,7 +113,9 @@ pub async fn save_flow(
         payload.definition =
             crate::flows::seal_definition(&secrets, &id, &payload.definition, existing.as_deref())?;
     }
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    // Ce que le flux utilise ne peut être ni repris ni retiré entre le contrôle et l'enregistrement.
+    let _installations = plugins::share_installations().await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     let registry = s.catalog_cache.operations(&roots).await;
     if let Ok(graph) =
         serde_json::from_str::<forgearr_shared::flows::FlowGraph>(&payload.definition)
@@ -228,7 +230,7 @@ pub async fn validate_flow(
     };
     let graph: forgearr_shared::flows::FlowGraph =
         serde_json::from_str(&raw).map_err(|_| AppError::Invalid)?;
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     let blocks = s.catalog_cache.blocks(&roots).await;
 
     let mut errors = Vec::new();
@@ -304,7 +306,7 @@ pub async fn node_variables(
     _auth: ViewFlowsAuth,
     Json(payload): Json<forgearr_shared::flows::node_references::NodeVariablesRequest>,
 ) -> AppResult<Json<forgearr_shared::flows::node_references::NodeVariablesView>> {
-    let roots = plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     let registry = s.catalog_cache.operations(&roots).await;
     Ok(Json(crate::flows::node_variables_view(&payload, &registry)))
 }
@@ -328,6 +330,7 @@ pub async fn restore_version(
         .unwrap_or(frozen.definition),
         is_default: frozen.is_default,
     };
+    let _installations = plugins::share_installations().await;
     let mut restored = repository::save_flow(&s.pool, &id, &req).await?;
     restored.definition = crate::flows::mask_definition(&restored.definition);
     Ok(Json(restored))

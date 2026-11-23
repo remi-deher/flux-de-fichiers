@@ -29,6 +29,7 @@ async fn app() -> anyhow::Result<(axum::Router, tempfile::TempDir)> {
         config_dir: dir.path().to_path_buf(),
         tools_cache_dir: "var/tools-cache".into(),
         plugins_dir: None,
+        detected_plugins_dir: None,
         static_dir: "frontend/dist".into(),
         max_file_bytes: 1024,
         local_worker: false,

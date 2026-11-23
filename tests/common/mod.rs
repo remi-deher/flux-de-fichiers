@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 pub mod leases;
+pub mod store;
 
 use forgearr::api_keys::install_known_key;
 use forgearr_shared::Role;
@@ -24,6 +25,12 @@ pub fn static_dir_with_page() -> anyhow::Result<tempfile::TempDir> {
         dir.path().join("forgearr.svg"),
     )?;
     Ok(dir)
+}
+
+/// Reprise des dépôts finie (ADR 0029) : le moteur ne lit plus que l'installé.
+pub async fn mark_store_migrated(pool: &SqlitePool) -> anyhow::Result<()> {
+    forgearr::repository::set_pending_store_repositories(pool, &[]).await?;
+    Ok(())
 }
 
 /// Installe une clé administrateur et une clé worker de valeur connue.

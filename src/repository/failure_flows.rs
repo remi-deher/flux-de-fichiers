@@ -7,7 +7,10 @@
 //! redémarrage ou avec plusieurs exécuteurs. Un worker qui exécute lui-même le flux d'échec obtient
 //! d'abord l'accord du central, qui pose `done` sous son bail (ADR 0027).
 
-use super::leases::LeaseKey;
+use super::{
+    flow_usage::{TaskFlow, failure_not_held_sql, held_json},
+    leases::LeaseKey,
+};
 use crate::{
     domain::{Claim, Job, JobStatus, JobStepEntry, JobStepStatus},
     error::{AppError, AppResult},
@@ -79,15 +82,26 @@ pub async fn failure_flow_state(
 /// Prend en charge la plus ancienne tâche en attente : elle passe à `done` dans la même requête,
 /// puis la tâche est relue avec le contexte nécessaire à l'exécution de son flux d'échec.
 pub async fn take_pending_failure_flow(pool: &SqlitePool) -> AppResult<Option<(Job, Claim)>> {
-    let taken: Option<(Uuid, i64)> = sqlx::query_as(
+    take_failure_flow_except(pool, &[]).await
+}
+
+/// [`take_pending_failure_flow`], sauf ceux qui se servent d'une version retenue : ils restent en attente.
+pub async fn take_failure_flow_except(
+    pool: &SqlitePool,
+    held: &[TaskFlow],
+) -> AppResult<Option<(Job, Claim)>> {
+    let taken: Option<(Uuid, i64)> = sqlx::query_as(&format!(
         "UPDATE jobs SET failure_flow_state=?1 \
-         WHERE id=(SELECT id FROM jobs WHERE failure_flow_state=?2 AND status=?3 ORDER BY updated_at, id LIMIT 1) \
+         WHERE id=(SELECT id FROM jobs WHERE failure_flow_state=?2 AND status=?3 AND {not_held} \
+                   ORDER BY updated_at, id LIMIT 1) \
            AND failure_flow_state=?2 \
          RETURNING id, lease_epoch",
-    )
+        not_held = failure_not_held_sql("?4"),
+    ))
     .bind(FailureFlowState::Done.as_str())
     .bind(FailureFlowState::Pending.as_str())
     .bind(JobStatus::Failed)
+    .bind(held_json(held)?)
     .fetch_optional(pool)
     .await?;
     let Some((id, epoch)) = taken else {
@@ -109,6 +123,23 @@ pub async fn take_pending_failure_flow(pool: &SqlitePool) -> AppResult<Option<(J
             Err(error)
         }
     }
+}
+
+/// Rend un flux d'échec pris en charge mais pas exécuté, pour un motif passager : il reste à exécuter. `false` :
+/// la tâche a été relancée depuis.
+pub async fn give_back_failure_flow(pool: &SqlitePool, (job, epoch): LeaseKey) -> AppResult<bool> {
+    let given_back = sqlx::query(
+        "UPDATE jobs SET failure_flow_state=?3 \
+         WHERE id=?1 AND lease_epoch=?2 AND status=?4 AND failure_flow_state=?5",
+    )
+    .bind(job)
+    .bind(epoch)
+    .bind(FailureFlowState::Pending.as_str())
+    .bind(JobStatus::Failed)
+    .bind(FailureFlowState::Done.as_str())
+    .execute(pool)
+    .await?;
+    Ok(given_back.rows_affected() > 0)
 }
 
 /// Rang de la première étape ajoutée par [`append_job_steps`] (numérotée après le journal).

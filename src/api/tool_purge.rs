@@ -19,14 +19,24 @@ pub(super) async fn prune_before(state: &AppState, deadline: Instant) {
     }
 }
 
-/// Purge le cache du central, sauf si une tâche du worker intégré peut encore y prendre ses outils.
-/// Rend `false` si la purge est reportée.
+/// Purge le cache du central, sauf si une tâche du worker intégré peut encore y prendre ses outils, ou si
+/// les éléments installés ne disent pas encore lesquels servent. Rend `false` si la purge est reportée.
 async fn prune(state: &AppState) -> bool {
-    let roots = plugins::catalog_roots(&state.pool, &state.config).await;
+    let engine = match plugins::engine_sources(&state.pool, &state.config).await {
+        Ok(engine) => engine,
+        Err(error) => {
+            tracing::warn!(%error, "purge des outils reportée : catalogue illisible");
+            return false;
+        }
+    };
+    if !engine.is_complete() {
+        tracing::debug!("pas de purge des outils : éléments installés à reprendre ou à réparer");
+        return true;
+    }
     let cache = state.tool_cache();
     let keep: Vec<(String, String)> = state
         .catalog_cache
-        .tools_status(&roots, &cache)
+        .tools_status(&engine.roots, &cache)
         .await
         .into_iter()
         .map(|tool| (tool.id, tool.version))
@@ -79,10 +89,6 @@ mod tests {
             std::fs::create_dir_all(tools.join(version))?;
         }
 
-        // Aucun catalogue lisible : rien ne dit quels outils servent encore.
-        assert!(prune(&state).await);
-        assert!(tools.join(STALE).is_dir());
-
         let catalog = dir.path().join("catalogue");
         std::fs::create_dir_all(&catalog)?;
         std::fs::write(
@@ -91,7 +97,17 @@ mod tests {
                 {"id":"demo","type":"app","version":"2.0.0","name":"Démo","manifestPath":"apps/demo/manifest.json"}
             ]}"#,
         )?;
+        let empty = state.clone();
         let state = with_catalog(state, &catalog);
+
+        // Reprise des dépôts en cours : d'autres outils peuvent servir.
+        assert!(prune(&state).await);
+        assert!(tools.join(STALE).is_dir());
+        repository::set_pending_store_repositories(&state.pool, &[]).await?;
+
+        // Aucun catalogue lisible : rien ne dit quels outils servent encore.
+        assert!(prune(&empty).await);
+        assert!(tools.join(STALE).is_dir());
 
         // Le titulaire du bail en cours devient le worker intégré.
         repository::set_serves_central(&state.pool, lease.worker_id, true).await?;

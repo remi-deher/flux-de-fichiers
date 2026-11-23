@@ -65,8 +65,8 @@ central, puis l'interface du worker : saisissez l'adresse du central et approuve
 Mot de passe oublié par courriel (ADR 0015) : `SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS` (`starttls`, `tls`
 ou `none`), `SMTP_USERNAME`, `SMTP_FROM` et `SMTP_PASSWORD` (ou `SMTP_PASSWORD_FILE`), avec `WEB_ORIGIN`
 pour bâtir le lien. Sans eux, seule la ligne de commande `reset-password` reste.
-Plugins : `PLUGINS_DIR` (dossier de catalogue local de développement, prioritaire) et
-`PLUGIN_ALLOW_PRIVATE_HOSTS=1` pour autoriser un dépôt sur un réseau privé.
+Plugins : `PLUGINS_DIR` (dossier de catalogue lu directement par le moteur, prioritaire ; vide, aucun dossier
+voisin n'est cherché) et `PLUGIN_ALLOW_PRIVATE_HOSTS=1` pour autoriser un dépôt sur un réseau privé.
 
 ## Bibliothèques sur plusieurs hôtes
 

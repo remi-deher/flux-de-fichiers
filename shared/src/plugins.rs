@@ -1,5 +1,6 @@
 //! Contrat des plugins : catalogue, dépôts, outils distribués et réglages (ADR 0014).
 
+pub mod store;
 pub mod subcategory;
 pub mod vocab;
 

@@ -34,6 +34,7 @@ async fn file_pool(dir: &Path) -> anyhow::Result<SqlitePool> {
         config_dir: dir.join("config"),
         tools_cache_dir: dir.join("tools"),
         plugins_dir: None,
+        detected_plugins_dir: None,
         static_dir: dir.join("static"),
         max_file_bytes: MAX_BYTES,
         local_worker: false,

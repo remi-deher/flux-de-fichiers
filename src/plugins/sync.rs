@@ -5,9 +5,10 @@ use super::{
     CatalogItemType, PluginRepository,
     declared_files::{collect_declared, declared_files},
     icon::check_svg_icon,
+    install::DISTRIBUTION_FILE_NAME,
     parse_index_tolerant,
     repository_copy::{COPY_LOCK, publish},
-    sources::owns_copy,
+    sources::{INDEX_RELATIVE_PATH, owns_copy},
 };
 use crate::{
     error::AppError,
@@ -23,14 +24,12 @@ use std::{
 };
 use subtle::ConstantTimeEq;
 
-const INDEX_RELATIVE_PATH: &str = "index.json";
-const DISTRIBUTION_FILE_NAME: &str = "distribution.v1.json";
 /// Variable d'environnement qui autorise les adresses privées (réseaux de laboratoire, tests).
 pub const ALLOW_PRIVATE_HOSTS_ENV: &str = net_policy::ALLOW_PRIVATE_HOSTS_ENV;
 /// Variable d'environnement imposant des releases immuables (URL figée, `releaseVersion` et SHA-256 complets).
 pub const REQUIRE_IMMUTABLE_RELEASES_ENV: &str = "PLUGIN_REQUIRE_IMMUTABLE_RELEASES";
 const SYNC_TIMEOUT: Duration = Duration::from_secs(15);
-const MAX_FILE_BYTES: usize = 1024 * 1024;
+pub(super) const MAX_FILE_BYTES: usize = 1024 * 1024;
 pub(super) const MAX_FILES: usize = 500;
 const FETCH_CONCURRENCY: usize = 8;
 
@@ -112,6 +111,9 @@ pub struct SyncReport {
     pub release_version: Option<String>,
     #[serde(default)]
     pub index_sha256: String,
+    /// Fichiers que le serveur a refusés (401, 403) sans dire qu'ils n'existent pas.
+    #[serde(skip)]
+    pub withheld: Vec<String>,
 }
 
 /// Indique si une URL pointe vers une branche Git mouvante (`dev`, `main`, `master`, `refs/heads/`).
@@ -522,6 +524,15 @@ fn collect_icons(
     Ok(())
 }
 
+/// Fichiers refusés par le serveur pour une autre raison que leur absence : une autre synchronisation peut les
+/// apporter.
+fn withheld_paths<T>(fetched: &[Fetched<T>]) -> impl Iterator<Item = String> {
+    fetched
+        .iter()
+        .filter(|(_, result)| matches!(result, Err(SyncError::Http { .. })))
+        .map(|(path, _)| path.clone())
+}
+
 struct PreparedSync {
     files: Vec<(String, Vec<u8>)>,
     report: SyncReport,
@@ -578,6 +589,7 @@ async fn prepare_sync(
     already_queued.insert(INDEX_RELATIVE_PATH.to_owned());
 
     let fetched = fetch_text_batch(&client, &base, wanted).await;
+    let mut withheld: Vec<String> = withheld_paths(&fetched).collect();
     let mut files: Vec<(String, String)> = vec![(INDEX_RELATIVE_PATH.to_owned(), index_text)];
     let mut manifest_docs: Vec<(String, String)> = Vec::new();
     collect_fetched_json(
@@ -593,6 +605,7 @@ async fn prepare_sync(
     already_queued.extend(extra.iter().cloned());
     if !extra.is_empty() {
         let extra_fetched = fetch_text_batch(&client, &base, extra).await;
+        withheld.extend(withheld_paths(&extra_fetched));
         collect_fetched_json(
             extra_fetched,
             &expected_sha256,
@@ -621,6 +634,7 @@ async fn prepare_sync(
     let room = MAX_FILES.saturating_sub(files.len());
     let declared = declared_files(&already_queued, &manifest_docs, room, &mut skipped);
     let declared_fetched = fetch_batch(&client, &base, declared.keys().cloned().collect()).await;
+    withheld.extend(withheld_paths(&declared_fetched));
     let declared_content = collect_declared(
         declared_fetched,
         &declared,
@@ -649,6 +663,7 @@ async fn prepare_sync(
         warnings,
         release_version,
         index_sha256,
+        withheld,
     };
     Ok(PreparedSync { files, report })
 }
@@ -740,6 +755,8 @@ fn collect_fetched_json(
                     skipped.push(format!("{relative} : introuvable"));
                 }
             }
+            // Panne passagère : la copie précédente reste, sans quoi un fichier y semblerait retiré.
+            Err(error) if error.is_transient() => return Err(error),
             Err(error) => skipped.push(format!("{relative} : {error}")),
         }
     }
@@ -1405,6 +1422,48 @@ mod tests {
 
     fn failed(path: &str) -> Fetched<String> {
         (path.to_owned(), Err(SyncError::Network("coupé".into())))
+    }
+
+    #[test]
+    fn a_passing_failure_of_a_declared_document_refuses_the_whole_copy() -> anyhow::Result<()> {
+        let path = "plugins/a/manifest.json";
+        let mut files = Vec::new();
+        let mut manifests = Vec::new();
+        let mut skipped = Vec::new();
+        let mut collect = |fetched: Fetched<String>| {
+            collect_fetched_json(
+                vec![fetched],
+                &HashMap::new(),
+                false,
+                &mut files,
+                &mut manifests,
+                &mut skipped,
+            )
+        };
+        assert!(matches!(collect(failed(path)), Err(SyncError::Network(_))));
+        // Un document vraiment absent est seulement signalé.
+        collect(fetched(path, None))?;
+        assert!(files.is_empty() && manifests.is_empty());
+        assert_eq!(skipped.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn only_a_refusal_that_may_pass_is_withheld() {
+        let refused =
+            |path: &str, error: SyncError| -> Fetched<String> { (path.to_owned(), Err(error)) };
+        let http = SyncError::Http {
+            status: StatusCode::FORBIDDEN.as_u16(),
+            url: String::new(),
+        };
+        let fetched = [
+            refused("interdit.json", http),
+            refused("gros.json", SyncError::TooLarge(String::new())),
+            ("absent.json".to_owned(), Ok(None)),
+            ("là.json".to_owned(), Ok(Some("{}".to_owned()))),
+        ];
+        let withheld: Vec<String> = withheld_paths(&fetched).collect();
+        assert_eq!(withheld, ["interdit.json"]);
     }
 
     #[test]

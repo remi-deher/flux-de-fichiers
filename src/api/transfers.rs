@@ -140,18 +140,30 @@ pub async fn delete_output(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn validate_staged_output(
+/// Sondes qui contrôlent un résultat, et versions de leurs outils.
+#[derive(Default)]
+pub(crate) struct OutputProbes {
+    registry: crate::flows::OperationRegistry,
+    versions: std::collections::HashMap<String, String>,
+}
+
+/// Sondes de ce résultat ; aucune si son contrôle n'en demande pas. `PublicationPending` tant qu'un élément
+/// installé à réparer peut porter celle qui manque (ADR 0029) : le titulaire garde son résultat.
+pub(crate) async fn output_probes(
     s: &AppState,
     spec: &media::OutputSpec,
-    source: &std::path::Path,
     staging: &std::path::Path,
-) -> anyhow::Result<()> {
-    if spec.post_validate.mode == media::PostValidateMode::None {
-        return Ok(());
+) -> AppResult<OutputProbes> {
+    if !spec.post_validate.mode.uses_probes() {
+        return Ok(OutputProbes::default());
     }
-    let roots = crate::plugins::catalog_roots(&s.pool, &s.config).await;
-    let registry = s.catalog_cache.operations(&roots).await;
-    let cache_mgr = s.tool_cache();
+    let engine = crate::plugins::engine_sources(&s.pool, &s.config).await?;
+    let roots = &engine.roots;
+    if let Some(item) = crate::plugins::unreadable_item(&engine, &s.catalog_cache, &[]).await {
+        tracing::error!(%item, staging = %staging.display(), "résultat pas encore contrôlé : élément installé à réparer");
+        return Err(AppError::PublicationPending);
+    }
+    let registry = s.catalog_cache.operations(roots).await;
     let mut versions = std::collections::HashMap::new();
     for probe in registry.all_probes() {
         if let crate::flows::OperationRuntime::Binary(bin) = &probe.runtime
@@ -159,14 +171,25 @@ async fn validate_staged_output(
         {
             versions.insert(
                 tool.id.clone(),
-                s.catalog_cache.resolve_tool_version(&roots, &tool.id).await,
+                s.catalog_cache.resolve_tool_version(roots, &tool.id).await,
             );
         }
     }
+    Ok(OutputProbes { registry, versions })
+}
+
+async fn validate_staged_output(
+    s: &AppState,
+    probes: &OutputProbes,
+    spec: &media::OutputSpec,
+    source: &std::path::Path,
+    staging: &std::path::Path,
+) -> anyhow::Result<()> {
+    let cache_mgr = s.tool_cache();
     crate::flows::binary_runner::post_validate_output(
-        &registry,
+        &probes.registry,
         &cache_mgr,
-        &versions,
+        &probes.versions,
         &spec.post_validate,
         None,
         source,
@@ -198,7 +221,9 @@ pub(crate) async fn publish_staged(
             s.config.max_file_bytes,
         )
         .await?;
-        validate_staged_output(s, spec, source, staging)
+        // Une panne du central n'est pas un résultat refusé.
+        let probes = output_probes(s, spec, staging).await?;
+        validate_staged_output(s, &probes, spec, source, staging)
             .await
             .map_err(|_| AppError::Invalid)?;
     }

@@ -102,6 +102,20 @@ pub struct OperationContract {
     pub exposes: Option<ExposedVariables>,
 }
 
+impl OperationContract {
+    /// Outils que l'opération lance ou place dans le `PATH`.
+    pub fn tool_refs(&self) -> impl Iterator<Item = &ToolRef> {
+        let (tool, path_tools) = match &self.runtime {
+            OperationRuntime::Binary(bin) => (bin.tool.as_ref(), bin.path_tools.as_slice()),
+            OperationRuntime::Script(script) => {
+                (script.tool.as_ref(), script.path_tools.as_slice())
+            }
+            OperationRuntime::Primitive(_) | OperationRuntime::Http(_) => (None, &[][..]),
+        };
+        tool.into_iter().chain(path_tools)
+    }
+}
+
 /// Définition d'exécution selon la nature (`primitive`, `binary`, `http`, `script`).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[allow(clippy::large_enum_variant)]
@@ -544,12 +558,23 @@ fn resolve_script_entrypoint(manifest_dir: &Path, raw: &mut Value) {
     }
 }
 
+/// Script de la librairie désigné par le nœud.
+pub fn library_script_id(node: &FlowNode) -> Option<&str> {
+    node.config
+        .get("scriptId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+}
+
 /// Registre en mémoire des contrats d'opérations et de la table bloc/alias → `operationId`.
 #[derive(Clone, Debug, Default)]
 pub struct OperationRegistry {
     operations: HashMap<String, OperationContract>,
     raw_operations: HashMap<String, Value>,
     block_operations: HashMap<String, String>,
+    /// Plugin ou script dont le dossier porte chaque opération : `providerId` n'est qu'une déclaration.
+    owners: HashMap<String, String>,
 }
 
 impl OperationRegistry {
@@ -565,6 +590,7 @@ impl OperationRegistry {
             operations: HashMap::new(),
             raw_operations: HashMap::new(),
             block_operations,
+            owners: HashMap::new(),
         };
         for (_, raw) in operations {
             let _ = registry.register_json(raw);
@@ -600,7 +626,12 @@ impl OperationRegistry {
                 };
                 if let Ok(mut value) = serde_json::from_str::<Value>(&text) {
                     resolve_script_entrypoint(&manifest_dir, &mut value);
-                    let _ = registry.register_json(value);
+                    let operation_id = value.get("id").and_then(Value::as_str).map(str::to_owned);
+                    if registry.register_json(value).is_ok()
+                        && let Some(operation_id) = operation_id
+                    {
+                        registry.owners.insert(operation_id, entry.id.clone());
+                    }
                 }
             }
         }
@@ -735,6 +766,16 @@ impl OperationRegistry {
         self.operations.get(operation_id)
     }
 
+    /// Toutes les opérations, sans ordre.
+    pub fn operations(&self) -> impl Iterator<Item = &OperationContract> {
+        self.operations.values()
+    }
+
+    /// Plugin ou script qui porte l'opération ; `None` pour un registre reçu dans un bail.
+    pub fn owner_of(&self, operation_id: &str) -> Option<&str> {
+        self.owners.get(operation_id).map(String::as_str)
+    }
+
     pub fn operation_id_for_kind(&self, kind: &str) -> Option<&str> {
         self.block_operations
             .get(kind)
@@ -754,6 +795,11 @@ impl OperationRegistry {
     pub fn resolve_node_operation(&self, node: &FlowNode) -> Option<&OperationContract> {
         let op_id = self.operation_id_for_node(node)?;
         self.operations.get(op_id)
+    }
+
+    /// Opération du script de la librairie que le nœud désigne (`scriptId`).
+    pub fn library_script_operation(&self, node: &FlowNode) -> Option<&OperationContract> {
+        self.get(&format!("operation.{}", library_script_id(node)?))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -843,6 +889,19 @@ impl OperationRegistry {
             .collect()
     }
 
+    /// L'opération peut-elle sonder les sources d'une tâche ?
+    pub fn is_primary_probe(op: &OperationContract) -> bool {
+        matches!(
+            &op.runtime,
+            OperationRuntime::Binary(bin) if bin.execution_mode == BinaryExecutionMode::ProbePrimary
+        )
+    }
+
+    /// L'opération peut-elle traiter une tâche sans flux ?
+    pub fn is_default_operation(op: &OperationContract) -> bool {
+        matches!(&op.runtime, OperationRuntime::Binary(bin) if bin.default_fallback)
+    }
+
     /// L'opération est-elle une sonde, exécutée avant tout nœud du flux ?
     pub fn is_probe(op: &OperationContract) -> bool {
         matches!(
@@ -859,16 +918,7 @@ impl OperationRegistry {
         let mut matches: Vec<&OperationContract> = self
             .operations
             .values()
-            .filter(|op| {
-                matches!(
-                    &op.runtime,
-                    OperationRuntime::Binary(bin)
-                        if matches!(
-                            bin.execution_mode,
-                            BinaryExecutionMode::ProbePrimary | BinaryExecutionMode::ProbeEnrich
-                        )
-                )
-            })
+            .filter(|op| Self::is_probe(op))
             .collect();
         matches.sort_by(|a, b| a.id.cmp(&b.id));
         matches
@@ -878,12 +928,7 @@ impl OperationRegistry {
         let mut matches: Vec<&OperationContract> = self
             .operations
             .values()
-            .filter(|op| {
-                matches!(
-                    &op.runtime,
-                    OperationRuntime::Binary(bin) if bin.default_fallback
-                )
-            })
+            .filter(|op| Self::is_default_operation(op))
             .collect();
         matches.sort_by(|a, b| a.id.cmp(&b.id));
         matches.into_iter().next()
@@ -893,14 +938,7 @@ impl OperationRegistry {
         let mut seen = HashSet::new();
         let mut tools = Vec::new();
         let mut push_op_tool = |op: &OperationContract| {
-            let (tool, path_tools) = match &op.runtime {
-                OperationRuntime::Binary(bin) => (bin.tool.as_ref(), bin.path_tools.as_slice()),
-                OperationRuntime::Script(script) => {
-                    (script.tool.as_ref(), script.path_tools.as_slice())
-                }
-                OperationRuntime::Primitive(_) | OperationRuntime::Http(_) => (None, &[][..]),
-            };
-            for tool in tool.into_iter().chain(path_tools) {
+            for tool in op.tool_refs() {
                 if seen.insert(tool.id.clone()) {
                     tools.push(tool.clone());
                 }
@@ -914,6 +952,9 @@ impl OperationRegistry {
             Some(graph) => {
                 for node in &graph.nodes {
                     if let Some(op) = self.resolve_node_operation(node) {
+                        push_op_tool(op);
+                    }
+                    if let Some(op) = self.library_script_operation(node) {
                         push_op_tool(op);
                     }
                 }
@@ -980,9 +1021,7 @@ impl OperationRegistry {
                     blocks.insert(node.kind.as_str().to_owned(), op.id.clone());
                     insert_op(op);
                 }
-                if let Some(script_id) = node.config.get("scriptId").and_then(Value::as_str)
-                    && let Some(target_op) = self.get(&format!("operation.{script_id}"))
-                {
+                if let Some(target_op) = self.library_script_operation(node) {
                     insert_op(target_op);
                 }
             }

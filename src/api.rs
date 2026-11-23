@@ -775,32 +775,39 @@ async fn register(
     }
     Ok(axum::Json(worker))
 }
-/// Enrichit un bail (`Claim`) avec les contrats d'opérations, outils requis et réglages nécessaires.
+/// Enrichit un bail (`Claim`) avec les contrats d'opérations, outils requis et réglages nécessaires, et rend
+/// les dossiers de catalogue dont ils viennent.
 pub(crate) async fn populate_claim_contracts(
     pool: &sqlx::SqlitePool,
     config: &Config,
     catalog_cache: &crate::plugins::CatalogCache,
     worker_id: uuid::Uuid,
     claim: &mut Claim,
-) -> AppResult<()> {
-    let roots = crate::plugins::catalog_roots(pool, config).await;
-    let catalog = crate::plugins::list_catalog(&roots);
-    let registry = catalog_cache.operations(&roots).await;
+) -> AppResult<Vec<std::path::PathBuf>> {
+    let engine = crate::plugins::engine_sources(pool, config).await?;
+    let roots = &engine.roots;
+    let registry = catalog_cache.operations(roots).await;
     if let Some(probe_op) =
         registry.primary_probe_for_file(std::path::Path::new(claim.working_source_name()))
     {
         if let crate::flows::OperationRuntime::Binary(bin) = &probe_op.runtime
             && let Some(tool) = &bin.tool
         {
-            let version = catalog_cache.resolve_tool_version(&roots, &tool.id).await;
+            let version = catalog_cache.resolve_tool_version(roots, &tool.id).await;
             claim.probe_tool_id = Some(tool.id.clone());
             claim.probe_version = Some(version);
         }
-    } else if registry.all_probes().is_empty()
-        && let Some(probe) = crate::plugins::required_probe(&catalog)
-    {
-        claim.probe_tool_id = Some(probe.tool_id);
-        claim.probe_version = Some(probe.version);
+    } else if registry.all_probes().is_empty() {
+        let entries: Vec<_> = catalog_cache
+            .entries(roots)
+            .await
+            .into_iter()
+            .map(|(_, entry)| entry)
+            .collect();
+        if let Some(probe) = crate::plugins::required_probe(&entries) {
+            claim.probe_tool_id = Some(probe.tool_id);
+            claim.probe_version = Some(probe.version);
+        }
     }
     // Flux principal (ou opération par défaut) puis flux liés figés (ADR 0026).
     let claim_flows: Vec<Option<FlowRecord>> = std::iter::once(claim.frozen_flow.clone())
@@ -811,6 +818,7 @@ pub(crate) async fn populate_claim_contracts(
                 .map(|linked| Some(linked.flow.clone())),
         )
         .collect();
+    ensure_readable_items(&engine, catalog_cache, &claim_flows).await?;
     let mut tool_refs: Vec<crate::flows::ToolRef> = Vec::new();
     for flow in &claim_flows {
         for tool in registry.required_tool_refs_for_flow(flow.as_ref()) {
@@ -821,7 +829,7 @@ pub(crate) async fn populate_claim_contracts(
     }
     let mut required_tools = Vec::with_capacity(tool_refs.len());
     for tool in tool_refs {
-        let version = catalog_cache.resolve_tool_version(&roots, &tool.id).await;
+        let version = catalog_cache.resolve_tool_version(roots, &tool.id).await;
         required_tools.push(ToolRequirement {
             tool_id: tool.id,
             version,
@@ -866,7 +874,44 @@ pub(crate) async fn populate_claim_contracts(
         }
         claim.media_root = Some(media_root);
     }
-    Ok(())
+    Ok(engine.roots)
+}
+
+/// Refuse une tâche qui dépend d'un élément installé dont la copie figée est illisible : son bail est rendu
+/// au lieu de la faire échouer (ADR 0029). Filet : [`claim_ready`] laisse ces tâches en file.
+async fn ensure_readable_items(
+    engine: &crate::plugins::EngineSources,
+    catalog_cache: &crate::plugins::CatalogCache,
+    flows: &[Option<FlowRecord>],
+) -> AppResult<()> {
+    if engine.damaged.is_empty() {
+        return Ok(());
+    }
+    let graphs: Vec<_> = flows
+        .iter()
+        .map(|flow| {
+            flow.as_ref()
+                .map(|flow| forgearr_shared::flows::FlowGraph::parse(&flow.definition))
+        })
+        .collect();
+    match crate::plugins::unreadable_item(engine, catalog_cache, &graphs).await {
+        Some(item) => {
+            tracing::error!(%item, "tâche non remise : élément installé à réparer");
+            Err(crate::error::AppError::CentralUnavailable)
+        }
+        None => Ok(()),
+    }
+}
+
+/// Réserve la prochaine tâche du worker dont les éléments installés sont lisibles ; les autres attendent en
+/// file leur réparation, sans y perdre de tentative (ADR 0029).
+pub(crate) async fn claim_ready(
+    s: &AppState,
+    worker_id: uuid::Uuid,
+    protocol: LeaseProtocol,
+) -> AppResult<Option<Claim>> {
+    let held = crate::plugins::held_flows(&s.pool, &s.config, &s.catalog_cache).await?;
+    repository::claim_except(&s.pool, worker_id, protocol, &held).await
 }
 
 async fn claim(
@@ -893,7 +938,7 @@ async fn claim(
         let changes = repository::end_disowned_leases(&s.pool, r.worker_id, active_jobs).await?;
         leases::notify_lease_changes(&s, &changes);
     }
-    let mut claim_res = repository::claim_with_protocol(&s.pool, r.worker_id, protocol).await?;
+    let mut claim_res = claim_ready(&s, r.worker_id, protocol).await?;
     if let Some(ref mut claim) = claim_res {
         if let Err(error) = prepare_claim(&s, &h, r.worker_id, claim).await {
             return Err(undeliverable_claim(&s, r.worker_id, claim, error).await);
@@ -959,6 +1004,7 @@ async fn plugin_sync_loop(state: AppState) {
         crate::plugins::sync_enabled_repositories(&state.pool, &state.config, &state.catalog_cache)
             .await;
         state.catalog_cache.invalidate().await;
+        sweep_installed_items(&state).await;
         let next_sync = tokio::time::Instant::now() + PLUGIN_SYNC_INTERVAL;
         tool_purge::prune_before(&state, next_sync).await;
         tokio::time::sleep_until(next_sync).await;
@@ -997,8 +1043,49 @@ pub async fn connect_database(config: &Config) -> anyhow::Result<SqlitePool> {
         .connect_with(connect_options)
         .await?;
 
+    crate::database_backup::backup_before_store_migration(&pool, &config.backups_dir()).await?;
     sqlx::migrate!().run(&pool).await?;
     Ok(pool)
+}
+
+/// Démarrage : fige, depuis les copies sur disque, ce que le moteur lisait dans les dépôts (ADR 0029). Les
+/// types de blocs y sont déjà à jour. Un échec laisse le moteur lire les dépôts, jusqu'à l'essai suivant.
+async fn resume_installed_items(state: &AppState) {
+    let local_dir = crate::plugins::local_catalog_dir(&state.config);
+    match crate::plugins::migrate_legacy_block_kinds(&state.pool, &local_dir).await {
+        Ok(0) => {}
+        Ok(count) => tracing::info!(
+            count,
+            "types de blocs repris sous les identifiants du catalogue 2.0.0"
+        ),
+        Err(error) => tracing::warn!(error = %error, "reprise des types de blocs impossible"),
+    }
+    match crate::plugins::repair_local_index(&local_dir) {
+        Ok(false) => {}
+        Ok(true) => tracing::warn!("index de la collection locale régénéré"),
+        Err(error) => tracing::warn!(?error, "index de la collection locale illisible"),
+    }
+    let (pool, config, cache) = (&state.pool, &state.config, &state.catalog_cache);
+    if let Err(error) = crate::plugins::resume_store(pool, config, cache, None).await {
+        tracing::warn!(?error, "reprise des éléments installés à retenter");
+    }
+}
+
+/// Retire les restes de copies figées, une fois la reprise finie.
+async fn sweep_installed_items(state: &AppState) {
+    let lock = crate::plugins::lock_installations().await;
+    let swept = async {
+        if !repository::store_migration_is_done(&state.pool).await? {
+            return Ok(0);
+        }
+        crate::plugins::sweep_orphans(&lock, &state.pool, &state.config.installed_dir()).await
+    }
+    .await;
+    match swept {
+        Ok(0) => {}
+        Ok(count) => tracing::info!(count, "restes de copies installées effacés"),
+        Err(error) => tracing::warn!(?error, "balayage des copies installées impossible"),
+    }
 }
 
 pub async fn serve(config: Config) -> anyhow::Result<()> {
@@ -1012,6 +1099,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     let state = AppState::new(pool.clone(), Arc::new(config));
     // Avant toute lecture du catalogue par une tâche ou un flux.
     crate::plugins::recover_repository_copies(&state.pool, &state.config).await;
+    resume_installed_items(&state).await;
     // Aucun worker n'a pu joindre le central arrêté : compteurs à zéro avant toute expiration.
     repository::restart_contacts(&state.pool).await?;
     source_recovery::recover(&state).await?;
@@ -1081,15 +1169,6 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
             }
         }
         Err(error) => tracing::warn!(error = %error, "clé de chiffrement indisponible"),
-    }
-    let local_dir = crate::plugins::local_catalog_dir(&state.config);
-    match crate::plugins::migrate_legacy_block_kinds(&state.pool, &local_dir).await {
-        Ok(0) => {}
-        Ok(count) => tracing::info!(
-            count,
-            "types de blocs repris sous les identifiants du catalogue 2.0.0"
-        ),
-        Err(error) => tracing::warn!(error = %error, "reprise des types de blocs impossible"),
     }
     let plugin_sync = tokio::spawn(plugin_sync_loop(state.clone()));
     let lib_scans = tokio::spawn(library_scan_loop(state.clone()));

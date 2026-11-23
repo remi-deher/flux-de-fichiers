@@ -49,13 +49,7 @@ pub(super) fn effective_script_runtime(
     let mut effective = base.clone();
     if effective.code.is_none()
         && node.config.get("mode").and_then(Value::as_str) != Some("inline")
-        && let Some(script_id) = node
-            .config
-            .get("scriptId")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-        && let Some(target_op) = registry.get(&format!("operation.{script_id}"))
+        && let Some(target_op) = registry.library_script_operation(node)
         && let OperationRuntime::Script(target_rt) = &target_op.runtime
     {
         let fallback_tool = effective.tool.clone();

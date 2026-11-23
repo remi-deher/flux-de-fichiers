@@ -397,7 +397,7 @@ pub async fn placement(
                 )
             })
         });
-    let roots = crate::plugins::catalog_roots(&s.pool, &s.config).await;
+    let roots = crate::plugins::engine_roots(&s.pool, &s.config).await?;
     let registry = s.catalog_cache.operations(&roots).await;
     let catalog_tools_unavailable = registry
         .required_tool_refs_for_flow(flow.as_ref())

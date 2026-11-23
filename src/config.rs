@@ -5,6 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Dossiers de plugins cherchés sans `PLUGINS_DIR` : montage du conteneur, puis dépôt voisin.
+const DETECTED_PLUGIN_FOLDERS: [&str; 2] = ["/plugins", "../flux-de-fichiers-plugins"];
 const DEFAULT_BIND_ADDRESS: &str = "0.0.0.0:3000";
 const DEFAULT_WEB_SESSION_TTL_SECONDS: i64 = 28_800;
 pub const MIN_WEB_SESSION_TTL_SECONDS: i64 = 60;
@@ -18,7 +20,10 @@ pub struct Config {
     pub input_dir: PathBuf,
     pub config_dir: PathBuf,
     pub tools_cache_dir: PathBuf,
+    /// Dossier de catalogue donné par `PLUGINS_DIR`, lu par le moteur avant tout autre.
     pub plugins_dir: Option<PathBuf>,
+    /// Dossier de plugins trouvé à côté du projet : une source du Store, pas du moteur (ADR 0029).
+    pub detected_plugins_dir: Option<PathBuf>,
     pub static_dir: PathBuf,
     pub max_file_bytes: u64,
     pub local_worker: bool,
@@ -118,6 +123,27 @@ pub fn value(name: &str) -> anyhow::Result<String> {
     })
 }
 
+/// Dossier de plugins donné explicitement, sinon le premier trouvé. Une variable vide ne donne rien et
+/// arrête la recherche.
+fn plugin_folders(
+    explicit: Option<String>,
+    candidates: &[&str],
+) -> (Option<PathBuf>, Option<PathBuf>) {
+    match explicit {
+        Some(folder) => (
+            Some(PathBuf::from(folder)).filter(|folder| !folder.as_os_str().is_empty()),
+            None,
+        ),
+        None => (
+            None,
+            candidates
+                .iter()
+                .map(PathBuf::from)
+                .find(|folder| folder.is_dir()),
+        ),
+    }
+}
+
 /// Autorité privée du central (`CA_CERT`), facultative.
 pub fn central_ca() -> Option<PathBuf> {
     env::var("CA_CERT").ok().map(Into::into)
@@ -180,6 +206,16 @@ impl Config {
         self.config_dir.join("plugins")
     }
 
+    /// Copies figées des éléments installés (ADR 0029).
+    pub fn installed_dir(&self) -> PathBuf {
+        self.config_dir.join("installed")
+    }
+
+    /// Copies de la base écrites avant une migration sans retour arrière.
+    pub fn backups_dir(&self) -> PathBuf {
+        self.config_dir.join("backups")
+    }
+
     pub fn load() -> anyhow::Result<Self> {
         let config_dir = resolve_config_dir();
         std::fs::create_dir_all(&config_dir)?;
@@ -235,6 +271,8 @@ impl Config {
         };
 
         let data_dir: PathBuf = env::var("DATA_DIR").unwrap_or_else(|_| "var".into()).into();
+        let (plugins_dir, detected_plugins_dir) =
+            plugin_folders(env::var("PLUGINS_DIR").ok(), &DETECTED_PLUGIN_FOLDERS);
 
         Ok(Self {
             bind,
@@ -262,19 +300,8 @@ impl Config {
             tools_cache_dir: env::var("TOOLS_CACHE_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| data_dir.join("tools-cache")),
-            plugins_dir: env::var("PLUGINS_DIR").map(PathBuf::from).ok().or_else(|| {
-                let container_path = PathBuf::from("/plugins");
-                if container_path.is_dir() {
-                    Some(container_path)
-                } else {
-                    let dev_path = PathBuf::from("../flux-de-fichiers-plugins");
-                    if dev_path.is_dir() {
-                        Some(dev_path)
-                    } else {
-                        None
-                    }
-                }
-            }),
+            plugins_dir,
+            detected_plugins_dir,
             static_dir,
             smtp: SmtpConfig::from_env()?,
         })
@@ -314,6 +341,27 @@ mod tests {
     #[test]
     fn test_smtp_is_disabled_without_a_host() -> anyhow::Result<()> {
         assert!(smtp(&[("SMTP_FROM", "a@b.fr")], None)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn only_an_explicit_plugin_folder_feeds_the_engine() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let found = dir.path().to_string_lossy().into_owned();
+        let candidates = ["/absent/plugins", found.as_str()];
+        assert_eq!(
+            plugin_folders(Some("/donné".to_owned()), &candidates),
+            (Some(PathBuf::from("/donné")), None)
+        );
+        assert_eq!(
+            plugin_folders(None, &candidates),
+            (None, Some(dir.path().to_path_buf()))
+        );
+        assert_eq!(plugin_folders(None, &candidates[..1]), (None, None));
+        assert_eq!(
+            plugin_folders(Some(String::new()), &candidates),
+            (None, None)
+        );
         Ok(())
     }
 

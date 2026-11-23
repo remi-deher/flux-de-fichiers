@@ -204,7 +204,7 @@ async fn run_simulate_flow(
         };
     }
 
-    let roots = crate::plugins::catalog_roots(&state.pool, &state.config).await;
+    let roots = crate::plugins::engine_roots(&state.pool, &state.config).await?;
     let catalog = state.catalog_cache.blocks(&roots).await;
     let report = simulate_flow_basic(&graph, &catalog, &input);
     Ok(McpToolResult::json(&report))

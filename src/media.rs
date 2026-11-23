@@ -70,6 +70,13 @@ pub enum PostValidateMode {
     ProbePreserve,
 }
 
+impl PostValidateMode {
+    /// Le contrôle passe-t-il par une sonde du catalogue ?
+    pub const fn uses_probes(self) -> bool {
+        matches!(self, Self::ValidProbe | Self::ProbePreserve)
+    }
+}
+
 /// Spécification complète de validation post-exécution d'un fichier produit.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

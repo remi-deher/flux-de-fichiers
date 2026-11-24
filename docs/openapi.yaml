@@ -976,6 +976,44 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/highlight:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Colorer le code d'un script en cours d'édition (jetons par ligne, ADR 0030)
+      description: >-
+        Limite HTTP 1 Mio. `extension` inconnue : le code revient en texte brut. Droit requis : gérer les plugins.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, extension]
+              properties:
+                code: {type: string}
+                extension: {type: string, example: sh}
+      responses:
+        '200':
+          description: Lignes de jetons
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lines]
+                properties:
+                  lines:
+                    type: array
+                    items:
+                      type: array
+                      items:
+                        type: object
+                        required: [text]
+                        properties:
+                          text: {type: string}
+                          kind: {type: string, enum: [plain, comment, string, number, keyword, function, variable, operator]}
+        '403': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/local/resources:
     post:
       security: [{ApiKey: []}, {WebSession: []}]

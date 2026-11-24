@@ -345,6 +345,11 @@ fn json_routes() -> Router<AppState> {
                 .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
         )
         .route(
+            "/api/v1/local/scripts/trial",
+            post(local::trial_script)
+                .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
+        )
+        .route(
             "/api/v1/highlight",
             post(local::highlight)
                 .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),

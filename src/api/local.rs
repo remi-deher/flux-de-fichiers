@@ -3,7 +3,7 @@
 use super::{AnyAuth, AppState, ManagePluginsAuth, ViewLibrariesAuth, to_completion, transfers};
 use crate::{
     error::{AppError, AppResult},
-    plugins,
+    plugins, repository, script_trial,
 };
 use axum::{
     Json,
@@ -20,6 +20,7 @@ use forgearr_shared::{
         LocalScriptSummary, UploadLocalResourceRequest, UpsertLocalScriptRequest,
     },
     plugins::CatalogEntry,
+    script_trial::{ScriptTrialRequest, ScriptTrialResult},
 };
 use serde_json::{Value, json};
 
@@ -96,6 +97,27 @@ pub async fn highlight(
             .await
             .map_err(|_| AppError::Internal)?;
     Ok(Json(HighlightedCode { lines }))
+}
+
+/// Dossier, sous les données du central, où s'exécutent les essais de script du worker intégré.
+const TRIAL_DIRECTORY: &str = "script-trials";
+
+/// Exécute le code en cours d'édition sur le worker choisi (ADR 0031). Seul le worker intégré est joignable
+/// pour l'instant ; un worker distant arrive avec le sous-lot 3b.
+pub async fn trial_script(
+    State(s): State<AppState>,
+    _auth: ManagePluginsAuth,
+    Json(req): Json<ScriptTrialRequest>,
+) -> AppResult<Json<ScriptTrialResult>> {
+    let worker = repository::get_worker(&s.pool, req.worker_id).await?;
+    if !worker.is_integrated() {
+        return Err(AppError::Invalid);
+    }
+    let scratch = s.config.data_dir.join(TRIAL_DIRECTORY);
+    tokio::fs::create_dir_all(&scratch).await?;
+    // Chemin absolu : le script s'exécute dans son propre dossier, un chemin relatif n'y serait plus valable.
+    let scratch = tokio::fs::canonicalize(&scratch).await?;
+    Ok(Json(script_trial::run_script_trial(&req, &scratch).await))
 }
 
 pub async fn upload_resource(

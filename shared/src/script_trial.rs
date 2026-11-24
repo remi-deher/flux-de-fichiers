@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     fn a_relayed_trial_keeps_its_ids_and_uses_camel_case() -> Result<(), serde_json::Error> {
-        let (request_id, worker_id) = (Uuid::new_v4(), Uuid::new_v4());
+        let (request_id, worker_id) = (Uuid::from_u128(1), Uuid::from_u128(2));
         let task = WorkerScriptTrialTask {
             request_id,
             worker_id,
@@ -139,7 +139,10 @@ mod tests {
             result: ScriptTrialResult::default(),
         };
         let value = serde_json::to_value(&report)?;
-        assert_eq!(serde_json::from_value::<WorkerScriptTrialReport>(value)?, report);
+        assert_eq!(
+            serde_json::from_value::<WorkerScriptTrialReport>(value)?,
+            report
+        );
         Ok(())
     }
 

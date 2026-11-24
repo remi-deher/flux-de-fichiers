@@ -582,8 +582,10 @@ impl WorkerLoop {
         let pending = format!(
             "/api/v1/worker/script-trials/pending?worker_id={worker_id}&wait_ms={REMOTE_BROWSE_WAIT_MS}"
         );
-        self.serve_relayed(pending, move |task| self.answer_script_trial(worker_id, task))
-            .await;
+        self.serve_relayed(pending, move |task| {
+            self.answer_script_trial(worker_id, task)
+        })
+        .await;
     }
 
     async fn answer_script_trial(

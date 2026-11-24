@@ -204,9 +204,7 @@ mod tests {
         let caller = {
             let broker = broker.clone();
             let waiting = waiting.clone();
-            tokio::spawn(async move {
-                broker.call(waiting, Duration::from_secs(5)).await
-            })
+            tokio::spawn(async move { broker.call(waiting, Duration::from_secs(5)).await })
         };
         let taken = broker.take_for_worker(worker, Duration::from_secs(5)).await;
         assert_eq!(taken.len(), 1);
@@ -224,9 +222,7 @@ mod tests {
         let caller = {
             let broker = broker.clone();
             let waiting = waiting.clone();
-            tokio::spawn(async move {
-                broker.call(waiting, Duration::from_millis(300)).await
-            })
+            tokio::spawn(async move { broker.call(waiting, Duration::from_millis(300)).await })
         };
         let seen = broker.take_for_worker(stranger, Duration::ZERO).await;
         assert!(seen.is_empty());
@@ -240,7 +236,9 @@ mod tests {
         let broker = TestBroker::new();
         let worker = Uuid::new_v4();
         let waiting = ask(worker);
-        let outcome = broker.call(waiting.clone(), Duration::from_millis(50)).await;
+        let outcome = broker
+            .call(waiting.clone(), Duration::from_millis(50))
+            .await;
         assert!(matches!(outcome, Err(AppError::CentralUnavailable)));
         let seen = broker.take_for_worker(worker, Duration::ZERO).await;
         assert!(seen.is_empty());

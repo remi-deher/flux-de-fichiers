@@ -120,10 +120,16 @@ async fn an_online_remote_worker_runs_the_trial_through_the_relay() -> anyhow::R
             let (status, tasks) = send(&state, "GET", &pending, key, None).await?;
             anyhow::ensure!(status == StatusCode::OK, "attente refusée : {status}");
             let task = &tasks[0];
-            let code = task["request"]["code"].as_str().unwrap_or_default().to_owned();
+            let code = task["request"]["code"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned();
             let report = report_body(&task["requestId"], remote);
             let (status, _) = send(&state, "POST", REPORT_URI, key, Some(report)).await?;
-            anyhow::ensure!(status == StatusCode::NO_CONTENT, "rapport refusé : {status}");
+            anyhow::ensure!(
+                status == StatusCode::NO_CONTENT,
+                "rapport refusé : {status}"
+            );
             anyhow::Ok(code)
         })
     };

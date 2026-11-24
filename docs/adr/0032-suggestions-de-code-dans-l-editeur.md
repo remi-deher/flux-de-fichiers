@@ -1,6 +1,6 @@
 # 0032 — Suggestions de code dans l'éditeur de script
 
-Statut : proposé. Demande de l'utilisateur le 24 nov. 2026 : des suggestions « comme dans un vrai IDE », par intelligence de langage (LSP). À cadrer avant tout code ; complète l'ADR 0030.
+Statut : proposé ; phase (a) écrite le 24 nov. 2026 (en attente de la CI), phases (b) et (c) à venir. Demande de l'utilisateur le 24 nov. 2026 : des suggestions « comme dans un vrai IDE », par intelligence de langage (LSP). À cadrer avant tout code ; complète l'ADR 0030.
 
 ## Contexte
 
@@ -17,6 +17,10 @@ L'éditeur (ADR 0030) colore le code mais ne suggère rien. Il accepte sept inte
 ## Décision (provisoire)
 
 Phaser : (a) liste de suggestions côté client sans serveur de langage (mots-clés, mots du script, contrat Forgearr, variables déclarées), qui sert aussi de repli ; (b) session LSP relayée par le central pour bash puis Python ; (c) diagnostics et info-bulles. Aucune bibliothèque JavaScript d'éditeur.
+
+## Phase (a) écrite
+
+`client/src/libraries/suggestions.rs` (calcul pur, testé) et la liste de `code_editor.rs`. Après deux caractères, la liste propose, dans l'ordre : variables déclarées du script, champs du contrat JSON, mots-clés de l'interpréteur, mots déjà présents dans le script (huit au plus). Flèches pour choisir, Tab ou Entrée pour accepter, Échap pour fermer ; un clic accepte aussi. La liste se place sous le curseur par la ligne et la colonne (police fixe), sans mesure du DOM.
 
 ## Conséquences
 

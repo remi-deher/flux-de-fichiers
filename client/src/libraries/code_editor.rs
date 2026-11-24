@@ -3,6 +3,7 @@
 //! d'une grille, que le conteneur fait défiler d'un bloc. Les jetons viennent du central.
 
 use crate::api;
+use super::suggestions::{self, Suggestion};
 use crate::plugins::highlighted_lines;
 use forgearr_shared::highlight::{CodeToken, HighlightRequest, HighlightedCode, TokenKind};
 use leptos::prelude::*;
@@ -15,6 +16,18 @@ const HIGHLIGHT_PATH: &str = "/api/v1/highlight";
 const HIGHLIGHT_DELAY: Duration = Duration::from_millis(350);
 /// Retrait inséré par la touche Tab.
 const INDENT: &str = "  ";
+
+/// Liste de suggestions ouverte sous le curseur.
+#[derive(Clone, Debug)]
+struct SuggestionPopup {
+    items: Vec<Suggestion>,
+    selected: usize,
+    /// Début du mot tapé et position du curseur (unités UTF-16) : la plage remplacée à l'acceptation.
+    start: usize,
+    caret: usize,
+    line: usize,
+    column: usize,
+}
 
 /// Code et jetons calculés pour ce code précis.
 type Highlighted = Option<(String, Vec<Vec<CodeToken>>)>;
@@ -124,15 +137,89 @@ fn schedule_highlight(
 pub fn CodeEditor(
     code: RwSignal<String>,
     #[prop(into)] extension: Signal<&'static str>,
+    /// Noms des variables déclarées du script, proposés dans les suggestions.
+    #[prop(into)]
+    declared: Signal<Vec<String>>,
     read_only: bool,
 ) -> impl IntoView {
     let highlighted = RwSignal::new(None::<(String, Vec<Vec<CodeToken>>)>);
     schedule_highlight(code, extension, highlighted);
     // Échap libère la touche Tab une fois, pour pouvoir quitter la zone au clavier.
     let release_tab = StoredValue::new(false);
+    let area_ref = NodeRef::<leptos::html::Textarea>::new();
+    let popup = RwSignal::new(None::<SuggestionPopup>);
+
+    // Recalcule la liste d'après le mot qui précède le curseur.
+    let refresh = move |area: &HtmlTextAreaElement| {
+        let text = area.value();
+        let caret = area.selection_start().ok().flatten().unwrap_or(0) as usize;
+        let (start, prefix) = suggestions::word_before(&text, caret);
+        let items = suggestions::suggest(
+            &prefix,
+            &text,
+            extension.get_untracked(),
+            &declared.get_untracked(),
+        );
+        if items.is_empty() {
+            popup.set(None);
+            return;
+        }
+        let (line, column) = suggestions::caret_position(&text, caret);
+        popup.set(Some(SuggestionPopup {
+            items,
+            selected: 0,
+            start,
+            caret,
+            line,
+            column,
+        }));
+    };
+
+    // Remplace le mot tapé par la suggestion `index`.
+    let accept = move |index: usize| {
+        let Some(open) = popup.get_untracked() else {
+            return;
+        };
+        let (Some(item), Some(area)) = (open.items.get(index), area_ref.get_untracked()) else {
+            return;
+        };
+        let (next, caret) =
+            suggestions::replace_range(&code.get_untracked(), open.start, open.caret, &item.label);
+        area.set_value(&next);
+        let caret = u32::try_from(caret).unwrap_or(u32::MAX);
+        let _ = area.set_selection_range(caret, caret);
+        code.set(next);
+        popup.set(None);
+    };
 
     let on_keydown = move |ev: leptos::ev::KeyboardEvent| {
         let key = ev.key();
+        if let Some(open) = popup.get_untracked() {
+            let last = open.items.len().saturating_sub(1);
+            match key.as_str() {
+                "ArrowDown" | "ArrowUp" => {
+                    ev.prevent_default();
+                    let selected = if key == "ArrowDown" {
+                        (open.selected + 1).min(last)
+                    } else {
+                        open.selected.saturating_sub(1)
+                    };
+                    popup.set(Some(SuggestionPopup { selected, ..open }));
+                    return;
+                }
+                "Enter" | "Tab" => {
+                    ev.prevent_default();
+                    accept(open.selected);
+                    return;
+                }
+                "Escape" => {
+                    popup.set(None);
+                    return;
+                }
+                "ArrowLeft" | "ArrowRight" | "Home" | "End" => popup.set(None),
+                _ => {}
+            }
+        }
         if key == "Escape" {
             release_tab.set_value(true);
             return;
@@ -177,13 +264,40 @@ pub fn CodeEditor(
                     }}
                     "\n"
                 </pre>
-                <textarea id="script-code"
+                <textarea id="script-code" node_ref=area_ref
                     class="code-editor__layer code-editor__input"
                     required=true disabled=read_only spellcheck="false" wrap="off"
                     autocapitalize="off" autocomplete="off"
                     prop:value=move || code.get()
-                    on:input=move |e| code.set(event_target_value(&e))
+                    on:input=move |e| {
+                        code.set(event_target_value(&e));
+                        if let Some(area) = area_ref.get_untracked() {
+                            refresh(&area);
+                        }
+                    }
+                    on:blur=move |_| popup.set(None)
+                    on:click=move |_| popup.set(None)
                     on:keydown=on_keydown />
+                {move || popup.get().map(|open| {
+                    let selected = open.selected;
+                    view! {
+                        <ul class="code-editor__suggestions" role="listbox"
+                            style=format!("--caret-line: {}; --caret-col: {};", open.line, open.column)>
+                            {open.items.into_iter().enumerate().map(|(index, item)| view! {
+                                <li class="code-editor__suggestion" role="option"
+                                    class:is-selected=index == selected
+                                    aria-selected=(index == selected).to_string()
+                                    on:mousedown=move |ev| {
+                                        ev.prevent_default();
+                                        accept(index);
+                                    }>
+                                    <span>{item.label}</span>
+                                    <span class="code-editor__suggestion-kind">{item.kind.label()}</span>
+                                </li>
+                            }).collect_view()}
+                        </ul>
+                    }
+                })}
             </div>
         </div>
     }

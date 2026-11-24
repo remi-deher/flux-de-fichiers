@@ -2,6 +2,7 @@
 
 mod block_templates;
 mod code_editor;
+mod suggestions;
 mod draft;
 mod form;
 mod history;

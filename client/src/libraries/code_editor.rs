@@ -36,13 +36,37 @@ fn plain_lines(code: &str) -> Vec<Vec<CodeToken>> {
         .collect()
 }
 
-/// Jetons à afficher : ceux du central s'ils décrivent exactement `code`, sinon le texte brut, pour que la
-/// couche colorée ne se décale jamais du texte saisi.
+/// Jetons à afficher : ceux du central s'ils décrivent exactement `code` ; sinon les lignes inchangées depuis
+/// le dernier calcul gardent leur couleur (début et fin du texte) et seules les lignes touchées passent en
+/// texte brut. La couche colorée garde ainsi le même nombre de lignes que le texte saisi et ne se décale jamais.
 fn visible_lines(code: &str, highlighted: &Highlighted) -> Vec<Vec<CodeToken>> {
-    match highlighted {
-        Some((computed_for, lines)) if computed_for == code => lines.clone(),
-        _ => plain_lines(code),
+    let Some((computed_for, tokens)) = highlighted else {
+        return plain_lines(code);
+    };
+    if computed_for == code {
+        return tokens.clone();
     }
+    let old_lines: Vec<&str> = computed_for.lines().collect();
+    let new_lines: Vec<&str> = code.lines().collect();
+    if old_lines.len() != tokens.len() {
+        return plain_lines(code);
+    }
+    let head = old_lines
+        .iter()
+        .zip(&new_lines)
+        .take_while(|(old, new)| old == new)
+        .count();
+    let tail = old_lines[head..]
+        .iter()
+        .rev()
+        .zip(new_lines[head..].iter().rev())
+        .take_while(|(old, new)| old == new)
+        .count();
+    let mut lines = plain_lines(code);
+    lines[..head].clone_from_slice(&tokens[..head]);
+    let (old_end, new_end) = (old_lines.len() - tail, new_lines.len() - tail);
+    lines[new_end..].clone_from_slice(&tokens[old_end..]);
+    lines
 }
 
 /// Remplace la sélection `[start, end)` (en unités UTF-16, comme le navigateur) par un retrait ; renvoie le
@@ -194,9 +218,41 @@ mod tests {
         }]];
         let known = Some(("ls".to_owned(), tokens.clone()));
         assert_eq!(visible_lines("ls", &known), tokens);
-        let stale = visible_lines("ls -l", &known);
-        assert_eq!(stale, plain_lines("ls -l"));
         assert_eq!(visible_lines("ls", &None), plain_lines("ls"));
+    }
+
+    fn colored(text: &str) -> Vec<CodeToken> {
+        vec![CodeToken {
+            text: text.to_owned(),
+            kind: TokenKind::Keyword,
+        }]
+    }
+
+    #[test]
+    fn untouched_lines_keep_their_color_while_the_edited_one_turns_plain() {
+        let known = Some((
+            "a\nb\nc".to_owned(),
+            vec![colored("a"), colored("b"), colored("c")],
+        ));
+        let lines = visible_lines("a\nbx\nc", &known);
+        assert_eq!(lines, [colored("a"), plain_lines("bx").remove(0), colored("c")]);
+    }
+
+    #[test]
+    fn inserted_and_removed_lines_keep_the_line_count_of_the_text() {
+        let known = Some(("a\nc".to_owned(), vec![colored("a"), colored("c")]));
+        let inserted = visible_lines("a\nb\nc", &known);
+        assert_eq!(inserted.len(), 3);
+        assert_eq!(inserted[0], colored("a"));
+        assert_eq!(inserted[2], colored("c"));
+        let removed = visible_lines("c", &known);
+        assert_eq!(removed, [colored("c")]);
+    }
+
+    #[test]
+    fn tokens_that_do_not_match_their_text_fall_back_to_plain() {
+        let known = Some(("a\nb".to_owned(), vec![colored("a")]));
+        assert_eq!(visible_lines("a\nbx", &known), plain_lines("a\nbx"));
     }
 
     #[test]

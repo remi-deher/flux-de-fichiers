@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.85.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.84.0...v0.85.0) (2026-11-24)
+
+
+### Features
+
+* **librairies:** coloration et numéros de ligne dans l'éditeur de script (ADR 0030, lot 2) ([dc48c48](https://github.com/remi-deher/flux-de-fichiers/commit/dc48c484b13395ada2341eaf6d87668898eac366))
+* **librairies:** coloration et numéros de ligne dans l'éditeur de script (ADR 0030, lot 2) ([a4526a0](https://github.com/remi-deher/flux-de-fichiers/commit/a4526a0792e613617d363f964a54c894f5fdbb9f))
+
+
+### Bug Fixes
+
+* **api:** route de coloration et description OpenAPI à leur place ([7121ed5](https://github.com/remi-deher/flux-de-fichiers/commit/7121ed555737f3233a93c31cd99000ac733989c5))
+
 ## [0.84.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.83.0...v0.84.0) (2026-11-23)
 
 

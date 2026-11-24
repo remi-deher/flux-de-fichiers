@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.86.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.85.0...v0.86.0) (2026-11-24)
+
+
+### Features
+
+* **librairies:** essai d'un script sur le worker intégré (ADR 0031, lot 3a) ([69ab52e](https://github.com/remi-deher/flux-de-fichiers/commit/69ab52e25a1fc3b0097539baa26aa7210066baea))
+* **librairies:** essai d'un script sur le worker intégré (ADR 0031, lot 3a) ([5f6fe64](https://github.com/remi-deher/flux-de-fichiers/commit/5f6fe64e708cff3b5020f44d03abaf905841ea4d))
+
+
+### Bug Fixes
+
+* **librairies:** dossier d'essai absolu quand le dossier de données est relatif ([fdf4dfa](https://github.com/remi-deher/flux-de-fichiers/commit/fdf4dfa79c637d0b5b86dd5d1c378cabb2edf798))
+* **librairies:** résultats de lecture ignorés et mise en forme du test d'essai ([646df74](https://github.com/remi-deher/flux-de-fichiers/commit/646df748876f94f9c021e96e9abb5fad93a75f09))
+* **librairies:** retire des modifications étrangères ajoutées par erreur à src/api/local.rs ([1f90a32](https://github.com/remi-deher/flux-de-fichiers/commit/1f90a3229ca4ebf3c17b780f0eed9afd4723611a))
+
 ## [0.85.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.84.0...v0.85.0) (2026-11-24)
 
 

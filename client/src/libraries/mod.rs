@@ -1,6 +1,7 @@
 //! Écran Librairie : bibliothèques médias, flows & modèles, scripts locaux, ressources & modèles de blocs, et packs maison.
 
 mod block_templates;
+mod code_editor;
 mod draft;
 mod form;
 mod history;

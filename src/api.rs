@@ -347,6 +347,11 @@ fn json_routes() -> Router<AppState> {
         .route(
             "/api/v1/local/resources",
             post(local::upload_resource).layer(axum::extract::DefaultBodyLimit::max(
+        .route(
+            "/api/v1/highlight",
+            post(local::highlight)
+                .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
+        )
                 LOCAL_RESOURCE_BODY_LIMIT,
             )),
         )

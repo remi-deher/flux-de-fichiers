@@ -39,14 +39,72 @@ pub const SCRIPTS_CSS: &str = r#"
   gap: 0.4rem;
 }
 
-.script-workbench__editor {
+/* Zone de code : numéros, couche colorée et saisie transparente partagent police, interligne et marges. */
+.code-editor {
   flex: 1;
   min-height: 12rem;
-  resize: none;
-  white-space: pre;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   overflow: auto;
-  tab-size: 2;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
+  tab-size: 2;
+}
+
+.code-editor__gutter {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  list-style: none;
+  text-align: right;
+  color: var(--text-dim);
+  user-select: none;
+  border-right: 1px solid var(--border-subtle);
+  position: sticky;
+  left: 0;
+  background: inherit;
+}
+
+.code-editor__stack {
+  display: grid;
+  min-width: 0;
+}
+
+.code-editor__layer {
+  grid-area: 1 / 1;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  font: inherit;
+  letter-spacing: normal;
+  white-space: pre;
+  tab-size: inherit;
+}
+
+.code-editor__highlight {
+  pointer-events: none;
+  color: var(--text-main);
+}
+
+.code-editor__input {
+  min-width: 0;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text-main);
+  outline: none;
+}
+
+.code-editor__input::selection {
+  background: var(--primary-bg);
+}
+
+.code-editor:focus-within {
+  border-color: var(--primary);
 }
 
 .script-workbench__side {
@@ -75,7 +133,7 @@ pub const SCRIPTS_CSS: &str = r#"
     border-top: 1px solid var(--border-subtle);
   }
 
-  .script-workbench__editor {
+  .code-editor {
     min-height: 18rem;
   }
 }

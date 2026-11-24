@@ -65,11 +65,10 @@ pub async fn download_resource(
     _auth: ViewLibrariesAuth,
     Path(id): Path<String>,
 ) -> AppResult<Response> {
-    let local_dir = plugins::local_catalog_dir(&s.config);
-    let (path, filename) =
-        tokio::task::spawn_blocking(move || plugins::local_resource_file(&local_dir, &id))
-            .await
-            .map_err(|_| AppError::Internal)??;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
+    let (path, filename) = tokio::task::spawn_blocking(move || plugins::resource_file(&roots, &id))
+        .await
+        .map_err(|_| AppError::Internal)??;
     let mut response =
         transfers::stream_file(&path, Some(&filename), "application/octet-stream").await?;
     response
@@ -115,6 +114,8 @@ pub async fn trial_script(
     }
     let scratch = s.config.data_dir.join(TRIAL_DIRECTORY);
     tokio::fs::create_dir_all(&scratch).await?;
+    // Chemin absolu : le script s'exécute dans son propre dossier, un chemin relatif n'y serait plus valable.
+    let scratch = tokio::fs::canonicalize(&scratch).await?;
     Ok(Json(script_trial::run_script_trial(&req, &scratch).await))
 }
 
@@ -160,6 +161,10 @@ pub async fn delete_item(
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     let deleted_id = id.clone();
-    write_local(&s, move |dir| plugins::delete_local_item(dir, &id)).await?;
+    to_completion(async move {
+        let lock = plugins::lock_installations().await;
+        plugins::delete_collection_item(&lock, &s.pool, &s.config, &s.catalog_cache, &id).await
+    })
+    .await?;
     Ok(Json(json!({ "id": deleted_id, "deleted": true })))
 }

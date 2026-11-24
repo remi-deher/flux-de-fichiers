@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.87.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.86.0...v0.87.0) (2026-11-24)
+
+
+### Features
+
+* **librairies:** suggestions de code dans l'éditeur de script (ADR 0032, phase a) ([f002af0](https://github.com/remi-deher/flux-de-fichiers/commit/f002af06608484131cc73b7a734129edfdceae48))
+* **librairies:** suggestions de code et coloration sans scintillement (ADR 0032, phase a) ([a27dea5](https://github.com/remi-deher/flux-de-fichiers/commit/a27dea5cc20390d26edf9389287313c15fea6bff))
+
+
+### Bug Fixes
+
+* **librairies:** la coloration reste affichée pendant la frappe et ADR 0032 des suggestions ([fe7f384](https://github.com/remi-deher/flux-de-fichiers/commit/fe7f3846d2225f88d4ded3ccdd95c13592eea5f5))
+
 ## [0.86.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.85.0...v0.86.0) (2026-11-24)
 
 

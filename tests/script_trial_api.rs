@@ -59,8 +59,8 @@ async fn trial(
 }
 
 #[tokio::test]
-async fn the_integrated_worker_runs_the_edited_code_and_returns_what_it_saw()
--> anyhow::Result<()> {
+async fn the_integrated_worker_runs_the_edited_code_and_returns_what_it_saw() -> anyhow::Result<()>
+{
     let (state, _dir) = central().await?;
     let worker = register(&state, INTEGRATED_WORKER_NAME).await?;
     let code = "cat >/dev/null\necho '{\"message\":\"bonjour\"}'";

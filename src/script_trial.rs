@@ -97,7 +97,7 @@ async fn run_script_trial_within(
     let (mut stdout_bytes, mut stderr_bytes) = (Vec::new(), Vec::new());
     let started = Instant::now();
     let run = async {
-        tokio::join!(
+        let _ = tokio::join!(
             read_bounded_into(stdout, &mut stdout_bytes),
             read_bounded_into(stderr, &mut stderr_bytes),
             send_stdin(Some(stdin), stdin_text.as_bytes()),

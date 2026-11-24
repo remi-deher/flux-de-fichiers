@@ -976,6 +976,50 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/local/scripts/trial:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Essayer le code d'un script sur un worker (ADR 0031)
+      description: >-
+        Exécute le code fourni, sans l'enregistrer, dans un dossier jetable du worker choisi, avec une entrée JSON
+        d'exemple (`config`, `vars`) et au plus 30 s. Retourne stdin, stdout, stderr (64 Kio au plus chacun), le code
+        de sortie et la réponse interprétée. Seul le worker intégré est joignable (`400` pour un autre) ; `404` si le
+        worker n'existe pas. Droit requis : gérer les plugins.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workerId, interpreter, code]
+              properties:
+                workerId: {type: string, format: uuid}
+                interpreter: {type: string, enum: [sh, bash, python3, node, deno, bun, pwsh]}
+                code: {type: string}
+                entrypoint: {type: string}
+                config: {type: object}
+                vars: {type: object}
+      responses:
+        '200':
+          description: Ce que l'essai a observé
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stdin: {type: string}
+                  stdout: {type: string}
+                  stderr: {type: string}
+                  exitCode: {type: integer, nullable: true}
+                  durationMs: {type: integer}
+                  timedOut: {type: boolean}
+                  truncated: {type: boolean}
+                  response: {type: object, nullable: true}
+                  responseError: {type: string, nullable: true}
+                  launchError: {type: string, nullable: true}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/highlight:
     post:
       security: [{ApiKey: []}, {WebSession: []}]

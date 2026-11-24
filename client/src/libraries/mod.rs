@@ -12,6 +12,7 @@ mod rows;
 mod script_draft;
 mod script_editor;
 mod scripts;
+mod suggestions;
 mod transfer_workers;
 mod variables_editor;
 

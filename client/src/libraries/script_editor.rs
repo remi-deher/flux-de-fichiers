@@ -7,7 +7,7 @@ use super::script_draft::{
     CATEGORIES, OpenedScript, ScriptDraft, category_value, is_starter_code, opened_script_warning,
     parse_category, parse_tags, starter_script_code,
 };
-use super::variables_editor::{VariablesEditor, rows_from, rows_to_variables};
+use super::variables_editor::{VariablesEditor, rows_from, rows_to_variables, variable_names};
 use super::{LOCAL_PATH, LOCAL_SCRIPTS_PATH, LOCAL_TOPICS};
 use crate::api;
 use crate::live::{Loaded, load, use_live};
@@ -179,6 +179,7 @@ fn ScriptForm(
     let dependencies_unverified = RwSignal::new(draft.dependencies_unverified);
     let panel = RwSignal::new(SidePanel::Properties);
     let extension = Signal::derive(move || interp.get().default_extension());
+    let declared = Signal::derive(move || variable_names(&variable_rows.get()));
 
     // Toute saisie après l'ouverture déclare des modifications (confirmation en quittant).
     let dirty = RwSignal::new(false);
@@ -282,7 +283,7 @@ fn ScriptForm(
                     <label class="form-label" for="script-code">
                         "Code (entrée stdin JSON → sortie stdout JSON) *"
                     </label>
-                    <CodeEditor code=code extension=extension read_only=read_only />
+                    <CodeEditor code=code extension=extension declared=declared read_only=read_only />
                     <p class="form-help">
                         "Le script reçoit workingFile, workDir, mediaInfo et config sur stdin."
                     </p>

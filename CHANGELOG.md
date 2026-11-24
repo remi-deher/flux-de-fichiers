@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.88.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.87.0...v0.88.0) (2026-11-24)
+
+
+### Features
+
+* **librairies:** essai d'un script sur un worker distant (ADR 0031, lot 3b) ([655f2d9](https://github.com/remi-deher/flux-de-fichiers/commit/655f2d9430ab4a288dbfc7b1812cd0ac512c3a77))
+* **librairies:** essai d'un script sur un worker distant (ADR 0031, lot 3b) ([777445a](https://github.com/remi-deher/flux-de-fichiers/commit/777445a2591e65281a757787ee568b4581ca1961))
+
+
+### Bug Fixes
+
+* **librairies:** identifiants fixes dans le test partagé et mise en forme rustfmt du lot 3b ([6553b5b](https://github.com/remi-deher/flux-de-fichiers/commit/6553b5b7713cb0a5964d201f4567c555cb777ccc))
+
 ## [0.87.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.86.0...v0.87.0) (2026-11-24)
 
 

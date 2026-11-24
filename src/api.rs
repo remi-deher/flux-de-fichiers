@@ -70,6 +70,8 @@ pub struct AppState {
     /// Signalement des changements à relire par les interfaces ouvertes (ADR 0028).
     pub changes: ChangeNotifier,
     pub browse_broker: crate::filesystem_browser::RemoteBrowseBroker,
+    /// Essais de script confiés à un worker distant (ADR 0031, lot 3b).
+    pub trial_broker: crate::script_trial::TrialBroker,
     pub source_publication: crate::source_publication_broker::SourcePublicationBroker,
     pub source_inspection: crate::source_publication_broker::SourcePublicationBroker,
     /// Publications menées par ce processus, par tâche et époque (ADR 0027).
@@ -101,6 +103,7 @@ impl AppState {
             event_history,
             changes,
             browse_broker: crate::filesystem_browser::RemoteBrowseBroker::new(),
+            trial_broker: crate::script_trial::TrialBroker::new(),
             source_publication: crate::source_publication_broker::SourcePublicationBroker::default(
             ),
             source_inspection: crate::source_publication_broker::SourcePublicationBroker::default(),
@@ -247,6 +250,15 @@ fn json_routes() -> Router<AppState> {
         .route(
             "/api/v1/worker/filesystem",
             post(libraries::worker_report_browse)
+                .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
+        )
+        .route(
+            "/api/v1/worker/script-trials/pending",
+            get(local::worker_pending_trials),
+        )
+        .route(
+            "/api/v1/worker/script-trials",
+            post(local::worker_report_trial)
                 .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
         )
         .route("/api/v1/flows", get(flows::list_flows))

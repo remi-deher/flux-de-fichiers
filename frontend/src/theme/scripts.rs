@@ -69,6 +69,7 @@ pub const SCRIPTS_CSS: &str = r#"
 }
 
 .code-editor__stack {
+  position: relative;
   display: grid;
   min-width: 0;
 }
@@ -101,6 +102,39 @@ pub const SCRIPTS_CSS: &str = r#"
 
 .code-editor__input::selection {
   background: var(--primary-bg);
+}
+
+.code-editor__suggestions {
+  position: absolute;
+  top: calc(0.5rem + (var(--caret-line) + 1) * 1.5em);
+  left: calc(0.75rem + var(--caret-col) * 1ch);
+  z-index: 5;
+  min-width: 14rem;
+  margin: 0;
+  padding: 0.2rem;
+  list-style: none;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text-main);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.code-editor__suggestion {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+}
+
+.code-editor__suggestion.is-selected {
+  background: var(--primary-bg);
+}
+
+.code-editor__suggestion-kind {
+  color: var(--text-dim);
 }
 
 .code-editor:focus-within {

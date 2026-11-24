@@ -36,6 +36,14 @@ fn bound_from_text(raw: &str) -> Result<Option<Number>, InvalidDefaultText> {
     }
 }
 
+/// Noms des variables déclarées dans les lignes (les noms vides sont ignorés).
+pub fn variable_names(rows: &[VariableRow]) -> Vec<String> {
+    rows.iter()
+        .map(|row| row.variable.name.clone())
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
 /// Lignes éditables d'après les variables enregistrées.
 pub fn rows_from(variables: Vec<ScriptVariable>) -> Vec<VariableRow> {
     (0u32..)

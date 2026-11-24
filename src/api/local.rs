@@ -85,6 +85,7 @@ pub async fn upsert_script(
     let saved = write_local(&s, move |dir| plugins::save_local_script(dir, req)).await?;
     Ok(Json(saved))
 }
+
 /// Colore le code d'un script en cours d'édition : analyse syntaxique côté serveur, hors du fil asynchrone.
 pub async fn highlight(
     _auth: ManagePluginsAuth,
@@ -96,7 +97,6 @@ pub async fn highlight(
             .map_err(|_| AppError::Internal)?;
     Ok(Json(HighlightedCode { lines }))
 }
-
 
 pub async fn upload_resource(
     State(s): State<AppState>,

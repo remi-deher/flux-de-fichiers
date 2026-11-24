@@ -976,9 +976,6 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
-  /api/v1/local/resources:
-    post:
-      security: [{ApiKey: []}, {WebSession: []}]
   /api/v1/highlight:
     post:
       security: [{ApiKey: []}, {WebSession: []}]
@@ -1017,6 +1014,9 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/local/resources:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
       summary: Importer ou remplacer une ressource binaire locale (max 5 Mio décodé, limite HTTP 10 Mio)
       requestBody:
         required: true

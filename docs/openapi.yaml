@@ -983,7 +983,8 @@ paths:
       description: >-
         Exécute le code fourni, sans l'enregistrer, dans un dossier jetable du worker choisi, avec une entrée JSON
         d'exemple (`config`, `vars`) et au plus 30 s. Retourne stdin, stdout, stderr (64 Kio au plus chacun), le code
-        de sortie et la réponse interprétée. Seul le worker intégré est joignable (`400` pour un autre) ; `404` si le
+        de sortie et la réponse interprétée. Le worker intégré l'exécute dans le processus central ; un worker distant
+        en ligne le reçoit par le courtier de demandes (`502` s'il est hors ligne ou ne répond pas) ; `404` si le
         worker n'existe pas. Droit requis : gérer les plugins.
       requestBody:
         required: true

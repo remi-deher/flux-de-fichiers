@@ -7,7 +7,9 @@ use crate::{
         WorkerBrowseReport, WorkerBrowseTask,
     },
     error::{AppError, AppResult},
-    filesystem_browser, repository, storage,
+    filesystem_browser, repository,
+    request_broker::{Relayed, RequestBroker},
+    storage,
 };
 use axum::{
     Json,
@@ -497,19 +499,40 @@ pub async fn browse(
     Ok(Json(listing))
 }
 
+/// Demandes en attente dans `broker` pour un worker distant authentifié (attente longue plafonnée).
+pub(super) async fn take_pending<T: Relayed + Clone, R: Relayed>(
+    s: &AppState,
+    headers: &HeaderMap,
+    broker: &RequestBroker<T, R>,
+    query: WorkerPendingBrowseQuery,
+) -> AppResult<Json<Vec<T>>> {
+    crate::auth::authorize_worker(&s.pool, headers).await?;
+    let wait_ms = query.wait_ms.unwrap_or(0).min(MAX_BROWSE_WAIT_MS);
+    let tasks = broker
+        .take_for_worker(query.worker_id, Duration::from_millis(wait_ms))
+        .await;
+    Ok(Json(tasks))
+}
+
+/// Réponse d'un worker distant authentifié à une demande de `broker`.
+pub(super) async fn complete_report<T: Relayed + Clone, R: Relayed>(
+    s: &AppState,
+    headers: &HeaderMap,
+    broker: &RequestBroker<T, R>,
+    report: R,
+) -> AppResult<StatusCode> {
+    crate::auth::authorize_worker(&s.pool, headers).await?;
+    let _ = broker.complete(report).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Demande d'exploration en attente pour un worker distant authentifié.
 pub async fn worker_pending_browse(
     State(s): State<AppState>,
     headers: HeaderMap,
     Query(q): Query<WorkerPendingBrowseQuery>,
 ) -> AppResult<Json<Vec<WorkerBrowseTask>>> {
-    crate::auth::authorize_worker(&s.pool, &headers).await?;
-    let wait_ms = q.wait_ms.unwrap_or(0).min(MAX_BROWSE_WAIT_MS);
-    let tasks = s
-        .browse_broker
-        .take_for_worker(q.worker_id, Duration::from_millis(wait_ms))
-        .await;
-    Ok(Json(tasks))
+    take_pending(&s, &headers, &s.browse_broker, q).await
 }
 
 /// Réception du résultat d'exploration envoyé par un worker distant.
@@ -518,9 +541,7 @@ pub async fn worker_report_browse(
     headers: HeaderMap,
     Json(report): Json<WorkerBrowseReport>,
 ) -> AppResult<StatusCode> {
-    crate::auth::authorize_worker(&s.pool, &headers).await?;
-    let _ = s.browse_broker.complete(report).await;
-    Ok(StatusCode::NO_CONTENT)
+    complete_report(&s, &headers, &s.browse_broker, report).await
 }
 
 #[derive(Deserialize)]

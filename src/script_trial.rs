@@ -3,6 +3,7 @@
 
 use crate::{
     flows::script_runner::{ScriptInput, sanitize_script_filename, send_stdin},
+    request_broker::{Relayed, RequestBroker},
     supervision::SupervisedChild,
     tool_run::{mask_log_secrets, read_bounded_into},
 };
@@ -10,7 +11,7 @@ use forgearr_shared::{
     flows::SCRIPT_SCHEMA_VERSION,
     script_trial::{
         ScriptTrialRequest, ScriptTrialResult, TRIAL_CAPTURE_BYTES, TRIAL_TIMEOUT_SECONDS,
-        parse_script_response,
+        WorkerScriptTrialReport, WorkerScriptTrialTask, parse_script_response,
     },
 };
 use serde_json::{Value, json};
@@ -27,6 +28,37 @@ const DEFAULT_SAFE_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 const TRIAL_IDENTIFIER: &str = "essai";
 const SAMPLE_FILE_NAME: &str = "exemple.mkv";
 const SCRATCH_PREFIX: &str = ".script-trial-";
+/// Sous-dossier, sous les données du central ou le dossier de travail d'un worker, où s'exécutent les essais.
+const TRIAL_DIRECTORY: &str = "script-trials";
+
+impl Relayed for WorkerScriptTrialTask {
+    fn request_id(&self) -> Uuid {
+        self.request_id
+    }
+    fn worker_id(&self) -> Uuid {
+        self.worker_id
+    }
+}
+
+impl Relayed for WorkerScriptTrialReport {
+    fn request_id(&self) -> Uuid {
+        self.request_id
+    }
+    fn worker_id(&self) -> Uuid {
+        self.worker_id
+    }
+}
+
+/// Courtier des essais confiés à un worker distant (ADR 0031, lot 3b).
+pub type TrialBroker = RequestBroker<WorkerScriptTrialTask, WorkerScriptTrialReport>;
+
+/// Dossier des essais sous `parent`, créé au besoin et rendu absolu : le script s'exécute dans son propre
+/// dossier, où un chemin relatif ne désignerait plus rien.
+pub async fn scratch_root(parent: &Path) -> std::io::Result<PathBuf> {
+    let root = parent.join(TRIAL_DIRECTORY);
+    tokio::fs::create_dir_all(&root).await?;
+    tokio::fs::canonicalize(&root).await
+}
 
 /// Dossier de travail de l'essai, supprimé à la fin quel que soit le résultat.
 struct Scratch(PathBuf);

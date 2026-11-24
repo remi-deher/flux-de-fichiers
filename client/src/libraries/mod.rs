@@ -2,7 +2,6 @@
 
 mod block_templates;
 mod code_editor;
-mod suggestions;
 mod draft;
 mod form;
 mod history;
@@ -13,6 +12,7 @@ mod rows;
 mod script_draft;
 mod script_editor;
 mod scripts;
+mod suggestions;
 mod transfer_workers;
 mod variables_editor;
 

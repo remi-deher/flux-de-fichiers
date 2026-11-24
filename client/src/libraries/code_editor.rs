@@ -2,8 +2,8 @@
 //! coloration. Un `<textarea>` transparent est superposé à un `<pre>` coloré ; les deux occupent la même case
 //! d'une grille, que le conteneur fait défiler d'un bloc. Les jetons viennent du central.
 
-use crate::api;
 use super::suggestions::{self, Suggestion};
+use crate::api;
 use crate::plugins::highlighted_lines;
 use forgearr_shared::highlight::{CodeToken, HighlightRequest, HighlightedCode, TokenKind};
 use leptos::prelude::*;
@@ -349,7 +349,10 @@ mod tests {
             vec![colored("a"), colored("b"), colored("c")],
         ));
         let lines = visible_lines("a\nbx\nc", &known);
-        assert_eq!(lines, [colored("a"), plain_lines("bx").remove(0), colored("c")]);
+        assert_eq!(
+            lines,
+            [colored("a"), plain_lines("bx").remove(0), colored("c")]
+        );
     }
 
     #[test]

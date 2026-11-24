@@ -28,25 +28,76 @@ const CONTRACT_FIELDS: &[&str] = &[
 ];
 
 const SHELL_KEYWORDS: &[&str] = &[
-    "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac", "in",
-    "function", "return", "exit", "echo", "export", "local", "read", "shift", "set", "unset", "trap",
-    "eval", "exec", "test", "printf",
+    "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac",
+    "in", "function", "return", "exit", "echo", "export", "local", "read", "shift", "set", "unset",
+    "trap", "eval", "exec", "test", "printf",
 ];
 const PYTHON_KEYWORDS: &[&str] = &[
-    "def", "class", "return", "import", "from", "as", "if", "elif", "else", "for", "while", "in", "try",
-    "except", "finally", "with", "lambda", "yield", "pass", "break", "continue", "raise", "assert",
-    "global", "nonlocal", "True", "False", "None", "print", "json", "sys",
+    "def", "class", "return", "import", "from", "as", "if", "elif", "else", "for", "while", "in",
+    "try", "except", "finally", "with", "lambda", "yield", "pass", "break", "continue", "raise",
+    "assert", "global", "nonlocal", "True", "False", "None", "print", "json", "sys",
 ];
 const SCRIPT_KEYWORDS: &[&str] = &[
-    "const", "let", "var", "function", "return", "if", "else", "for", "while", "do", "switch", "case",
-    "break", "continue", "try", "catch", "finally", "throw", "new", "class", "extends", "import",
-    "export", "from", "async", "await", "typeof", "instanceof", "null", "undefined", "true", "false",
-    "console", "JSON", "process",
+    "const",
+    "let",
+    "var",
+    "function",
+    "return",
+    "if",
+    "else",
+    "for",
+    "while",
+    "do",
+    "switch",
+    "case",
+    "break",
+    "continue",
+    "try",
+    "catch",
+    "finally",
+    "throw",
+    "new",
+    "class",
+    "extends",
+    "import",
+    "export",
+    "from",
+    "async",
+    "await",
+    "typeof",
+    "instanceof",
+    "null",
+    "undefined",
+    "true",
+    "false",
+    "console",
+    "JSON",
+    "process",
 ];
 const POWERSHELL_KEYWORDS: &[&str] = &[
-    "function", "param", "if", "elseif", "else", "foreach", "for", "while", "switch", "return", "try",
-    "catch", "finally", "throw", "Write-Output", "Write-Host", "Write-Error", "ConvertFrom-Json",
-    "ConvertTo-Json", "Get-Content", "Set-Content", "Test-Path", "Join-Path",
+    "function",
+    "param",
+    "if",
+    "elseif",
+    "else",
+    "foreach",
+    "for",
+    "while",
+    "switch",
+    "return",
+    "try",
+    "catch",
+    "finally",
+    "throw",
+    "Write-Output",
+    "Write-Host",
+    "Write-Error",
+    "ConvertFrom-Json",
+    "ConvertTo-Json",
+    "Get-Content",
+    "Set-Content",
+    "Test-Path",
+    "Join-Path",
 ];
 
 /// Origine d'une suggestion ; l'ordre des variantes est l'ordre d'affichage.
@@ -112,7 +163,10 @@ pub fn caret_position(code: &str, caret: usize) -> (usize, usize) {
     let units: Vec<u16> = code.encode_utf16().collect();
     let before = String::from_utf16_lossy(&units[..caret.min(units.len())]);
     let line = before.matches('\n').count();
-    let column = before.rsplit('\n').next().map_or(0, |last| last.chars().count());
+    let column = before
+        .rsplit('\n')
+        .next()
+        .map_or(0, |last| last.chars().count());
     (line, column)
 }
 
@@ -144,8 +198,16 @@ pub fn suggest(prefix: &str, code: &str, extension: &str, declared: &[String]) -
     let sources = declared
         .iter()
         .map(|name| (name.as_str(), SuggestionKind::Variable))
-        .chain(CONTRACT_FIELDS.iter().map(|name| (*name, SuggestionKind::Contract)))
-        .chain(keywords(extension).iter().map(|name| (*name, SuggestionKind::Keyword)))
+        .chain(
+            CONTRACT_FIELDS
+                .iter()
+                .map(|name| (*name, SuggestionKind::Contract)),
+        )
+        .chain(
+            keywords(extension)
+                .iter()
+                .map(|name| (*name, SuggestionKind::Keyword)),
+        )
         .chain(script_words.map(|word| (word, SuggestionKind::Word)));
     let mut found: Vec<Suggestion> = Vec::new();
     for (label, kind) in sources {

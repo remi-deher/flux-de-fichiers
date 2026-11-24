@@ -18,7 +18,7 @@ use forgearr_shared::{
     jobs::JobErrorCode,
     script_variables::SECRET_PLACEHOLDER,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{Map, Value};
 use std::{
     collections::HashMap,
@@ -39,15 +39,7 @@ const PIPE_DRAIN_GRACE: Duration = Duration::from_secs(2);
 /// Callback de progression émis pendant l'exécution d'un script.
 pub type ScriptProgressCallback = Arc<dyn Fn(u32, &str) + Send + Sync>;
 
-/// Statut retourné par un script sur `stdout` JSON.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ScriptOutcomeStatus {
-    #[default]
-    Ok,
-    Skip,
-    Error,
-}
+pub use forgearr_shared::script_trial::{ScriptOutcomeStatus, ScriptOutput};
 
 /// Charge utile JSON envoyée au script sur `stdin`.
 #[derive(Clone, Debug, Serialize)]
@@ -65,27 +57,6 @@ pub struct ScriptInput<'a> {
     pub config: Value,
     /// Variables du flux : `{"file": {..}, "job": {..}, "vars": {..}}`.
     pub variables: Value,
-}
-
-/// Réponse JSON optionnelle lue sur `stdout` après exécution du script.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScriptOutput {
-    #[serde(default)]
-    pub status: ScriptOutcomeStatus,
-    #[serde(default)]
-    pub message: Option<String>,
-    #[serde(default)]
-    pub next_port: Option<String>,
-    #[serde(default)]
-    pub working_file: Option<String>,
-    #[serde(default)]
-    pub media_info: Option<Value>,
-    #[serde(default)]
-    pub stop_pipeline: bool,
-    /// Variables personnalisées à fusionner dans `vars.*` (objet plat nom → scalaire).
-    #[serde(default)]
-    pub variables: Option<Map<String, Value>>,
 }
 
 /// Issue d'une étape script exécutée avec succès ou ignorée.
@@ -126,7 +97,7 @@ impl Drop for TempScriptFile {
     }
 }
 
-fn sanitize_script_filename(entrypoint: Option<&str>, step_index: i32) -> String {
+pub(crate) fn sanitize_script_filename(entrypoint: Option<&str>, step_index: i32) -> String {
     let base = entrypoint
         .and_then(|p| Path::new(p).file_name())
         .and_then(|n| n.to_str())
@@ -186,7 +157,7 @@ fn resolve_program(
 /// Écrit l'entrée du script puis ferme son stdin. Sous le délai du script : un script qui ne lit
 /// pas son entrée, plus grosse que le tampon du tube, ne doit pas bloquer la tâche sans fin. Un
 /// tube fermé (script déjà terminé) n'est pas une erreur.
-async fn send_stdin(stdin: Option<tokio::process::ChildStdin>, bytes: &[u8]) {
+pub(crate) async fn send_stdin(stdin: Option<tokio::process::ChildStdin>, bytes: &[u8]) {
     let Some(mut stdin) = stdin else {
         return;
     };

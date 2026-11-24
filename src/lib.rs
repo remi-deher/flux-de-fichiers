@@ -31,6 +31,7 @@ pub mod plugins;
 pub mod repository;
 pub mod retained;
 pub mod runtime_settings;
+pub mod script_trial;
 pub mod secret_rotation;
 pub mod secrets;
 pub mod software_probe;

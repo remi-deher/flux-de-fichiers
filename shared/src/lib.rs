@@ -24,6 +24,7 @@ pub mod logs;
 pub mod mcp;
 pub mod plugins;
 pub mod relay;
+pub mod script_trial;
 pub mod script_variables;
 pub mod search;
 pub mod session;

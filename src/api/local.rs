@@ -13,6 +13,7 @@ use axum::{
 };
 use forgearr_shared::{
     Permission,
+    highlight::{HighlightRequest, HighlightedCode},
     local::{
         CreateBlockTemplateRequest, CreateFlowTemplateRequest, CreateLocalPackRequest,
         LocalBlockTemplate, LocalFlowTemplate, LocalLibrarySnapshot, LocalResourceSummary,
@@ -83,6 +84,18 @@ pub async fn upsert_script(
 ) -> AppResult<Json<LocalScriptSummary>> {
     let saved = write_local(&s, move |dir| plugins::save_local_script(dir, req)).await?;
     Ok(Json(saved))
+}
+
+/// Colore le code d'un script en cours d'édition : analyse syntaxique côté serveur, hors du fil asynchrone.
+pub async fn highlight(
+    _auth: ManagePluginsAuth,
+    Json(req): Json<HighlightRequest>,
+) -> AppResult<Json<HighlightedCode>> {
+    let lines =
+        tokio::task::spawn_blocking(move || plugins::highlight_code(&req.code, &req.extension))
+            .await
+            .map_err(|_| AppError::Internal)?;
+    Ok(Json(HighlightedCode { lines }))
 }
 
 pub async fn upload_resource(

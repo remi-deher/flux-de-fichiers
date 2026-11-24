@@ -91,6 +91,7 @@ mod tests {
         assert!(styles.contains(".mini-viewport {"));
         assert!(styles.contains(".flow-quick-add {"));
         assert!(styles.contains(".script-workbench__body {"));
+        assert!(styles.contains(".code-editor__input {"));
         assert!(styles.contains(".flow-canvas__marquee {"));
         assert!(styles.contains(".flow-wire__popover {"));
         assert!(styles.contains(".application-shell.is-workbench .app-topbar {"));

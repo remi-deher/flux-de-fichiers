@@ -38,6 +38,7 @@ pub(crate) use metadata::{StatusBanner, StoreTone};
 pub(crate) use pack_detail::{PackDetail, PackDrawerTab};
 use plugin_detail::{PluginDetail, PluginDrawerTab};
 use repos::ReposSection;
+pub(crate) use script_preview::highlighted_lines;
 use tool_detail::{ToolDetail, ToolDrawerTab};
 use tools::ToolsSection;
 

@@ -1,6 +1,7 @@
 //! Page d'édition d'un script local, en pleine page (ADR 0030) : le code à gauche, les propriétés,
 //! variables et dépendances à droite. Remplace le tiroir de l'onglet Scripts.
 
+use super::code_editor::CodeEditor;
 use super::requirements_editor::{RequirementsEditor, requirement_rows_from, rows_to_requirements};
 use super::script_draft::{
     CATEGORIES, OpenedScript, ScriptDraft, category_value, is_starter_code, opened_script_warning,
@@ -177,6 +178,7 @@ fn ScriptForm(
     let requirement_rows = RwSignal::new(requirement_rows_from(draft.requires));
     let dependencies_unverified = RwSignal::new(draft.dependencies_unverified);
     let panel = RwSignal::new(SidePanel::Properties);
+    let extension = Signal::derive(move || interp.get().default_extension());
 
     // Toute saisie après l'ouverture déclare des modifications (confirmation en quittant).
     let dirty = RwSignal::new(false);
@@ -280,10 +282,7 @@ fn ScriptForm(
                     <label class="form-label" for="script-code">
                         "Code (entrée stdin JSON → sortie stdout JSON) *"
                     </label>
-                    <textarea id="script-code" class="form-input text-mono script-workbench__editor"
-                        required=true disabled=read_only spellcheck="false"
-                        prop:value=move || code.get()
-                        on:input=move |e| code.set(event_target_value(&e)) />
+                    <CodeEditor code=code extension=extension read_only=read_only />
                     <p class="form-help">
                         "Le script reçoit workingFile, workDir, mediaInfo et config sur stdin."
                     </p>

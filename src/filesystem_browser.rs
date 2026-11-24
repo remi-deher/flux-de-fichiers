@@ -6,20 +6,17 @@ use crate::{
         WorkerBrowseReport, WorkerBrowseTask,
     },
     error::{AppError, AppResult},
+    request_broker::{Relayed, RequestBroker},
 };
 use forgearr_shared::libraries::is_media_extension;
 use forgearr_shared::libraries::{FolderScanOptions, FolderScanReport};
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
-    sync::Arc,
     time::Duration,
 };
-use tokio::sync::{Mutex, Notify, oneshot};
 use uuid::Uuid;
 
 pub const MAX_BROWSE_ENTRIES: usize = 300;
-pub const BROWSE_REQUEST_TTL: Duration = Duration::from_secs(30);
 pub const SYSTEM_ROOT_EXCLUDED_DIRS: &[&str] = &[
     "proc",
     "sys",
@@ -256,35 +253,28 @@ pub fn error_code_for_report(err: &AppError) -> &'static str {
     }
 }
 
-struct PendingRequest {
-    task: WorkerBrowseTask,
-    dispatched: bool,
-    expires_at: tokio::time::Instant,
-    reply: oneshot::Sender<WorkerBrowseReport>,
+impl Relayed for WorkerBrowseTask {
+    fn request_id(&self) -> Uuid {
+        self.request_id
+    }
+    fn worker_id(&self) -> Uuid {
+        self.worker_id
+    }
 }
 
-#[derive(Default)]
-struct BrokerInner {
-    state: Mutex<HashMap<Uuid, PendingRequest>>,
-    notify: Notify,
+impl Relayed for WorkerBrowseReport {
+    fn request_id(&self) -> Uuid {
+        self.request_id
+    }
+    fn worker_id(&self) -> Uuid {
+        self.worker_id
+    }
 }
 
 /// Courtier en mémoire qui relaie les demandes d'exploration vers un worker distant connecté.
-#[derive(Clone, Default)]
-pub struct RemoteBrowseBroker {
-    inner: Arc<BrokerInner>,
-}
+pub type RemoteBrowseBroker = RequestBroker<WorkerBrowseTask, WorkerBrowseReport>;
 
 impl RemoteBrowseBroker {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    fn purge_expired(state: &mut HashMap<Uuid, PendingRequest>) {
-        let now = tokio::time::Instant::now();
-        state.retain(|_, req| now < req.expires_at);
-    }
-
     /// Met une demande d'exploration en file pour `worker_id` et attend la réponse jusqu'à `timeout`.
     pub async fn request(
         &self,
@@ -318,97 +308,19 @@ impl RemoteBrowseBroker {
         scan: Option<FolderScanOptions>,
         timeout: Duration,
     ) -> AppResult<WorkerBrowseReport> {
-        let (tx, rx) = oneshot::channel();
-        let request_id = Uuid::new_v4();
-        {
-            let mut state = self.inner.state.lock().await;
-            Self::purge_expired(&mut state);
-            state.insert(
-                request_id,
-                PendingRequest {
-                    task: WorkerBrowseTask {
-                        request_id,
-                        worker_id,
-                        path,
-                        scan,
-                    },
-                    dispatched: false,
-                    expires_at: tokio::time::Instant::now() + timeout.max(BROWSE_REQUEST_TTL),
-                    reply: tx,
-                },
-            );
-        }
-        self.inner.notify.notify_waiters();
-
-        let awaited = tokio::time::timeout(timeout, rx).await;
-        match awaited {
-            Err(_) => {
-                let mut state = self.inner.state.lock().await;
-                state.remove(&request_id);
-                Err(AppError::CentralUnavailable)
-            }
-            Ok(Err(_)) => Err(AppError::CentralUnavailable),
-            Ok(Ok(report)) => match report.error.as_deref() {
-                None => Ok(report),
-                Some("not_found") => Err(AppError::NotFound),
-                Some("invalid_input") => Err(AppError::Invalid),
-                _ => Err(AppError::CentralUnavailable),
-            },
-        }
-    }
-
-    async fn drain_pending(&self, worker_id: Uuid) -> Vec<WorkerBrowseTask> {
-        let mut state = self.inner.state.lock().await;
-        Self::purge_expired(&mut state);
-        let mut tasks = Vec::new();
-        for entry in state.values_mut() {
-            if entry.task.worker_id == worker_id && !entry.dispatched {
-                entry.dispatched = true;
-                tasks.push(entry.task.clone());
-            }
-        }
-        tasks
-    }
-
-    /// Récupère les demandes en attente pour un worker, avec attente longue optionnelle.
-    pub async fn take_for_worker(&self, worker_id: Uuid, wait: Duration) -> Vec<WorkerBrowseTask> {
-        let tasks = self.drain_pending(worker_id).await;
-        if !tasks.is_empty() || wait.is_zero() {
-            return tasks;
-        }
-        let deadline = tokio::time::Instant::now() + wait;
-        loop {
-            let notified = self.inner.notify.notified();
-            let tasks = self.drain_pending(worker_id).await;
-            if !tasks.is_empty() {
-                return tasks;
-            }
-            if tokio::time::Instant::now() >= deadline {
-                return Vec::new();
-            }
-            if tokio::time::timeout_at(deadline, notified).await.is_err() {
-                return self.drain_pending(worker_id).await;
-            }
-        }
-    }
-
-    /// Délivre la réponse du worker à la requête HTTP en attente.
-    pub async fn complete(&self, report: WorkerBrowseReport) -> bool {
-        let entry = {
-            let mut state = self.inner.state.lock().await;
-            let matches_worker = state
-                .get(&report.request_id)
-                .is_some_and(|pending| pending.task.worker_id == report.worker_id);
-            if !matches_worker {
-                return false;
-            }
-            state.remove(&report.request_id)
+        let task = WorkerBrowseTask {
+            request_id: Uuid::new_v4(),
+            worker_id,
+            path,
+            scan,
         };
-        let Some(entry) = entry else {
-            return false;
-        };
-        let _ = entry.reply.send(report);
-        true
+        let report = self.call(task, timeout).await?;
+        match report.error.as_deref() {
+            None => Ok(report),
+            Some("not_found") => Err(AppError::NotFound),
+            Some("invalid_input") => Err(AppError::Invalid),
+            _ => Err(AppError::CentralUnavailable),
+        }
     }
 }
 

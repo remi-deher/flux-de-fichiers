@@ -29,6 +29,7 @@ pub mod password;
 pub mod password_reset;
 pub mod plugins;
 pub mod repository;
+pub mod request_broker;
 pub mod retained;
 pub mod runtime_settings;
 pub mod script_trial;

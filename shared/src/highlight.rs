@@ -43,6 +43,20 @@ pub struct CodeToken {
     pub kind: TokenKind,
 }
 
+/// Demande de coloration d'un code en cours d'édition (`POST /api/v1/highlight`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HighlightRequest {
+    pub code: String,
+    /// Extension du langage (`sh`, `py`, `js`, `ps1`) ; inconnue, le code revient en texte brut.
+    pub extension: String,
+}
+
+/// Code découpé en lignes de jetons, sans saut de ligne.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HighlightedCode {
+    pub lines: Vec<Vec<CodeToken>>,
+}
+
 /// Aperçu d'un script de dépôt : ses métadonnées et son code découpé en lignes de jetons.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

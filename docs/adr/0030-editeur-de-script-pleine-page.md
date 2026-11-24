@@ -1,7 +1,7 @@
 # 0030 — Éditeur de script en pleine page
 
 Statut : proposé. Forme (page plein écran) choisie par l'utilisateur le 23 nov. 2026. Lot 1 écrit le 23 nov. 2026
-(en attente de la CI) ; lots 2 et 3 à venir. Modifie l'ADR 0014 (écrans du client) et complète l'ADR 0025 (édition des variables et dépendances).
+et publié en 0.84.0 ; lot 2 écrit le 24 nov. 2026 (en attente de la CI) ; lot 3 à venir. Modifie l'ADR 0014 (écrans du client) et complète l'ADR 0025 (édition des variables et dépendances).
 
 ## Contexte
 
@@ -16,15 +16,16 @@ inchangé, les gabarits par interpréteur existent déjà (`starter_script_code`
 1. **Deux routes.** `/app/libraries/scripts/new` et `/app/libraries/scripts/<id>` (`Route::NewScript`,
    `Route::ScriptEditor(id)`), rattachées à l'entrée « Librairies » de la navigation, comme `FlowEditor` l'est à
    « Flux ». Le tiroir de création est retiré ; la carte d'un script ouvre la page.
-2. **Mise en page.** Zone de code à gauche (numéros de ligne, police fixe, tabulation qui insère des espaces,
+2. **Mise en page.** Zone de code à gauche (numéros de ligne, police fixe, tabulation qui insère deux espaces — Échap libère la touche Tab une fois, pour quitter la zone au clavier ;
    coloration en direct) ; panneau à droite : nom et interpréteur, puis onglets « Informations », « Variables »
    et « Dépendances » (les éditeurs existants, déplacés tels quels). Barre fixe : Enregistrer, Fermer,
    indicateur « modifié ».
 3. **Coloration sans bibliothèque JavaScript.** Un `<textarea>` transparent superposé à un `<pre>` coloré, défilant
    ensemble. Les jetons viennent du central : `POST /api/v1/highlight` (`code`, `extension`) renvoie
-   `Vec<Vec<CodeToken>>` via `highlight_code` (syntect, côté serveur). Appel différé après une pause de frappe,
-   le texte brut reste affiché entre-temps ; corps limité à `MAX_SCRIPT_BYTES`. Droit requis : gérer les
-   librairies. La grammaire PowerShell et le repli en texte brut sont ceux de `highlight_code`.
+   `{lines: Vec<Vec<CodeToken>>}` via `highlight_code` (syntect, côté serveur, hors du fil asynchrone). Appel
+   différé de 350 ms après la dernière frappe ; les jetons ne s'affichent que s'ils ont été calculés pour le
+   texte exact présent, sinon le texte brut reste affiché (la couche colorée ne se décale jamais). Corps limité
+   à 1 Mio (limite HTTP des routes de scripts). Droit requis : gérer les plugins, comme l'enregistrement. La grammaire PowerShell et le repli en texte brut sont ceux de `highlight_code`.
 4. **Quitter sans perdre.** La page déclare ses modifications au `Router` (`unsaved`) : la garde
    `needs_leave_confirmation` existante demande confirmation. La détection de modification concurrente du script
    ouvert (`opened_script_warning`) est conservée.

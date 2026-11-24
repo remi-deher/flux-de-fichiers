@@ -39,6 +39,7 @@ pub use dependencies::{
     resolve_dependencies,
 };
 pub use engine::{EngineSources, engine_roots, engine_sources};
+pub use highlight::highlight_code;
 pub use install::{
     ensure_tool_installed, ensure_tool_installed_verified, ensure_tools_for_requirements,
     install_from_distribution, is_installing, parse_distribution, read_distribution,

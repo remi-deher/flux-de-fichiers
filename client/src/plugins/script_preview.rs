@@ -113,7 +113,7 @@ fn ImportButton(import_path: String, in_collection: Signal<Option<bool>>) -> imp
 }
 
 /// Rend les lignes de jetons en `<span>` colorés, séparées par des retours à la ligne.
-fn highlighted_lines(lines: Vec<Vec<CodeToken>>) -> impl IntoView {
+pub(crate) fn highlighted_lines(lines: Vec<Vec<CodeToken>>) -> impl IntoView {
     lines
         .into_iter()
         .map(|line| {

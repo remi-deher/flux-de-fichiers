@@ -1,6 +1,6 @@
 # 0031 — Essai d'un script sur un worker
 
-Statut : proposé. Lot 3 de l'ADR 0030 ; lieu d'essai (un worker choisi) décidé par l'utilisateur le 24 nov. 2026.
+Statut : proposé ; sous-lots 3a et 3b écrits le 24 nov. 2026 (3b en attente de la CI), 3c à venir. Lot 3 de l'ADR 0030 ; lieu d'essai (un worker choisi) décidé par l'utilisateur le 24 nov. 2026.
 
 ## Contexte
 
@@ -18,7 +18,8 @@ essai sur un worker donne le même résultat que la production.
    `config`, `vars`). Le worker intégré exécute l'essai dans le processus central ; un worker distant en ligne le
    reçoit par le courtier de demandes existant (`/api/v1/worker/script-trials/pending` en attente longue, puis
    `/api/v1/worker/script-trials` pour le rapport), sur le modèle de l'exploration de dossiers. Un worker hors
-   ligne répond `503`. Attente maximale : délai du script + marge, plafonné.
+   ligne, ou qui ne répond pas dans le délai, répond `502` (`central_unavailable`), comme l'exploration de
+   dossiers. Attente maximale : délai du script + marge, plafonné.
 3. **Exécution.** Dossier de travail jetable ; fichier d'exemple vide (`exemple.mkv`) comme `workingFile` et
    `sourceFile` ; même entrée JSON, même `env_clear` (`PATH`, `TMPDIR`), même interpréteur que
    `execute_script_operation` ; délai de 30 s au plus. Le dossier est supprimé ensuite, quel que soit le résultat.
@@ -37,8 +38,10 @@ essai sur un worker donne le même résultat que la production.
 
 - **3a — exécuteur et route** : types partagés, exécuteur d'essai, route centrale, worker intégré (un autre worker
   répond `400` en attendant 3b).
-- **3b — worker distant** : courtier de demandes rendu générique (partagé avec l'exploration de dossiers), routes
-  `script-trials`, boucle d'écoute du worker.
+- **3b — worker distant (écrit)** : `RequestBroker<T, R>` (`src/request_broker.rs`) remplace le courtier propre à
+  l'exploration de dossiers, qui en devient un cas particulier (`RemoteBrowseBroker`) ; routes worker
+  `/api/v1/worker/script-trials/pending` et `/api/v1/worker/script-trials` ; boucle `serve_relayed` du worker,
+  commune à l'exploration et à l'essai. Le `PATH` d'un essai est celui du processus du worker, comme celui du moteur.
 - **3c — interface** : panneau « Essai » (choix du worker, `config`, `vars`), bouton, affichage du résultat.
 
 ## Conséquences

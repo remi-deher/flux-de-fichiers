@@ -1,14 +1,18 @@
 //! Gestionnaires HTTP de la librairie locale (`/api/v1/local`) : scripts, ressources, modèles et packs maison.
 
-use super::{AnyAuth, AppState, ManagePluginsAuth, ViewLibrariesAuth, to_completion, transfers};
+use super::{
+    AnyAuth, AppState, ManagePluginsAuth, ViewLibrariesAuth,
+    libraries::{WorkerPendingBrowseQuery, complete_report, take_pending},
+    to_completion, transfers,
+};
 use crate::{
     error::{AppError, AppResult},
     plugins, repository, script_trial,
 };
 use axum::{
     Json,
-    extract::{Path, State},
-    http::{HeaderValue, header},
+    extract::{Path, Query, State},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::Response,
 };
 use forgearr_shared::{
@@ -20,9 +24,14 @@ use forgearr_shared::{
         LocalScriptSummary, UploadLocalResourceRequest, UpsertLocalScriptRequest,
     },
     plugins::CatalogEntry,
-    script_trial::{ScriptTrialRequest, ScriptTrialResult},
+    script_trial::{
+        ScriptTrialRequest, ScriptTrialResult, TRIAL_TIMEOUT_SECONDS, WorkerScriptTrialReport,
+        WorkerScriptTrialTask,
+    },
 };
 use serde_json::{Value, json};
+use std::time::Duration;
+use uuid::Uuid;
 
 /// Écrit dans la librairie locale puis vide le cache du catalogue, qui signale le changement. Une écriture
 /// à la fois : chacune réécrit l'index, comme l'installation d'un script.
@@ -99,11 +108,11 @@ pub async fn highlight(
     Ok(Json(HighlightedCode { lines }))
 }
 
-/// Dossier, sous les données du central, où s'exécutent les essais de script du worker intégré.
-const TRIAL_DIRECTORY: &str = "script-trials";
+/// Marge, en secondes, laissée au va-et-vient avec un worker distant en plus du délai du script.
+const RELAY_MARGIN_SECONDS: u64 = 10;
 
-/// Exécute le code en cours d'édition sur le worker choisi (ADR 0031). Seul le worker intégré est joignable
-/// pour l'instant ; un worker distant arrive avec le sous-lot 3b.
+/// Exécute le code en cours d'édition sur le worker choisi (ADR 0031) : dans ce processus pour le worker
+/// intégré, relayé par le courtier pour un worker distant en ligne.
 pub async fn trial_script(
     State(s): State<AppState>,
     _auth: ManagePluginsAuth,
@@ -111,13 +120,38 @@ pub async fn trial_script(
 ) -> AppResult<Json<ScriptTrialResult>> {
     let worker = repository::get_worker(&s.pool, req.worker_id).await?;
     if !worker.is_integrated() {
-        return Err(AppError::Invalid);
+        if !worker.is_online(chrono::Utc::now()) {
+            return Err(AppError::CentralUnavailable);
+        }
+        let task = WorkerScriptTrialTask {
+            request_id: Uuid::new_v4(),
+            worker_id: worker.id,
+            request: req,
+        };
+        let wait = Duration::from_secs(TRIAL_TIMEOUT_SECONDS + RELAY_MARGIN_SECONDS);
+        let report = s.trial_broker.call(task, wait).await?;
+        return Ok(Json(report.result));
     }
-    let scratch = s.config.data_dir.join(TRIAL_DIRECTORY);
-    tokio::fs::create_dir_all(&scratch).await?;
-    // Chemin absolu : le script s'exécute dans son propre dossier, un chemin relatif n'y serait plus valable.
-    let scratch = tokio::fs::canonicalize(&scratch).await?;
+    let scratch = script_trial::scratch_root(&s.config.data_dir).await?;
     Ok(Json(script_trial::run_script_trial(&req, &scratch).await))
+}
+
+/// Essais en attente pour un worker distant authentifié.
+pub async fn worker_pending_trials(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<WorkerPendingBrowseQuery>,
+) -> AppResult<Json<Vec<WorkerScriptTrialTask>>> {
+    take_pending(&s, &headers, &s.trial_broker, q).await
+}
+
+/// Résultat d'un essai renvoyé par un worker distant.
+pub async fn worker_report_trial(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Json(report): Json<WorkerScriptTrialReport>,
+) -> AppResult<StatusCode> {
+    complete_report(&s, &headers, &s.trial_broker, report).await
 }
 
 pub async fn upload_resource(

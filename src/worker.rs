@@ -498,14 +498,17 @@ pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
 }
 
 impl WorkerLoop {
-    /// Répond aux demandes d'exploration de dossiers relayées par le central.
-    async fn respond_to_browse_requests(&self, worker_id: Uuid) {
-        let query = format!(
-            "/api/v1/worker/filesystem/pending?worker_id={worker_id}&wait_ms={REMOTE_BROWSE_WAIT_MS}"
-        );
+    /// Boucle commune des demandes relayées par le central : attente longue sur `pending`, puis `handle` pour
+    /// chaque demande reçue, l'une après l'autre.
+    async fn serve_relayed<T, H, Fut>(&self, pending: String, handle: H)
+    where
+        T: serde::de::DeserializeOwned,
+        H: Fn(T) -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
         loop {
             let fetch = self
-                .request(reqwest::Method::GET, &query)
+                .request(reqwest::Method::GET, &pending)
                 .timeout(REMOTE_BROWSE_HTTP_TIMEOUT)
                 .send();
             let response = tokio::select! {
@@ -513,10 +516,9 @@ impl WorkerLoop {
                 () = self.stopped() => return,
             };
             let tasks = match response {
-                Ok(resp) if resp.status().is_success() => resp
-                    .json::<Vec<crate::domain::WorkerBrowseTask>>()
-                    .await
-                    .unwrap_or_default(),
+                Ok(resp) if resp.status().is_success() => {
+                    resp.json::<Vec<T>>().await.unwrap_or_default()
+                }
                 _ => {
                     tokio::select! {
                         _ = tokio::time::sleep(REMOTE_BROWSE_RETRY_DELAY) => continue,
@@ -525,42 +527,89 @@ impl WorkerLoop {
                 }
             };
             for task in tasks {
-                let mut report = crate::domain::WorkerBrowseReport {
-                    request_id: task.request_id,
-                    worker_id,
-                    listing: None,
-                    scan: None,
-                    error: None,
-                };
-                let result = if let Some(mut options) = task.scan {
-                    options.max_bytes = options.max_bytes.min(self.config.max_bytes);
-                    match task.path.as_deref() {
-                        Some(path) => crate::library_scan::scan_folder(
-                            Path::new(path),
-                            &options,
-                            &[&self.config.work_dir, &self.config.tools_cache_dir],
-                        )
-                        .await
-                        .map(|scan| report.scan = Some(scan)),
-                        None => Err(crate::error::AppError::Invalid),
-                    }
-                } else {
-                    crate::filesystem_browser::browse_local(worker_id, task.path.as_deref(), None)
-                        .await
-                        .map(|listing| report.listing = Some(listing))
-                };
-                if let Err(err) = result {
-                    report.error =
-                        Some(crate::filesystem_browser::error_code_for_report(&err).to_owned());
-                }
-                let _ = self
-                    .request(reqwest::Method::POST, "/api/v1/worker/filesystem")
-                    .timeout(REMOTE_BROWSE_REPORT_TIMEOUT)
-                    .json(&report)
-                    .send()
-                    .await;
+                handle(task).await;
             }
         }
+    }
+
+    /// Répond aux demandes d'exploration de dossiers relayées par le central.
+    async fn respond_to_browse_requests(&self, worker_id: Uuid) {
+        let pending = format!(
+            "/api/v1/worker/filesystem/pending?worker_id={worker_id}&wait_ms={REMOTE_BROWSE_WAIT_MS}"
+        );
+        self.serve_relayed(pending, move |task| self.answer_browse(worker_id, task))
+            .await;
+    }
+
+    async fn answer_browse(&self, worker_id: Uuid, task: crate::domain::WorkerBrowseTask) {
+        let mut report = crate::domain::WorkerBrowseReport {
+            request_id: task.request_id,
+            worker_id,
+            listing: None,
+            scan: None,
+            error: None,
+        };
+        let result = if let Some(mut options) = task.scan {
+            options.max_bytes = options.max_bytes.min(self.config.max_bytes);
+            match task.path.as_deref() {
+                Some(path) => crate::library_scan::scan_folder(
+                    Path::new(path),
+                    &options,
+                    &[&self.config.work_dir, &self.config.tools_cache_dir],
+                )
+                .await
+                .map(|scan| report.scan = Some(scan)),
+                None => Err(crate::error::AppError::Invalid),
+            }
+        } else {
+            crate::filesystem_browser::browse_local(worker_id, task.path.as_deref(), None)
+                .await
+                .map(|listing| report.listing = Some(listing))
+        };
+        if let Err(err) = result {
+            report.error = Some(crate::filesystem_browser::error_code_for_report(&err).to_owned());
+        }
+        let _ = self
+            .request(reqwest::Method::POST, "/api/v1/worker/filesystem")
+            .timeout(REMOTE_BROWSE_REPORT_TIMEOUT)
+            .json(&report)
+            .send()
+            .await;
+    }
+
+    /// Exécute les essais de script que le central relaie à ce worker (ADR 0031, lot 3b).
+    async fn respond_to_script_trials(&self, worker_id: Uuid) {
+        let pending = format!(
+            "/api/v1/worker/script-trials/pending?worker_id={worker_id}&wait_ms={REMOTE_BROWSE_WAIT_MS}"
+        );
+        self.serve_relayed(pending, move |task| self.answer_script_trial(worker_id, task))
+            .await;
+    }
+
+    async fn answer_script_trial(
+        &self,
+        worker_id: Uuid,
+        task: forgearr_shared::script_trial::WorkerScriptTrialTask,
+    ) {
+        use forgearr_shared::script_trial::{ScriptTrialResult, WorkerScriptTrialReport};
+        let result = match crate::script_trial::scratch_root(&self.config.work_dir).await {
+            Ok(root) => crate::script_trial::run_script_trial(&task.request, &root).await,
+            Err(err) => ScriptTrialResult {
+                launch_error: Some(format!("dossier d'essai indisponible : {err}")),
+                ..ScriptTrialResult::default()
+            },
+        };
+        let report = WorkerScriptTrialReport {
+            request_id: task.request_id,
+            worker_id,
+            result,
+        };
+        let _ = self
+            .request(reqwest::Method::POST, "/api/v1/worker/script-trials")
+            .timeout(REMOTE_BROWSE_REPORT_TIMEOUT)
+            .json(&report)
+            .send()
+            .await;
     }
 
     /// Répond aux demandes de retour du résultat chez le détenteur de la source.
@@ -723,6 +772,12 @@ impl WorkerLoop {
                 browse_runner.respond_to_browse_requests(worker.id).await;
             })
         };
+        let script_trial_responder = {
+            let trial_runner = runner.clone();
+            tokio::spawn(async move {
+                trial_runner.respond_to_script_trials(worker.id).await;
+            })
+        };
         let transfer_server = runner.spawn_transfer_server(worker.id);
         let source_publication_responder = {
             let publication_runner = runner.clone();
@@ -767,6 +822,7 @@ impl WorkerLoop {
             .await;
         runner.drain(&mut active).await;
         browse_responder.abort();
+        script_trial_responder.abort();
         source_publication_responder.abort();
         source_inspection_responder.abort();
         software_probe_refresher.abort();

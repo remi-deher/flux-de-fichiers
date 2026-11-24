@@ -81,6 +81,24 @@ pub struct ScriptTrialResult {
     pub launch_error: Option<String>,
 }
 
+/// Essai confié à un worker distant en ligne, que le central met en file (ADR 0031, lot 3b).
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerScriptTrialTask {
+    pub request_id: Uuid,
+    pub worker_id: Uuid,
+    pub request: ScriptTrialRequest,
+}
+
+/// Résultat d'un essai, renvoyé au central par le worker distant qui l'a exécuté.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerScriptTrialReport {
+    pub request_id: Uuid,
+    pub worker_id: Uuid,
+    pub result: ScriptTrialResult,
+}
+
 /// Lit `stdout` comme réponse d'un script : `Ok(None)` s'il est vide.
 pub fn parse_script_response(stdout: &str) -> Result<Option<ScriptOutput>, String> {
     let trimmed = stdout.trim();
@@ -95,6 +113,35 @@ pub fn parse_script_response(stdout: &str) -> Result<Option<ScriptOutput>, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_relayed_trial_keeps_its_ids_and_uses_camel_case() -> Result<(), serde_json::Error> {
+        let (request_id, worker_id) = (Uuid::new_v4(), Uuid::new_v4());
+        let task = WorkerScriptTrialTask {
+            request_id,
+            worker_id,
+            request: ScriptTrialRequest {
+                worker_id,
+                interpreter: ScriptInterpreter::Sh,
+                code: "true".to_owned(),
+                entrypoint: None,
+                config: Map::new(),
+                vars: Map::new(),
+            },
+        };
+        let json = serde_json::to_value(&task)?;
+        assert_eq!(json["requestId"], request_id.to_string());
+        assert_eq!(json["request"]["workerId"], worker_id.to_string());
+        assert_eq!(serde_json::from_value::<WorkerScriptTrialTask>(json)?, task);
+        let report = WorkerScriptTrialReport {
+            request_id,
+            worker_id,
+            result: ScriptTrialResult::default(),
+        };
+        let value = serde_json::to_value(&report)?;
+        assert_eq!(serde_json::from_value::<WorkerScriptTrialReport>(value)?, report);
+        Ok(())
+    }
 
     #[test]
     fn an_empty_stdout_is_no_response_and_garbage_is_an_error() {

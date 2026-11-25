@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.89.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.89.0...v0.89.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **store:** le bouton du plan dit « Mettre à jour » ou « Réparer » selon le plan ([03edb61](https://github.com/remi-deher/flux-de-fichiers/commit/03edb614b9f75748e96e1b7d94c5f90325a38d0c))
+* **store:** libellé du bouton du plan selon l'action ([4cc90c4](https://github.com/remi-deher/flux-de-fichiers/commit/4cc90c46f77337d0794157bcdb0743b39a177295))
+
 ## [0.89.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.88.0...v0.89.0) (2026-11-25)
 
 

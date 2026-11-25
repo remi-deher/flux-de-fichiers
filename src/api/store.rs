@@ -98,22 +98,26 @@ pub async fn list_installed(
     Ok(Json(items))
 }
 
-/// Ce qui se sert d'un élément installé.
+/// Ce qui se sert d'un élément installé depuis le Store ; 404 pour un autre.
 pub async fn usage(
     State(s): State<AppState>,
     Path(id): Path<String>,
     _auth: ViewPluginsAuth,
 ) -> AppResult<Json<ItemUsage>> {
-    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
-    let catalog = Arc::new(plugins::EngineCatalog::cached(&s.catalog_cache, &roots).await);
-    if catalog.entry(&id).is_none() {
-        return Err(AppError::NotFound);
-    }
     let local_dir = plugins::local_catalog_dir(&s.config);
     let sources = {
         let mut conn = s.pool.acquire().await?;
+        // Seul un élément installé depuis le Store se désinstalle.
+        if repository::get_installation(&mut conn, &id)
+            .await?
+            .is_none()
+        {
+            return Err(AppError::NotFound);
+        }
         plugins::UsageSources::read(&mut conn, &local_dir).await?
     };
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
+    let catalog = Arc::new(plugins::EngineCatalog::cached(&s.catalog_cache, &roots).await);
     let usage = tokio::task::spawn_blocking(move || {
         plugins::item_usage(&id, &catalog, &sources, &local_dir)
     })

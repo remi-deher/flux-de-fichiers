@@ -1,12 +1,13 @@
 //! Assistant d'installation (ADR 0029 §4) : plan, accords, outils à télécharger, puis application.
 
 use super::store::InstallTarget;
-use super::{STORE_TOPICS, section_badge_label};
+use super::{STORE_TOPICS, SelectedItem, section_badge_label};
 use crate::api;
 use crate::live::use_live;
+use crate::route::{Route, use_router};
 use crate::ui::{Tag, TagTone, Toasts};
 use forgearr_shared::plugins::store::plan::{
-    InstallOutcome, InstallPlan, InstallRequest, PlanAction, PlanRequest,
+    InstallOutcome, InstallPlan, InstallRequest, PlanAction, PlanRequest, UseTarget,
 };
 use leptos::prelude::*;
 use std::collections::BTreeSet;
@@ -58,10 +59,26 @@ pub fn outcome_summary(outcome: &InstallOutcome) -> (bool, String) {
     (false, message)
 }
 
+/// Écran où mène « Utiliser » ; un plugin s'ouvre dans sa fiche, sans changer d'écran.
+pub fn use_route(target: &UseTarget) -> Option<Route> {
+    match target {
+        UseTarget::Flow { id } => Some(Route::FlowEditor(id.clone())),
+        UseTarget::Script { id } => Some(Route::ScriptEditor(id.clone())),
+        UseTarget::Plugin { .. } | UseTarget::None => None,
+    }
+}
+
 #[component]
-pub fn InstallWizard(target: InstallTarget, open: RwSignal<bool>) -> impl IntoView {
+pub fn InstallWizard(
+    target: InstallTarget,
+    open: RwSignal<bool>,
+    on_open_plugin: Callback<SelectedItem>,
+) -> impl IntoView {
     let live = use_live();
+    let router = use_router();
+    let name = target.name.clone();
     let targets = vec![target.item];
+    let outcome = RwSignal::new(None::<InstallOutcome>);
     let request = PlanRequest {
         targets: targets.clone(),
     };
@@ -76,22 +93,55 @@ pub fn InstallWizard(target: InstallTarget, open: RwSignal<bool>) -> impl IntoVi
         async move { api::post::<_, InstallOutcome>(APPLY_PATH, Some(&request)).await }
     });
     Effect::new(move |_| match apply.value().get() {
-        Some(Ok(outcome)) => {
-            let (ok, message) = outcome_summary(&outcome);
+        Some(Ok(result)) => {
+            let (ok, message) = outcome_summary(&result);
             if ok {
                 Toasts::notify_success(message);
             } else {
                 Toasts::notify_error(message);
             }
             live.touch(STORE_TOPICS);
-            open.set(false);
+            outcome.set(Some(result));
         }
         Some(Err(error)) => Toasts::notify_error(error.message()),
         None => {}
     });
 
+    let use_it = move |target: UseTarget| {
+        open.set(false);
+        match (use_route(&target), target) {
+            (Some(route), _) => router.go(route),
+            (None, UseTarget::Plugin { id }) => on_open_plugin.run(SelectedItem {
+                id,
+                name: name.clone(),
+            }),
+            (None, _) => {}
+        }
+    };
     view! {
-        {move || match plan.get() {
+        {move || outcome.get().map(|done| {
+            let (_, message) = outcome_summary(&done);
+            let target = done.use_target.clone();
+            let use_it = use_it.clone();
+            let usable = target != UseTarget::None;
+            view! {
+                <section class="install-plan__section">
+                    <h3>"Installation terminée"</h3>
+                    <p>{message}</p>
+                    <div class="install-plan__actions">
+                        <button type="button" class="btn btn-secondary" on:click=move |_| open.set(false)>
+                            "Fermer"
+                        </button>
+                        {usable.then(|| view! {
+                            <button type="button" class="btn btn-primary" on:click=move |_| use_it(target.clone())>
+                                "Utiliser"
+                            </button>
+                        })}
+                    </div>
+                </section>
+            }
+        })}
+        {move || outcome.read().is_none().then(|| match plan.get() {
             None => view! { <p class="text-dim">"Calcul du plan…"</p> }.into_any(),
             Some(Err(error)) => view! { <p class="form-error">{error.message()}</p> }.into_any(),
             Some(Ok(plan)) => {
@@ -102,7 +152,7 @@ pub fn InstallWizard(target: InstallTarget, open: RwSignal<bool>) -> impl IntoVi
                 }
                 plan_view(plan, targets.clone(), accepted, tools, apply).into_any()
             }
-        }}
+        })}
     }
 }
 
@@ -275,6 +325,20 @@ mod tests {
             id: "video".to_owned(),
         });
         assert!(!can_apply(&blocked, 0));
+    }
+
+    #[test]
+    fn use_leads_to_the_editor_of_the_new_copy() {
+        assert_eq!(
+            use_route(&UseTarget::Flow { id: "f".to_owned() }),
+            Some(Route::FlowEditor("f".to_owned()))
+        );
+        assert_eq!(
+            use_route(&UseTarget::Script { id: "s".to_owned() }),
+            Some(Route::ScriptEditor("s".to_owned()))
+        );
+        assert_eq!(use_route(&UseTarget::Plugin { id: "p".to_owned() }), None);
+        assert_eq!(use_route(&UseTarget::None), None);
     }
 
     #[test]

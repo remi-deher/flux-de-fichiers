@@ -784,6 +784,11 @@ async fn the_store_plans_installs_lists_and_uninstalls_an_item() -> anyhow::Resu
             .is_some_and(|items| items.iter().any(|item| item["id"] == "inutile"))
     );
 
+    let (status, usage) = central
+        .call("GET", "/api/v1/installations/audio/usage", None)
+        .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(usage["flows"], json!(["audio-run"]));
     let (status, refused) = central
         .call("DELETE", "/api/v1/installations/audio", None)
         .await?;

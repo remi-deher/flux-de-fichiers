@@ -54,7 +54,6 @@ pub(crate) fn tool_required_permissions(name: &str) -> &'static [Permission] {
         | "test_plugin_connection"
         | "install_tool"
         | "install_plugin"
-        | "install_pack"
         | "plan_installation"
         | "install_items"
         | "uninstall_item"

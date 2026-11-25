@@ -156,12 +156,6 @@ pub fn tools() -> Vec<McpTool> {
             "Lit le détail d'un pack (composants et plan d'installation).",
             obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
         ),
-        McpTool::write(
-            "install_pack",
-            "Installe un pack du catalogue et ses outils requis.",
-            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-            true,
-        ),
         McpTool::read_only(
             "list_local_catalog",
             "Liste le catalogue local (scripts, ressources, modèles de blocs/flux, packs).",
@@ -505,19 +499,6 @@ pub async fn call(
                 State(state.clone()),
                 Path(id),
                 ViewPluginsAuth(principal.clone()),
-            )
-            .await
-            .map(|Json(v)| McpToolResult::json(&v))
-        }
-        "install_pack" => {
-            let id = match req_str(&args, "id") {
-                Ok(id) => id.to_owned(),
-                Err(msg) => return Some(McpToolResult::error(msg)),
-            };
-            plugins::install_pack(
-                State(state.clone()),
-                Path(id),
-                ManagePluginsAuth(principal.clone()),
             )
             .await
             .map(|Json(v)| McpToolResult::json(&v))

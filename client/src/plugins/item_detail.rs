@@ -2,7 +2,8 @@
 
 use super::flow_preview::FlowDiagram;
 use super::metadata::{CommonInfoRows, MetaRow, StatusBanner, StoreTone};
-use super::script_preview::{ScriptPreview, catalog_script_import_path, catalog_script_path};
+use super::script_preview::{ScriptPreview, catalog_script_path};
+use super::uninstall::InstalledActions;
 use super::{card_description, section_badge_label};
 use crate::route::{Route, use_router};
 use crate::ui::{Tag, TagTone};
@@ -28,7 +29,6 @@ pub fn CatalogItemDetail(entry: Memo<CatalogEntry>, can_manage: bool) -> impl In
         view! {
             <ScriptPreview
                 path=catalog_script_path(&opened.id)
-                import_path=can_manage.then(|| catalog_script_import_path(&opened.id))
             />
         }
     });
@@ -37,6 +37,7 @@ pub fn CatalogItemDetail(entry: Memo<CatalogEntry>, can_manage: bool) -> impl In
             {move || view! { <ItemSummary entry=entry.get() /> }}
             {script_preview}
             {move || view! { <ItemInfo entry=entry.get() /> }}
+            <InstalledActions item_id=opened.id.clone() can_manage=can_manage />
         </div>
     }
 }

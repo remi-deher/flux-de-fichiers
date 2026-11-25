@@ -330,10 +330,6 @@ fn json_routes() -> Router<AppState> {
             get(plugins::catalog_script),
         )
         .route(
-            "/api/v1/catalog-scripts/{entry_id}/import",
-            post(plugins::import_catalog_script),
-        )
-        .route(
             "/api/v1/plugins/repositories/{id}/sync",
             post(plugins::sync_repository),
         )
@@ -553,7 +549,6 @@ fn transfer_routes() -> Router<AppState> {
         .route("/api/v1/tools/{id}/install", post(plugins::install_tool))
         // Fige les éléments, puis télécharge les outils cochés.
         .route("/api/v1/installations/apply", post(store::install))
-        .route("/api/v1/packs/{id}/install", post(plugins::install_pack))
         .route(EVENTS_PATH, get(events::all))
         .route(JOB_EVENTS_PATH, get(events::jobs))
         .route("/api/v1/ai/runs/{id}/events", get(crate::ai::run_events))

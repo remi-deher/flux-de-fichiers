@@ -3,6 +3,7 @@
 use super::exposed_variables::ExposedVariablesSection;
 use super::metadata::{CommonInfoRows, MetaRow, StatusBanner, StoreTone, tool_status_tag};
 use super::settings::PluginSettings;
+use super::uninstall::InstalledActions;
 use super::{CATALOG_PATH, CATALOG_TOPICS, SelectedItem, install_with_dependencies_action};
 use crate::api::ApiError;
 use crate::flows::NodeDomain;
@@ -413,9 +414,13 @@ pub fn PluginDetail(
                     }
                 }
             }}
-            {move || settings_shown.get().then(|| view! {
-                <PluginSettings plugin_id=plugin_id.clone() />
-            })}
+            {
+                let plugin_id = plugin_id.clone();
+                move || settings_shown.get().then(|| view! {
+                    <PluginSettings plugin_id=plugin_id.clone() />
+                })
+            }
+            <InstalledActions item_id=plugin_id can_manage=can_configure />
         </div>
     }
 }

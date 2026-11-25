@@ -18,6 +18,7 @@ mod store;
 mod subcategory_groups;
 mod tool_detail;
 mod tools;
+mod uninstall;
 
 use crate::api;
 use crate::live::{load, use_live};
@@ -377,7 +378,7 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
 
             <Drawer open=wizard_open eyebrow="Installation" title=wizard_title>
                 {move || installing.get().map(|target| view! {
-                    <InstallWizard target=target open=wizard_open />
+                    <InstallWizard target=target open=wizard_open on_open_plugin=open_plugin />
                 })}
             </Drawer>
             <Drawer
@@ -411,7 +412,6 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
                         <PackDetail
                             pack_id=item.id
                             tab=pack_tab
-                            can_install=can_manage
                             on_open_plugin=open_plugin
                             on_open_tool=open_tool
                             catalog_entries=catalog_entries

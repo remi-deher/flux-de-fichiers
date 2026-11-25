@@ -3,9 +3,11 @@
 use super::metadata::{StoreCard, StoreTone};
 use super::{card_description, section_badge_label, section_icon};
 use crate::live::Loaded;
+use crate::ui::focus::on_activate;
 use crate::ui::search::{matches, query};
-use crate::ui::{EmptyState, IconName, Segmented, Tag, TagTone};
+use crate::ui::{EmptyState, Icon, IconName, Segmented, Tag, TagTone};
 use forgearr_shared::plugins::store::{InstallState, ItemRef, StoreEntry};
+use forgearr_shared::plugins::vocab::CatalogItemType;
 use leptos::prelude::*;
 use std::collections::HashMap;
 
@@ -118,6 +120,13 @@ fn entry_matches(entry: &StoreEntry, text: &str) -> bool {
     matches(&fields, text)
 }
 
+const FEATURED_PACK_ICON_SIZE: u32 = 22;
+
+/// Les packs sont mis en avant en tête du Store tant qu'aucun filtre ni recherche ne restreint la vue.
+fn features_packs(filter: StoreFilter, text: &str) -> bool {
+    filter == StoreFilter::All && text.trim().is_empty()
+}
+
 /// Élément à installer, et le nom affiché dans l'assistant.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstallTarget {
@@ -148,6 +157,7 @@ pub fn StoreSection(
             })
             .collect::<Vec<_>>()
     });
+    let featured = Memo::new(move |_| features_packs(filter.get(), &query()));
     view! {
         <div class="store-toolbar">
             <div class="store-toolbar__actions">
@@ -173,14 +183,118 @@ pub fn StoreSection(
                     message="Ajoutez ou synchronisez un dépôt, ou changez de filtre."
                 />
             }.into_any(),
-            Some(Ok(_)) => view! {
-                <div class="store-grid">
-                    {visible.get().into_iter().map(|(entry, shared)| {
-                        store_card(entry, shared, can_install, on_install)
-                    }).collect_view()}
-                </div>
-            }.into_any(),
+            Some(Ok(_)) => {
+                let (packs, others): (Vec<_>, Vec<_>) = visible
+                    .get()
+                    .into_iter()
+                    .partition(|(entry, _)| featured.get() && entry.entry.entry_type == CatalogItemType::Pack);
+                view! {
+                    {(!packs.is_empty()).then(|| view! {
+                        <div class="store-section">
+                            <div class="store-section__head">
+                                <h2 class="store-section__title">"Packs recommandés"</h2>
+                                <p class="store-section__subtitle">"Ensembles prêts à l'emploi : le plan installe chacun de leurs composants"</p>
+                            </div>
+                            <div class="featured-packs">
+                                {packs.into_iter().map(|(entry, shared)| {
+                                    featured_pack_card(entry, shared, can_install, on_install)
+                                }).collect_view()}
+                            </div>
+                        </div>
+                    })}
+                    <div class="store-grid">
+                        {others.into_iter().map(|(entry, shared)| {
+                            store_card(entry, shared, can_install, on_install)
+                        }).collect_view()}
+                    </div>
+                }.into_any()
+            }
         }}
+    }
+}
+
+/// Ce que montrent les deux cartes : badge d'état, action, et cible de l'assistant.
+struct CardParts {
+    status: String,
+    tone: TagTone,
+    action: Option<&'static str>,
+    target: InstallTarget,
+}
+
+fn card_parts(entry: &StoreEntry, can_install: bool) -> CardParts {
+    let (status, tone) = state_badge(&entry.install);
+    CardParts {
+        status,
+        tone,
+        action: primary_action(&entry.install).filter(|_| can_install),
+        target: InstallTarget {
+            item: ItemRef {
+                repository_id: entry.origin.repository_id.clone(),
+                id: entry.entry.id.clone(),
+            },
+            name: entry.entry.name.clone(),
+        },
+    }
+}
+
+fn featured_pack_card(
+    entry: StoreEntry,
+    shared: bool,
+    can_install: bool,
+    on_install: Callback<InstallTarget>,
+) -> impl IntoView {
+    let CardParts {
+        status,
+        tone,
+        action,
+        target,
+    } = card_parts(&entry, can_install);
+    let open = {
+        let target = target.clone();
+        move || {
+            if action.is_some() {
+                on_install.run(target.clone());
+            }
+        }
+    };
+    let open_key = open.clone();
+    let foot = if shared {
+        format!(
+            "v{} · {}",
+            entry.entry.version, entry.origin.repository_name
+        )
+    } else {
+        format!("v{}", entry.entry.version)
+    };
+    view! {
+        <article
+            class="featured-pack"
+            tabindex="0"
+            on:click=move |_| open()
+            on:keydown=on_activate(open_key)
+        >
+            <div class="featured-pack__top">
+                <span class="featured-pack__icon" aria-hidden="true">
+                    <Icon name=IconName::Download size=FEATURED_PACK_ICON_SIZE />
+                </span>
+                <Tag label=status tone=tone />
+            </div>
+            <div>
+                <h3 class="featured-pack__title">{entry.entry.name.clone()}</h3>
+                <p class="featured-pack__desc">{card_description(&entry.entry)}</p>
+            </div>
+            <div class="featured-pack__foot">
+                <span class="store-card__version">{foot}</span>
+                {action.map(|label| view! {
+                    <button type="button" class="btn btn-primary btn-sm" on:click=move |ev| {
+                        ev.stop_propagation();
+                        on_install.run(target.clone());
+                    }>
+                        {label}
+                    </button>
+                })}
+            </div>
+        </article>
     }
 }
 
@@ -190,21 +304,13 @@ fn store_card(
     can_install: bool,
     on_install: Callback<InstallTarget>,
 ) -> impl IntoView {
-    let StoreEntry {
-        origin,
-        install,
-        entry,
-        ..
-    } = entry;
-    let (status, tone) = state_badge(&install);
-    let target = InstallTarget {
-        item: ItemRef {
-            repository_id: origin.repository_id.clone(),
-            id: entry.id.clone(),
-        },
-        name: entry.name.clone(),
-    };
-    let action = primary_action(&install).filter(|_| can_install);
+    let CardParts {
+        status,
+        tone,
+        action,
+        target,
+    } = card_parts(&entry, can_install);
+    let StoreEntry { origin, entry, .. } = entry;
     let open = {
         let target = target.clone();
         Callback::new(move |()| {
@@ -276,6 +382,13 @@ mod tests {
         assert!(StoreFilter::NotInstalled.accepts(&InstallState::Available));
         assert!(!StoreFilter::Updates.accepts(&installed(None, false)));
         assert!(StoreFilter::All.accepts(&InstallState::Provided));
+    }
+
+    #[test]
+    fn packs_are_featured_only_on_the_unfiltered_store() {
+        assert!(features_packs(StoreFilter::All, " "));
+        assert!(!features_packs(StoreFilter::All, "hdr"));
+        assert!(!features_packs(StoreFilter::Updates, ""));
     }
 
     #[test]

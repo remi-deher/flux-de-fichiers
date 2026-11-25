@@ -9,18 +9,13 @@ use super::{
 };
 use crate::live::{Loaded, load};
 use crate::ui::filters::{Filters, PluginKindFilter, plugin_kind};
-use crate::ui::focus::on_activate;
 use crate::ui::search::{matches, query};
-use crate::ui::{
-    EmptyState, Icon, IconName, MetricTone, Segmented, StatItem, StatStrip, Tag, TagTone,
-};
+use crate::ui::{EmptyState, IconName, MetricTone, Segmented, StatItem, StatStrip, Tag, TagTone};
 use forgearr_shared::plugins::store::InstalledItem;
 use forgearr_shared::plugins::vocab::{CatalogItemType, CatalogSection};
 use forgearr_shared::plugins::{CatalogEntry, CatalogReadiness, ToolStatusSummary};
 use leptos::prelude::*;
 use std::collections::HashMap;
-
-const FEATURED_PACK_ICON_SIZE: u32 = 22;
 
 /// Filtre rapide par état opérationnel dans la vue Catalogue.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -199,75 +194,6 @@ fn primary_action_label(entry: &CatalogEntry, can_configure: bool) -> &'static s
             _ => "Ouvrir",
         },
         _ => "Aperçu",
-    }
-}
-
-#[component]
-fn FeaturedPackCard(
-    entry: CatalogEntry,
-    can_configure: bool,
-    active_id: Signal<Option<String>>,
-    on_open_pack: Callback<SelectedItem>,
-) -> impl IntoView {
-    let id = entry.id.clone();
-    let check_id = id.clone();
-    let name = entry.name.clone();
-    let desc = card_description(&entry);
-    let runtime = entry.runtime.clone().unwrap_or_default();
-    let (status_label, status_tone, _) =
-        readiness_badge(runtime.readiness, runtime.missing_tools_count);
-    let components_label = if runtime.components_count > 0 {
-        format!("{} composant(s)", runtime.components_count)
-    } else {
-        format!("v{}", entry.version)
-    };
-    let open = move || {
-        on_open_pack.run(SelectedItem {
-            id: id.clone(),
-            name: name.clone(),
-        });
-    };
-    let open_click = open.clone();
-    let open_key = open.clone();
-    let open_btn = open;
-    let cta_class = if runtime.readiness == CatalogReadiness::NeedsTools && can_configure {
-        "btn btn-primary btn-sm"
-    } else {
-        "btn btn-secondary btn-sm"
-    };
-
-    view! {
-        <article
-            class="featured-pack"
-            class:is-open=move || active_id.get().as_deref() == Some(check_id.as_str())
-            tabindex="0"
-            on:click=move |_| open_click()
-            on:keydown=on_activate(open_key)
-        >
-            <div class="featured-pack__top">
-                <span class="featured-pack__icon" aria-hidden="true">
-                    <Icon name=IconName::Download size=FEATURED_PACK_ICON_SIZE />
-                </span>
-                <Tag label=status_label tone=status_tone />
-            </div>
-            <div>
-                <h3 class="featured-pack__title">{entry.name}</h3>
-                <p class="featured-pack__desc">{desc}</p>
-            </div>
-            <div class="featured-pack__foot">
-                <span class="store-card__version">{components_label}</span>
-                <button
-                    type="button"
-                    class=cta_class
-                    on:click=move |ev| {
-                        ev.stop_propagation();
-                        open_btn();
-                    }
-                >
-                    {if can_configure { "Voir / Installer" } else { "Découvrir" }}
-                </button>
-            </div>
-        </article>
     }
 }
 
@@ -641,37 +567,11 @@ pub fn CatalogSectionView(
                         }
                         if kind == PluginKindFilter::Any {
                             let sections = partition_catalog_sections(shown);
-                            let show_featured_packs = text.trim().is_empty()
-                                && readiness == ReadinessFilter::All
-                                && !sections.packs.is_empty();
-                            let fallback_packs = if show_featured_packs {
-                                Vec::new()
-                            } else {
-                                sections.packs.clone()
-                            };
                             view! {
-                                {show_featured_packs.then(|| view! {
-                                    <div class="store-section">
-                                        <div class="store-section__head">
-                                            <h2 class="store-section__title">"Packs recommandés"</h2>
-                                            <p class="store-section__subtitle">"Ensembles prêts à l'emploi installables en un clic"</p>
-                                        </div>
-                                        <div class="featured-packs">
-                                            {sections.packs.into_iter().map(|pack| view! {
-                                                <FeaturedPackCard
-                                                    entry=pack
-                                                    can_configure=can_configure
-                                                    active_id=active_item_id
-                                                    on_open_pack=on_open_pack
-                                                />
-                                            }).collect_view()}
-                                        </div>
-                                    </div>
-                                })}
                                 <CatalogGridSection
                                     title=Some("Packs")
                                     subtitle=Some("Ensembles prêts à l'emploi")
-                                    entries=fallback_packs
+                                    entries=sections.packs
                                     can_configure=can_configure
                                     active_item_id=active_item_id
                                     on_open_plugin=on_open_plugin

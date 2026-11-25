@@ -40,6 +40,10 @@ struct TestApp {
 async fn test_app() -> anyhow::Result<TestApp> {
     let config_dir = tempfile::tempdir()?;
     let plugins_dir = tempfile::tempdir()?;
+    common::store::write_blocks(
+        &config_dir.path().join("plugins/local"),
+        &["file-input", "file-output"],
+    )?;
     let config = Config {
         bind: "127.0.0.1:3000".parse()?,
         database_url: "sqlite::memory:".into(),
@@ -400,8 +404,7 @@ async fn flow_validation_reports_invalid_variable_references_in_its_errors() -> 
         })
     }));
 
-    // Le catalogue de ce test ne connaît pas les blocs d'entrée et de sortie : seule l'absence
-    // d'erreur de référence est vérifiée.
+    // Seule l'absence d'erreur de référence est vérifiée.
     let valid = encoder_graph(json!({"cible": "{{workingFile}}"}));
     let (_, report) = send(
         &app,
@@ -902,68 +905,5 @@ async fn a_catalog_script_is_previewed_by_its_id_whatever_its_repository() -> an
     let anonymous = Request::builder().uri(&uri).body(Body::empty())?;
     let (status, _) = send(&app, anonymous).await?;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    Ok(())
-}
-
-#[tokio::test]
-async fn a_catalog_script_is_copied_into_the_local_library_once() -> anyhow::Result<()> {
-    let app = test_app().await?;
-    let script_id = save_encoder_script(app.plugins_dir.path())?;
-    let uri = format!("/api/v1/catalog-scripts/{script_id}/import");
-
-    let (status, saved) = send(&app, authorized("POST", &uri, None)?).await?;
-    assert_eq!(status, StatusCode::OK, "{saved}");
-    assert_eq!(saved["code"], json!(SCRIPT_CODE));
-    assert_eq!(saved["name"], json!("Encodeur"));
-    assert_eq!(saved["variables"][0]["name"], json!("crf"));
-    assert_eq!(saved["variables"][1]["name"], json!("cible"));
-    assert!(
-        saved["id"]
-            .as_str()
-            .is_some_and(|id| id.starts_with("script."))
-    );
-
-    let (status, _) = send(&app, authorized("POST", &uri, None)?).await?;
-    assert_eq!(status, StatusCode::CONFLICT, "déjà dans la librairie");
-
-    let (status, _) = send(
-        &app,
-        authorized("POST", "/api/v1/catalog-scripts/script.absent/import", None)?,
-    )
-    .await?;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-
-    let anonymous = Request::builder()
-        .method("POST")
-        .uri(&uri)
-        .body(Body::empty())?;
-    let (status, _) = send(&app, anonymous).await?;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
-    Ok(())
-}
-
-#[tokio::test]
-async fn a_script_already_in_the_local_library_is_not_copied_onto_itself() -> anyhow::Result<()> {
-    let app = test_app().await?;
-    let created = json!({
-        "name": "Perso", "interpreter": "sh", "code": SCRIPT_CODE, "tags": []
-    });
-    let (status, saved) = send(
-        &app,
-        authorized("POST", "/api/v1/local/scripts", Some(&created))?,
-    )
-    .await?;
-    assert_eq!(status, StatusCode::OK, "{saved}");
-    let id = saved["id"].as_str().unwrap_or_default();
-    let (status, _) = send(
-        &app,
-        authorized(
-            "POST",
-            &format!("/api/v1/catalog-scripts/{id}/import"),
-            None,
-        )?,
-    )
-    .await?;
-    assert_eq!(status, StatusCode::CONFLICT);
     Ok(())
 }

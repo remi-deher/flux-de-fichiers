@@ -272,18 +272,6 @@ pub struct PackInstallation {
     pub runtime_implemented: Option<bool>,
 }
 
-/// Bilan d'installation d'un pack déclaratif.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PackInstallResult {
-    pub pack_id: String,
-    pub pack_version: String,
-    pub installed_tools: Vec<String>,
-    pub failed_tools: Vec<(String, String)>,
-    pub verified_components: Vec<String>,
-    pub missing_components: Vec<String>,
-}
-
 /// Bilan d'installation d'une pièce du catalogue et des outils qu'elle requiert
 /// (`POST /api/v1/plugins/{id}/install`, `POST /api/v1/tools/{id}/install`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

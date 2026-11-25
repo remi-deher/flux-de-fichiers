@@ -44,6 +44,18 @@ pub enum AppError {
     InvalidManifest(String),
     #[error("invalid flow variables: {0}")]
     InvalidFlowVariables(String),
+    /// Le flux ajoute des blocs que rien d'installé ne porte (ADR 0029).
+    #[error("unknown blocks: {0}")]
+    UnknownBlocks(String),
+    /// Quelque chose se sert de l'élément à retirer (ADR 0029).
+    #[error("item in use: {0}")]
+    ItemInUse(String),
+    /// Le plan d'installation a changé depuis qu'il a été montré (ADR 0029).
+    #[error("plan outdated")]
+    PlanOutdated,
+    /// Le plan est bloqué, ou un accord qu'il demande manque (ADR 0029).
+    #[error("installation blocked: {0}")]
+    InstallationBlocked(String),
     #[error("repository unavailable: {0}")]
     RepositoryUnavailable(String),
     /// Les éléments installés ne sont pas encore tous repris des dépôts (ADR 0029).
@@ -94,6 +106,10 @@ impl IntoResponse for AppError {
             | Self::UnsupportedArchive(_)
             | Self::InvalidManifest(_) => (StatusCode::BAD_REQUEST, "invalid_tool_artifact"),
             Self::InvalidFlowVariables(_) => (StatusCode::BAD_REQUEST, "invalid_flow_variables"),
+            Self::UnknownBlocks(_) => (StatusCode::BAD_REQUEST, "unknown_blocks"),
+            Self::ItemInUse(_) => (StatusCode::CONFLICT, "item_in_use"),
+            Self::PlanOutdated => (StatusCode::CONFLICT, "plan_outdated"),
+            Self::InstallationBlocked(_) => (StatusCode::CONFLICT, "installation_blocked"),
             Self::RepositoryUnavailable(_) => (StatusCode::BAD_GATEWAY, "repository_unavailable"),
             Self::StoreMigrating(_) => (StatusCode::CONFLICT, "store_migrating"),
             Self::CentralUnavailable => (StatusCode::BAD_GATEWAY, "central_unavailable"),
@@ -106,6 +122,9 @@ impl IntoResponse for AppError {
         };
         let mut error = json!({"code": code});
         if let Self::InvalidFlowVariables(detail)
+        | Self::UnknownBlocks(detail)
+        | Self::ItemInUse(detail)
+        | Self::InstallationBlocked(detail)
         | Self::RepositoryUnavailable(detail)
         | Self::StoreMigrating(detail) = &self
         {
@@ -188,6 +207,27 @@ mod tests {
         assert_eq!(body["error"]["code"], "lease_expired_or_conflict");
         let (status, _) = answer(AppError::PublicationPending).await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn a_refusal_names_what_is_missing_or_what_uses_the_item() {
+        for (error, expected, code) in [
+            (
+                AppError::UnknownBlocks("x.run".into()),
+                StatusCode::BAD_REQUEST,
+                "unknown_blocks",
+            ),
+            (
+                AppError::ItemInUse("flux : A".into()),
+                StatusCode::CONFLICT,
+                "item_in_use",
+            ),
+        ] {
+            let (status, body) = answer(error).await;
+            assert_eq!(status, expected);
+            assert_eq!(body["error"]["code"], code);
+            assert!(body["error"]["message"].is_string());
+        }
     }
 
     #[tokio::test]

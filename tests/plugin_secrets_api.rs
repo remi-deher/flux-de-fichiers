@@ -663,7 +663,7 @@ async fn test_local_library_limits_conflicts_and_role_permissions() -> anyhow::R
 
     // Modèles de blocs/flows et définition de flow > 16 Kio passent aussi.
     let big_nodes: Vec<_> = (0..180)
-        .map(|i| serde_json::json!({"id": format!("n{i}"), "type": "file-input", "name": format!("N{i}"), "config": {"pad": "x".repeat(120)}}))
+        .map(|i| serde_json::json!({"id": format!("n{i}"), "type": "block.demo.run", "name": format!("N{i}"), "config": {"pad": "x".repeat(120)}}))
         .collect();
     let big_graph = serde_json::json!({"nodes": big_nodes, "connections": []});
     let (status, _) = call(

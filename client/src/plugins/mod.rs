@@ -3,6 +3,7 @@
 mod catalog;
 mod exposed_variables;
 mod flow_preview;
+mod install;
 mod item_detail;
 mod metadata;
 mod pack_detail;
@@ -13,9 +14,11 @@ mod repos;
 mod script_preview;
 mod settings;
 mod settings_form;
+mod store;
 mod subcategory_groups;
 mod tool_detail;
 mod tools;
+mod uninstall;
 
 use crate::api;
 use crate::live::{load, use_live};
@@ -28,10 +31,11 @@ pub(crate) use flow_preview::{
 use forgearr_shared::live::ChangeTopic;
 use forgearr_shared::plugins::vocab::{CatalogItemType, CatalogSection};
 use forgearr_shared::plugins::{
-    CatalogEntry, DependencyInstallResult, PluginRepository, ToolStatusSummary,
+    CatalogEntry, DependencyInstallResult, PluginRepository, ToolStatusSummary, store::StoreEntry,
 };
 use forgearr_shared::session::Me;
 use forgearr_shared::{InstanceKind, Permission};
+use install::InstallWizard;
 use item_detail::CatalogItemDetail;
 use leptos::prelude::*;
 pub(crate) use metadata::{StatusBanner, StoreTone};
@@ -39,6 +43,7 @@ pub(crate) use pack_detail::{PackDetail, PackDrawerTab};
 use plugin_detail::{PluginDetail, PluginDrawerTab};
 use repos::ReposSection;
 pub(crate) use script_preview::highlighted_lines;
+use store::{InstallTarget, StoreSection};
 use tool_detail::{ToolDetail, ToolDrawerTab};
 use tools::ToolsSection;
 
@@ -46,11 +51,18 @@ const REPOSITORIES_PATH: &str = "/api/v1/plugins/repositories";
 const CATALOG_SCRIPTS_PATH: &str = "/api/v1/catalog-scripts";
 const CATALOG_PATH: &str = "/api/v1/plugins";
 const TOOLS_PATH: &str = "/api/v1/tools";
+const STORE_PATH: &str = "/api/v1/store";
 
 /// Sujets lus par le catalogue et la fiche d'un plugin ou d'un pack.
 pub(super) const CATALOG_TOPICS: &[ChangeTopic] = &[ChangeTopic::Catalog, ChangeTopic::Tools];
 /// Sujets lus par les applications : leur liste vient aussi du catalogue.
 pub(super) const TOOL_TOPICS: &[ChangeTopic] = CATALOG_TOPICS;
+/// Sujets lus par le Store : une installation, une synchronisation ou un dépôt retiré le changent.
+pub(super) const STORE_TOPICS: &[ChangeTopic] = &[
+    ChangeTopic::Catalog,
+    ChangeTopic::Tools,
+    ChangeTopic::Repositories,
+];
 /// Sujets lus par les dépôts.
 pub(super) const REPOSITORY_TOPICS: &[ChangeTopic] =
     &[ChangeTopic::Repositories, ChangeTopic::Catalog];
@@ -174,7 +186,8 @@ pub(super) fn card_description(entry: &CatalogEntry) -> String {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PluginsTab {
     #[default]
-    Catalog,
+    Store,
+    Installed,
     Tools,
     Repositories,
 }
@@ -182,7 +195,8 @@ pub enum PluginsTab {
 impl PluginsTab {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Catalog => "Catalogue",
+            Self::Store => "Store",
+            Self::Installed => "Installés",
             Self::Tools => "Outils",
             Self::Repositories => "Dépôts",
         }
@@ -190,9 +204,14 @@ impl PluginsTab {
 
     pub fn visible_tabs(can_manage: bool) -> &'static [Self] {
         if can_manage {
-            &[Self::Catalog, Self::Tools, Self::Repositories]
+            &[
+                Self::Store,
+                Self::Installed,
+                Self::Tools,
+                Self::Repositories,
+            ]
         } else {
-            &[Self::Catalog, Self::Tools]
+            &[Self::Store, Self::Installed, Self::Tools]
         }
     }
 }
@@ -240,7 +259,19 @@ fn current_entry(entries: &[CatalogEntry], opened: &CatalogEntry) -> CatalogEntr
 pub fn PluginsPage(me: Me) -> impl IntoView {
     let central = me.instance_kind == InstanceKind::Central;
     let can_manage = central && me.allows(Permission::ManagePlugins);
-    let active_tab = RwSignal::new(PluginsTab::Catalog);
+    let active_tab = RwSignal::new(PluginsTab::Store);
+    let installing = RwSignal::new(None::<InstallTarget>);
+    let wizard_open = RwSignal::new(false);
+    let open_wizard = Callback::new(move |target: InstallTarget| {
+        installing.set(Some(target));
+        wizard_open.set(true);
+    });
+    let wizard_title = Signal::derive(move || {
+        installing
+            .get()
+            .map(|target| target.name)
+            .unwrap_or_default()
+    });
     let adding_repo = RwSignal::new(false);
 
     // Tiroir d'inspection unifié permettant la navigation croisée Plugin <-> Outil.
@@ -300,6 +331,7 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
     let drawer_title = Signal::derive(move || target.get().map(|t| t.title()).unwrap_or_default());
 
     let catalog = load::<Vec<CatalogEntry>>(CATALOG_TOPICS, CATALOG_PATH);
+    let store = load::<Vec<StoreEntry>>(STORE_TOPICS, STORE_PATH);
     let tools = load::<Vec<ToolStatusSummary>>(TOOL_TOPICS, TOOLS_PATH);
     let repositories =
         can_manage.then(|| load::<Vec<PluginRepository>>(REPOSITORY_TOPICS, REPOSITORIES_PATH));
@@ -308,7 +340,8 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
 
     let tab_count = move |tab: PluginsTab| -> Option<usize> {
         match tab {
-            PluginsTab::Catalog => catalog
+            PluginsTab::Store => store.get().and_then(Result::ok).map(|list| list.len()),
+            PluginsTab::Installed => catalog
                 .get()
                 .and_then(Result::ok)
                 .map(|entries| summarize_catalog(&entries).total),
@@ -343,6 +376,11 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
                 }).collect_view()}
             </nav>
 
+            <Drawer open=wizard_open eyebrow="Installation" title=wizard_title>
+                {move || installing.get().map(|target| view! {
+                    <InstallWizard target=target open=wizard_open on_open_plugin=open_plugin />
+                })}
+            </Drawer>
             <Drawer
                 open=plugin_open
                 eyebrow="Plugin"
@@ -374,7 +412,6 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
                         <PackDetail
                             pack_id=item.id
                             tab=pack_tab
-                            can_install=can_manage
                             on_open_plugin=open_plugin
                             on_open_tool=open_tool
                             catalog_entries=catalog_entries
@@ -413,7 +450,10 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
             </Drawer>
 
             {move || match active_tab.get() {
-                PluginsTab::Catalog => view! {
+                PluginsTab::Store => view! {
+                    <StoreSection store=store can_install=can_manage on_install=open_wizard />
+                }.into_any(),
+                PluginsTab::Installed => view! {
                     <CatalogSectionView
                         catalog=catalog
                         can_configure=can_manage
@@ -453,17 +493,18 @@ mod tests {
     fn visible_tabs_hide_repositories_without_manage_permission() {
         assert_eq!(
             PluginsTab::visible_tabs(false),
-            &[PluginsTab::Catalog, PluginsTab::Tools]
+            &[PluginsTab::Store, PluginsTab::Installed, PluginsTab::Tools]
         );
         assert_eq!(
             PluginsTab::visible_tabs(true),
             &[
-                PluginsTab::Catalog,
+                PluginsTab::Store,
+                PluginsTab::Installed,
                 PluginsTab::Tools,
                 PluginsTab::Repositories
             ]
         );
-        assert_eq!(PluginsTab::Catalog.label(), "Catalogue");
+        assert_eq!(PluginsTab::Installed.label(), "Installés");
     }
 
     fn entry(id: &str, entry_type: CatalogItemType) -> CatalogEntry {

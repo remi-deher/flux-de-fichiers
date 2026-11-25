@@ -74,11 +74,10 @@ pub async fn download_resource(
     _auth: ViewLibrariesAuth,
     Path(id): Path<String>,
 ) -> AppResult<Response> {
-    let local_dir = plugins::local_catalog_dir(&s.config);
-    let (path, filename) =
-        tokio::task::spawn_blocking(move || plugins::local_resource_file(&local_dir, &id))
-            .await
-            .map_err(|_| AppError::Internal)??;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
+    let (path, filename) = tokio::task::spawn_blocking(move || plugins::resource_file(&roots, &id))
+        .await
+        .map_err(|_| AppError::Internal)??;
     let mut response =
         transfers::stream_file(&path, Some(&filename), "application/octet-stream").await?;
     response
@@ -196,6 +195,10 @@ pub async fn delete_item(
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     let deleted_id = id.clone();
-    write_local(&s, move |dir| plugins::delete_local_item(dir, &id)).await?;
+    to_completion(async move {
+        let lock = plugins::lock_installations().await;
+        plugins::delete_collection_item(&lock, &s.pool, &s.config, &s.catalog_cache, &id).await
+    })
+    .await?;
     Ok(Json(json!({ "id": deleted_id, "deleted": true })))
 }

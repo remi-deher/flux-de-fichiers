@@ -63,6 +63,9 @@ pub enum InstallState {
         version: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         update: Option<AvailableUpdate>,
+        /// « À réparer » : son dépôt peut redonner la copie que le moteur ne lit plus.
+        #[serde(default)]
+        damaged: bool,
     },
     /// Déjà lu par le moteur depuis `PLUGINS_DIR` ou la collection locale.
     Provided,
@@ -79,7 +82,9 @@ impl InstallState {
     pub fn is_actionable(&self) -> bool {
         match self {
             Self::Available | Self::PartlyInstalled { .. } => true,
-            Self::Installed { update, .. } => update.is_some(),
+            Self::Installed {
+                update, damaged, ..
+            } => update.is_some() || *damaged,
             Self::Provided | Self::HeldByOther { .. } | Self::Incomplete { .. } => false,
         }
     }
@@ -171,9 +176,10 @@ mod tests {
 
     #[test]
     fn only_useful_plans_are_offered() {
-        let installed = |update| InstallState::Installed {
+        let installed = |update, damaged| InstallState::Installed {
             version: "1.0.0".to_owned(),
             update,
+            damaged,
         };
         let update = AvailableUpdate {
             version: "1.0.0".to_owned(),
@@ -181,8 +187,9 @@ mod tests {
         };
         assert!(InstallState::Available.is_actionable());
         assert!(InstallState::PartlyInstalled { remaining: 3 }.is_actionable());
-        assert!(installed(Some(update)).is_actionable());
-        assert!(!installed(None).is_actionable());
+        assert!(installed(Some(update), false).is_actionable());
+        assert!(installed(None, true).is_actionable());
+        assert!(!installed(None, false).is_actionable());
         assert!(!InstallState::Provided.is_actionable());
     }
 

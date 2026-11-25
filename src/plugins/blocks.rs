@@ -3,7 +3,7 @@
 //! Aucun bloc n'est embarqué par le moteur : sans dépôt synchronisé ni dossier local, le
 //! catalogue retourné est vide.
 
-use super::{CatalogItemType, catalog_with_roots};
+use super::{CatalogEntry, CatalogItemType, catalog_with_roots};
 use forgearr_shared::flows::{OwnedBlockSpec, OwnedFieldKind, OwnedFieldSpec};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -35,14 +35,12 @@ pub fn flow_block_catalog(roots: &[PathBuf]) -> Vec<OwnedBlockSpec> {
         if entry.entry_type != CatalogItemType::Block {
             continue;
         }
-        if entry.id.contains(".example") || entry.id.starts_with("macro.") {
-            continue;
-        }
-        let Ok(document) = load_block_document(&root, &entry.manifest_path) else {
+        let Ok(content) = std::fs::read_to_string(root.join(&entry.manifest_path)) else {
             continue;
         };
-        let mut owned = document_to_spec(&document);
-        owned.owner = entry.owner.clone();
+        let Some(owned) = block_spec(&entry, &content) else {
+            continue;
+        };
         if let Some(existing) = catalog.iter_mut().find(|spec| spec.kind == owned.kind) {
             *existing = owned;
         } else {
@@ -50,6 +48,16 @@ pub fn flow_block_catalog(roots: &[PathBuf]) -> Vec<OwnedBlockSpec> {
         }
     }
     catalog
+}
+
+/// Fiche du bloc que décrit ce document ; `None` s'il est illisible, ou n'est qu'un exemple ou une macro.
+pub(super) fn block_spec(entry: &CatalogEntry, content: &str) -> Option<OwnedBlockSpec> {
+    if entry.id.contains(".example") || entry.id.starts_with("macro.") {
+        return None;
+    }
+    let mut spec = document_to_spec(&parse_block_document(content).ok()?);
+    spec.owner = entry.owner.clone();
+    Some(spec)
 }
 
 fn string_list(value: Option<&Value>) -> Vec<String> {
@@ -79,8 +87,11 @@ fn parse_ui_ports(value: Option<&Value>) -> Vec<(String, String)> {
 }
 
 fn load_block_document(root: &Path, manifest_path: &str) -> anyhow::Result<PluginBlockDocument> {
-    let content = std::fs::read_to_string(root.join(manifest_path))?;
-    let value: Value = serde_json::from_str(&content)?;
+    parse_block_document(&std::fs::read_to_string(root.join(manifest_path))?)
+}
+
+fn parse_block_document(content: &str) -> anyhow::Result<PluginBlockDocument> {
+    let value: Value = serde_json::from_str(content)?;
     let id = value
         .get("id")
         .and_then(Value::as_str)

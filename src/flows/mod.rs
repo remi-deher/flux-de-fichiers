@@ -16,12 +16,15 @@ mod script_branch;
 pub mod script_runner;
 mod sub_flow;
 pub mod substitution;
+mod unknown_blocks;
 mod variables;
 
 #[cfg(test)]
 mod engine_tests;
 #[cfg(test)]
 mod gate_flow_tests;
+#[cfg(test)]
+mod library_script_tests;
 #[cfg(test)]
 mod placement_flow_tests;
 #[cfg(test)]
@@ -73,6 +76,7 @@ pub use lease_secrets::{
 pub use node_references::{
     check_references, node_variables_view, reference_warnings, upstream_node_ids,
 };
+pub use unknown_blocks::{added_unknown_blocks, is_unknown_block, unknown_block_message};
 
 const MAX_FLOW_STEPS: usize = 32;
 /// Nœud du journal pour l'opération de repli, exécutée sans flux.

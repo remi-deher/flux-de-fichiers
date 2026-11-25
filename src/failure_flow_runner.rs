@@ -64,6 +64,8 @@ pub fn failure_code(job: &Job) -> JobErrorCode {
 
 /// Exécute un flux d'échec pris en charge ; `false` s'il a été rendu pour un motif passager du central.
 async fn execute(state: &AppState, job: &Job, mut claim: Claim) -> bool {
+    // Aucun bail ne dit à la purge que ses outils servent.
+    let _tools = state.tools_in_use.read().await;
     let worker_id = state.local_worker_id.get().copied().unwrap_or_default();
     let prepared = api::populate_claim_contracts(
         &state.pool,

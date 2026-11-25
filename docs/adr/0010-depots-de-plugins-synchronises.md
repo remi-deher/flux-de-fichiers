@@ -2,6 +2,11 @@
 
 Statut : accepté par l'utilisateur (12 nov. 2026).
 
+> **Modifiée par l'[ADR 0029](0029-store-elements-installes-et-depots.md)** (§1 à 3 et 5) : un dépôt synchronisé n'alimente plus le
+> moteur, il sert de vitrine au Store ; le moteur ne lit que les copies figées installées, la collection
+> locale et `PLUGINS_DIR`. Les installations de plugin, de pack et l'import de script passent par le plan
+> d'installation (`/api/v1/installations`).
+
 ## Contexte
 
 Le catalogue provenait d'un catalogue codé en dur dans le binaire, la synchronisation d'un

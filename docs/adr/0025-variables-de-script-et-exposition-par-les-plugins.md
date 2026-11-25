@@ -2,6 +2,10 @@
 
 Statut : accepté par l'utilisateur (21 nov. 2026) ; phases A à D et lots 4 et 5 implémentés.
 
+> **Modifiée par l'[ADR 0029](0029-store-elements-installes-et-depots.md)** : un script de dépôt n'est plus importé
+> par « Ajouter à ma collection » ; il s'installe depuis le Store, en copie intégrale qui garde ses
+> identifiants de bloc et d'opération, et son retrait est refusé tant qu'un flux s'en sert.
+
 ## Contexte
 
 Un script reçoit sur `stdin` un JSON (`workingFile`, `sourceFile`, `workDir`, `mediaInfo`,

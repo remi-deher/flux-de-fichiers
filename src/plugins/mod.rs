@@ -60,10 +60,7 @@ pub use local::{
     build_local_snapshot, repair_local_index, resource_file, save_local_block_template,
     save_local_flow_template, save_local_pack, save_local_script, upload_local_resource,
 };
-pub use packs::{
-    PackInstallResult, PackInstallation, build_pack_detail, install_pack, install_pack_verified,
-    read_pack_installation,
-};
+pub use packs::{PackInstallation, build_pack_detail, read_pack_installation};
 pub use probe::{ProbeContract, file_job_may_start, probe_is_ready, required_probe};
 pub use readiness::{attach_dependency_statuses, compute_entry_runtime, is_plugin_configured};
 pub use sources::{
@@ -87,9 +84,7 @@ pub use forgearr_shared::plugins::{
     PluginSettingsView, RepositoryDetailView, ToolArtifactSummary, ToolDetailView, ToolStatus,
     ToolStatusSummary,
 };
-pub use script_preview::{
-    catalog_script_import, read_catalog_script_preview, read_repository_script_preview,
-};
+pub use script_preview::{read_catalog_script_preview, read_repository_script_preview};
 pub use script_requirements::{
     ScriptRequirements, operation_declaration_issue, read_script_requirements, requirement_statuses,
 };

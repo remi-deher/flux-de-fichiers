@@ -2,6 +2,9 @@
 
 Statut : accepté par l'utilisateur (14 nov. 2026). Bascule terminée le 14 nov. 2026 : le client sert toute l'interface.
 
+> **Note (ADR 0029)** : l'écran Extensions a les onglets Store, Installés, Outils et Dépôts ; l'installation
+> passe par un assistant (plan, accords, outils, « Utiliser »).
+
 ## Contexte
 
 L'interface est générée une fois par Leptos en mode `ssr` (`frontend/dist/index.html`), mais tout

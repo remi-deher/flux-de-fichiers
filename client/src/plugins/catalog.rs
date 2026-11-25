@@ -7,7 +7,9 @@ use crate::live::Loaded;
 use crate::ui::filters::{Filters, PluginKindFilter, plugin_kind};
 use crate::ui::focus::on_activate;
 use crate::ui::search::{matches, query};
-use crate::ui::{EmptyState, Icon, IconName, MetricTone, StatItem, StatStrip, Tag, TagTone};
+use crate::ui::{
+    EmptyState, Icon, IconName, MetricTone, Segmented, StatItem, StatStrip, Tag, TagTone,
+};
 use forgearr_shared::plugins::vocab::{CatalogItemType, CatalogSection};
 use forgearr_shared::plugins::{CatalogEntry, CatalogReadiness};
 use leptos::prelude::*;
@@ -24,7 +26,7 @@ pub enum ReadinessFilter {
 }
 
 impl ReadinessFilter {
-    pub const ALL: [Self; 3] = [Self::All, Self::Ready, Self::ActionRequired];
+    pub const ALL: &[Self] = &[Self::All, Self::Ready, Self::ActionRequired];
 
     pub const fn label(self) -> &'static str {
         match self {
@@ -476,22 +478,12 @@ pub fn CatalogSectionView(
         <div class="store-toolbar">
             <StatStrip aria_label="Synthèse du catalogue" items=stats />
             <div class="store-toolbar__actions">
-                <div class="store-segmented" role="group" aria-label="Filtrer par état">
-                    {ReadinessFilter::ALL.into_iter().map(|opt| {
-                        let is_active = move || readiness_filter.get() == opt;
-                        view! {
-                            <button
-                                type="button"
-                                class="store-segmented__btn"
-                                class:is-active=is_active
-                                aria-pressed=move || is_active().to_string()
-                                on:click=move |_| readiness_filter.set(opt)
-                            >
-                                {opt.label()}
-                            </button>
-                        }
-                    }).collect_view()}
-                </div>
+                <Segmented
+                    options=ReadinessFilter::ALL
+                    selected=readiness_filter
+                    label=ReadinessFilter::label
+                    aria_label="Filtrer par état"
+                />
             </div>
         </div>
         <section class="page-section">

@@ -1,4 +1,4 @@
-//! Plugins : catalogue App Store, outils distribués, dépôts synchronisés et tiroirs croisés (ADR 0010, 0014).
+//! Plugins : onglets Store, Installés (outils compris) et Dépôts, et tiroirs croisés (ADR 0010, 0014, 0029).
 
 mod catalog;
 mod exposed_variables;
@@ -45,13 +45,13 @@ use repos::ReposSection;
 pub(crate) use script_preview::highlighted_lines;
 use store::{InstallTarget, StoreSection};
 use tool_detail::{ToolDetail, ToolDrawerTab};
-use tools::ToolsSection;
 
 const REPOSITORIES_PATH: &str = "/api/v1/plugins/repositories";
 const CATALOG_SCRIPTS_PATH: &str = "/api/v1/catalog-scripts";
 const CATALOG_PATH: &str = "/api/v1/plugins";
 const TOOLS_PATH: &str = "/api/v1/tools";
 const STORE_PATH: &str = "/api/v1/store";
+pub(super) const INSTALLATIONS_PATH: &str = "/api/v1/installations";
 
 /// Sujets lus par le catalogue et la fiche d'un plugin ou d'un pack.
 pub(super) const CATALOG_TOPICS: &[ChangeTopic] = &[ChangeTopic::Catalog, ChangeTopic::Tools];
@@ -188,7 +188,6 @@ pub enum PluginsTab {
     #[default]
     Store,
     Installed,
-    Tools,
     Repositories,
 }
 
@@ -197,21 +196,15 @@ impl PluginsTab {
         match self {
             Self::Store => "Store",
             Self::Installed => "Installés",
-            Self::Tools => "Outils",
             Self::Repositories => "Dépôts",
         }
     }
 
     pub fn visible_tabs(can_manage: bool) -> &'static [Self] {
         if can_manage {
-            &[
-                Self::Store,
-                Self::Installed,
-                Self::Tools,
-                Self::Repositories,
-            ]
+            &[Self::Store, Self::Installed, Self::Repositories]
         } else {
-            &[Self::Store, Self::Installed, Self::Tools]
+            &[Self::Store, Self::Installed]
         }
     }
 }
@@ -341,11 +334,14 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
     let tab_count = move |tab: PluginsTab| -> Option<usize> {
         match tab {
             PluginsTab::Store => store.get().and_then(Result::ok).map(|list| list.len()),
-            PluginsTab::Installed => catalog
-                .get()
-                .and_then(Result::ok)
-                .map(|entries| summarize_catalog(&entries).total),
-            PluginsTab::Tools => tools.get().and_then(Result::ok).map(|list| list.len()),
+            PluginsTab::Installed => {
+                let entries = catalog.get().and_then(Result::ok)?;
+                let tool_count = tools
+                    .get()
+                    .and_then(Result::ok)
+                    .map_or(0, |list| list.len());
+                Some(summarize_catalog(&entries).total + tool_count)
+            }
             PluginsTab::Repositories => repositories
                 .and_then(|res| res.get())
                 .and_then(Result::ok)
@@ -456,18 +452,13 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
                 PluginsTab::Installed => view! {
                     <CatalogSectionView
                         catalog=catalog
+                        tools=tools
                         can_configure=can_manage
                         active_item_id=active_item_id
+                        active_tool_id=active_tool_id
                         on_open_plugin=open_plugin
                         on_open_pack=open_pack
                         on_open_item=open_item
-                    />
-                }.into_any(),
-                PluginsTab::Tools => view! {
-                    <ToolsSection
-                        tools=tools
-                        can_install=can_manage
-                        active_tool_id=active_tool_id
                         on_open_tool=open_tool
                     />
                 }.into_any(),
@@ -493,14 +484,13 @@ mod tests {
     fn visible_tabs_hide_repositories_without_manage_permission() {
         assert_eq!(
             PluginsTab::visible_tabs(false),
-            &[PluginsTab::Store, PluginsTab::Installed, PluginsTab::Tools]
+            &[PluginsTab::Store, PluginsTab::Installed]
         );
         assert_eq!(
             PluginsTab::visible_tabs(true),
             &[
                 PluginsTab::Store,
                 PluginsTab::Installed,
-                PluginsTab::Tools,
                 PluginsTab::Repositories
             ]
         );

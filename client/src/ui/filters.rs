@@ -106,6 +106,8 @@ pub enum PluginKindFilter {
     Scripts,
     Resources,
     Packs,
+    /// Outils distribués : ils viennent de leur propre liste, avec l'état de leur binaire.
+    Tools,
 }
 
 impl PluginKindFilter {
@@ -120,6 +122,7 @@ impl PluginKindFilter {
             Self::Scripts => entry.entry_type.section() == Some(CatalogSection::Scripts),
             Self::Resources => entry.entry_type.section() == Some(CatalogSection::Other),
             Self::Packs => entry.entry_type.section() == Some(CatalogSection::Packs),
+            Self::Tools => false,
         }
     }
 }

@@ -1,6 +1,6 @@
 //! Gestionnaires HTTP pour les plugins, le catalogue et les outils distribués.
 
-use super::{AppState, ManagePluginsAuth, ViewPluginsAuth, local::write_local, to_completion};
+use super::{AppState, ManagePluginsAuth, ViewPluginsAuth, to_completion};
 use crate::{
     error::{AppError, AppResult},
     plugins::{self, CatalogEntry, ToolStatusSummary},

@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.89.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.88.0...v0.89.0) (2026-11-25)
+
+
+### Features
+
+* **store:** application du plan, routes Store et Installations, outils MCP (ADR 0029, lot 5) ([493645c](https://github.com/remi-deher/flux-de-fichiers/commit/493645ce2de1afd915677cc4b8610e4624081d32))
+* **store:** désinstallation, « Utilisé par » et « Utiliser » ; anciennes installations de pack et import de script retirés (ADR 0029, lot 7) ([eaf6fa0](https://github.com/remi-deher/flux-de-fichiers/commit/eaf6fa0f579c9a6801fd60a44cc33f4368c95036))
+* **store:** installations depuis le Store (ADR 0029, lots 3 à 5) ([2c595a1](https://github.com/remi-deher/flux-de-fichiers/commit/2c595a122156ef0fa8da211d47cbe7f575feb8d4))
+* **store:** onglets Store et Installés, assistant d'installation (ADR 0029, lot 6) ([f14abc2](https://github.com/remi-deher/flux-de-fichiers/commit/f14abc298c70ccdbf7ea594fc91b473fb2d8f23f))
+* **store:** scripts intégraux, plan d'installation et retrait contrôlé (ADR 0029, lots 3 et 4) ([439ecf2](https://github.com/remi-deher/flux-de-fichiers/commit/439ecf2d6de0c0a98464db997230bee369100a20))
+
+
+### Bug Fixes
+
+* **store:** espace d'exposition non réservé dans les tests du plan, import inutile retiré ([6502e51](https://github.com/remi-deher/flux-de-fichiers/commit/6502e5149e742f7ba952ee5acb2ab5674dceb9e3))
+* **store:** import devenu inutile retiré ([79d1260](https://github.com/remi-deher/flux-de-fichiers/commit/79d1260d32079aca7c20b18d9c30951883aaf30d))
+* **store:** libellés du plan au futur, fiche d'un plugin désinstallé expliquée ([23be759](https://github.com/remi-deher/flux-de-fichiers/commit/23be759b93df5d6421307da5f539a3b47555fe2b))
+
 ## [0.88.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.87.0...v0.88.0) (2026-11-24)
 
 

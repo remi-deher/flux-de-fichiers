@@ -17,9 +17,9 @@ const APPLY_PATH: &str = "/api/v1/installations/apply";
 
 pub fn action_label(action: PlanAction) -> (&'static str, TagTone) {
     match action {
-        PlanAction::Install => ("Installé", TagTone::Primary),
-        PlanAction::Update => ("Mis à jour", TagTone::Warning),
-        PlanAction::Repair => ("Réparé", TagTone::Danger),
+        PlanAction::Install => ("À installer", TagTone::Primary),
+        PlanAction::Update => ("À mettre à jour", TagTone::Warning),
+        PlanAction::Repair => ("À réparer", TagTone::Danger),
         PlanAction::AlreadyInstalled => ("Déjà présent", TagTone::Neutral),
     }
 }

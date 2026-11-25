@@ -1,18 +1,24 @@
-//! Vue Catalogue en style App Store : vitrine des packs recommandés, filtres d'état et grille responsive.
+//! Onglet Installés : ce que lit le moteur, outils compris, avec filtres de type et d'état (ADR 0029 §16).
 
 use super::metadata::{StoreCard, StoreTone, readiness_badge};
 use super::subcategory_groups::group_by_subcategory;
-use super::{SelectedItem, card_description, section_badge_label, section_icon};
-use crate::live::Loaded;
+use super::tools::{ToolGrid, filter_tools};
+use super::{
+    INSTALLATIONS_PATH, STORE_TOPICS, SelectedItem, card_description, section_badge_label,
+    section_icon,
+};
+use crate::live::{Loaded, load};
 use crate::ui::filters::{Filters, PluginKindFilter, plugin_kind};
 use crate::ui::focus::on_activate;
 use crate::ui::search::{matches, query};
 use crate::ui::{
     EmptyState, Icon, IconName, MetricTone, Segmented, StatItem, StatStrip, Tag, TagTone,
 };
+use forgearr_shared::plugins::store::InstalledItem;
 use forgearr_shared::plugins::vocab::{CatalogItemType, CatalogSection};
-use forgearr_shared::plugins::{CatalogEntry, CatalogReadiness};
+use forgearr_shared::plugins::{CatalogEntry, CatalogReadiness, ToolStatusSummary};
 use leptos::prelude::*;
+use std::collections::HashMap;
 
 const FEATURED_PACK_ICON_SIZE: u32 = 22;
 
@@ -23,26 +29,62 @@ pub enum ReadinessFilter {
     All,
     Ready,
     ActionRequired,
+    Updates,
+    Damaged,
+}
+
+/// Ce que l'inscription d'un élément installé ajoute à son état.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct InstallFlags {
+    pub update: bool,
+    pub damaged: bool,
+}
+
+/// Mise à jour proposée et copie à réparer, par identifiant d'élément installé.
+pub fn install_flags(items: &[InstalledItem]) -> HashMap<String, InstallFlags> {
+    items
+        .iter()
+        .map(|item| {
+            let flags = InstallFlags {
+                update: item.update.is_some(),
+                damaged: item.damaged,
+            };
+            (item.entry.id.clone(), flags)
+        })
+        .collect()
+}
+
+fn entry_readiness(entry: &CatalogEntry) -> CatalogReadiness {
+    entry
+        .runtime
+        .as_ref()
+        .map(|r| r.readiness)
+        .unwrap_or(CatalogReadiness::Available)
 }
 
 impl ReadinessFilter {
-    pub const ALL: &[Self] = &[Self::All, Self::Ready, Self::ActionRequired];
+    pub const ALL: &[Self] = &[
+        Self::All,
+        Self::Ready,
+        Self::ActionRequired,
+        Self::Updates,
+        Self::Damaged,
+    ];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::All => "Tous",
             Self::Ready => "Prêts",
             Self::ActionRequired => "Action requise",
+            Self::Updates => "Mises à jour",
+            Self::Damaged => "À réparer",
         }
     }
 
-    pub fn accepts(self, entry: &CatalogEntry) -> bool {
-        let readiness = entry
-            .runtime
-            .as_ref()
-            .map(|r| r.readiness)
-            .unwrap_or(CatalogReadiness::Available);
+    pub fn accepts(self, readiness: CatalogReadiness, flags: InstallFlags) -> bool {
         match self {
+            Self::Updates => flags.update,
+            Self::Damaged => flags.damaged,
             Self::All => true,
             Self::Ready => matches!(
                 readiness,
@@ -103,14 +145,23 @@ pub fn filter_catalog(
     entries: Vec<CatalogEntry>,
     kind: PluginKindFilter,
     readiness: ReadinessFilter,
+    flags: &HashMap<String, InstallFlags>,
     text: &str,
 ) -> Vec<CatalogEntry> {
     entries
         .into_iter()
         .filter(|entry| {
-            kind.accepts(entry) && readiness.accepts(entry) && catalog_entry_matches(entry, text)
+            let entry_flags = flags.get(&entry.id).copied().unwrap_or_default();
+            kind.accepts(entry)
+                && readiness.accepts(entry_readiness(entry), entry_flags)
+                && catalog_entry_matches(entry, text)
         })
         .collect()
+}
+
+/// Les outils s'affichent avec « Tous » et avec leur propre filtre ; les autres pièces, sauf avec « Outils ».
+const fn shows_tools(kind: PluginKindFilter) -> bool {
+    matches!(kind, PluginKindFilter::Any | PluginKindFilter::Tools)
 }
 
 fn catalog_entry_matches(entry: &CatalogEntry, text: &str) -> bool {
@@ -130,11 +181,7 @@ fn catalog_entry_matches(entry: &CatalogEntry, text: &str) -> bool {
 }
 
 fn primary_action_label(entry: &CatalogEntry, can_configure: bool) -> &'static str {
-    let readiness = entry
-        .runtime
-        .as_ref()
-        .map(|r| r.readiness)
-        .unwrap_or(CatalogReadiness::Available);
+    let readiness = entry_readiness(entry);
     match entry.entry_type {
         CatalogItemType::Pack => {
             if can_configure {
@@ -409,21 +456,57 @@ fn GroupedCatalogSections(
     }
 }
 
+/// Rubrique « Outils » de l'onglet ; rien si aucun outil ne passe les filtres.
+#[component]
+fn ToolsGridSection(
+    tools: Vec<ToolStatusSummary>,
+    can_install: bool,
+    active_tool_id: Signal<Option<String>>,
+    on_open_tool: Callback<SelectedItem>,
+) -> impl IntoView {
+    (!tools.is_empty()).then(|| {
+        let subtitle = format!("Binaires exécutés sur les nœuds · {}", tools.len());
+        view! {
+            <div class="store-section">
+                <div class="store-section__head">
+                    <h2 class="store-section__title">"Outils"</h2>
+                    <p class="store-section__subtitle">{subtitle}</p>
+                </div>
+                <ToolGrid
+                    tools=tools
+                    can_install=can_install
+                    active_tool_id=active_tool_id
+                    on_open_tool=on_open_tool
+                />
+            </div>
+        }
+    })
+}
+
 #[component]
 pub fn CatalogSectionView(
     catalog: Loaded<Vec<CatalogEntry>>,
+    tools: Loaded<Vec<ToolStatusSummary>>,
     can_configure: bool,
     active_item_id: Signal<Option<String>>,
+    active_tool_id: Signal<Option<String>>,
     on_open_plugin: Callback<SelectedItem>,
     on_open_pack: Callback<SelectedItem>,
     on_open_item: Callback<CatalogEntry>,
+    on_open_tool: Callback<SelectedItem>,
 ) -> impl IntoView {
     let filters = use_context::<Filters>();
     let readiness_filter = RwSignal::new(ReadinessFilter::All);
+    let installed = load::<Vec<InstalledItem>>(STORE_TOPICS, INSTALLATIONS_PATH);
+    let flags = Memo::new(move |_| {
+        install_flags(&installed.get().and_then(Result::ok).unwrap_or_default())
+    });
+    let tool_list = Memo::new(move |_| tools.get().and_then(Result::ok).unwrap_or_default());
 
     let stats = Signal::derive(move || {
         let catalog_entries = catalog.get().and_then(Result::ok).unwrap_or_default();
         let counts = summarize_catalog(&catalog_entries);
+        let tools_count = tool_list.read().len();
         let active_kind = plugin_kind();
         let set_kind = move |next: PluginKindFilter| {
             Callback::new(move |()| {
@@ -433,7 +516,12 @@ pub fn CatalogSectionView(
             })
         };
         vec![
-            StatItem::new("Tous", counts.total.to_string(), MetricTone::Neutral).with_filter(
+            StatItem::new(
+                "Tous",
+                (counts.total + tools_count).to_string(),
+                MetricTone::Neutral,
+            )
+            .with_filter(
                 active_kind == PluginKindFilter::Any,
                 set_kind(PluginKindFilter::Any),
             ),
@@ -471,6 +559,10 @@ pub fn CatalogSectionView(
                 active_kind == PluginKindFilter::Resources,
                 set_kind(PluginKindFilter::Resources),
             ),
+            StatItem::new("Outils", tools_count.to_string(), MetricTone::Neutral).with_filter(
+                active_kind == PluginKindFilter::Tools,
+                set_kind(PluginKindFilter::Tools),
+            ),
         ]
     });
 
@@ -491,6 +583,20 @@ pub fn CatalogSectionView(
                 let text = query();
                 let kind = plugin_kind();
                 let readiness = readiness_filter.get();
+                let flags = flags.read();
+                let shown_tools = if shows_tools(kind) {
+                    filter_tools(tool_list.get(), readiness, &flags, &text)
+                } else {
+                    Vec::new()
+                };
+                let tools_view = view! {
+                    <ToolsGridSection
+                        tools=shown_tools.clone()
+                        can_install=can_configure
+                        active_tool_id=active_tool_id
+                        on_open_tool=on_open_tool
+                    />
+                };
                 match catalog.get() {
                     None => view! {
                         <div class="empty-state-panel">
@@ -505,8 +611,8 @@ pub fn CatalogSectionView(
                     }
                     .into_any(),
                     Some(Ok(all)) => {
-                        let shown = filter_catalog(all, kind, readiness, &text);
-                        if shown.is_empty() {
+                        let shown = filter_catalog(all, kind, readiness, &flags, &text);
+                        if shown.is_empty() && shown_tools.is_empty() {
                             let unfiltered = text.trim().is_empty()
                                 && kind == PluginKindFilter::Any
                                 && readiness == ReadinessFilter::All;
@@ -530,6 +636,9 @@ pub fn CatalogSectionView(
                             .into_any();
                         }
 
+                        if kind == PluginKindFilter::Tools {
+                            return tools_view.into_any();
+                        }
                         if kind == PluginKindFilter::Any {
                             let sections = partition_catalog_sections(shown);
                             let show_featured_packs = text.trim().is_empty()
@@ -599,6 +708,7 @@ pub fn CatalogSectionView(
                                     on_open_pack=on_open_pack
                                     on_open_item=on_open_item
                                 />
+                                {tools_view}
                             }
                             .into_any()
                         } else {
@@ -669,6 +779,7 @@ mod tests {
         let block = entry("block.remux", CatalogItemType::Block);
 
         let all = vec![plugin, flow, script, pack, preset, subtitle, app, block];
+        let no_flags = HashMap::new();
         assert_eq!(
             summarize_catalog(&all),
             CatalogCounts {
@@ -681,7 +792,14 @@ mod tests {
             }
         );
         assert_eq!(
-            filter_catalog(all.clone(), PluginKindFilter::Any, ReadinessFilter::All, "").len(),
+            filter_catalog(
+                all.clone(),
+                PluginKindFilter::Any,
+                ReadinessFilter::All,
+                &no_flags,
+                ""
+            )
+            .len(),
             6
         );
         assert_eq!(
@@ -689,6 +807,7 @@ mod tests {
                 all.clone(),
                 PluginKindFilter::Any,
                 ReadinessFilter::ActionRequired,
+                &no_flags,
                 ""
             )
             .len(),
@@ -699,6 +818,7 @@ mod tests {
                 all.clone(),
                 PluginKindFilter::Plugins,
                 ReadinessFilter::All,
+                &no_flags,
                 "arr"
             )
             .len(),
@@ -709,6 +829,7 @@ mod tests {
                 all.clone(),
                 PluginKindFilter::Scripts,
                 ReadinessFilter::All,
+                &no_flags,
                 ""
             )
             .len(),
@@ -719,14 +840,67 @@ mod tests {
                 all.clone(),
                 PluginKindFilter::Resources,
                 ReadinessFilter::All,
+                &no_flags,
                 ""
             )
             .len(),
             2
         );
         assert_eq!(
-            filter_catalog(all, PluginKindFilter::Flows, ReadinessFilter::All, "").len(),
+            filter_catalog(
+                all,
+                PluginKindFilter::Flows,
+                ReadinessFilter::All,
+                &no_flags,
+                ""
+            )
+            .len(),
             1
+        );
+    }
+
+    #[test]
+    fn updates_and_repairs_come_from_the_installation_record() {
+        let update = InstallFlags {
+            update: true,
+            damaged: false,
+        };
+        let damaged = InstallFlags {
+            update: false,
+            damaged: true,
+        };
+        assert!(ReadinessFilter::Updates.accepts(CatalogReadiness::Ready, update));
+        assert!(!ReadinessFilter::Updates.accepts(CatalogReadiness::Ready, damaged));
+        assert!(ReadinessFilter::Damaged.accepts(CatalogReadiness::Ready, damaged));
+        assert!(!ReadinessFilter::Damaged.accepts(CatalogReadiness::NeedsTools, update));
+        assert!(
+            ReadinessFilter::All.accepts(CatalogReadiness::NeedsTools, InstallFlags::default())
+        );
+        assert!(shows_tools(PluginKindFilter::Tools));
+        assert!(shows_tools(PluginKindFilter::Any));
+        assert!(!shows_tools(PluginKindFilter::Plugins));
+        let mut flagged = HashMap::new();
+        flagged.insert("sonarr".to_owned(), update);
+        let shown = filter_catalog(
+            vec![
+                entry("sonarr", CatalogItemType::Plugin),
+                entry("radarr", CatalogItemType::Plugin),
+            ],
+            PluginKindFilter::Any,
+            ReadinessFilter::Updates,
+            &flagged,
+            "",
+        );
+        assert_eq!(shown.len(), 1);
+        assert!(
+            filter_catalog(
+                vec![entry("ffmpeg", CatalogItemType::App)],
+                PluginKindFilter::Tools,
+                ReadinessFilter::All,
+                &flagged,
+                "",
+            )
+            .is_empty()
         );
     }
 

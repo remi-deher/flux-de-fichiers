@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 pub enum PlanAction {
     Install,
     Update,
+    /// Même contenu, dont la copie est absente ou altérée.
+    Repair,
     AlreadyInstalled,
 }
 
@@ -45,7 +47,7 @@ pub struct PlanItem {
     pub configured: bool,
 }
 
-/// Outil recommandé. Son contrat est toujours figé ; la case ne décide que du téléchargement.
+/// Outil recommandé. Son contrat, toujours figé, est aussi dans `items` ; la case ne décide que du téléchargement.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlanTool {
@@ -61,7 +63,7 @@ pub struct PlanTool {
 }
 
 /// Nom unique dans le moteur.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ClaimKind {
     EntryId,

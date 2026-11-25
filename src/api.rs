@@ -84,6 +84,8 @@ pub struct AppState {
     /// Identifiant du worker intégré une fois enregistré (absent s'il est désactivé) : il détient les
     /// sources que le central voit et reçoit leurs résultats (ADR 0022).
     pub local_worker_id: Arc<std::sync::OnceLock<uuid::Uuid>>,
+    /// Partagé par ce que le central exécute hors d'un bail avec les outils de son cache ; la purge le prend seule.
+    pub tools_in_use: Arc<tokio::sync::RwLock<()>>,
 }
 
 impl AppState {
@@ -114,6 +116,7 @@ impl AppState {
             ai_models: crate::ai::health::ModelCache::new(),
             ai_diagnosis: crate::ai::diagnosis::DiagnosisStore::new(),
             local_worker_id: Arc::new(std::sync::OnceLock::new()),
+            tools_in_use: Arc::default(),
         }
     }
 

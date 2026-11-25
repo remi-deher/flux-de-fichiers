@@ -45,9 +45,11 @@ pub use install::{
     install_from_distribution, is_installing, parse_distribution, read_distribution,
 };
 pub use installed::{
-    DamagedItem, EngineCatalog, InstallationGuard, ItemContent, SyncedRepository, UsageSources,
-    UsedElements, elements_used_by, freeze_item, frozen_is_intact, held_flows, installed_root,
-    item_usage, lock_installations, read_item, resume_store, share_installations, sweep_orphans,
+    DamagedItem, EngineCatalog, InstallationGuard, InstalledState, ItemContent, PlanContext,
+    PlannedChange, PreparedPlan, ScriptCopy, SyncedRepository, UsageSources, UsedElements,
+    compare_script_copy, delete_collection_item, elements_used_by, ensure_unused, freeze_item,
+    frozen_is_intact, held_flows, installed_root, item_usage, lock_installations,
+    plan_installation, read_item, resume_store, share_installations, sweep_orphans,
     unreadable_item,
 };
 pub use legacy_ids::{
@@ -55,9 +57,8 @@ pub use legacy_ids::{
     rename_legacy_block_kinds,
 };
 pub use local::{
-    build_local_snapshot, delete_local_item, local_resource_file, repair_local_index,
-    save_local_block_template, save_local_flow_template, save_local_pack, save_local_script,
-    upload_local_resource,
+    build_local_snapshot, repair_local_index, resource_file, save_local_block_template,
+    save_local_flow_template, save_local_pack, save_local_script, upload_local_resource,
 };
 pub use packs::{
     PackInstallResult, PackInstallation, build_pack_detail, install_pack, install_pack_verified,

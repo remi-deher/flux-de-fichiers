@@ -1,17 +1,14 @@
 //! Lecture de l'instantané consolidé de la librairie locale et résolution sûre des ressources.
 
-use super::{is_safe_filename, normalize_description};
+use super::{declared_file, is_safe_filename, item_dir, normalize_description, read_local_script};
 use crate::{
     error::{AppError, AppResult},
     plugins::{
-        CatalogEntry, CatalogItemType, catalog_with_roots, is_valid_repository_id, load_catalog,
-        vocab::CatalogSection,
+        CatalogEntry, CatalogItemType, catalog_with_roots, load_catalog, vocab::CatalogSection,
     },
-    tools_cache::ToolCacheManager,
 };
 use forgearr_shared::local::{
     LocalBlockTemplate, LocalFlowTemplate, LocalLibrarySnapshot, LocalResourceSummary,
-    LocalScriptSummary, ScriptInterpreter,
 };
 use serde_json::Value;
 use std::{
@@ -20,77 +17,23 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Lit le manifeste, l'opération et le code d'un script du catalogue situé sous `root`.
-pub(in crate::plugins) fn read_local_script(
-    root: &Path,
-    entry: &CatalogEntry,
-) -> Option<LocalScriptSummary> {
-    let manifest_path = root.join(&entry.manifest_path);
-    let item_dir = manifest_path.parent()?;
-    let val: Value = serde_json::from_str(&fs::read_to_string(&manifest_path).ok()?).ok()?;
-    let op_val: Value =
-        serde_json::from_str(&fs::read_to_string(item_dir.join("operations/run.json")).ok()?)
-            .ok()?;
-    let runtime = op_val.get("runtime")?;
-    let interpreter: ScriptInterpreter =
-        serde_json::from_value(runtime.get("interpreter")?.clone()).ok()?;
-    let entrypoint = runtime
-        .get("entrypoint")
-        .and_then(Value::as_str)?
-        .to_owned();
-    if !is_safe_filename(&entrypoint) {
-        return None;
-    }
-    let code = fs::read_to_string(item_dir.join(&entrypoint)).unwrap_or_default();
-    let variables = runtime
-        .get("variables")
-        .and_then(|raw| serde_json::from_value(raw.clone()).ok())
-        .unwrap_or_default();
-    let requires = runtime
-        .get("requires")
-        .and_then(|raw| serde_json::from_value(raw.clone()).ok())
-        .unwrap_or_default();
-    let dependencies_unverified = runtime
-        .get("dependenciesUnverified")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let slug = entry
-        .id
-        .strip_prefix("script.")
-        .unwrap_or(&entry.id)
-        .to_owned();
-    Some(LocalScriptSummary {
-        id: entry.id.clone(),
-        slug,
-        name: entry.name.clone(),
-        description: normalize_description(val.get("description").and_then(Value::as_str)),
-        interpreter,
-        entrypoint,
-        code,
-        category: entry.category,
-        tags: entry.tags.clone(),
-        variables,
-        requires,
-        dependencies_unverified,
-    })
+fn read_manifest(root: &Path, entry: &CatalogEntry) -> Option<Value> {
+    let text = fs::read_to_string(root.join(&entry.manifest_path)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// Chemin du fichier d'une ressource, et son nom.
+fn asset_of(manifest: &Value) -> Option<(&str, &str)> {
+    let path = declared_file(manifest, "asset")?;
+    let filename = Path::new(path).file_name()?.to_str()?;
+    is_safe_filename(filename).then_some((path, filename))
 }
 
 fn read_local_resource(root: &Path, entry: &CatalogEntry) -> Option<LocalResourceSummary> {
-    let manifest_path = root.join(&entry.manifest_path);
-    let item_dir = manifest_path.parent()?;
-    let val: Value = serde_json::from_str(&fs::read_to_string(&manifest_path).ok()?).ok()?;
-    let asset = val
-        .get("files")
-        .and_then(Value::as_array)?
-        .iter()
-        .find(|f| f.get("role").and_then(Value::as_str) == Some("asset"))?;
-    let filename = asset.get("path").and_then(Value::as_str)?.to_owned();
-    if !is_safe_filename(&filename) {
-        return None;
-    }
-    let size_bytes = fs::metadata(item_dir.join(&filename))
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let manifest = read_manifest(root, entry)?;
+    let (path, filename) = asset_of(&manifest)?;
+    let file = root.join(&entry.manifest_path).parent()?.join(path);
+    let size_bytes = fs::metadata(file).map_or(0, |metadata| metadata.len());
     let slug = entry
         .id
         .strip_prefix("resource.")
@@ -101,49 +44,30 @@ fn read_local_resource(root: &Path, entry: &CatalogEntry) -> Option<LocalResourc
         slug,
         name: entry.name.clone(),
         entry_type: entry.entry_type,
-        filename,
+        filename: filename.to_owned(),
         size_bytes,
-        description: normalize_description(val.get("description").and_then(Value::as_str)),
+        description: normalize_description(manifest.get("description").and_then(Value::as_str)),
     })
 }
 
-/// Résout en lecture seule le chemin disque sûr et le nom de fichier d'une ressource locale importée.
-pub fn local_resource_file(local_dir: &Path, id: &str) -> AppResult<(PathBuf, String)> {
-    if !is_valid_repository_id(id) {
+/// Fichier d'une ressource et son nom, dans le premier de ces dossiers de catalogue qui la porte.
+pub fn resource_file(roots: &[PathBuf], id: &str) -> AppResult<(PathBuf, String)> {
+    let (root, entry) = catalog_with_roots(roots)
+        .into_iter()
+        .find(|(_, entry)| {
+            entry.id == id
+                && entry.entry_type.section() == Some(CatalogSection::Other)
+                && entry.entry_type != CatalogItemType::ResourceTemplate
+        })
+        .ok_or(AppError::NotFound)?;
+    let dir = item_dir(&root, &entry)?;
+    let manifest = read_manifest(&root, &entry).ok_or(AppError::NotFound)?;
+    let (path, filename) = asset_of(&manifest).ok_or(AppError::NotFound)?;
+    let file = fs::canonicalize(dir.join(path)).map_err(|_| AppError::NotFound)?;
+    if !file.starts_with(&dir) || !file.is_file() {
         return Err(AppError::NotFound);
     }
-    let Ok(index) = load_catalog(local_dir) else {
-        return Err(AppError::NotFound);
-    };
-    let Some(entry) = index.entries.into_iter().find(|entry| {
-        entry.id == id
-            && entry.entry_type.section() == Some(CatalogSection::Other)
-            && entry.entry_type != CatalogItemType::ResourceTemplate
-    }) else {
-        return Err(AppError::NotFound);
-    };
-    let rel_manifest = Path::new(&entry.manifest_path);
-    if !ToolCacheManager::is_safe_relative_path(rel_manifest) {
-        return Err(AppError::NotFound);
-    }
-    let Some(summary) = read_local_resource(local_dir, &entry) else {
-        return Err(AppError::NotFound);
-    };
-    let Some(item_dir_rel) = rel_manifest.parent() else {
-        return Err(AppError::NotFound);
-    };
-    let canonical_root = fs::canonicalize(local_dir).map_err(|_| AppError::NotFound)?;
-    let canonical_item =
-        fs::canonicalize(canonical_root.join(item_dir_rel)).map_err(|_| AppError::NotFound)?;
-    let canonical_file =
-        fs::canonicalize(canonical_item.join(&summary.filename)).map_err(|_| AppError::NotFound)?;
-    if !canonical_item.starts_with(&canonical_root)
-        || !canonical_file.starts_with(&canonical_item)
-        || !canonical_file.is_file()
-    {
-        return Err(AppError::NotFound);
-    }
-    Ok((canonical_file, summary.filename))
+    Ok((file, filename.to_owned()))
 }
 
 fn read_block_template(
@@ -151,8 +75,7 @@ fn read_block_template(
     entry: &CatalogEntry,
     is_local: bool,
 ) -> Option<LocalBlockTemplate> {
-    let content = fs::read_to_string(root.join(&entry.manifest_path)).ok()?;
-    let val = serde_json::from_str::<Value>(&content).ok()?;
+    let val = read_manifest(root, entry)?;
     let definition = val.get("definition").cloned()?;
     Some(LocalBlockTemplate {
         id: entry.id.clone(),
@@ -169,8 +92,7 @@ fn read_flow_template(
     entry: &CatalogEntry,
     is_local: bool,
 ) -> Option<LocalFlowTemplate> {
-    let content = fs::read_to_string(root.join(&entry.manifest_path)).ok()?;
-    let val = serde_json::from_str::<Value>(&content).ok()?;
+    let val = read_manifest(root, entry)?;
     let definition = val.get("definition").cloned()?;
     Some(LocalFlowTemplate {
         id: entry.id.clone(),

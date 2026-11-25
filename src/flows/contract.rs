@@ -5,7 +5,9 @@ use crate::{
     media::{
         DurationRule, MagicBytesRule, OutputSpec, PostValidateMode, PostValidateSpec, ProbeFormat,
     },
-    plugins::{CatalogItemType, catalog_with_roots, flow_block_catalog, load_manifest},
+    plugins::{
+        CatalogEntry, CatalogItemType, catalog_with_roots, flow_block_catalog, load_manifest,
+    },
     tool_run::{ProgressParser, ProgressStream},
     tools_cache::{ToolCacheManager, host_arch},
 };
@@ -13,7 +15,7 @@ use forgearr_shared::{
     exposed_variables::{
         ExposedVariables, ScriptRequirement, validate_exposed, validate_requirements,
     },
-    flows::{FlowGraph, FlowNode, FlowRecord},
+    flows::{FlowGraph, FlowNode, FlowRecord, OwnedBlockSpec},
     jobs::JobErrorCode,
     script_variables::validate_variables,
 };
@@ -103,6 +105,14 @@ pub struct OperationContract {
 }
 
 impl OperationContract {
+    /// Contrat que décrit ce document, déclarations contrôlées.
+    pub fn parse(raw: &Value) -> Result<Self, ContractError> {
+        let contract: Self = serde_json::from_value(raw.clone())
+            .map_err(|err| ContractError::InvalidContract(err.to_string()))?;
+        validate_contract_declarations(&contract)?;
+        Ok(contract)
+    }
+
     /// Outils que l'opération lance ou place dans le `PATH`.
     pub fn tool_refs(&self) -> impl Iterator<Item = &ToolRef> {
         let (tool, path_tools) = match &self.runtime {
@@ -567,6 +577,11 @@ pub fn library_script_id(node: &FlowNode) -> Option<&str> {
         .filter(|id| !id.is_empty())
 }
 
+/// Opération que le moteur cherche pour un script de la librairie.
+pub fn library_operation_id(script_id: &str) -> String {
+    format!("operation.{script_id}")
+}
+
 /// Registre en mémoire des contrats d'opérations et de la table bloc/alias → `operationId`.
 #[derive(Clone, Debug, Default)]
 pub struct OperationRegistry {
@@ -575,6 +590,8 @@ pub struct OperationRegistry {
     block_operations: HashMap<String, String>,
     /// Plugin ou script dont le dossier porte chaque opération : `providerId` n'est qu'une déclaration.
     owners: HashMap<String, String>,
+    /// Opération de chaque élément script, dont l'identifiant ne se déduit pas toujours du sien.
+    library_scripts: HashMap<String, String>,
 }
 
 impl OperationRegistry {
@@ -591,6 +608,7 @@ impl OperationRegistry {
             raw_operations: HashMap::new(),
             block_operations,
             owners: HashMap::new(),
+            library_scripts: HashMap::new(),
         };
         for (_, raw) in operations {
             let _ = registry.register_json(raw);
@@ -626,30 +644,68 @@ impl OperationRegistry {
                 };
                 if let Ok(mut value) = serde_json::from_str::<Value>(&text) {
                     resolve_script_entrypoint(&manifest_dir, &mut value);
-                    let operation_id = value.get("id").and_then(Value::as_str).map(str::to_owned);
-                    if registry.register_json(value).is_ok()
-                        && let Some(operation_id) = operation_id
-                    {
-                        registry.owners.insert(operation_id, entry.id.clone());
-                    }
+                    registry.register_owned(&entry, value);
                 }
             }
         }
-        for spec in flow_block_catalog(roots) {
-            if let Some(op_id) = spec.operation_id {
-                registry.register_block_mapping(&spec.kind, &op_id);
-                for alias in spec.aliases {
-                    registry.register_block_mapping(&alias, &op_id);
-                }
-            }
-        }
+        registry.map_blocks(&flow_block_catalog(roots));
         registry
     }
 
+    /// Ce que deviendrait ce registre si les opérations de ces éléments étaient remplacées, avec ces blocs.
+    pub fn replacing<'a>(
+        &self,
+        replaced: &HashSet<&str>,
+        added: impl IntoIterator<Item = (&'a CatalogEntry, &'a Value)>,
+        blocks: &[OwnedBlockSpec],
+    ) -> Self {
+        let mut registry = self.clone();
+        registry
+            .owners
+            .retain(|_, owner| !replaced.contains(owner.as_str()));
+        let kept = &registry.owners;
+        let is_kept = |id: &str| kept.contains_key(id) || !self.owners.contains_key(id);
+        registry.operations.retain(|id, _| is_kept(id));
+        registry.raw_operations.retain(|id, _| is_kept(id));
+        registry
+            .library_scripts
+            .retain(|item, _| !replaced.contains(item.as_str()));
+        for (owner, raw) in added {
+            registry.register_owned(owner, raw.clone());
+        }
+        registry.block_operations.clear();
+        registry.map_blocks(blocks);
+        registry
+    }
+
+    /// Enregistre une opération de cet élément ; illisible, elle est ignorée.
+    fn register_owned(&mut self, owner: &CatalogEntry, raw: Value) {
+        let operation_id = raw.get("id").and_then(Value::as_str).map(str::to_owned);
+        if self.register_json(raw).is_ok()
+            && let Some(operation_id) = operation_id
+        {
+            if owner.entry_type == CatalogItemType::Script && self.is_script(&operation_id) {
+                self.library_scripts
+                    .entry(owner.id.clone())
+                    .or_insert_with(|| operation_id.clone());
+            }
+            self.owners.insert(operation_id, owner.id.clone());
+        }
+    }
+
+    fn map_blocks(&mut self, blocks: &[OwnedBlockSpec]) {
+        for spec in blocks {
+            if let Some(op_id) = &spec.operation_id {
+                self.register_block_mapping(&spec.kind, op_id);
+                for alias in &spec.aliases {
+                    self.register_block_mapping(alias, op_id);
+                }
+            }
+        }
+    }
+
     pub fn register_json(&mut self, raw: Value) -> Result<(), ContractError> {
-        let contract: OperationContract = serde_json::from_value(raw.clone())
-            .map_err(|err| ContractError::InvalidContract(err.to_string()))?;
-        validate_contract_declarations(&contract)?;
+        let contract = OperationContract::parse(&raw)?;
         self.raw_operations.insert(contract.id.clone(), raw);
         self.operations.insert(contract.id.clone(), contract);
         Ok(())
@@ -766,6 +822,16 @@ impl OperationRegistry {
         self.operations.get(operation_id)
     }
 
+    /// Document d'une opération, tel que publié.
+    pub fn raw(&self, operation_id: &str) -> Option<&Value> {
+        self.raw_operations.get(operation_id)
+    }
+
+    fn is_script(&self, operation_id: &str) -> bool {
+        self.get(operation_id)
+            .is_some_and(|op| matches!(op.runtime, OperationRuntime::Script(_)))
+    }
+
     /// Toutes les opérations, sans ordre.
     pub fn operations(&self) -> impl Iterator<Item = &OperationContract> {
         self.operations.values()
@@ -797,9 +863,12 @@ impl OperationRegistry {
         self.operations.get(op_id)
     }
 
-    /// Opération du script de la librairie que le nœud désigne (`scriptId`).
+    /// Opération du script de la librairie que le nœud désigne (`scriptId`). Un script installé garde celle de
+    /// son dépôt ; un bail la porte sous le nom que tout worker cherche.
     pub fn library_script_operation(&self, node: &FlowNode) -> Option<&OperationContract> {
-        self.get(&format!("operation.{}", library_script_id(node)?))
+        let script_id = library_script_id(node)?;
+        self.get(&library_operation_id(script_id))
+            .or_else(|| self.get(self.library_scripts.get(script_id)?))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -971,9 +1040,12 @@ impl OperationRegistry {
     /// Le graphe contient-il une opération qui accepte une entrée non média ?
     pub fn graph_accepts_non_media(&self, graph: &FlowGraph) -> bool {
         graph.nodes.iter().any(|node| {
-            self.resolve_node_operation(node).is_some_and(|op| {
-                matches!(&op.runtime, OperationRuntime::Script(script) if script.accepts_non_media)
-            })
+            self.resolve_node_operation(node)
+                .into_iter()
+                .chain(self.library_script_operation(node))
+                .any(|op| {
+                    matches!(&op.runtime, OperationRuntime::Script(script) if script.accepts_non_media)
+                })
         })
     }
 
@@ -1002,16 +1074,18 @@ impl OperationRegistry {
     ) -> (HashMap<String, Value>, HashMap<String, String>) {
         let mut ops = HashMap::new();
         let mut blocks = HashMap::new();
-        let mut insert_op = |op: &OperationContract| {
+        let mut insert_op = |id: String, op: &OperationContract| {
             if let Some(raw) = self.raw_operations.get(&op.id) {
-                ops.insert(op.id.clone(), raw.clone());
+                let mut raw = raw.clone();
+                raw["id"] = Value::String(id.clone());
+                ops.insert(id, raw);
             }
         };
         for probe in self.all_probes() {
-            insert_op(probe);
+            insert_op(probe.id.clone(), probe);
         }
         if let Some(default_op) = self.default_fallback_operation() {
-            insert_op(default_op);
+            insert_op(default_op.id.clone(), default_op);
         }
         if let Some(graph) =
             flow.and_then(|f| serde_json::from_str::<FlowGraph>(&f.definition).ok())
@@ -1019,10 +1093,12 @@ impl OperationRegistry {
             for node in &graph.nodes {
                 if let Some(op) = self.resolve_node_operation(node) {
                     blocks.insert(node.kind.as_str().to_owned(), op.id.clone());
-                    insert_op(op);
+                    insert_op(op.id.clone(), op);
                 }
-                if let Some(target_op) = self.library_script_operation(node) {
-                    insert_op(target_op);
+                if let Some(script_id) = library_script_id(node)
+                    && let Some(target_op) = self.library_script_operation(node)
+                {
+                    insert_op(library_operation_id(script_id), target_op);
                 }
             }
         }

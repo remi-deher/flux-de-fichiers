@@ -40,6 +40,10 @@ struct TestApp {
 async fn test_app() -> anyhow::Result<TestApp> {
     let config_dir = tempfile::tempdir()?;
     let plugins_dir = tempfile::tempdir()?;
+    common::store::write_blocks(
+        &config_dir.path().join("plugins/local"),
+        &["file-input", "file-output"],
+    )?;
     let config = Config {
         bind: "127.0.0.1:3000".parse()?,
         database_url: "sqlite::memory:".into(),
@@ -400,8 +404,7 @@ async fn flow_validation_reports_invalid_variable_references_in_its_errors() -> 
         })
     }));
 
-    // Le catalogue de ce test ne connaît pas les blocs d'entrée et de sortie : seule l'absence
-    // d'erreur de référence est vérifiée.
+    // Seule l'absence d'erreur de référence est vérifiée.
     let valid = encoder_graph(json!({"cible": "{{workingFile}}"}));
     let (_, report) = send(
         &app,

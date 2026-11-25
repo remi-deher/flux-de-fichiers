@@ -6,13 +6,15 @@ use crate::{
     opaque_token::sha256_hex,
     plugins::{
         CatalogEntry, CatalogItemType, icon::declared_icon_path, install::DISTRIBUTION_FILE_NAME,
-        is_valid_repository_id, parse_index_tolerant, sources::INDEX_RELATIVE_PATH,
-        sync::MAX_FILES, sync::verify_optional_sha256, vocab::CatalogSection,
+        is_valid_repository_id, parse_index_tolerant, rename_legacy_block_kinds,
+        sources::INDEX_RELATIVE_PATH, sync::MAX_FILES, sync::verify_optional_sha256,
+        vocab::CatalogSection,
     },
 };
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -25,7 +27,7 @@ const VOLATILE_ENTRY_FIELDS: [&str; 3] = ["updatedAt", "sha256", "contentSha256"
 /// Rôles de `files[]` distingués ici ; les autres sont des fichiers annexes.
 #[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-enum DeclaredRole {
+pub(super) enum DeclaredRole {
     Operation,
     CapabilityProbe,
     Asset,
@@ -39,12 +41,27 @@ enum Need {
     Optional,
 }
 
+/// Fichiers déclarés d'un manifeste, avec leur rôle s'il est distingué ici.
+pub(super) fn declared_files(
+    manifest: &Value,
+) -> impl Iterator<Item = (Option<DeclaredRole>, &str)> {
+    let declared = manifest.get("files").and_then(Value::as_array);
+    declared.into_iter().flatten().filter_map(|file| {
+        let role = file
+            .get("role")
+            .and_then(|role| DeclaredRole::deserialize(role).ok());
+        Some((role, file.get("path")?.as_str()?))
+    })
+}
+
 /// Contenu d'un élément, prêt à être figé.
 #[derive(Clone, Debug)]
 pub struct ItemContent {
     pub entry: CatalogEntry,
     /// Fichiers que le moteur lit et que le dossier n'a pas.
     pub missing: Vec<String>,
+    /// Ceux de `missing` qui décrivent une opération : la synchronisation en écarte, l'élément sert sans elles.
+    pub missing_operations: Vec<String>,
     /// Fichiers annexes absents ou refusés.
     pub skipped: Vec<String>,
     /// Empreinte de l'entrée, de ses blocs et de tous les fichiers.
@@ -62,12 +79,13 @@ impl ItemContent {
     }
 
     /// Mêmes fichiers, relativement au dossier du manifeste ? Sert à savoir si une copie modifiable est
-    /// restée identique à sa copie figée, que l'index décrit autrement.
+    /// restée identique à sa copie figée, que l'index décrit autrement. Le renommage des anciens types de blocs,
+    /// fait au démarrage dans la collection, n'est pas une différence.
     pub fn has_same_files_as(&self, other: &Self) -> bool {
         self.relative_files() == other.relative_files()
     }
 
-    fn relative_files(&self) -> BTreeMap<&str, &[u8]> {
+    fn relative_files(&self) -> BTreeMap<&str, Cow<'_, [u8]>> {
         let manifest = safe_path(&self.entry.manifest_path).unwrap_or_default();
         let folder = folder_of(&manifest);
         self.files
@@ -77,7 +95,7 @@ impl ItemContent {
                     .strip_prefix(folder)
                     .and_then(|rest| rest.strip_prefix('/'))
                     .unwrap_or(path);
-                (relative, content.as_slice())
+                (relative, with_current_kinds(relative, content))
             })
             .collect()
     }
@@ -88,6 +106,15 @@ impl ItemContent {
 /// Chaque chemin est contrôlé et chaque empreinte publiée vérifiée. Un fichier manquant n'est pas une
 /// erreur : il est signalé dans `missing` ou `skipped`.
 pub fn read_item(root: &Path, item_id: &str) -> AppResult<ItemContent> {
+    read_published_item(root, item_id, false)
+}
+
+/// Comme [`read_item`] ; `require_digest` refuse un fichier dont l'index ne publie pas l'empreinte.
+pub(super) fn read_published_item(
+    root: &Path,
+    item_id: &str,
+    require_digest: bool,
+) -> AppResult<ItemContent> {
     if !is_valid_repository_id(item_id) {
         return Err(AppError::Invalid);
     }
@@ -120,9 +147,11 @@ pub fn read_item(root: &Path, item_id: &str) -> AppResult<ItemContent> {
     let mut collector = Collector {
         root,
         expected,
+        require_digest,
         files: BTreeMap::new(),
         total_bytes: 0,
         missing: BTreeSet::new(),
+        missing_operations: BTreeSet::new(),
         skipped: BTreeSet::new(),
     };
     collector.take_item(&entry)?;
@@ -144,6 +173,7 @@ pub fn read_item(root: &Path, item_id: &str) -> AppResult<ItemContent> {
     let Collector {
         files,
         missing,
+        missing_operations,
         skipped,
         ..
     } = collector;
@@ -151,11 +181,23 @@ pub fn read_item(root: &Path, item_id: &str) -> AppResult<ItemContent> {
         entry,
         skipped: skipped.difference(&missing).cloned().collect(),
         missing: missing.into_iter().collect(),
+        missing_operations: missing_operations.into_iter().collect(),
         content_sha256,
         schema_version: index.schema_version,
         raw_entries,
         files,
     })
+}
+
+/// Contenu aux types de blocs actuels.
+fn with_current_kinds<'a>(path: &str, content: &'a [u8]) -> Cow<'a, [u8]> {
+    std::str::from_utf8(content)
+        .ok()
+        .filter(|_| path.ends_with(".json"))
+        .and_then(rename_legacy_block_kinds)
+        .map_or(Cow::Borrowed(content), |renamed| {
+            Cow::Owned(renamed.into_bytes())
+        })
 }
 
 fn invalid(error: impl std::fmt::Display) -> AppError {
@@ -231,9 +273,11 @@ struct Collector {
     /// Canonique : un chemin qui passe par un lien symbolique s'en écarte.
     root: PathBuf,
     expected: HashMap<String, String>,
+    require_digest: bool,
     files: BTreeMap<String, Vec<u8>>,
     total_bytes: usize,
     missing: BTreeSet<String>,
+    missing_operations: BTreeSet<String>,
     skipped: BTreeSet<String>,
 }
 
@@ -254,7 +298,8 @@ impl Collector {
             self.note_absent(path, need);
             return Ok(false);
         };
-        verify_optional_sha256(path, &content, &self.expected, false).map_err(invalid)?;
+        verify_optional_sha256(path, &content, &self.expected, self.require_digest)
+            .map_err(invalid)?;
         self.total_bytes += content.len();
         if self.total_bytes > MAX_ITEM_BYTES || self.files.len() >= MAX_FILES {
             return Err(AppError::InvalidManifest(
@@ -314,14 +359,7 @@ impl Collector {
     ) -> AppResult<()> {
         let is_resource = entry.entry_type.section() == Some(CatalogSection::Other);
         let mut has_asset = false;
-        let declared = manifest.get("files").and_then(Value::as_array);
-        for file in declared.into_iter().flatten() {
-            let Some(path) = file.get("path").and_then(Value::as_str) else {
-                continue;
-            };
-            let role = file
-                .get("role")
-                .and_then(|role| DeclaredRole::deserialize(role).ok());
+        for (role, path) in declared_files(manifest) {
             let need = match role {
                 Some(DeclaredRole::Docs) => continue,
                 Some(DeclaredRole::Operation | DeclaredRole::CapabilityProbe) => Need::Required,
@@ -333,6 +371,9 @@ impl Collector {
                 Some(DeclaredRole::Asset) | None => Need::Optional,
             };
             let Some(taken) = self.take_declared(folder, path, need)? else {
+                if role == Some(DeclaredRole::Operation) {
+                    self.missing_operations.extend(declared_path(folder, path));
+                }
                 continue;
             };
             if role == Some(DeclaredRole::Operation)

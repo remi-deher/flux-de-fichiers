@@ -1,5 +1,11 @@
 //! Dépôts de plugins écrits sur disque, comme après une synchronisation.
 
+use forgearr::{
+    api::AppState,
+    plugins::{self, CatalogItemType},
+    repository::{self, InstallationRecord},
+};
+use forgearr_shared::plugins::store::ItemOrigin;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -33,6 +39,71 @@ fn write(path: &Path, content: &str) -> std::io::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(path, content)
+}
+
+/// Catalogue dont un seul plugin porte ces blocs, sans opération : un flux peut les citer.
+pub fn write_blocks(root: &Path, kinds: &[&str]) -> anyhow::Result<()> {
+    const OWNER: &str = "blocs";
+    const MANIFEST: &str = "plugins/blocs/manifest.json";
+    let mut entries = vec![json!({
+        "id": OWNER, "type": "plugin", "version": "1.0.0", "name": OWNER, "manifestPath": MANIFEST
+    })];
+    write(
+        &root.join(MANIFEST),
+        &json!({
+            "schemaVersion": "1.1.0", "id": OWNER, "type": "plugin", "version": "1.0.0",
+            "name": OWNER
+        })
+        .to_string(),
+    )?;
+    for kind in kinds {
+        let path = format!("plugins/blocs/blocks/{kind}.json");
+        write(
+            &root.join(&path),
+            &json!({"schemaVersion": "1.1.0", "id": kind, "version": "1.0.0", "name": kind})
+                .to_string(),
+        )?;
+        entries.push(json!({
+            "id": kind, "type": "block", "owner": OWNER, "version": "1.0.0", "name": kind,
+            "manifestPath": path
+        }));
+    }
+    write(
+        &root.join("index.json"),
+        &json!({"schemaVersion": "1.0.0", "entries": entries}).to_string(),
+    )?;
+    Ok(())
+}
+
+/// Installe un élément de ce dépôt, comme le ferait le Store ; un script reçoit sa copie modifiable.
+pub async fn install(state: &AppState, root: &Path, item_id: &str) -> anyhow::Result<()> {
+    let origin = ItemOrigin {
+        repository_id: OFFICIAL.to_owned(),
+        repository_url: "https://officiel.example/index.json".to_owned(),
+        repository_name: OFFICIAL.to_owned(),
+    };
+    let content = plugins::read_item(root, item_id)?;
+    let is_script = content.entry.entry_type == CatalogItemType::Script;
+    let record = InstallationRecord {
+        item_id: item_id.to_owned(),
+        kind: content.entry.entry_type,
+        version: content.entry.version.clone(),
+        content_sha256: content.content_sha256.clone(),
+        origin: origin.clone(),
+        copy_id: is_script.then(|| item_id.to_owned()),
+        copy_pending: is_script,
+        serves_every_task: false,
+    };
+    {
+        let lock = plugins::lock_installations().await;
+        plugins::freeze_item(&lock, &state.config.installed_dir(), content, &origin).await?;
+        let mut conn = state.pool.acquire().await?;
+        repository::save_installation(&mut conn, &record).await?;
+    }
+    // Écrit les copies modifiables en attente.
+    plugins::resume_store(&state.pool, &state.config, &state.catalog_cache, None).await?;
+    state.catalog_cache.invalidate().await;
+    Ok(())
 }
 
 /// Dépôt en préparation ; `publish` écrit son index.
@@ -148,6 +219,23 @@ impl TestRepository {
             &json!({"toolId": id, "toolVersion": TOOL_VERSION, "artifacts": []}).to_string(),
         )?;
         self.entry(id, "app", None, &format!("apps/{id}/manifest.json"));
+        Ok(self)
+    }
+
+    /// Image d'un seul fichier, dans un sous-dossier.
+    pub fn image(mut self, id: &str, filename: &str, content: &str) -> anyhow::Result<Self> {
+        let folder = self.root.join("resources").join(id);
+        write(
+            &folder.join("manifest.json"),
+            &json!({
+                "schemaVersion": "1.1.0", "id": id, "type": "resource.image", "version": "1.0.0",
+                "name": id, "files": [{"path": format!("files/{filename}"), "role": "asset"}]
+            })
+            .to_string(),
+        )?;
+        write(&folder.join("files").join(filename), content)?;
+        let manifest = format!("resources/{id}/manifest.json");
+        self.entry(id, "resource.image", None, &manifest);
         Ok(self)
     }
 

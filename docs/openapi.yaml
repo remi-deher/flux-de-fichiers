@@ -117,7 +117,7 @@ paths:
         variables déclarées des nœuds script (inconnues, réservées aux blocs HTTP, ou vers un nœud qui
         ne précède pas) sont aussi signalées dans `errors` ; une référence à une variable exposée
         dépréciée et l'ancienne syntaxe `{{…}}` (convertie, puis réécrite à l'enregistrement) le sont
-        dans `warnings` (ADR 0025, 0026)
+        dans `warnings` (ADR 0025, 0026) ; un type de bloc que rien d'installé ne porte est une erreur (ADR 0029)
       requestBody:
         required: true
         content:
@@ -251,6 +251,7 @@ paths:
       responses:
         '200':
           description: Flux restauré
+        '400': {description: "unknown_blocks : la version cite un bloc que rien d'installé ne porte et que le flux courant n'a pas ; `message` le nomme (ADR 0029). L'enregistrement d'un flux suit la même règle"}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/libraries/{id}/files/{name}:
     post:
@@ -961,7 +962,9 @@ paths:
       security: [{ApiKey: []}, {WebSession: []}]
       summary: Créer ou mettre à jour un script local (`stdio` JSON) et générer son opération et son bloc
       description: >-
-        Limite HTTP 1 Mio ; code plafonné à 512 Kio. Retourne `409` en cas de collision sans `id`.
+        Limite HTTP 1 Mio ; code plafonné à 512 Kio. Retourne `409` si un autre script porte déjà ce nom ou cette
+        opération. Un script installé (ADR 0029) s'enregistre sous son `id` : son bloc, son opération, ses outils,
+        ses réglages par défaut, ses ports et ses champs sont gardés.
       requestBody:
         required: true
         content:
@@ -1127,16 +1130,17 @@ paths:
   /api/v1/local/items/{id}:
     delete:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Supprimer un élément du catalogue local et reconstruire `index.json`
+      summary: Supprimer un élément du catalogue local et reconstruire `index.json` ; un script installé n'est plus inscrit
       parameters: [{in: path, name: id, required: true, schema: {type: string}}]
       responses:
         '200': {description: Élément supprimé}
+        '409': {description: "item_in_use : un flux, une tâche non terminée, un modèle ou un script s'en sert ; `message` les nomme"}
         '404': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
   /api/v1/local/items/{id}/file:
     get:
       security: [{ApiKey: []}, {WebSession: []}]
-      summary: Télécharger le fichier d'une ressource locale importée (`nosniff`, `no-store`)
+      summary: Télécharger le fichier d'une ressource de la collection ou installée (`nosniff`, `no-store`)
       parameters: [{in: path, name: id, required: true, schema: {type: string}}]
       responses:
         '200':

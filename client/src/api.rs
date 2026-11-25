@@ -66,6 +66,11 @@ impl ApiError {
     pub fn message(&self) -> String {
         match self {
             Self::Unauthorized => "Session absente ou expirée : reconnectez-vous.".into(),
+            Self::Rejected {
+                status: 409,
+                detail: Some(detail),
+                ..
+            } => format!("Action refusée : {detail}."),
             Self::Rejected { status: 409, .. } => {
                 "Action refusée dans l'état actuel (conflit).".into()
             }
@@ -238,6 +243,15 @@ mod tests {
             detail: None,
         };
         assert!(conflict.message().contains("conflit"));
+        let named = ApiError::Rejected {
+            status: 409,
+            code: "item_in_use".into(),
+            detail: Some("« Routage » est utilisé (flux : Films)".into()),
+        };
+        assert_eq!(
+            named.message(),
+            "Action refusée : « Routage » est utilisé (flux : Films)."
+        );
         let other = ApiError::Rejected {
             status: 422,
             code: "invalid_input".into(),

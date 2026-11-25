@@ -380,8 +380,13 @@ async fn job_steps_output_delete_and_library_claim_work_end_to_end() -> anyhow::
         r#"{"schemaVersion":"1.0.0","entries":[
             {"id":"pack.demo","type":"pack","version":"1.0.0","name":"Demo","manifestPath":"packs/demo/manifest.json"},
             {"id":"video","type":"plugin","version":"1.0.0","name":"Video","manifestPath":"plugins/video/manifest.json"},
+            {"id":"sonarr-rename","type":"block","owner":"video","version":"1.0.0","name":"Renommer","manifestPath":"plugins/video/rename.json"},
             {"id":"mkvtoolnix","type":"app","version":"1.0.0","name":"MKVToolNix","manifestPath":"apps/mkvtoolnix/manifest.json"}
         ]}"#,
+    )?;
+    std::fs::write(
+        repos_dir.join("plugins/video/rename.json"),
+        r#"{"id":"sonarr-rename","version":"1.0.0","name":"Renommer"}"#,
     )?;
     std::fs::write(
         repos_dir.join("packs/demo/manifest.json"),

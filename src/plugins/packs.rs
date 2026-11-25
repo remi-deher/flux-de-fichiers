@@ -22,6 +22,11 @@ pub fn read_pack_installation(roots: &[PathBuf], pack_id: &str) -> AppResult<Pac
         return Err(AppError::NotFound);
     };
 
+    if !ToolCacheManager::is_safe_relative_path(Path::new(&entry.manifest_path)) {
+        return Err(AppError::InvalidManifest(
+            "chemin de manifeste refusé".into(),
+        ));
+    }
     let manifest_path = root.join(&entry.manifest_path);
     let manifest_raw = std::fs::read_to_string(&manifest_path).map_err(|_| AppError::NotFound)?;
     let manifest_json: Value = serde_json::from_str(&manifest_raw)

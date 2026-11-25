@@ -65,3 +65,34 @@ pub async fn delete_collection_item(
     cache.invalidate().await;
     deleted
 }
+
+/// Désinstalle un élément dont rien ne se sert (ADR 0029 §8). Ses réglages sont conservés ; un script perd sa copie
+/// modifiable, un flux créé reste à l'utilisateur. `NotFound` s'il n'est pas inscrit.
+pub async fn uninstall_item(
+    _lock: &InstallationGuard,
+    pool: &SqlitePool,
+    config: &Config,
+    cache: &CatalogCache,
+    item_id: &str,
+) -> AppResult<()> {
+    let local_dir = local_catalog_dir(config);
+    let roots = engine_roots(pool, config).await?;
+    let catalog = Arc::new(EngineCatalog::cached(cache, &roots).await);
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let record = repository::get_installation(&mut tx, item_id)
+        .await?
+        .ok_or(AppError::NotFound)?
+        .record;
+    ensure_unused(&mut tx, item_id, &catalog, &local_dir).await?;
+    repository::delete_installation(&mut tx, item_id).await?;
+    tx.commit().await?;
+    if record.kind == CatalogItemType::Script && local_item_dir(&local_dir, item_id).is_ok() {
+        let item_id = item_id.to_owned();
+        tokio::task::spawn_blocking(move || delete_local_item(&local_dir, &item_id))
+            .await
+            .map_err(|_| AppError::Internal)??;
+    }
+    // Le dossier figé devient un reste : le balayage l'effacera après son délai de garde.
+    cache.invalidate().await;
+    Ok(())
+}

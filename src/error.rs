@@ -50,6 +50,12 @@ pub enum AppError {
     /// Quelque chose se sert de l'élément à retirer (ADR 0029).
     #[error("item in use: {0}")]
     ItemInUse(String),
+    /// Le plan d'installation a changé depuis qu'il a été montré (ADR 0029).
+    #[error("plan outdated")]
+    PlanOutdated,
+    /// Le plan est bloqué, ou un accord qu'il demande manque (ADR 0029).
+    #[error("installation blocked: {0}")]
+    InstallationBlocked(String),
     #[error("repository unavailable: {0}")]
     RepositoryUnavailable(String),
     /// Les éléments installés ne sont pas encore tous repris des dépôts (ADR 0029).
@@ -102,6 +108,8 @@ impl IntoResponse for AppError {
             Self::InvalidFlowVariables(_) => (StatusCode::BAD_REQUEST, "invalid_flow_variables"),
             Self::UnknownBlocks(_) => (StatusCode::BAD_REQUEST, "unknown_blocks"),
             Self::ItemInUse(_) => (StatusCode::CONFLICT, "item_in_use"),
+            Self::PlanOutdated => (StatusCode::CONFLICT, "plan_outdated"),
+            Self::InstallationBlocked(_) => (StatusCode::CONFLICT, "installation_blocked"),
             Self::RepositoryUnavailable(_) => (StatusCode::BAD_GATEWAY, "repository_unavailable"),
             Self::StoreMigrating(_) => (StatusCode::CONFLICT, "store_migrating"),
             Self::CentralUnavailable => (StatusCode::BAD_GATEWAY, "central_unavailable"),
@@ -116,6 +124,7 @@ impl IntoResponse for AppError {
         if let Self::InvalidFlowVariables(detail)
         | Self::UnknownBlocks(detail)
         | Self::ItemInUse(detail)
+        | Self::InstallationBlocked(detail)
         | Self::RepositoryUnavailable(detail)
         | Self::StoreMigrating(detail) = &self
         {

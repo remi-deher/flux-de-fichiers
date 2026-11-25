@@ -717,3 +717,88 @@ async fn a_detected_plugin_folder_is_resumed_then_only_a_source_of_the_store() -
     assert_eq!(central.contracts("audio.run").await?, before);
     Ok(())
 }
+
+/// Parcours du Store (ADR 0029 §4, §5, §8) : plan, application, liste, désinstallation refusée puis permise.
+#[tokio::test]
+async fn the_store_plans_installs_lists_and_uninstalls_an_item() -> anyhow::Result<()> {
+    let central = Central::new().await?;
+    TestRepository::official(central.copy_of(OFFICIAL))?.publish()?;
+    central.save_flow("audio-run").await?;
+    assert!(central.resume(None).await?);
+    assert!(!central.installed().await?.contains(&"inutile".to_owned()));
+
+    let (status, store) = central.call("GET", "/api/v1/store", None).await?;
+    assert_eq!(status, StatusCode::OK);
+    let listed = store
+        .as_array()
+        .and_then(|entries| entries.iter().find(|entry| entry["id"] == "inutile"))
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(listed["install"]["state"], "available");
+
+    let targets = json!([{"repositoryId": OFFICIAL, "id": "inutile"}]);
+    let (status, plan) = central
+        .call(
+            "POST",
+            "/api/v1/installations/plan",
+            Some(json!({"targets": targets})),
+        )
+        .await?;
+    assert_eq!(status, StatusCode::OK, "{plan}");
+    assert_eq!(plan["blockers"], json!([]));
+    let planned: Vec<&str> = plan["items"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item["id"].as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(planned.contains(&"inutile") && planned.contains(&"inutile-outil"));
+
+    let outdated = json!({"targets": targets, "planId": "autre", "consents": plan["consents"]});
+    let (status, refused) = central
+        .call("POST", "/api/v1/installations/apply", Some(outdated))
+        .await?;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(refused["error"]["code"], "plan_outdated");
+
+    let accepted =
+        json!({"targets": targets, "planId": plan["planId"], "consents": plan["consents"]});
+    let (status, outcome) = central
+        .call("POST", "/api/v1/installations/apply", Some(accepted))
+        .await?;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    assert_eq!(
+        outcome["useTarget"],
+        json!({"kind": "plugin", "id": "inutile"})
+    );
+    assert!(central.installed().await?.contains(&"inutile".to_owned()));
+
+    let (status, installed) = central.call("GET", "/api/v1/installations", None).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        installed
+            .as_array()
+            .is_some_and(|items| items.iter().any(|item| item["id"] == "inutile"))
+    );
+
+    let (status, refused) = central
+        .call("DELETE", "/api/v1/installations/audio", None)
+        .await?;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(refused["error"]["code"], "item_in_use");
+    assert!(central.installed().await?.contains(&"audio".to_owned()));
+
+    let (status, _) = central
+        .call("DELETE", "/api/v1/installations/inutile", None)
+        .await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(!central.installed().await?.contains(&"inutile".to_owned()));
+    let (status, _) = central
+        .call("DELETE", "/api/v1/installations/inutile", None)
+        .await?;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    Ok(())
+}

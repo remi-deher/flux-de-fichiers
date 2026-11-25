@@ -361,6 +361,13 @@ pub struct InstalledRef {
     pub copy_id: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolFailure {
+    pub id: String,
+    pub message: String,
+}
+
 /// Où mène « Utiliser » après l'installation.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -383,6 +390,12 @@ pub enum UseTarget {
 pub struct InstallOutcome {
     #[serde(default)]
     pub installed: Vec<InstalledRef>,
+    /// Outils téléchargés.
+    #[serde(default)]
+    pub installed_tools: Vec<String>,
+    /// Outils non téléchargés : les éléments restent installés.
+    #[serde(default)]
+    pub failed_tools: Vec<ToolFailure>,
     #[serde(default)]
     pub use_target: UseTarget,
 }

@@ -721,6 +721,74 @@ paths:
       responses:
         '204': {description: Référence et fichier supprimés}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/store:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: "Store (ADR 0029) : éléments des dépôts activés, homonymes compris, avec `origin` et `install.state` (`available`, `installed`, `provided`, `held_by_other`, `incomplete`, `partly_installed`)"
+      responses:
+        '200':
+          description: Éléments du Store
+          content:
+            application/json:
+              schema: {type: array, items: {type: object}}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/installations:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Éléments installés, leur origine, leurs mises à jour et leur état (`damaged`)
+      responses:
+        '200':
+          description: Éléments installés
+          content:
+            application/json:
+              schema: {type: array, items: {type: object}}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/installations/plan:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: "Plan d'installation ou de mise à jour, sans effet : éléments, outils recommandés, blocages, accords à donner. Corps : `{targets: [{repositoryId, id}]}`. Droit `manage_plugins`."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [targets], properties: {targets: {type: array, items: {type: object}}}}
+      responses:
+        '200': {description: "Plan (`planId`, `items`, `tools`, `blockers`, `consents`, `warnings`)"}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: "`store_migrating` : la reprise des dépôts n'est pas finie"}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/installations/apply:
+    post:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: "Applique un plan accepté : éléments figés et inscrits en une transaction, puis outils cochés téléchargés (un échec d'outil n'annule rien). Corps : `{targets, planId, consents, tools}`. Un flux installé devient un nouveau flux ; en créer exige aussi `manage_flows`."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [targets, planId]}
+      responses:
+        '200': {description: "`installed`, `installedTools`, `failedTools`, `useTarget`"}
+        '409': {description: "`plan_outdated` : le plan a changé ; `installation_blocked` : blocage ou accord manquant (détail dans `message`)"}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/installations/{id}:
+    delete:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Désinstalle un élément ; ses réglages sont conservés, un flux créé reste à l'utilisateur
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '204': {description: Désinstallé}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: "`item_in_use` : ce qui s'en sert est nommé dans `message`"}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/installations/{id}/usage:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: Flux, tâches et éléments qui se servent d'un élément installé
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: "`flows` et `items`"}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/plugins:
     get:
       security: [{ApiKey: []}, {WebSession: []}]

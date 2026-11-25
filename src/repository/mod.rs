@@ -101,8 +101,8 @@ pub use plugins::{
 pub use relays::{RelayOutcome, list_relays, relay_job};
 pub use resource_slots::{job_resource_class, job_resource_classes};
 pub use settings_origin::{
-    SavedSettings, attach_settings_to_installed, list_saved_settings, set_settings_origin,
-    settings_belong_to,
+    SavedSettings, attach_settings_to_installed, discard_plugin_settings, list_saved_settings,
+    set_settings_origin, settings_belong_to,
 };
 pub use source_publication_journal::{
     PendingSourcePublication, abandon_unauthorized_publication, authorize_source_publication,

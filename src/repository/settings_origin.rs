@@ -66,6 +66,18 @@ pub async fn set_settings_origin(
     Ok(())
 }
 
+/// Efface les réglages conservés d'un plugin, accord donné pour installer l'homonyme d'un autre dépôt.
+pub async fn discard_plugin_settings(
+    conn: &mut SqliteConnection,
+    plugin_id: &str,
+) -> AppResult<()> {
+    sqlx::query("DELETE FROM plugin_settings WHERE plugin_id = ?1")
+        .bind(plugin_id)
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
 /// Attache les réglages d'un plugin à l'origine de l'élément installé de ce nom ; sans effet s'il ne l'est pas.
 pub async fn attach_settings_to_installed(pool: &SqlitePool, plugin_id: &str) -> AppResult<()> {
     sqlx::query(

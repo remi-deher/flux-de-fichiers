@@ -2,6 +2,7 @@
 //! mini-dépôt immuable par élément. La base fait autorité ; un dossier non inscrit est un reste.
 
 mod adopt;
+mod apply;
 mod availability;
 mod bootstrap;
 mod files;
@@ -17,6 +18,7 @@ mod sweep;
 mod test_support;
 mod usage;
 
+pub use apply::{ApplyContext, apply_installation};
 pub use availability::{held_flows, unreadable_item};
 pub use bootstrap::{SyncedRepository, resume_store};
 pub use files::{ItemContent, read_item};
@@ -25,7 +27,7 @@ pub use freeze::{freeze_item, frozen_is_intact};
 pub use integrity::DamagedItem;
 pub(super) use integrity::frozen_roots;
 pub use plan::{InstalledState, PlanContext, PlannedChange, PreparedPlan, plan_installation};
-pub use remove::{delete_collection_item, ensure_unused};
+pub use remove::{delete_collection_item, ensure_unused, uninstall_item};
 pub use script_copy::{ScriptCopy, compare_script_copy};
 pub(super) use survey::configured_plugins;
 pub use sweep::sweep_orphans;

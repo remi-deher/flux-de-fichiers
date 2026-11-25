@@ -42,7 +42,9 @@ pub(crate) fn tool_required_permissions(name: &str) -> &'static [Permission] {
         | "validate_flow" | "simulate_flow" | "diff_flow_versions" => &[Permission::ViewFlows],
         "save_flow" | "delete_flow" | "restore_flow_version" => &[Permission::ManageFlows],
         "list_repositories" | "get_repository" | "list_catalog" | "get_plugin" | "list_tools"
-        | "get_tool" | "get_pack" | "list_local_catalog" => &[Permission::ViewPlugins],
+        | "get_tool" | "get_pack" | "list_local_catalog" | "list_store" | "list_installations" => {
+            &[Permission::ViewPlugins]
+        }
         "add_repository"
         | "sync_repository"
         | "toggle_repository"
@@ -53,6 +55,9 @@ pub(crate) fn tool_required_permissions(name: &str) -> &'static [Permission] {
         | "install_tool"
         | "install_plugin"
         | "install_pack"
+        | "plan_installation"
+        | "install_items"
+        | "uninstall_item"
         | "upload_local_resource"
         | "upsert_local_script"
         | "create_local_block_template"

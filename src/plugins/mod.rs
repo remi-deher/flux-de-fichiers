@@ -45,12 +45,12 @@ pub use install::{
     install_from_distribution, is_installing, parse_distribution, read_distribution,
 };
 pub use installed::{
-    DamagedItem, EngineCatalog, InstallationGuard, InstalledState, ItemContent, PlanContext,
-    PlannedChange, PreparedPlan, ScriptCopy, SyncedRepository, UsageSources, UsedElements,
-    compare_script_copy, delete_collection_item, elements_used_by, ensure_unused, freeze_item,
-    frozen_is_intact, held_flows, installed_root, item_usage, lock_installations,
-    plan_installation, read_item, resume_store, share_installations, sweep_orphans,
-    unreadable_item,
+    ApplyContext, DamagedItem, EngineCatalog, InstallationGuard, InstalledState, ItemContent,
+    PlanContext, PlannedChange, PreparedPlan, ScriptCopy, SyncedRepository, UsageSources,
+    UsedElements, apply_installation, compare_script_copy, delete_collection_item,
+    elements_used_by, ensure_unused, freeze_item, frozen_is_intact, held_flows, installed_root,
+    item_usage, lock_installations, plan_installation, read_item, resume_store,
+    share_installations, sweep_orphans, uninstall_item, unreadable_item,
 };
 pub use legacy_ids::{
     legacy_plugin_id, migrate_legacy_block_kinds, migrate_legacy_plugin_secrets,

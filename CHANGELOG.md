@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.90.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.89.1...v0.90.0) (2026-11-25)
+
+
+### Features
+
+* **store:** onglet Outils fondu dans Installés, filtres Mises à jour et À réparer (ADR 0029 §16) ([b5ee442](https://github.com/remi-deher/flux-de-fichiers/commit/b5ee4425ab0e46e6ee1f33a0d96c0f4db77bc1fb))
+* **store:** trois onglets, outils dans Installés, filtres Mises à jour et À réparer ([558f683](https://github.com/remi-deher/flux-de-fichiers/commit/558f683803e8e6973e97eef9276f4cc64ce2d175))
+
 ## [0.89.1](https://github.com/remi-deher/flux-de-fichiers/compare/v0.89.0...v0.89.1) (2026-11-25)
 
 

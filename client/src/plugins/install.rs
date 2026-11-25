@@ -24,6 +24,18 @@ pub fn action_label(action: PlanAction) -> (&'static str, TagTone) {
     }
 }
 
+/// Libellés du bouton, au repos et pendant l'application : une installation l'emporte, puis une réparation.
+pub fn apply_labels(plan: &InstallPlan) -> (&'static str, &'static str) {
+    let has = |action| plan.items.iter().any(|item| item.action == action);
+    if has(PlanAction::Install) {
+        ("Installer", "Installation…")
+    } else if has(PlanAction::Repair) {
+        ("Réparer", "Réparation…")
+    } else {
+        ("Mettre à jour", "Mise à jour…")
+    }
+}
+
 /// Le plan peut-il être appliqué : rien ne le bloque, tous ses accords sont donnés, et il change quelque chose ?
 pub fn can_apply(plan: &InstallPlan, accepted: usize) -> bool {
     plan.blockers.is_empty()
@@ -164,6 +176,7 @@ fn plan_view(
     apply: Action<InstallRequest, Result<InstallOutcome, api::ApiError>>,
 ) -> impl IntoView {
     let consents_count = plan.consents.len();
+    let (apply_label, applying_label) = apply_labels(&plan);
     let blocked = !plan.blockers.is_empty();
     let ready = {
         let plan = plan.clone();
@@ -263,7 +276,7 @@ fn plan_view(
                     disabled=move || !ready()
                     on:click=submit
                 >
-                    {move || if apply.pending().get() { "Installation…" } else { "Installer" }}
+                    {move || if apply.pending().get() { applying_label } else { apply_label }}
                 </button>
             </div>
         </div>
@@ -325,6 +338,15 @@ mod tests {
             id: "video".to_owned(),
         });
         assert!(!can_apply(&blocked, 0));
+    }
+
+    #[test]
+    fn the_button_names_what_the_plan_does() {
+        assert_eq!(apply_labels(&plan(PlanAction::Update)).0, "Mettre à jour");
+        assert_eq!(apply_labels(&plan(PlanAction::Repair)).0, "Réparer");
+        let mut mixed = plan(PlanAction::Update);
+        mixed.items.push(item(PlanAction::Install));
+        assert_eq!(apply_labels(&mixed), ("Installer", "Installation…"));
     }
 
     #[test]

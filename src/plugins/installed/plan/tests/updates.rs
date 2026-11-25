@@ -139,12 +139,12 @@ async fn an_update_must_still_suit_operations_and_scripts() -> anyhow::Result<()
     let outil = |version: &str| Item::tool("interpreteurs").version(version);
     let script = Item::script(
         "route",
-        script_requiring(json!([{"variable": "media.codec", "provider": "video"}])),
+        script_requiring(json!([{"variable": "mediainfo.codec", "provider": "video"}])),
     );
     let exposing = |contract: &str| {
         video("1.0.0")
             .version(contract)
-            .exposing("media", contract, &["codec"])
+            .exposing("mediainfo", contract, &["codec"])
     };
     let central =
         Central::with_installed(&[outil("1.1.0"), exposing("1.0.0"), script.clone()]).await?;

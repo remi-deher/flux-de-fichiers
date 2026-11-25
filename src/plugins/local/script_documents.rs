@@ -12,7 +12,7 @@ use crate::{
     tools_cache::ToolCacheManager,
 };
 use forgearr_shared::local::{ScriptInterpreter, UpsertLocalScriptRequest};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value, json};
 use std::{
     fs,

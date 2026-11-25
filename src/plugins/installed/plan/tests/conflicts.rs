@@ -148,10 +148,10 @@ async fn an_inherited_conflict_does_not_prevent_an_update() -> anyhow::Result<()
 
 #[tokio::test]
 async fn an_operation_speaks_for_its_own_plugin_only() -> anyhow::Result<()> {
-    let video = video().exposing("media", "1.0.0", &["codec"]);
+    let video = video().exposing("mediainfo", "1.0.0", &["codec"]);
     let central = Central::with_installed(&[video]).await?;
     let usurper = Item::plugin("tiers", primitive()).declaring("providerId", json!("video"));
-    let sharing = Item::plugin("partage", primitive()).exposing("media", "1.0.0", &["codec"]);
+    let sharing = Item::plugin("partage", primitive()).exposing("mediainfo", "1.0.0", &["codec"]);
     central.publish(THIRD_PARTY, &[usurper, sharing]).await?;
     let prepared = central.plan(&[(THIRD_PARTY, "tiers")]).await?;
     assert_eq!(
@@ -169,7 +169,7 @@ async fn an_operation_speaks_for_its_own_plugin_only() -> anyhow::Result<()> {
         prepared.plan.warnings,
         [PlanWarning::SharedNamespace {
             id: "partage".to_owned(),
-            namespace: "media".to_owned(),
+            namespace: "mediainfo".to_owned(),
             holder: "video".to_owned(),
         }]
     );

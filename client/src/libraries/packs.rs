@@ -329,7 +329,6 @@ pub fn LocalPacksSection(
                 <PackDetail
                     pack_id=id
                     tab=inspect_tab
-                    can_install=can_manage
                 />
             })}
         </Drawer>

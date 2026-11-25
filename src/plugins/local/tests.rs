@@ -49,7 +49,7 @@ fn local_script_upload_templates_and_pack_roundtrip_without_github() -> anyhow::
         },
     )?;
     assert_eq!(sub.id, "resource.sous-titres-fr");
-    let (file_path, download_name) = local_resource_file(&local_dir, &sub.id)?;
+    let (file_path, download_name) = resource_file(std::slice::from_ref(&local_dir), &sub.id)?;
     assert_eq!(download_name, "fr.srt");
     assert!(file_path.is_file());
 
@@ -133,7 +133,7 @@ fn local_script_upload_templates_and_pack_roundtrip_without_github() -> anyhow::
     let snap_after = build_local_snapshot(&roots, &local_dir);
     assert!(snap_after.resources.is_empty());
     assert!(matches!(
-        local_resource_file(&local_dir, &sub.id),
+        resource_file(std::slice::from_ref(&local_dir), &sub.id),
         Err(AppError::NotFound)
     ));
     Ok(())
@@ -238,7 +238,10 @@ fn duplicate_creation_without_id_returns_conflict_and_updates_clean_old_files() 
     )?;
     assert!(!local_dir.join("resources/logo/logo.png").exists());
     assert!(local_dir.join("resources/logo/logo-v2.png").is_file());
-    assert_eq!(local_resource_file(&local_dir, &res.id)?.1, "logo-v2.png");
+    assert_eq!(
+        resource_file(std::slice::from_ref(&local_dir), &res.id)?.1,
+        "logo-v2.png"
+    );
     Ok(())
 }
 
@@ -297,7 +300,7 @@ fn validation_rejects_mismatched_prefix_invalid_graph_and_invalid_pack_dep() -> 
     assert!(matches!(bad_pack, Err(AppError::InvalidManifest(_))));
 
     assert!(matches!(
-        local_resource_file(&local_dir, "../etc/passwd"),
+        resource_file(&[local_dir], "../etc/passwd"),
         Err(AppError::NotFound)
     ));
     Ok(())

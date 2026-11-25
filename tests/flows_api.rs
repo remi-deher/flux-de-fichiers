@@ -366,6 +366,8 @@ async fn webhook_block_honors_fail_on_error() -> anyhow::Result<()> {
 
 async fn secrets_app() -> anyhow::Result<(axum::Router, sqlx::SqlitePool, tempfile::TempDir)> {
     let config_dir = tempfile::tempdir()?;
+    let local_dir = config_dir.path().join("plugins/local");
+    common::store::write_blocks(&local_dir, &["file-input", "webhook"])?;
     let config = Config {
         bind: "127.0.0.1:3000".parse()?,
         database_url: "sqlite::memory:".into(),

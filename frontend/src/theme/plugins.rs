@@ -608,4 +608,41 @@ pub const PLUGINS_CSS: &str = r#"
 .tok-function { color: var(--info); }
 .tok-variable { color: var(--accent); }
 .tok-operator { color: var(--text-dim); }
+/* --- Assistant d'installation du Store --- */
+.install-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.install-plan__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.install-plan__section[data-tone="danger"] {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.install-plan__section[data-tone="warning"] {
+  border-color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.install-plan__list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.install-plan__actions {
+  display: flex;
+  justify-content: flex-end;
+}
 "#;

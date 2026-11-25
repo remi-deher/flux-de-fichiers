@@ -5,35 +5,48 @@ use crate::error::AppResult;
 use forgearr_shared::plugins::store::ItemOrigin;
 use sqlx::{SqliteConnection, SqlitePool};
 
+/// Réglages enregistrés d'un plugin, secrets scellés compris : jamais journalisés.
 #[derive(sqlx::FromRow)]
-struct SettingsRow {
-    settings: String,
+pub struct SavedSettings {
+    pub plugin_id: String,
+    pub settings: String,
     origin_repository_id: Option<String>,
     origin_repository_url: Option<String>,
 }
 
-/// Les réglages conservés peuvent-ils servir au plugin de cette origine ? Oui s'il n'y en a pas ; non
-/// s'ils viennent d'ailleurs ou d'une origine inconnue.
+impl SavedSettings {
+    /// Peuvent-ils servir au plugin de cette origine ? Non s'ils viennent d'ailleurs ou d'une origine inconnue.
+    pub fn belong_to(&self, origin: &ItemOrigin) -> bool {
+        self.is_blank()
+            || (self.origin_repository_id.as_deref() == Some(origin.repository_id.as_str())
+                && self.origin_repository_url.as_deref() == Some(origin.repository_url.as_str()))
+    }
+
+    fn is_blank(&self) -> bool {
+        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&self.settings)
+            .is_ok_and(|settings| settings.is_empty())
+    }
+}
+
+const SELECT_SETTINGS: &str =
+    "SELECT plugin_id, settings, origin_repository_id, origin_repository_url FROM plugin_settings";
+
+pub async fn list_saved_settings(conn: &mut SqliteConnection) -> AppResult<Vec<SavedSettings>> {
+    Ok(sqlx::query_as(SELECT_SETTINGS).fetch_all(conn).await?)
+}
+
+/// Les réglages conservés peuvent-ils servir au plugin de cette origine ? Oui s'il n'y en a pas.
 pub async fn settings_belong_to(
     conn: &mut SqliteConnection,
     plugin_id: &str,
     origin: &ItemOrigin,
 ) -> AppResult<bool> {
-    let saved: Option<SettingsRow> = sqlx::query_as(
-        "SELECT settings, origin_repository_id, origin_repository_url FROM plugin_settings WHERE plugin_id = ?1",
-    )
-    .bind(plugin_id)
-    .fetch_optional(conn)
-    .await?;
-    let Some(saved) = saved else {
-        return Ok(true);
-    };
-    let is_blank =
-        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&saved.settings)
-            .is_ok_and(|settings| settings.is_empty());
-    Ok(is_blank
-        || (saved.origin_repository_id.as_deref() == Some(origin.repository_id.as_str())
-            && saved.origin_repository_url.as_deref() == Some(origin.repository_url.as_str())))
+    let saved: Option<SavedSettings> =
+        sqlx::query_as(&format!("{SELECT_SETTINGS} WHERE plugin_id = ?1"))
+            .bind(plugin_id)
+            .fetch_optional(conn)
+            .await?;
+    Ok(saved.is_none_or(|saved| saved.belong_to(origin)))
 }
 
 /// Attache les réglages d'un plugin à son origine ; sans effet s'il n'en a pas.
@@ -50,6 +63,18 @@ pub async fn set_settings_origin(
     .bind(&origin.repository_url)
     .execute(conn)
     .await?;
+    Ok(())
+}
+
+/// Efface les réglages conservés d'un plugin, accord donné pour installer l'homonyme d'un autre dépôt.
+pub async fn discard_plugin_settings(
+    conn: &mut SqliteConnection,
+    plugin_id: &str,
+) -> AppResult<()> {
+    sqlx::query("DELETE FROM plugin_settings WHERE plugin_id = ?1")
+        .bind(plugin_id)
+        .execute(conn)
+        .await?;
     Ok(())
 }
 

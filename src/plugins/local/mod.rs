@@ -1,22 +1,30 @@
 //! Gestion du dépôt local utilisateur (`/config/plugins/local`) sans dépendre d'un dépôt GitHub.
 
 mod index;
+mod locate;
+mod script;
+mod script_documents;
 mod snapshot;
 mod write;
 
+#[cfg(test)]
+mod script_tests;
 #[cfg(test)]
 mod tests;
 
 pub(super) use index::INSTALLED_SCRIPTS_FOLDER;
 pub use index::{rebuild_local_index, repair_local_index};
-pub(super) use snapshot::read_local_script;
-pub use snapshot::{build_local_snapshot, local_resource_file};
+pub(super) use locate::local_item_dir;
+use locate::{declared_file, item_dir, script_item_dir};
+pub use script::save_local_script;
+pub(super) use script::{read_local_script, script_name_taken};
+pub use snapshot::{build_local_snapshot, resource_file};
+pub(super) use write::delete_local_item;
 pub use write::{
-    delete_local_item, save_local_block_template, save_local_flow_template, save_local_pack,
-    save_local_script, upload_local_resource,
+    save_local_block_template, save_local_flow_template, save_local_pack, upload_local_resource,
 };
 
-use super::is_valid_repository_id;
+use super::{installed::replace_file, is_valid_repository_id};
 use crate::error::{AppError, AppResult};
 use serde_json::Value;
 use std::{
@@ -84,7 +92,7 @@ pub(super) fn write_json_pretty(path: &Path, value: &Value) -> AppResult<()> {
     }
     let formatted = serde_json::to_string_pretty(value)
         .map_err(|err| AppError::InvalidManifest(err.to_string()))?;
-    fs::write(path, formatted)?;
+    replace_file(path, formatted.as_bytes())?;
     Ok(())
 }
 
@@ -133,15 +141,19 @@ fn has_manifest(base_dir: &Path) -> bool {
 /// Préfixe des identifiants de scripts locaux.
 pub(super) const SCRIPT_ID_PREFIX: &str = "script.";
 
-/// Dossier d'un script local.
+/// Dossier d'un script de l'utilisateur.
 pub(super) fn script_dir(local_dir: &Path, slug: &str) -> PathBuf {
     local_dir.join("scripts").join(slug)
 }
 
-/// Créer un script de ce nom serait-il refusé, un autre l'occupant déjà ?
-pub(in crate::plugins) fn script_name_taken(local_dir: &Path, name: &str) -> bool {
-    resolve_slug(None, SCRIPT_ID_PREFIX, name)
-        .is_ok_and(|(slug, _)| has_manifest(&script_dir(local_dir, &slug)))
+/// Identifiant d'un script sans le préfixe de ceux de l'utilisateur.
+fn script_slug(id: &str) -> &str {
+    id.strip_prefix(SCRIPT_ID_PREFIX).unwrap_or(id)
+}
+
+/// Opération d'un script de la collection.
+fn operation_id(slug: &str) -> String {
+    format!("operation.script.{slug}")
 }
 
 pub(super) fn ensure_new_target_absent(base_dir: &Path, is_update: bool) -> AppResult<()> {

@@ -5,10 +5,10 @@ use crate::{plugins, repository};
 use std::time::Duration;
 use tokio::time::Instant;
 
-/// Attente avant de retenter une purge reportée par une tâche en cours.
+/// Attente avant de retenter une purge reportée par une exécution en cours.
 const PURGE_RETRY_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
-/// Purge dès qu'aucune tâche intégrée ne l'empêche, sans dépasser `deadline`.
+/// Purge dès qu'aucune exécution du central ne l'empêche, sans dépasser `deadline`.
 pub(super) async fn prune_before(state: &AppState, deadline: Instant) {
     while !prune(state).await {
         let retry = Instant::now() + PURGE_RETRY_INTERVAL;
@@ -19,9 +19,15 @@ pub(super) async fn prune_before(state: &AppState, deadline: Instant) {
     }
 }
 
-/// Purge le cache du central, sauf si une tâche du worker intégré peut encore y prendre ses outils, ou si
-/// les éléments installés ne disent pas encore lesquels servent. Rend `false` si la purge est reportée.
+/// Purge le cache du central, sauf si une tâche du worker intégré ou un flux d'échec peut encore y prendre ses
+/// outils, ou si les éléments installés ne disent pas encore lesquels servent. Rend `false` si la purge est
+/// reportée.
 async fn prune(state: &AppState) -> bool {
+    // Tenu jusqu'au bout : un flux d'échec ne commence pas entre la liste des outils et leur purge.
+    let Ok(_unused) = state.tools_in_use.try_write() else {
+        tracing::debug!("purge des outils reportée : le central exécute un flux d'échec");
+        return false;
+    };
     let engine = match plugins::engine_sources(&state.pool, &state.config).await {
         Ok(engine) => engine,
         Err(error) => {
@@ -81,7 +87,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tools_are_purged_only_with_a_catalog_and_without_a_local_task() -> anyhow::Result<()> {
+    async fn tools_are_purged_only_with_a_catalog_and_while_unused() -> anyhow::Result<()> {
         let dir = tempfile::tempdir()?;
         let (state, _, lease, _) = setup(dir.path()).await?;
         let tools = state.config.tools_cache_dir.clone();
@@ -117,6 +123,12 @@ mod tests {
         assert!(tools.join(STALE).is_dir());
 
         repository::set_serves_central(&state.pool, lease.worker_id, false).await?;
+
+        // Un flux d'échec s'exécute sans bail.
+        let running = state.tools_in_use.read().await;
+        assert!(!prune(&state).await);
+        assert!(tools.join(STALE).is_dir());
+        drop(running);
         assert!(prune(&state).await);
         assert!(!tools.join(STALE).exists());
         assert!(tools.join(CURRENT).is_dir());

@@ -2,7 +2,7 @@
 
 use super::protocol::{McpTool, McpToolResult, empty_schema, obj_schema, parse_args, req_str};
 use crate::{
-    api::{AnyAuth, AppState, ManagePluginsAuth, ViewPluginsAuth, local, plugins},
+    api::{AnyAuth, AppState, ManagePluginsAuth, ViewPluginsAuth, local, plugins, store},
     auth::Principal,
     plugins::CreateRepositoryRequest,
 };
@@ -16,6 +16,41 @@ use serde_json::{Value, json};
 
 pub fn tools() -> Vec<McpTool> {
     vec![
+        McpTool::read_only(
+            "list_store",
+            "Liste les éléments des dépôts activés (homonymes compris) et ce que le Store peut en faire.",
+            empty_schema(),
+        ),
+        McpTool::read_only(
+            "list_installations",
+            "Liste les éléments installés, leur origine et leurs mises à jour.",
+            empty_schema(),
+        ),
+        McpTool::write(
+            "plan_installation",
+            "Calcule, sans effet, le plan d'installation ou de mise à jour d'éléments du Store : dépendances, outils, blocages et accords à donner.",
+            obj_schema(json!({ "targets": { "type": "array" } }), &["targets"]),
+            false,
+        ),
+        McpTool::write(
+            "install_items",
+            "Applique un plan accepté (planId, accords, outils à télécharger). Refusé si le plan a changé.",
+            obj_schema(
+                json!({
+                    "targets": { "type": "array" },
+                    "planId": { "type": "string" },
+                    "consents": { "type": "array" },
+                    "tools": { "type": "array" }
+                }),
+                &["targets", "planId"],
+            ),
+            true,
+        ),
+        McpTool::destructive(
+            "uninstall_item",
+            "Désinstalle un élément ; refusé, en nommant l'usage, si quelque chose s'en sert.",
+            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
+        ),
         McpTool::read_only(
             "list_repositories",
             "Liste les dépôts de plugins configurés.",
@@ -120,12 +155,6 @@ pub fn tools() -> Vec<McpTool> {
             "get_pack",
             "Lit le détail d'un pack (composants et plan d'installation).",
             obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-        ),
-        McpTool::write(
-            "install_pack",
-            "Installe un pack du catalogue et ses outils requis.",
-            obj_schema(json!({ "id": { "type": "string" } }), &["id"]),
-            true,
         ),
         McpTool::read_only(
             "list_local_catalog",
@@ -236,6 +265,53 @@ pub async fn call(
     principal: &Principal,
 ) -> Option<McpToolResult> {
     let result = match name {
+        "list_store" => store::list_store(State(state.clone()), ViewPluginsAuth(principal.clone()))
+            .await
+            .map(|Json(v)| McpToolResult::json(&v)),
+        "list_installations" => {
+            store::list_installed(State(state.clone()), ViewPluginsAuth(principal.clone()))
+                .await
+                .map(|Json(v)| McpToolResult::json(&v))
+        }
+        "plan_installation" => {
+            let req = match parse_args(args) {
+                Ok(req) => req,
+                Err(msg) => return Some(McpToolResult::error(msg)),
+            };
+            store::plan(
+                State(state.clone()),
+                ManagePluginsAuth(principal.clone()),
+                Json(req),
+            )
+            .await
+            .map(|Json(v)| McpToolResult::json(&v))
+        }
+        "install_items" => {
+            let req = match parse_args(args) {
+                Ok(req) => req,
+                Err(msg) => return Some(McpToolResult::error(msg)),
+            };
+            store::install(
+                State(state.clone()),
+                ManagePluginsAuth(principal.clone()),
+                Json(req),
+            )
+            .await
+            .map(|Json(v)| McpToolResult::json(&v))
+        }
+        "uninstall_item" => {
+            let id = match req_str(&args, "id") {
+                Ok(id) => id.to_owned(),
+                Err(msg) => return Some(McpToolResult::error(msg)),
+            };
+            store::uninstall(
+                State(state.clone()),
+                Path(id),
+                ManagePluginsAuth(principal.clone()),
+            )
+            .await
+            .map(|_| McpToolResult::json(&json!({ "uninstalled": true })))
+        }
         "list_repositories" => {
             plugins::list_repositories(State(state.clone()), ViewPluginsAuth(principal.clone()))
                 .await
@@ -423,19 +499,6 @@ pub async fn call(
                 State(state.clone()),
                 Path(id),
                 ViewPluginsAuth(principal.clone()),
-            )
-            .await
-            .map(|Json(v)| McpToolResult::json(&v))
-        }
-        "install_pack" => {
-            let id = match req_str(&args, "id") {
-                Ok(id) => id.to_owned(),
-                Err(msg) => return Some(McpToolResult::error(msg)),
-            };
-            plugins::install_pack(
-                State(state.clone()),
-                Path(id),
-                ManagePluginsAuth(principal.clone()),
             )
             .await
             .map(|Json(v)| McpToolResult::json(&v))

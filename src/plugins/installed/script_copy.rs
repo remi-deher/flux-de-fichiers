@@ -24,6 +24,37 @@ pub(super) fn script_copy_dir(local_dir: &Path, item_id: &str) -> PathBuf {
     local_dir.join(INSTALLED_SCRIPTS_FOLDER).join(item_id)
 }
 
+/// État de la copie modifiable d'un script installé.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScriptCopy {
+    Missing,
+    /// Identique à la copie figée.
+    Original,
+    /// Modifiée, ou plus comparable : elle ne doit pas être remplacée.
+    Modified,
+}
+
+/// Compare la copie modifiable d'un script à cette copie figée. Bloquant.
+pub fn compare_script_copy(
+    frozen: &Path,
+    local_dir: &Path,
+    item_id: &str,
+) -> AppResult<ScriptCopy> {
+    if !script_copy_dir(local_dir, item_id).try_exists()? {
+        return Ok(ScriptCopy::Missing);
+    }
+    match (read_item(frozen, item_id), read_item(local_dir, item_id)) {
+        (Err(AppError::Storage(error)), _) | (_, Err(AppError::Storage(error))) => {
+            Err(error.into())
+        }
+        (Ok(frozen), Ok(copy)) if is_in_copy_dir(&copy) && copy.has_same_files_as(&frozen) => {
+            Ok(ScriptCopy::Original)
+        }
+        // Un fichier changé à la main ne correspond plus à l'index de la collection.
+        _ => Ok(ScriptCopy::Modified),
+    }
+}
+
 /// Écrit la copie modifiable d'un script depuis sa copie figée. Sans effet si elle est déjà là, même modifiée ;
 /// `Conflict` si autre chose occupe son identifiant ou son dossier. Bloquant, sous le verrou des
 /// installations.
@@ -77,10 +108,7 @@ fn is_already_copied(local_dir: &Path, item_id: &str) -> AppResult<bool> {
         // Un arrêt a pu précéder la mise à jour de l'index.
         rebuild_local_index(local_dir)?;
         // Le dossier n'apparaît que complet : lisible sous ce nom, c'est la copie, modifiée depuis ou non.
-        let folder = format!("{INSTALLED_SCRIPTS_FOLDER}/{item_id}");
-        let is_copy = read_item(local_dir, item_id).is_ok_and(|copy| {
-            safe_path(&copy.entry.manifest_path).is_some_and(|path| folder_of(&path) == folder)
-        });
+        let is_copy = read_item(local_dir, item_id).is_ok_and(|copy| is_in_copy_dir(&copy));
         return if is_copy {
             Ok(true)
         } else {
@@ -95,7 +123,7 @@ fn is_already_copied(local_dir: &Path, item_id: &str) -> AppResult<bool> {
 }
 
 /// Fichiers relatifs au dossier du script ; refus si l'un d'eux est ailleurs.
-fn files_of_copy(content: &ItemContent) -> AppResult<Vec<(&str, &[u8])>> {
+pub(super) fn files_of_copy(content: &ItemContent) -> AppResult<Vec<(&str, &[u8])>> {
     let item_id = &content.entry.id;
     let refused = |reason: &str| AppError::InvalidManifest(format!("{item_id} : {reason}"));
     let manifest = safe_path(&content.entry.manifest_path)
@@ -114,6 +142,12 @@ fn files_of_copy(content: &ItemContent) -> AppResult<Vec<(&str, &[u8])>> {
                 .ok_or_else(|| refused("fichier hors du dossier du script"))
         })
         .collect()
+}
+
+/// Ce contenu de la collection vient-il du dossier des scripts installés ?
+fn is_in_copy_dir(copy: &ItemContent) -> bool {
+    let folder = format!("{INSTALLED_SCRIPTS_FOLDER}/{}", copy.entry.id);
+    safe_path(&copy.entry.manifest_path).is_some_and(|path| folder_of(&path) == folder)
 }
 
 fn is_same(local_dir: &Path, item_id: &str, content: &ItemContent) -> bool {
@@ -186,6 +220,41 @@ mod tests {
         let refused = write_script_copy(repository.path(), local.path(), "demo");
         assert!(matches!(refused, Err(AppError::Conflict)));
         assert_eq!(std::fs::read_to_string(&manifest)?, "{");
+        Ok(())
+    }
+
+    #[test]
+    fn a_copy_is_original_until_it_is_edited() -> anyhow::Result<()> {
+        let repository = script()?;
+        // Type d'avant le catalogue 2.0.0, que le démarrage renomme dans la collection.
+        let block = "scripts/demo/blocks/run.json";
+        let text = std::fs::read_to_string(repository.path().join(block))?;
+        let named = text.replace(r#""demo-run""#, r#""block.video.encode""#);
+        assert_ne!(named, text);
+        write(repository.path(), block, &named)?;
+        let local = tempfile::tempdir()?;
+        let state = || compare_script_copy(repository.path(), local.path(), "demo");
+        assert_eq!(state()?, ScriptCopy::Missing);
+        write_script_copy(repository.path(), local.path(), "demo")?;
+        assert_eq!(state()?, ScriptCopy::Original);
+
+        let copied = script_copy_dir(local.path(), "demo").join("blocks/run.json");
+        let current = named.replace(r#""block.video.encode""#, r#""video.encode""#);
+        std::fs::write(&copied, &current)?;
+        rebuild_local_index(local.path())?;
+        assert_eq!(state()?, ScriptCopy::Original);
+
+        // À la main, sans que l'index le sache, puis par l'éditeur.
+        std::fs::write(&copied, current.replace("Demo", "Autre"))?;
+        assert_eq!(state()?, ScriptCopy::Modified);
+        rebuild_local_index(local.path())?;
+        assert_eq!(state()?, ScriptCopy::Modified);
+        std::fs::write(&copied, &current)?;
+        rebuild_local_index(local.path())?;
+        assert_eq!(state()?, ScriptCopy::Original);
+        // Sans copie figée lisible, rien ne dit que la copie est restée la même.
+        let unknown = compare_script_copy(Path::new("/absent"), local.path(), "demo")?;
+        assert_eq!(unknown, ScriptCopy::Modified);
         Ok(())
     }
 

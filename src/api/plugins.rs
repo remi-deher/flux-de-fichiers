@@ -1,6 +1,6 @@
 //! Gestionnaires HTTP pour les plugins, le catalogue et les outils distribués.
 
-use super::{AppState, ManagePluginsAuth, ViewPluginsAuth, local::write_local, to_completion};
+use super::{AppState, ManagePluginsAuth, ViewPluginsAuth, to_completion};
 use crate::{
     error::{AppError, AppResult},
     plugins::{self, CatalogEntry, ToolStatusSummary},
@@ -515,27 +515,6 @@ pub async fn catalog_script(
     preview.map(Json).ok_or(AppError::NotFound)
 }
 
-/// Copie un script du catalogue dans la librairie locale (« ma collection »), où il se modifie.
-///
-/// Un script déjà local, ou dont le nom existe déjà dans la librairie, est refusé (409).
-pub async fn import_catalog_script(
-    State(s): State<AppState>,
-    Path(entry_id): Path<String>,
-    _auth: ManagePluginsAuth,
-) -> AppResult<Json<forgearr_shared::local::LocalScriptSummary>> {
-    let roots = plugins::legacy_store_roots(&s.pool, &s.config).await?;
-    let saved = write_local(&s, move |local_dir| {
-        let (source_dir, request) =
-            plugins::catalog_script_import(&roots, &entry_id).ok_or(AppError::NotFound)?;
-        if source_dir == local_dir {
-            return Err(AppError::Conflict);
-        }
-        plugins::save_local_script(local_dir, request)
-    })
-    .await?;
-    Ok(Json(saved))
-}
-
 /// Ajoute un nouveau dépôt tiers de plugins ou flux.
 pub async fn add_repository(
     State(s): State<AppState>,
@@ -673,24 +652,4 @@ pub async fn tool_detail(
             .map_err(|_| AppError::Internal)?
             .ok_or(AppError::NotFound)?;
     Ok(Json(detail))
-}
-
-/// Exécute l'installation déclarative d'un pack (outils requis et vérification des composants), même si
-/// le client coupe la connexion.
-pub async fn install_pack(
-    State(s): State<AppState>,
-    Path(id): Path<String>,
-    _auth: ManagePluginsAuth,
-) -> AppResult<Json<plugins::PackInstallResult>> {
-    to_completion(async move {
-        let roots = plugins::legacy_store_roots(&s.pool, &s.config).await?;
-        let cache_mgr = s.tool_cache();
-        let sync_policy = crate::runtime_settings::load_effective(&s.pool, &s.config)
-            .await
-            .sync_policy();
-        plugins::install_pack_verified(&s.pool, &roots, &cache_mgr, &sync_policy, &id)
-            .await
-            .map(Json)
-    })
-    .await
 }

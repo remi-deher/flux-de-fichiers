@@ -24,7 +24,9 @@ const FAILURE_FLOW: &str = "flow.echec";
 const PLAIN_FLOW: &str = "flow.simple";
 const MAX_TEST_BODY_BYTES: usize = 64 * 1024;
 
-async fn setup() -> anyhow::Result<(axum::Router, SqlitePool)> {
+async fn setup() -> anyhow::Result<(axum::Router, SqlitePool, tempfile::TempDir)> {
+    let plugins = tempfile::tempdir()?;
+    common::store::write_blocks(plugins.path(), &["file-input", "essentiel.sub-flow"])?;
     let config = Config {
         bind: "127.0.0.1:3000".parse()?,
         database_url: "sqlite::memory:".into(),
@@ -32,7 +34,7 @@ async fn setup() -> anyhow::Result<(axum::Router, SqlitePool)> {
         input_dir: "var/input".into(),
         config_dir: "var/config".into(),
         tools_cache_dir: "var/tools-cache".into(),
-        plugins_dir: None,
+        plugins_dir: Some(plugins.path().to_path_buf()),
         detected_plugins_dir: None,
         static_dir: "frontend/dist".into(),
         max_file_bytes: 1024,
@@ -49,7 +51,7 @@ async fn setup() -> anyhow::Result<(axum::Router, SqlitePool)> {
     sqlx::migrate!().run(&pool).await?;
     common::install_keys(&pool).await?;
     let app = router(AppState::new(pool.clone(), Arc::new(config)));
-    Ok((app, pool))
+    Ok((app, pool, plugins))
 }
 
 fn calling(target: &str) -> Value {
@@ -102,7 +104,7 @@ fn versions(links: &[LinkedFlow]) -> Vec<(LinkedFlowRole, String, i64)> {
 
 #[tokio::test]
 async fn sub_flows_and_failure_flow_are_frozen_with_the_job() -> anyhow::Result<()> {
-    let (_app, pool) = setup().await?;
+    let (_app, pool, _plugins) = setup().await?;
     save(&pool, SUB_FLOW, &plain("v1")).await?;
     save(&pool, FAILURE_FLOW, &plain("échec")).await?;
     let mut main = calling(SUB_FLOW);
@@ -134,7 +136,7 @@ async fn sub_flows_and_failure_flow_are_frozen_with_the_job() -> anyhow::Result<
 
 #[tokio::test]
 async fn the_global_failure_flow_applies_only_without_a_flow_choice() -> anyhow::Result<()> {
-    let (_app, pool) = setup().await?;
+    let (_app, pool, _plugins) = setup().await?;
     save(&pool, FAILURE_FLOW, &plain("échec")).await?;
     save(&pool, PLAIN_FLOW, &plain("simple")).await?;
     let mut own = plain("propre");
@@ -197,7 +199,7 @@ async fn expect_put(
 
 #[tokio::test]
 async fn saving_refuses_sub_flow_cycles_and_unknown_links() -> anyhow::Result<()> {
-    let (app, _pool) = setup().await?;
+    let (app, _pool, _plugins) = setup().await?;
     expect_put(&app, "flow.a", &calling("flow.a"), StatusCode::BAD_REQUEST).await?;
     expect_put(&app, "flow.a", &calling("flow.x"), StatusCode::BAD_REQUEST).await?;
     expect_put(&app, "flow.b", &plain("b"), StatusCode::OK).await?;
@@ -223,7 +225,7 @@ async fn saving_refuses_sub_flow_cycles_and_unknown_links() -> anyhow::Result<()
 
 #[tokio::test]
 async fn the_global_failure_flow_is_read_and_written_through_the_api() -> anyhow::Result<()> {
-    let (app, _pool) = setup().await?;
+    let (app, _pool, _plugins) = setup().await?;
     let uri = "/api/v1/flows/failure-default";
     let unknown = json!({"flowId": "flow.absent"});
     let response = app

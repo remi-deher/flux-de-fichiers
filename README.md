@@ -39,7 +39,9 @@ via un reverse proxy externe). Au premier démarrage, le central crée dans `/co
 | `secret_key` | clé de chiffrement des secrets, générée à l'installation (0600) |
 | `secret_keys.retired` | anciennes clés gardées pour déchiffrer seulement, si présent (0600) |
 | `recovery_kit.exported` | clé couverte par le dernier kit de récupération exporté |
-| `plugins/<dépôt>/` | copie locale de chaque dépôt de plugins synchronisé |
+| `plugins/<dépôt>/` | copie locale de chaque dépôt de plugins synchronisé (vitrine du Store) |
+| `installed/<id>.<empreinte>/` | copie figée de chaque élément installé, seule lue par le moteur |
+| `backups/` | copie de la base faite avant la migration du Store |
 
 **Première ouverture** : la page d'installation demande le nom du central, puis un
 identifiant et un mot de passe administrateur ; la session s'ouvre ensuite toute seule
@@ -94,7 +96,11 @@ est exécutée après la publication du résultat lorsque la connexion correspon
 
 Le catalogue ne vient que des dépôts de plugins (aucun catalogue embarqué). Le dépôt
 officiel [Forgearr Plugins](https://github.com/remi-deher/flux-de-fichiers-plugins) est synchronisé au démarrage, toutes les 6 h et à la
-demande dans `/config/plugins/<id>`. Chaque worker installe lui-même ses outils depuis leur
+demande dans `/config/plugins/<id>`. Un dépôt n'est qu'une vitrine : plugins, flux, scripts, packs
+et outils s'installent depuis l'onglet **Store** de l'écran Extensions, après un plan qui montre
+dépendances, outils et accords à donner ; seule la copie figée installée sert aux tâches, et une
+mise à jour ne s'applique qu'à la demande. **Installés** liste ce qui l'est, ce qui s'en sert, et
+permet de le désinstaller ([ADR 0029](docs/adr/0029-store-elements-installes-et-depots.md)). Chaque worker installe lui-même ses outils depuis leur
 contrat de distribution (téléchargement https, SHA-256 vérifié avant exécution) ; une sonde
 installée est exigée avant toute tâche sur fichier. Les clés d'API et les en-têtes des
 webhooks sont chiffrés au repos et ne sont jamais renvoyés par l'API. Détails :

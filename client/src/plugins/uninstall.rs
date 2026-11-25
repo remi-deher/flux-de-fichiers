@@ -1,14 +1,12 @@
 //! « Utilisé par » et désinstallation d'un élément installé (ADR 0029 §8).
 
-use super::STORE_TOPICS;
+use super::{INSTALLATIONS_PATH, STORE_TOPICS};
 use crate::api;
 use crate::live::{load, use_live};
 use crate::route::encode_segment;
 use crate::ui::Toasts;
 use forgearr_shared::plugins::store::usage::ItemUsage;
 use leptos::prelude::*;
-
-const INSTALLATIONS_PATH: &str = "/api/v1/installations";
 
 fn installation_path(item_id: &str) -> String {
     format!("{INSTALLATIONS_PATH}/{}", encode_segment(item_id))

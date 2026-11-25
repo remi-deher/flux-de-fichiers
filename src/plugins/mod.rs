@@ -45,24 +45,22 @@ pub use install::{
     install_from_distribution, is_installing, parse_distribution, read_distribution,
 };
 pub use installed::{
-    DamagedItem, EngineCatalog, InstallationGuard, ItemContent, SyncedRepository, UsageSources,
-    UsedElements, elements_used_by, freeze_item, frozen_is_intact, held_flows, installed_root,
-    item_usage, lock_installations, read_item, resume_store, share_installations, sweep_orphans,
-    unreadable_item,
+    ApplyContext, DamagedItem, EngineCatalog, InstallationGuard, InstalledState, ItemContent,
+    PlanContext, PlannedChange, PreparedPlan, ScriptCopy, SyncedRepository, UsageSources,
+    UsedElements, apply_installation, compare_script_copy, delete_collection_item,
+    elements_used_by, ensure_unused, freeze_item, frozen_is_intact, held_flows, installed_root,
+    item_usage, lock_installations, plan_installation, read_item, resume_store,
+    share_installations, sweep_orphans, uninstall_item, unreadable_item,
 };
 pub use legacy_ids::{
     legacy_plugin_id, migrate_legacy_block_kinds, migrate_legacy_plugin_secrets,
     rename_legacy_block_kinds,
 };
 pub use local::{
-    build_local_snapshot, delete_local_item, local_resource_file, repair_local_index,
-    save_local_block_template, save_local_flow_template, save_local_pack, save_local_script,
-    upload_local_resource,
+    build_local_snapshot, repair_local_index, resource_file, save_local_block_template,
+    save_local_flow_template, save_local_pack, save_local_script, upload_local_resource,
 };
-pub use packs::{
-    PackInstallResult, PackInstallation, build_pack_detail, install_pack, install_pack_verified,
-    read_pack_installation,
-};
+pub use packs::{PackInstallation, build_pack_detail, read_pack_installation};
 pub use probe::{ProbeContract, file_job_may_start, probe_is_ready, required_probe};
 pub use readiness::{attach_dependency_statuses, compute_entry_runtime, is_plugin_configured};
 pub use sources::{
@@ -86,9 +84,7 @@ pub use forgearr_shared::plugins::{
     PluginSettingsView, RepositoryDetailView, ToolArtifactSummary, ToolDetailView, ToolStatus,
     ToolStatusSummary,
 };
-pub use script_preview::{
-    catalog_script_import, read_catalog_script_preview, read_repository_script_preview,
-};
+pub use script_preview::{read_catalog_script_preview, read_repository_script_preview};
 pub use script_requirements::{
     ScriptRequirements, operation_declaration_issue, read_script_requirements, requirement_statuses,
 };

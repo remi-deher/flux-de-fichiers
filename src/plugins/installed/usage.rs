@@ -14,6 +14,7 @@ use crate::{
     software_probe::declared_probe_tools,
 };
 use forgearr_shared::{
+    exposed_variables::{RepositoryPointer, ScriptRequirement},
     flows::{FlowGraph, OwnedBlockSpec, find_owned},
     plugins::store::usage::ItemUsage,
 };
@@ -54,11 +55,11 @@ impl EngineCatalog {
         self.located(id).map(|(_, entry)| entry)
     }
 
-    fn located(&self, id: &str) -> Option<&(PathBuf, CatalogEntry)> {
+    pub(super) fn located(&self, id: &str) -> Option<&(PathBuf, CatalogEntry)> {
         self.entries.iter().find(|(_, entry)| entry.id == id)
     }
 
-    fn has_primary_probe(&self) -> bool {
+    pub(super) fn has_primary_probe(&self) -> bool {
         self.operations.primary_probe().is_some() || self.probe_tool().is_some()
     }
 
@@ -106,19 +107,34 @@ impl UsedElements {
         );
         self.tools
             .extend(operation.tool_refs().map(|tool| tool.id.clone()));
-        match &operation.runtime {
-            OperationRuntime::Http(http) => self.items.extend(http.settings_plugin_id.clone()),
-            OperationRuntime::Script(script) if !script.dependencies_unverified => {
-                self.items.extend(
-                    script
-                        .requires
-                        .iter()
-                        .map(|requirement| requirement.provider.clone()),
-                )
-            }
-            _ => {}
-        }
+        self.items
+            .extend(providers_of(operation).map(|(id, _)| id.to_owned()));
     }
+}
+
+/// Variables exposées qu'une opération exige ; aucune si le script a été intégré sans ses dépendances.
+pub(super) fn requirements_of(operation: &OperationContract) -> &[ScriptRequirement] {
+    match &operation.runtime {
+        OperationRuntime::Script(script) if !script.dependencies_unverified => &script.requires,
+        _ => &[],
+    }
+}
+
+/// Plugins dont l'opération lit les réglages ou les variables, et le dépôt qu'elle désigne pour en fournir un.
+pub(super) fn providers_of(
+    operation: &OperationContract,
+) -> impl Iterator<Item = (&str, Option<&RepositoryPointer>)> {
+    let settings = match &operation.runtime {
+        OperationRuntime::Http(http) => http.settings_plugin_id.as_deref(),
+        _ => None,
+    };
+    let required = requirements_of(operation).iter().map(|requirement| {
+        (
+            requirement.provider.as_str(),
+            requirement.repository.as_ref(),
+        )
+    });
+    settings.map(|id| (id, None)).into_iter().chain(required)
 }
 
 /// Éléments dont les nœuds de ce graphe se servent.
@@ -333,13 +349,26 @@ impl UsageSources {
         })
     }
 
-    /// Tous les graphes.
-    pub(super) fn graphs(&self) -> impl Iterator<Item = &FlowGraph> {
+    /// Flux et modèles, avec leur nom.
+    pub(super) fn named_graphs(&self) -> impl Iterator<Item = (&str, &FlowGraph)> {
         self.flows
             .iter()
             .chain(&self.templates)
-            .map(|named| &named.graph)
-            .chain(self.tasks.iter().filter_map(|task| task.graph.as_ref()))
+            .map(|named| (named.name.as_str(), &named.graph))
+    }
+
+    /// Fichiers des tâches non terminées d'un même flux ; `None` : sans flux.
+    pub(super) fn tasks(&self) -> impl Iterator<Item = (&[String], Option<&FlowGraph>)> {
+        self.tasks
+            .iter()
+            .map(|task| (task.sources.as_slice(), task.graph.as_ref()))
+    }
+
+    /// Tous les graphes.
+    pub(super) fn graphs(&self) -> impl Iterator<Item = &FlowGraph> {
+        self.named_graphs()
+            .map(|(_, graph)| graph)
+            .chain(self.tasks().filter_map(|(_, graph)| graph))
     }
 }
 
@@ -347,6 +376,14 @@ impl UsageSources {
 pub(super) fn parse_graph(definition: &str) -> FlowGraph {
     let renamed = rename_legacy_block_kinds(definition);
     FlowGraph::parse(renamed.as_deref().unwrap_or(definition))
+}
+
+/// Graphe d'un document de flux ou de modèle ; `None` s'il n'a pas de définition.
+pub(super) fn document_graph(document: &Value) -> Option<FlowGraph> {
+    Some(match document.get("definition")? {
+        Value::String(definition) => parse_graph(definition),
+        definition => parse_graph(&definition.to_string()),
+    })
 }
 
 /// Entrées de la collection locale ; aucune si elle n'a pas encore d'index. Un index illisible est une erreur,
@@ -382,15 +419,12 @@ fn local_templates(local_dir: &Path) -> AppResult<Vec<NamedGraph>> {
                 continue;
             }
         };
-        let definition = match document.get("definition") {
-            Some(Value::String(definition)) => definition.clone(),
-            Some(definition) => definition.to_string(),
-            None => continue,
-        };
-        templates.push(NamedGraph {
-            graph: parse_graph(&definition),
-            name: entry.name,
-        });
+        if let Some(graph) = document_graph(&document) {
+            templates.push(NamedGraph {
+                graph,
+                name: entry.name,
+            });
+        }
     }
     Ok(templates)
 }

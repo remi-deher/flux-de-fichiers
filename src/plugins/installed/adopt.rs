@@ -164,7 +164,7 @@ pub(super) async fn finish_script_copies(
     Ok(changed)
 }
 
-async fn finish_script_copy(
+pub(super) async fn finish_script_copy(
     _lock: &InstallationGuard,
     pool: &SqlitePool,
     config: &Config,

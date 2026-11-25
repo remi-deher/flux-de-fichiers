@@ -21,6 +21,7 @@ mod setup;
 pub(crate) mod source_publication;
 pub(crate) mod source_recovery;
 pub(crate) mod source_recovery_remote;
+pub(crate) mod store;
 pub(crate) mod system;
 mod tool_purge;
 pub(crate) mod transfers;
@@ -84,6 +85,8 @@ pub struct AppState {
     /// Identifiant du worker intégré une fois enregistré (absent s'il est désactivé) : il détient les
     /// sources que le central voit et reçoit leurs résultats (ADR 0022).
     pub local_worker_id: Arc<std::sync::OnceLock<uuid::Uuid>>,
+    /// Partagé par ce que le central exécute hors d'un bail avec les outils de son cache ; la purge le prend seule.
+    pub tools_in_use: Arc<tokio::sync::RwLock<()>>,
 }
 
 impl AppState {
@@ -114,6 +117,7 @@ impl AppState {
             ai_models: crate::ai::health::ModelCache::new(),
             ai_diagnosis: crate::ai::diagnosis::DiagnosisStore::new(),
             local_worker_id: Arc::new(std::sync::OnceLock::new()),
+            tools_in_use: Arc::default(),
         }
     }
 
@@ -291,6 +295,14 @@ fn json_routes() -> Router<AppState> {
                 .layer(axum::extract::DefaultBodyLimit::max(LARGE_JSON_BODY_LIMIT)),
         )
         .route("/api/v1/plugins", get(plugins::catalog))
+        .route("/api/v1/store", get(store::list_store))
+        .route("/api/v1/installations/plan", post(store::plan))
+        .route("/api/v1/installations", get(store::list_installed))
+        .route(
+            "/api/v1/installations/{id}",
+            axum::routing::delete(store::uninstall),
+        )
+        .route("/api/v1/installations/{id}/usage", get(store::usage))
         .route(
             "/api/v1/plugins/exposed-variables",
             get(plugins::exposed_variables),
@@ -316,10 +328,6 @@ fn json_routes() -> Router<AppState> {
         .route(
             "/api/v1/catalog-scripts/{entry_id}",
             get(plugins::catalog_script),
-        )
-        .route(
-            "/api/v1/catalog-scripts/{entry_id}/import",
-            post(plugins::import_catalog_script),
         )
         .route(
             "/api/v1/plugins/repositories/{id}/sync",
@@ -539,7 +547,8 @@ fn transfer_routes() -> Router<AppState> {
             post(plugins::install_plugin),
         )
         .route("/api/v1/tools/{id}/install", post(plugins::install_tool))
-        .route("/api/v1/packs/{id}/install", post(plugins::install_pack))
+        // Fige les éléments, puis télécharge les outils cochés.
+        .route("/api/v1/installations/apply", post(store::install))
         .route(EVENTS_PATH, get(events::all))
         .route(JOB_EVENTS_PATH, get(events::jobs))
         .route("/api/v1/ai/runs/{id}/events", get(crate::ai::run_events))

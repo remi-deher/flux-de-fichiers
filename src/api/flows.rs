@@ -11,7 +11,8 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use forgearr_shared::flows::OwnedBlockSpec;
+use forgearr_shared::flows::{FlowGraph, OwnedBlockSpec, legacy_references};
+use std::path::PathBuf;
 
 /// Catalogue des blocs pour la palette : issu exclusivement des dépôts de plugins synchronisés.
 pub async fn list_blocks(
@@ -77,6 +78,46 @@ pub async fn get_version(
     Ok(Json(flow))
 }
 
+/// Définition enregistrée d'un flux ; `None` s'il n'existe pas encore.
+async fn saved_definition(s: &AppState, id: &str) -> AppResult<Option<String>> {
+    match repository::get_flow(&s.pool, id).await {
+        Ok(flow) => Ok(Some(flow.definition)),
+        Err(AppError::NotFound) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Définition aux formats actuels : types de blocs renommés, `{{…}}` réécrit en `{$…}` (ADR 0026).
+fn upgraded_definition(definition: String) -> String {
+    let renamed = plugins::rename_legacy_block_kinds(&definition).unwrap_or(definition);
+    legacy_references::upgrade_legacy_definition(&renamed).unwrap_or(renamed)
+}
+
+/// Refuse un bloc que rien d'installé ne porte, sauf s'il est déjà dans le flux enregistré.
+async fn ensure_known_blocks(
+    s: &AppState,
+    roots: &[PathBuf],
+    registry: &crate::flows::OperationRegistry,
+    definition: &str,
+    saved: Option<&str>,
+) -> AppResult<()> {
+    let blocks = s.catalog_cache.blocks(roots).await;
+    let unknown = crate::flows::added_unknown_blocks(
+        &FlowGraph::parse(definition),
+        saved.map(FlowGraph::parse).as_ref(),
+        &blocks,
+        registry,
+    );
+    if unknown.is_empty() {
+        return Ok(());
+    }
+    let problems: Vec<String> = unknown
+        .iter()
+        .map(|kind| crate::flows::unknown_block_message(kind))
+        .collect();
+    Err(AppError::UnknownBlocks(problems.join(" | ")))
+}
+
 /// Enregistre ou met à jour la définition d'un flux (sans installer d'outils à l'enregistrement).
 pub async fn save_flow(
     State(s): State<AppState>,
@@ -98,20 +139,12 @@ pub async fn save_flow(
     }
     super::flow_links::ensure_valid_links(&s.pool, &id, &payload.definition).await?;
     let mut payload = payload;
-    // L'ancienne syntaxe `{{…}}` est réécrite en `{$…}` à l'enregistrement (ADR 0026).
-    if let Some(upgraded) =
-        forgearr_shared::flows::legacy_references::upgrade_legacy_definition(&payload.definition)
-    {
-        payload.definition = upgraded;
-    }
+    payload.definition = upgraded_definition(payload.definition);
+    let saved = saved_definition(&s, &id).await?;
     if crate::flows::has_flow_secrets(&payload.definition) {
-        let existing = repository::get_flow(&s.pool, &id)
-            .await
-            .ok()
-            .map(|flow| flow.definition);
         let secrets = crate::secrets::SecretBox::open(&s.config.config_dir)?;
         payload.definition =
-            crate::flows::seal_definition(&secrets, &id, &payload.definition, existing.as_deref())?;
+            crate::flows::seal_definition(&secrets, &id, &payload.definition, saved.as_deref())?;
     }
     // Ce que le flux utilise ne peut être ni repris ni retiré entre le contrôle et l'enregistrement.
     let _installations = plugins::share_installations().await;
@@ -125,6 +158,7 @@ pub async fn save_flow(
             return Err(AppError::InvalidFlowVariables(problems.join(" | ")));
         }
     }
+    ensure_known_blocks(&s, &roots, &registry, &payload.definition, saved.as_deref()).await?;
     let mut flow = repository::save_flow(&s.pool, &id, &payload).await?;
     flow.definition = crate::flows::mask_definition(&flow.definition);
 
@@ -232,6 +266,7 @@ pub async fn validate_flow(
         serde_json::from_str(&raw).map_err(|_| AppError::Invalid)?;
     let roots = plugins::engine_roots(&s.pool, &s.config).await?;
     let blocks = s.catalog_cache.blocks(&roots).await;
+    let registry = s.catalog_cache.operations(&roots).await;
 
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
@@ -259,13 +294,12 @@ pub async fn validate_flow(
                     }
                 }
             }
-        } else if !blocks.is_empty() {
+        } else if crate::flows::is_unknown_block(node, &blocks, &registry) {
             errors.push(format!(
-                "Nœud {} : type de bloc inconnu « {} »",
-                node.id, node.kind
+                "Nœud {} : {}",
+                node.id,
+                crate::flows::unknown_block_message(node.kind.as_str())
             ));
-        } else {
-            warnings.push("Catalogue de blocs vide : types de blocs non vérifiés.".to_owned());
         }
     }
     for conn in &graph.connections {
@@ -288,7 +322,6 @@ pub async fn validate_flow(
     if has_cycle(&graph) {
         errors.push("Le graphe contient au moins un cycle.".to_owned());
     }
-    let registry = s.catalog_cache.operations(&roots).await;
     errors.extend(crate::flows::check_references(&graph, &registry));
     warnings.extend(crate::flows::reference_warnings(&graph, &registry));
     Ok(Json(FlowValidationReport {
@@ -323,14 +356,15 @@ pub async fn restore_version(
         name: frozen.name,
         description: frozen.description,
         file_mask: frozen.file_mask,
-        // La version figée reste intacte ; la nouvelle version courante passe au format `{$…}`.
-        definition: forgearr_shared::flows::legacy_references::upgrade_legacy_definition(
-            &frozen.definition,
-        )
-        .unwrap_or(frozen.definition),
+        // La version figée reste intacte ; la nouvelle version courante passe aux formats actuels.
+        definition: upgraded_definition(frozen.definition),
         is_default: frozen.is_default,
     };
+    let saved = saved_definition(&s, &id).await?;
     let _installations = plugins::share_installations().await;
+    let roots = plugins::engine_roots(&s.pool, &s.config).await?;
+    let registry = s.catalog_cache.operations(&roots).await;
+    ensure_known_blocks(&s, &roots, &registry, &req.definition, saved.as_deref()).await?;
     let mut restored = repository::save_flow(&s.pool, &id, &req).await?;
     restored.definition = crate::flows::mask_definition(&restored.definition);
     Ok(Json(restored))

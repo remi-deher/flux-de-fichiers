@@ -1,17 +1,14 @@
-//! Fiche d'inspection à onglets d'un pack : vue d'ensemble + installation unifiée et informations.
+//! Fiche d'inspection à onglets d'un pack : composants et informations ; il s'installe depuis le Store.
 
 use super::flow_preview::FlowMiniPreview;
 use super::metadata::{CommonInfoRows, MetaRow, StatusBanner, StoreTone};
-use super::{CATALOG_TOPICS, SelectedItem, TOOL_TOPICS, section_badge_label};
-use crate::api;
-use crate::live::{load, use_live};
+use super::{CATALOG_TOPICS, SelectedItem, section_badge_label};
+use crate::live::load;
 use crate::route::encode_segment;
-use crate::ui::{Icon, IconName, Tag, TagTone, Toasts};
+use crate::ui::{Icon, IconName, Tag, TagTone};
 use forgearr_shared::plugins::vocab::CatalogItemType;
-use forgearr_shared::plugins::{CatalogEntry, PackDetailView, PackInstallResult};
+use forgearr_shared::plugins::{CatalogEntry, PackDetailView};
 use leptos::prelude::*;
-
-const INSTALL_ICON_SIZE: u32 = 15;
 
 /// Onglets du tiroir d'un pack (composants et installation réunis dans Aperçu).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,7 +18,7 @@ pub enum PackDrawerTab {
 }
 
 impl PackDrawerTab {
-    pub const TABS: &'static [&'static str] = &["Aperçu & Installation", "Informations"];
+    pub const TABS: &'static [&'static str] = &["Aperçu", "Informations"];
 
     pub const fn from_index(index: usize) -> Self {
         match index {
@@ -31,32 +28,9 @@ impl PackDrawerTab {
     }
 }
 
-/// Synthèse textuelle du bilan d'installation retourné par `POST /api/v1/packs/{id}/install`.
-pub fn pack_install_summary(result: &PackInstallResult) -> (bool, String) {
-    let ok = result.failed_tools.is_empty() && result.missing_components.is_empty();
-    let msg = if ok {
-        format!(
-            "{} outil(s) installé(s), {} composant(s) vérifié(s).",
-            result.installed_tools.len(),
-            result.verified_components.len()
-        )
-    } else {
-        format!(
-            "{} outil(s) en échec, {} composant(s) manquant(s).",
-            result.failed_tools.len(),
-            result.missing_components.len()
-        )
-    };
-    (ok, msg)
-}
-
 #[component]
 fn OverviewTab(
     detail: PackDetailView,
-    can_install: bool,
-    install: Action<(), Result<PackInstallResult, api::ApiError>>,
-    last_result: RwSignal<Option<PackInstallResult>>,
-    feedback: RwSignal<Option<String>>,
     on_open_plugin: Option<Callback<SelectedItem>>,
     on_open_tool: Option<Callback<SelectedItem>>,
     catalog_entries: Option<Signal<Vec<CatalogEntry>>>,
@@ -64,63 +38,19 @@ fn OverviewTab(
     let spec = detail.installation;
     let components_count = spec.components.len();
     let runtime_label = match spec.runtime_implemented {
-        Some(true) => "Prêt à installer",
+        Some(true) => "Installable depuis le Store",
         Some(false) => "Non implémenté",
         None => "Pack déclaratif",
     };
-
-    let install_btn = can_install.then(|| {
-        view! {
-            <button
-                type="button"
-                class="btn btn-primary btn-sm"
-                disabled=move || install.pending().get()
-                on:click=move |_| { install.dispatch(()); }
-            >
-                <Icon name=IconName::Download size=INSTALL_ICON_SIZE />
-                <span>{move || if install.pending().get() { "Installation…" } else { "Installer le pack" }}</span>
-            </button>
-        }
-        .into_any()
-    });
 
     view! {
         <StatusBanner
             title=runtime_label
             text=Some(format!("{components_count} composant(s) inclus dans ce pack."))
             tone=StoreTone::Primary
-            action=install_btn
         />
         {detail.description.map(|desc| view! {
             <p class="text-sm">{desc}</p>
-        })}
-        {move || last_result.get().map(|res| view! {
-            <div class="pack-components">
-                <h3 class="form-label">"Bilan de l'installation"</h3>
-                <div class="cluster">
-                    <Tag label=format!("Outils installés : {}", res.installed_tools.len()) tone=TagTone::Success />
-                    <Tag label=format!("Composants vérifiés : {}", res.verified_components.len()) tone=TagTone::Primary />
-                    {(!res.failed_tools.is_empty()).then(|| view! {
-                        <Tag label=format!("Échecs outils : {}", res.failed_tools.len()) tone=TagTone::Danger />
-                    })}
-                    {(!res.missing_components.is_empty()).then(|| view! {
-                        <Tag label=format!("Manquants : {}", res.missing_components.len()) tone=TagTone::Warning />
-                    })}
-                </div>
-                {(!res.failed_tools.is_empty()).then(|| view! {
-                    <ul class="step-list">
-                        {res.failed_tools.into_iter().map(|(tool_id, reason)| view! {
-                            <li class="step-item">
-                                <span class="text-mono text-strong">{tool_id}</span>
-                                <p class="form-error text-sm">{reason}</p>
-                            </li>
-                        }).collect_view()}
-                    </ul>
-                })}
-            </div>
-        })}
-        {move || feedback.get().map(|msg| view! {
-            <p class="form-help" role="status">{msg}</p>
         })}
         {spec.entrypoint.map(|entry| {
             let entry_id = entry.id.clone();
@@ -237,39 +167,14 @@ fn InfoTab(detail: PackDetailView) -> impl IntoView {
 pub fn PackDetail(
     pack_id: String,
     tab: RwSignal<usize>,
-    can_install: bool,
     #[prop(optional)] on_open_plugin: Option<Callback<SelectedItem>>,
     #[prop(optional)] on_open_tool: Option<Callback<SelectedItem>>,
     #[prop(optional)] catalog_entries: Option<Signal<Vec<CatalogEntry>>>,
 ) -> impl IntoView {
     let encoded = encode_segment(&pack_id);
     let spec_path = format!("/api/v1/packs/{encoded}");
-    let install_path = format!("/api/v1/packs/{encoded}/install");
 
-    let live = use_live();
     let detail = load::<PackDetailView>(CATALOG_TOPICS, spec_path);
-    let feedback = RwSignal::new(None::<String>);
-    let last_result = RwSignal::new(None::<PackInstallResult>);
-
-    let install = Action::new_local(move |(): &()| {
-        let path = install_path.clone();
-        async move { api::post::<(), PackInstallResult>(&path, None).await }
-    });
-
-    Effect::new(move |_| match install.value().get() {
-        Some(Ok(result)) => {
-            let (ok, summary) = pack_install_summary(&result);
-            last_result.set(Some(result));
-            if ok {
-                Toasts::set_success(feedback, summary);
-            } else {
-                Toasts::set_error(feedback, summary);
-            }
-            live.touch(TOOL_TOPICS);
-        }
-        Some(Err(error)) => Toasts::set_error(feedback, error.message()),
-        None => {}
-    });
 
     view! {
         <div class="inspection-panel">
@@ -282,10 +187,6 @@ pub fn PackDetail(
                         PackDrawerTab::Overview => view! {
                             <OverviewTab
                                 detail=data
-                                can_install=can_install
-                                install=install
-                                last_result=last_result
-                                feedback=feedback
                                 on_open_plugin=on_open_plugin
                                 on_open_tool=on_open_tool
                                 catalog_entries=catalog_entries
@@ -306,38 +207,9 @@ mod tests {
 
     #[test]
     fn pack_drawer_tabs_map_all_indices() {
-        assert_eq!(
-            PackDrawerTab::TABS,
-            &["Aperçu & Installation", "Informations"]
-        );
+        assert_eq!(PackDrawerTab::TABS, &["Aperçu", "Informations"]);
         assert_eq!(PackDrawerTab::from_index(0), PackDrawerTab::Overview);
         assert_eq!(PackDrawerTab::from_index(1), PackDrawerTab::Info);
         assert_eq!(PackDrawerTab::from_index(10), PackDrawerTab::Info);
-    }
-
-    #[test]
-    fn pack_install_summary_reports_success_and_failures() {
-        let ok = PackInstallResult {
-            pack_id: "media".into(),
-            pack_version: "1.0.0".into(),
-            installed_tools: vec!["ffmpeg".into(), "mp4box".into()],
-            failed_tools: Vec::new(),
-            verified_components: vec!["video".into()],
-            missing_components: Vec::new(),
-        };
-        let (passed, summary) = pack_install_summary(&ok);
-        assert!(passed);
-        assert!(summary.contains("2 outil(s) installé(s)"));
-        assert!(summary.contains("1 composant(s) vérifié(s)"));
-
-        let partial = PackInstallResult {
-            failed_tools: vec![("ffmpeg".into(), "réseau indisponible".into())],
-            missing_components: vec!["audio".into()],
-            ..ok
-        };
-        let (passed, summary) = pack_install_summary(&partial);
-        assert!(!passed);
-        assert!(summary.contains("1 outil(s) en échec"));
-        assert!(summary.contains("1 composant(s) manquant(s)"));
     }
 }

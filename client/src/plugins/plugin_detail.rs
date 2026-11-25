@@ -3,6 +3,10 @@
 use super::exposed_variables::ExposedVariablesSection;
 use super::metadata::{CommonInfoRows, MetaRow, StatusBanner, StoreTone, tool_status_tag};
 use super::settings::PluginSettings;
+use super::uninstall::InstalledActions;
+
+/// Code d'erreur d'un plugin qui n'est plus installé.
+const NOT_FOUND: &str = "not_found";
 use super::{CATALOG_PATH, CATALOG_TOPICS, SelectedItem, install_with_dependencies_action};
 use crate::api::ApiError;
 use crate::flows::NodeDomain;
@@ -374,6 +378,9 @@ pub fn PluginDetail(
                 let active_tab = active_tab.get();
                 match detail.get() {
                     None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),
+                    Some(Err(error)) if error.code() == Some(NOT_FOUND) => view! {
+                        <p class="text-dim">"Ce plugin n'est plus installé ; il reste disponible dans le Store."</p>
+                    }.into_any(),
                     Some(Err(error)) => view! { <p class="text-danger">{error.message()}</p> }.into_any(),
                     Some(Ok(data)) => {
                         let banner_data = data.clone();
@@ -413,9 +420,13 @@ pub fn PluginDetail(
                     }
                 }
             }}
-            {move || settings_shown.get().then(|| view! {
-                <PluginSettings plugin_id=plugin_id.clone() />
-            })}
+            {
+                let plugin_id = plugin_id.clone();
+                move || settings_shown.get().then(|| view! {
+                    <PluginSettings plugin_id=plugin_id.clone() />
+                })
+            }
+            <InstalledActions item_id=plugin_id can_manage=can_configure />
         </div>
     }
 }

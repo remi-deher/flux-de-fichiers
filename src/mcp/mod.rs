@@ -42,7 +42,9 @@ pub(crate) fn tool_required_permissions(name: &str) -> &'static [Permission] {
         | "validate_flow" | "simulate_flow" | "diff_flow_versions" => &[Permission::ViewFlows],
         "save_flow" | "delete_flow" | "restore_flow_version" => &[Permission::ManageFlows],
         "list_repositories" | "get_repository" | "list_catalog" | "get_plugin" | "list_tools"
-        | "get_tool" | "get_pack" | "list_local_catalog" => &[Permission::ViewPlugins],
+        | "get_tool" | "get_pack" | "list_local_catalog" | "list_store" | "list_installations" => {
+            &[Permission::ViewPlugins]
+        }
         "add_repository"
         | "sync_repository"
         | "toggle_repository"
@@ -52,7 +54,9 @@ pub(crate) fn tool_required_permissions(name: &str) -> &'static [Permission] {
         | "test_plugin_connection"
         | "install_tool"
         | "install_plugin"
-        | "install_pack"
+        | "plan_installation"
+        | "install_items"
+        | "uninstall_item"
         | "upload_local_resource"
         | "upsert_local_script"
         | "create_local_block_template"
@@ -528,8 +532,31 @@ mod tests {
     use forgearr_shared::Role;
     use tower::ServiceExt;
 
+    /// Blocs que citent les flux de test, portés par un plugin de la collection.
+    fn write_blocks(root: &std::path::Path) -> anyhow::Result<()> {
+        const OWNER: &str = "blocs";
+        std::fs::create_dir_all(root)?;
+        std::fs::write(root.join("manifest.json"), "{}")?;
+        let mut entries = vec![json!({
+            "id": OWNER, "type": "plugin", "version": "1.0.0", "name": OWNER,
+            "manifestPath": "manifest.json"
+        })];
+        for kind in ["file-input", "file-output", "webhook"] {
+            let path = format!("{kind}.json");
+            std::fs::write(root.join(&path), json!({"id": kind}).to_string())?;
+            entries.push(json!({
+                "id": kind, "type": "block", "owner": OWNER, "version": "1.0.0", "name": kind,
+                "manifestPath": path
+            }));
+        }
+        let index = json!({"schemaVersion": "1.0.0", "entries": entries});
+        std::fs::write(root.join("index.json"), index.to_string())?;
+        Ok(())
+    }
+
     async fn test_app() -> anyhow::Result<(axum::Router, AppState, tempfile::TempDir)> {
         let dir = tempfile::tempdir()?;
+        write_blocks(&dir.path().join("config/plugins/local"))?;
         let input_dir = dir.path().join("input");
         std::fs::create_dir_all(&input_dir)?;
         let config = Config {

@@ -24,7 +24,7 @@ impl StarterGroup {
         match self {
             Self::Skeletons => "Squelettes",
             Self::Catalog => "Modèles installés",
-            Self::Store => "Modèles du Store à installer",
+            Self::Store => "Modèles du Catalogue à installer",
             Self::Local => "Mes modèles",
         }
     }

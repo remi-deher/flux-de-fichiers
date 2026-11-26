@@ -4,6 +4,7 @@ mod brand_mark;
 pub mod command_palette;
 pub mod drawer;
 pub mod empty_state;
+pub mod file_types_input;
 pub mod filters;
 pub mod focus;
 pub mod folder_picker;

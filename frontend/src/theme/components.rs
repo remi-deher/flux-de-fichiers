@@ -2174,4 +2174,97 @@ dialog.app-dialog.dialog-narrow { max-width: 540px; }
   gap: 0.35rem;
   margin-top: 0.35rem;
 }
+
+/* --- Champ « Types de fichiers » (pastilles et suggestions) --- */
+.file-types {
+  position: relative;
+}
+
+.file-types__field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2.5rem;
+  padding: 0.3rem 0.5rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+}
+
+.file-types__field:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.file-types__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.35rem 0.15rem 0.65rem;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-main);
+  background: var(--primary-bg);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+
+.file-types__chip::after {
+  content: "×";
+  color: var(--text-dim);
+}
+
+.file-types__chip:disabled {
+  cursor: default;
+}
+
+.file-types__input {
+  flex: 1 1 6rem;
+  min-width: 0;
+  padding: 0.2rem 0.25rem;
+  font: inherit;
+  color: var(--text-main);
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.file-types__options {
+  position: absolute;
+  z-index: 5;
+  top: 100%;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+  padding: 0.4rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.file-types__option {
+  min-height: 2.25rem;
+  padding: 0 0.65rem;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-main);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.file-types__option.is-selected {
+  background: var(--primary-bg);
+  border-color: var(--primary);
+}
+
+.file-types__option.is-selected::after {
+  content: " ✓";
+}
 "#;

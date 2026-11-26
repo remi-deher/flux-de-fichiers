@@ -18,13 +18,16 @@ mod presentation;
 mod quick_add;
 mod script_inspector;
 mod simulation;
+mod start;
 mod state;
+mod template_creation;
 mod template_input;
 mod variables_form;
 mod versions;
 
 pub use editor::FlowEditor;
 pub(crate) use presentation::NodeDomain;
+pub use start::NewFlow;
 
 use crate::plugins::{FlowMiniPreview, preview_from_definition_json};
 use crate::route::{Link, Route, encode_segment, use_router};
@@ -44,6 +47,7 @@ use forgearr_shared::libraries::Library;
 use forgearr_shared::local::{CreateFlowTemplateRequest, LocalFlowTemplate, LocalLibrarySnapshot};
 use forgearr_shared::session::Me;
 use leptos::prelude::*;
+use template_creation::create_flow_from_template;
 
 const FLOWS_PATH: &str = "/api/v1/flows";
 const LIBRARIES_PATH: &str = "/api/v1/libraries";
@@ -543,22 +547,10 @@ fn FlowTemplateDetailDrawer(
     let (_, total_blocks, total_connections) = pipeline_preview_steps(&def_str);
     let feedback = RwSignal::new(None::<String>);
 
-    let name_for_create = template.name.clone();
-    let desc_for_create = template.description.clone();
-    let mask_for_create = template.file_mask.clone();
-    let def_for_create = def_str.clone();
+    let template_for_create = StoredValue::new(template.clone());
     let create_from_tpl = Action::new_local(move |_: &()| {
-        let suffix = (js_sys::Date::now() as u64 % ID_SUFFIX_MODULO).to_string();
-        let id = new_flow_id(&name_for_create, &suffix);
-        let path = format!("{FLOWS_PATH}/{}", encode_segment(&id));
-        let req = UpdateFlowRequest {
-            name: name_for_create.clone(),
-            description: desc_for_create.clone(),
-            file_mask: mask_for_create.clone(),
-            is_default: false,
-            definition: def_for_create.clone(),
-        };
-        async move { api::put::<UpdateFlowRequest, FlowRecord>(&path, &req).await }
+        let template = template_for_create.get_value();
+        async move { create_flow_from_template(&template, &template.name, &template.file_mask).await }
     });
     Effect::new(move |_| match create_from_tpl.value().get() {
         Some(Ok(created)) => {

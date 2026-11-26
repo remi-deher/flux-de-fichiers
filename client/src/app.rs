@@ -26,7 +26,7 @@ fn Screen(me: Me) -> impl IntoView {
             Route::Overview => view! { <CentralOverview me=me /> }.into_any(),
             Route::Jobs => view! { <JobsPage me=me /> }.into_any(),
             Route::Flows => view! { <flows::FlowsPage me=me /> }.into_any(),
-            Route::NewFlow => view! { <flows::FlowEditor me=me flow_id=None /> }.into_any(),
+            Route::NewFlow => view! { <flows::NewFlow me=me /> }.into_any(),
             Route::FlowEditor(id) => {
                 view! { <flows::FlowEditor me=me flow_id=Some(id) /> }.into_any()
             }

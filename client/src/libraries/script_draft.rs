@@ -165,10 +165,9 @@ pub(super) fn opened_script_warning(
                 .into_any(),
             )
         }
-        OpenedScript::Removed => Some(
-            view! { <ChangedElsewhere text="Ce script a été supprimé de la librairie." /> }
-                .into_any(),
-        ),
+        OpenedScript::Removed => {
+            Some(view! { <ChangedElsewhere text="Ce script a été supprimé." /> }.into_any())
+        }
     }
 }
 

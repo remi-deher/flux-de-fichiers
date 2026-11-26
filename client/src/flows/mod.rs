@@ -34,10 +34,12 @@ use crate::route::{Link, Route, encode_segment, use_router};
 use crate::ui::filters::{Filters, FlowFilter, flow_filter};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
+use crate::ui::vocabulary;
 use crate::ui::{
     Drawer, IconName, MetricTone, Registre, RegistreMessage, StatItem, StatStrip, StatusBadge, Tag,
     TagTone, Toasts, on_activate,
 };
+use crate::url_state::{DrawerKind, use_detail_drawer};
 use crate::{api, format};
 use forgearr_shared::Permission;
 use forgearr_shared::flows::{
@@ -211,7 +213,7 @@ fn FlowPipelineSection(definition: String, empty_label: &'static str) -> impl In
 
     view! {
         <div class="inspection-panel__section">
-            <p class="inspection-panel__title">"Aperçu du pipeline"</p>
+            <p class="inspection-panel__title">"Aperçu du flux"</p>
             {match mini_preview {
                 Some(preview) => view! { <FlowMiniPreview preview=preview /> }.into_any(),
                 None => view! { <p class="text-dim text-sm">{empty_label}</p> }.into_any(),
@@ -249,7 +251,7 @@ fn FlowPipelineSection(definition: String, empty_label: &'static str) -> impl In
                     .collect::<Vec<_>>();
                 view! {
                     <div class="table-wrapper no-margin-top">
-                        <table class="data-table" aria-label="Blocs du pipeline">
+                        <table class="data-table" aria-label="Blocs du flux">
                             <thead>
                                 <tr>
                                     <th>"#"</th>
@@ -416,7 +418,7 @@ fn FlowDetailDrawer(
                                 <div class="detail-val">{desc}</div>
                                 <div class="detail-term">"Version"</div>
                                 <div class="detail-val text-mono">{format!("v{}", flow.version)}</div>
-                                <div class="detail-term">"Masque de fichiers"</div>
+                                <div class="detail-term">{vocabulary::FILE_TYPES}</div>
                                 <div class="detail-val text-mono">{flow.file_mask}</div>
                                 <div class="detail-term">"Flux par défaut"</div>
                                 <div class="detail-val">{if flow.is_default { "Oui" } else { "Non" }}</div>
@@ -439,7 +441,7 @@ fn FlowDetailDrawer(
 
                         <FlowPipelineSection
                             definition=flow.definition
-                            empty_label="Pipeline vide"
+                            empty_label="Flux vide"
                         />
                     }.into_any()
                 }
@@ -602,7 +604,7 @@ fn FlowTemplateDetailDrawer(
                     <div class="detail-val">{desc}</div>
                     <div class="detail-term">"Version"</div>
                     <div class="detail-val text-mono">{format!("v{}", template.version)}</div>
-                    <div class="detail-term">"Masque de fichiers"</div>
+                    <div class="detail-term">{vocabulary::FILE_TYPES}</div>
                     <div class="detail-val text-mono">{template.file_mask}</div>
                 </div>
             </div>
@@ -663,8 +665,27 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
     let reload = RwSignal::new(0_u32);
     let view_mode = RwSignal::new(FlowsCatalogFilter::Flows);
     let selected_entry = RwSignal::new(None::<SelectedFlowEntry>);
-    let flow_drawer_open = RwSignal::new(false);
-    let tpl_drawer_open = RwSignal::new(false);
+    let (flow_selection, flow_drawer_open) = use_detail_drawer(DrawerKind::Flow);
+    let (template_selection, tpl_drawer_open) = use_detail_drawer(DrawerKind::FlowTemplate);
+    // Un lien direct (`?voir=flux.<id>`) choisit l'entrée affichée par le tiroir.
+    Effect::new(move |_| {
+        let from_url = flow_selection
+            .get()
+            .filter(|_| flow_drawer_open.get())
+            .map(SelectedFlowEntry::Flow);
+        if from_url.is_some() && selected_entry.get_untracked() != from_url {
+            selected_entry.set(from_url);
+        }
+    });
+    Effect::new(move |_| {
+        let from_url = template_selection
+            .get()
+            .filter(|_| tpl_drawer_open.get())
+            .map(SelectedFlowEntry::Template);
+        if from_url.is_some() && selected_entry.get_untracked() != from_url {
+            selected_entry.set(from_url);
+        }
+    });
     let flow_tab = RwSignal::new(0_usize);
 
     let flows = LocalResource::new(move || {
@@ -722,11 +743,13 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
     let open_flow = move |id: String| {
         tpl_drawer_open.set(false);
         flow_tab.set(0);
+        flow_selection.set(Some(id.clone()));
         selected_entry.set(Some(SelectedFlowEntry::Flow(id)));
         flow_drawer_open.set(true);
     };
     let open_template = move |id: String| {
         flow_drawer_open.set(false);
+        template_selection.set(Some(id.clone()));
         selected_entry.set(Some(SelectedFlowEntry::Template(id)));
         tpl_drawer_open.set(true);
     };
@@ -757,7 +780,12 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
             })
         };
         let mut items = vec![
-            StatItem::new("Flows", counts.total.to_string(), MetricTone::Neutral).with_filter(
+            StatItem::new(
+                vocabulary::FLOWS,
+                counts.total.to_string(),
+                MetricTone::Neutral,
+            )
+            .with_filter(
                 mode == FlowsCatalogFilter::Flows && active == FlowFilter::All,
                 set_filter(FlowFilter::All),
             ),
@@ -806,8 +834,8 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
     });
 
     const HEADERS: [&str; 6] = [
-        "Flow",
-        "Masque",
+        vocabulary::FLOW,
+        vocabulary::FILE_TYPES,
         "Structure",
         "Bibliothèques",
         "Mise à jour",
@@ -913,7 +941,7 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
                 return view! {
                     <RegistreMessage
                         span=HEADERS.len()
-                        text="Aucun modèle de flow. Transformez un flow en modèle ou synchronisez un dépôt."
+                        text="Aucun modèle de flux. Transformez un flux en modèle ou synchronisez un dépôt."
                     />
                 }
                 .into_any();
@@ -1050,9 +1078,9 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
 
     view! {
         <div class="tab-panel" role="tabpanel">
-            <StatStrip aria_label="Synthèse des flows" items=stats />
+            <StatStrip aria_label="Synthèse des flux" items=stats />
             <div class="registre">
-                <Registre aria_label="Catalogue des flows" headers=HEADERS.to_vec()>
+                <Registre aria_label="Registre des flux" headers=HEADERS.to_vec()>
                     {registre_body}
                 </Registre>
             </div>

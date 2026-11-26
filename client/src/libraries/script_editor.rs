@@ -10,11 +10,12 @@ use super::script_draft::{
 use super::script_trial::{ScriptTrial, TrialInput};
 use super::script_trial_panel::ScriptTrialPanel;
 use super::variables_editor::{VariablesEditor, rows_from, rows_to_variables, variable_names};
-use super::{LOCAL_PATH, LOCAL_SCRIPTS_PATH, LOCAL_TOPICS};
+use super::{LOCAL_PATH, LOCAL_SCRIPTS_PATH, LOCAL_TOPICS, LibraryTab};
 use crate::api;
 use crate::live::{Loaded, load, use_live};
 use crate::route::{Route, use_router};
 use crate::ui::{Tag, TagTone, Toasts};
+use crate::url_state::UrlTab;
 use forgearr_shared::Permission;
 use forgearr_shared::local::{
     LocalLibrarySnapshot, LocalScriptSummary, ScriptInterpreter, UpsertLocalScriptRequest,
@@ -111,7 +112,7 @@ pub fn ScriptEditor(me: Me, script_id: Option<String>) -> impl IntoView {
     Effect::new(move |_| match save.value().get() {
         Some(Ok(saved)) => {
             router.set_unsaved(false);
-            Toasts::notify_success("Script enregistré dans la librairie locale.");
+            Toasts::notify_success("Script enregistré.");
             live.touch(LOCAL_TOPICS);
             if is_new {
                 router.go(Route::ScriptEditor(saved.id));
@@ -146,11 +147,11 @@ pub fn ScriptEditor(me: Me, script_id: Option<String>) -> impl IntoView {
         {move || (draft.with(Option::is_none) && missing.get()).then(|| view! {
             <div class="flow-workbench">
                 <p class="flow-workbench__feedback" role="status">
-                    "Ce script n'existe pas ou a été supprimé de la librairie."
+                    "Ce script n'existe pas ou a été supprimé."
                 </p>
                 <div class="script-workbench__bar">
                     <button type="button" class="btn btn-secondary"
-                        on:click=move |_| router.go(Route::Libraries)>"Retour aux librairies"</button>
+                        on:click=move |_| router.go_tab(Route::Libraries, LibraryTab::Scripts.slug())>"Retour aux bibliothèques"</button>
                 </div>
             </div>
         })}
@@ -285,7 +286,7 @@ fn ScriptForm(
         <form class="flow-workbench script-workbench" on:submit=submit>
             <header class="script-workbench__bar">
                 <button type="button" class="btn btn-secondary"
-                    on:click=move |_| router.go(Route::Libraries)>"← Librairies"</button>
+                    on:click=move |_| router.go_tab(Route::Libraries, LibraryTab::Scripts.slug())>"← Bibliothèques"</button>
                 <h1 class="script-workbench__title">{move || page_title(&name.get())}</h1>
                 {move || dirty.get().then(|| view! { <Tag label="Modifié" tone=TagTone::Warning /> })}
                 <span class="script-workbench__spacer"></span>

@@ -1,0 +1,37 @@
+# 0034 — Adresses : onglets et tiroirs
+
+Statut : proposé. Lot 2 de la refonte de l'interface (proposition du 26 nov. 2026). Complète l'ADR 0014
+(écrans du client) et remplace la mémorisation de l'onglet des Librairies (`LAST_TAB`, ADR 0030).
+
+## Contexte
+
+L'onglet d'un écran et le tiroir ouvert n'étaient que des signaux locaux : un lien ne rouvrait pas le même
+écran, Retour quittait l'écran au lieu de fermer le tiroir, et l'onglet des Librairies était mémorisé dans
+une variable globale pour survivre au passage par l'éditeur de script.
+
+## Décision
+
+1. **Onglet = second segment du chemin.** `/app/plugins/installed`, `/app/jobs/logs`, `/app/settings/keys`,
+   `/app/libraries/scripts`. L'onglet par défaut n'écrit aucun segment ; un nom inconnu ou un onglet non
+   autorisé mène à l'onglet par défaut. Chaque écran à onglets déclare ses noms (`UrlTab`) et appelle
+   `use_tab` : le signal d'onglet suit l'adresse et l'adresse suit le signal. Changer d'onglet ajoute une
+   entrée d'historique et ferme le tiroir.
+2. **Tiroir = paramètre de requête.** Détail : `?voir=<type>.<id>` ; création : `?nouveau=<type>`. `<type>`
+   est l'énumération `DrawerKind` (Serde), jamais une chaîne libre. `use_detail_drawer` et
+   `use_create_drawer` renvoient les signaux (`RwSignal<bool>` d'ouverture, identifiant sélectionné) que
+   `Drawer` consomme déjà : le composant ne change pas.
+3. **Historique.** Ouvrir un tiroir pousse une entrée ; le fermer (croix, voile, Échap) revient en arrière si
+   c'est cette entrée qui l'a ouvert, et remplace l'adresse sinon. Retour ferme donc le tiroir.
+4. **`Location`.** `client/src/location.rs` lit et écrit l'adresse complète (écran, onglet, requête), sans
+   navigateur : analyse, rendu et aller-retour sont testés. Le `Router` porte l'onglet et la requête.
+
+## Migration
+
+- Fait au lot 2 : les quatre écrans à onglets (Bibliothèques, Extensions, Activité, Paramètres) ; les tiroirs
+  de création (mot de passe, clé d'API, compte, worker, dépôt, pack, ressource) et de détail (worker, flux,
+  modèle de flux).
+- Reste : les tiroirs de détail des Extensions (extension, pack, outil, élément, dépôt), de la bibliothèque,
+  du pack local, des modèles de blocs et du nouveau flux ; l'onglet du tiroir (`?onglet=`) ; la garde de
+  sortie (`unsaved`) des tiroirs de formulaire. Le tiroir de l'Activité garde ses paramètres actuels
+  (`?job=`, `?step=`, `jobs/query.rs`).
+- Un identifiant introuvable ouvre un tiroir vide ; le message « n'existe plus » reste à écrire.

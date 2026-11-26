@@ -36,6 +36,7 @@ use crate::ui::{
     Drawer, IconName, MetricTone, Registre, RegistreMessage, StatItem, StatStrip, StatusBadge, Tag,
     TagTone, Toasts, on_activate,
 };
+use crate::url_state::{DrawerKind, use_detail_drawer};
 use crate::{api, format};
 use forgearr_shared::Permission;
 use forgearr_shared::flows::{
@@ -672,8 +673,27 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
     let reload = RwSignal::new(0_u32);
     let view_mode = RwSignal::new(FlowsCatalogFilter::Flows);
     let selected_entry = RwSignal::new(None::<SelectedFlowEntry>);
-    let flow_drawer_open = RwSignal::new(false);
-    let tpl_drawer_open = RwSignal::new(false);
+    let (flow_selection, flow_drawer_open) = use_detail_drawer(DrawerKind::Flow);
+    let (template_selection, tpl_drawer_open) = use_detail_drawer(DrawerKind::FlowTemplate);
+    // Un lien direct (`?voir=flux.<id>`) choisit l'entrée affichée par le tiroir.
+    Effect::new(move |_| {
+        let from_url = flow_selection
+            .get()
+            .filter(|_| flow_drawer_open.get())
+            .map(SelectedFlowEntry::Flow);
+        if from_url.is_some() && selected_entry.get_untracked() != from_url {
+            selected_entry.set(from_url);
+        }
+    });
+    Effect::new(move |_| {
+        let from_url = template_selection
+            .get()
+            .filter(|_| tpl_drawer_open.get())
+            .map(SelectedFlowEntry::Template);
+        if from_url.is_some() && selected_entry.get_untracked() != from_url {
+            selected_entry.set(from_url);
+        }
+    });
     let flow_tab = RwSignal::new(0_usize);
 
     let flows = LocalResource::new(move || {
@@ -731,11 +751,13 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
     let open_flow = move |id: String| {
         tpl_drawer_open.set(false);
         flow_tab.set(0);
+        flow_selection.set(Some(id.clone()));
         selected_entry.set(Some(SelectedFlowEntry::Flow(id)));
         flow_drawer_open.set(true);
     };
     let open_template = move |id: String| {
         flow_drawer_open.set(false);
+        template_selection.set(Some(id.clone()));
         selected_entry.set(Some(SelectedFlowEntry::Template(id)));
         tpl_drawer_open.set(true);
     };

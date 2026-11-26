@@ -21,6 +21,7 @@ pub use system::duration_label;
 use crate::api;
 use crate::shell::instance_role_badge;
 use crate::ui::{MetricTone, StatItem, StatStrip};
+use crate::url_state::{UrlTab, use_tab};
 use account::AccountSection;
 use accounts::AccountsSection;
 use ai::AiSettingsSection;
@@ -62,6 +63,32 @@ impl Section {
     }
 }
 
+impl UrlTab for Section {
+    fn slug(self) -> &'static str {
+        match self {
+            Self::Account => "account",
+            Self::Users => "users",
+            Self::Keys => "keys",
+            Self::Ai => "ai",
+            Self::Network => "network",
+            Self::System => "system",
+        }
+    }
+
+    fn from_slug(slug: &str) -> Option<Self> {
+        [
+            Self::Account,
+            Self::Users,
+            Self::Keys,
+            Self::Ai,
+            Self::Network,
+            Self::System,
+        ]
+        .into_iter()
+        .find(|section| section.slug() == slug)
+    }
+}
+
 fn sections(me: &Me) -> Vec<Section> {
     let central = me.instance_kind == InstanceKind::Central;
     [
@@ -97,7 +124,8 @@ pub fn SettingsPage(me: Me) -> impl IntoView {
     let visible = sections(&me);
     let show_tabs = visible.len() > 1;
     let can_settings = visible.contains(&Section::System);
-    let active_tab = RwSignal::new(visible.first().copied().unwrap_or(Section::Account));
+    let first_section = visible.first().copied().unwrap_or(Section::Account);
+    let active_tab = use_tab(first_section, visible.clone());
 
     let status_reload = RwSignal::new(0u64);
     let status_resource = can_settings.then(|| {
@@ -292,5 +320,20 @@ mod tests {
                 "Système",
             ]
         );
+    }
+
+    #[test]
+    fn setting_sections_are_named_in_the_address_and_read_back() {
+        for section in [
+            Section::Account,
+            Section::Users,
+            Section::Keys,
+            Section::Ai,
+            Section::Network,
+            Section::System,
+        ] {
+            assert_eq!(Section::from_slug(section.slug()), Some(section));
+        }
+        assert_eq!(Section::from_slug("inconnu"), None);
     }
 }

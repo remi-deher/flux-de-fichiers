@@ -5,6 +5,7 @@ use super::account::role_label;
 use crate::api;
 use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, Icon, IconName, SectionHeader, Toasts};
+use crate::url_state::{DrawerKind, use_create_drawer};
 use forgearr_shared::Role;
 use forgearr_shared::accounts::{Account, CreateAccountRequest, UpdateAccountRequest};
 use leptos::prelude::*;
@@ -30,7 +31,7 @@ pub fn AccountsSection() -> impl IntoView {
         api::get::<Vec<Account>>(ACCOUNTS_PATH)
     });
     let feedback = RwSignal::new(None::<String>);
-    let creating = RwSignal::new(false);
+    let creating = use_create_drawer(DrawerKind::Account);
     let update = Action::new_local(move |(id, request): &(String, UpdateAccountRequest)| {
         let (path, request) = (format!("{ACCOUNTS_PATH}/{id}"), request.clone());
         async move { api::put::<UpdateAccountRequest, Account>(&path, &request).await }

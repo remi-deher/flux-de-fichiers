@@ -8,11 +8,12 @@ use super::script_draft::{
     parse_category, parse_tags, starter_script_code,
 };
 use super::variables_editor::{VariablesEditor, rows_from, rows_to_variables, variable_names};
-use super::{LOCAL_PATH, LOCAL_SCRIPTS_PATH, LOCAL_TOPICS};
+use super::{LOCAL_PATH, LOCAL_SCRIPTS_PATH, LOCAL_TOPICS, LibraryTab};
 use crate::api;
 use crate::live::{Loaded, load, use_live};
 use crate::route::{Route, use_router};
 use crate::ui::{Tag, TagTone, Toasts};
+use crate::url_state::UrlTab;
 use forgearr_shared::Permission;
 use forgearr_shared::local::{
     LocalLibrarySnapshot, LocalScriptSummary, ScriptInterpreter, UpsertLocalScriptRequest,
@@ -134,7 +135,7 @@ pub fn ScriptEditor(me: Me, script_id: Option<String>) -> impl IntoView {
                 </p>
                 <div class="script-workbench__bar">
                     <button type="button" class="btn btn-secondary"
-                        on:click=move |_| router.go(Route::Libraries)>"Retour aux bibliothèques"</button>
+                        on:click=move |_| router.go_tab(Route::Libraries, LibraryTab::Scripts.slug())>"Retour aux bibliothèques"</button>
                 </div>
             </div>
         })}
@@ -257,7 +258,7 @@ fn ScriptForm(
         <form class="flow-workbench script-workbench" on:submit=submit>
             <header class="script-workbench__bar">
                 <button type="button" class="btn btn-secondary"
-                    on:click=move |_| router.go(Route::Libraries)>"← Bibliothèques"</button>
+                    on:click=move |_| router.go_tab(Route::Libraries, LibraryTab::Scripts.slug())>"← Bibliothèques"</button>
                 <h1 class="script-workbench__title">{move || page_title(&name.get())}</h1>
                 {move || dirty.get().then(|| view! { <Tag label="Modifié" tone=TagTone::Warning /> })}
                 <span class="script-workbench__spacer"></span>

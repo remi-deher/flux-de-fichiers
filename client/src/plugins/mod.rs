@@ -25,6 +25,7 @@ use crate::live::{load, use_live};
 use crate::route::encode_segment;
 use crate::ui::vocabulary;
 use crate::ui::{Drawer, IconName, Toasts};
+use crate::url_state::{DrawerKind, UrlTab, use_create_drawer, use_tab};
 use catalog::{CatalogSectionView, summarize_catalog};
 pub(crate) use flow_preview::{
     FlowMiniPreview, preview_from_definition_json, preview_from_job_steps,
@@ -210,6 +211,22 @@ impl PluginsTab {
     }
 }
 
+impl UrlTab for PluginsTab {
+    fn slug(self) -> &'static str {
+        match self {
+            Self::Store => "catalogue",
+            Self::Installed => "installed",
+            Self::Repositories => "repos",
+        }
+    }
+
+    fn from_slug(slug: &str) -> Option<Self> {
+        [Self::Store, Self::Installed, Self::Repositories]
+            .into_iter()
+            .find(|tab| tab.slug() == slug)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectedItem {
     pub id: String,
@@ -253,7 +270,10 @@ fn current_entry(entries: &[CatalogEntry], opened: &CatalogEntry) -> CatalogEntr
 pub fn PluginsPage(me: Me) -> impl IntoView {
     let central = me.instance_kind == InstanceKind::Central;
     let can_manage = central && me.allows(Permission::ManagePlugins);
-    let active_tab = RwSignal::new(PluginsTab::Store);
+    let active_tab = use_tab(
+        PluginsTab::default(),
+        PluginsTab::visible_tabs(can_manage).to_vec(),
+    );
     let installing = RwSignal::new(None::<InstallTarget>);
     let wizard_open = RwSignal::new(false);
     let open_wizard = Callback::new(move |target: InstallTarget| {
@@ -266,7 +286,7 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
             .map(|target| target.name)
             .unwrap_or_default()
     });
-    let adding_repo = RwSignal::new(false);
+    let adding_repo = use_create_drawer(DrawerKind::Repository);
 
     // Tiroir d'inspection unifié permettant la navigation croisée Plugin <-> Outil.
     let target = RwSignal::new(None::<InspectionTarget>);
@@ -604,5 +624,14 @@ mod tests {
             section_badge_label(CatalogItemType::ResourceFont),
             "Polices"
         );
+    }
+
+    #[test]
+    fn extension_tabs_are_named_in_the_address_and_read_back() {
+        for tab in PluginsTab::visible_tabs(true) {
+            assert_eq!(PluginsTab::from_slug(tab.slug()), Some(*tab));
+        }
+        assert_eq!(PluginsTab::Store.slug(), "catalogue");
+        assert_eq!(PluginsTab::from_slug("store"), None);
     }
 }

@@ -3,6 +3,7 @@
 use crate::api;
 use crate::shell::instance_role_badge;
 use crate::ui::{Drawer, SectionHeader, Toasts};
+use crate::url_state::{DrawerKind, use_create_drawer};
 use forgearr_shared::accounts::ChangePasswordRequest;
 use forgearr_shared::session::Me;
 use leptos::prelude::*;
@@ -32,7 +33,7 @@ pub fn AccountSection(me: Me) -> impl IntoView {
         RwSignal::new(String::new()),
         RwSignal::new(String::new()),
     );
-    let changing_password = RwSignal::new(false);
+    let changing_password = use_create_drawer(DrawerKind::Password);
     let feedback = RwSignal::new(None::<String>);
     let change = Action::new_local(move |request: &ChangePasswordRequest| {
         let request = request.clone();

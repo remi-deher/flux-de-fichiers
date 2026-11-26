@@ -3,6 +3,7 @@
 use leptos::prelude::*;
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 
+use crate::location::{Location, Query};
 use forgearr_shared::app;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,21 +50,21 @@ impl Route {
         // Un segment de trop (`/libraries/scripts/a/b`) n'est pas un écran connu.
         let extra = parts.next().is_some();
         match segments {
-            (Some("jobs"), None, _) => Self::Jobs,
+            (Some("jobs"), None, _) | (Some("jobs"), Some(_), None) => Self::Jobs,
             (Some("flows"), None, _) => Self::Flows,
             (Some("flows"), Some("new"), None) => Self::NewFlow,
             (Some("flows"), Some(id), None) if !id.is_empty() => {
                 Self::FlowEditor(decode_segment(id))
             }
             (Some("libraries"), None, _) => Self::Libraries,
-            (Some("libraries"), Some("scripts"), None) => Self::Libraries,
+            (Some("libraries"), Some(_), None) => Self::Libraries,
             (Some("libraries"), Some("scripts"), Some("new")) if !extra => Self::NewScript,
             (Some("libraries"), Some("scripts"), Some(id)) if !id.is_empty() && !extra => {
                 Self::ScriptEditor(decode_segment(id))
             }
             (Some("workers"), None, _) => Self::Workers,
-            (Some("plugins"), None, _) => Self::Plugins,
-            (Some("settings"), None, _) => Self::Settings,
+            (Some("plugins"), None, _) | (Some("plugins"), Some(_), None) => Self::Plugins,
+            (Some("settings"), None, _) | (Some("settings"), Some(_), None) => Self::Settings,
             _ => Self::Overview,
         }
     }
@@ -91,7 +92,7 @@ pub fn encode_segment(value: &str) -> String {
         .collect()
 }
 
-fn decode_segment(value: &str) -> String {
+pub(crate) fn decode_segment(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut index = 0;
@@ -127,6 +128,11 @@ pub fn needs_leave_confirmation(unsaved: bool, current: &Route, target: &Route) 
 #[derive(Clone, Copy)]
 pub struct Router {
     current: RwSignal<Route>,
+    /// Onglet de l'écran (`None` : l'onglet par défaut) et paramètres de requête (tiroir ouvert…).
+    tab: RwSignal<Option<String>>,
+    query: RwSignal<Query>,
+    /// Vrai quand l'entrée d'historique courante a été poussée par l'ouverture d'un tiroir.
+    drawer_pushed: RwSignal<bool>,
     /// Vrai tant que l'écran affiché porte des modifications non enregistrées.
     unsaved: RwSignal<bool>,
 }
@@ -134,12 +140,15 @@ pub struct Router {
 impl Router {
     /// Lit l'adresse du navigateur et suit les retours arrière.
     pub fn install() -> Self {
-        let current = RwSignal::new(Route::parse(
-            &window().location().pathname().unwrap_or_default(),
-        ));
+        let location = browser_location();
+        let current = RwSignal::new(location.route);
+        let tab = RwSignal::new(location.tab);
+        let query = RwSignal::new(location.query);
+        let drawer_pushed = RwSignal::new(false);
         let unsaved = RwSignal::new(false);
         let on_pop = Closure::<dyn FnMut()>::new(move || {
-            let target = Route::parse(&window().location().pathname().unwrap_or_default());
+            let location = browser_location();
+            let target = location.route.clone();
             let shown = current.get_untracked();
             if needs_leave_confirmation(unsaved.get_untracked(), &shown, &target)
                 && !confirm_leaving()
@@ -150,6 +159,9 @@ impl Router {
                 });
                 return;
             }
+            drawer_pushed.set(false);
+            tab.set(location.tab);
+            query.set(location.query);
             current.set(target);
         });
         window().set_onpopstate(Some(on_pop.as_ref().unchecked_ref()));
@@ -164,7 +176,13 @@ impl Router {
         );
         window().set_onbeforeunload(Some(on_unload.as_ref().unchecked_ref()));
         on_unload.forget();
-        let router = Self { current, unsaved };
+        let router = Self {
+            current,
+            tab,
+            query,
+            drawer_pushed,
+            unsaved,
+        };
         provide_context(router);
         router
     }
@@ -179,19 +197,126 @@ impl Router {
     }
 
     pub fn go(&self, route: Route) {
+        self.go_to(Location::of(route));
+    }
+
+    /// Ouvre un écran sur l'onglet `tab`.
+    pub fn go_tab(&self, route: Route, tab: &str) {
+        self.go_to(Location::with_tab(route, tab));
+    }
+
+    fn go_to(&self, location: Location) {
         if needs_leave_confirmation(
             self.unsaved.get_untracked(),
             &self.current.get_untracked(),
-            &route,
+            &location.route,
         ) && !confirm_leaving()
         {
             return;
         }
-        let _ = window().history().and_then(|history| {
-            history.push_state_with_url(&JsValue::NULL, "", Some(&route.path()))
-        });
-        self.current.set(route);
+        self.write_history(&location, HistoryWrite::Push);
+        self.drawer_pushed.set(false);
+        self.show(location);
     }
+
+    /// Onglet courant de l'écran, `None` pour l'onglet par défaut.
+    pub fn tab(&self) -> Option<String> {
+        self.tab.get()
+    }
+
+    pub fn tab_untracked(&self) -> Option<String> {
+        self.tab.get_untracked()
+    }
+
+    /// Paramètres de requête courants.
+    pub fn query(&self) -> Query {
+        self.query.get()
+    }
+
+    pub fn query_untracked(&self) -> Query {
+        self.query.get_untracked()
+    }
+
+    fn location(&self) -> Location {
+        Location {
+            route: self.current.get_untracked(),
+            tab: self.tab.get_untracked(),
+            query: self.query.get_untracked(),
+        }
+    }
+
+    fn show(&self, location: Location) {
+        self.tab.set(location.tab);
+        self.query.set(location.query);
+        self.current.set(location.route);
+    }
+
+    /// Change d'onglet sur place : un onglet de plus dans l'historique, sans tiroir ouvert.
+    pub fn set_tab(&self, tab: Option<&str>) {
+        let current = self.location();
+        if current.tab.as_deref() == tab {
+            return;
+        }
+        let next = current.with_tab_value(tab);
+        self.write_history(&next, HistoryWrite::Push);
+        self.drawer_pushed.set(false);
+        self.show(next);
+    }
+
+    /// Pose ou retire un paramètre de requête (tiroir ouvert, onglet du tiroir).
+    ///
+    /// Ouvrir un tiroir pousse une entrée d'historique ; le fermer revient en arrière si c'est cette
+    /// entrée qui l'a ouvert (le bouton Retour ferme donc le tiroir), sinon remplace l'adresse.
+    pub fn set_param(&self, key: &str, value: Option<&str>) {
+        let current = self.location();
+        if current.query.get(key) == value {
+            return;
+        }
+        let next = current.with_query(key, value);
+        if value.is_none() && self.drawer_pushed.get_untracked() && next.query.render().is_empty() {
+            self.drawer_pushed.set(false);
+            if window().history().and_then(|history| history.back()).is_ok() {
+                return;
+            }
+        }
+        let opening = current.query.render().is_empty() && value.is_some();
+        self.write_history(
+            &next,
+            if opening {
+                HistoryWrite::Push
+            } else {
+                HistoryWrite::Replace
+            },
+        );
+        if opening {
+            self.drawer_pushed.set(true);
+        }
+        self.show(next);
+    }
+
+    fn write_history(&self, location: &Location, write: HistoryWrite) {
+        let url = location.url();
+        let _ = window().history().and_then(|history| match write {
+            HistoryWrite::Push => history.push_state_with_url(&JsValue::NULL, "", Some(&url)),
+            HistoryWrite::Replace => history.replace_state_with_url(&JsValue::NULL, "", Some(&url)),
+        });
+    }
+}
+
+/// Façon d'écrire une adresse dans l'historique du navigateur.
+#[derive(Clone, Copy)]
+enum HistoryWrite {
+    Push,
+    Replace,
+}
+
+/// Adresse actuellement affichée par le navigateur.
+fn browser_location() -> Location {
+    let location = window().location();
+    Location::parse(
+        &location.pathname().unwrap_or_default(),
+        &location.search().unwrap_or_default(),
+    )
 }
 
 fn confirm_leaving() -> bool {
@@ -318,5 +443,15 @@ mod tests {
         assert_eq!(Route::parse("/libraries/scripts"), Route::Libraries);
         assert_eq!(Route::parse("/libraries/scripts/a/b"), Route::Overview);
         assert_eq!(Route::parse("/libraries/scripts/new/x"), Route::Overview);
+    }
+
+    #[test]
+    fn tabbed_screens_accept_one_extra_segment() {
+        assert_eq!(Route::parse("/app/plugins/installed"), Route::Plugins);
+        assert_eq!(Route::parse("/jobs/logs"), Route::Jobs);
+        assert_eq!(Route::parse("/settings/keys"), Route::Settings);
+        assert_eq!(Route::parse("/libraries/packs"), Route::Libraries);
+        assert_eq!(Route::parse("/workers/x"), Route::Overview);
+        assert_eq!(Route::parse("/plugins/installed/x"), Route::Overview);
     }
 }

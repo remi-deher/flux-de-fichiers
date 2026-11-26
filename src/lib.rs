@@ -5,6 +5,8 @@ pub mod api_keys;
 pub mod auth;
 pub mod central_client;
 pub mod config;
+#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub mod confine;
 pub mod database_backup;
 pub mod domain;
 pub mod enrollment;

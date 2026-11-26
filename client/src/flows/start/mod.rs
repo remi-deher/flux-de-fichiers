@@ -9,8 +9,8 @@ use super::{FlowPipelineSection, LOCAL_PATH};
 use crate::api;
 use crate::plugins::{InstallTarget, InstallWizard, SelectedItem};
 use crate::route::{Link, Route, use_router};
-use crate::ui::{Drawer, Toasts};
 use crate::ui::file_types_input::{ALL_FILES, FileTypesInput};
+use crate::ui::{Drawer, Toasts};
 use cards::{
     StarterCard, StarterKey, default_name, group_cards, skeleton_cards, store_cards, template_cards,
 };

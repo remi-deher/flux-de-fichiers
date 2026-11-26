@@ -9,6 +9,7 @@ pub mod app;
 pub mod base64;
 pub mod brand;
 pub mod capabilities;
+pub mod confinement;
 pub mod diagnostics;
 pub mod exposed_variables;
 pub mod flow_analysis;

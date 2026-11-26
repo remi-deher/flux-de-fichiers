@@ -39,6 +39,10 @@ Cette approche rigide présente des limites majeures :
 - Ce scan n'est pas représenté par un bloc obligatoire préalable sur le flux afin de ne pas surcharger inutilement le graphe visuel.
 - Cette exception est un **choix de conception justifié** : l'extraction des pistes (codecs, résolutions, débits, langues audio et sous-titres) est le prérequis indispensable pour initialiser le `FlowContext`. Elle est donc exécutée automatiquement en sous-main dès l'interception du fichier source, avant l'entrée dans le premier bloc du flux.
 
+### 4. Exception : outils de langage de l'éditeur (26 nov. 2026)
+
+Une application déclarant la capacité `language-server` (ADR 0032) est un outil, pas un bloc d'action : le central la lance pour la durée d'une session d'édition, à la demande de l'éditeur de script et pour le compte de l'utilisateur connecté, puis l'arrête (inactivité, fermeture, retrait). Elle n'est jamais lancée par un flux, ne touche à aucun job et n'est pas un hook global : la règle de non-autonomie reste vraie pour l'exécution des flux.
+
 ## Conséquences
 
 - **Composabilité totale** : les pipelines deviennent pleinement modulaires et personnalisables à l'instar d'outils type Zapier ou FileFlows.

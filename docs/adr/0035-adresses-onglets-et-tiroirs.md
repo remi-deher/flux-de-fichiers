@@ -1,4 +1,4 @@
-# 0034 — Adresses : onglets et tiroirs
+# 0035 — Adresses : onglets et tiroirs
 
 Statut : proposé. Lot 2 de la refonte de l'interface (proposition du 26 nov. 2026). Complète l'ADR 0014
 (écrans du client) et remplace la mémorisation de l'onglet des Librairies (`LAST_TAB`, ADR 0030).

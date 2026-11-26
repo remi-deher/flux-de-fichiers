@@ -3,7 +3,10 @@
 //! Chaque essai lance le binaire de Forgearr, qui s'applique le profil puis remplace son processus par un
 //! programme système. Sans Landlock sur la machine, les essais qui en dépendent le disent et s'arrêtent.
 
-#![cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+#![cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
 
 use forgearr::confine::{EXIT_LAUNCH_FAILED, EXIT_SETUP_FAILED, confined_command_with, detect};
 use forgearr_shared::confinement::{ConfinementProfile, NetworkAccess, ResourceLimits};
@@ -108,7 +111,10 @@ fn the_network_is_closed_unless_the_profile_opens_it() -> anyhow::Result<()> {
         return Ok(());
     }
     let listener = TcpListener::bind("127.0.0.1:0")?;
-    let connect = format!("exec 3<>/dev/tcp/127.0.0.1/{}", listener.local_addr()?.port());
+    let connect = format!(
+        "exec 3<>/dev/tcp/127.0.0.1/{}",
+        listener.local_addr()?.port()
+    );
     let closed = ConfinementProfile::runtime();
     assert!(!run(&closed, "bash", &["-c", &connect])?.status.success());
     let open = ConfinementProfile::runtime().with_network(NetworkAccess::Any);
@@ -124,7 +130,10 @@ fn a_file_larger_than_the_limit_cannot_be_written() -> anyhow::Result<()> {
     }
     let directory = tempfile::tempdir()?;
     let target = directory.path().join("gros.bin");
-    let command = format!("head -c {OVERSIZED_WRITE_BYTES} /dev/zero > {}", target.display());
+    let command = format!(
+        "head -c {OVERSIZED_WRITE_BYTES} /dev/zero > {}",
+        target.display()
+    );
     let limits = ResourceLimits {
         max_file_bytes: Some(FILE_SIZE_LIMIT_BYTES),
         ..ResourceLimits::default()
@@ -153,7 +162,11 @@ fn denied_system_calls_fail_with_a_permission_error() -> anyhow::Result<()> {
          sys.exit(0 if result == -1 and ctypes.get_errno() == 1 else 1)",
         libc::SYS_ptrace
     );
-    let output = run(&ConfinementProfile::runtime(), "python3", &["-c", &ptrace_without_request])?;
+    let output = run(
+        &ConfinementProfile::runtime(),
+        "python3",
+        &["-c", &ptrace_without_request],
+    )?;
     assert!(output.status.success(), "{}", stderr_of(&output));
     Ok(())
 }
@@ -163,7 +176,11 @@ fn a_missing_program_exits_with_the_launch_code() -> anyhow::Result<()> {
     if !landlock_available() {
         return Ok(());
     }
-    let output = run(&ConfinementProfile::runtime(), "/nonexistent/programme", &[])?;
+    let output = run(
+        &ConfinementProfile::runtime(),
+        "/nonexistent/programme",
+        &[],
+    )?;
     assert_eq!(output.status.code(), Some(EXIT_LAUNCH_FAILED));
     assert!(stderr_of(&output).contains("lancement impossible"));
     Ok(())

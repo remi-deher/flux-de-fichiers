@@ -142,8 +142,14 @@ mod tests {
         let filter = build_filter(AUDIT_ARCH, &[])?;
         assert_eq!(filter[0].code, BPF_LOAD_WORD_ABSOLUTE);
         assert_eq!(filter[0].k, SECCOMP_DATA_ARCH_OFFSET);
-        assert_eq!((filter[1].code, filter[1].k), (BPF_JUMP_IF_EQUAL, AUDIT_ARCH));
-        assert_eq!((filter[2].code, filter[2].k), (BPF_RETURN, SECCOMP_RET_KILL_PROCESS));
+        assert_eq!(
+            (filter[1].code, filter[1].k),
+            (BPF_JUMP_IF_EQUAL, AUDIT_ARCH)
+        );
+        assert_eq!(
+            (filter[2].code, filter[2].k),
+            (BPF_RETURN, SECCOMP_RET_KILL_PROCESS)
+        );
         Ok(())
     }
 
@@ -160,10 +166,16 @@ mod tests {
     fn each_denied_call_adds_a_comparison_and_an_error_return() -> Result<(), ConfineError> {
         let denied = [libc::SYS_mount, libc::SYS_ptrace];
         let filter = build_filter(AUDIT_ARCH, &denied)?;
-        assert_eq!(filter.len(), FIXED_INSTRUCTIONS + denied.len() * INSTRUCTIONS_PER_DENIED_CALL);
+        assert_eq!(
+            filter.len(),
+            FIXED_INSTRUCTIONS + denied.len() * INSTRUCTIONS_PER_DENIED_CALL
+        );
         let mount = u32::try_from(libc::SYS_mount).unwrap_or(u32::MAX);
         assert_eq!((filter[4].code, filter[4].k), (BPF_JUMP_IF_EQUAL, mount));
-        assert_eq!((filter[4].jt, filter[4].jf), (NO_JUMP, SKIP_ONE_INSTRUCTION));
+        assert_eq!(
+            (filter[4].jt, filter[4].jf),
+            (NO_JUMP, SKIP_ONE_INSTRUCTION)
+        );
         assert_eq!(filter[5].k, SECCOMP_RET_ERRNO | EPERM_CODE);
         Ok(())
     }

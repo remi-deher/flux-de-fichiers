@@ -87,9 +87,8 @@ pub fn abi() -> u32 {
     let flag = libc::c_long::from(CREATE_RULESET_VERSION_FLAG);
     // SAFETY: avec le drapeau de version, l'appel ne lit ni l'attribut (nul) ni sa taille (nulle) et ne
     // crée aucun descripteur ; il rend la version ou -1.
-    let version = unsafe {
-        libc::syscall(SYS_LANDLOCK_CREATE_RULESET, no_attribute, no_size, flag)
-    };
+    let version =
+        unsafe { libc::syscall(SYS_LANDLOCK_CREATE_RULESET, no_attribute, no_size, flag) };
     u32::try_from(version).unwrap_or(0)
 }
 
@@ -292,14 +291,21 @@ mod tests {
         let rights = path_rights(PathAccess::Write, true, handled);
         let needed = FS_WRITE_FILE | FS_MAKE_REG | FS_MAKE_DIR | FS_REMOVE_FILE | FS_TRUNCATE;
         assert_eq!(rights & needed, needed);
-        assert_eq!(rights & (FS_EXECUTE | FS_MAKE_CHAR | FS_MAKE_BLOCK | FS_IOCTL_DEV), 0);
+        assert_eq!(
+            rights & (FS_EXECUTE | FS_MAKE_CHAR | FS_MAKE_BLOCK | FS_IOCTL_DEV),
+            0
+        );
     }
 
     #[test]
     fn a_writable_file_gets_only_file_rights_the_kernel_handles() {
         let old = path_rights(PathAccess::Write, false, handled_fs_access(FIRST_ABI));
         assert_eq!(old, FS_READ_FILE | FS_WRITE_FILE);
-        let recent = path_rights(PathAccess::Write, false, handled_fs_access(ABI_WITH_TRUNCATE));
+        let recent = path_rights(
+            PathAccess::Write,
+            false,
+            handled_fs_access(ABI_WITH_TRUNCATE),
+        );
         assert_eq!(recent, FS_READ_FILE | FS_WRITE_FILE | FS_TRUNCATE);
     }
 
@@ -307,8 +313,14 @@ mod tests {
     fn network_is_filtered_unless_the_profile_allows_it() -> Result<(), ConfineError> {
         let denying = ConfinementProfile::default();
         let allowing = ConfinementProfile::default().with_network(NetworkAccess::Any);
-        assert_eq!(handled_network_access(&denying, LANDLOCK_ABI_WITH_NETWORK)?, NETWORK_ACCESS);
-        assert_eq!(handled_network_access(&allowing, LANDLOCK_ABI_WITH_NETWORK)?, 0);
+        assert_eq!(
+            handled_network_access(&denying, LANDLOCK_ABI_WITH_NETWORK)?,
+            NETWORK_ACCESS
+        );
+        assert_eq!(
+            handled_network_access(&allowing, LANDLOCK_ABI_WITH_NETWORK)?,
+            0
+        );
         assert_eq!(handled_network_access(&allowing, FIRST_ABI)?, 0);
         Ok(())
     }
@@ -332,7 +344,10 @@ mod tests {
     #[test]
     fn without_landlock_the_restriction_follows_the_enforcement() {
         let required = ConfinementProfile::default();
-        assert!(matches!(restrict(&required, 0), Err(ConfineError::Unsupported(_))));
+        assert!(matches!(
+            restrict(&required, 0),
+            Err(ConfineError::Unsupported(_))
+        ));
         let best_effort = required.with_enforcement(Enforcement::BestEffort);
         assert!(restrict(&best_effort, 0).is_ok());
     }

@@ -68,7 +68,10 @@ mod tests {
         let arguments = arguments_of(&command);
         assert_eq!(arguments[0], SANDBOX_EXEC_COMMAND);
         assert_eq!(arguments[1], PROFILE_FLAG);
-        assert_eq!(serde_json::from_str::<ConfinementProfile>(&arguments[2])?, profile);
+        assert_eq!(
+            serde_json::from_str::<ConfinementProfile>(&arguments[2])?,
+            profile
+        );
         assert_eq!(&arguments[3..], [ARGUMENTS_SEPARATOR, "ty", "server"]);
         Ok(())
     }

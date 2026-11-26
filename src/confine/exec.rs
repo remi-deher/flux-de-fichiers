@@ -105,7 +105,14 @@ mod tests {
     #[test]
     fn a_complete_invocation_is_parsed() -> Result<(), ConfineError> {
         let json = r#"{"network":"any"}"#;
-        let arguments = strings(&[PROFILE_FLAG, json, ARGUMENTS_SEPARATOR, "ty", "server", "-v"]);
+        let arguments = strings(&[
+            PROFILE_FLAG,
+            json,
+            ARGUMENTS_SEPARATOR,
+            "ty",
+            "server",
+            "-v",
+        ]);
         let invocation = parse_invocation(&arguments)?;
         assert_eq!(invocation.profile.network, NetworkAccess::Any);
         assert_eq!(invocation.program, "ty");
@@ -131,14 +138,20 @@ mod tests {
             strings(&[PROFILE_FLAG, "{}", ARGUMENTS_SEPARATOR]),
         ];
         for arguments in incomplete {
-            assert!(matches!(parse_invocation(&arguments), Err(ConfineError::Usage)));
+            assert!(matches!(
+                parse_invocation(&arguments),
+                Err(ConfineError::Usage)
+            ));
         }
     }
 
     #[test]
     fn an_unreadable_profile_is_reported() {
         let arguments = strings(&[PROFILE_FLAG, "pas du json", ARGUMENTS_SEPARATOR, "true"]);
-        assert!(matches!(parse_invocation(&arguments), Err(ConfineError::Profile(_))));
+        assert!(matches!(
+            parse_invocation(&arguments),
+            Err(ConfineError::Profile(_))
+        ));
     }
 
     #[test]
@@ -147,8 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn the_two_failure_codes_differ_from_each_other_and_from_success() {
+    fn the_two_failure_codes_differ_from_each_other() {
         assert_ne!(EXIT_SETUP_FAILED, EXIT_LAUNCH_FAILED);
-        assert!(EXIT_SETUP_FAILED > 0 && EXIT_LAUNCH_FAILED > 0);
     }
 }

@@ -5,7 +5,10 @@ use forgearr::{
 
 /// Un lancement confiné (`sandbox-exec`, ADR 0034) s'exécute avant toute initialisation : ni journaux, ni
 /// runtime asynchrone, un seul fil.
-#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
 fn run_confined_launch_if_requested() {
     use forgearr::confine::{SANDBOX_EXEC_COMMAND, run_sandbox_exec};
     let arguments: Vec<String> = std::env::args().skip(1).collect();
@@ -16,7 +19,10 @@ fn run_confined_launch_if_requested() {
     }
 }
 
-#[cfg(not(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+#[cfg(not(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+)))]
 fn run_confined_launch_if_requested() {}
 
 fn main() -> anyhow::Result<()> {

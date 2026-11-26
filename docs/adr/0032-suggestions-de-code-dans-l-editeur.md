@@ -1,6 +1,6 @@
 # 0032 — Suggestions de code dans l'éditeur de script
 
-Statut : proposé ; phase (a) écrite le 24 nov. 2026 (en attente de la CI), phases (b) et (c) à venir. Demande de l'utilisateur le 24 nov. 2026 : des suggestions « comme dans un vrai IDE », par intelligence de langage (LSP). À cadrer avant tout code ; complète l'ADR 0030.
+Statut : proposé ; phase (a) livrée en 0.87.0 ; phases (b) et (c) cadrées le 26 nov. 2026 avec l'utilisateur, code à venir. Demande de l'utilisateur le 24 nov. 2026 : des suggestions « comme dans un vrai IDE », par intelligence de langage (LSP). Complète l'ADR 0030.
 
 ## Contexte
 
@@ -14,9 +14,28 @@ L'éditeur (ADR 0030) colore le code mais ne suggère rien. Il accepte sept inte
 4. **Contrat Forgearr.** Le serveur de langage ignore le contrat `stdin`/`stdout` JSON ; les champs (`workingFile`, `variables`, `nextPort`…) et les variables déclarées seraient ajoutés par une liste de suggestions propre à Forgearr, fusionnée aux réponses du LSP.
 5. **Interface.** Liste de suggestions sous le curseur (flèches, Tab/Entrée, Échap), diagnostics soulignés, info-bulle : à ajouter à `CodeEditor` sans changer sa grille `textarea`/`pre`.
 
-## Décision (provisoire)
+## Décision
 
-Phaser : (a) liste de suggestions côté client sans serveur de langage (mots-clés, mots du script, contrat Forgearr, variables déclarées), qui sert aussi de repli ; (b) session LSP relayée par le central pour bash puis Python ; (c) diagnostics et info-bulles. Aucune bibliothèque JavaScript d'éditeur.
+Phaser : (a) liste de suggestions côté client sans serveur de langage, qui sert aussi de repli ; (b) session LSP relayée par le central pour bash puis Python ; (c) diagnostics et info-bulles. Aucune bibliothèque JavaScript d'éditeur. Les choix ci-dessous ont été arrêtés par l'utilisateur le 26 nov. 2026.
+
+1. **Où.** Les serveurs de langage tournent sur le central uniquement. Un serveur sur un worker distant (session bavarde par le courtier à attente longue) est reporté.
+2. **Livraison.** Une application de catalogue `langages` (capacité `language-server`), autonome et jamais embarquée dans l'image : `ty` (Python, binaire natif, `ty server`), `shellcheck` (binaire statique, diagnostics bash et sh, `--shell=sh` pour sh) et `bash-language-server` avec son propre Node.js embarqué (environ 100 Mo). Aucune dépendance à `interpreteurs`. Le central compose la commande depuis le cache d'outils (`prepare_command`, environnement vidé). Un essai de `ty` sur des scripts réels ouvre le lot b0 ; si la complétion ou les infobulles déçoivent, `pyright` le remplace sans changer le reste.
+3. **Canal.** Un WebSocket `GET /api/v1/language/session?interpreter=…`, à messages Forgearr typés (énumération Serde dans `shared/`), jamais du JSON-RPC brut : le navigateur ne peut envoyer aucune commande LSP arbitraire. Client vers central : `open`, `change`, `complete`, `hover`, `close`. Central vers client : `ready`, `diagnostics` (poussés dès que le serveur les publie), `completion`, `hover`, `unavailable` (raison : serveur absent, plafond atteint, serveur arrêté). Droit « gérer les plugins », comme l'éditeur ; session web, droit et origine vérifiés à l'ouverture, accès revérifié périodiquement comme le flux d'événements (ADR 0028). Message de plus de 1 Mio : canal fermé. Il faut activer la fonction `ws` d'Axum et celle de `web-sys` ; le reverse proxy externe doit laisser passer la mise à niveau WebSocket (ADR 0005), sinon l'éditeur reste sur la liste (a).
+4. **Sessions.** Un processus par éditeur ouvert, lié au compte, plafond global réglable (4 par défaut) ; au-delà, `unavailable`. Dossier de travail jetable et vide, document en mémoire seulement (`didOpen`), URI `file:///forgearr/<session>/script.<ext>`. Le lancement passe par l'exécution confinée de l'[ADR 0034](0034-execution-confinee.md) (profil : lecture du dossier d'outil, écriture dans le dossier jetable, pas de réseau). Arrêt après 10 minutes sans message, à la fermeture du canal et au retrait de l'application (`shutdown`, `exit`, puis `kill_on_drop`). Méthodes envoyées : `initialize`, `didOpen`, `didChange` (texte entier), `completion`, `completionItem/resolve`, `hover`, `shutdown` ; jamais `workspace/executeCommand`. Réponses bornées : 64 Kio par message du serveur, 200 suggestions, 2 s par requête.
+5. **Fusion.** Variables déclarées et champs du contrat Forgearr d'abord, puis le serveur, puis les mots du script ; doublons retirés par libellé. Sans réponse en 800 ms, la liste (a) s'affiche seule ; le canal se rouvre avec un délai croissant.
+6. **Imports Python tiers.** L'avertissement « import introuvable » est masqué : les paquets vivent sur les workers, pas sur le central. La bibliothèque standard reste complétée.
+7. **ADR 0009.** Un serveur de langage est un outil (application) lancé par l'éditeur, pas un bloc de flux : l'exception est inscrite dans l'ADR 0009.
+
+## Phasage de (b) et (c)
+
+- **b0 — application `langages` (dépôt de plugins).** Essai de `ty` ; manifeste autonome ; `ty` et `shellcheck` en archives amont épinglées par SHA-256 ; `bash-language-server` par un nouveau mode de construction `npm-packages` (verrou figé, sans script d'installation, empreintes d'intégrité npm, Node embarqué) ; README et licences.
+- **b1 — canal et sessions (application).** Types partagés, codec JSON-RPC (`Content-Length`), gestionnaire de sessions, route WebSocket, documentation du reverse proxy.
+- **b2 — suggestions du serveur dans l'éditeur.** Ouverture et fermeture du canal par la page, fusion pure avec la liste (a), caractères déclencheurs (`.` en Python, `$` en bash), repli.
+- **c1 — diagnostics.** Soulignement dans la couche `pre` (jetons découpés aux bornes), marque dans la gouttière, compteur dans la barre.
+- **c2 — info-bulles.** Au survol après 500 ms et au clavier (Ctrl+K I), Markdown rendu en texte sûr, sans HTML brut.
+- **c3 — diagnostics Forgearr.** Règles pures, utiles même sans serveur installé : `nextPort` inconnu du bloc, variable lue mais non déclarée, sortie JSON absente. Après c1.
+
+b0 et b1 avancent en parallèle (b1 se teste avec un faux serveur sur `tokio::io::duplex`).
 
 ## Phase (a) écrite
 
@@ -26,4 +45,6 @@ Phaser : (a) liste de suggestions côté client sans serveur de langage (mots-cl
 
 - La stack ne change pas ; les serveurs de langage vivent hors de l'image.
 - Sans serveur installé pour un langage, l'éditeur garde la liste (a).
-- Tests : relais de session (droits, expiration, arrêt du processus), fusion des suggestions, navigation au clavier.
+- Tests : session écrite sur `AsyncRead`/`AsyncWrite` génériques (droits, expiration, plafond, arrêt du processus, message trop gros), fusion des suggestions, découpage des jetons aux bornes des diagnostics (multi-lignes, UTF-16), règles de c3, navigation au clavier.
+- Limite connue : une tabulation collée ou un caractère large décale soulignements et info-bulles, comme la liste (a) aujourd'hui.
+- Hors périmètre : node, deno, bun (`typescript-language-server`) et pwsh (très lourd) restent sur la liste (a) ; le même mécanisme les accueillera.

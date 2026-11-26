@@ -81,7 +81,7 @@ pub fn AccountSection(me: Me) -> impl IntoView {
                     <span class="detail-val">{role_label(me.role)}</span>
                 </div>
                 <div class="detail-row">
-                    <span class="detail-term">"Nœud"</span>
+                    <span class="detail-term">"Installation"</span>
                     <span class="detail-val">{instance_role_badge(me.instance_kind)}</span>
                 </div>
             </div>

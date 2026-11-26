@@ -125,7 +125,7 @@ pub fn PluginSettings(plugin_id: String) -> impl IntoView {
             {move || match shape.get() {
                 None if loaded.read().is_some() => ().into_any(),
                 None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),
-                Some(fields) if fields.is_empty() => view! { <p class="text-dim">"Ce plugin n'a pas de réglage."</p> }.into_any(),
+                Some(fields) if fields.is_empty() => view! { <p class="text-dim">"Cette extension n'a pas de réglage."</p> }.into_any(),
                 Some(fields) => {
                     let has_url_field = fields
                         .iter()

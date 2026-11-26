@@ -103,18 +103,18 @@ fn PluginActionBanner(
     let (title, text, tone) = if missing > 0 {
         (
             format!("{missing} outil(s) requis à installer"),
-            Some("Installez les binaires nécessaires pour activer les blocs de ce plugin.".into()),
+            Some("Installez les binaires nécessaires pour activer les blocs de cette extension.".into()),
             StoreTone::Warning,
         )
     } else if detail.has_settings {
         (
-            "Plugin prêt à configurer".to_owned(),
+            "Extension prête à configurer".to_owned(),
             Some("Renseignez ses identifiants dans l'onglet Paramètres.".into()),
             StoreTone::Primary,
         )
     } else {
         (
-            "Plugin prêt à l'emploi".to_owned(),
+            "Extension prête à l'emploi".to_owned(),
             Some(format!(
                 "{} bloc(s) disponible(s) dans l'éditeur de flux.",
                 detail.blocks.len()
@@ -257,7 +257,7 @@ fn BlocksTab(
         <DependenciesList dependencies=dependencies on_open_tool=on_open_tool />
         {if grouped.is_empty() {
             view! {
-                <p class="text-dim">"Ce plugin n'expose aucun bloc exécutable."</p>
+                <p class="text-dim">"Cette extension n'expose aucun bloc exécutable."</p>
             }
             .into_any()
         } else {
@@ -379,7 +379,7 @@ pub fn PluginDetail(
                 match detail.get() {
                     None => view! { <p class="text-dim">"Chargement…"</p> }.into_any(),
                     Some(Err(error)) if error.code() == Some(NOT_FOUND) => view! {
-                        <p class="text-dim">"Ce plugin n'est plus installé ; il reste disponible dans le Store."</p>
+                        <p class="text-dim">"Cette extension n'est plus installée ; elle reste disponible dans le Catalogue."</p>
                     }.into_any(),
                     Some(Err(error)) => view! { <p class="text-danger">{error.message()}</p> }.into_any(),
                     Some(Ok(data)) => {
@@ -407,7 +407,7 @@ pub fn PluginDetail(
                                     } else {
                                         view! {
                                             <p class="text-dim">
-                                                "Ce plugin n'expose aucun réglage global. Ses options se configurent directement sur chaque bloc dans l'éditeur de flux."
+                                                "Cette extension n'expose aucun réglage global. Ses options se configurent directement sur chaque bloc dans l'éditeur de flux."
                                             </p>
                                         }
                                         .into_any()

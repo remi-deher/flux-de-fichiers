@@ -112,7 +112,7 @@ pub fn ResourcesSection(
     Effect::new(move |_| match upload.value().get() {
         Some(Ok(_)) => {
             upload_open.set(false);
-            Toasts::notify_success("Fichier enregistré dans la librairie locale.");
+            Toasts::notify_success("Fichier enregistré.");
             live.touch(LOCAL_TOPICS);
         }
         Some(Err(err)) => Toasts::set_error(feedback, err.message()),

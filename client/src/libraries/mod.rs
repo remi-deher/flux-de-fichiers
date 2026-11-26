@@ -121,7 +121,7 @@ impl LibraryTab {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Libraries => "Bibliothèques",
-            Self::Flows => "Flows & Modèles",
+            Self::Flows => "Flux & Modèles",
             Self::Scripts => "Scripts",
             Self::Resources => "Ressources & Blocs",
             Self::Packs => "Packs",
@@ -441,7 +441,7 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
 
     view! {
         <div class="tab-panel" role="tabpanel">
-            <nav class="page-subnav" role="tablist" aria-label="Sections des librairies">
+            <nav class="page-subnav" role="tablist" aria-label="Sections des bibliothèques">
                 {tabs.into_iter().map(|tab| {
                     let is_active = move || active_tab.get() == tab;
                     view! {
@@ -507,7 +507,7 @@ mod tests {
         );
         assert_eq!(LibraryTab::visible_tabs(&admin).len(), 5);
         assert_eq!(LibraryTab::Libraries.label(), "Bibliothèques");
-        assert_eq!(LibraryTab::Flows.label(), "Flows & Modèles");
+        assert_eq!(LibraryTab::Flows.label(), "Flux & Modèles");
         assert_eq!(LibraryTab::Resources.label(), "Ressources & Blocs");
     }
 }

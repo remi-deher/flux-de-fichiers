@@ -160,9 +160,9 @@ fn UsageTab(detail: ToolDetailView, on_open_plugin: Callback<SelectedItem>) -> i
             })}
         </div>
         <div class="pack-components">
-            <h3 class="form-label">"Plugins utilisant cet outil"</h3>
+            <h3 class="form-label">"Extensions utilisant cet outil"</h3>
             {if detail.used_by_plugins.is_empty() {
-                view! { <p class="text-dim text-sm">"Aucun plugin du catalogue ne déclare cet outil en dépendance."</p> }.into_any()
+                view! { <p class="text-dim text-sm">"Aucune extension du catalogue ne déclare cet outil en dépendance."</p> }.into_any()
             } else {
                 view! {
                     <ul class="step-list">
@@ -184,7 +184,7 @@ fn UsageTab(detail: ToolDetailView, on_open_plugin: Callback<SelectedItem>) -> i
                                             <span class="text-mono text-strong">{plugin_id}</span>
                                         </span>
                                         <span class="dep-link__meta">
-                                            <Tag label="Ouvrir le plugin" tone=TagTone::Primary />
+                                            <Tag label="Ouvrir l'extension" tone=TagTone::Primary />
                                         </span>
                                     </button>
                                 </li>

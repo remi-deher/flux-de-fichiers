@@ -38,7 +38,7 @@ fn OverviewTab(
     let spec = detail.installation;
     let components_count = spec.components.len();
     let runtime_label = match spec.runtime_implemented {
-        Some(true) => "Installable depuis le Store",
+        Some(true) => "Installable depuis le Catalogue",
         Some(false) => "Non implémenté",
         None => "Pack déclaratif",
     };

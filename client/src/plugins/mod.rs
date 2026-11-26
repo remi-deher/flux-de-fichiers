@@ -23,6 +23,7 @@ mod uninstall;
 use crate::api;
 use crate::live::{load, use_live};
 use crate::route::encode_segment;
+use crate::ui::vocabulary;
 use crate::ui::{Drawer, IconName, Toasts};
 use catalog::{CatalogSectionView, summarize_catalog};
 pub(crate) use flow_preview::{
@@ -140,8 +141,8 @@ pub(super) fn section_badge_label(entry_type: CatalogItemType) -> &'static str {
         return sub;
     }
     match entry_type.section() {
-        Some(CatalogSection::Plugins) => "Plugin",
-        Some(CatalogSection::Flows) => "Flow",
+        Some(CatalogSection::Plugins) => vocabulary::EXTENSION,
+        Some(CatalogSection::Flows) => vocabulary::FLOW,
         Some(CatalogSection::Scripts) => "Script",
         Some(CatalogSection::Packs) => "Pack",
         Some(CatalogSection::Applications) => "Application",
@@ -162,10 +163,10 @@ fn section_fallback_desc(entry_type: CatalogItemType) -> &'static str {
             "Script appelé par un bloc de flux pour une étape sur mesure."
         }
         Some(CatalogSection::Packs) => {
-            "Installe d'un coup des plugins, flux et ressources prévus pour fonctionner ensemble."
+            "Installe d'un coup des extensions, flux et ressources prévus pour fonctionner ensemble."
         }
         Some(CatalogSection::Applications) => {
-            "Programme installé sur les nœuds (FFmpeg, MKVToolNix…) et utilisé par les plugins."
+            "Programme installé sur les workers (FFmpeg, MKVToolNix…) et utilisé par les extensions."
         }
         Some(CatalogSection::Other) | None => {
             "Ressource utilisée par les flux : police, image, sous-titre, préréglage…"
@@ -194,7 +195,7 @@ pub enum PluginsTab {
 impl PluginsTab {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Store => "Store",
+            Self::Store => vocabulary::CATALOGUE,
             Self::Installed => "Installés",
             Self::Repositories => "Dépôts",
         }
@@ -379,7 +380,7 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
             </Drawer>
             <Drawer
                 open=plugin_open
-                eyebrow="Plugin"
+                eyebrow=vocabulary::EXTENSION
                 title=drawer_title
                 tabs=PluginDrawerTab::tabs(can_manage).to_vec()
                 tab=plugin_tab
@@ -591,8 +592,8 @@ mod tests {
 
     #[test]
     fn badge_labels_cover_all_catalog_item_types() {
-        assert_eq!(section_badge_label(CatalogItemType::Plugin), "Plugin");
-        assert_eq!(section_badge_label(CatalogItemType::Flow), "Flow");
+        assert_eq!(section_badge_label(CatalogItemType::Plugin), "Extension");
+        assert_eq!(section_badge_label(CatalogItemType::Flow), "Flux");
         assert_eq!(section_badge_label(CatalogItemType::Script), "Script");
         assert_eq!(section_badge_label(CatalogItemType::Pack), "Pack");
         assert_eq!(

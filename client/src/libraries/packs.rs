@@ -202,7 +202,7 @@ pub fn LocalPacksSection(
                             <div class="empty-state-panel">
                                 <EmptyState
                                     title="Aucun pack local"
-                                    message="Regroupez vos scripts, ressources et modèles de flows dans un pack local réutilisable."
+                                    message="Regroupez vos scripts, ressources et modèles de flux dans un pack local réutilisable."
                                     icon_name=IconName::Package
                                 />
                             </div>
@@ -293,7 +293,7 @@ pub fn LocalPacksSection(
                     <Show
                         when=move || !choices.read().is_empty()
                         fallback=|| view! {
-                            <p class="text-dim text-sm">"Créez d'abord un script, une ressource ou un modèle de flow."</p>
+                            <p class="text-dim text-sm">"Créez d'abord un script, une ressource ou un modèle de flux."</p>
                         }
                     >
                         <ul class="step-list">

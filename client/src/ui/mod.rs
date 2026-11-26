@@ -20,6 +20,7 @@ pub mod status_badge;
 pub mod toast;
 pub mod topbar_action;
 pub mod variables_table;
+pub mod vocabulary;
 pub mod window_listener;
 
 pub use brand_mark::BrandMark;

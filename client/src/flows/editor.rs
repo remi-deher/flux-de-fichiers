@@ -10,6 +10,7 @@ use super::versions::{FlowVersions, editable_graph};
 use crate::ai::AiAssistantState;
 use crate::api;
 use crate::route::{Link, Route, encode_segment, use_router};
+use crate::ui::vocabulary;
 use crate::ui::{Icon, IconName, Toasts};
 use chrono::{DateTime, Utc};
 use forgearr_shared::Permission;
@@ -178,7 +179,7 @@ fn FlowCommandBar(
                         <button
                             type="button"
                             class="flow-pill flow-pill--mask text-mono"
-                            title="Modifier le masque de fichiers et les réglages"
+                            title="Modifier les types de fichiers et les réglages"
                             on:click=move |_| toggle_settings()
                         >
                             {move || meta.get().file_mask}
@@ -361,7 +362,7 @@ fn FlowSettingsPane(
                                 />
                             </div>
                             <div class="form-group">
-                                <label for="flow-settings-mask" class="form-label">"Masque de fichiers"</label>
+                                <label for="flow-settings-mask" class="form-label">{vocabulary::FILE_TYPES}</label>
                                 <input
                                     id="flow-settings-mask"
                                     class="form-input text-mono"

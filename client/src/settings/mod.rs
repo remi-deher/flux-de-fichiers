@@ -176,7 +176,7 @@ pub fn SettingsPage(me: Me) -> impl IntoView {
                 }
             }
         } else {
-            items.push(StatItem::new("Nœud", node_kind, MetricTone::Neutral));
+            items.push(StatItem::new("Installation", node_kind, MetricTone::Neutral));
         }
         items
     });

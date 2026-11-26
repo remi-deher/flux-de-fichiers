@@ -427,7 +427,7 @@ fn WorkerDetail(
             {match telemetry {
                 Some(t) => view! { <WorkerTelemetrySection telemetry=t /> }.into_any(),
                 None => view! {
-                    <p class="form-help">"Aucune télémétrie matérielle encore remontée pour ce nœud."</p>
+                    <p class="form-help">"Aucune télémétrie matérielle encore remontée pour ce worker."</p>
                 }.into_any(),
             }}
             <div class="inspection-drawer__actions">
@@ -702,9 +702,9 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                                     "Aucun worker correspondant"
                                 }
                                 message=if unfiltered {
-                                    "Enrôlez un nœud distant ou activez le worker intégré pour exécuter vos flux."
+                                    "Enrôlez un worker distant ou activez le worker intégré pour exécuter vos flux."
                                 } else {
-                                    "Ajustez votre recherche ou le filtre de présence pour retrouver un nœud."
+                                    "Ajustez votre recherche ou le filtre de présence pour retrouver un worker."
                                 }
                                 icon_name=IconName::Workers
                                 action=empty_action
@@ -727,7 +727,7 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                             let footer_hint = if worker.is_integrated() {
                                 "Rattaché au central"
                             } else {
-                                "Nœud distant"
+                                "Worker distant"
                             };
                             let mounted_libs = libs.as_ref().map(|libraries|
                                 worker_libraries(libraries, id, worker.is_integrated()).len());

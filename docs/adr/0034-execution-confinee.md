@@ -1,4 +1,4 @@
-# 0033 — Exécution confinée des processus externes
+# 0034 — Exécution confinée des processus externes
 
 Statut : proposé le 26 nov. 2026 (aucun code). Demande de l'utilisateur : pouvoir exécuter n'importe quel binaire ou langage fourni par le dépôt de plugins, tout en gardant une forme de sandboxing, en Rust seul et simple à mettre en place. Complète les ADR 0004 (confinement strict de l'exécution), 0012, 0017, 0025 et 0031 ; s'applique d'abord aux serveurs de langage de l'ADR 0032.
 

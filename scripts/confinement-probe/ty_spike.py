@@ -158,6 +158,9 @@ def main():
     script_path, command = sys.argv[1], sys.argv[2:]
     base_text = open(script_path, encoding="utf-8").read()
     os.makedirs(WORKSPACE, exist_ok=True)
+    # ty ne vérifie que les fichiers de son projet : le document existe donc aussi sur le disque.
+    with open(f"{WORKSPACE}/script.py", "w", encoding="utf-8") as document:
+        document.write(base_text)
     report = {"commande": command, "completions": {}, "infobulles": {}}
     client = Client(command)
     started = time.monotonic()

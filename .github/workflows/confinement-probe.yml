@@ -1,0 +1,90 @@
+# Sonde de l'ADR 0034 (phase 0) : Landlock et seccomp passent-ils dans un conteneur durci comme celui de
+# compose.yaml, et un serveur de langage Python (ty) tient-il ses promesses ? Les résultats vont dans le
+# résumé du job ; la sonde ne vérifie rien du code de l'application.
+name: confinement-probe
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - ".github/workflows/confinement-probe.yml"
+      - "scripts/confinement-probe/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: sonde-${{ matrix.architecture }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86_64
+            runner: ubuntu-latest
+          - architecture: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Noyau de la machine
+        run: |
+          {
+            echo "## Machine ${{ matrix.architecture }}"
+            echo '```'
+            uname -a
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Mêmes réglages que `x-app` de compose.yaml : non-root, lecture seule, aucune capacité,
+      # `no-new-privileges`, profil seccomp par défaut de Docker.
+      - name: Landlock et seccomp dans le conteneur durci (profil Docker par défaut)
+        run: |
+          docker run --rm --user 10001 --read-only --tmpfs /tmp:mode=1777 --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            -v "$PWD/scripts/confinement-probe:/probe:ro" python:3.13-slim python /probe/probe.py | tee probe-durci.json
+          {
+            echo "### Conteneur durci, profil seccomp par défaut de Docker"
+            echo '```json'
+            cat probe-durci.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Témoin, sans profil seccomp de Docker
+        if: ${{ !cancelled() }}
+        run: |
+          docker run --rm --user 10001 --read-only --tmpfs /tmp:mode=1777 --cap-drop ALL \
+            --security-opt no-new-privileges:true --security-opt seccomp=unconfined \
+            -v "$PWD/scripts/confinement-probe:/probe:ro" python:3.13-slim python /probe/probe.py | tee probe-temoin.json
+          {
+            echo "### Témoin, seccomp=unconfined"
+            echo '```json'
+            cat probe-temoin.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Télécharger ty et vérifier son empreinte
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          archive="ty-${{ matrix.architecture }}-unknown-linux-gnu.tar.gz"
+          base="https://github.com/astral-sh/ty/releases/latest/download"
+          mkdir -p "$RUNNER_TEMP/ty"
+          cd "$RUNNER_TEMP/ty"
+          curl -fsSLO "$base/$archive"
+          curl -fsSLO "$base/$archive.sha256"
+          sha256sum -c "$archive.sha256"
+          tar -xzf "$archive"
+          binary="$(find . -type f -name ty | head -n 1)"
+          chmod +x "$binary"
+          echo "TY_BINARY=$PWD/$binary" >> "$GITHUB_ENV"
+      - name: Essai de ty (complétion, infobulle, diagnostics)
+        if: ${{ !cancelled() }}
+        run: |
+          version="$("$TY_BINARY" --version)"
+          python3 scripts/confinement-probe/ty_spike.py scripts/confinement-probe/samples/script_contrat.py \
+            "$TY_BINARY" server | tee ty-resultat.json
+          {
+            echo "### $version"
+            echo '```json'
+            cat ty-resultat.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

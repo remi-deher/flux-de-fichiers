@@ -159,7 +159,7 @@ fn FlowStart(can_install: bool, on_draft: Callback<FlowDraft>) -> impl IntoView 
             (StarterKey::Template(_), Some(template)) => {
                 create.dispatch((template, chosen_name, mask));
             }
-            (StarterKey::Template(_) | StarterKey::Store(_), None) => {}
+            (StarterKey::Template(_), None) | (StarterKey::Store(_), _) => {}
         }
     };
 

@@ -181,11 +181,8 @@ mod tests {
 
     #[test]
     fn store_cards_keep_only_flows_that_are_not_installed_yet() {
-        let mut entries = store_entries(&[
-            ("flow", "remux"),
-            ("plugin", "video"),
-            ("flow", "installe"),
-        ]);
+        let mut entries =
+            store_entries(&[("flow", "remux"), ("plugin", "video"), ("flow", "installe")]);
         assert_eq!(entries.len(), 3);
         entries[2].install = InstallState::Installed {
             version: "1.0.0".into(),

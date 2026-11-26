@@ -55,7 +55,7 @@ class Client:
             body = stream.read(length)
             message = json.loads(body)
             if "method" in message and "id" in message:
-                self.send({"jsonrpc": "2.0", "id": message["id"], "result": None})
+                self.send({"jsonrpc": "2.0", "id": message["id"], "result": server_request_result(message)})
             else:
                 self.messages.put(message)
 
@@ -114,6 +114,13 @@ class Client:
         except OSError:
             pass
         return None
+
+
+def server_request_result(message):
+    """Réponse du client à une requête du serveur : une configuration vide par élément demandé."""
+    if message["method"] == "workspace/configuration":
+        return [{} for _ in message.get("params", {}).get("items", [])]
+    return None
 
 
 def position_of(text, needle):

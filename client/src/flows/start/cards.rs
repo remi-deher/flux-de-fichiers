@@ -168,7 +168,10 @@ mod tests {
     fn groups_round_trip_through_serde() {
         for group in StarterGroup::ALL {
             let text = serde_json::to_string(&group).unwrap_or_default();
-            assert_eq!(serde_json::from_str::<StarterGroup>(&text).ok(), Some(group));
+            assert_eq!(
+                serde_json::from_str::<StarterGroup>(&text).ok(),
+                Some(group)
+            );
         }
     }
 }

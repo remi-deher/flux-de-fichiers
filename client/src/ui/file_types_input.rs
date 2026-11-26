@@ -97,7 +97,9 @@ pub fn suggest_file_types(query: &str) -> Vec<&'static str> {
         .iter()
         .filter(|(pattern, keywords)| {
             needle.is_empty()
-                || pattern.trim_start_matches(EXTENSION_PREFIX).contains(&needle)
+                || pattern
+                    .trim_start_matches(EXTENSION_PREFIX)
+                    .contains(&needle)
                 || keywords.contains(&needle)
         })
         .map(|(pattern, _)| *pattern)
@@ -227,7 +229,10 @@ mod tests {
     fn normalize_completes_bare_extensions_and_keeps_wildcards() {
         assert_eq!(normalize_file_type("mp4").as_deref(), Some("*.mp4"));
         assert_eq!(normalize_file_type(" .MKV ").as_deref(), Some("*.MKV"));
-        assert_eq!(normalize_file_type("film*.mkv").as_deref(), Some("film*.mkv"));
+        assert_eq!(
+            normalize_file_type("film*.mkv").as_deref(),
+            Some("film*.mkv")
+        );
         assert_eq!(normalize_file_type("  "), None);
     }
 

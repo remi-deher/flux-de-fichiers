@@ -76,7 +76,12 @@ fn find_branch(catalog: &[OwnedBlockSpec]) -> Option<&OwnedBlockSpec> {
 }
 
 fn add_block(graph: &mut FlowGraph, spec: &OwnedBlockSpec, catalog: &[OwnedBlockSpec]) -> String {
-    graph.append(spec.kind_enum(), &spec.label, spec.default_config(), catalog)
+    graph.append(
+        spec.kind_enum(),
+        &spec.label,
+        spec.default_config(),
+        catalog,
+    )
 }
 
 /// Aiguillage relié à l'entrée, puis une sortie au bout de chaque branche.

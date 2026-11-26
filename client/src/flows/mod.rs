@@ -26,8 +26,8 @@ mod variables_form;
 mod versions;
 
 pub use editor::FlowEditor;
-pub use start::NewFlow;
 pub(crate) use presentation::NodeDomain;
+pub use start::NewFlow;
 
 use crate::plugins::{FlowMiniPreview, preview_from_definition_json};
 use crate::route::{Link, Route, encode_segment, use_router};
@@ -550,9 +550,7 @@ fn FlowTemplateDetailDrawer(
     let template_for_create = StoredValue::new(template.clone());
     let create_from_tpl = Action::new_local(move |_: &()| {
         let template = template_for_create.get_value();
-        async move {
-            create_flow_from_template(&template, &template.name, &template.file_mask).await
-        }
+        async move { create_flow_from_template(&template, &template.name, &template.file_mask).await }
     });
     Effect::new(move |_| match create_from_tpl.value().get() {
         Some(Ok(created)) => {

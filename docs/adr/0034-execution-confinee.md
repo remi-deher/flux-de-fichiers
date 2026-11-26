@@ -1,6 +1,6 @@
 # 0034 — Exécution confinée des processus externes
 
-Statut : proposé le 26 nov. 2026 ; phase 0 faite et phase 1 écrite le 26 nov. 2026 (en attente de la CI). Demande de l'utilisateur : pouvoir exécuter n'importe quel binaire ou langage fourni par le dépôt de plugins, tout en gardant une forme de sandboxing, en Rust seul et simple à mettre en place. Complète les ADR 0004 (confinement strict de l'exécution), 0012, 0017, 0025 et 0031 ; s'applique d'abord aux serveurs de langage de l'ADR 0032.
+Statut : proposé le 26 nov. 2026 ; phase 0 faite et phase 1 écrite le 26 nov. 2026 (CI verte). Demande de l'utilisateur : pouvoir exécuter n'importe quel binaire ou langage fourni par le dépôt de plugins, tout en gardant une forme de sandboxing, en Rust seul et simple à mettre en place. Complète les ADR 0004 (confinement strict de l'exécution), 0012, 0017, 0025 et 0031 ; s'applique d'abord aux serveurs de langage de l'ADR 0032.
 
 ## Contexte
 
@@ -57,7 +57,9 @@ réglé comme `compose.yaml` (non-root, lecture seule, `cap_drop: ALL`, `no-new-
 - `ty` 0.0.111 : complétion, infobulle et temps de réponse conviennent (150 à 160 suggestions pour `sys.`, quelques
   millisecondes, 48 à 50 Mio de mémoire). À corriger côté client : les attributs spéciaux (`__class__`…) viennent en
   tête d'une valeur sans type connu, et `ty` lit les paquets du Python de la machine (`requests` y était résolu).
-  Les diagnostics sont à revérifier (voir le lot b0 de l'ADR 0032).
+  Diagnostics : trois passes (poussés, à la demande, configuration répondue, script écrit sur disque) n'ont rendu
+  qu'une liste vide pour un script contenant un nom inconnu. Cause non trouvée ; à élucider au début du lot b0 de
+  l'ADR 0032 (essai avec un `pyproject.toml`, un `ty.toml` ou un répertoire hors de `/tmp`), sinon repli sur `pyright`.
 
 ## Phasage
 

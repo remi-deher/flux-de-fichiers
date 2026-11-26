@@ -522,7 +522,7 @@ pub const FLOWS_CSS: &str = r#"
 
 .flow-start__title {
   margin: 0;
-  font-size: 1.6rem;
+  font-size: var(--font-size-2xl);
   line-height: 1.1;
 }
 
@@ -584,7 +584,7 @@ pub const FLOWS_CSS: &str = r#"
   color: var(--text-dim);
 }
 
-@media (max-width: 720px) {
+@media (max-width: 768px) {
   .flow-start__body {
     grid-template-columns: minmax(0, 1fr);
   }

@@ -28,7 +28,6 @@ pub use command_palette::{CommandPalette, CommandPaletteState};
 pub use drawer::Drawer;
 pub use empty_state::EmptyState;
 pub use focus::on_activate;
-pub use file_types_input::FileTypesInput;
 pub use folder_picker::FolderTreePicker;
 pub use icon::{Icon, IconName};
 pub use metric_card::MetricTone;

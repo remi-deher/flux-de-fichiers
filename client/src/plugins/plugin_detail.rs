@@ -103,7 +103,10 @@ fn PluginActionBanner(
     let (title, text, tone) = if missing > 0 {
         (
             format!("{missing} outil(s) requis à installer"),
-            Some("Installez les binaires nécessaires pour activer les blocs de cette extension.".into()),
+            Some(
+                "Installez les binaires nécessaires pour activer les blocs de cette extension."
+                    .into(),
+            ),
             StoreTone::Warning,
         )
     } else if detail.has_settings {

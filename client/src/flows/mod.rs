@@ -766,7 +766,12 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
             })
         };
         let mut items = vec![
-            StatItem::new(vocabulary::FLOWS, counts.total.to_string(), MetricTone::Neutral).with_filter(
+            StatItem::new(
+                vocabulary::FLOWS,
+                counts.total.to_string(),
+                MetricTone::Neutral,
+            )
+            .with_filter(
                 mode == FlowsCatalogFilter::Flows && active == FlowFilter::All,
                 set_filter(FlowFilter::All),
             ),

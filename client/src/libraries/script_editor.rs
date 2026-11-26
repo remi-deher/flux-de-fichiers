@@ -7,12 +7,15 @@ use super::script_draft::{
     CATEGORIES, OpenedScript, ScriptDraft, category_value, is_starter_code, opened_script_warning,
     parse_category, parse_tags, starter_script_code,
 };
+use super::script_trial::{ScriptTrial, TrialInput};
+use super::script_trial_panel::ScriptTrialPanel;
 use super::variables_editor::{VariablesEditor, rows_from, rows_to_variables, variable_names};
-use super::{LOCAL_PATH, LOCAL_SCRIPTS_PATH, LOCAL_TOPICS};
+use super::{LOCAL_PATH, LOCAL_SCRIPTS_PATH, LOCAL_TOPICS, LibraryTab};
 use crate::api;
 use crate::live::{Loaded, load, use_live};
 use crate::route::{Route, use_router};
 use crate::ui::{Tag, TagTone, Toasts};
+use crate::url_state::UrlTab;
 use forgearr_shared::Permission;
 use forgearr_shared::local::{
     LocalLibrarySnapshot, LocalScriptSummary, ScriptInterpreter, UpsertLocalScriptRequest,
@@ -26,17 +29,29 @@ enum SidePanel {
     Properties,
     Variables,
     Dependencies,
+    Trial,
 }
 
 impl SidePanel {
-    const ALL: [Self; 3] = [Self::Properties, Self::Variables, Self::Dependencies];
+    const ALL: [Self; 4] = [
+        Self::Properties,
+        Self::Variables,
+        Self::Dependencies,
+        Self::Trial,
+    ];
 
     const fn label(self) -> &'static str {
         match self {
             Self::Properties => "Propriétés",
             Self::Variables => "Variables",
             Self::Dependencies => "Dépendances",
+            Self::Trial => "Essai",
         }
+    }
+
+    /// L'onglet est proposé : l'essai demande le droit de gérer les plugins (ADR 0031).
+    const fn offered(self, can_trial: bool) -> bool {
+        can_trial || !matches!(self, Self::Trial)
     }
 }
 
@@ -53,6 +68,7 @@ fn page_title(name: &str) -> String {
 #[component]
 pub fn ScriptEditor(me: Me, script_id: Option<String>) -> impl IntoView {
     let can_manage = me.allows(Permission::ManageSettings);
+    let can_trial = me.allows(Permission::ManagePlugins);
     let router = use_router();
     let live = use_live();
     let snapshot = load::<LocalLibrarySnapshot>(LOCAL_TOPICS, LOCAL_PATH);
@@ -96,7 +112,7 @@ pub fn ScriptEditor(me: Me, script_id: Option<String>) -> impl IntoView {
     Effect::new(move |_| match save.value().get() {
         Some(Ok(saved)) => {
             router.set_unsaved(false);
-            Toasts::notify_success("Script enregistré dans la librairie locale.");
+            Toasts::notify_success("Script enregistré.");
             live.touch(LOCAL_TOPICS);
             if is_new {
                 router.go(Route::ScriptEditor(saved.id));
@@ -121,6 +137,7 @@ pub fn ScriptEditor(me: Me, script_id: Option<String>) -> impl IntoView {
                 draft=opened
                 snapshot=snapshot
                 can_manage=can_manage
+                can_trial=can_trial
                 pending=pending
                 feedback=feedback
                 on_submit=on_submit
@@ -130,11 +147,11 @@ pub fn ScriptEditor(me: Me, script_id: Option<String>) -> impl IntoView {
         {move || (draft.with(Option::is_none) && missing.get()).then(|| view! {
             <div class="flow-workbench">
                 <p class="flow-workbench__feedback" role="status">
-                    "Ce script n'existe pas ou a été supprimé de la librairie."
+                    "Ce script n'existe pas ou a été supprimé."
                 </p>
                 <div class="script-workbench__bar">
                     <button type="button" class="btn btn-secondary"
-                        on:click=move |_| router.go(Route::Libraries)>"Retour aux librairies"</button>
+                        on:click=move |_| router.go_tab(Route::Libraries, LibraryTab::Scripts.slug())>"Retour aux bibliothèques"</button>
                 </div>
             </div>
         })}
@@ -151,6 +168,7 @@ fn ScriptForm(
     draft: ScriptDraft,
     snapshot: Loaded<LocalLibrarySnapshot>,
     can_manage: bool,
+    can_trial: bool,
     pending: Signal<bool>,
     feedback: RwSignal<Option<String>>,
     on_submit: Callback<UpsertLocalScriptRequest>,
@@ -174,10 +192,21 @@ fn ScriptForm(
     let code = RwSignal::new(draft.code);
     let category = RwSignal::new(draft.category);
     let tags = RwSignal::new(draft.tags);
+    let trial = ScriptTrial::new(&draft.variables);
     let variable_rows = RwSignal::new(rows_from(draft.variables));
     let requirement_rows = RwSignal::new(requirement_rows_from(draft.requires));
     let dependencies_unverified = RwSignal::new(draft.dependencies_unverified);
     let panel = RwSignal::new(SidePanel::Properties);
+    let trial_pending = trial.pending();
+    let declared_variables = Signal::derive(move || rows_to_variables(&variable_rows.get()));
+    let start_trial = move |_| {
+        panel.set(SidePanel::Trial);
+        trial.run(TrialInput {
+            interpreter: interp.get_untracked(),
+            code: code.get_untracked(),
+            entrypoint: filename.get_untracked(),
+        });
+    };
     let extension = Signal::derive(move || interp.get().default_extension());
     let declared = Signal::derive(move || variable_names(&variable_rows.get()));
 
@@ -257,10 +286,17 @@ fn ScriptForm(
         <form class="flow-workbench script-workbench" on:submit=submit>
             <header class="script-workbench__bar">
                 <button type="button" class="btn btn-secondary"
-                    on:click=move |_| router.go(Route::Libraries)>"← Librairies"</button>
+                    on:click=move |_| router.go_tab(Route::Libraries, LibraryTab::Scripts.slug())>"← Bibliothèques"</button>
                 <h1 class="script-workbench__title">{move || page_title(&name.get())}</h1>
                 {move || dirty.get().then(|| view! { <Tag label="Modifié" tone=TagTone::Warning /> })}
                 <span class="script-workbench__spacer"></span>
+                {can_trial.then(|| view! {
+                    <button type="button" class="btn btn-secondary"
+                        disabled=move || trial_pending.get()
+                        on:click=start_trial>
+                        {move || if trial_pending.get() { "Essai…" } else { "Tester" }}
+                    </button>
+                })}
                 {can_manage.then(|| view! {
                     <button type="submit" class="btn btn-primary" disabled=move || pending.get()>
                         {move || if pending.get() { "Enregistrement…" } else { "Enregistrer" }}
@@ -290,7 +326,7 @@ fn ScriptForm(
                 </section>
                 <aside class="script-workbench__side">
                     <nav class="page-subnav" role="tablist" aria-label="Panneaux du script">
-                        {SidePanel::ALL.into_iter().map(|entry| {
+                        {SidePanel::ALL.into_iter().filter(|entry| entry.offered(can_trial)).map(|entry| {
                             let is_active = move || panel.get() == entry;
                             view! {
                                 <button type="button" role="tab" class="page-subnav__tab"
@@ -365,6 +401,12 @@ fn ScriptForm(
                             read_only=read_only
                         />
                     </div>
+                    {can_trial.then(|| view! {
+                        <div class="script-workbench__panel"
+                            hidden=move || panel.get() != SidePanel::Trial>
+                            <ScriptTrialPanel trial=trial declared=declared_variables />
+                        </div>
+                    })}
                 </aside>
             </div>
         </form>
@@ -384,6 +426,13 @@ mod tests {
     #[test]
     fn every_side_panel_has_a_distinct_label() {
         let labels: Vec<&str> = SidePanel::ALL.iter().map(|panel| panel.label()).collect();
-        assert_eq!(labels, ["Propriétés", "Variables", "Dépendances"]);
+        assert_eq!(labels, ["Propriétés", "Variables", "Dépendances", "Essai"]);
+    }
+
+    #[test]
+    fn the_trial_tab_needs_the_right_to_manage_plugins() {
+        assert!(SidePanel::Trial.offered(true));
+        assert!(!SidePanel::Trial.offered(false));
+        assert!(SidePanel::Properties.offered(false));
     }
 }

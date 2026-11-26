@@ -198,10 +198,10 @@ pub fn NodeInspector(editor: Editor, can_manage: bool) -> impl IntoView {
                         <div class="flow-inspector__body">
                             {description.map(|text| view! { <p class="form-help">{text}</p> })}
                             {is_script.then(|| view! {
-                                <p class="form-help">"Bloc script (stdin/stdout JSON) : configurez le code depuis Librairies → Scripts."</p>
+                                <p class="form-help">"Bloc script (stdin/stdout JSON) : configurez le code depuis Bibliothèques → Scripts."</p>
                             })}
                             {(from_plugin && !is_script).then(|| view! {
-                                <p class="form-help">"Bloc fourni par un dépôt de plugins."</p>
+                                <p class="form-help">"Bloc fourni par un dépôt d'extensions."</p>
                             })}
                             {spec.is_none().then(|| view! {
                                 <p class="form-help">

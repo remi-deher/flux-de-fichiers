@@ -174,7 +174,7 @@ pub fn ScriptBlockInspector(
                     });
                 }
             >
-                <option value="library">"Script de la librairie"</option>
+                <option value="library">"Script enregistré"</option>
                 <option value="inline">"Code direct (inline)"</option>
             </select>
         </div>
@@ -338,7 +338,7 @@ pub fn ScriptBlockInspector(
                     </div>
                     {can_manage.then(|| view! {
                         <div class="form-group">
-                            <label class="form-label" for="script-promote-name">"Promouvoir en script de librairie"</label>
+                            <label class="form-label" for="script-promote-name">"Nom du script à enregistrer"</label>
                             <input
                                 id="script-promote-name"
                                 class="form-input"
@@ -371,7 +371,7 @@ pub fn ScriptBlockInspector(
                                     });
                                 }
                             >
-                                "Enregistrer dans la librairie"
+                                "Enregistrer comme script"
                             </button>
                         </div>
                     })}

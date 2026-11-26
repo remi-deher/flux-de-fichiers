@@ -12,6 +12,7 @@ use crate::ui::{
     Drawer, EmptyState, Icon, IconName, MetricTone, ResourceCard, SectionHeader, StatItem,
     StatStrip, StatusBadge, Tag, TagTone, Toasts,
 };
+use crate::url_state::{DrawerKind, use_create_drawer, use_detail_drawer};
 use crate::{api, format};
 use chrono::{DateTime, Utc};
 use forgearr_shared::Permission;
@@ -427,7 +428,7 @@ fn WorkerDetail(
             {match telemetry {
                 Some(t) => view! { <WorkerTelemetrySection telemetry=t /> }.into_any(),
                 None => view! {
-                    <p class="form-help">"Aucune télémétrie matérielle encore remontée pour ce nœud."</p>
+                    <p class="form-help">"Aucune télémétrie matérielle encore remontée pour ce worker."</p>
                 }.into_any(),
             }}
             <div class="inspection-drawer__actions">
@@ -562,9 +563,21 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
         None => {}
     });
 
-    let selected = RwSignal::new(None::<Uuid>);
-    let detail_open = RwSignal::new(false);
-    let enroll_open = RwSignal::new(false);
+    let (worker_selection, detail_open) = use_detail_drawer(DrawerKind::Worker);
+    let selected = RwSignal::new(
+        worker_selection
+            .get_untracked()
+            .and_then(|id| id.parse::<Uuid>().ok()),
+    );
+    Effect::new(move |_| {
+        let from_url = worker_selection
+            .get()
+            .and_then(|id| id.parse::<Uuid>().ok());
+        if from_url.is_some() && selected.get_untracked() != from_url {
+            selected.set(from_url);
+        }
+    });
+    let enroll_open = use_create_drawer(DrawerKind::Worker);
     if can_manage {
         provide_topbar_action(ActionSpec {
             label: "Ajouter un worker",
@@ -702,9 +715,9 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                                     "Aucun worker correspondant"
                                 }
                                 message=if unfiltered {
-                                    "Enrôlez un nœud distant ou activez le worker intégré pour exécuter vos flux."
+                                    "Enrôlez un worker distant ou activez le worker intégré pour exécuter vos flux."
                                 } else {
-                                    "Ajustez votre recherche ou le filtre de présence pour retrouver un nœud."
+                                    "Ajustez votre recherche ou le filtre de présence pour retrouver un worker."
                                 }
                                 icon_name=IconName::Workers
                                 action=empty_action
@@ -727,7 +740,7 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                             let footer_hint = if worker.is_integrated() {
                                 "Rattaché au central"
                             } else {
-                                "Nœud distant"
+                                "Worker distant"
                             };
                             let mounted_libs = libs.as_ref().map(|libraries|
                                 worker_libraries(libraries, id, worker.is_integrated()).len());
@@ -760,6 +773,7 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                             .into_any();
                             let open_detail = Callback::new(move |()| {
                                 selected.set(Some(id));
+                                worker_selection.set(Some(id.to_string()));
                                 detail_open.set(true);
                             });
                             let actions = view! {
@@ -771,7 +785,7 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
                                     </button>
                                 })}
                                 <button type="button" class="btn btn-secondary btn-sm"
-                                    on:click=move |_| { selected.set(Some(id)); detail_open.set(true); }>
+                                    on:click=move |_| { selected.set(Some(id)); worker_selection.set(Some(id.to_string())); detail_open.set(true); }>
                                     "Inspecter"
                                 </button>
                             }

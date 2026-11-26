@@ -10,6 +10,7 @@ use crate::ui::{
     Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
     Toasts,
 };
+use crate::url_state::{DrawerKind, use_create_drawer};
 use forgearr_shared::local::{CreateLocalPackRequest, LocalLibrarySnapshot};
 use forgearr_shared::plugins::vocab::CatalogItemType;
 use forgearr_shared::plugins::{CatalogEntry, PackComponent};
@@ -94,7 +95,7 @@ pub fn LocalPacksSection(
     can_manage: bool,
 ) -> impl IntoView {
     let live = use_live();
-    let create_open = RwSignal::new(false);
+    let create_open = use_create_drawer(DrawerKind::Pack);
     let pack_name = RwSignal::new(String::new());
     let pack_desc = RwSignal::new(String::new());
     let selected = RwSignal::new(HashSet::<String>::new());
@@ -202,7 +203,7 @@ pub fn LocalPacksSection(
                             <div class="empty-state-panel">
                                 <EmptyState
                                     title="Aucun pack local"
-                                    message="Regroupez vos scripts, ressources et modèles de flows dans un pack local réutilisable."
+                                    message="Regroupez vos scripts, ressources et modèles de flux dans un pack local réutilisable."
                                     icon_name=IconName::Package
                                 />
                             </div>
@@ -293,7 +294,7 @@ pub fn LocalPacksSection(
                     <Show
                         when=move || !choices.read().is_empty()
                         fallback=|| view! {
-                            <p class="text-dim text-sm">"Créez d'abord un script, une ressource ou un modèle de flow."</p>
+                            <p class="text-dim text-sm">"Créez d'abord un script, une ressource ou un modèle de flux."</p>
                         }
                     >
                         <ul class="step-list">

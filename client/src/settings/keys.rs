@@ -4,6 +4,7 @@ use super::account::role_label;
 use crate::api;
 use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, Icon, IconName, SectionHeader, Toasts};
+use crate::url_state::{DrawerKind, use_create_drawer};
 use crate::workers::origin;
 use forgearr_shared::accounts::{ApiKeyRecord, CreateKeyRequest, CreatedKey};
 use forgearr_shared::{Permission, Role};
@@ -54,7 +55,7 @@ pub fn KeysSection() -> impl IntoView {
     });
     let feedback = RwSignal::new(None::<String>);
     let revealed = RwSignal::new(None::<RevealedKey>);
-    let creating = RwSignal::new(false);
+    let creating = use_create_drawer(DrawerKind::ApiKey);
     let (name, role) = (
         RwSignal::new(String::new()),
         RwSignal::new(DEFAULT_KEY_ROLE),

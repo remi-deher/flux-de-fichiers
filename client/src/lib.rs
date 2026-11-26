@@ -11,6 +11,7 @@ pub mod format;
 pub mod jobs;
 pub mod libraries;
 mod live;
+pub mod location;
 mod overview;
 mod plugins;
 mod prefs;
@@ -21,6 +22,7 @@ mod sleep;
 pub mod theme;
 pub mod timezone;
 mod ui;
+mod url_state;
 pub mod workers;
 
 use wasm_bindgen::prelude::wasm_bindgen;

@@ -165,13 +165,13 @@ pub fn StoreSection(
                     options=StoreFilter::ALL
                     selected=filter
                     label=StoreFilter::label
-                    aria_label="Filtrer le Store"
+                    aria_label="Filtrer le Catalogue"
                 />
             </div>
         </div>
         {move || match store.get() {
             None => view! {
-                <div class="empty-state-panel"><p class="text-dim">"Chargement du Store…"</p></div>
+                <div class="empty-state-panel"><p class="text-dim">"Chargement du Catalogue…"</p></div>
             }.into_any(),
             Some(Err(error)) => view! {
                 <div class="empty-state-panel"><p class="form-error">{error.message()}</p></div>

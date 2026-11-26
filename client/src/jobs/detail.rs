@@ -252,7 +252,7 @@ pub fn JobDetail(
                         <p class="inspection-panel__title">"Détails"</p>
                         <div class="detail-grid">
                             {mono_row("Nom", source_name.clone())}
-                            <div class="detail-term">"Flow"</div>
+                            <div class="detail-term">"Flux"</div>
                             <div class="detail-val">{flow_label}</div>
                             <div class="detail-term">"Bibliothèque"</div>
                             <div class="detail-val">{library_name}</div>
@@ -324,7 +324,7 @@ pub fn JobDetail(
                                             <tr>
                                                 <th>"#"</th>
                                                 <th>"Nom / Bloc"</th>
-                                                <th>"Élément de Flow"</th>
+                                                <th>"Bloc"</th>
                                                 <th>"Statut"</th>
                                             </tr>
                                         </thead>
@@ -384,7 +384,7 @@ pub fn JobDetail(
                                                 })}
                                             </div>
                                             <div class="step-item__meta text-xs text-dim">
-                                                <span>{format!("Nœud : {}", step.node_id)}</span>
+                                                <span>{format!("Bloc : {}", step.node_id)}</span>
                                             </div>
                                             {step.message.map(|msg| view! {
                                                 <p class="step-item__msg text-sm">{msg}</p>

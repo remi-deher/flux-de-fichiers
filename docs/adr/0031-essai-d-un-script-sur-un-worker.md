@@ -1,6 +1,6 @@
 # 0031 — Essai d'un script sur un worker
 
-Statut : proposé ; sous-lots 3a et 3b écrits le 24 nov. 2026 (3b en attente de la CI), 3c à venir. Lot 3 de l'ADR 0030 ; lieu d'essai (un worker choisi) décidé par l'utilisateur le 24 nov. 2026.
+Statut : proposé ; sous-lots 3a et 3b écrits le 24 nov. 2026, 3c écrit le 26 nov. 2026 (en attente de la CI). Lot 3 de l'ADR 0030 ; lieu d'essai (un worker choisi) décidé par l'utilisateur le 24 nov. 2026.
 
 ## Contexte
 
@@ -42,7 +42,11 @@ essai sur un worker donne le même résultat que la production.
   l'exploration de dossiers, qui en devient un cas particulier (`RemoteBrowseBroker`) ; routes worker
   `/api/v1/worker/script-trials/pending` et `/api/v1/worker/script-trials` ; boucle `serve_relayed` du worker,
   commune à l'exploration et à l'essai. Le `PATH` d'un essai est celui du processus du worker, comme celui du moteur.
-- **3c — interface** : panneau « Essai » (choix du worker, `config`, `vars`), bouton, affichage du résultat.
+- **3c — interface (écrit)** : onglet « Essai » du panneau latéral et bouton « Tester » de la barre, visibles avec
+  le droit « gérer les plugins ». Worker intégré proposé par défaut, workers hors ligne listés mais non
+  choisissables ; `vars` pré-rempli avec les valeurs par défaut des variables déclarées (secrets exclus) ; résultat :
+  verdict (code de sortie, délai, lancement impossible), durée, réponse interprétée, puis stdout, stderr et stdin
+  repliables. L'état d'essai n'est pas enregistré avec le script et ne marque pas la page comme modifiée.
 
 ## Conséquences
 

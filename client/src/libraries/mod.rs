@@ -11,6 +11,8 @@ mod resources;
 mod rows;
 mod script_draft;
 mod script_editor;
+mod script_trial;
+mod script_trial_panel;
 mod scripts;
 mod suggestions;
 mod transfer_workers;
@@ -45,7 +47,7 @@ use scripts::ScriptsSection;
 
 const LIBRARIES_PATH: &str = "/api/v1/libraries";
 const FLOWS_PATH: &str = "/api/v1/flows";
-const WORKERS_PATH: &str = "/api/v1/workers";
+pub(super) const WORKERS_PATH: &str = "/api/v1/workers";
 pub(super) const LOCAL_PATH: &str = "/api/v1/local";
 pub(super) const LOCAL_SCRIPTS_PATH: &str = "/api/v1/local/scripts";
 pub(super) const LOCAL_RESOURCES_PATH: &str = "/api/v1/local/resources";

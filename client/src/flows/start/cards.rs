@@ -3,6 +3,8 @@
 use super::skeleton::Skeleton;
 use crate::ui::file_types_input::ALL_FILES;
 use forgearr_shared::local::LocalFlowTemplate;
+use forgearr_shared::plugins::store::{InstallState, ItemRef, StoreEntry};
+use forgearr_shared::plugins::vocab::CatalogItemType;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -10,27 +12,31 @@ use serde::{Deserialize, Serialize};
 pub enum StarterGroup {
     Skeletons,
     Catalog,
+    Store,
     Local,
 }
 
 impl StarterGroup {
     /// Ordre d'affichage.
-    pub const ALL: [Self; 3] = [Self::Skeletons, Self::Catalog, Self::Local];
+    pub const ALL: [Self; 4] = [Self::Skeletons, Self::Catalog, Self::Store, Self::Local];
 
     pub fn title(self) -> &'static str {
         match self {
             Self::Skeletons => "Squelettes",
             Self::Catalog => "Modèles installés",
+            Self::Store => "Modèles du Store à installer",
             Self::Local => "Mes modèles",
         }
     }
 }
 
-/// Ce que choisit l'utilisateur : un squelette, ou un modèle par son identifiant.
+/// Ce que choisit l'utilisateur : un squelette, un modèle installé par son identifiant, ou un
+/// modèle du Store qu'il faut d'abord installer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StarterKey {
     Skeleton(Skeleton),
     Template(String),
+    Store(ItemRef),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -81,6 +87,34 @@ pub fn template_cards(templates: &[LocalFlowTemplate]) -> Vec<StarterCard> {
         .collect()
 }
 
+/// Une carte par flux du Store pas encore installé ; les autres éléments et états sont ignorés.
+pub fn store_cards(entries: &[StoreEntry]) -> Vec<StarterCard> {
+    entries
+        .iter()
+        .filter(|entry| {
+            entry.entry.entry_type == CatalogItemType::Flow
+                && entry.install == InstallState::Available
+        })
+        .map(|entry| StarterCard {
+            key: StarterKey::Store(ItemRef {
+                repository_id: entry.origin.repository_id.clone(),
+                id: entry.entry.id.clone(),
+            }),
+            group: StarterGroup::Store,
+            title: entry.entry.name.clone(),
+            description: entry
+                .entry
+                .description
+                .as_deref()
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .unwrap_or(&entry.origin.repository_name)
+                .to_owned(),
+            file_types: ALL_FILES.to_owned(),
+        })
+        .collect()
+}
+
 /// Cartes regroupées dans l'ordre d'affichage ; un groupe vide n'apparaît pas.
 pub fn group_cards(cards: &[StarterCard]) -> Vec<(StarterGroup, Vec<StarterCard>)> {
     StarterGroup::ALL
@@ -101,7 +135,7 @@ pub fn group_cards(cards: &[StarterCard]) -> Vec<(StarterGroup, Vec<StarterCard>
 pub fn default_name(card: &StarterCard) -> String {
     match &card.key {
         StarterKey::Skeleton(skeleton) => skeleton.default_name().to_owned(),
-        StarterKey::Template(_) => card.title.clone(),
+        StarterKey::Template(_) | StarterKey::Store(_) => card.title.clone(),
     }
 }
 
@@ -120,6 +154,56 @@ mod tests {
             definition: json!({}),
             is_local,
         }
+    }
+
+    /// Entrées de Store `(type, identifiant)`.
+    fn store_entries(items: &[(&str, &str)]) -> Vec<StoreEntry> {
+        items
+            .iter()
+            .filter_map(|(kind, id)| {
+                serde_json::from_value(json!({
+                    "origin": {
+                        "repositoryId": "officiel",
+                        "repositoryUrl": "https://example.test/depot",
+                        "repositoryName": "Dépôt officiel"
+                    },
+                    "id": id,
+                    "type": kind,
+                    "version": "1.0.0",
+                    "name": format!("Flux {id}"),
+                    "manifestPath": format!("flows/{id}/manifest.json"),
+                    "description": "Convertit en MKV"
+                }))
+                .ok()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn store_cards_keep_only_flows_that_are_not_installed_yet() {
+        let mut entries = store_entries(&[
+            ("flow", "remux"),
+            ("plugin", "video"),
+            ("flow", "installe"),
+        ]);
+        assert_eq!(entries.len(), 3);
+        entries[2].install = InstallState::Installed {
+            version: "1.0.0".into(),
+            update: None,
+            damaged: false,
+        };
+        let cards = store_cards(&entries);
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].group, StarterGroup::Store);
+        assert_eq!(cards[0].title, "Flux remux");
+        assert_eq!(cards[0].description, "Convertit en MKV");
+        assert_eq!(
+            cards[0].key,
+            StarterKey::Store(ItemRef {
+                repository_id: "officiel".into(),
+                id: "remux".into()
+            })
+        );
     }
 
     #[test]

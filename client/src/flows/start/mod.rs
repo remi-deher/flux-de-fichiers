@@ -7,15 +7,21 @@ use super::editor::FlowEditor;
 use super::template_creation::create_flow_from_template;
 use super::{FlowPipelineSection, LOCAL_PATH};
 use crate::api;
+use crate::plugins::{InstallTarget, InstallWizard, SelectedItem};
 use crate::route::{Link, Route, use_router};
-use crate::ui::Toasts;
+use crate::ui::{Drawer, Toasts};
 use crate::ui::file_types_input::{ALL_FILES, FileTypesInput};
-use cards::{StarterCard, StarterKey, default_name, group_cards, skeleton_cards, template_cards};
+use cards::{
+    StarterCard, StarterKey, default_name, group_cards, skeleton_cards, store_cards, template_cards,
+};
+use forgearr_shared::Permission;
 use forgearr_shared::local::{LocalFlowTemplate, LocalLibrarySnapshot};
+use forgearr_shared::plugins::store::StoreEntry;
 use forgearr_shared::session::Me;
 use leptos::prelude::*;
 pub use skeleton::Skeleton;
 
+const STORE_PATH: &str = "/api/v1/store";
 const NAME_INPUT_ID: &str = "flow-start-name";
 const FILE_TYPES_INPUT_ID: &str = "flow-start-file-types";
 
@@ -48,14 +54,16 @@ pub fn NewFlow(me: Me) -> impl IntoView {
                 <FlowEditor me=me.clone() flow_id=None draft=chosen />
             }.into_any(),
             None => view! {
-                <FlowStart on_draft=Callback::new(move |chosen| draft.set(Some(chosen))) />
+                <FlowStart
+                    can_install=me.allows(Permission::ManagePlugins)
+                    on_draft=Callback::new(move |chosen| draft.set(Some(chosen))) />
             }.into_any(),
         }}
     }
 }
 
 #[component]
-fn FlowStart(on_draft: Callback<FlowDraft>) -> impl IntoView {
+fn FlowStart(can_install: bool, on_draft: Callback<FlowDraft>) -> impl IntoView {
     let router = use_router();
     let snapshot = LocalResource::new(|| api::get::<LocalLibrarySnapshot>(LOCAL_PATH));
     let templates = Memo::new(move |_| {
@@ -65,10 +73,28 @@ fn FlowStart(on_draft: Callback<FlowDraft>) -> impl IntoView {
             .map(|loaded| loaded.flow_templates)
             .unwrap_or_default()
     });
+    let store = LocalResource::new(move || async move {
+        if can_install {
+            api::get::<Vec<StoreEntry>>(STORE_PATH)
+                .await
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    });
     let cards = Memo::new(move |_| {
         let mut all = skeleton_cards();
         all.extend(template_cards(&templates.get()));
+        all.extend(store_cards(&store.get().unwrap_or_default()));
         all
+    });
+    let installing = RwSignal::new(None::<InstallTarget>);
+    let wizard_open = RwSignal::new(false);
+    let wizard_title = Signal::derive(move || {
+        installing
+            .get()
+            .map(|target| target.name)
+            .unwrap_or_default()
     });
 
     let initial = FlowDraft::default();
@@ -85,8 +111,9 @@ fn FlowStart(on_draft: Callback<FlowDraft>) -> impl IntoView {
             .get()
             .into_iter()
             .find(|template| template.id == id),
-        StarterKey::Skeleton(_) => None,
+        StarterKey::Skeleton(_) | StarterKey::Store(_) => None,
     });
+    let is_store = Memo::new(move |_| matches!(selected.get(), StarterKey::Store(_)));
 
     let create = Action::new_local(
         move |(template, chosen_name, mask): &(LocalFlowTemplate, String, String)| {
@@ -106,6 +133,17 @@ fn FlowStart(on_draft: Callback<FlowDraft>) -> impl IntoView {
     });
 
     let start = move |_| {
+        if let StarterKey::Store(item) = selected.get_untracked() {
+            let title = cards
+                .get_untracked()
+                .into_iter()
+                .find(|card| card.key == StarterKey::Store(item.clone()))
+                .map(|card| card.title)
+                .unwrap_or_default();
+            installing.set(Some(InstallTarget { item, name: title }));
+            wizard_open.set(true);
+            return;
+        }
         let chosen_name = name.get_untracked().trim().to_owned();
         if chosen_name.is_empty() {
             Toasts::notify_error("Donnez un nom au flux.");
@@ -121,7 +159,7 @@ fn FlowStart(on_draft: Callback<FlowDraft>) -> impl IntoView {
             (StarterKey::Template(_), Some(template)) => {
                 create.dispatch((template, chosen_name, mask));
             }
-            (StarterKey::Template(_), None) => {}
+            (StarterKey::Template(_) | StarterKey::Store(_), None) => {}
         }
     };
 
@@ -162,18 +200,28 @@ fn FlowStart(on_draft: Callback<FlowDraft>) -> impl IntoView {
                     })}
                 </div>
                 <aside class="flow-start__side">
-                    <div class="form-group">
-                        <label for=NAME_INPUT_ID class="form-label">"Nom du flux"</label>
-                        <input id=NAME_INPUT_ID type="text" class="form-input"
-                            prop:value=move || name.get()
-                            on:input=move |event| name.set(event_target_value(&event)) />
-                    </div>
-                    <div class="form-group">
-                        <label for=FILE_TYPES_INPUT_ID class="form-label">"Types de fichiers"</label>
-                        <FileTypesInput input_id=FILE_TYPES_INPUT_ID value=file_types
-                            on_change=Callback::new(move |value| file_types.set(value)) />
-                        <p class="form-help">"Les fichiers que ce flux traitera. Modifiable plus tard."</p>
-                    </div>
+                    {move || if is_store.get() {
+                        view! {
+                            <p class="form-help">
+                                "Ce modèle s'installe avec ses extensions et ses scripts, puis s'ouvre dans l'éditeur sous son propre nom et ses types de fichiers."
+                            </p>
+                        }.into_any()
+                    } else {
+                        view! {
+                            <div class="form-group">
+                                <label for=NAME_INPUT_ID class="form-label">"Nom du flux"</label>
+                                <input id=NAME_INPUT_ID type="text" class="form-input"
+                                    prop:value=move || name.get()
+                                    on:input=move |event| name.set(event_target_value(&event)) />
+                            </div>
+                            <div class="form-group">
+                                <label for=FILE_TYPES_INPUT_ID class="form-label">"Types de fichiers"</label>
+                                <FileTypesInput input_id=FILE_TYPES_INPUT_ID value=file_types
+                                    on_change=Callback::new(move |value| file_types.set(value)) />
+                                <p class="form-help">"Les fichiers que ce flux traitera. Modifiable plus tard."</p>
+                            </div>
+                        }.into_any()
+                    }}
                     {move || match selected_template.get() {
                         Some(template) => view! {
                             <FlowPipelineSection
@@ -185,10 +233,22 @@ fn FlowStart(on_draft: Callback<FlowDraft>) -> impl IntoView {
                     <button type="button" class="btn btn-primary"
                         disabled=move || create.pending().get()
                         on:click=start>
-                        "Créer et ouvrir l'éditeur"
+                        {move || if is_store.get() {
+                            "Installer et ouvrir l'éditeur"
+                        } else {
+                            "Créer et ouvrir l'éditeur"
+                        }}
                     </button>
                 </aside>
             </div>
+            <Drawer open=wizard_open eyebrow="Installation" title=wizard_title>
+                {move || installing.get().map(|target| view! {
+                    <InstallWizard
+                        target=target
+                        open=wizard_open
+                        on_open_plugin=Callback::new(|_: SelectedItem| {}) />
+                })}
+            </Drawer>
         </div>
     }
 }

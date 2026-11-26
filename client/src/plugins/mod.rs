@@ -37,7 +37,7 @@ use forgearr_shared::plugins::{
 };
 use forgearr_shared::session::Me;
 use forgearr_shared::{InstanceKind, Permission};
-use install::InstallWizard;
+pub(crate) use install::InstallWizard;
 use item_detail::CatalogItemDetail;
 use leptos::prelude::*;
 pub(crate) use metadata::{StatusBanner, StoreTone};
@@ -45,7 +45,8 @@ pub(crate) use pack_detail::{PackDetail, PackDrawerTab};
 use plugin_detail::{PluginDetail, PluginDrawerTab};
 use repos::ReposSection;
 pub(crate) use script_preview::highlighted_lines;
-use store::{InstallTarget, StoreSection};
+pub(crate) use store::InstallTarget;
+use store::StoreSection;
 use tool_detail::{ToolDetail, ToolDrawerTab};
 
 const REPOSITORIES_PATH: &str = "/api/v1/plugins/repositories";

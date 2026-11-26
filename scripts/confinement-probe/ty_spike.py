@@ -131,6 +131,13 @@ def label_of(item):
     return item.get("label", "?")
 
 
+def summarise(diagnostics):
+    return [
+        {"ligne": item["range"]["start"]["line"] + 1, "gravite": item.get("severity"),
+         "code": item.get("code"), "message": item.get("message", "")[:120]}
+        for item in diagnostics]
+
+
 def hover_text(result):
     contents = (result or {}).get("contents")
     if isinstance(contents, dict):
@@ -154,6 +161,7 @@ def main():
             "completion": {"completionItem": {"documentationFormat": ["markdown", "plaintext"]}},
             "hover": {"contentFormat": ["markdown", "plaintext"]},
             "publishDiagnostics": {},
+            "diagnostic": {"dynamicRegistration": False},
         }},
     })
     if reply is None:
@@ -170,10 +178,13 @@ def main():
         "uri": DOCUMENT_URI, "languageId": "python", "version": 1, "text": base_text}})
     diagnostics = client.wait_diagnostics()
     report["delai_premiers_diagnostics_s"] = round(time.monotonic() - started, 2)
-    report["diagnostics"] = None if diagnostics is None else [
-        {"ligne": item["range"]["start"]["line"] + 1, "gravite": item.get("severity"),
-         "code": item.get("code"), "message": item.get("message", "")[:120]}
-        for item in diagnostics]
+    report["diagnostics_pousses"] = None if diagnostics is None else summarise(diagnostics)
+    reply, took = client.request("textDocument/diagnostic", {"textDocument": {"uri": DOCUMENT_URI}})
+    pulled = (reply or {}).get("result") or {}
+    report["diagnostics_demandes"] = {
+        "reponse": reply is not None, "delai_s": round(took, 2), "type": pulled.get("kind"),
+        "erreur": (reply or {}).get("error"), "elements": summarise(pulled.get("items", []))}
+    report["capacite_diagnostics"] = capabilities.get("diagnosticProvider")
     version = 1
     for query in COMPLETION_QUERIES:
         version += 1

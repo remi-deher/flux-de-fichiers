@@ -570,7 +570,9 @@ pub fn WorkersPage(me: Me) -> impl IntoView {
             .and_then(|id| id.parse::<Uuid>().ok()),
     );
     Effect::new(move |_| {
-        let from_url = worker_selection.get().and_then(|id| id.parse::<Uuid>().ok());
+        let from_url = worker_selection
+            .get()
+            .and_then(|id| id.parse::<Uuid>().ok());
         if from_url.is_some() && selected.get_untracked() != from_url {
             selected.set(from_url);
         }

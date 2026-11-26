@@ -104,7 +104,10 @@ pub fn use_detail_drawer(kind: DrawerKind) -> (RwSignal<Option<String>>, RwSigna
     let url_kind = kind.clone();
     Effect::new(move |_| {
         let value = param.get();
-        match value.as_deref().and_then(|value| detail_id(value, &url_kind)) {
+        match value
+            .as_deref()
+            .and_then(|value| detail_id(value, &url_kind))
+        {
             Some(id) => {
                 if selected.get_untracked().as_ref() != Some(&id) {
                     selected.set(Some(id));
@@ -120,10 +123,14 @@ pub fn use_detail_drawer(kind: DrawerKind) -> (RwSignal<Option<String>>, RwSigna
     Effect::new(move |_| {
         let chosen = selected.get();
         let is_open = open.get();
-        let wanted = chosen.filter(|_| is_open).map(|id| detail_value(&kind, &id));
+        let wanted = chosen
+            .filter(|_| is_open)
+            .map(|id| detail_value(&kind, &id));
         let current = param.get_untracked();
         // Un tiroir d'un autre type reste ouvert : on ne l'écrase que pour fermer le nôtre.
-        let ours = current.as_deref().is_some_and(|v| detail_id(v, &kind).is_some());
+        let ours = current
+            .as_deref()
+            .is_some_and(|v| detail_id(v, &kind).is_some());
         if wanted != current && (wanted.is_some() || ours) {
             param.set(wanted);
         }

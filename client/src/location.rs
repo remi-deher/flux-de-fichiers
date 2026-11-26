@@ -187,12 +187,24 @@ mod tests {
         assert_eq!(plugins.route, Route::Plugins);
         assert_eq!(plugins.tab.as_deref(), Some("repos"));
         assert_eq!(Location::parse("/plugins", "").tab, None);
-        assert_eq!(Location::parse("/libraries/scripts", "").tab.as_deref(), Some("scripts"));
-        assert_eq!(Location::parse("/settings/keys", "").tab.as_deref(), Some("keys"));
-        assert_eq!(Location::parse("/jobs/logs", "").tab.as_deref(), Some("logs"));
+        assert_eq!(
+            Location::parse("/libraries/scripts", "").tab.as_deref(),
+            Some("scripts")
+        );
+        assert_eq!(
+            Location::parse("/settings/keys", "").tab.as_deref(),
+            Some("keys")
+        );
+        assert_eq!(
+            Location::parse("/jobs/logs", "").tab.as_deref(),
+            Some("logs")
+        );
         // Les écrans sans onglet n'en lisent pas, et un chemin trop long reste inconnu.
         assert_eq!(Location::parse("/workers", "").tab, None);
-        assert_eq!(Location::parse("/plugins/repos/x", "").route, Route::Overview);
+        assert_eq!(
+            Location::parse("/plugins/repos/x", "").route,
+            Route::Overview
+        );
     }
 
     #[test]

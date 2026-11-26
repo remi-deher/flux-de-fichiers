@@ -275,7 +275,11 @@ impl Router {
         let next = current.with_query(key, value);
         if value.is_none() && self.drawer_pushed.get_untracked() && next.query.render().is_empty() {
             self.drawer_pushed.set(false);
-            if window().history().and_then(|history| history.back()).is_ok() {
+            if window()
+                .history()
+                .and_then(|history| history.back())
+                .is_ok()
+            {
                 return;
             }
         }

@@ -50,7 +50,7 @@ pub(super) fn ScriptTrialPanel(
 
     view! {
         <p class="form-help">
-            "« Tester » exécute le code en cours d'édition (même non enregistré) sur le worker choisi, avec un fichier d'exemple vide. Aucun job ni historique n'est créé ; les secrets et réglages de plugin ne sont jamais envoyés."
+            "« Tester » exécute le code en cours d'édition (même non enregistré) sur le worker choisi, avec un fichier d'exemple vide. Aucun job ni historique n'est créé ; les secrets et réglages d'extension ne sont jamais envoyés."
         </p>
         <div class="form-group">
             <label class="form-label" for="trial-worker">"Worker"</label>

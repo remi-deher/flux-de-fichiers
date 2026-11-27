@@ -11,6 +11,7 @@ use super::versions::{FlowVersions, editable_graph};
 use crate::ai::AiAssistantState;
 use crate::api;
 use crate::route::{Link, Route, encode_segment, use_router};
+use crate::ui::file_types_input::FileTypesInput;
 use crate::ui::vocabulary;
 use crate::ui::{Icon, IconName, Toasts};
 use chrono::{DateTime, Utc};
@@ -82,27 +83,6 @@ fn FlowCommandBar(
     saving: Signal<bool>,
     on_save: Callback<()>,
 ) -> impl IntoView {
-    let editing_title = RwSignal::new(false);
-    let draft_title = RwSignal::new(String::new());
-    let title_input_ref = NodeRef::<leptos::html::Input>::new();
-
-    Effect::new(move |_| {
-        if editing_title.get()
-            && let Some(input) = title_input_ref.get()
-        {
-            let _ = input.focus();
-        }
-    });
-
-    let commit_title = move || {
-        let trimmed = draft_title.get_untracked().trim().to_owned();
-        if !trimmed.is_empty() && trimmed != meta.with_untracked(|r| r.name.clone()) {
-            meta.update(|record| record.name = trimmed);
-            editor.dirty.set(true);
-        }
-        editing_title.set(false);
-    };
-
     let toggle_palette = move || editor.toggle_palette();
 
     let toggle_settings = move || {
@@ -134,65 +114,33 @@ fn FlowCommandBar(
 
                 <div class="flow-command-bar__identity">
                     <div class="flow-command-bar__title-row">
-                        {move || {
-                            if editing_title.get() && can_manage {
-                                view! {
-                                    <input
-                                        node_ref=title_input_ref
-                                        type="text"
-                                        class="flow-title-input"
-                                        aria-label="Nom du flux"
-                                        prop:value=move || draft_title.get()
-                                        on:input=move |event| draft_title.set(event_target_value(&event))
-                                        on:blur=move |_| commit_title()
-                                        on:keydown=move |event| {
-                                            match event.key().as_str() {
-                                                "Enter" => {
-                                                    event.prevent_default();
-                                                    commit_title();
-                                                }
-                                                "Escape" => {
-                                                    event.prevent_default();
-                                                    editing_title.set(false);
-                                                }
-                                                _ => {}
-                                            }
-                                        }
-                                    />
-                                }
-                                .into_any()
-                            } else {
-                                view! {
-                                    <button
-                                        type="button"
-                                        class="flow-title-btn"
-                                        disabled=!can_manage
-                                        title="Cliquer pour renommer le flux"
-                                        on:click=move |_| {
-                                            if !can_manage {
-                                                return;
-                                            }
-                                            draft_title.set(meta.with_untracked(|r| r.name.clone()));
-                                            editing_title.set(true);
-                                        }
-                                    >
-                                        <span class="flow-title-btn__text">{move || meta.get().name}</span>
-                                    </button>
-                                }
-                                .into_any()
+                        <input
+                            id="flow-bar-name"
+                            type="text"
+                            class="flow-title-input"
+                            aria-label="Nom du flux"
+                            placeholder="Nom du flux"
+                            disabled=!can_manage
+                            prop:value=move || meta.get().name
+                            on:input=move |event| {
+                                meta.update(|record| record.name = event_target_value(&event));
+                                editor.dirty.set(true);
                             }
-                        }}
+                        />
                     </div>
 
                     <div class="flow-command-bar__pills">
-                        <button
-                            type="button"
-                            class="flow-pill flow-pill--mask text-mono"
-                            title="Modifier les types de fichiers et les réglages"
-                            on:click=move |_| toggle_settings()
-                        >
-                            {move || meta.get().file_mask}
-                        </button>
+                        <div class="flow-command-bar__types" role="group" aria-label=vocabulary::FILE_TYPES>
+                            <FileTypesInput
+                                input_id="flow-bar-file-types"
+                                value=Signal::derive(move || meta.get().file_mask)
+                                on_change=Callback::new(move |types: String| {
+                                    meta.update(|record| record.file_mask = types);
+                                    editor.dirty.set(true);
+                                })
+                                disabled=!can_manage
+                            />
+                        </div>
                         {move || meta.get().is_default.then(|| view! {
                             <span class="flow-pill flow-pill--default">"Par défaut"</span>
                         })}
@@ -357,32 +305,6 @@ fn FlowSettingsPane(
                         </header>
 
                         <div class="flow-inspector__body">
-                            <div class="form-group">
-                                <label for="flow-settings-name" class="form-label">"Nom du flux"</label>
-                                <input
-                                    id="flow-settings-name"
-                                    class="form-input"
-                                    disabled=!can_manage
-                                    prop:value=move || meta.get().name
-                                    on:input=move |event| {
-                                        meta.update(|r| r.name = event_target_value(&event));
-                                        editor.dirty.set(true);
-                                    }
-                                />
-                            </div>
-                            <div class="form-group">
-                                <label for="flow-settings-mask" class="form-label">{vocabulary::FILE_TYPES}</label>
-                                <input
-                                    id="flow-settings-mask"
-                                    class="form-input text-mono"
-                                    disabled=!can_manage
-                                    prop:value=move || meta.get().file_mask
-                                    on:input=move |event| {
-                                        meta.update(|r| r.file_mask = event_target_value(&event));
-                                        editor.dirty.set(true);
-                                    }
-                                />
-                            </div>
                             <div class="form-group">
                                 <label for="flow-settings-desc" class="form-label">"Description"</label>
                                 <input

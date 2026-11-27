@@ -10,6 +10,9 @@ pub const CREATE_PARAM: &str = "nouveau";
 /// Paramètre de requête qui désigne l'onglet du tiroir ouvert : `?onglet=<n>`.
 pub const DRAWER_TAB_PARAM: &str = "onglet";
 
+/// Paramètre de requête de l'éditeur de script : le flux d'où l'on vient, `?depuis=<flux>`.
+pub const FROM_PARAM: &str = "depuis";
+
 /// Écrans dont le second segment du chemin est un onglet (`/plugins/installed`).
 fn has_tabs(route: &Route) -> bool {
     matches!(

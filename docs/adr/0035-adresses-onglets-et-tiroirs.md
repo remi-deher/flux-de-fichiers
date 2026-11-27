@@ -40,6 +40,14 @@ une variable globale pour survivre au passage par l'éditeur de script.
   générés portent un suffixe). Les Bibliothèques perdent « Flux & Modèles » et « Scripts » ; l'éditeur de script
   garde ses routes `/app/libraries/scripts/…` jusqu'au lot 4 mais appartient à l'entrée Flux et y revient.
   Le composant `PageSubnav` (`client/src/ui/page_subnav.rs`) porte la rangée d'onglets des écrans migrés.
+- Fait au lot 4 : un seul éditeur de script (ADR 0030). L'inspecteur du bloc Script n'a plus de zone de code :
+  il choisit un script, ouvre « Modifier le script » ou « + Nouveau script » dans l'éditeur, et garde les
+  variables et le routage. Un ancien bloc à code direct (`mode: inline`, toujours exécuté par le moteur) se lit
+  dans l'inspecteur et s'enregistre en script. Les routes de l'éditeur deviennent `/app/flows/scripts/new` et
+  `/app/flows/scripts/<id>` (les anciennes `/app/libraries/scripts/…` restent lues). Ouvert depuis un flux,
+  l'éditeur porte `?depuis=<flux>` et y revient à sa fermeture (`libraries/script_origin.rs`) ; la garde de
+  sortie demande de confirmer si le flux n'est pas enregistré. L'éditeur n'est donc pas une couche au-dessus du
+  flux : c'est un écran, avec retour au flux.
 - Reste : les tiroirs des modèles de blocs et du nouveau flux ; la garde de sortie (`unsaved`) des tiroirs
   de formulaire. Le tiroir de l'Activité garde ses paramètres actuels (`?job=`, `?step=`, `jobs/query.rs`).
 - Un identifiant introuvable ouvre un tiroir vide ; le message « n'existe plus » reste à écrire.

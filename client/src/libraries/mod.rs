@@ -11,6 +11,7 @@ mod resources;
 mod rows;
 mod script_draft;
 mod script_editor;
+mod script_origin;
 mod script_trial;
 mod script_trial_panel;
 mod scripts;
@@ -43,6 +44,7 @@ use packs::LocalPacksSection;
 use resources::ResourcesSection;
 pub(crate) use script_draft::starter_script_code;
 pub use script_editor::ScriptEditor;
+pub(crate) use script_origin::script_editor_location;
 use scripts::ScriptsSection;
 
 const LIBRARIES_PATH: &str = "/api/v1/libraries";

@@ -62,6 +62,11 @@ impl Route {
             }
             (Some("libraries"), None, _) => Self::Libraries,
             (Some("libraries"), Some(_), None) => Self::Libraries,
+            (Some("flows"), Some("scripts"), Some("new")) if !extra => Self::NewScript,
+            (Some("flows"), Some("scripts"), Some(id)) if !id.is_empty() && !extra => {
+                Self::ScriptEditor(decode_segment(id))
+            }
+            // Anciennes adresses de l'éditeur (`/libraries/scripts/…`), avant le lot 4.
             (Some("libraries"), Some("scripts"), Some("new")) if !extra => Self::NewScript,
             (Some("libraries"), Some("scripts"), Some(id)) if !id.is_empty() && !extra => {
                 Self::ScriptEditor(decode_segment(id))
@@ -204,7 +209,8 @@ impl Router {
         self.go_to(Location::with_tab(route, tab));
     }
 
-    fn go_to(&self, location: Location) {
+    /// Ouvre l'adresse `location` (écran, onglet et requête), avec la garde de sortie.
+    pub fn go_to(&self, location: Location) {
         if needs_leave_confirmation(
             self.unsaved.get_untracked(),
             &self.current.get_untracked(),
@@ -434,6 +440,15 @@ mod tests {
     fn script_editor_routes_belong_to_the_flows_section() {
         assert_eq!(Route::NewScript.section(), Route::Flows);
         assert_eq!(Route::ScriptEditor("s".into()).section(), Route::Flows);
+        assert_eq!(Route::parse("/flows/scripts/new"), Route::NewScript);
+        assert_eq!(Route::NewScript.path(), "/flows/scripts/new");
+        assert_eq!(Route::ScriptEditor("s.1".into()).path(), "/flows/scripts/s.1");
+        assert_eq!(
+            Route::parse("/flows/scripts/script.a"),
+            Route::ScriptEditor("script.a".into())
+        );
+        assert_eq!(Route::parse("/flows/scripts/a/b"), Route::Overview);
+        // Les anciennes adresses restent lues.
         assert_eq!(Route::parse("/libraries/scripts/new"), Route::NewScript);
         assert_eq!(
             Route::parse("/app/libraries/scripts/script.a"),

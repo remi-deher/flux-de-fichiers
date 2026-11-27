@@ -8,6 +8,7 @@ pub(crate) mod flows;
 pub(crate) mod installation;
 pub(crate) mod jobs;
 mod keys;
+pub(crate) mod language;
 pub(crate) mod leases;
 pub(crate) mod libraries;
 pub(crate) mod local;
@@ -44,7 +45,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     routing::{get, post, put},
 };
-use forgearr_shared::{jobs::LeaseProtocol, live::EVENTS_PATH};
+use forgearr_shared::{jobs::LeaseProtocol, language::LANGUAGE_SESSION_PATH, live::EVENTS_PATH};
 use sqlx::{
     SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
@@ -87,6 +88,8 @@ pub struct AppState {
     pub local_worker_id: Arc<std::sync::OnceLock<uuid::Uuid>>,
     /// Partagé par ce que le central exécute hors d'un bail avec les outils de son cache ; la purge le prend seule.
     pub tools_in_use: Arc<tokio::sync::RwLock<()>>,
+    /// Plafond des serveurs de langage ouverts en même temps (ADR 0032).
+    pub language_sessions: crate::language::limit::SessionLimiter,
 }
 
 impl AppState {
@@ -118,6 +121,7 @@ impl AppState {
             ai_diagnosis: crate::ai::diagnosis::DiagnosisStore::new(),
             local_worker_id: Arc::new(std::sync::OnceLock::new()),
             tools_in_use: Arc::default(),
+            language_sessions: crate::language::limit::SessionLimiter::from_environment(),
         }
     }
 
@@ -194,7 +198,9 @@ fn is_ai_run_events_route(path: &str) -> bool {
 
 /// Routes dont la réponse peut durer bien au-delà d'un appel JSON.
 pub fn is_long_running_route(path: &str) -> bool {
-    if matches!(path, EVENTS_PATH | JOB_EVENTS_PATH) || is_ai_run_events_route(path) {
+    if matches!(path, EVENTS_PATH | JOB_EVENTS_PATH | LANGUAGE_SESSION_PATH)
+        || is_ai_run_events_route(path)
+    {
         return true;
     }
     let Some(rest) = path.strip_prefix("/api/v1/jobs/") else {
@@ -551,6 +557,7 @@ fn transfer_routes() -> Router<AppState> {
         .route("/api/v1/installations/apply", post(store::install))
         .route(EVENTS_PATH, get(events::all))
         .route(JOB_EVENTS_PATH, get(events::jobs))
+        .route(LANGUAGE_SESSION_PATH, get(language::session))
         .route("/api/v1/ai/runs/{id}/events", get(crate::ai::run_events))
         .route(
             "/api/v1/jobs/{id}/output",

@@ -12,7 +12,7 @@ rust-version = "1.99"
 anyhow = "1.0"
 argon2 = "0.5"
 forgearr-shared = { path = "shared", features = ["sqlx"] }
-axum = { version = "0.8", features = ["macros"] }
+axum = { version = "0.8", features = ["macros", "ws"] }
 chrono = { version = "0.4", features = ["serde"] }
 flate2 = "1.0"
 futures-util = "0.3"
@@ -32,6 +32,7 @@ tar = "0.4"
 thiserror = "2.0"
 tokio = { version = "1.48", features = ["full"] }
 tokio-util = { version = "0.7", features = ["io"] }
+tokio-tungstenite = "0.29"
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["trace", "request-id", "limit", "timeout", "fs"] }
 tracing = "0.1"

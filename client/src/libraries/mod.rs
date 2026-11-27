@@ -28,7 +28,7 @@ use crate::ui::{
     Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, StatusBadge, Tag,
     TagTone, Toasts,
 };
-use crate::url_state::{UrlTab, use_tab};
+use crate::url_state::{DrawerKind, UrlTab, use_detail_drawer, use_tab};
 use crate::{api, format};
 use draft::{LibraryDraft, access_label, is_ready, library_counts};
 use forgearr_shared::Permission;
@@ -172,8 +172,16 @@ fn MediaLibrariesSection(
     let can_manage = me.allows(Permission::ManageLibraries);
     let can_view_jobs = me.allows(Permission::ViewJobs);
     let can_manage_jobs = me.allows(Permission::ManageJobs);
-    let files_drawer = RwSignal::new(false);
-    let selected_library = RwSignal::new(None::<Library>);
+    let (files_library_id, files_drawer) = use_detail_drawer(DrawerKind::Library);
+    // La bibliothèque vient de la liste ; l'adresse ne porte que son identifiant.
+    let selected_library = Signal::derive(move || {
+        let id = files_library_id.get()?;
+        libraries
+            .get()
+            .and_then(Result::ok)?
+            .into_iter()
+            .find(|library| library.id.to_string() == id)
+    });
     let filters = use_context::<Filters>();
     let editing = RwSignal::new(None::<LibraryDraft>);
     let drawer = RwSignal::new(false);
@@ -338,7 +346,7 @@ fn MediaLibrariesSection(
                                 Some(view! {
                                     {can_view_jobs.then(|| view! {
                                         <button type="button" class="btn btn-secondary btn-sm"
-                                            on:click=move |event: leptos::ev::MouseEvent| { event.stop_propagation(); selected_library.set(Some(selected.clone())); files_drawer.set(true); }>
+                                            on:click=move |event: leptos::ev::MouseEvent| { event.stop_propagation(); files_library_id.set(Some(selected.id.to_string())); files_drawer.set(true); }>
                                             "Fichiers"
                                         </button>
                                     })}

@@ -131,8 +131,6 @@ pub struct Router {
     /// Onglet de l'écran (`None` : l'onglet par défaut) et paramètres de requête (tiroir ouvert…).
     tab: RwSignal<Option<String>>,
     query: RwSignal<Query>,
-    /// Vrai quand l'entrée d'historique courante a été poussée par l'ouverture d'un tiroir.
-    drawer_pushed: RwSignal<bool>,
     /// Vrai tant que l'écran affiché porte des modifications non enregistrées.
     unsaved: RwSignal<bool>,
 }
@@ -144,7 +142,6 @@ impl Router {
         let current = RwSignal::new(location.route);
         let tab = RwSignal::new(location.tab);
         let query = RwSignal::new(location.query);
-        let drawer_pushed = RwSignal::new(false);
         let unsaved = RwSignal::new(false);
         let on_pop = Closure::<dyn FnMut()>::new(move || {
             let location = browser_location();
@@ -159,7 +156,6 @@ impl Router {
                 });
                 return;
             }
-            drawer_pushed.set(false);
             tab.set(location.tab);
             query.set(location.query);
             current.set(target);
@@ -180,7 +176,6 @@ impl Router {
             current,
             tab,
             query,
-            drawer_pushed,
             unsaved,
         };
         provide_context(router);
@@ -215,7 +210,6 @@ impl Router {
             return;
         }
         self.write_history(&location, HistoryWrite::Push);
-        self.drawer_pushed.set(false);
         self.show(location);
     }
 
@@ -259,42 +253,26 @@ impl Router {
         }
         let next = current.with_tab_value(tab);
         self.write_history(&next, HistoryWrite::Push);
-        self.drawer_pushed.set(false);
         self.show(next);
     }
 
     /// Pose ou retire un paramètre de requête (tiroir ouvert, onglet du tiroir).
     ///
-    /// Ouvrir un tiroir pousse une entrée d'historique ; le fermer revient en arrière si c'est cette
-    /// entrée qui l'a ouvert (le bouton Retour ferme donc le tiroir), sinon remplace l'adresse.
+    /// Ouvrir un tiroir depuis une adresse sans requête pousse une entrée d'historique : Retour ferme
+    /// le tiroir. Tout autre changement (fermer, passer d'un tiroir à l'autre) remplace l'adresse.
     pub fn set_param(&self, key: &str, value: Option<&str>) {
         let current = self.location();
         if current.query.get(key) == value {
             return;
         }
         let next = current.with_query(key, value);
-        if value.is_none() && self.drawer_pushed.get_untracked() && next.query.render().is_empty() {
-            self.drawer_pushed.set(false);
-            if window()
-                .history()
-                .and_then(|history| history.back())
-                .is_ok()
-            {
-                return;
-            }
-        }
         let opening = current.query.render().is_empty() && value.is_some();
-        self.write_history(
-            &next,
-            if opening {
-                HistoryWrite::Push
-            } else {
-                HistoryWrite::Replace
-            },
-        );
-        if opening {
-            self.drawer_pushed.set(true);
-        }
+        let write = if opening {
+            HistoryWrite::Push
+        } else {
+            HistoryWrite::Replace
+        };
+        self.write_history(&next, write);
         self.show(next);
     }
 

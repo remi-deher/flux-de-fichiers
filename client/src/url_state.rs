@@ -1,14 +1,11 @@
 //! État d'écran porté par l'adresse (ADR 0033, lot 2) : onglet d'un écran, tiroir ouvert.
 //! Un lien copié rouvre le même onglet et le même tiroir ; Retour ferme le tiroir.
 
+use crate::location::{CREATE_PARAM, DETAIL_PARAM, DRAWER_TAB_PARAM};
 use crate::route::use_router;
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// Paramètre de requête qui désigne le tiroir de détail ouvert : `?voir=<type>.<id>`.
-pub const DETAIL_PARAM: &str = "voir";
-/// Paramètre de requête qui désigne le tiroir de création ouvert : `?nouveau=<type>`.
-pub const CREATE_PARAM: &str = "nouveau";
 /// Sépare le type de l'identifiant dans `?voir=flux.<id>`.
 const DETAIL_SEPARATOR: char = '.';
 
@@ -33,6 +30,16 @@ pub enum DrawerKind {
     Pack,
     #[serde(rename = "ressource")]
     Resource,
+    #[serde(rename = "extension")]
+    Extension,
+    #[serde(rename = "outil")]
+    Tool,
+    #[serde(rename = "element")]
+    CatalogItem,
+    #[serde(rename = "bibliotheque")]
+    Library,
+    #[serde(rename = "pack-local")]
+    LocalPack,
 }
 
 impl DrawerKind {
@@ -42,6 +49,11 @@ impl DrawerKind {
             .ok()
             .and_then(|value| value.as_str().map(str::to_owned))
             .unwrap_or_default()
+    }
+
+    /// Tiroir nommé par `slug` dans l'adresse ; `None` pour un nom inconnu.
+    pub fn from_slug(slug: &str) -> Option<Self> {
+        serde_json::from_value(serde_json::Value::String(slug.to_owned())).ok()
     }
 }
 
@@ -87,6 +99,27 @@ pub fn use_param(key: &'static str) -> RwSignal<Option<String>> {
     });
     Effect::new(move |_| router.set_param(key, value.get().as_deref()));
     value
+}
+
+/// Onglet du tiroir ouvert, lié à `?onglet=<n>` (le premier onglet n'écrit rien). Fermer ou changer
+/// de tiroir retire le paramètre (`Location::with_query`), et le signal revient au premier onglet.
+pub fn use_drawer_tab(tab: RwSignal<usize>) {
+    let param = use_param(DRAWER_TAB_PARAM);
+    let from_param = |value: Option<String>| value.and_then(|v| v.parse().ok()).unwrap_or(0);
+    tab.set(from_param(param.get_untracked()));
+    Effect::new(move |_| {
+        let from_url = from_param(param.get());
+        if tab.get_untracked() != from_url {
+            tab.set(from_url);
+        }
+    });
+    Effect::new(move |_| {
+        let chosen = tab.get();
+        let wanted = (chosen != 0).then(|| chosen.to_string());
+        if param.get_untracked() != wanted {
+            param.set(wanted);
+        }
+    });
 }
 
 /// Tiroir de création : ouvert tant que `?nouveau=<kind>` est dans l'adresse.
@@ -139,8 +172,15 @@ pub fn use_detail_drawer(kind: DrawerKind) -> (RwSignal<Option<String>>, RwSigna
 }
 
 /// Écrit `kind.id` pour `?voir=`.
-fn detail_value(kind: &str, id: &str) -> String {
+pub fn detail_value(kind: &str, id: &str) -> String {
     format!("{kind}{DETAIL_SEPARATOR}{id}")
+}
+
+/// Type et identifiant de `?voir=<kind>.<id>`, ou `None` si le type est inconnu ou l'identifiant vide.
+pub fn parse_detail(value: &str) -> Option<(DrawerKind, String)> {
+    let (slug, id) = value.split_once(DETAIL_SEPARATOR)?;
+    let kind = DrawerKind::from_slug(slug)?;
+    (!id.is_empty()).then(|| (kind, id.to_owned()))
 }
 
 /// Identifiant de `?voir=<kind>.<id>`, ou `None` si le paramètre désigne un autre type.
@@ -182,6 +222,22 @@ mod tests {
         assert_eq!(DrawerKind::FlowTemplate.slug(), "modele");
         assert_eq!(DrawerKind::Password.slug(), "mot-de-passe");
         assert_eq!(DrawerKind::Resource.slug(), "ressource");
+        assert_eq!(DrawerKind::CatalogItem.slug(), "element");
+        assert_eq!(DrawerKind::LocalPack.slug(), "pack-local");
+        assert_eq!(DrawerKind::from_slug("outil"), Some(DrawerKind::Tool));
+        assert_eq!(DrawerKind::from_slug("inconnu"), None);
+    }
+
+    #[test]
+    fn a_detail_value_is_read_back_with_its_drawer_kind() {
+        let value = detail_value(&DrawerKind::Extension.slug(), "plug.a");
+        assert_eq!(
+            parse_detail(&value),
+            Some((DrawerKind::Extension, "plug.a".to_owned()))
+        );
+        assert_eq!(parse_detail("inconnu.1"), None);
+        assert_eq!(parse_detail("outil."), None);
+        assert_eq!(parse_detail("outil"), None);
     }
 
     #[test]

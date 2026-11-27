@@ -10,7 +10,7 @@ use crate::ui::{
     Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
     Toasts,
 };
-use crate::url_state::{DrawerKind, use_create_drawer};
+use crate::url_state::{DrawerKind, use_create_drawer, use_detail_drawer, use_drawer_tab};
 use forgearr_shared::local::{CreateLocalPackRequest, LocalLibrarySnapshot};
 use forgearr_shared::plugins::vocab::CatalogItemType;
 use forgearr_shared::plugins::{CatalogEntry, PackComponent};
@@ -101,10 +101,9 @@ pub fn LocalPacksSection(
     let selected = RwSignal::new(HashSet::<String>::new());
     let feedback = RwSignal::new(None::<String>);
 
-    let inspect_open = RwSignal::new(false);
-    let inspect_id = RwSignal::new(None::<String>);
-    let inspect_name = RwSignal::new(String::new());
+    let (inspect_id, inspect_open) = use_detail_drawer(DrawerKind::LocalPack);
     let inspect_tab = RwSignal::new(0_usize);
+    use_drawer_tab(inspect_tab);
 
     Effect::new(move |_| {
         if !create_open.get() {
@@ -172,13 +171,12 @@ pub fn LocalPacksSection(
         });
     }
 
+    // Le nom vient de la liste ; l'adresse ne porte que l'identifiant.
     let inspect_title = Signal::derive(move || {
-        let name = inspect_name.get();
-        if name.is_empty() {
-            "Pack local".to_owned()
-        } else {
-            name
-        }
+        let id = inspect_id.get().unwrap_or_default();
+        let data = snapshot.get().and_then(Result::ok);
+        data.and_then(|data| data.packs.into_iter().find(|pack| pack.id == id))
+            .map_or_else(|| "Pack local".to_owned(), |pack| pack.name)
     });
 
     view! {
@@ -213,12 +211,10 @@ pub fn LocalPacksSection(
                         <div class="resource-grid resource-grid--list">
                             {shown.into_iter().map(|pack| {
                                 let pid = pack.id.clone();
-                                let pname = pack.name.clone();
                                 let card_id = pack.id.clone();
                                 let open_inspect = Callback::new(move |()| {
-                                    inspect_id.set(Some(pid.clone()));
-                                    inspect_name.set(pname.clone());
                                     inspect_tab.set(0);
+                                    inspect_id.set(Some(pid.clone()));
                                     inspect_open.set(true);
                                 });
                                 let active = Signal::derive(move || {

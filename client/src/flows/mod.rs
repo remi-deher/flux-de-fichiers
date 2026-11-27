@@ -39,7 +39,7 @@ use crate::ui::{
     Drawer, IconName, MetricTone, Registre, RegistreMessage, StatItem, StatStrip, StatusBadge, Tag,
     TagTone, Toasts, on_activate,
 };
-use crate::url_state::{DrawerKind, use_detail_drawer};
+use crate::url_state::{DrawerKind, use_detail_drawer, use_drawer_tab};
 use crate::{api, format};
 use forgearr_shared::Permission;
 use forgearr_shared::flows::{
@@ -687,6 +687,7 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
         }
     });
     let flow_tab = RwSignal::new(0_usize);
+    use_drawer_tab(flow_tab);
 
     let flows = LocalResource::new(move || {
         reload.track();

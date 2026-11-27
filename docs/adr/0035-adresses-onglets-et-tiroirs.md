@@ -20,8 +20,8 @@ une variable globale pour survivre au passage par l'éditeur de script.
    est l'énumération `DrawerKind` (Serde), jamais une chaîne libre. `use_detail_drawer` et
    `use_create_drawer` renvoient les signaux (`RwSignal<bool>` d'ouverture, identifiant sélectionné) que
    `Drawer` consomme déjà : le composant ne change pas.
-3. **Historique.** Ouvrir un tiroir pousse une entrée ; le fermer (croix, voile, Échap) revient en arrière si
-   c'est cette entrée qui l'a ouvert, et remplace l'adresse sinon. Retour ferme donc le tiroir.
+3. **Historique.** Ouvrir un tiroir depuis une adresse sans requête pousse une entrée (Retour le ferme) ;
+   fermer un tiroir ou passer de l'un à l'autre remplace l'adresse.
 4. **`Location`.** `client/src/location.rs` lit et écrit l'adresse complète (écran, onglet, requête), sans
    navigateur : analyse, rendu et aller-retour sont testés. Le `Router` porte l'onglet et la requête.
 
@@ -30,8 +30,10 @@ une variable globale pour survivre au passage par l'éditeur de script.
 - Fait au lot 2 : les quatre écrans à onglets (Bibliothèques, Extensions, Activité, Paramètres) ; les tiroirs
   de création (mot de passe, clé d'API, compte, worker, dépôt, pack, ressource) et de détail (worker, flux,
   modèle de flux).
-- Reste : les tiroirs de détail des Extensions (extension, pack, outil, élément, dépôt), de la bibliothèque,
-  du pack local, des modèles de blocs et du nouveau flux ; l'onglet du tiroir (`?onglet=`) ; la garde de
-  sortie (`unsaved`) des tiroirs de formulaire. Le tiroir de l'Activité garde ses paramètres actuels
-  (`?job=`, `?step=`, `jobs/query.rs`).
+- Fait au lot 2b : les tiroirs de détail des Extensions (`extension`, `pack`, `outil`, `element`), du dépôt
+  (`depot`), de la bibliothèque (`bibliotheque`) et du pack local (`pack-local`) ; l'onglet du tiroir
+  (`?onglet=<n>`, rang de l'onglet, le premier n'écrit rien). Ouvrir, changer ou fermer un tiroir retire
+  `onglet`. Une pièce du catalogue (`element`) s'ouvre dès que le catalogue est chargé.
+- Reste : les tiroirs des modèles de blocs et du nouveau flux ; la garde de sortie (`unsaved`) des tiroirs
+  de formulaire. Le tiroir de l'Activité garde ses paramètres actuels (`?job=`, `?step=`, `jobs/query.rs`).
 - Un identifiant introuvable ouvre un tiroir vide ; le message « n'existe plus » reste à écrire.

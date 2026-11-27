@@ -3,6 +3,7 @@
 mod catalog;
 mod exposed_variables;
 mod flow_preview;
+mod inspection;
 mod install;
 mod item_detail;
 mod metadata;
@@ -25,7 +26,7 @@ use crate::live::{load, use_live};
 use crate::route::encode_segment;
 use crate::ui::vocabulary;
 use crate::ui::{Drawer, IconName, Toasts};
-use crate::url_state::{DrawerKind, UrlTab, use_create_drawer, use_tab};
+use crate::url_state::{DrawerKind, UrlTab, use_create_drawer, use_drawer_tab, use_tab};
 use catalog::{CatalogSectionView, summarize_catalog};
 pub(crate) use flow_preview::{
     FlowMiniPreview, preview_from_definition_json, preview_from_job_steps,
@@ -38,6 +39,7 @@ use forgearr_shared::plugins::{
 use forgearr_shared::session::Me;
 use forgearr_shared::{InstanceKind, Permission};
 pub(crate) use install::InstallWizard;
+use inspection::{InspectionDrawers, InspectionTarget};
 use item_detail::CatalogItemDetail;
 use leptos::prelude::*;
 pub(crate) use metadata::{StatusBanner, StoreTone};
@@ -234,30 +236,6 @@ pub struct SelectedItem {
     pub name: String,
 }
 
-#[derive(Clone, PartialEq)]
-enum InspectionTarget {
-    Plugin(SelectedItem),
-    Pack(SelectedItem),
-    Tool(SelectedItem),
-    Item(Box<CatalogEntry>),
-}
-
-impl InspectionTarget {
-    fn id(&self) -> &str {
-        match self {
-            Self::Plugin(s) | Self::Pack(s) | Self::Tool(s) => &s.id,
-            Self::Item(entry) => &entry.id,
-        }
-    }
-
-    fn title(&self) -> String {
-        match self {
-            Self::Plugin(s) | Self::Pack(s) | Self::Tool(s) => s.name.clone(),
-            Self::Item(entry) => entry.name.clone(),
-        }
-    }
-}
-
 /// Fiche à jour d'une pièce ouverte ; retirée du catalogue, elle reste affichée telle quelle.
 fn current_entry(entries: &[CatalogEntry], opened: &CatalogEntry) -> CatalogEntry {
     entries
@@ -290,44 +268,33 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
     let adding_repo = use_create_drawer(DrawerKind::Repository);
 
     // Tiroir d'inspection unifié permettant la navigation croisée Plugin <-> Outil.
-    let target = RwSignal::new(None::<InspectionTarget>);
-    let plugin_open = RwSignal::new(false);
+    let drawers = InspectionDrawers::new();
+    let InspectionDrawers {
+        target,
+        plugin: plugin_open,
+        pack: pack_open,
+        tool: tool_open,
+        item: item_open,
+    } = drawers;
     let plugin_tab = RwSignal::new(0_usize);
-    let pack_open = RwSignal::new(false);
     let pack_tab = RwSignal::new(0_usize);
-    let tool_open = RwSignal::new(false);
     let tool_tab = RwSignal::new(0_usize);
-    let item_open = RwSignal::new(false);
-
-    let close_all_drawers = move || {
-        plugin_open.set(false);
-        pack_open.set(false);
-        tool_open.set(false);
-        item_open.set(false);
-    };
+    [plugin_tab, pack_tab, tool_tab].into_iter().for_each(use_drawer_tab);
 
     let open_plugin = Callback::new(move |item: SelectedItem| {
-        close_all_drawers();
-        target.set(Some(InspectionTarget::Plugin(item)));
         plugin_tab.set(0);
-        plugin_open.set(true);
+        drawers.show(InspectionTarget::Plugin(item));
     });
     let open_pack = Callback::new(move |item: SelectedItem| {
-        close_all_drawers();
-        target.set(Some(InspectionTarget::Pack(item)));
         pack_tab.set(0);
-        pack_open.set(true);
+        drawers.show(InspectionTarget::Pack(item));
     });
     let open_tool = Callback::new(move |item: SelectedItem| {
-        close_all_drawers();
-        target.set(Some(InspectionTarget::Tool(item)));
         tool_tab.set(0);
-        tool_open.set(true);
+        drawers.show(InspectionTarget::Tool(item));
     });
     let open_item = Callback::new(move |entry: CatalogEntry| {
-        close_all_drawers();
-        target.set(Some(InspectionTarget::Item(Box::new(entry))));
-        item_open.set(true);
+        drawers.show(InspectionTarget::Item(Box::new(entry)));
     });
 
     let active_item_id = Signal::derive(move || {
@@ -352,6 +319,8 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
         can_manage.then(|| load::<Vec<PluginRepository>>(REPOSITORY_TOPICS, REPOSITORIES_PATH));
     let catalog_entries =
         Signal::derive(move || catalog.get().and_then(Result::ok).unwrap_or_default());
+    let tool_list = Signal::derive(move || tools.get().and_then(Result::ok).unwrap_or_default());
+    drawers.sync_with_url(catalog_entries, tool_list);
 
     let tab_count = move |tab: PluginsTab| -> Option<usize> {
         match tab {

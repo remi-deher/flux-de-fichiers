@@ -177,42 +177,34 @@ pub const FLOWS_CSS: &str = r#"
   min-width: 0;
 }
 
-.flow-title-btn {
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-main);
-  font-size: var(--font-size-sm);
-  font-weight: 700;
-  padding: 0.12rem 0.45rem;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  text-align: left;
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
-}
-
-.flow-title-btn:hover:not(:disabled) {
-  background: var(--bg-subtle);
-  border-color: var(--border-color);
-}
-
-.flow-title-btn:disabled {
-  cursor: default;
-}
-
 .flow-title-input {
   font-size: var(--font-size-sm);
   font-weight: 700;
   padding: 0.18rem 0.5rem;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--primary);
-  background: var(--bg-elevated);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text-main);
   min-width: 200px;
   max-width: 280px;
+  text-overflow: ellipsis;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.flow-title-input:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--border-color);
+}
+
+.flow-title-input:focus {
+  background: var(--bg-elevated);
+  border-color: var(--primary);
+  outline: none;
+}
+
+.flow-command-bar__types {
+  min-width: 14rem;
+  max-width: 28rem;
 }
 
 .flow-command-bar__pills {
@@ -234,17 +226,6 @@ pub const FLOWS_CSS: &str = r#"
   background: var(--bg-subtle);
   color: var(--text-dim);
   line-height: 1.35;
-}
-
-.flow-pill--mask {
-  cursor: pointer;
-  color: var(--primary);
-  background: var(--primary-bg);
-  border-color: var(--border-highlight);
-}
-
-.flow-pill--mask:hover {
-  filter: brightness(1.08);
 }
 
 .flow-pill--default {

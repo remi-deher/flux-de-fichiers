@@ -10,8 +10,9 @@ use super::script_draft::{
 use super::script_trial::{ScriptTrial, TrialInput};
 use super::script_trial_panel::ScriptTrialPanel;
 use super::variables_editor::{VariablesEditor, rows_from, rows_to_variables, variable_names};
-use super::{LOCAL_PATH, LOCAL_SCRIPTS_PATH, LOCAL_TOPICS, LibraryTab};
+use super::{LOCAL_PATH, LOCAL_SCRIPTS_PATH, LOCAL_TOPICS};
 use crate::api;
+use crate::flows::FlowsTab;
 use crate::live::{Loaded, load, use_live};
 use crate::route::{Route, use_router};
 use crate::ui::{Tag, TagTone, Toasts};
@@ -151,7 +152,7 @@ pub fn ScriptEditor(me: Me, script_id: Option<String>) -> impl IntoView {
                 </p>
                 <div class="script-workbench__bar">
                     <button type="button" class="btn btn-secondary"
-                        on:click=move |_| router.go_tab(Route::Libraries, LibraryTab::Scripts.slug())>"Retour aux bibliothèques"</button>
+                        on:click=move |_| router.go_tab(Route::Flows, FlowsTab::Scripts.slug())>"Retour aux scripts"</button>
                 </div>
             </div>
         })}
@@ -286,7 +287,7 @@ fn ScriptForm(
         <form class="flow-workbench script-workbench" on:submit=submit>
             <header class="script-workbench__bar">
                 <button type="button" class="btn btn-secondary"
-                    on:click=move |_| router.go_tab(Route::Libraries, LibraryTab::Scripts.slug())>"← Bibliothèques"</button>
+                    on:click=move |_| router.go_tab(Route::Flows, FlowsTab::Scripts.slug())>"← Scripts"</button>
                 <h1 class="script-workbench__title">{move || page_title(&name.get())}</h1>
                 {move || dirty.get().then(|| view! { <Tag label="Modifié" tone=TagTone::Warning /> })}
                 <span class="script-workbench__spacer"></span>

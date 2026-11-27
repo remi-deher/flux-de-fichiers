@@ -14,7 +14,7 @@ pub const DRAWER_TAB_PARAM: &str = "onglet";
 fn has_tabs(route: &Route) -> bool {
     matches!(
         route,
-        Route::Jobs | Route::Libraries | Route::Plugins | Route::Settings
+        Route::Flows | Route::Jobs | Route::Libraries | Route::Plugins | Route::Settings
     )
 }
 
@@ -187,6 +187,7 @@ mod tests {
             Location::of(Route::Overview),
             Location::of(Route::Flows),
             Location::with_tab(Route::Plugins, "installed"),
+            Location::with_tab(Route::Flows, "modeles"),
             Location::with_tab(Route::Libraries, "scripts"),
             Location::with_tab(Route::Jobs, "logs").with_query("voir", Some("job.1")),
             Location::of(Route::Workers).with_query("nouveau", Some("worker")),

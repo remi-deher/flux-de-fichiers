@@ -12,7 +12,7 @@ une variable globale pour survivre au passage par l'éditeur de script.
 ## Décision
 
 1. **Onglet = second segment du chemin.** `/app/plugins/installed`, `/app/jobs/logs`, `/app/settings/keys`,
-   `/app/libraries/scripts`. L'onglet par défaut n'écrit aucun segment ; un nom inconnu ou un onglet non
+   `/app/flows/scripts`. L'onglet par défaut n'écrit aucun segment ; un nom inconnu ou un onglet non
    autorisé mène à l'onglet par défaut. Chaque écran à onglets déclare ses noms (`UrlTab`) et appelle
    `use_tab` : le signal d'onglet suit l'adresse et l'adresse suit le signal. Changer d'onglet ajoute une
    entrée d'historique et ferme le tiroir.
@@ -34,6 +34,12 @@ une variable globale pour survivre au passage par l'éditeur de script.
   (`depot`), de la bibliothèque (`bibliotheque`) et du pack local (`pack-local`) ; l'onglet du tiroir
   (`?onglet=<n>`, rang de l'onglet, le premier n'écrit rien). Ouvrir, changer ou fermer un tiroir retire
   `onglet`. Une pièce du catalogue (`element`) s'ouvre dès que le catalogue est chargé.
+- Fait au lot 3 : l'écran Flux a trois onglets, `/app/flows` (Flux, par défaut), `/app/flows/modeles` et
+  `/app/flows/scripts` (`FlowsTab`, `client/src/flows/screen.rs`). Les onglets passent avant l'identifiant d'un
+  flux dans `Route::parse` : un flux nommé `flux`, `modeles` ou `scripts` serait masqué (les identifiants
+  générés portent un suffixe). Les Bibliothèques perdent « Flux & Modèles » et « Scripts » ; l'éditeur de script
+  garde ses routes `/app/libraries/scripts/…` jusqu'au lot 4 mais appartient à l'entrée Flux et y revient.
+  Le composant `PageSubnav` (`client/src/ui/page_subnav.rs`) porte la rangée d'onglets des écrans migrés.
 - Reste : les tiroirs des modèles de blocs et du nouveau flux ; la garde de sortie (`unsaved`) des tiroirs
   de formulaire. Le tiroir de l'Activité garde ses paramètres actuels (`?job=`, `?step=`, `jobs/query.rs`).
 - Un identifiant introuvable ouvre un tiroir vide ; le message « n'existe plus » reste à écrire.

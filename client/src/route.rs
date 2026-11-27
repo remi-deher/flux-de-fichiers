@@ -3,7 +3,9 @@
 use leptos::prelude::*;
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 
+use crate::flows::FlowsTab;
 use crate::location::{Location, Query};
+use crate::url_state::UrlTab;
 use forgearr_shared::app;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,6 +55,8 @@ impl Route {
             (Some("jobs"), None, _) | (Some("jobs"), Some(_), None) => Self::Jobs,
             (Some("flows"), None, _) => Self::Flows,
             (Some("flows"), Some("new"), None) => Self::NewFlow,
+            // Les onglets de l'écran Flux passent avant l'identifiant d'un flux.
+            (Some("flows"), Some(tab), None) if FlowsTab::from_slug(tab).is_some() => Self::Flows,
             (Some("flows"), Some(id), None) if !id.is_empty() => {
                 Self::FlowEditor(decode_segment(id))
             }
@@ -73,7 +77,7 @@ impl Route {
     pub fn section(&self) -> Self {
         match self {
             Self::FlowEditor(_) => Self::Flows,
-            Self::NewScript | Self::ScriptEditor(_) => Self::Libraries,
+            Self::NewScript | Self::ScriptEditor(_) => Self::Flows,
             other => other.clone(),
         }
     }
@@ -414,9 +418,22 @@ mod tests {
     }
 
     #[test]
-    fn script_editor_routes_belong_to_the_libraries_section() {
-        assert_eq!(Route::NewScript.section(), Route::Libraries);
-        assert_eq!(Route::ScriptEditor("s".into()).section(), Route::Libraries);
+    fn the_flows_screen_has_tabs_that_come_before_flow_identifiers() {
+        assert_eq!(Route::parse("/app/flows/modeles"), Route::Flows);
+        assert_eq!(Route::parse("/flows/scripts"), Route::Flows);
+        assert_eq!(Route::parse("/flows/flux"), Route::Flows);
+        assert_eq!(Route::parse("/flows/new"), Route::NewFlow);
+        assert_eq!(
+            Route::parse("/flows/mon-flux.a1"),
+            Route::FlowEditor("mon-flux.a1".into())
+        );
+        assert_eq!(Route::parse("/flows/scripts/x"), Route::Overview);
+    }
+
+    #[test]
+    fn script_editor_routes_belong_to_the_flows_section() {
+        assert_eq!(Route::NewScript.section(), Route::Flows);
+        assert_eq!(Route::ScriptEditor("s".into()).section(), Route::Flows);
         assert_eq!(Route::parse("/libraries/scripts/new"), Route::NewScript);
         assert_eq!(
             Route::parse("/app/libraries/scripts/script.a"),

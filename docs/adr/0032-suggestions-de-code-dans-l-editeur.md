@@ -1,6 +1,6 @@
 # 0032 — Suggestions de code dans l'éditeur de script
 
-Statut : proposé ; phase (a) livrée en 0.87.0 ; phases (b) et (c) cadrées le 26 nov. 2026 avec l'utilisateur, code à venir. Demande de l'utilisateur le 24 nov. 2026 : des suggestions « comme dans un vrai IDE », par intelligence de langage (LSP). Complète l'ADR 0030.
+Statut : proposé ; phase (a) livrée en 0.87.0 ; phases (b) et (c) cadrées le 26 nov. 2026 avec l'utilisateur ; lots b0 et b1 écrits, la suite à venir. Demande de l'utilisateur le 24 nov. 2026 : des suggestions « comme dans un vrai IDE », par intelligence de langage (LSP). Complète l'ADR 0030.
 
 ## Contexte
 
@@ -36,6 +36,14 @@ Phaser : (a) liste de suggestions côté client sans serveur de langage, qui ser
 - **c3 — diagnostics Forgearr.** Règles pures, utiles même sans serveur installé : `nextPort` inconnu du bloc, variable lue mais non déclarée, sortie JSON absente. Après c1.
 
 b0 et b1 avancent en parallèle (b1 se teste avec un faux serveur sur `tokio::io::duplex`).
+
+## Lot b1 écrit
+
+- **Messages.** `shared/src/language.rs` : `ClientMessage` (`open`, `change`, `complete`, `hover`, `close`) et `ServerMessage` (`ready`, `diagnostics`, `completion`, `hover`, `unavailable`), étiquetés par `type`, en `camelCase`. Le serveur de langage d'un interpréteur est décidé par `LanguageServer::for_interpreter`.
+- **Route.** `GET /api/v1/language/session?interpreter=…`, droit `manage_plugins`, cookie de session (le navigateur ne pose pas d'en-tête), `Origin` contrôlé, messages de la page limités à 1 Mio, droits revérifiés toutes les 30 s. Quand aucun serveur ne répond, la page reçoit `unavailable` (`interpreter-unsupported`, `server-missing`, `limit-reached`, `server-stopped`) puis la fermeture, et garde sa liste (a).
+- **Session.** `src/language/session.rs` relaie sur des flux génériques : poignée de main de 15 s, requête bornée à 2 s, 64 Kio par message du serveur, 200 suggestions, arrêt après 10 min sans message de la page. Les diagnostics sont poussés dès que le serveur les publie, ou tirés (`textDocument/diagnostic`) quand il le propose. Les imports Python tiers non résolus sont masqués.
+- **Lancement.** `src/language/launch.rs` : `sandbox-exec` (ADR 0034) avec lecture du dossier de l'application `langages`, écriture dans `<données>/language/<session>` (supprimé à la fin, porte `HOME` et les caches), aucun réseau, environnement vidé. La session retient `tools_in_use` : la purge des outils attend sa fin. Plafond de 4 sessions (`LANGUAGE_SESSIONS_MAX`, 32 au plus).
+- **Reverse proxy.** Le canal est un WebSocket : le proxy doit transmettre `Upgrade` et `Connection`, et ne pas couper une connexion inactive trop vite (la page ne parle que lorsque l'utilisateur tape ; nginx : `proxy_http_version 1.1`, `proxy_set_header Upgrade $http_upgrade`, `proxy_set_header Connection "upgrade"`, `proxy_read_timeout` d'au moins 10 min).
 
 ## Phase (a) écrite
 

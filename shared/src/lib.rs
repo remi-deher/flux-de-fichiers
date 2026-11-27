@@ -18,6 +18,7 @@ pub mod flows;
 pub mod format;
 pub mod highlight;
 pub mod jobs;
+pub mod language;
 pub mod libraries;
 pub mod live;
 pub mod local;

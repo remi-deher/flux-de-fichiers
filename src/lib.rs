@@ -20,6 +20,7 @@ pub mod flows;
 pub mod hardware_probe;
 pub mod instance;
 pub mod job_runner;
+pub mod language;
 pub mod lease_sweeper;
 pub mod library_scan;
 pub mod live;

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.91.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.90.0...v0.91.0) (2026-11-25)
+
+
+### Features
+
+* **store:** Packs recommandés dans le Store ([12dc75e](https://github.com/remi-deher/flux-de-fichiers/commit/12dc75edec4f44eb0d57900061f59ffbc15a4d8f))
+* **store:** Packs recommandés dans le Store, retirés de l'onglet Installés ([4aff564](https://github.com/remi-deher/flux-de-fichiers/commit/4aff564147247787a7586c9c52f70ff4bf87d671))
+
 ## [0.90.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.89.1...v0.90.0) (2026-11-25)
 
 

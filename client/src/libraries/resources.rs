@@ -13,6 +13,7 @@ use crate::ui::{
     Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, Tag, TagTone,
     Toasts,
 };
+use crate::url_state::{DrawerKind, use_create_drawer};
 use forgearr_shared::base64;
 use forgearr_shared::flows::FlowRecord;
 use forgearr_shared::local::{
@@ -73,7 +74,7 @@ pub fn ResourcesSection(
 ) -> impl IntoView {
     let live = use_live();
     let filter = RwSignal::new(ResourcesKindFilter::All);
-    let upload_open = RwSignal::new(false);
+    let upload_open = use_create_drawer(DrawerKind::Resource);
     let template_open = RwSignal::new(false);
     let template_draft = RwSignal::new(None::<BlockTemplateDraft>);
     let feedback = RwSignal::new(None::<String>);
@@ -112,7 +113,7 @@ pub fn ResourcesSection(
     Effect::new(move |_| match upload.value().get() {
         Some(Ok(_)) => {
             upload_open.set(false);
-            Toasts::notify_success("Fichier enregistré dans la librairie locale.");
+            Toasts::notify_success("Fichier enregistré.");
             live.touch(LOCAL_TOPICS);
         }
         Some(Err(err)) => Toasts::set_error(feedback, err.message()),

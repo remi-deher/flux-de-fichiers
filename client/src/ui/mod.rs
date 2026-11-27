@@ -4,6 +4,7 @@ mod brand_mark;
 pub mod command_palette;
 pub mod drawer;
 pub mod empty_state;
+pub mod file_types_input;
 pub mod filters;
 pub mod focus;
 pub mod folder_picker;
@@ -20,6 +21,7 @@ pub mod status_badge;
 pub mod toast;
 pub mod topbar_action;
 pub mod variables_table;
+pub mod vocabulary;
 pub mod window_listener;
 
 pub use brand_mark::BrandMark;

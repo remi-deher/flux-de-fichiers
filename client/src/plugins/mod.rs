@@ -23,7 +23,9 @@ mod uninstall;
 use crate::api;
 use crate::live::{load, use_live};
 use crate::route::encode_segment;
+use crate::ui::vocabulary;
 use crate::ui::{Drawer, IconName, Toasts};
+use crate::url_state::{DrawerKind, UrlTab, use_create_drawer, use_tab};
 use catalog::{CatalogSectionView, summarize_catalog};
 pub(crate) use flow_preview::{
     FlowMiniPreview, preview_from_definition_json, preview_from_job_steps,
@@ -35,7 +37,7 @@ use forgearr_shared::plugins::{
 };
 use forgearr_shared::session::Me;
 use forgearr_shared::{InstanceKind, Permission};
-use install::InstallWizard;
+pub(crate) use install::InstallWizard;
 use item_detail::CatalogItemDetail;
 use leptos::prelude::*;
 pub(crate) use metadata::{StatusBanner, StoreTone};
@@ -43,7 +45,8 @@ pub(crate) use pack_detail::{PackDetail, PackDrawerTab};
 use plugin_detail::{PluginDetail, PluginDrawerTab};
 use repos::ReposSection;
 pub(crate) use script_preview::highlighted_lines;
-use store::{InstallTarget, StoreSection};
+pub(crate) use store::InstallTarget;
+use store::StoreSection;
 use tool_detail::{ToolDetail, ToolDrawerTab};
 
 const REPOSITORIES_PATH: &str = "/api/v1/plugins/repositories";
@@ -140,8 +143,8 @@ pub(super) fn section_badge_label(entry_type: CatalogItemType) -> &'static str {
         return sub;
     }
     match entry_type.section() {
-        Some(CatalogSection::Plugins) => "Plugin",
-        Some(CatalogSection::Flows) => "Flow",
+        Some(CatalogSection::Plugins) => vocabulary::EXTENSION,
+        Some(CatalogSection::Flows) => vocabulary::FLOW,
         Some(CatalogSection::Scripts) => "Script",
         Some(CatalogSection::Packs) => "Pack",
         Some(CatalogSection::Applications) => "Application",
@@ -162,10 +165,10 @@ fn section_fallback_desc(entry_type: CatalogItemType) -> &'static str {
             "Script appelé par un bloc de flux pour une étape sur mesure."
         }
         Some(CatalogSection::Packs) => {
-            "Installe d'un coup des plugins, flux et ressources prévus pour fonctionner ensemble."
+            "Installe d'un coup des extensions, flux et ressources prévus pour fonctionner ensemble."
         }
         Some(CatalogSection::Applications) => {
-            "Programme installé sur les nœuds (FFmpeg, MKVToolNix…) et utilisé par les plugins."
+            "Programme installé sur les workers (FFmpeg, MKVToolNix…) et utilisé par les extensions."
         }
         Some(CatalogSection::Other) | None => {
             "Ressource utilisée par les flux : police, image, sous-titre, préréglage…"
@@ -194,7 +197,7 @@ pub enum PluginsTab {
 impl PluginsTab {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Store => "Store",
+            Self::Store => vocabulary::CATALOGUE,
             Self::Installed => "Installés",
             Self::Repositories => "Dépôts",
         }
@@ -206,6 +209,22 @@ impl PluginsTab {
         } else {
             &[Self::Store, Self::Installed]
         }
+    }
+}
+
+impl UrlTab for PluginsTab {
+    fn slug(self) -> &'static str {
+        match self {
+            Self::Store => "catalogue",
+            Self::Installed => "installed",
+            Self::Repositories => "repos",
+        }
+    }
+
+    fn from_slug(slug: &str) -> Option<Self> {
+        [Self::Store, Self::Installed, Self::Repositories]
+            .into_iter()
+            .find(|tab| tab.slug() == slug)
     }
 }
 
@@ -252,7 +271,10 @@ fn current_entry(entries: &[CatalogEntry], opened: &CatalogEntry) -> CatalogEntr
 pub fn PluginsPage(me: Me) -> impl IntoView {
     let central = me.instance_kind == InstanceKind::Central;
     let can_manage = central && me.allows(Permission::ManagePlugins);
-    let active_tab = RwSignal::new(PluginsTab::Store);
+    let active_tab = use_tab(
+        PluginsTab::default(),
+        PluginsTab::visible_tabs(can_manage).to_vec(),
+    );
     let installing = RwSignal::new(None::<InstallTarget>);
     let wizard_open = RwSignal::new(false);
     let open_wizard = Callback::new(move |target: InstallTarget| {
@@ -265,7 +287,7 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
             .map(|target| target.name)
             .unwrap_or_default()
     });
-    let adding_repo = RwSignal::new(false);
+    let adding_repo = use_create_drawer(DrawerKind::Repository);
 
     // Tiroir d'inspection unifié permettant la navigation croisée Plugin <-> Outil.
     let target = RwSignal::new(None::<InspectionTarget>);
@@ -379,7 +401,7 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
             </Drawer>
             <Drawer
                 open=plugin_open
-                eyebrow="Plugin"
+                eyebrow=vocabulary::EXTENSION
                 title=drawer_title
                 tabs=PluginDrawerTab::tabs(can_manage).to_vec()
                 tab=plugin_tab
@@ -591,8 +613,8 @@ mod tests {
 
     #[test]
     fn badge_labels_cover_all_catalog_item_types() {
-        assert_eq!(section_badge_label(CatalogItemType::Plugin), "Plugin");
-        assert_eq!(section_badge_label(CatalogItemType::Flow), "Flow");
+        assert_eq!(section_badge_label(CatalogItemType::Plugin), "Extension");
+        assert_eq!(section_badge_label(CatalogItemType::Flow), "Flux");
         assert_eq!(section_badge_label(CatalogItemType::Script), "Script");
         assert_eq!(section_badge_label(CatalogItemType::Pack), "Pack");
         assert_eq!(
@@ -603,5 +625,14 @@ mod tests {
             section_badge_label(CatalogItemType::ResourceFont),
             "Polices"
         );
+    }
+
+    #[test]
+    fn extension_tabs_are_named_in_the_address_and_read_back() {
+        for tab in PluginsTab::visible_tabs(true) {
+            assert_eq!(PluginsTab::from_slug(tab.slug()), Some(*tab));
+        }
+        assert_eq!(PluginsTab::Store.slug(), "catalogue");
+        assert_eq!(PluginsTab::from_slug("store"), None);
     }
 }

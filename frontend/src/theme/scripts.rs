@@ -155,6 +155,60 @@ pub const SCRIPTS_CSS: &str = r#"
   display: none;
 }
 
+/* --- Panneau « Essai » (ADR 0031) --- */
+.script-trial__result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.script-trial__response {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.3rem 0.75rem;
+  margin: 0;
+  align-items: start;
+}
+
+.script-trial__response dt {
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+
+.script-trial__response dd {
+  margin: 0;
+}
+
+.script-trial__details {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+}
+
+.script-trial__summary {
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+.script-trial__stream {
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  max-height: 16rem;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.script-trial__response .script-trial__stream {
+  padding: 0;
+  max-height: 8rem;
+}
+
 @media (max-width: 960px) {
   .script-workbench__body {
     grid-template-columns: 1fr;

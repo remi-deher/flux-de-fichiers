@@ -24,7 +24,7 @@ use tokio::{
 /// Intervalle des messages de maintien du flux d'événements, pour traverser les proxys.
 const SSE_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
 /// Délai au bout duquel une session expirée, révoquée ou privée de ses droits perd son flux.
-const ACCESS_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+pub(super) const ACCESS_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 /// Un événement SSE sans donnée n'est jamais remis au navigateur.
 const EMPTY_DATA: &str = "{}";
 

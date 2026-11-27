@@ -343,6 +343,23 @@ paths:
           content:
             text/event-stream: {schema: {type: string}}
         default: {$ref: '#/components/responses/Error'}
+  /api/v1/language/session:
+    get:
+      security: [{ApiKey: []}, {WebSession: []}]
+      summary: >-
+        Canal WebSocket des suggestions de code de l'éditeur de script (ADR 0032), droit `manage_plugins`.
+        Messages JSON typés (`open`, `change`, `complete`, `hover`, `close` de la page ; `ready`, `diagnostics`,
+        `completion`, `hover`, `unavailable` du central), jamais de JSON-RPC brut. L'en-tête `Origin` doit
+        être celui du central. Un message illisible, binaire ou de plus de 1 Mio ferme le canal ; l'accès est
+        revérifié toutes les 30 s. Un `unavailable` précède la fermeture quand aucun serveur de langage ne
+        répond (interpréteur non pris en charge, application `langages` absente, plafond atteint).
+      parameters:
+        - {in: query, name: interpreter, required: true, schema: {type: string, enum: [sh, bash, python3, node, deno, bun, pwsh]}}
+      responses:
+        '101': {description: Passage au protocole WebSocket.}
+        '400': {description: Interpréteur inconnu.}
+        '403': {description: Droit ou origine refusés.}
+        default: {$ref: '#/components/responses/Error'}
   /api/v1/jobs/failures:
     get:
       security: [{ApiKey: []}, {WebSession: []}]

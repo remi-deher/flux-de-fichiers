@@ -15,7 +15,7 @@ inchangé, les gabarits par interpréteur existent déjà (`starter_script_code`
 
 1. **Deux routes.** `/app/flows/scripts/new` et `/app/flows/scripts/<id>` (ADR 0035, lot 4 ; d'abord
    `/app/libraries/scripts/…`, toujours lues) (`Route::NewScript`,
-   `Route::ScriptEditor(id)`), rattachées à l'entrée « Librairies » de la navigation, comme `FlowEditor` l'est à
+   `Route::ScriptEditor(id)`), rattachées à l'entrée « Flux » de la navigation (lot 4 ; d'abord « Librairies »), comme `FlowEditor` l'est à
    « Flux ». Le tiroir de création est retiré ; la carte d'un script ouvre la page.
 2. **Mise en page.** Zone de code à gauche (numéros de ligne, police fixe, tabulation qui insère deux espaces — Échap libère la touche Tab une fois, pour quitter la zone au clavier ;
    coloration en direct) ; panneau à droite : nom et interpréteur, puis onglets « Informations », « Variables »

@@ -357,7 +357,11 @@ async fn a_server_request_during_the_handshake_does_not_block_it() -> TestResult
     let mut server = start();
     let initialize = server.heard().await?;
     server
-        .says(protocol::request(60, "client/registerCapability", json!({})))
+        .says(protocol::request(
+            60,
+            "client/registerCapability",
+            json!({}),
+        ))
         .await?;
     server
         .says(json!({"jsonrpc": "2.0", "id": initialize["id"], "result": {"capabilities": {}}}))

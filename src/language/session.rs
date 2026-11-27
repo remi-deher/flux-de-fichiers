@@ -162,8 +162,12 @@ impl<W: AsyncWrite + Unpin> Session<W> {
     /// entre-temps reçoivent leur réponse. La page est prévenue par `Ready`.
     async fn handshake(&mut self, frames: &mut mpsc::Receiver<Value>) -> Flow {
         let params = protocol::initialize_params(self.spec.process_id, self.spec.id);
-        self.send(protocol::request(INITIALIZE_ID, protocol::INITIALIZE, params))
-            .await?;
+        self.send(protocol::request(
+            INITIALIZE_ID,
+            protocol::INITIALIZE,
+            params,
+        ))
+        .await?;
         let deadline = Instant::now() + self.spec.timings.handshake;
         loop {
             let received = timeout_at(deadline, frames.recv())
@@ -348,7 +352,11 @@ impl<W: AsyncWrite + Unpin> Session<W> {
     /// de toute façon tué à la fin.
     async fn shutdown(&mut self) {
         let _ = self
-            .send(protocol::request(SHUTDOWN_ID, protocol::SHUTDOWN, Value::Null))
+            .send(protocol::request(
+                SHUTDOWN_ID,
+                protocol::SHUTDOWN,
+                Value::Null,
+            ))
             .await;
         let _ = self
             .send(protocol::notification(protocol::EXIT, Value::Null))

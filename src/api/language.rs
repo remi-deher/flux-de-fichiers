@@ -22,9 +22,7 @@ use axum::{
 };
 use forgearr_shared::{
     Permission,
-    language::{
-        LANGUAGE_TOOL_ID, LanguageServer, MAX_CLIENT_MESSAGE_BYTES, UnavailableReason,
-    },
+    language::{LANGUAGE_TOOL_ID, LanguageServer, MAX_CLIENT_MESSAGE_BYTES, UnavailableReason},
     local::ScriptInterpreter,
 };
 use serde::Deserialize;
@@ -110,7 +108,13 @@ async fn start(
         .ok_or(LaunchError::Missing(LANGUAGE_TOOL_ID))?;
     let launcher =
         std::env::current_exe().map_err(|error| LaunchError::Failed(error.to_string()))?;
-    launch::launch(&launcher, &tool_dir, &state.config.data_dir, server, session)
+    launch::launch(
+        &launcher,
+        &tool_dir,
+        &state.config.data_dir,
+        server,
+        session,
+    )
 }
 
 /// L'appelant a-t-il encore le droit de gérer les applications ? Une base momentanément indisponible ne

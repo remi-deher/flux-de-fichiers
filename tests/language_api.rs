@@ -26,9 +26,7 @@ use tokio::{
 };
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
-    tungstenite::{
-        Error as WebSocketError, Message, client::IntoClientRequest, http::HeaderValue,
-    },
+    tungstenite::{Error as WebSocketError, Message, client::IntoClientRequest, http::HeaderValue},
 };
 use uuid::Uuid;
 
@@ -248,7 +246,15 @@ async fn relayed(upgrade: WebSocketUpgrade, check_every: Duration, allowed: bool
         };
         let reader = BufReader::new(session_reader);
         let still_allowed = || async move { allowed };
-        relay(socket, spec, reader, session_writer, check_every, still_allowed).await;
+        relay(
+            socket,
+            spec,
+            reader,
+            session_writer,
+            check_every,
+            still_allowed,
+        )
+        .await;
     })
 }
 

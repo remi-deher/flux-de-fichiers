@@ -148,8 +148,7 @@ fn suggestion_kind(code: Option<u64>) -> SuggestionKind {
 fn suggestion_from(item: &Value) -> Option<Suggestion> {
     let label = truncated(item.get("label")?.as_str()?, MAX_FIELD_CHARS);
     let text_of = |field: &str| {
-        item
-            .get(field)
+        item.get(field)
             .and_then(Value::as_str)
             .map(|text| truncated(text, MAX_FIELD_CHARS))
             .filter(|text| !text.is_empty())
@@ -177,8 +176,7 @@ pub fn suggestions_from(result: &Value) -> Vec<Suggestion> {
 }
 
 fn markup_text(part: &Value) -> Option<&str> {
-    part
-        .as_str()
+    part.as_str()
         .or_else(|| part.get("value").and_then(Value::as_str))
 }
 

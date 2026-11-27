@@ -21,6 +21,7 @@ const TOOL_INTRUDER_FILE: &str = "intrus";
 const WORKSPACE_NOTE_FILE: &str = "note";
 /// Ce que le serveur d'essai tente, puis annonce ligne à ligne.
 const PROBE_SCRIPT: &str = r#"#!/bin/sh
+PATH=/usr/bin:/bin
 touch "${0%/*}/intrus" 2>/dev/null && echo tool-writable || echo tool-readonly
 touch "$HOME/note" 2>/dev/null && echo workspace-writable || echo workspace-readonly
 echo "$PWD"
@@ -66,7 +67,13 @@ async fn the_server_reads_its_tool_and_writes_only_its_workspace() -> anyhow::Re
     assert_eq!(line_from(&mut launched.reader).await?, "workspace-writable");
     let working_directory = line_from(&mut launched.reader).await?;
     assert_eq!(Path::new(&working_directory), launched.workspace.path());
-    assert!(launched.workspace.path().join(WORKSPACE_NOTE_FILE).is_file());
+    assert!(
+        launched
+            .workspace
+            .path()
+            .join(WORKSPACE_NOTE_FILE)
+            .is_file()
+    );
     assert!(!tool.path().join("bin").join(TOOL_INTRUDER_FILE).exists());
     Ok(())
 }

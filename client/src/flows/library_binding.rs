@@ -99,9 +99,8 @@ pub fn LibraryBinding(
     Effect::new(move |_| {
         selected.set(bound_to(&libraries.get(), &flow_id.get_value()));
     });
-    let changes = Memo::new(move |_| {
-        plan_changes(&libraries.get(), &flow_id.get_value(), &selected.get())
-    });
+    let changes =
+        Memo::new(move |_| plan_changes(&libraries.get(), &flow_id.get_value(), &selected.get()));
 
     let apply = Action::new_local(move |changes: &Vec<BindingChange>| {
         let changes = changes.clone();

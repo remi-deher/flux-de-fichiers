@@ -10,6 +10,7 @@ use super::{
 use crate::live::{Loaded, load};
 use crate::ui::filters::{Filters, PluginKindFilter, plugin_kind};
 use crate::ui::search::{matches, query};
+use crate::ui::vocabulary;
 use crate::ui::{EmptyState, IconName, MetricTone, Segmented, StatItem, StatStrip, Tag, TagTone};
 use forgearr_shared::plugins::store::InstalledItem;
 use forgearr_shared::plugins::vocab::{CatalogItemType, CatalogSection};
@@ -391,7 +392,7 @@ fn ToolsGridSection(
     on_open_tool: Callback<SelectedItem>,
 ) -> impl IntoView {
     (!tools.is_empty()).then(|| {
-        let subtitle = format!("Binaires exécutés sur les nœuds · {}", tools.len());
+        let subtitle = format!("Binaires exécutés sur les workers · {}", tools.len());
         view! {
             <div class="store-section">
                 <div class="store-section__head">
@@ -452,7 +453,7 @@ pub fn CatalogSectionView(
                 set_kind(PluginKindFilter::Any),
             ),
             StatItem::new(
-                "Plugins",
+                vocabulary::EXTENSIONS,
                 counts.plugins.to_string(),
                 if counts.plugins > 0 {
                     MetricTone::Success
@@ -551,7 +552,7 @@ pub fn CatalogSectionView(
                                             "Aucune extension correspondante"
                                         }
                                         message=if unfiltered {
-                                            "Synchronisez un dépôt de plugins pour peupler ce catalogue."
+                                            "Synchronisez un dépôt d'extensions pour peupler ce catalogue."
                                         } else {
                                             "Ajustez votre recherche ou les filtres actifs pour afficher des extensions."
                                         }
@@ -579,7 +580,7 @@ pub fn CatalogSectionView(
                                     on_open_item=on_open_item
                                 />
                                 <GroupedCatalogSections
-                                    title=Some("Plugins")
+                                    title=Some(vocabulary::EXTENSIONS)
                                     subtitle=Some("Extensions ajoutant des blocs et intégrations à vos flux")
                                     entries=sections.plugins
                                     can_configure=can_configure

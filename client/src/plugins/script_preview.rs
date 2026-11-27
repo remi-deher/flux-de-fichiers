@@ -62,7 +62,7 @@ fn RequirementsList(requirements: Vec<RequirementStatus>, unverified: bool) -> i
         <h3 class="form-label">"Dépendances"</h3>
         {unverified.then(|| view! {
             <p class="text-dim text-sm">
-                "Dépendances non vérifiées : les variables exposées par les plugins se saisissent à la main."
+                "Dépendances non vérifiées : les variables exposées par les extensions se saisissent à la main."
             </p>
         })}
         <ul class="step-list">

@@ -11,6 +11,8 @@ mod resources;
 mod rows;
 mod script_draft;
 mod script_editor;
+mod script_trial;
+mod script_trial_panel;
 mod scripts;
 mod suggestions;
 mod transfer_workers;
@@ -26,6 +28,7 @@ use crate::ui::{
     Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, StatusBadge, Tag,
     TagTone, Toasts,
 };
+use crate::url_state::{UrlTab, use_tab};
 use crate::{api, format};
 use draft::{LibraryDraft, access_label, is_ready, library_counts};
 use forgearr_shared::Permission;
@@ -45,7 +48,7 @@ use scripts::ScriptsSection;
 
 const LIBRARIES_PATH: &str = "/api/v1/libraries";
 const FLOWS_PATH: &str = "/api/v1/flows";
-const WORKERS_PATH: &str = "/api/v1/workers";
+pub(super) const WORKERS_PATH: &str = "/api/v1/workers";
 pub(super) const LOCAL_PATH: &str = "/api/v1/local";
 pub(super) const LOCAL_SCRIPTS_PATH: &str = "/api/v1/local/scripts";
 pub(super) const LOCAL_RESOURCES_PATH: &str = "/api/v1/local/resources";
@@ -100,12 +103,6 @@ pub(super) fn LocalDeleteButton(
     }
 }
 
-thread_local! {
-    /// Dernier onglet ouvert : on le retrouve en revenant d'un éditeur en pleine page (ADR 0030).
-    static LAST_TAB: std::cell::Cell<LibraryTab> =
-        const { std::cell::Cell::new(LibraryTab::Libraries) };
-}
-
 /// Sous-onglets de l'écran Librairie.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LibraryTab {
@@ -121,7 +118,7 @@ impl LibraryTab {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Libraries => "Bibliothèques",
-            Self::Flows => "Flows & Modèles",
+            Self::Flows => "Flux & Modèles",
             Self::Scripts => "Scripts",
             Self::Resources => "Ressources & Blocs",
             Self::Packs => "Packs",
@@ -137,6 +134,30 @@ impl LibraryTab {
         tabs.push(Self::Resources);
         tabs.push(Self::Packs);
         tabs
+    }
+}
+
+impl UrlTab for LibraryTab {
+    fn slug(self) -> &'static str {
+        match self {
+            Self::Libraries => "libraries",
+            Self::Flows => "flows",
+            Self::Scripts => "scripts",
+            Self::Resources => "resources",
+            Self::Packs => "packs",
+        }
+    }
+
+    fn from_slug(slug: &str) -> Option<Self> {
+        [
+            Self::Libraries,
+            Self::Flows,
+            Self::Scripts,
+            Self::Resources,
+            Self::Packs,
+        ]
+        .into_iter()
+        .find(|tab| tab.slug() == slug)
     }
 }
 
@@ -417,8 +438,8 @@ fn MediaLibrariesSection(
 #[component]
 pub fn LibrariesPage(me: Me) -> impl IntoView {
     let can_manage_local = me.allows(Permission::ManageSettings);
-    let active_tab = RwSignal::new(LAST_TAB.get());
-    Effect::new(move |_| LAST_TAB.set(active_tab.get()));
+    let tabs = LibraryTab::visible_tabs(&me);
+    let active_tab = use_tab(LibraryTab::default(), tabs.clone());
     let reload_libs = RwSignal::new(0_u32);
     let reload_flows = RwSignal::new(0_u32);
     let live = use_live();
@@ -437,11 +458,10 @@ pub fn LibrariesPage(me: Me) -> impl IntoView {
         bump(reload_flows);
         live.touch(LOCAL_TOPICS);
     });
-    let tabs = LibraryTab::visible_tabs(&me);
 
     view! {
         <div class="tab-panel" role="tabpanel">
-            <nav class="page-subnav" role="tablist" aria-label="Sections des librairies">
+            <nav class="page-subnav" role="tablist" aria-label="Sections des bibliothèques">
                 {tabs.into_iter().map(|tab| {
                     let is_active = move || active_tab.get() == tab;
                     view! {
@@ -507,7 +527,21 @@ mod tests {
         );
         assert_eq!(LibraryTab::visible_tabs(&admin).len(), 5);
         assert_eq!(LibraryTab::Libraries.label(), "Bibliothèques");
-        assert_eq!(LibraryTab::Flows.label(), "Flows & Modèles");
+        assert_eq!(LibraryTab::Flows.label(), "Flux & Modèles");
         assert_eq!(LibraryTab::Resources.label(), "Ressources & Blocs");
+    }
+
+    #[test]
+    fn library_tabs_are_named_in_the_address_and_read_back() {
+        for tab in [
+            LibraryTab::Libraries,
+            LibraryTab::Flows,
+            LibraryTab::Scripts,
+            LibraryTab::Resources,
+            LibraryTab::Packs,
+        ] {
+            assert_eq!(LibraryTab::from_slug(tab.slug()), Some(tab));
+        }
+        assert_eq!(LibraryTab::from_slug("inconnu"), None);
     }
 }

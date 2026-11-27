@@ -10,6 +10,7 @@ use crate::theme::ThemePicker;
 use crate::ui::filters::Filters;
 use crate::ui::search::Search;
 use crate::ui::topbar_action::TopbarAction;
+use crate::ui::vocabulary;
 use crate::ui::{
     BrandMark, CommandPalette, CommandPaletteState, Icon, IconName, TagTone, ToastViewport, Toasts,
 };
@@ -74,11 +75,11 @@ pub fn groups() -> Vec<(&'static str, Vec<Screen>)> {
                 ),
                 screen(
                     Route::Libraries,
-                    "Librairies",
+                    vocabulary::LIBRARIES,
                     IconName::Libraries,
                     Permission::ViewLibraries,
                     false,
-                    "Filtrer les librairies…",
+                    "Filtrer les bibliothèques…",
                 ),
             ],
         ),
@@ -87,7 +88,7 @@ pub fn groups() -> Vec<(&'static str, Vec<Screen>)> {
             vec![
                 screen(
                     Route::Flows,
-                    "Flows",
+                    vocabulary::FLOWS,
                     IconName::Flows,
                     Permission::ViewFlows,
                     false,

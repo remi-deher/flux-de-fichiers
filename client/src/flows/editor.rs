@@ -5,11 +5,13 @@ use super::flow_choice::FailureFlowSettings;
 use super::inspector::NodeInspector;
 use super::palette::Palette;
 use super::presentation::{DiagnosticLevel, FlowDiagnostic, diagnose_graph};
+use super::start::{FlowDraft, Skeleton};
 use super::state::{Editor, incomplete_blocks};
 use super::versions::{FlowVersions, editable_graph};
 use crate::ai::AiAssistantState;
 use crate::api;
 use crate::route::{Link, Route, encode_segment, use_router};
+use crate::ui::vocabulary;
 use crate::ui::{Icon, IconName, Toasts};
 use chrono::{DateTime, Utc};
 use forgearr_shared::Permission;
@@ -41,6 +43,14 @@ fn blank_flow() -> (FlowRecord, FlowGraph) {
         created_at: DateTime::<Utc>::UNIX_EPOCH,
         updated_at: DateTime::<Utc>::UNIX_EPOCH,
     };
+    (record, graph)
+}
+
+/// Flux encore jamais enregistré, au nom et aux types de fichiers choisis sur l'écran de départ.
+fn flow_from_draft(draft: &FlowDraft) -> (FlowRecord, FlowGraph) {
+    let (mut record, graph) = blank_flow();
+    record.name = draft.name.clone();
+    record.file_mask = draft.file_mask.clone();
     (record, graph)
 }
 
@@ -178,7 +188,7 @@ fn FlowCommandBar(
                         <button
                             type="button"
                             class="flow-pill flow-pill--mask text-mono"
-                            title="Modifier le masque de fichiers et les réglages"
+                            title="Modifier les types de fichiers et les réglages"
                             on:click=move |_| toggle_settings()
                         >
                             {move || meta.get().file_mask}
@@ -361,7 +371,7 @@ fn FlowSettingsPane(
                                 />
                             </div>
                             <div class="form-group">
-                                <label for="flow-settings-mask" class="form-label">"Masque de fichiers"</label>
+                                <label for="flow-settings-mask" class="form-label">{vocabulary::FILE_TYPES}</label>
                                 <input
                                     id="flow-settings-mask"
                                     class="form-input text-mono"
@@ -614,7 +624,12 @@ fn FlowDiagnosticsTray(editor: Editor, diagnostics: Memo<Vec<FlowDiagnostic>>) -
 }
 
 #[component]
-fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
+fn Workspace(
+    me: Me,
+    record: FlowRecord,
+    graph: FlowGraph,
+    #[prop(optional)] skeleton: Skeleton,
+) -> impl IntoView {
     let can_manage = me.allows(Permission::ManageFlows);
     let router = use_router();
     let initial_id = (!record.id.is_empty()).then(|| record.id.clone());
@@ -630,15 +645,11 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
         Some(Ok(catalog)) => {
             let should_seed = meta.with_untracked(|m| m.id.is_empty())
                 && editor.graph.with_untracked(|g| g.nodes.is_empty());
-            if should_seed && let Some(entry) = catalog.iter().find(|s| !s.has_input) {
-                let mut seeded = FlowGraph::default();
-                seeded.append(
-                    entry.kind_enum(),
-                    &entry.label,
-                    entry.default_config(),
-                    &catalog,
-                );
-                editor.seed_initial_graph(seeded);
+            if should_seed {
+                let seeded = skeleton.build(&catalog);
+                if !seeded.nodes.is_empty() {
+                    editor.seed_initial_graph(seeded);
+                }
             }
             editor.catalog.set(catalog);
             editor.catalog_loaded.set(true);
@@ -843,10 +854,16 @@ fn Workspace(me: Me, record: FlowRecord, graph: FlowGraph) -> impl IntoView {
 }
 
 #[component]
-pub fn FlowEditor(me: Me, flow_id: Option<String>) -> impl IntoView {
+pub fn FlowEditor(
+    me: Me,
+    flow_id: Option<String>,
+    #[prop(optional)] draft: Option<FlowDraft>,
+) -> impl IntoView {
     let Some(id) = flow_id else {
-        let (record, graph) = blank_flow();
-        return view! { <Workspace me=me record=record graph=graph /> }.into_any();
+        let draft = draft.unwrap_or_default();
+        let (record, graph) = flow_from_draft(&draft);
+        return view! { <Workspace me=me record=record graph=graph skeleton=draft.skeleton /> }
+            .into_any();
     };
     let path = format!("{FLOWS_PATH}/{}", encode_segment(&id));
     let flow = LocalResource::new(move || {
@@ -876,6 +893,20 @@ mod tests {
     #[test]
     fn a_blank_flow_starts_empty_and_has_no_id() {
         let (record, graph) = blank_flow();
+        assert!(record.id.is_empty());
+        assert!(graph.nodes.is_empty());
+    }
+
+    #[test]
+    fn a_draft_gives_the_flow_its_name_and_file_types() {
+        let draft = FlowDraft {
+            name: "Mes films".into(),
+            file_mask: "*.mkv, *.mp4".into(),
+            skeleton: Skeleton::InOut,
+        };
+        let (record, graph) = flow_from_draft(&draft);
+        assert_eq!(record.name, "Mes films");
+        assert_eq!(record.file_mask, "*.mkv, *.mp4");
         assert!(record.id.is_empty());
         assert!(graph.nodes.is_empty());
     }

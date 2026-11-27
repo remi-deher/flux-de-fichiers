@@ -176,7 +176,7 @@ fn RequirementRowEditor(
                     on:input=move |e| edit_row(rows, key, |row| row.variable = event_target_value(&e)) />
             </div>
             <div class="form-group">
-                <label class="form-label">"Plugin fournisseur"</label>
+                <label class="form-label">"Extension fournisseur"</label>
                 <input class="form-input text-mono" disabled=read_only placeholder="app.mediainfo"
                     prop:value=text(|row| row.provider.clone())
                     on:input=move |e| edit_row(rows, key, |row| row.provider = event_target_value(&e)) />
@@ -235,9 +235,9 @@ pub fn RequirementsEditor(
     };
     view! {
         <div class="form-group">
-            <span class="form-label">"Dépendances sur des variables de plugins"</span>
+            <span class="form-label">"Dépendances sur des variables d'extensions"</span>
             <p class="form-help">
-                "Variables exposées par un plugin que le script utilise : sans le fournisseur, le script est indisponible."
+                "Variables exposées par une extension que le script utilise : sans le fournisseur, le script est indisponible."
             </p>
             <For
                 each=move || row_keys(rows)

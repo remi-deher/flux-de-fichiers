@@ -17,6 +17,7 @@ use crate::api;
 use crate::ui::filters::{Filters, JobStateFilter, job_state, period};
 use crate::ui::search::{matches, query};
 use crate::ui::{Drawer, MetricTone, StatItem, StatStrip, Toasts};
+use crate::url_state::{UrlTab, use_tab};
 use chrono::Utc;
 use diagnosis::AiDiagnosisCard;
 use forgearr_shared::flows::FlowRecord;
@@ -53,12 +54,30 @@ impl ActivityTab {
     }
 }
 
+impl UrlTab for ActivityTab {
+    fn slug(self) -> &'static str {
+        match self {
+            Self::Tasks => "tasks",
+            Self::Logs => "logs",
+        }
+    }
+
+    fn from_slug(slug: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|tab| tab.slug() == slug)
+    }
+}
+
 #[component]
 pub fn JobsPage(me: Me) -> impl IntoView {
     // Le journal du central est réservé à ceux qui gèrent les clés (administrateurs).
     let can_logs =
         me.instance_kind == InstanceKind::Central && me.allows(Permission::ManageApiKeys);
-    let active_tab = RwSignal::new(ActivityTab::Tasks);
+    let allowed_tabs = if can_logs {
+        ActivityTab::ALL.to_vec()
+    } else {
+        vec![ActivityTab::Tasks]
+    };
+    let active_tab = use_tab(ActivityTab::Tasks, allowed_tabs);
     // Le diagnostic IA n'existe que sur le central ; seul un administrateur le recalcule.
     let is_central = me.instance_kind == InstanceKind::Central;
     let can_refresh_diagnosis = is_central && me.allows(Permission::ManageSettings);
@@ -547,5 +566,18 @@ fn JobsTasks(me: Me) -> impl IntoView {
                 })}
             </Drawer>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn activity_tabs_are_named_in_the_address_and_read_back() {
+        for tab in ActivityTab::ALL {
+            assert_eq!(ActivityTab::from_slug(tab.slug()), Some(tab));
+        }
+        assert_eq!(ActivityTab::from_slug("inconnu"), None);
     }
 }

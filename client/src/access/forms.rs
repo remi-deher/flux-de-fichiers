@@ -105,7 +105,7 @@ const ROLE_OPTIONS: [RoleOption; 2] = [
     RoleOption {
         target: RoleTarget::Worker,
         icon: IconName::Workers,
-        badge: "Nœud de calcul",
+        badge: "Worker",
         title: "Enrôler un worker",
         description: "Exécuteur dédié rattaché à un central existant pour traiter vos médias.",
     },
@@ -355,7 +355,7 @@ pub fn WorkerSetupForm(goto: Callback<Gate>, can_choose_role: bool) -> impl Into
                         <div class="auth-gate__form">
                             <p class="auth-gate__notice">
                                 <strong>{state_label}</strong><br />
-                                "Ouvrez l'écran Workers sur "<code>{target}</code>" et approuvez le nœud "<strong>{name}</strong>"."
+                                "Ouvrez l'écran Workers sur "<code>{target}</code>" et approuvez le worker "<strong>{name}</strong>"."
                             </p>
                             <p class="form-error" role="alert">{move || feedback.get()}</p>
                             <button type="button" class="btn btn-secondary auth-gate__submit"

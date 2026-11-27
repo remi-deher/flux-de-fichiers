@@ -27,7 +27,7 @@ pub fn validate_block_template_json(raw: &str) -> Result<Value, &'static str> {
         .iter()
         .any(|c| !node_ids.contains(c.from.as_str()) || !node_ids.contains(c.to.as_str()))
     {
-        return Err("Une connexion référence un nœud absent du modèle.");
+        return Err("Une connexion référence un bloc absent du modèle.");
     }
     Ok(value)
 }
@@ -232,7 +232,7 @@ pub fn BlockTemplateDrawer(
                             let available = flows.get().and_then(Result::ok).unwrap_or_default();
                             (writable && !available.is_empty()).then(|| view! {
                                 <div class="form-group">
-                                    <label class="form-label" for="btpl-source">"Pré-remplir depuis un flow existant"</label>
+                                    <label class="form-label" for="btpl-source">"Pré-remplir depuis un flux existant"</label>
                                     <select id="btpl-source" class="form-input" on:change=move |ev| {
                                         let chosen = event_target_value(&ev);
                                         if let Some(flow) = available.iter().find(|f| f.id == chosen) {
@@ -246,7 +246,7 @@ pub fn BlockTemplateDrawer(
                                             }
                                         }
                                     }>
-                                        <option value="">"— Choisir un flow —"</option>
+                                        <option value="">"— Choisir un flux —"</option>
                                         {available.iter().map(|f| view! {
                                             <option value=f.id.clone()>{f.name.clone()}</option>
                                         }).collect_view()}

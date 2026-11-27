@@ -113,7 +113,7 @@ pub fn ToolGrid(
                     .into_any()
                 });
                 let description = if tool.description.trim().is_empty() {
-                    "Outil distribué exécuté sur les nœuds.".to_owned()
+                    "Outil distribué exécuté sur les workers.".to_owned()
                 } else {
                     tool.description
                 };

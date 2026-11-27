@@ -7,6 +7,7 @@ use super::state::Editor;
 use crate::api;
 use crate::route::{Link, Route};
 use crate::ui::search::{matches, query as global_query};
+use crate::ui::vocabulary;
 use crate::ui::{Icon, IconName, Toasts};
 use forgearr_shared::flows::{FlowGraph, OwnedBlockSpec};
 use forgearr_shared::local::LocalLibrarySnapshot;
@@ -250,7 +251,7 @@ pub fn Palette(editor: Editor) -> impl IntoView {
                                                 {
                                                     "Script"
                                                 } else {
-                                                    "Plugin"
+                                                    vocabulary::EXTENSION
                                                 };
                                                 let accent_style =
                                                     format!("--component-accent: {}", domain.accent_var());

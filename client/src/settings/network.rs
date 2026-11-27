@@ -320,7 +320,7 @@ fn SettingsRuntimeForm(initial: SystemStatus, on_saved: Callback<()>) -> impl In
                     <input type="checkbox"
                         prop:checked=move || allow_private_plugin_hosts.get()
                         on:change=move |ev| allow_private_plugin_hosts.set(event_target_checked(&ev)) />
-                    <span>"Autoriser les dépôts de plugins sur des adresses privées / locales"</span>
+                    <span>"Autoriser les dépôts d'extensions sur des adresses privées / locales"</span>
                 </label>
                 <label class="flow-settings__toggle">
                     <input type="checkbox"

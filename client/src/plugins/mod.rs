@@ -38,8 +38,8 @@ use forgearr_shared::plugins::{
 };
 use forgearr_shared::session::Me;
 use forgearr_shared::{InstanceKind, Permission};
-pub(crate) use install::InstallWizard;
 use inspection::{InspectionDrawers, InspectionTarget};
+pub(crate) use install::InstallWizard;
 use item_detail::CatalogItemDetail;
 use leptos::prelude::*;
 pub(crate) use metadata::{StatusBanner, StoreTone};
@@ -279,7 +279,9 @@ pub fn PluginsPage(me: Me) -> impl IntoView {
     let plugin_tab = RwSignal::new(0_usize);
     let pack_tab = RwSignal::new(0_usize);
     let tool_tab = RwSignal::new(0_usize);
-    [plugin_tab, pack_tab, tool_tab].into_iter().for_each(use_drawer_tab);
+    [plugin_tab, pack_tab, tool_tab]
+        .into_iter()
+        .for_each(use_drawer_tab);
 
     let open_plugin = Callback::new(move |item: SelectedItem| {
         plugin_tab.set(0);

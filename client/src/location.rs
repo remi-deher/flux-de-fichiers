@@ -123,8 +123,8 @@ impl Location {
     /// Même adresse avec `key` posé à `value`. Ouvrir, changer ou fermer un tiroir retire l'onglet du
     /// tiroir précédent : le suivant s'ouvre sur son premier onglet.
     pub fn with_query(&self, key: &str, value: Option<&str>) -> Self {
-        let opens_another_drawer = matches!(key, DETAIL_PARAM | CREATE_PARAM)
-            && self.query.get(key) != value;
+        let opens_another_drawer =
+            matches!(key, DETAIL_PARAM | CREATE_PARAM) && self.query.get(key) != value;
         let query = self.query.with(key, value);
         let query = if opens_another_drawer {
             query.with(DRAWER_TAB_PARAM, None)

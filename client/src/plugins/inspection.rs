@@ -155,7 +155,11 @@ impl InspectionDrawers {
             let already = shown
                 .as_ref()
                 .is_some_and(|t| t.kind() == kind && t.id() == id);
-            if already && self.open_signal(kind).is_some_and(|open| open.get_untracked()) {
+            if already
+                && self
+                    .open_signal(kind)
+                    .is_some_and(|open| open.get_untracked())
+            {
                 return;
             }
             // Le catalogue peut arriver après l'adresse : lire ces listes relance l'effet à leur arrivée.

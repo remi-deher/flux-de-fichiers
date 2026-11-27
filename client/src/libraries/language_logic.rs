@@ -37,7 +37,9 @@ pub fn is_trigger(extension: &str, typed: char) -> bool {
 pub fn char_before(code: &str, caret: usize) -> Option<char> {
     let units: Vec<u16> = code.encode_utf16().collect();
     let caret = caret.min(units.len());
-    String::from_utf16_lossy(&units[..caret]).chars().next_back()
+    String::from_utf16_lossy(&units[..caret])
+        .chars()
+        .next_back()
 }
 
 /// Position du curseur pour le serveur : ligne depuis 0, colonne en unités UTF-16.
@@ -377,7 +379,10 @@ mod tests {
             UnavailableReason::InterpreterUnsupported,
             UnavailableReason::ServerMissing,
         ] {
-            assert_eq!(Link::Idle.connecting().unavailable(reason, now), Link::Local);
+            assert_eq!(
+                Link::Idle.connecting().unavailable(reason, now),
+                Link::Local
+            );
         }
         for reason in [
             UnavailableReason::LimitReached,

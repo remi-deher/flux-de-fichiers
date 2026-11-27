@@ -223,8 +223,12 @@ pub fn CodeEditor(
         let (Some(item), Some(area)) = (open.items.get(index), area_ref.get_untracked()) else {
             return;
         };
-        let (next, caret) =
-            suggestions::replace_range(&code.get_untracked(), open.start, open.caret, item.inserted());
+        let (next, caret) = suggestions::replace_range(
+            &code.get_untracked(),
+            open.start,
+            open.caret,
+            item.inserted(),
+        );
         area.set_value(&next);
         let caret = u32::try_from(caret).unwrap_or(u32::MAX);
         let _ = area.set_selection_range(caret, caret);

@@ -162,7 +162,8 @@ impl Channel {
                 }
             }
             ServerMessage::Unavailable { reason } => {
-                self.link.set(self.link.get().unavailable(reason, js_sys::Date::now()));
+                self.link
+                    .set(self.link.get().unavailable(reason, js_sys::Date::now()));
                 self.release();
             }
             ServerMessage::Diagnostics { .. } | ServerMessage::Hover { .. } => {}

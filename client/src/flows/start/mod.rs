@@ -156,7 +156,7 @@ fn FlowStart(on_draft: Callback<FlowDraft>) -> impl IntoView {
                     }).collect_view()}
                     {move || templates.with(Vec::is_empty).then(|| view! {
                         <p class="form-help">
-                            "Les modèles du Store apparaissent ici une fois installés. "
+                            "Les modèles du Catalogue apparaissent ici une fois installés. "
                             <Link to=Route::Plugins>"Ouvrir Extensions"</Link>
                         </p>
                     })}

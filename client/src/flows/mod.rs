@@ -800,10 +800,7 @@ pub fn FlowsSection(me: Me, scope: FlowsScope) -> impl IntoView {
             items.push(
                 StatItem::new("Inutilisés", counts.unused.to_string(), unused_tone)
                     .with_detail("aucune bibliothèque")
-                    .with_filter(
-                        active == FlowFilter::Unused,
-                        set_filter(FlowFilter::Unused),
-                    ),
+                    .with_filter(active == FlowFilter::Unused, set_filter(FlowFilter::Unused)),
             );
         }
         items

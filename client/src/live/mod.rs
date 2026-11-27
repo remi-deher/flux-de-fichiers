@@ -1,7 +1,7 @@
 //! Événements en temps réel du central (ADR 0028) : un seul abonnement par page, un signal par sujet.
 
 mod changed_elsewhere;
-mod reconnect;
+pub(crate) mod reconnect;
 mod resource;
 mod stream;
 

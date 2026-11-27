@@ -319,7 +319,7 @@ fn ScriptForm(
                     <label class="form-label" for="script-code">
                         "Code (entrée stdin JSON → sortie stdout JSON) *"
                     </label>
-                    <CodeEditor code=code extension=extension declared=declared read_only=read_only />
+                    <CodeEditor code=code extension=extension interpreter=interp declared=declared read_only=read_only />
                     <p class="form-help">
                         "Le script reçoit workingFile, workDir, mediaInfo et config sur stdin."
                     </p>

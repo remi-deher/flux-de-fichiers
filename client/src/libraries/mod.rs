@@ -4,6 +4,8 @@ mod block_templates;
 mod code_editor;
 mod draft;
 mod form;
+mod language_channel;
+mod language_logic;
 mod history;
 mod packs;
 mod requirements_editor;

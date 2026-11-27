@@ -150,10 +150,11 @@ pub fn LibraryBinding(
             {move || libraries.get().into_iter().map(|library| {
                 let id = library.id;
                 let input_id = format!("flow-library-{id}");
+                let label_for = input_id.clone();
                 let replaced = replaced_flow(&library, &flow_id.get_value()).map(str::to_owned);
                 view! {
                     <div class="form-group">
-                        <label class="flow-settings__toggle" for=input_id.clone()>
+                        <label class="flow-settings__toggle" for=label_for>
                             <input
                                 id=input_id
                                 type="checkbox"
@@ -203,14 +204,20 @@ mod tests {
     use super::*;
     use chrono::DateTime;
     use forgearr_shared::libraries::LibraryOutputPolicy;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn unique_id() -> Uuid {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        Uuid::from_u128(u128::from(NEXT.fetch_add(1, Ordering::Relaxed)))
+    }
 
     fn library(flow_id: Option<&str>) -> Library {
         Library {
-            id: Uuid::new_v4(),
+            id: unique_id(),
             name: "Films".into(),
             flow_id: flow_id.map(str::to_owned),
             workers: Vec::new(),
-            transfer_workers: vec![Uuid::new_v4()],
+            transfer_workers: vec![unique_id()],
             scan_interval_minutes: 30,
             last_scanned_at: None,
             include_extensions: vec!["mkv".into()],

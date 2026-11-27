@@ -42,7 +42,6 @@ use forgearr_shared::session::Me;
 use forgearr_shared::workers::Worker;
 use form::LibraryForm;
 use leptos::prelude::*;
-pub(crate) use script_draft::starter_script_code;
 pub use script_editor::ScriptEditor;
 pub(crate) use script_origin::script_editor_location;
 use scripts::ScriptsSection;

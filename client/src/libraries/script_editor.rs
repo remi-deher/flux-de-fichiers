@@ -16,7 +16,6 @@ use crate::api;
 use crate::live::{Loaded, load, use_live};
 use crate::route::{Route, use_router};
 use crate::ui::{Tag, TagTone, Toasts};
-use crate::url_state::UrlTab;
 use forgearr_shared::Permission;
 use forgearr_shared::local::{
     LocalLibrarySnapshot, LocalScriptSummary, ScriptInterpreter, UpsertLocalScriptRequest,

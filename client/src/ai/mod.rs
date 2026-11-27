@@ -170,6 +170,12 @@ pub fn starter_prompts(route: &Route) -> Vec<(&'static str, String)> {
                 "Y a-t-il des fichiers source détectés qui n'ont pas encore de tâche associée ?".to_owned(),
             ),
         ],
+        Route::Workshop => vec![
+            (
+                "Ressources et packs",
+                "Quelles ressources, quels modèles de blocs et quels packs locaux sont disponibles pour bâtir mes flux ?".to_owned(),
+            ),
+        ],
         Route::Workers => vec![
             (
                 "Santé des workers",

@@ -448,7 +448,10 @@ mod tests {
         assert_eq!(Route::ScriptEditor("s".into()).section(), Route::Flows);
         assert_eq!(Route::parse("/flows/scripts/new"), Route::NewScript);
         assert_eq!(Route::NewScript.path(), "/flows/scripts/new");
-        assert_eq!(Route::ScriptEditor("s.1".into()).path(), "/flows/scripts/s.1");
+        assert_eq!(
+            Route::ScriptEditor("s.1".into()).path(),
+            "/flows/scripts/s.1"
+        );
         assert_eq!(
             Route::parse("/flows/scripts/script.a"),
             Route::ScriptEditor("script.a".into())

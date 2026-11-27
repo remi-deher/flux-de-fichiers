@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.92.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.91.0...v0.92.0) (2026-11-27)
+
+
+### Features
+
+* **client:** écran de départ pour un nouveau flux ([b1c93b8](https://github.com/remi-deher/flux-de-fichiers/commit/b1c93b8fe7e159e469b003a1499c6d3b8f422fc2))
+* **client:** écran de départ pour un nouveau flux ([211c32f](https://github.com/remi-deher/flux-de-fichiers/commit/211c32fe3f0911a1dafaed9b67497d3eefe5dd8f))
+* **client:** modèles du Store à installer dans l'écran de départ ([57a75a5](https://github.com/remi-deher/flux-de-fichiers/commit/57a75a5f7ce0d43dd266d42c8be7c7c954cca49d))
+* **client:** modèles du Store à installer dans l'écran de départ ([3227099](https://github.com/remi-deher/flux-de-fichiers/commit/32270999f1b65191db9d3debac008546800a30c8))
+* **client:** onglets et tiroirs adressables (ADR 0034, lot 2) ([afed01e](https://github.com/remi-deher/flux-de-fichiers/commit/afed01e2d80061e62c37db368be2f4f40320121f))
+* **client:** panneau Essai de l'éditeur de script (ADR 0031, lot 3c) ([6db3d60](https://github.com/remi-deher/flux-de-fichiers/commit/6db3d6091bea5eed8165149574b6543ebc023d5a))
+* **client:** panneau Essai de l'éditeur de script (ADR 0031, lot 3c) ([87d0447](https://github.com/remi-deher/flux-de-fichiers/commit/87d0447db95662aaa67cc37f568a370db89bc946))
+* **client:** vocabulaire unique de l'interface (ADR 0033, lot 1) ([c4e4f1e](https://github.com/remi-deher/flux-de-fichiers/commit/c4e4f1ed2bdb3ef41fc5f4d54f55b5ea32e72f83))
+* **client:** vocabulaire unique et adresses d'onglets et de tiroirs (lots 1 et 2) ([e1606eb](https://github.com/remi-deher/flux-de-fichiers/commit/e1606eb23ac2e175a20aabf5ef2f4e935b620b4d))
+* **confine:** ADR 0032/0034, sonde de confinement et module sandbox-exec (phases 0 et 1) ([9763efd](https://github.com/remi-deher/flux-de-fichiers/commit/9763efd89cd48b11ca635ce0e21f97dc17866548))
+* **confine:** lance un programme sous un profil de confinement (ADR 0034, phase 1) ([007a346](https://github.com/remi-deher/flux-de-fichiers/commit/007a3461c2da351b099b946c2aa71bde6420093b))
+
+
+### Bug Fixes
+
+* **client:** couvre le choix d'un modèle du Store dans l'écran de départ ([bf944e0](https://github.com/remi-deher/flux-de-fichiers/commit/bf944e0bf35bfd5eb7a26310cbc304512a308f5d))
+* **client:** écrit « Catalogue » dans l'aide de l'écran de départ (ADR 0033) ([cb80949](https://github.com/remi-deher/flux-de-fichiers/commit/cb809494a8face7c351de4bc5c23582d23c44cf3))
+* **client:** nomme le groupe « Catalogue » à l'écran de départ (ADR 0033) ([8ca9bb2](https://github.com/remi-deher/flux-de-fichiers/commit/8ca9bb230a31ccfed400d5a622cdf0adbd749428))
+* **client:** retire la réexportation inutilisée du champ Types de fichiers ([0ec67ad](https://github.com/remi-deher/flux-de-fichiers/commit/0ec67ad1aaa6c30517064a95238fdcd306e4b7ae))
+* **client:** termes bannis restants (plugin, Store) — remet dev au vert ([c61ce9d](https://github.com/remi-deher/flux-de-fichiers/commit/c61ce9d8748eae8ece87f8d14a418188095ac41a))
+* **client:** termes bannis restants dans le bouton Tester et l'écran de départ ([4ab5add](https://github.com/remi-deher/flux-de-fichiers/commit/4ab5addae272fb7e08b2398f9f0b6300908baf5b))
+* **confine:** applique rustfmt et retire une assertion constante ([6be269e](https://github.com/remi-deher/flux-de-fichiers/commit/6be269eb24ad3db35a2c0ecb8e9fbeef49684460))
+* **frontend:** écran de départ sur l'échelle typographique et les points de rupture du thème ([1bfcf54](https://github.com/remi-deher/flux-de-fichiers/commit/1bfcf54f686ee8cb2abbf1563755cc6c86e48de2))
+
 ## [0.91.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.90.0...v0.91.0) (2026-11-25)
 
 

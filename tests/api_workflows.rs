@@ -301,6 +301,7 @@ async fn json_routes_reject_oversized_bodies_and_transfers_do_not() -> anyhow::R
     assert!(is_long_running_route("/api/v1/jobs/events"));
     assert!(is_long_running_route("/api/v1/events"));
     assert!(is_long_running_route("/api/v1/ai/runs/abc/events"));
+    assert!(is_long_running_route("/api/v1/language/session"));
     assert!(!is_long_running_route("/api/v1/ai/runs/abc"));
     assert!(!is_long_running_route("/api/v1/ai/runs//events"));
     assert!(!is_long_running_route(

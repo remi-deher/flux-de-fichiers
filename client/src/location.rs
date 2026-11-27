@@ -3,6 +3,13 @@
 
 use crate::route::{Route, decode_segment, encode_segment};
 
+/// Paramètre de requête qui désigne le tiroir de détail ouvert : `?voir=<type>.<id>`.
+pub const DETAIL_PARAM: &str = "voir";
+/// Paramètre de requête qui désigne le tiroir de création ouvert : `?nouveau=<type>`.
+pub const CREATE_PARAM: &str = "nouveau";
+/// Paramètre de requête qui désigne l'onglet du tiroir ouvert : `?onglet=<n>`.
+pub const DRAWER_TAB_PARAM: &str = "onglet";
+
 /// Écrans dont le second segment du chemin est un onglet (`/plugins/installed`).
 fn has_tabs(route: &Route) -> bool {
     matches!(
@@ -113,9 +120,19 @@ impl Location {
         format!("{path}{tab}{}", self.query.render())
     }
 
+    /// Même adresse avec `key` posé à `value`. Ouvrir, changer ou fermer un tiroir retire l'onglet du
+    /// tiroir précédent : le suivant s'ouvre sur son premier onglet.
     pub fn with_query(&self, key: &str, value: Option<&str>) -> Self {
+        let opens_another_drawer =
+            matches!(key, DETAIL_PARAM | CREATE_PARAM) && self.query.get(key) != value;
+        let query = self.query.with(key, value);
+        let query = if opens_another_drawer {
+            query.with(DRAWER_TAB_PARAM, None)
+        } else {
+            query
+        };
         Self {
-            query: self.query.with(key, value),
+            query,
             ..self.clone()
         }
     }
@@ -205,6 +222,20 @@ mod tests {
             Location::parse("/plugins/repos/x", "").route,
             Route::Overview
         );
+    }
+
+    #[test]
+    fn a_drawer_tab_goes_away_with_its_drawer() {
+        let open = Location::of(Route::Workers)
+            .with_query(DETAIL_PARAM, Some("worker.1"))
+            .with_query(DRAWER_TAB_PARAM, Some("2"));
+        assert_eq!(open.url(), "/workers?voir=worker.1&onglet=2");
+        // Même tiroir : l'onglet reste ; un autre tiroir ou sa fermeture le retire.
+        let same = open.with_query(DETAIL_PARAM, Some("worker.1"));
+        assert_eq!(same.query.get(DRAWER_TAB_PARAM), Some("2"));
+        let other = open.with_query(DETAIL_PARAM, Some("worker.2"));
+        assert_eq!(other.url(), "/workers?voir=worker.2");
+        assert_eq!(open.with_query(DETAIL_PARAM, None).url(), "/workers");
     }
 
     #[test]

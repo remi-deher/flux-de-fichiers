@@ -11,6 +11,7 @@ use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
     Drawer, EmptyState, IconName, MetricTone, StatItem, StatStrip, Tag, TagTone, Toasts,
 };
+use crate::url_state::{DrawerKind, use_detail_drawer, use_drawer_tab};
 use forgearr_shared::plugins::{CreateRepositoryRequest, PluginRepository};
 use leptos::prelude::*;
 use serde_json::Value;
@@ -105,10 +106,20 @@ pub fn ReposSection(
         on_click: Callback::new(move |()| adding.set(true)),
     });
     let active_filter = RwSignal::new(RepoFilter::All);
-    let selected_repo = RwSignal::new(None::<SelectedItem>);
-    let detail_open = RwSignal::new(false);
+    let (selected_id, detail_open) = use_detail_drawer(DrawerKind::Repository);
     let detail_tab = RwSignal::new(0_usize);
+    use_drawer_tab(detail_tab);
     let live = use_live();
+    // Le nom vient de la liste ; l'adresse seule ne le porte pas.
+    let selected_repo = Signal::derive(move || {
+        let id = selected_id.get()?;
+        let name = repositories
+            .get()
+            .and_then(Result::ok)
+            .and_then(|list| list.into_iter().find(|repo| repo.id == id))
+            .map_or_else(|| id.clone(), |repo| repo.name);
+        Some(SelectedItem { id, name })
+    });
     let detail_title = Signal::derive(move || {
         selected_repo
             .get()
@@ -305,9 +316,8 @@ pub fn ReposSection(
                         view! {
                             <div class="repo-list">
                                 {shown.into_iter().map(|repo| {
-                                    let (inspect_id, inspect_name, active_id, sync_id, toggle_id) = (
+                                    let (inspect_id, active_id, sync_id, toggle_id) = (
                                         repo.id.clone(),
-                                        repo.name.clone(),
                                         repo.id.clone(),
                                         repo.id.clone(),
                                         repo.id.clone(),
@@ -350,11 +360,8 @@ pub fn ReposSection(
                                         </button>
                                     }.into_any();
                                     let open_detail = Callback::new(move |()| {
-                                        selected_repo.set(Some(SelectedItem {
-                                            id: inspect_id.clone(),
-                                            name: inspect_name.clone(),
-                                        }));
                                         detail_tab.set(0);
+                                        selected_id.set(Some(inspect_id.clone()));
                                         detail_open.set(true);
                                     });
                                     view! {

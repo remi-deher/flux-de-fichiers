@@ -439,7 +439,7 @@ mod tests {
             Route::parse("/flows/mon-flux.a1"),
             Route::FlowEditor("mon-flux.a1".into())
         );
-        assert_eq!(Route::parse("/flows/scripts/x"), Route::Overview);
+        assert_eq!(Route::parse("/flows/modeles/x"), Route::Overview);
     }
 
     #[test]

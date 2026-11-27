@@ -1010,7 +1010,7 @@ pub fn FlowsSection(me: Me, scope: FlowsScope) -> impl IntoView {
                                             router.go(Route::FlowEditor(editor_id.clone()));
                                         }
                                     >
-                                        "Atelier"
+                                        "Éditer"
                                     </button>
                                 </td>
                             </tr>

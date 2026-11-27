@@ -16,6 +16,7 @@ pub enum Route {
     NewFlow,
     FlowEditor(String),
     Libraries,
+    Workshop,
     NewScript,
     ScriptEditor(String),
     Workers,
@@ -33,6 +34,7 @@ impl Route {
             Self::NewFlow => app::NEW_FLOW.to_owned(),
             Self::FlowEditor(id) => format!("{}/{}", app::FLOWS, encode_segment(id)),
             Self::Libraries => app::LIBRARIES.to_owned(),
+            Self::Workshop => app::WORKSHOP.to_owned(),
             Self::NewScript => app::NEW_SCRIPT.to_owned(),
             Self::ScriptEditor(id) => format!("{}/{}", app::SCRIPTS, encode_segment(id)),
             Self::Workers => app::WORKERS.to_owned(),
@@ -60,6 +62,9 @@ impl Route {
             (Some("flows"), Some(id), None) if !id.is_empty() => {
                 Self::FlowEditor(decode_segment(id))
             }
+            // Ressources et packs ont quitté les Bibliothèques (lot 5) ; leurs anciens liens suivent.
+            (Some("libraries"), Some("resources" | "packs"), None) => Self::Workshop,
+            (Some("workshop"), None, _) | (Some("workshop"), Some(_), None) => Self::Workshop,
             (Some("libraries"), None, _) => Self::Libraries,
             (Some("libraries"), Some(_), None) => Self::Libraries,
             (Some("flows"), Some("scripts"), Some("new")) if !extra => Self::NewScript,
@@ -378,6 +383,7 @@ mod tests {
             Route::FlowEditor("flow.films-abc".into()),
             Route::FlowEditor("flux à part".into()),
             Route::Libraries,
+            Route::Workshop,
             Route::NewScript,
             Route::ScriptEditor("script.mon-script".into()),
             Route::ScriptEditor("script à part".into()),
@@ -460,11 +466,21 @@ mod tests {
     }
 
     #[test]
+    fn the_workshop_takes_over_the_old_resources_and_packs_tabs_of_the_libraries() {
+        assert_eq!(Route::parse("/app/workshop"), Route::Workshop);
+        assert_eq!(Route::Workshop.path(), "/workshop");
+        assert_eq!(Route::parse("/libraries/resources"), Route::Workshop);
+        assert_eq!(Route::parse("/libraries/packs"), Route::Workshop);
+        assert_eq!(Route::parse("/libraries"), Route::Libraries);
+        assert_eq!(Route::parse("/workshop/packs/x"), Route::Overview);
+    }
+
+    #[test]
     fn tabbed_screens_accept_one_extra_segment() {
         assert_eq!(Route::parse("/app/plugins/installed"), Route::Plugins);
         assert_eq!(Route::parse("/jobs/logs"), Route::Jobs);
         assert_eq!(Route::parse("/settings/keys"), Route::Settings);
-        assert_eq!(Route::parse("/libraries/packs"), Route::Libraries);
+        assert_eq!(Route::parse("/workshop/packs"), Route::Workshop);
         assert_eq!(Route::parse("/workers/x"), Route::Overview);
         assert_eq!(Route::parse("/plugins/installed/x"), Route::Overview);
     }

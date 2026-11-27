@@ -150,7 +150,7 @@ pub fn starter_prompts(route: &Route) -> Vec<(&'static str, String)> {
                 format!("Compare les deux dernières versions du flux `{id}` avec diff_flow_versions."),
             ),
         ],
-        Route::Flows | Route::NewFlow => vec![
+        Route::Flows | Route::NewFlow | Route::NewScript | Route::ScriptEditor(_) => vec![
             (
                 "Auditer les flux",
                 "Liste tous les flux configurés, vérifie leur validité et signale les anomalies éventuelles.".to_owned(),
@@ -160,7 +160,7 @@ pub fn starter_prompts(route: &Route) -> Vec<(&'static str, String)> {
                 "Quels blocs de traitement et d'extension sont disponibles pour bâtir un flux ?".to_owned(),
             ),
         ],
-        Route::Libraries | Route::NewScript | Route::ScriptEditor(_) => vec![
+        Route::Libraries => vec![
             (
                 "Auditer les bibliothèques",
                 "Analyse la configuration des bibliothèques (filtres, flux associés, règles de sortie).".to_owned(),

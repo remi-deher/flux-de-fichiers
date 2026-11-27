@@ -1,4 +1,5 @@
-//! Écran Librairie : bibliothèques médias, flows & modèles, scripts locaux, ressources & modèles de blocs, et packs maison.
+//! Écran Bibliothèques (dossiers de médias surveillés), scripts locaux (onglet de l'écran Flux) et écran
+//! Atelier : ressources, modèles de blocs et packs locaux (ADR 0035, lots 3 à 5).
 
 mod block_templates;
 mod code_editor;
@@ -18,6 +19,7 @@ mod scripts;
 mod suggestions;
 mod transfer_workers;
 mod variables_editor;
+mod workshop;
 
 use crate::live::{load, use_live};
 use crate::route::encode_segment;
@@ -25,10 +27,10 @@ use crate::ui::filters::{Filters, LibraryFilter, library_filter};
 use crate::ui::search::{matches, query};
 use crate::ui::topbar_action::{ActionSpec, provide_topbar_action};
 use crate::ui::{
-    Drawer, EmptyState, IconName, MetricTone, PageSubnav, ResourceCard, StatItem, StatStrip,
-    StatusBadge, Tag, TagTone, Toasts,
+    Drawer, EmptyState, IconName, MetricTone, ResourceCard, StatItem, StatStrip, StatusBadge, Tag,
+    TagTone, Toasts,
 };
-use crate::url_state::{DrawerKind, UrlTab, use_detail_drawer, use_tab};
+use crate::url_state::{DrawerKind, use_detail_drawer};
 use crate::{api, format};
 use draft::{LibraryDraft, access_label, is_ready, library_counts};
 use forgearr_shared::Permission;
@@ -40,12 +42,11 @@ use forgearr_shared::session::Me;
 use forgearr_shared::workers::Worker;
 use form::LibraryForm;
 use leptos::prelude::*;
-use packs::LocalPacksSection;
-use resources::ResourcesSection;
 pub(crate) use script_draft::starter_script_code;
 pub use script_editor::ScriptEditor;
 pub(crate) use script_origin::script_editor_location;
 use scripts::ScriptsSection;
+pub use workshop::WorkshopPage;
 
 const LIBRARIES_PATH: &str = "/api/v1/libraries";
 const FLOWS_PATH: &str = "/api/v1/flows";
@@ -101,41 +102,6 @@ pub(super) fn LocalDeleteButton(
         >
             "Supprimer"
         </button>
-    }
-}
-
-/// Sous-onglets de l'écran Bibliothèques (les flux, modèles et scripts sont sur l'écran Flux).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum LibraryTab {
-    #[default]
-    Libraries,
-    Resources,
-    Packs,
-}
-
-impl LibraryTab {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Libraries => "Bibliothèques",
-            Self::Resources => "Ressources & Blocs",
-            Self::Packs => "Packs",
-        }
-    }
-
-    pub const ALL: [Self; 3] = [Self::Libraries, Self::Resources, Self::Packs];
-}
-
-impl UrlTab for LibraryTab {
-    fn slug(self) -> &'static str {
-        match self {
-            Self::Libraries => "libraries",
-            Self::Resources => "resources",
-            Self::Packs => "packs",
-        }
-    }
-
-    fn from_slug(slug: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|tab| tab.slug() == slug)
     }
 }
 
@@ -431,68 +397,23 @@ pub fn ScriptsPanel(me: Me) -> impl IntoView {
 
 #[component]
 pub fn LibrariesPage(me: Me) -> impl IntoView {
-    let can_manage_local = me.allows(Permission::ManageSettings);
-    let active_tab = use_tab(LibraryTab::default(), LibraryTab::ALL.to_vec());
     let reload_libs = RwSignal::new(0_u32);
-
     let libraries = LocalResource::new(move || {
         reload_libs.track();
         api::get::<Vec<Library>>(LIBRARIES_PATH)
     });
     let flows = LocalResource::new(|| api::get::<Vec<FlowRecord>>(FLOWS_PATH));
     let workers = LocalResource::new(|| api::get::<Vec<Worker>>(WORKERS_PATH));
-    let snapshot = load::<LocalLibrarySnapshot>(LOCAL_TOPICS, LOCAL_PATH);
 
     view! {
-        <div class="tab-panel" role="tabpanel">
-            <PageSubnav
-                aria_label="Sections des bibliothèques"
-                tabs=LibraryTab::ALL.into_iter().map(|tab| (tab, tab.label())).collect()
-                active=active_tab
+        <div class="tab-panel">
+            <MediaLibrariesSection
+                me=me
+                libraries=libraries
+                flows=flows
+                workers=workers
+                reload=reload_libs
             />
-            {move || match active_tab.get() {
-                LibraryTab::Libraries => view! {
-                    <MediaLibrariesSection
-                        me=me.clone()
-                        libraries=libraries
-                        flows=flows
-                        workers=workers
-                        reload=reload_libs
-                    />
-                }.into_any(),
-                LibraryTab::Resources => view! {
-                    <ResourcesSection
-                        snapshot=snapshot
-                        flows=flows
-                        can_manage=can_manage_local
-                    />
-                }.into_any(),
-                LibraryTab::Packs => view! {
-                    <LocalPacksSection snapshot=snapshot can_manage=can_manage_local />
-                }.into_any(),
-            }}
         </div>
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn library_tabs_leave_flows_templates_and_scripts_to_the_flows_screen() {
-        assert_eq!(LibraryTab::ALL.len(), 3);
-        assert_eq!(LibraryTab::Libraries.label(), "Bibliothèques");
-        assert_eq!(LibraryTab::Resources.label(), "Ressources & Blocs");
-        assert_eq!(LibraryTab::from_slug("flows"), None);
-        assert_eq!(LibraryTab::from_slug("scripts"), None);
-    }
-
-    #[test]
-    fn library_tabs_are_named_in_the_address_and_read_back() {
-        for tab in LibraryTab::ALL {
-            assert_eq!(LibraryTab::from_slug(tab.slug()), Some(tab));
-        }
-        assert_eq!(LibraryTab::from_slug("inconnu"), None);
     }
 }

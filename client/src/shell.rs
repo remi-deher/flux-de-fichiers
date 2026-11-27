@@ -95,6 +95,14 @@ pub fn groups() -> Vec<(&'static str, Vec<Screen>)> {
                     "Filtrer les flux…",
                 ),
                 screen(
+                    Route::Workshop,
+                    vocabulary::WORKSHOP,
+                    IconName::Package,
+                    Permission::ViewLibraries,
+                    false,
+                    "Filtrer les ressources et les packs…",
+                ),
+                screen(
                     Route::Jobs,
                     "Activité",
                     IconName::Activity,

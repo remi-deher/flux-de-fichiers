@@ -48,6 +48,12 @@ une variable globale pour survivre au passage par l'éditeur de script.
   l'éditeur porte `?depuis=<flux>` et y revient à sa fermeture (`libraries/script_origin.rs`) ; la garde de
   sortie demande de confirmer si le flux n'est pas enregistré. L'éditeur n'est donc pas une couche au-dessus du
   flux : c'est un écran, avec retour au flux.
+- Fait au lot 5 : les Bibliothèques ne montrent plus que les dossiers de médias surveillés (plus d'onglets).
+  Les ressources, modèles de blocs et packs locaux vont dans l'écran Atelier, `/app/workshop`
+  (`WorkshopPage`, `client/src/libraries/workshop.rs`), onglets `resources` (par défaut) et `packs`, entrée de
+  navigation « Atelier » (`vocabulary::WORKSHOP`) dans le groupe « Traitements », avec le droit de lire les
+  bibliothèques. `/app/libraries/resources` et `/app/libraries/packs` mènent à l'Atelier. Le bouton « Atelier »
+  de la liste des flux devient « Éditer », pour ne pas confondre les deux mots.
 - Reste : les tiroirs des modèles de blocs et du nouveau flux ; la garde de sortie (`unsaved`) des tiroirs
   de formulaire. Le tiroir de l'Activité garde ses paramètres actuels (`?job=`, `?step=`, `jobs/query.rs`).
 - Un identifiant introuvable ouvre un tiroir vide ; le message « n'existe plus » reste à écrire.

@@ -2,6 +2,7 @@
 //! Atelier : ressources, modèles de blocs et packs locaux (ADR 0035, lots 3 à 5).
 
 mod block_templates;
+mod carried_tokens;
 mod code_editor;
 mod diagnostic_marks;
 mod draft;

@@ -4,9 +4,10 @@
 
 use super::language_logic::{Link, is_served, language_position, session_url};
 use forgearr_shared::{
-    language::{ClientMessage, ServerMessage, Suggestion},
+    language::{ClientMessage, Diagnostic, ServerMessage, Suggestion},
     local::ScriptInterpreter,
 };
+use leptos::prelude::*;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -17,6 +18,9 @@ use web_sys::{MessageEvent, WebSocket};
 
 /// Ce que l'éditeur fait d'une réponse du serveur ; jamais appelé si le canal tombe avant.
 type Reply = Box<dyn FnOnce(Vec<Suggestion>)>;
+
+/// Dernières anomalies publiées par le serveur, avec le texte pour lequel il les a calculées.
+pub type Diagnosed = Option<(String, Vec<Diagnostic>)>;
 
 /// Canal d'un éditeur ; le cloner donne un autre accès au même canal.
 #[derive(Clone)]
@@ -34,16 +38,31 @@ struct Channel {
     synced: RefCell<Option<String>>,
     /// Texte le plus récent vu par le canal, envoyé à l'ouverture du document.
     latest: RefCell<String>,
+    diagnostics: RwSignal<Diagnosed>,
     on_message: Closure<dyn FnMut(MessageEvent)>,
     on_lost: Closure<dyn FnMut()>,
 }
 
 impl LanguageChannel {
-    /// Prépare le canal ; `text` est le code déjà présent. Rien n'est ouvert avant `set_interpreter`.
-    pub fn new(interpreter: ScriptInterpreter, text: &str) -> Self {
-        let channel =
-            Rc::new_cyclic(|channel: &Weak<Channel>| Channel::new(interpreter, text, channel));
+    /// Prépare le canal ; `text` est le code déjà présent et `diagnostics` reçoit ce que le serveur publie.
+    /// Rien n'est ouvert avant `set_interpreter`.
+    pub fn new(interpreter: ScriptInterpreter, text: &str, diagnostics: RwSignal<Diagnosed>) -> Self {
+        let channel = Rc::new_cyclic(|channel: &Weak<Channel>| {
+            Channel::new(interpreter, text, diagnostics, channel)
+        });
         Self(channel)
+    }
+
+    /// Le texte de l'éditeur a changé : le serveur le reçoit (et publie ses diagnostics) si le canal est prêt,
+    /// sinon il le recevra à l'ouverture.
+    pub fn follow(&self, text: &str) {
+        let channel = &self.0;
+        channel.latest.replace(text.to_owned());
+        if channel.link.get().is_ready() {
+            channel.sync(text);
+        } else {
+            channel.connect_if_due();
+        }
     }
 
     /// Change d'interpréteur : l'ancienne session est fermée, une nouvelle s'ouvre si un serveur existe.
@@ -95,7 +114,12 @@ impl LanguageChannel {
 }
 
 impl Channel {
-    fn new(interpreter: ScriptInterpreter, text: &str, channel: &Weak<Self>) -> Self {
+    fn new(
+        interpreter: ScriptInterpreter,
+        text: &str,
+        diagnostics: RwSignal<Diagnosed>,
+        channel: &Weak<Self>,
+    ) -> Self {
         let message_target = channel.clone();
         let lost_target = channel.clone();
         Self {
@@ -107,6 +131,7 @@ impl Channel {
             version: Cell::new(0),
             synced: RefCell::new(None),
             latest: RefCell::new(text.to_owned()),
+            diagnostics,
             on_message: Closure::new(move |event: MessageEvent| {
                 if let (Some(channel), Some(data)) =
                     (message_target.upgrade(), event.data().as_string())
@@ -145,7 +170,7 @@ impl Channel {
         }
     }
 
-    /// Message du central. Les diagnostics et les info-bulles sont l'affaire des lots c1 et c2.
+    /// Message du central. Les info-bulles sont l'affaire du lot c2.
     fn received(&self, data: &str) {
         let Ok(message) = serde_json::from_str::<ServerMessage>(data) else {
             return;
@@ -166,7 +191,13 @@ impl Channel {
                     .set(self.link.get().unavailable(reason, js_sys::Date::now()));
                 self.release();
             }
-            ServerMessage::Diagnostics { .. } | ServerMessage::Hover { .. } => {}
+            ServerMessage::Diagnostics { items } => {
+                let known = self.synced.borrow().clone();
+                if let Some(text) = known {
+                    let _ = self.diagnostics.try_set(Some((text, items)));
+                }
+            }
+            ServerMessage::Hover { .. } => {}
         }
     }
 
@@ -210,6 +241,7 @@ impl Channel {
     /// Détache et ferme le socket ; les réponses attendues sont abandonnées.
     fn release(&self) {
         self.pending.borrow_mut().clear();
+        let _ = self.diagnostics.try_set(None);
         if let Some(socket) = self.socket.take() {
             socket.set_onmessage(None);
             socket.set_onclose(None);

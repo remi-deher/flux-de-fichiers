@@ -124,7 +124,8 @@ pub fn mark_lines(lines: &[Vec<CodeToken>], diagnostics: &[Diagnostic]) -> Vec<V
             let spans: Vec<(u32, u32, DiagnosticSeverity)> = diagnostics
                 .iter()
                 .filter_map(|diagnostic| {
-                    span_on_line(diagnostic, number).map(|(from, to)| (from, to, diagnostic.severity))
+                    span_on_line(diagnostic, number)
+                        .map(|(from, to)| (from, to, diagnostic.severity))
                 })
                 .collect();
             mark_line(line, &spans)

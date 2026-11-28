@@ -46,7 +46,11 @@ struct Channel {
 impl LanguageChannel {
     /// Prépare le canal ; `text` est le code déjà présent et `diagnostics` reçoit ce que le serveur publie.
     /// Rien n'est ouvert avant `set_interpreter`.
-    pub fn new(interpreter: ScriptInterpreter, text: &str, diagnostics: RwSignal<Diagnosed>) -> Self {
+    pub fn new(
+        interpreter: ScriptInterpreter,
+        text: &str,
+        diagnostics: RwSignal<Diagnosed>,
+    ) -> Self {
         let channel = Rc::new_cyclic(|channel: &Weak<Channel>| {
             Channel::new(interpreter, text, diagnostics, channel)
         });

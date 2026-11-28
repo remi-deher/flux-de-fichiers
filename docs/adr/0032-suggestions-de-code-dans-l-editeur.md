@@ -1,6 +1,6 @@
 # 0032 — Suggestions de code dans l'éditeur de script
 
-Statut : proposé ; phase (a) livrée en 0.87.0 ; phases (b) et (c) cadrées le 26 nov. 2026 avec l'utilisateur ; lots b0, b1 et b2 écrits, la suite à venir. Demande de l'utilisateur le 24 nov. 2026 : des suggestions « comme dans un vrai IDE », par intelligence de langage (LSP). Complète l'ADR 0030.
+Statut : proposé ; phase (a) livrée en 0.87.0 ; phases (b) et (c) cadrées le 26 nov. 2026 avec l'utilisateur ; lots b0, b1, b2 et c1 écrits, la suite à venir. Demande de l'utilisateur le 24 nov. 2026 : des suggestions « comme dans un vrai IDE », par intelligence de langage (LSP). Complète l'ADR 0030.
 
 ## Contexte
 
@@ -52,6 +52,13 @@ b0 et b1 avancent en parallèle (b1 se teste avec un faux serveur sur `tokio::io
 - **Fusion.** `language_logic::merge` : les suggestions du serveur d'abord, dans son ordre et filtrées par le mot tapé, puis ce que la liste locale (a) ajoute, sans doublon, huit au plus. La liste locale s'affiche aussitôt et se complète à la réponse du serveur.
 - **Repli.** Un interpréteur sans serveur ou une application `langages` absente laissent la liste locale seule. Un canal tombé, un plafond atteint ou un serveur arrêté pour inactivité se rouvrent à la demande suivante, après une attente qui double à chaque échec (celle des flux d'événements : 2 s, plafond 60 s). Aucun minuteur ne tourne en arrière-plan.
 - Les diagnostics et les info-bulles reçus sont ignorés jusqu'aux lots c1 et c2.
+
+## Lot c1 écrit
+
+- **Texte donné au serveur.** Après 400 ms sans frappe, l'éditeur envoie son texte au serveur de langage (`LanguageChannel::follow`), qui publie ses diagnostics (poussés, ou tirés à chaque changement pour `ty`). Les suggestions envoient aussi le texte avant de demander.
+- **Soulignement.** `client/src/libraries/diagnostic_marks.rs` coupe les jetons colorés aux bornes de chaque anomalie (colonnes UTF-16) sans jamais changer le texte : la couche `pre` garde la largeur de la saisie. Ondulé rouge pour une erreur, ondulé orange pour un avertissement, pointillé pour une information ou une suggestion ; la plus grave l'emporte quand les plages se recouvrent.
+- **Gouttière et résumé.** Le numéro de la ligne prend la couleur de l'anomalie la plus grave (son message en infobulle) ; une ligne sous la zone résume (« 2 erreurs · 1 avertissement »).
+- **Texte modifié depuis le calcul.** Les anomalies sont rattachées au texte pour lequel le serveur les a calculées : à la frappe, celles des lignes inchangées en haut et en bas restent (les dernières suivent le décalage de lignes), celles des lignes touchées disparaissent jusqu'à la publication suivante. Elles disparaissent aussi quand le canal se ferme.
 
 ## Phase (a) écrite
 

@@ -2,21 +2,23 @@
 //! coloration. Un `<textarea>` transparent est superposé à un `<pre>` coloré ; les deux occupent la même case
 //! d'une grille, que le conteneur fait défiler d'un bloc. Les jetons viennent du central.
 
-use super::language_channel::LanguageChannel;
+use super::diagnostic_marks::{self, MarkedToken, mark_class};
+use super::language_channel::{Diagnosed, LanguageChannel};
 use super::language_logic::{self, char_before};
 use super::suggestions::{self, MIN_PREFIX_CHARS, Suggestion};
 use crate::api;
-use crate::plugins::highlighted_lines;
 use forgearr_shared::highlight::{CodeToken, HighlightRequest, HighlightedCode, TokenKind};
 use forgearr_shared::local::ScriptInterpreter;
 use leptos::prelude::*;
-use std::time::Duration;
+use std::{rc::Rc, time::Duration};
 use wasm_bindgen::JsCast;
 use web_sys::HtmlTextAreaElement;
 
 const HIGHLIGHT_PATH: &str = "/api/v1/highlight";
 /// Pause de frappe avant de demander la coloration au central.
 const HIGHLIGHT_DELAY: Duration = Duration::from_millis(350);
+/// Pause de frappe avant de donner le texte au serveur de langage, qui en publie les diagnostics.
+const DIAGNOSTICS_DELAY: Duration = Duration::from_millis(400);
 /// Retrait inséré par la touche Tab.
 const INDENT: &str = "  ";
 
@@ -99,40 +101,73 @@ fn insert_indent(code: &str, start: usize, end: usize) -> (String, usize) {
     (String::from_utf16_lossy(&next), caret)
 }
 
+/// Appelle `run` avec ce que lit `read` une fois `delay` écoulé sans nouvelle valeur. `run` reçoit aussi de
+/// quoi savoir, plus tard, si cette valeur est toujours la dernière (une réponse tardive ne doit pas la
+/// remplacer).
+fn after_pause<T: 'static>(
+    read: impl Fn() -> T + 'static,
+    delay: Duration,
+    run: impl Fn(T, Rc<dyn Fn() -> bool>) + Clone + 'static,
+) {
+    let generation = StoredValue::new(0_u64);
+    Effect::new(move |_| {
+        let value = read();
+        generation.update_value(|count| *count += 1);
+        let ticket = generation.get_value();
+        let run = run.clone();
+        set_timeout(
+            move || {
+                let current: Rc<dyn Fn() -> bool> =
+                    Rc::new(move || generation.try_get_value() == Some(ticket));
+                if current() {
+                    run(value, current);
+                }
+            },
+            delay,
+        );
+    });
+}
+
 /// Demande la coloration après une pause de frappe ; une frappe plus récente annule l'appel en attente.
 fn schedule_highlight(
     code: RwSignal<String>,
     extension: Signal<&'static str>,
     highlighted: RwSignal<Highlighted>,
 ) {
-    let generation = StoredValue::new(0_u64);
-    Effect::new(move |_| {
-        let text = code.get();
-        let extension = extension.get();
-        generation.update_value(|count| *count += 1);
-        let ticket = generation.get_value();
-        set_timeout(
-            move || {
-                if generation.try_get_value() != Some(ticket) {
-                    return;
-                }
-                leptos::task::spawn_local(async move {
-                    let request = HighlightRequest {
-                        code: text.clone(),
-                        extension: extension.to_owned(),
-                    };
-                    let reply =
-                        api::post::<_, HighlightedCode>(HIGHLIGHT_PATH, Some(&request)).await;
-                    if let Ok(done) = reply
-                        && generation.try_get_value() == Some(ticket)
-                    {
-                        let _ = highlighted.try_set(Some((text, done.lines)));
-                    }
-                });
-            },
-            HIGHLIGHT_DELAY,
-        );
+    let read = move || (code.get(), extension.get());
+    after_pause(read, HIGHLIGHT_DELAY, move |(text, extension), current| {
+        leptos::task::spawn_local(async move {
+            let request = HighlightRequest {
+                code: text.clone(),
+                extension: extension.to_owned(),
+            };
+            let reply = api::post::<_, HighlightedCode>(HIGHLIGHT_PATH, Some(&request)).await;
+            if let Ok(done) = reply
+                && current()
+            {
+                let _ = highlighted.try_set(Some((text, done.lines)));
+            }
+        });
     });
+}
+
+/// Rend les lignes de jetons : une couleur par genre de jeton, un soulignement par gravité d'anomalie.
+fn marked_lines(lines: Vec<Vec<MarkedToken>>) -> impl IntoView {
+    lines
+        .into_iter()
+        .map(|line| {
+            view! {
+                {line.into_iter().map(|token| {
+                    let class = match token.mark {
+                        Some(severity) => format!("{} {}", token.kind.css_class(), mark_class(severity)),
+                        None => token.kind.css_class().to_owned(),
+                    };
+                    view! { <span class=class>{token.text}</span> }
+                }).collect_view()}
+                "\n"
+            }
+        })
+        .collect_view()
 }
 
 /// Éditeur de code : `code` est lu et écrit ; `extension` choisit la grammaire de coloration et `interpreter`
@@ -154,10 +189,26 @@ pub fn CodeEditor(
     let area_ref = NodeRef::<leptos::html::Textarea>::new();
     let popup = RwSignal::new(None::<SuggestionPopup>);
     // Le serveur de langage complète la liste locale ; sans lui, la liste locale répond seule.
+    let diagnosed = RwSignal::<Diagnosed>::new(None);
     let channel = StoredValue::new_local(LanguageChannel::new(
         interpreter.get_untracked(),
         &code.get_untracked(),
+        diagnosed,
     ));
+    if !read_only {
+        let follow = move |text: String, _current: Rc<dyn Fn() -> bool>| {
+            channel.with_value(|channel| channel.follow(&text));
+        };
+        after_pause(move || code.get(), DIAGNOSTICS_DELAY, follow);
+    }
+    // Les anomalies du serveur, ramenées sur le texte tel qu'il est maintenant.
+    let current_diagnostics = Memo::new(move |_| {
+        let text = code.get();
+        diagnosed
+            .get()
+            .map(|(computed_for, items)| diagnostic_marks::remap(&computed_for, &text, &items))
+            .unwrap_or_default()
+    });
     Effect::new(move |_| {
         let interpreter = interpreter.get();
         if !read_only {
@@ -295,16 +346,24 @@ pub fn CodeEditor(
     view! {
         <div class="code-editor">
             <ol class="code-editor__gutter" aria-hidden="true">
-                {move || (1..=line_count(&code.get()))
-                    .map(|number| view! { <li>{number}</li> })
-                    .collect_view()}
+                {move || {
+                    let marks = diagnostic_marks::gutter_marks(
+                        line_count(&code.get()),
+                        &current_diagnostics.get(),
+                    );
+                    marks.into_iter().enumerate().map(|(index, mark)| {
+                        let class = mark.as_ref().map(|found| mark_class(found.severity));
+                        let note = mark.map(|found| found.message);
+                        view! { <li class=class title=note>{index + 1}</li> }
+                    }).collect_view()
+                }}
             </ol>
             <div class="code-editor__stack">
                 <pre class="code-editor__layer code-editor__highlight" aria-hidden="true">
                     {move || {
                         let current = code.get();
                         let lines = visible_lines(&current, &highlighted.get());
-                        highlighted_lines(lines)
+                        marked_lines(diagnostic_marks::mark_lines(&lines, &current_diagnostics.get()))
                     }}
                     "\n"
                 </pre>
@@ -344,6 +403,9 @@ pub fn CodeEditor(
                 })}
             </div>
         </div>
+        {move || diagnostic_marks::summary(&current_diagnostics.get()).map(|text| view! {
+            <p class="code-editor__status" role="status">{text}</p>
+        })}
     }
 }
 

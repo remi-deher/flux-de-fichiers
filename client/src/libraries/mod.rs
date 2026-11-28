@@ -3,6 +3,7 @@
 
 mod block_templates;
 mod code_editor;
+mod diagnostic_marks;
 mod draft;
 mod form;
 mod history;

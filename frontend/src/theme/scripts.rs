@@ -149,6 +149,50 @@ pub const SCRIPTS_CSS: &str = r#"
   background: var(--primary-bg);
 }
 
+.code-editor__hover {
+  position: absolute;
+  top: calc(0.5rem + (var(--caret-line) + 1) * 1.5em);
+  left: calc(0.75rem + var(--caret-col) * 1ch);
+  z-index: 6;
+  max-width: min(40rem, 90%);
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text-main);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  white-space: normal;
+}
+
+.code-editor__hover p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code-editor__hover pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--accent);
+}
+
+.code-editor__hover p + p,
+.code-editor__hover p + pre,
+.code-editor__hover pre + p,
+.code-editor__hover pre + pre {
+  margin-top: 0.35rem;
+}
+
+/* Règle de mesure : sa largeur donne celle d'un caractère de la police fixe, sans rien afficher. */
+.code-editor__ruler {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre;
+}
+
 .code-editor__suggestion-kind {
   color: var(--text-dim);
 }

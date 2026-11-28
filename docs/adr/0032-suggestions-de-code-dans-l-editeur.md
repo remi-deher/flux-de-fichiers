@@ -1,6 +1,6 @@
 # 0032 — Suggestions de code dans l'éditeur de script
 
-Statut : proposé ; phase (a) livrée en 0.87.0 ; phases (b) et (c) cadrées le 26 nov. 2026 avec l'utilisateur ; lots b0, b1, b2 et c1 écrits, la suite à venir. Demande de l'utilisateur le 24 nov. 2026 : des suggestions « comme dans un vrai IDE », par intelligence de langage (LSP). Complète l'ADR 0030.
+Statut : proposé ; phase (a) livrée en 0.87.0 ; phases (b) et (c) cadrées le 26 nov. 2026 avec l'utilisateur ; lots b0, b1, b2, c1 et c2 écrits, la suite à venir. Demande de l'utilisateur le 24 nov. 2026 : des suggestions « comme dans un vrai IDE », par intelligence de langage (LSP). Complète l'ADR 0030.
 
 ## Contexte
 
@@ -59,6 +59,11 @@ b0 et b1 avancent en parallèle (b1 se teste avec un faux serveur sur `tokio::io
 - **Soulignement.** `client/src/libraries/diagnostic_marks.rs` coupe les jetons colorés aux bornes de chaque anomalie (colonnes UTF-16) sans jamais changer le texte : la couche `pre` garde la largeur de la saisie. Ondulé rouge pour une erreur, ondulé orange pour un avertissement, pointillé pour une information ou une suggestion ; la plus grave l'emporte quand les plages se recouvrent.
 - **Gouttière et résumé.** Le numéro de la ligne prend la couleur de l'anomalie la plus grave (son message en infobulle) ; une ligne sous la zone résume (« 2 erreurs · 1 avertissement »).
 - **Texte modifié depuis le calcul.** Les anomalies sont rattachées au texte pour lequel le serveur les a calculées : à la frappe, celles des lignes inchangées en haut et en bas restent (les dernières suivent le décalage de lignes), celles des lignes touchées disparaissent jusqu'à la publication suivante. Elles disparaissent aussi quand le canal se ferme.
+
+## Lot c2 écrit
+
+- **Déclenchement.** Le pointeur reste 500 ms sur un caractère, ou Ctrl+K puis I demande l'info-bulle à la position du curseur. Le pointeur est converti en position du protocole (`language_logic::cell_at`) d'après la largeur d'un caractère, mesurée sur une règle invisible, et les marges de la saisie ; un pointeur hors du texte ne demande rien. Frappe, Échap, sortie du pointeur et perte du focus la ferment ; une réponse d'une demande périmée est ignorée.
+- **Rendu.** `client/src/libraries/hover_text.rs` réduit le Markdown du serveur à des paragraphes et des blocs de code, rendus comme du texte : les balises HTML sont retirées et rien n'est interprété. Le texte est coupé à 1 500 caractères. L'info-bulle se place sous la ligne, comme la liste de suggestions, et ne capte pas le pointeur.
 
 ## Phase (a) écrite
 

@@ -7,6 +7,8 @@ mod diagnostic_marks;
 mod draft;
 mod form;
 mod history;
+mod hover_text;
+mod hover_tip;
 mod language_channel;
 mod language_logic;
 mod packs;
@@ -21,6 +23,7 @@ mod script_trial_panel;
 mod scripts;
 mod suggestions;
 mod transfer_workers;
+mod typing_pause;
 mod variables_editor;
 mod workshop;
 

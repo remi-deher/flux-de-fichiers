@@ -58,6 +58,58 @@ pub fn language_position(code: &str, caret: usize) -> Position {
     }
 }
 
+/// Dimensions d'une cellule de la zone de code, en pixels : celle d'un caractère de la police fixe et les
+/// marges de la saisie.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CellMetrics {
+    pub char_width: f64,
+    pub line_height: f64,
+    pub pad_left: f64,
+    pub pad_top: f64,
+}
+
+/// Caractère sous le pointeur : sa position pour le serveur, et sa ligne et sa colonne (en caractères) pour
+/// placer l'info-bulle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cell {
+    pub position: Position,
+    pub line: usize,
+    pub column: usize,
+}
+
+/// Valeur en pixels d'une longueur calculée (`12px`).
+pub fn parse_pixels(length: &str) -> Option<f64> {
+    length.trim().strip_suffix("px")?.trim().parse().ok()
+}
+
+/// Caractère sous le pointeur (`x`, `y` : pixels depuis le coin de la saisie). `None` hors du texte : dans
+/// les marges, sous la dernière ligne ou au-delà de la fin d'une ligne.
+pub fn cell_at(code: &str, x: f64, y: f64, metrics: CellMetrics) -> Option<Cell> {
+    let valid = metrics.char_width > 0.0 && metrics.line_height > 0.0;
+    if !valid || x < metrics.pad_left || y < metrics.pad_top {
+        return None;
+    }
+    // Troncature voulue : l'indice de la cellule est la partie entière du quotient.
+    let (line, column) = (
+        ((y - metrics.pad_top) / metrics.line_height) as usize,
+        ((x - metrics.pad_left) / metrics.char_width) as usize,
+    );
+    let text = code.split('\n').nth(line)?;
+    if column >= text.chars().count() {
+        return None;
+    }
+    let units: usize = text.chars().take(column).map(char::len_utf16).sum();
+    let position = Position {
+        line: u32::try_from(line).ok()?,
+        character: u32::try_from(units).ok()?,
+    };
+    Some(Cell {
+        position,
+        line,
+        column,
+    })
+}
+
 /// Adresse du canal : `wss` derrière du TLS, `ws` sinon ; l'interpréteur est écrit comme dans l'API.
 pub fn session_url(secure: bool, host: &str, interpreter: ScriptInterpreter) -> Option<String> {
     let scheme = if secure { "wss" } else { "ws" };
@@ -242,6 +294,63 @@ mod tests {
             character: 2,
         };
         assert_eq!(language_position("ab", 99), past_the_end);
+    }
+
+    fn metrics() -> CellMetrics {
+        CellMetrics {
+            char_width: 8.0,
+            line_height: 20.0,
+            pad_left: 12.0,
+            pad_top: 8.0,
+        }
+    }
+
+    #[test]
+    fn the_pointer_is_mapped_to_a_line_and_a_utf16_column() {
+        let position = |x, y| cell_at("echo ab\n😀cd", x, y, metrics()).map(|cell| cell.position);
+        let at = |line, character| Some(Position { line, character });
+        assert_eq!(position(12.0, 8.0), at(0, 0));
+        assert_eq!(position(12.0 + 8.0 * 5.0, 10.0), at(0, 5));
+        // Deuxième ligne : « 😀 » compte 2 unités, « c » est donc en colonne 2.
+        assert_eq!(position(12.0 + 8.0, 8.0 + 20.0), at(1, 2));
+    }
+
+    #[test]
+    fn the_cell_keeps_the_character_column_for_the_tooltip() {
+        let cell = cell_at("a😀bc", 12.0 + 8.0 * 2.0, 8.0, metrics());
+        assert_eq!(
+            cell,
+            Some(Cell {
+                position: Position {
+                    line: 0,
+                    character: 3,
+                },
+                line: 0,
+                column: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn computed_lengths_are_read_in_pixels() {
+        assert_eq!(parse_pixels("12px"), Some(12.0));
+        assert_eq!(parse_pixels(" 8.5px "), Some(8.5));
+        assert_eq!(parse_pixels("1rem"), None);
+        assert_eq!(parse_pixels(""), None);
+    }
+
+    #[test]
+    fn the_pointer_outside_the_text_maps_to_nothing() {
+        let position = |x, y| cell_at("ab\ncd", x, y, metrics());
+        assert_eq!(position(5.0, 10.0), None);
+        assert_eq!(position(20.0, 3.0), None);
+        assert_eq!(position(12.0 + 8.0 * 2.0, 10.0), None);
+        assert_eq!(position(12.0, 8.0 + 20.0 * 5.0), None);
+        let broken = CellMetrics {
+            char_width: 0.0,
+            ..metrics()
+        };
+        assert_eq!(cell_at("ab", 20.0, 10.0, broken), None);
     }
 
     #[test]

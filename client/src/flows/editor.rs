@@ -3,11 +3,13 @@
 use super::canvas::GraphCanvas;
 use super::flow_choice::FailureFlowSettings;
 use super::inspector::NodeInspector;
+use super::library_binding::LibraryBinding;
 use super::palette::Palette;
 use super::presentation::{DiagnosticLevel, FlowDiagnostic, diagnose_graph};
 use super::start::{FlowDraft, Skeleton};
 use super::state::{Editor, incomplete_blocks};
 use super::versions::{FlowVersions, editable_graph};
+use super::{bound_library_count, flow_libs_label};
 use crate::ai::AiAssistantState;
 use crate::api;
 use crate::route::{Link, Route, encode_segment, use_router};
@@ -19,6 +21,7 @@ use forgearr_shared::Permission;
 use forgearr_shared::flows::{
     FlowGraph, FlowRecord, OwnedBlockSpec, UpdateFlowRequest, new_flow_id,
 };
+use forgearr_shared::libraries::Library;
 use forgearr_shared::session::Me;
 use leptos::ev;
 use leptos::prelude::*;
@@ -26,6 +29,7 @@ use wasm_bindgen::JsCast;
 
 const FLOWS_PATH: &str = "/api/v1/flows";
 const BLOCKS_PATH: &str = "/api/v1/flows/blocks";
+const LIBRARIES_PATH: &str = "/api/v1/libraries";
 const DEFAULT_FILE_MASK: &str = "*";
 const CMD_ICON_SIZE: u32 = 15;
 const CHEVRON_ICON_SIZE: u32 = 18;
@@ -80,6 +84,7 @@ fn FlowCommandBar(
     meta: RwSignal<FlowRecord>,
     diagnostics: Memo<Vec<FlowDiagnostic>>,
     can_manage: bool,
+    libraries: Signal<Vec<Library>>,
     saving: Signal<bool>,
     on_save: Callback<()>,
 ) -> impl IntoView {
@@ -144,6 +149,23 @@ fn FlowCommandBar(
                         {move || meta.get().is_default.then(|| view! {
                             <span class="flow-pill flow-pill--default">"Par défaut"</span>
                         })}
+                        {move || {
+                            let record = meta.get();
+                            (!record.id.is_empty() && record.version > 0).then(|| {
+                                let count =
+                                    libraries.with(|all| bound_library_count(&record.id, all));
+                                view! {
+                                    <button
+                                        type="button"
+                                        class="flow-pill flow-pill--libraries"
+                                        title="Rattacher ce flux à des bibliothèques"
+                                        on:click=move |_| editor.open_settings()
+                                    >
+                                        {flow_libs_label(count)}
+                                    </button>
+                                }
+                            })
+                        }}
                         <span class="flow-pill flow-pill--version">
                             {move || match meta.get().version {
                                 0 => "Nouveau".to_owned(),
@@ -287,6 +309,9 @@ fn FlowSettingsPane(
     meta: RwSignal<FlowRecord>,
     feedback: RwSignal<Option<String>>,
     can_manage: bool,
+    libraries: Signal<Vec<Library>>,
+    can_bind: bool,
+    on_libraries_changed: Callback<()>,
 ) -> impl IntoView {
     view! {
         <div class="flow-dock-pane flow-settings-pane" aria-label="Réglages et versions du flux">
@@ -335,6 +360,15 @@ fn FlowSettingsPane(
 
                             <FailureFlowSettings editor=editor flow_id=record.id.clone()
                                 can_manage=can_manage />
+
+                            {(!record.id.is_empty() && record.version > 0).then(|| view! {
+                                <LibraryBinding
+                                    flow_id=record.id.clone()
+                                    libraries=libraries
+                                    can_bind=can_bind
+                                    on_changed=on_libraries_changed
+                                />
+                            })}
 
                             {(!record.id.is_empty() && record.version > 0).then(|| view! {
                                 <div class="flow-inspector__section">
@@ -386,6 +420,9 @@ fn RightDock(
     meta: RwSignal<FlowRecord>,
     feedback: RwSignal<Option<String>>,
     can_manage: bool,
+    libraries: Signal<Vec<Library>>,
+    can_bind: bool,
+    on_libraries_changed: Callback<()>,
 ) -> impl IntoView {
     let is_open = move || editor.any_right_panel_open();
     let has_selection = move || editor.selected.get().is_some();
@@ -452,6 +489,9 @@ fn RightDock(
                                 meta=meta
                                 feedback=feedback
                                 can_manage=can_manage
+                                libraries=libraries
+                                can_bind=can_bind
+                                on_libraries_changed=on_libraries_changed
                             />
                         }
                         .into_any()
@@ -553,7 +593,24 @@ fn Workspace(
     #[prop(optional)] skeleton: Skeleton,
 ) -> impl IntoView {
     let can_manage = me.allows(Permission::ManageFlows);
+    let can_view_libraries = me.allows(Permission::ViewLibraries);
+    let can_bind = can_manage && me.allows(Permission::ManageLibraries);
     let router = use_router();
+    let libraries_reload = RwSignal::new(0_u32);
+    let libraries_resource = LocalResource::new(move || {
+        libraries_reload.track();
+        async move {
+            if can_view_libraries {
+                api::get::<Vec<Library>>(LIBRARIES_PATH)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            }
+        }
+    });
+    let libraries = Signal::derive(move || libraries_resource.get().unwrap_or_default());
+    let on_libraries_changed = Callback::new(move |()| libraries_reload.update(|n| *n += 1));
     let initial_id = (!record.id.is_empty()).then(|| record.id.clone());
     let editor = Editor::for_flow(initial_id, graph);
     let meta = RwSignal::new(record);
@@ -758,6 +815,7 @@ fn Workspace(
                     meta=meta
                     diagnostics=diagnostics
                     can_manage=can_manage
+                    libraries=libraries
                     saving=saving
                     on_save=trigger_save
                 />
@@ -768,6 +826,9 @@ fn Workspace(
                     meta=meta
                     feedback=feedback
                     can_manage=can_manage
+                    libraries=libraries
+                    can_bind=can_bind
+                    on_libraries_changed=on_libraries_changed
                 />
                 <FlowDiagnosticsTray editor=editor diagnostics=diagnostics />
             </div>

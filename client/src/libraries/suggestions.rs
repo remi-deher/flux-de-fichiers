@@ -3,9 +3,9 @@
 //! présents dans le script.
 
 /// Nombre minimal de caractères tapés avant de proposer quoi que ce soit.
-const MIN_PREFIX_CHARS: usize = 2;
+pub(super) const MIN_PREFIX_CHARS: usize = 2;
 /// Nombre maximal de suggestions affichées.
-const MAX_SUGGESTIONS: usize = 8;
+pub(super) const MAX_SUGGESTIONS: usize = 8;
 /// Longueur minimale d'un mot du script pour être proposé.
 const MIN_WORD_CHARS: usize = 3;
 
@@ -107,6 +107,11 @@ pub enum SuggestionKind {
     Contract,
     Keyword,
     Word,
+    /// Les genres ci-dessous ne viennent que du serveur de langage.
+    Function,
+    Module,
+    Property,
+    Snippet,
 }
 
 impl SuggestionKind {
@@ -117,6 +122,10 @@ impl SuggestionKind {
             Self::Contract => "contrat",
             Self::Keyword => "mot-clé",
             Self::Word => "mot",
+            Self::Function => "fonction",
+            Self::Module => "module",
+            Self::Property => "propriété",
+            Self::Snippet => "extrait",
         }
     }
 }
@@ -125,6 +134,24 @@ impl SuggestionKind {
 pub struct Suggestion {
     pub label: String,
     pub kind: SuggestionKind,
+    /// Texte inséré à l'acceptation s'il diffère du libellé (suggestions du serveur de langage).
+    pub insert: Option<String>,
+}
+
+impl Suggestion {
+    /// Suggestion locale : le libellé est le texte inséré.
+    pub fn local(label: &str, kind: SuggestionKind) -> Self {
+        Self {
+            label: label.to_owned(),
+            kind,
+            insert: None,
+        }
+    }
+
+    /// Ce qui remplace le mot tapé quand la suggestion est acceptée.
+    pub fn inserted(&self) -> &str {
+        self.insert.as_deref().unwrap_or(&self.label)
+    }
 }
 
 /// Mots-clés de la grammaire (`extension` : celle de l'interpréteur) ; aucun pour une extension inconnue.
@@ -183,7 +210,7 @@ pub fn replace_range(code: &str, start: usize, end: usize, text: &str) -> (Strin
     (String::from_utf16_lossy(&next), caret)
 }
 
-fn starts_with_ignore_case(label: &str, prefix: &str) -> bool {
+pub(super) fn starts_with_ignore_case(label: &str, prefix: &str) -> bool {
     label.to_lowercase().starts_with(&prefix.to_lowercase())
 }
 
@@ -215,10 +242,7 @@ pub fn suggest(prefix: &str, code: &str, extension: &str, declared: &[String]) -
             && starts_with_ignore_case(label, prefix)
             && !found.iter().any(|known| known.label == label)
         {
-            found.push(Suggestion {
-                label: label.to_owned(),
-                kind,
-            });
+            found.push(Suggestion::local(label, kind));
         }
     }
     found.sort_by(|a, b| a.kind.cmp(&b.kind).then_with(|| a.label.cmp(&b.label)));
@@ -257,6 +281,34 @@ mod tests {
             ("echo workingFile".to_owned(), 16)
         );
         assert_eq!(replace_range("ab", 9, 9, "c"), ("abc".to_owned(), 3));
+    }
+
+    #[test]
+    fn a_suggestion_inserts_its_label_unless_it_names_another_text() {
+        let local = Suggestion::local("dirname", SuggestionKind::Word);
+        assert_eq!(local.inserted(), "dirname");
+        let from_server = Suggestion {
+            insert: Some("dirname ".to_owned()),
+            ..local
+        };
+        assert_eq!(from_server.inserted(), "dirname ");
+    }
+
+    #[test]
+    fn every_kind_has_its_own_label() {
+        let kinds = [
+            SuggestionKind::Variable,
+            SuggestionKind::Contract,
+            SuggestionKind::Keyword,
+            SuggestionKind::Word,
+            SuggestionKind::Function,
+            SuggestionKind::Module,
+            SuggestionKind::Property,
+            SuggestionKind::Snippet,
+        ];
+        let labels: std::collections::BTreeSet<&str> =
+            kinds.iter().map(|kind| kind.label()).collect();
+        assert_eq!(labels.len(), kinds.len());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Onglet Ressources & Blocs de la Librairie : import de fichiers locaux et modèles de blocs.
+//! Onglet Ressources & Blocs de l'Atelier : import de fichiers locaux et modèles de blocs.
 
 use super::block_templates::{BlockTemplateCard, BlockTemplateDraft, BlockTemplateDrawer};
 use super::{

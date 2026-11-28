@@ -228,6 +228,16 @@ pub const FLOWS_CSS: &str = r#"
   line-height: 1.35;
 }
 
+.flow-pill--libraries {
+  cursor: pointer;
+}
+
+.flow-pill--libraries:hover,
+.flow-pill--libraries:focus-visible {
+  color: var(--text);
+  border-color: var(--primary);
+}
+
 .flow-pill--default {
   color: var(--success);
   background: var(--success-bg);

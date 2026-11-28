@@ -11,11 +11,13 @@ mod fields;
 mod flow_choice;
 mod geometry;
 mod inspector;
+mod library_binding;
 mod palette;
 mod plan;
 mod pointer;
 mod presentation;
 mod quick_add;
+mod screen;
 mod script_inspector;
 mod simulation;
 mod start;
@@ -27,6 +29,8 @@ mod versions;
 
 pub use editor::FlowEditor;
 pub(crate) use presentation::NodeDomain;
+pub use screen::FlowsPage;
+pub(crate) use screen::FlowsTab;
 pub use start::NewFlow;
 
 use crate::plugins::{FlowMiniPreview, preview_from_definition_json};
@@ -59,13 +63,12 @@ const LOCAL_ITEMS_PATH: &str = "/api/v1/local/items";
 const PIPELINE_PREVIEW_LIMIT: usize = 4;
 const ID_SUFFIX_MODULO: u64 = 100_000;
 
-/// Mode d'affichage de la section Flows & Modèles.
+/// Ce que liste la section : les flux, ou les modèles de flux (onglets Flux et Modèles).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum FlowsCatalogFilter {
+pub enum FlowsScope {
     #[default]
     Flows,
     Templates,
-    All,
 }
 
 /// Étape résumée dans la prévisualisation d'un pipeline de flux.
@@ -652,18 +655,12 @@ fn FlowTemplateDetailDrawer(
 }
 
 #[component]
-pub fn FlowsPage(me: Me) -> impl IntoView {
-    view! { <FlowsSection me=me /> }
-}
-
-#[component]
-pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) -> impl IntoView {
+pub fn FlowsSection(me: Me, scope: FlowsScope) -> impl IntoView {
     let can_manage = me.allows(Permission::ManageFlows);
     let can_templates = me.allows(Permission::ManageSettings);
     let can_libraries = me.allows(Permission::ViewLibraries);
     let filters = use_context::<Filters>();
     let reload = RwSignal::new(0_u32);
-    let view_mode = RwSignal::new(FlowsCatalogFilter::Flows);
     let selected_entry = RwSignal::new(None::<SelectedFlowEntry>);
     let (flow_selection, flow_drawer_open) = use_detail_drawer(DrawerKind::Flow);
     let (template_selection, tpl_drawer_open) = use_detail_drawer(DrawerKind::FlowTemplate);
@@ -711,9 +708,6 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
     });
     let on_removed = Callback::new(move |()| {
         reload.update(|count| *count = count.wrapping_add(1));
-        if let Some(cb) = on_changed {
-            cb.run(());
-        }
     });
     let close_drawers = Callback::new(move |()| {
         flow_drawer_open.set(false);
@@ -756,25 +750,30 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
     };
 
     let router = use_router();
-    if can_manage {
+    if can_manage && scope == FlowsScope::Flows {
         provide_topbar_action(ActionSpec {
             label: "Nouveau flux",
             on_click: Callback::new(move |()| router.go(Route::NewFlow)),
         });
     }
     let stats = Signal::derive(move || {
+        if scope == FlowsScope::Templates {
+            let templates_count = local_snapshot
+                .get()
+                .and_then(Result::ok)
+                .map_or(0, |s| s.flow_templates.len());
+            return vec![StatItem::new(
+                "Modèles",
+                templates_count.to_string(),
+                MetricTone::Neutral,
+            )];
+        }
         let list = flows.get().and_then(Result::ok).unwrap_or_default();
-        let templates_count = local_snapshot
-            .get()
-            .and_then(Result::ok)
-            .map_or(0, |s| s.flow_templates.len());
         let libs = libraries.get().unwrap_or_default();
         let counts = flow_usage_counts(&list, &libs);
         let active = flow_filter();
-        let mode = view_mode.get();
         let set_filter = move |next: FlowFilter| {
             Callback::new(move |()| {
-                view_mode.set(FlowsCatalogFilter::Flows);
                 if let Some(filters) = filters {
                     filters.flow.set(next);
                 }
@@ -786,19 +785,13 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
                 counts.total.to_string(),
                 MetricTone::Neutral,
             )
-            .with_filter(
-                mode == FlowsCatalogFilter::Flows && active == FlowFilter::All,
-                set_filter(FlowFilter::All),
-            ),
+            .with_filter(active == FlowFilter::All, set_filter(FlowFilter::All)),
         ];
         if can_libraries {
             items.push(
                 StatItem::new("Utilisés", counts.used.to_string(), MetricTone::Success)
                     .with_detail("≥ 1 bibliothèque")
-                    .with_filter(
-                        mode == FlowsCatalogFilter::Flows && active == FlowFilter::Used,
-                        set_filter(FlowFilter::Used),
-                    ),
+                    .with_filter(active == FlowFilter::Used, set_filter(FlowFilter::Used)),
             );
             let unused_tone = if counts.unused > 0 {
                 MetricTone::Warning
@@ -808,29 +801,9 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
             items.push(
                 StatItem::new("Inutilisés", counts.unused.to_string(), unused_tone)
                     .with_detail("aucune bibliothèque")
-                    .with_filter(
-                        mode == FlowsCatalogFilter::Flows && active == FlowFilter::Unused,
-                        set_filter(FlowFilter::Unused),
-                    ),
+                    .with_filter(active == FlowFilter::Unused, set_filter(FlowFilter::Unused)),
             );
         }
-        items.push(
-            StatItem::new("Modèles", templates_count.to_string(), MetricTone::Neutral).with_filter(
-                mode == FlowsCatalogFilter::Templates,
-                Callback::new(move |()| view_mode.set(FlowsCatalogFilter::Templates)),
-            ),
-        );
-        items.push(
-            StatItem::new(
-                "Tous",
-                (counts.total + templates_count).to_string(),
-                MetricTone::Neutral,
-            )
-            .with_filter(
-                mode == FlowsCatalogFilter::All,
-                Callback::new(move |()| view_mode.set(FlowsCatalogFilter::All)),
-            ),
-        );
         items
     });
 
@@ -846,17 +819,13 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
     let registre_body = move || {
         let text = query();
         let active_filter = flow_filter();
-        let mode = view_mode.get();
         let libs = libraries.get().unwrap_or_default();
         let templates = local_snapshot
             .get()
             .and_then(Result::ok)
             .map(|s| s.flow_templates)
             .unwrap_or_default();
-        let shown_templates: Vec<LocalFlowTemplate> = if matches!(
-            mode,
-            FlowsCatalogFilter::Templates | FlowsCatalogFilter::All
-        ) {
+        let shown_templates: Vec<LocalFlowTemplate> = if scope == FlowsScope::Templates {
             templates
                 .into_iter()
                 .filter(|tpl| matches(&[&tpl.name, &tpl.id, &tpl.file_mask], &text))
@@ -937,7 +906,7 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
                 .collect_view()
         };
 
-        if mode == FlowsCatalogFilter::Templates {
+        if scope == FlowsScope::Templates {
             if shown_templates.is_empty() {
                 return view! {
                     <RegistreMessage
@@ -969,7 +938,7 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
                     })
                     .collect();
 
-                if shown_flows.is_empty() && shown_templates.is_empty() {
+                if shown_flows.is_empty() {
                     let unfiltered = text.trim().is_empty() && active_filter == FlowFilter::All;
                     return view! {
                         <RegistreMessage
@@ -1042,13 +1011,12 @@ pub fn FlowsSection(me: Me, #[prop(optional)] on_changed: Option<Callback<()>>) 
                                             router.go(Route::FlowEditor(editor_id.clone()));
                                         }
                                     >
-                                        "Atelier"
+                                        "Éditer"
                                     </button>
                                 </td>
                             </tr>
                         }
                     }).collect_view()}
-                    {render_template_rows(shown_templates)}
                 }
                 .into_any()
             }

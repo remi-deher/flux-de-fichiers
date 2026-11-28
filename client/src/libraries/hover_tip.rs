@@ -73,7 +73,7 @@ impl HoverTip {
     }
 
     /// Règle invisible dont la largeur et la hauteur donnent celles d'un caractère de la police fixe.
-    pub fn ruler(&self) -> impl IntoView {
+    pub fn ruler(&self) -> impl IntoView + use<> {
         view! {
             <span class="code-editor__ruler" aria-hidden="true" node_ref=self.ruler>
                 {"0".repeat(RULER_CHARS)}
@@ -102,7 +102,9 @@ impl HoverTip {
                 if asked.try_get_value() != Some(ticket) {
                     return;
                 }
-                let shown = reply.map(|text| blocks(&text)).filter(|found| !found.is_empty());
+                let shown = reply
+                    .map(|text| blocks(&text))
+                    .filter(|found| !found.is_empty());
                 tip.set(shown.map(|blocks| Tip {
                     blocks,
                     line,
@@ -174,7 +176,7 @@ impl HoverTip {
     }
 
     /// L'info-bulle, placée sous la ligne comme la liste de suggestions.
-    pub fn tooltip(&self) -> impl IntoView {
+    pub fn tooltip(&self) -> impl IntoView + use<> {
         let tip = self.tip;
         move || {
             tip.get().map(|shown| {

@@ -143,7 +143,8 @@ mod tests {
 
     #[test]
     fn markdown_marks_are_removed() {
-        let markdown = "# Titre\n**gras** et `code` et __souligné__\nVoir [la doc](https://exemple.org/a) ici";
+        let markdown =
+            "# Titre\n**gras** et `code` et __souligné__\nVoir [la doc](https://exemple.org/a) ici";
         assert_eq!(
             blocks(markdown),
             [text("Titre\ngras et code et souligné\nVoir la doc ici")]

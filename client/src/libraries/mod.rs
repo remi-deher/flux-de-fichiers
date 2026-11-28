@@ -18,6 +18,7 @@ mod rows;
 mod script_draft;
 mod script_editor;
 mod script_origin;
+mod script_rules;
 mod script_trial;
 mod script_trial_panel;
 mod scripts;

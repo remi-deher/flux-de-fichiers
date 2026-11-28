@@ -11,6 +11,7 @@ mod fields;
 mod flow_choice;
 mod geometry;
 mod inspector;
+mod library_binding;
 mod palette;
 mod plan;
 mod pointer;

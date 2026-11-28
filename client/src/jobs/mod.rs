@@ -16,7 +16,7 @@ pub use live::LiveJobs;
 use crate::api;
 use crate::ui::filters::{Filters, JobStateFilter, job_state, period};
 use crate::ui::search::{matches, query};
-use crate::ui::{Drawer, MetricTone, StatItem, StatStrip, Toasts};
+use crate::ui::{Drawer, MetricTone, PageSubnav, StatItem, StatStrip, Toasts};
 use crate::url_state::{UrlTab, use_tab};
 use chrono::Utc;
 use diagnosis::AiDiagnosisCard;
@@ -83,23 +83,11 @@ pub fn JobsPage(me: Me) -> impl IntoView {
     let can_refresh_diagnosis = is_central && me.allows(Permission::ManageSettings);
     view! {
         {can_logs.then(|| view! {
-            <nav class="page-subnav" role="tablist" aria-label="Vues de l'activité">
-                {ActivityTab::ALL.into_iter().map(|tab| {
-                    let is_active = move || active_tab.get() == tab;
-                    view! {
-                        <button
-                            type="button"
-                            role="tab"
-                            class="page-subnav__tab"
-                            class:is-active=is_active
-                            aria-selected=move || is_active().to_string()
-                            on:click=move |_| active_tab.set(tab)
-                        >
-                            {tab.label()}
-                        </button>
-                    }
-                }).collect_view()}
-            </nav>
+            <PageSubnav
+                aria_label="Vues de l'activité"
+                tabs=ActivityTab::ALL.into_iter().map(|tab| (tab, tab.label())).collect()
+                active=active_tab
+            />
         })}
         {move || match active_tab.get() {
             ActivityTab::Tasks => view! {

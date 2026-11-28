@@ -1,4 +1,4 @@
-//! Onglet Packs de la Librairie : assembler, inspecter et gérer des packs locaux sans dépôt GitHub.
+//! Onglet Packs de l'Atelier : assembler, inspecter et gérer des packs locaux sans dépôt GitHub.
 
 use super::{LOCAL_PACKS_PATH, LOCAL_TOPICS, LocalDeleteButton, use_local_delete};
 use crate::api;

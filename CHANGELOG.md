@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.93.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.92.0...v0.93.0) (2026-11-27)
+
+
+### Features
+
+* **client:** nom et types de fichiers dans la barre de l'éditeur ([a3a128f](https://github.com/remi-deher/flux-de-fichiers/commit/a3a128fd39c7a0fafda4997c86913bfddd47d92b))
+* **client:** nom et types de fichiers dans la barre de l'éditeur ([39a08db](https://github.com/remi-deher/flux-de-fichiers/commit/39a08dbc4ede6a04cc6671b039c87304e5074979))
+
 ## [0.92.0](https://github.com/remi-deher/flux-de-fichiers/compare/v0.91.0...v0.92.0) (2026-11-27)
 
 

@@ -7,15 +7,15 @@ use super::script_draft::{
     CATEGORIES, OpenedScript, ScriptDraft, category_value, is_starter_code, opened_script_warning,
     parse_category, parse_tags, starter_script_code,
 };
+use super::script_origin::{leave_label, leave_location, origin_flow, script_editor_location};
 use super::script_trial::{ScriptTrial, TrialInput};
 use super::script_trial_panel::ScriptTrialPanel;
 use super::variables_editor::{VariablesEditor, rows_from, rows_to_variables, variable_names};
-use super::{LOCAL_PATH, LOCAL_SCRIPTS_PATH, LOCAL_TOPICS, LibraryTab};
+use super::{LOCAL_PATH, LOCAL_SCRIPTS_PATH, LOCAL_TOPICS};
 use crate::api;
 use crate::live::{Loaded, load, use_live};
 use crate::route::{Route, use_router};
 use crate::ui::{Tag, TagTone, Toasts};
-use crate::url_state::UrlTab;
 use forgearr_shared::Permission;
 use forgearr_shared::local::{
     LocalLibrarySnapshot, LocalScriptSummary, ScriptInterpreter, UpsertLocalScriptRequest,
@@ -115,7 +115,11 @@ pub fn ScriptEditor(me: Me, script_id: Option<String>) -> impl IntoView {
             Toasts::notify_success("Script enregistré.");
             live.touch(LOCAL_TOPICS);
             if is_new {
-                router.go(Route::ScriptEditor(saved.id));
+                let from = origin_flow(&router);
+                router.go_to(script_editor_location(
+                    Route::ScriptEditor(saved.id),
+                    from.as_deref(),
+                ));
             } else {
                 draft.set(Some(ScriptDraft::from_summary(&saved)));
             }
@@ -151,7 +155,7 @@ pub fn ScriptEditor(me: Me, script_id: Option<String>) -> impl IntoView {
                 </p>
                 <div class="script-workbench__bar">
                     <button type="button" class="btn btn-secondary"
-                        on:click=move |_| router.go_tab(Route::Libraries, LibraryTab::Scripts.slug())>"Retour aux bibliothèques"</button>
+                        on:click=move |_| router.go_to(leave_location(origin_flow(&router).as_deref()))>"Retour"</button>
                 </div>
             </div>
         })}
@@ -286,7 +290,9 @@ fn ScriptForm(
         <form class="flow-workbench script-workbench" on:submit=submit>
             <header class="script-workbench__bar">
                 <button type="button" class="btn btn-secondary"
-                    on:click=move |_| router.go_tab(Route::Libraries, LibraryTab::Scripts.slug())>"← Bibliothèques"</button>
+                    on:click=move |_| router.go_to(leave_location(origin_flow(&router).as_deref()))>
+                    {leave_label(origin_flow(&router).as_deref())}
+                </button>
                 <h1 class="script-workbench__title">{move || page_title(&name.get())}</h1>
                 {move || dirty.get().then(|| view! { <Tag label="Modifié" tone=TagTone::Warning /> })}
                 <span class="script-workbench__spacer"></span>

@@ -23,8 +23,7 @@ const UNDECLARED_TEXT: &str = "est lue mais n'est pas déclarée dans l'onglet V
 /// Fin du message d'un port inconnu (le port la précède).
 const UNKNOWN_PORT_TEXT: &str = "n'existe qu'en routage simple ; en routage conditionnel, seuls";
 /// Message d'une sortie sans JSON.
-const NO_JSON_TEXT: &str =
-    "Le script n'écrit aucune réponse JSON sur stdout : le moteur le tient pour réussi, sans message, port ni variable.";
+const NO_JSON_TEXT: &str = "Le script n'écrit aucune réponse JSON sur stdout : le moteur le tient pour réussi, sans message, port ni variable.";
 /// Nombre maximal d'anomalies rendues par ces règles.
 const MAX_RULE_DIAGNOSTICS: usize = 100;
 
@@ -270,7 +269,13 @@ fn missing_json_output(interpreter: ScriptInterpreter, code: &str) -> Option<Dia
     let span = first_text_line(code)?;
     let message = NO_JSON_TEXT.to_owned();
     let severity = DiagnosticSeverity::Information;
-    Some(diagnostic(code, span, severity, Rule::NoJsonOutput, message))
+    Some(diagnostic(
+        code,
+        span,
+        severity,
+        Rule::NoJsonOutput,
+        message,
+    ))
 }
 
 /// Anomalies relevées par les règles de Forgearr, dans l'ordre du texte.

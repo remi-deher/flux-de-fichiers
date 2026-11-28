@@ -2,6 +2,7 @@
 //! coloration. Un `<textarea>` transparent est superposé à un `<pre>` coloré ; les deux occupent la même case
 //! d'une grille, que le conteneur fait défiler d'un bloc. Les jetons viennent du central.
 
+use super::carried_tokens::carry_lines;
 use super::diagnostic_marks::{self, MarkedToken, mark_class};
 use super::hover_tip::HoverTip;
 use super::language_channel::{Diagnosed, LanguageChannel};
@@ -58,8 +59,9 @@ fn plain_lines(code: &str) -> Vec<Vec<CodeToken>> {
 }
 
 /// Jetons à afficher : ceux du central s'ils décrivent exactement `code` ; sinon les lignes inchangées depuis
-/// le dernier calcul gardent leur couleur (début et fin du texte) et seules les lignes touchées passent en
-/// texte brut. La couche colorée garde ainsi le même nombre de lignes que le texte saisi et ne se décale jamais.
+/// le dernier calcul gardent leur couleur (début et fin du texte) et les lignes touchées reportent celle de
+/// leur version précédente (`carried_tokens`). La couche colorée garde ainsi le même nombre de lignes que le
+/// texte saisi et ne se décale jamais.
 fn visible_lines(code: &str, highlighted: &Highlighted) -> Vec<Vec<CodeToken>> {
     let Some((computed_for, tokens)) = highlighted else {
         return plain_lines(code);
@@ -87,6 +89,10 @@ fn visible_lines(code: &str, highlighted: &Highlighted) -> Vec<Vec<CodeToken>> {
     lines[..head].clone_from_slice(&tokens[..head]);
     let (old_end, new_end) = (old_lines.len() - tail, new_lines.len() - tail);
     lines[new_end..].clone_from_slice(&tokens[old_end..]);
+    let edited = carry_lines(&tokens[head..old_end], &new_lines[head..new_end]);
+    for (slot, line) in lines[head..new_end].iter_mut().zip(edited) {
+        *slot = line;
+    }
     lines
 }
 
@@ -443,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn untouched_lines_keep_their_color_while_the_edited_one_turns_plain() {
+    fn untouched_lines_keep_their_color_and_the_edited_one_keeps_what_it_had() {
         let known = Some((
             "a\nb\nc".to_owned(),
             vec![colored("a"), colored("b"), colored("c")],
@@ -451,7 +457,20 @@ mod tests {
         let lines = visible_lines("a\nbx\nc", &known);
         assert_eq!(
             lines,
-            [colored("a"), plain_lines("bx").remove(0), colored("c")]
+            [
+                colored("a"),
+                vec![
+                    CodeToken {
+                        text: "b".to_owned(),
+                        kind: TokenKind::Keyword,
+                    },
+                    CodeToken {
+                        text: "x".to_owned(),
+                        kind: TokenKind::Plain,
+                    },
+                ],
+                colored("c")
+            ]
         );
     }
 

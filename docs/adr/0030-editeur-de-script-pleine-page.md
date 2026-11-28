@@ -25,7 +25,7 @@ inchangé, les gabarits par interpréteur existent déjà (`starter_script_code`
    ensemble. Les jetons viennent du central : `POST /api/v1/highlight` (`code`, `extension`) renvoie
    `{lines: Vec<Vec<CodeToken>>}` via `highlight_code` (syntect, côté serveur, hors du fil asynchrone). Appel
    différé de 350 ms après la dernière frappe ; les jetons ne s'affichent que s'ils ont été calculés pour le
-   texte exact présent, sinon le texte brut reste affiché (la couche colorée ne se décale jamais). Corps limité
+   texte exact présent, sinon les lignes inchangées gardent leurs couleurs et les lignes touchées reportent celles de leur version précédente (`client/src/libraries/carried_tokens.rs` : début et fin inchangés gardent leur couleur, le texte saisi continue une chaîne ou un commentaire ouvert, sinon reste neutre) : la ligne qu'on tape ne repasse plus en blanc, et la couche colorée ne se décale jamais. Corps limité
    à 1 Mio (limite HTTP des routes de scripts). Droit requis : gérer les plugins, comme l'enregistrement. La grammaire PowerShell et le repli en texte brut sont ceux de `highlight_code`.
 4. **Quitter sans perdre.** La page déclare ses modifications au `Router` (`unsaved`) : la garde
    `needs_leave_confirmation` existante demande confirmation. La détection de modification concurrente du script

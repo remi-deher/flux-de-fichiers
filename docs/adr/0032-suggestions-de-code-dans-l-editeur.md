@@ -1,6 +1,6 @@
 # 0032 — Suggestions de code dans l'éditeur de script
 
-Statut : proposé ; phase (a) livrée en 0.87.0 ; phases (b) et (c) cadrées le 26 nov. 2026 avec l'utilisateur ; lots b0 et b1 écrits, la suite à venir. Demande de l'utilisateur le 24 nov. 2026 : des suggestions « comme dans un vrai IDE », par intelligence de langage (LSP). Complète l'ADR 0030.
+Statut : proposé ; phase (a) livrée en 0.87.0 ; phases (b) et (c) cadrées le 26 nov. 2026 avec l'utilisateur ; lots b0, b1 et b2 écrits, la suite à venir. Demande de l'utilisateur le 24 nov. 2026 : des suggestions « comme dans un vrai IDE », par intelligence de langage (LSP). Complète l'ADR 0030.
 
 ## Contexte
 
@@ -44,6 +44,14 @@ b0 et b1 avancent en parallèle (b1 se teste avec un faux serveur sur `tokio::io
 - **Session.** `src/language/session.rs` relaie sur des flux génériques : poignée de main de 15 s, requête bornée à 2 s, 64 Kio par message du serveur, 200 suggestions, arrêt après 10 min sans message de la page. Les diagnostics sont poussés dès que le serveur les publie, ou tirés (`textDocument/diagnostic`) quand il le propose. Les imports Python tiers non résolus sont masqués.
 - **Lancement.** `src/language/launch.rs` : `sandbox-exec` (ADR 0034) avec lecture du dossier de l'application `langages`, écriture dans `<données>/language/<session>` (supprimé à la fin, porte `HOME` et les caches), aucun réseau, environnement vidé. La session retient `tools_in_use` : la purge des outils attend sa fin. Plafond de 4 sessions (`LANGUAGE_SESSIONS_MAX`, 32 au plus).
 - **Reverse proxy.** Le canal est un WebSocket : le proxy doit transmettre `Upgrade` et `Connection`, et ne pas couper une connexion inactive trop vite (la page ne parle que lorsque l'utilisateur tape ; nginx : `proxy_http_version 1.1`, `proxy_set_header Upgrade $http_upgrade`, `proxy_set_header Connection "upgrade"`, `proxy_read_timeout` d'au moins 10 min).
+
+## Lot b2 écrit
+
+- **Canal.** `client/src/libraries/language_channel.rs` : un WebSocket par éditeur, ouvert avec lui (si l'interpréteur a un serveur, `LanguageServer::for_interpreter`) et fermé avec lui (`close` arrête le serveur). Le texte entier est envoyé à l'ouverture, puis seulement quand il a changé au moment d'une demande.
+- **Demandes.** Une demande part après deux caractères, ou aussitôt après un caractère déclencheur : `.` en Python, `$` en shell. Une réponse arrivée après une frappe plus récente est ignorée.
+- **Fusion.** `language_logic::merge` : les suggestions du serveur d'abord, dans son ordre et filtrées par le mot tapé, puis ce que la liste locale (a) ajoute, sans doublon, huit au plus. La liste locale s'affiche aussitôt et se complète à la réponse du serveur.
+- **Repli.** Un interpréteur sans serveur ou une application `langages` absente laissent la liste locale seule. Un canal tombé, un plafond atteint ou un serveur arrêté pour inactivité se rouvrent à la demande suivante, après une attente qui double à chaque échec (celle des flux d'événements : 2 s, plafond 60 s). Aucun minuteur ne tourne en arrière-plan.
+- Les diagnostics et les info-bulles reçus sont ignorés jusqu'aux lots c1 et c2.
 
 ## Phase (a) écrite
 

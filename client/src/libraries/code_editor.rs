@@ -2,10 +2,13 @@
 //! coloration. Un `<textarea>` transparent est superposé à un `<pre>` coloré ; les deux occupent la même case
 //! d'une grille, que le conteneur fait défiler d'un bloc. Les jetons viennent du central.
 
-use super::suggestions::{self, Suggestion};
+use super::language_channel::LanguageChannel;
+use super::language_logic::{self, char_before};
+use super::suggestions::{self, MIN_PREFIX_CHARS, Suggestion};
 use crate::api;
 use crate::plugins::highlighted_lines;
 use forgearr_shared::highlight::{CodeToken, HighlightRequest, HighlightedCode, TokenKind};
+use forgearr_shared::local::ScriptInterpreter;
 use leptos::prelude::*;
 use std::time::Duration;
 use wasm_bindgen::JsCast;
@@ -132,11 +135,13 @@ fn schedule_highlight(
     });
 }
 
-/// Éditeur de code : `code` est lu et écrit ; `extension` choisit la grammaire de coloration.
+/// Éditeur de code : `code` est lu et écrit ; `extension` choisit la grammaire de coloration et `interpreter`
+/// le serveur de langage qui complète la liste locale.
 #[component]
 pub fn CodeEditor(
     code: RwSignal<String>,
     #[prop(into)] extension: Signal<&'static str>,
+    #[prop(into)] interpreter: Signal<ScriptInterpreter>,
     /// Noms des variables déclarées du script, proposés dans les suggestions.
     #[prop(into)]
     declared: Signal<Vec<String>>,
@@ -148,31 +153,66 @@ pub fn CodeEditor(
     let release_tab = StoredValue::new(false);
     let area_ref = NodeRef::<leptos::html::Textarea>::new();
     let popup = RwSignal::new(None::<SuggestionPopup>);
+    // Le serveur de langage complète la liste locale ; sans lui, la liste locale répond seule.
+    let channel = StoredValue::new_local(LanguageChannel::new(
+        interpreter.get_untracked(),
+        &code.get_untracked(),
+    ));
+    Effect::new(move |_| {
+        let interpreter = interpreter.get();
+        if !read_only {
+            channel.with_value(|channel| channel.set_interpreter(interpreter));
+        }
+    });
+    on_cleanup(move || {
+        channel.try_with_value(LanguageChannel::close);
+    });
+    // Une réponse du serveur n'est prise en compte que si aucune frappe plus récente ne l'a rendue caduque.
+    let request = StoredValue::new(0_u64);
 
     // Recalcule la liste d'après le mot qui précède le curseur.
     let refresh = move |area: &HtmlTextAreaElement| {
         let text = area.value();
         let caret = area.selection_start().ok().flatten().unwrap_or(0) as usize;
         let (start, prefix) = suggestions::word_before(&text, caret);
-        let items = suggestions::suggest(
+        let local = suggestions::suggest(
             &prefix,
             &text,
             extension.get_untracked(),
             &declared.get_untracked(),
         );
-        if items.is_empty() {
-            popup.set(None);
-            return;
-        }
         let (line, column) = suggestions::caret_position(&text, caret);
-        popup.set(Some(SuggestionPopup {
-            items,
-            selected: 0,
-            start,
-            caret,
-            line,
-            column,
-        }));
+        let show = move |items: Vec<Suggestion>| {
+            if items.is_empty() {
+                popup.set(None);
+                return;
+            }
+            popup.set(Some(SuggestionPopup {
+                items,
+                selected: 0,
+                start,
+                caret,
+                line,
+                column,
+            }));
+        };
+        request.update_value(|count| *count += 1);
+        let ticket = request.get_value();
+        let triggered = char_before(&text, caret)
+            .is_some_and(|typed| language_logic::is_trigger(extension.get_untracked(), typed));
+        let asks_server = !read_only && (triggered || prefix.chars().count() >= MIN_PREFIX_CHARS);
+        if asks_server {
+            let fallback = local.clone();
+            let answer = move |items: Vec<forgearr_shared::language::Suggestion>| {
+                if request.try_get_value() != Some(ticket) {
+                    return;
+                }
+                let server = language_logic::from_server(&items, &prefix);
+                show(language_logic::merge(server, fallback));
+            };
+            channel.with_value(|channel| channel.complete(&text, caret, answer));
+        }
+        show(local);
     };
 
     // Remplace le mot tapé par la suggestion `index`.
@@ -183,8 +223,12 @@ pub fn CodeEditor(
         let (Some(item), Some(area)) = (open.items.get(index), area_ref.get_untracked()) else {
             return;
         };
-        let (next, caret) =
-            suggestions::replace_range(&code.get_untracked(), open.start, open.caret, &item.label);
+        let (next, caret) = suggestions::replace_range(
+            &code.get_untracked(),
+            open.start,
+            open.caret,
+            item.inserted(),
+        );
         area.set_value(&next);
         let caret = u32::try_from(caret).unwrap_or(u32::MAX);
         let _ = area.set_selection_range(caret, caret);

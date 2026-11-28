@@ -9,11 +9,12 @@ use forgearr_shared::language::{
     SuggestionKind,
 };
 use serde_json::{Value, json};
-use uuid::Uuid;
+use std::{fmt::Write, path::Path};
 
 const JSONRPC_VERSION: &str = "2.0";
-/// Dossier fictif des documents : rien n'existe à cet endroit, le texte vient du `didOpen`.
-const DOCUMENT_ROOT: &str = "file:///forgearr";
+const FILE_SCHEME: &str = "file://";
+/// Octets, en plus des lettres et des chiffres, qu'une adresse `file://` garde tels quels.
+const URI_SAFE_BYTES: &[u8] = b"/-._~";
 /// Longueur maximale (en caractères) d'un libellé, d'un détail ou d'un texte inséré.
 const MAX_FIELD_CHARS: usize = 500;
 /// Longueur maximale (en caractères) d'une info-bulle.
@@ -55,23 +56,34 @@ fn response(id: &Value, result: Value) -> Value {
     json!({"jsonrpc": JSONRPC_VERSION, "id": id, "result": result})
 }
 
-/// Adresse du document d'une session : `file:///forgearr/<session>/script.<extension>`.
-pub fn document_uri(session: Uuid, server: LanguageServer) -> String {
+/// Adresse du document d'une session : `<dossier de travail>/script.<extension>`. Le dossier existe : le
+/// serveur y rattache le document à son projet (le texte vient quand même du `didOpen`).
+pub fn document_uri(workspace: &Path, server: LanguageServer) -> String {
     format!(
-        "{DOCUMENT_ROOT}/{session}/script.{}",
+        "{}/script.{}",
+        workspace_uri(workspace),
         server.file_extension()
     )
 }
 
-/// Dossier racine de l'espace de travail d'une session.
-pub fn workspace_uri(session: Uuid) -> String {
-    format!("{DOCUMENT_ROOT}/{session}")
+/// Adresse `file://` du dossier de travail d'une session, avec les octets hors ASCII sûr codés en `%XX`.
+pub fn workspace_uri(workspace: &Path) -> String {
+    let path = workspace.to_string_lossy();
+    let mut uri = String::from(FILE_SCHEME);
+    for byte in path.bytes() {
+        if byte.is_ascii_alphanumeric() || URI_SAFE_BYTES.contains(&byte) {
+            uri.push(char::from(byte));
+        } else {
+            let _ = write!(uri, "%{byte:02X}");
+        }
+    }
+    uri
 }
 
-pub fn initialize_params(process_id: u32, session: Uuid) -> Value {
+pub fn initialize_params(process_id: u32, workspace: &Path) -> Value {
     json!({
         "processId": process_id,
-        "rootUri": workspace_uri(session),
+        "rootUri": workspace_uri(workspace),
         "capabilities": {
             "textDocument": {
                 "completion": {
@@ -276,25 +288,31 @@ mod tests {
     }
 
     #[test]
-    fn the_document_lives_under_a_per_session_fictional_folder() {
-        let session = Uuid::nil();
+    fn the_document_lives_in_the_session_workspace() {
+        let workspace = Path::new("/data/language/abc");
         assert_eq!(
-            document_uri(session, LanguageServer::Python),
-            format!("file:///forgearr/{session}/script.py")
+            document_uri(workspace, LanguageServer::Python),
+            "file:///data/language/abc/script.py"
         );
         assert_eq!(
-            document_uri(session, LanguageServer::Bash),
-            format!("file:///forgearr/{session}/script.sh")
+            document_uri(workspace, LanguageServer::Bash),
+            "file:///data/language/abc/script.sh"
         );
+        assert_eq!(workspace_uri(workspace), "file:///data/language/abc");
+    }
+
+    #[test]
+    fn unsafe_bytes_of_a_path_are_percent_encoded() {
+        let workspace = Path::new("/données/mon dossier#1");
         assert_eq!(
-            workspace_uri(session),
-            format!("file:///forgearr/{session}")
+            workspace_uri(workspace),
+            "file:///donn%C3%A9es/mon%20dossier%231"
         );
     }
 
     #[test]
     fn initialization_asks_for_diagnostics_completion_and_hover_only() {
-        let params = initialize_params(42, Uuid::nil());
+        let params = initialize_params(42, Path::new("/data/language/abc"));
         assert_eq!(params["processId"], 42);
         let text_document = &params["capabilities"]["textDocument"];
         assert!(text_document.get("completion").is_some());

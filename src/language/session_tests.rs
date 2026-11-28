@@ -1,6 +1,7 @@
 use super::*;
 use crate::language::codec::{read_message, write_message};
 use forgearr_shared::language::{DiagnosticSeverity, SuggestionKind};
+use std::path::{Path, PathBuf};
 use tokio::{
     io::{BufReader, DuplexStream, duplex},
     time::timeout,
@@ -8,6 +9,7 @@ use tokio::{
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
+const WORKSPACE: &str = "/data/language/test";
 const PIPE_BYTES: usize = 64 * 1024;
 const MAX_TEST_MESSAGE_BYTES: usize = 1 << 20;
 const WAIT: Duration = Duration::from_secs(5);
@@ -26,7 +28,7 @@ struct FakeServer {
 fn spec_with(timings: Timings) -> SessionSpec {
     SessionSpec {
         server: LanguageServer::Bash,
-        id: Uuid::nil(),
+        workspace: PathBuf::from(WORKSPACE),
         process_id: 7,
         timings,
     }
@@ -45,7 +47,7 @@ fn start_with(spec: SessionSpec) -> FakeServer {
     let (fake_writes, session_reader) = duplex(PIPE_BYTES);
     let (to_session, from_client) = mpsc::channel(8);
     let (to_client, from_session) = mpsc::channel(8);
-    let uri = protocol::document_uri(spec.id, spec.server);
+    let uri = protocol::document_uri(&spec.workspace, spec.server);
     let task = tokio::spawn(run(
         spec,
         BufReader::new(session_reader),
@@ -130,7 +132,7 @@ async fn the_handshake_ends_with_ready_for_the_page() -> TestResult {
     let mut server = start();
     let initialize = server.heard().await?;
     assert_eq!(initialize["params"]["processId"], 7);
-    let root = protocol::workspace_uri(Uuid::nil());
+    let root = protocol::workspace_uri(Path::new(WORKSPACE));
     assert_eq!(initialize["params"]["rootUri"], root);
     let id = initialize["id"].clone();
     server

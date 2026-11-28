@@ -14,6 +14,8 @@ pub const EXTENSION: &str = "Extension";
 pub const EXTENSIONS: &str = "Extensions";
 /// Onglet où l'on parcourt et installe les éléments des dépôts (ancien « Store »).
 pub const CATALOGUE: &str = "Catalogue";
+/// Entrée de navigation des ressources, modèles de blocs et packs locaux (hors flux et bibliothèques).
+pub const WORKSHOP: &str = "Atelier";
 /// Libellé du filtre de fichiers d'un flux (ancien « masque » ; le champ d'API `fileMask` ne change pas).
 pub const FILE_TYPES: &str = "Types de fichiers";
 
@@ -148,6 +150,7 @@ mod tests {
         assert_eq!(EXTENSIONS, "Extensions");
         assert_eq!(CATALOGUE, "Catalogue");
         assert_eq!(FILE_TYPES, "Types de fichiers");
+        assert_eq!(WORKSHOP, "Atelier");
     }
 
     #[test]

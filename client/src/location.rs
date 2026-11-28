@@ -10,11 +10,14 @@ pub const CREATE_PARAM: &str = "nouveau";
 /// Paramètre de requête qui désigne l'onglet du tiroir ouvert : `?onglet=<n>`.
 pub const DRAWER_TAB_PARAM: &str = "onglet";
 
+/// Paramètre de requête de l'éditeur de script : le flux d'où l'on vient, `?depuis=<flux>`.
+pub const FROM_PARAM: &str = "depuis";
+
 /// Écrans dont le second segment du chemin est un onglet (`/plugins/installed`).
 fn has_tabs(route: &Route) -> bool {
     matches!(
         route,
-        Route::Jobs | Route::Libraries | Route::Plugins | Route::Settings
+        Route::Flows | Route::Jobs | Route::Plugins | Route::Settings | Route::Workshop
     )
 }
 
@@ -187,7 +190,8 @@ mod tests {
             Location::of(Route::Overview),
             Location::of(Route::Flows),
             Location::with_tab(Route::Plugins, "installed"),
-            Location::with_tab(Route::Libraries, "scripts"),
+            Location::with_tab(Route::Flows, "modeles"),
+            Location::with_tab(Route::Workshop, "packs"),
             Location::with_tab(Route::Jobs, "logs").with_query("voir", Some("job.1")),
             Location::of(Route::Workers).with_query("nouveau", Some("worker")),
             Location::of(Route::FlowEditor("flux à part".into())),
@@ -205,8 +209,8 @@ mod tests {
         assert_eq!(plugins.tab.as_deref(), Some("repos"));
         assert_eq!(Location::parse("/plugins", "").tab, None);
         assert_eq!(
-            Location::parse("/libraries/scripts", "").tab.as_deref(),
-            Some("scripts")
+            Location::parse("/workshop/packs", "").tab.as_deref(),
+            Some("packs")
         );
         assert_eq!(
             Location::parse("/settings/keys", "").tab.as_deref(),

@@ -3,7 +3,9 @@
 use leptos::prelude::*;
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 
+use crate::flows::FlowsTab;
 use crate::location::{Location, Query};
+use crate::url_state::UrlTab;
 use forgearr_shared::app;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -14,6 +16,7 @@ pub enum Route {
     NewFlow,
     FlowEditor(String),
     Libraries,
+    Workshop,
     NewScript,
     ScriptEditor(String),
     Workers,
@@ -31,6 +34,7 @@ impl Route {
             Self::NewFlow => app::NEW_FLOW.to_owned(),
             Self::FlowEditor(id) => format!("{}/{}", app::FLOWS, encode_segment(id)),
             Self::Libraries => app::LIBRARIES.to_owned(),
+            Self::Workshop => app::WORKSHOP.to_owned(),
             Self::NewScript => app::NEW_SCRIPT.to_owned(),
             Self::ScriptEditor(id) => format!("{}/{}", app::SCRIPTS, encode_segment(id)),
             Self::Workers => app::WORKERS.to_owned(),
@@ -53,11 +57,21 @@ impl Route {
             (Some("jobs"), None, _) | (Some("jobs"), Some(_), None) => Self::Jobs,
             (Some("flows"), None, _) => Self::Flows,
             (Some("flows"), Some("new"), None) => Self::NewFlow,
+            // Les onglets de l'écran Flux passent avant l'identifiant d'un flux.
+            (Some("flows"), Some(tab), None) if FlowsTab::from_slug(tab).is_some() => Self::Flows,
             (Some("flows"), Some(id), None) if !id.is_empty() => {
                 Self::FlowEditor(decode_segment(id))
             }
+            // Ressources et packs ont quitté les Bibliothèques (lot 5) ; leurs anciens liens suivent.
+            (Some("libraries"), Some("resources" | "packs"), None) => Self::Workshop,
+            (Some("workshop"), None, _) | (Some("workshop"), Some(_), None) => Self::Workshop,
             (Some("libraries"), None, _) => Self::Libraries,
             (Some("libraries"), Some(_), None) => Self::Libraries,
+            (Some("flows"), Some("scripts"), Some("new")) if !extra => Self::NewScript,
+            (Some("flows"), Some("scripts"), Some(id)) if !id.is_empty() && !extra => {
+                Self::ScriptEditor(decode_segment(id))
+            }
+            // Anciennes adresses de l'éditeur (`/libraries/scripts/…`), avant le lot 4.
             (Some("libraries"), Some("scripts"), Some("new")) if !extra => Self::NewScript,
             (Some("libraries"), Some("scripts"), Some(id)) if !id.is_empty() && !extra => {
                 Self::ScriptEditor(decode_segment(id))
@@ -73,7 +87,7 @@ impl Route {
     pub fn section(&self) -> Self {
         match self {
             Self::FlowEditor(_) => Self::Flows,
-            Self::NewScript | Self::ScriptEditor(_) => Self::Libraries,
+            Self::NewScript | Self::ScriptEditor(_) => Self::Flows,
             other => other.clone(),
         }
     }
@@ -200,7 +214,8 @@ impl Router {
         self.go_to(Location::with_tab(route, tab));
     }
 
-    fn go_to(&self, location: Location) {
+    /// Ouvre l'adresse `location` (écran, onglet et requête), avec la garde de sortie.
+    pub fn go_to(&self, location: Location) {
         if needs_leave_confirmation(
             self.unsaved.get_untracked(),
             &self.current.get_untracked(),
@@ -368,6 +383,7 @@ mod tests {
             Route::FlowEditor("flow.films-abc".into()),
             Route::FlowEditor("flux à part".into()),
             Route::Libraries,
+            Route::Workshop,
             Route::NewScript,
             Route::ScriptEditor("script.mon-script".into()),
             Route::ScriptEditor("script à part".into()),
@@ -414,9 +430,34 @@ mod tests {
     }
 
     #[test]
-    fn script_editor_routes_belong_to_the_libraries_section() {
-        assert_eq!(Route::NewScript.section(), Route::Libraries);
-        assert_eq!(Route::ScriptEditor("s".into()).section(), Route::Libraries);
+    fn the_flows_screen_has_tabs_that_come_before_flow_identifiers() {
+        assert_eq!(Route::parse("/app/flows/modeles"), Route::Flows);
+        assert_eq!(Route::parse("/flows/scripts"), Route::Flows);
+        assert_eq!(Route::parse("/flows/flux"), Route::Flows);
+        assert_eq!(Route::parse("/flows/new"), Route::NewFlow);
+        assert_eq!(
+            Route::parse("/flows/mon-flux.a1"),
+            Route::FlowEditor("mon-flux.a1".into())
+        );
+        assert_eq!(Route::parse("/flows/modeles/x"), Route::Overview);
+    }
+
+    #[test]
+    fn script_editor_routes_belong_to_the_flows_section() {
+        assert_eq!(Route::NewScript.section(), Route::Flows);
+        assert_eq!(Route::ScriptEditor("s".into()).section(), Route::Flows);
+        assert_eq!(Route::parse("/flows/scripts/new"), Route::NewScript);
+        assert_eq!(Route::NewScript.path(), "/flows/scripts/new");
+        assert_eq!(
+            Route::ScriptEditor("s.1".into()).path(),
+            "/flows/scripts/s.1"
+        );
+        assert_eq!(
+            Route::parse("/flows/scripts/script.a"),
+            Route::ScriptEditor("script.a".into())
+        );
+        assert_eq!(Route::parse("/flows/scripts/a/b"), Route::Overview);
+        // Les anciennes adresses restent lues.
         assert_eq!(Route::parse("/libraries/scripts/new"), Route::NewScript);
         assert_eq!(
             Route::parse("/app/libraries/scripts/script.a"),
@@ -428,11 +469,21 @@ mod tests {
     }
 
     #[test]
+    fn the_workshop_takes_over_the_old_resources_and_packs_tabs_of_the_libraries() {
+        assert_eq!(Route::parse("/app/workshop"), Route::Workshop);
+        assert_eq!(Route::Workshop.path(), "/workshop");
+        assert_eq!(Route::parse("/libraries/resources"), Route::Workshop);
+        assert_eq!(Route::parse("/libraries/packs"), Route::Workshop);
+        assert_eq!(Route::parse("/libraries"), Route::Libraries);
+        assert_eq!(Route::parse("/workshop/packs/x"), Route::Overview);
+    }
+
+    #[test]
     fn tabbed_screens_accept_one_extra_segment() {
         assert_eq!(Route::parse("/app/plugins/installed"), Route::Plugins);
         assert_eq!(Route::parse("/jobs/logs"), Route::Jobs);
         assert_eq!(Route::parse("/settings/keys"), Route::Settings);
-        assert_eq!(Route::parse("/libraries/packs"), Route::Libraries);
+        assert_eq!(Route::parse("/workshop/packs"), Route::Workshop);
         assert_eq!(Route::parse("/workers/x"), Route::Overview);
         assert_eq!(Route::parse("/plugins/installed/x"), Route::Overview);
     }

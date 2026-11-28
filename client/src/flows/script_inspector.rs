@@ -5,7 +5,8 @@ use super::state::Editor;
 use super::template_input::ScriptProtocolHelp;
 use super::variables_form::ScriptVariablesPanel;
 use crate::api;
-use crate::libraries::starter_script_code;
+use crate::libraries::script_editor_location;
+use crate::route::{Route, use_router};
 use crate::ui::Toasts;
 use forgearr_shared::flows::{BranchPort, FlowNode, SCRIPT_ROUTING_KEY, ScriptRouting};
 use forgearr_shared::local::{
@@ -13,6 +14,14 @@ use forgearr_shared::local::{
 };
 use leptos::prelude::*;
 use serde_json::{Map, Value, json};
+
+/// Flux d'où l'on ouvre l'éditeur de script : l'éditeur y revient à sa fermeture.
+fn flow_origin(route: &Route) -> Option<String> {
+    match route {
+        Route::FlowEditor(id) => Some(id.clone()),
+        _ => None,
+    }
+}
 
 pub const UNIFIED_SCRIPT_KIND: &str = "scripts.run";
 
@@ -84,32 +93,22 @@ pub fn ScriptBlockInspector(
     node: FlowNode,
     can_manage: bool,
 ) -> impl IntoView {
+    let router = use_router();
+    let from = flow_origin(&router.current());
     let reload_local = RwSignal::new(0_u32);
     let snapshot = LocalResource::new(move || {
         reload_local.track();
         api::get::<LocalLibrarySnapshot>("/api/v1/local")
     });
 
+    // Un bloc ancien peut encore porter du code direct : il reste lisible et s'enregistre en script.
     let mode = RwSignal::new(initial_script_mode(&node).to_owned());
     let script_id = RwSignal::new(config_str(&node, "scriptId"));
-    let interp = RwSignal::new(
-        ScriptInterpreter::from_executable(&config_str(&node, "interpreter")).unwrap_or_default(),
-    );
-    let initial_code = {
-        let raw = config_str(&node, "code");
-        if raw.trim().is_empty() {
-            starter_script_code(interp.get_untracked()).to_owned()
-        } else {
-            raw
-        }
-    };
-    let code = RwSignal::new(initial_code);
+    let interpreter =
+        ScriptInterpreter::from_executable(&config_str(&node, "interpreter")).unwrap_or_default();
+    let inline_code = config_str(&node, "code");
     let routing = RwSignal::new(initial_script_routing(&node));
-
-    let creating = RwSignal::new(false);
-    let new_name = RwSignal::new(String::new());
-    let new_interp = RwSignal::new(ScriptInterpreter::Sh);
-    let new_code = RwSignal::new(starter_script_code(ScriptInterpreter::Sh).to_owned());
+    let promote_name = RwSignal::new(String::new());
     let feedback = RwSignal::new(None::<String>);
 
     let save_script = Action::new_local(move |req: &UpsertLocalScriptRequest| {
@@ -127,8 +126,7 @@ pub fn ScriptBlockInspector(
         let nid = node_id.clone();
         move |_| match save_script.value().get() {
             Some(Ok(saved)) => {
-                creating.set(false);
-                new_name.set(String::new());
+                promote_name.set(String::new());
                 feedback.set(None);
                 mode.set("library".to_owned());
                 script_id.set(saved.id.clone());
@@ -145,40 +143,13 @@ pub fn ScriptBlockInspector(
         }
     });
 
-    let nid_mode = node_id.clone();
     let nid_select = node_id.clone();
-    let nid_interp = node_id.clone();
-    let nid_code = node_id.clone();
     let nid_vars = node_id.clone();
     let nid_route = node_id;
+    let edit_from = from.clone();
+    let new_from = from;
 
     view! {
-        <div class="form-group">
-            <label for="script-block-mode" class="form-label">"Source du script"</label>
-            <select
-                id="script-block-mode"
-                class="form-input"
-                disabled=!can_manage
-                prop:value=move || mode.get()
-                on:change=move |ev| {
-                    let next = event_target_value(&ev);
-                    mode.set(next.clone());
-                    let cur_interp = interp.get_untracked().executable().to_owned();
-                    let cur_code = code.get_untracked();
-                    update_node_config(editor, &nid_mode, move |map| {
-                        map.insert("mode".into(), json!(next));
-                        if next == "inline" {
-                            map.entry("interpreter".to_owned()).or_insert_with(|| json!(cur_interp));
-                            map.entry("code".to_owned()).or_insert_with(|| json!(cur_code));
-                        }
-                    });
-                }
-            >
-                <option value="library">"Script enregistré"</option>
-                <option value="inline">"Code direct (inline)"</option>
-            </select>
-        </div>
-
         {move || {
             if mode.get() == "library" {
                 let scripts = snapshot
@@ -188,6 +159,8 @@ pub fn ScriptBlockInspector(
                     .unwrap_or_default();
                 let nid_select = nid_select.clone();
                 let nid_vars = nid_vars.clone();
+                let edit_from = edit_from.clone();
+                let new_from = new_from.clone();
                 view! {
                     <div class="form-group">
                         <label for="script-block-ref" class="form-label">"Script sélectionné"</label>
@@ -211,129 +184,47 @@ pub fn ScriptBlockInspector(
                             }).collect_view()}
                         </select>
                     </div>
-                    {move || (!script_id.get().is_empty()).then(|| view! {
-                        <ScriptVariablesPanel editor=editor node_id=nid_vars.clone() can_manage=can_manage />
-                    })}
                     {can_manage.then(|| view! {
-                        <div class="form-group">
+                        <div class="form-group cluster">
                             <button
                                 type="button"
                                 class="btn btn-secondary btn-sm"
-                                on:click=move |_| creating.update(|v| *v = !*v)
+                                disabled=move || script_id.get().is_empty()
+                                on:click=move |_| router.go_to(script_editor_location(
+                                    Route::ScriptEditor(script_id.get_untracked()),
+                                    edit_from.as_deref(),
+                                ))
                             >
-                                {move || if creating.get() { "Fermer la création" } else { "+ Nouveau script" }}
+                                "Modifier le script"
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-secondary btn-sm"
+                                on:click=move |_| router.go_to(script_editor_location(
+                                    Route::NewScript,
+                                    new_from.as_deref(),
+                                ))
+                            >
+                                "+ Nouveau script"
                             </button>
                         </div>
                     })}
-                    {move || (creating.get() && can_manage).then(|| view! {
-                        <div class="form-group">
-                            <label class="form-label" for="script-quick-name">"Nom du nouveau script *"</label>
-                            <input
-                                id="script-quick-name"
-                                class="form-input"
-                                prop:value=move || new_name.get()
-                                on:input=move |e| new_name.set(event_target_value(&e))
-                            />
-                            <label class="form-label" for="script-quick-interp">"Langage"</label>
-                            <select
-                                id="script-quick-interp"
-                                class="form-input"
-                                prop:value=move || new_interp.get().executable()
-                                on:change=move |e| {
-                                    let next = ScriptInterpreter::from_executable(&event_target_value(&e))
-                                        .unwrap_or_default();
-                                    new_interp.set(next);
-                                    new_code.set(starter_script_code(next).to_owned());
-                                }
-                            >
-                                {ScriptInterpreter::ALL.iter().map(|&v| view! {
-                                    <option value=v.executable()>{v.label()}</option>
-                                }).collect_view()}
-                            </select>
-                            <label class="form-label" for="script-quick-code">"Code"</label>
-                            <textarea
-                                id="script-quick-code"
-                                class="form-input text-mono"
-                                rows="6"
-                                prop:value=move || new_code.get()
-                                on:input=move |e| new_code.set(event_target_value(&e))
-                            />
-                            <button
-                                type="button"
-                                class="btn btn-primary btn-sm"
-                                disabled=move || save_script.pending().get()
-                                on:click=move |_| {
-                                    let name_val = new_name.get_untracked();
-                                    if name_val.trim().is_empty() {
-                                        Toasts::set_error(feedback, "Le nom du script est requis.");
-                                        return;
-                                    }
-                                    save_script.dispatch(UpsertLocalScriptRequest {
-                                        requires: Vec::new(),
-                                        dependencies_unverified: false,
-                                        variables: Vec::new(),
-                                        id: None,
-                                        name: name_val,
-                                        description: None,
-                                        interpreter: new_interp.get_untracked(),
-                                        code: new_code.get_untracked(),
-                                        filename: None,
-                                        category: None,
-                                        tags: Vec::new(),
-                                    });
-                                }
-                            >
-                                "Enregistrer et utiliser"
-                            </button>
-                        </div>
+                    {move || (!script_id.get().is_empty()).then(|| view! {
+                        <ScriptVariablesPanel editor=editor node_id=nid_vars.clone() can_manage=can_manage />
                     })}
                 }.into_any()
             } else {
-                let nid_interp = nid_interp.clone();
-                let nid_code = nid_code.clone();
+                let inline_code = inline_code.clone();
+                let promote_code = inline_code.clone();
                 view! {
                     <div class="form-group">
-                        <label for="script-inline-interp" class="form-label">"Interpréteur"</label>
-                        <select
-                            id="script-inline-interp"
-                            class="form-input"
-                            disabled=!can_manage
-                            prop:value=move || interp.get().executable()
-                            on:change=move |ev| {
-                                let next = ScriptInterpreter::from_executable(&event_target_value(&ev))
-                                    .unwrap_or_default();
-                                interp.set(next);
-                                update_node_config(editor, &nid_interp, move |map| {
-                                    map.insert("mode".into(), json!("inline"));
-                                    map.insert("interpreter".into(), json!(next.executable()));
-                                });
-                            }
-                        >
-                            {ScriptInterpreter::ALL.iter().map(|&v| view! {
-                                <option value=v.executable()>{v.label()}</option>
-                            }).collect_view()}
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="script-inline-code" class="form-label">"Code (stdin JSON → stdout JSON)"</label>
-                        <textarea
-                            id="script-inline-code"
-                            class="form-input text-mono"
-                            rows="9"
-                            disabled=!can_manage
-                            prop:value=move || code.get()
-                            on:input=move |ev| {
-                                let text = event_target_value(&ev);
-                                code.set(text.clone());
-                                update_node_config(editor, &nid_code, move |map| {
-                                    map.insert("mode".into(), json!("inline"));
-                                    map.insert("code".into(), json!(text));
-                                });
-                            }
-                        />
+                        <span class="form-label">"Code direct (ancien bloc)"</span>
                         <p class="form-help">
-                            {conditional_reply_help()}
+                            {format!("Interpréteur : {}. ", interpreter.label())}
+                            "Enregistrez-le en script pour le modifier dans l'éditeur."
                         </p>
+                        <pre class="text-mono text-sm">{inline_code}</pre>
+                        <p class="form-help">{conditional_reply_help()}</p>
                         <ScriptProtocolHelp />
                     </div>
                     {can_manage.then(|| view! {
@@ -343,15 +234,15 @@ pub fn ScriptBlockInspector(
                                 id="script-promote-name"
                                 class="form-input"
                                 placeholder="Nom du script à enregistrer…"
-                                prop:value=move || new_name.get()
-                                on:input=move |e| new_name.set(event_target_value(&e))
+                                prop:value=move || promote_name.get()
+                                on:input=move |e| promote_name.set(event_target_value(&e))
                             />
                             <button
                                 type="button"
                                 class="btn btn-secondary btn-sm"
                                 disabled=move || save_script.pending().get()
                                 on:click=move |_| {
-                                    let name_val = new_name.get_untracked();
+                                    let name_val = promote_name.get_untracked();
                                     if name_val.trim().is_empty() {
                                         Toasts::set_error(feedback, "Saisissez un nom pour enregistrer le script.");
                                         return;
@@ -363,8 +254,8 @@ pub fn ScriptBlockInspector(
                                         id: None,
                                         name: name_val,
                                         description: None,
-                                        interpreter: interp.get_untracked(),
-                                        code: code.get_untracked(),
+                                        interpreter,
+                                        code: promote_code.clone(),
                                         filename: None,
                                         category: None,
                                         tags: Vec::new(),
@@ -436,5 +327,13 @@ mod tests {
             ScriptRouting::Conditional
         );
         assert!(conditional_reply_help().contains("\"nextPort\":\"true\""));
+    }
+
+    #[test]
+    fn the_script_editor_returns_to_the_flow_that_opened_it() {
+        let route = Route::FlowEditor("flux.a".into());
+        assert_eq!(flow_origin(&route).as_deref(), Some("flux.a"));
+        assert_eq!(flow_origin(&Route::NewFlow), None);
+        assert_eq!(flow_origin(&Route::Flows), None);
     }
 }

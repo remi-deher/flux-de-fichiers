@@ -95,7 +95,7 @@ paramètres.
 - Non repris : widgets personnalisables de la vue d'ensemble, feuille de filtres de la barre du
   haut (remplacée par les onglets), onglets Réseau / Stockage / Intégrations, télémétrie
   matérielle, page Mises à jour, simulation animée. Les modèles de flows (locaux et issus du
-  catalogue) se créent et s'utilisent dans Librairies → Flows & Modèles (`/api/v1/local/flow-templates`).
+  catalogue) se créent et s'utilisent dans Flux → Modèles (`/app/flows/modeles` ; API `/api/v1/local/flow-templates`).
 - Éditeur de flux : glisser-déposer sans position libre (mise en page automatique) ; non essayé
   en réel (HTML5 DnD, `beforeunload`). Restaurer une version garde les en-têtes secrets du flux courant (masqués).
 - Aucun de ces écrans ni leurs correctifs (recherche globale, tiroir mobile, session expirée, choix du worker, pagination) n'a été ouvert en réel : seuls clippy et les tests natifs ont tourné.

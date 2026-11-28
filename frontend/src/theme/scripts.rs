@@ -68,6 +68,22 @@ pub const SCRIPTS_CSS: &str = r#"
   background: inherit;
 }
 
+/* Anomalies du serveur de langage : soulignement des jetons, numéro de ligne coloré, résumé sous la zone. */
+.diag-error { text-decoration: underline wavy var(--danger); text-decoration-thickness: 1px; text-underline-offset: 0.2em; }
+.diag-warning { text-decoration: underline wavy var(--warning); text-decoration-thickness: 1px; text-underline-offset: 0.2em; }
+.diag-information { text-decoration: underline dotted var(--info); text-decoration-thickness: 1px; text-underline-offset: 0.2em; }
+.diag-hint { text-decoration: underline dotted var(--text-dim); text-decoration-thickness: 1px; text-underline-offset: 0.2em; }
+.code-editor__gutter .diag-error { color: var(--danger); font-weight: 600; }
+.code-editor__gutter .diag-warning { color: var(--warning); font-weight: 600; }
+.code-editor__gutter .diag-information { color: var(--info); }
+.code-editor__gutter li { text-decoration: none; }
+
+.code-editor__status {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-size-sm);
+}
+
 .code-editor__stack {
   position: relative;
   display: grid;

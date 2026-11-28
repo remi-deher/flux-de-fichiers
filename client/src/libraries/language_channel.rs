@@ -4,7 +4,7 @@
 
 use super::language_logic::{Link, is_served, language_position, session_url};
 use forgearr_shared::{
-    language::{ClientMessage, Diagnostic, ServerMessage, Suggestion},
+    language::{ClientMessage, Diagnostic, Position, ServerMessage, Suggestion},
     local::ScriptInterpreter,
 };
 use leptos::prelude::*;
@@ -19,6 +19,9 @@ use web_sys::{MessageEvent, WebSocket};
 /// Ce que l'éditeur fait d'une réponse du serveur ; jamais appelé si le canal tombe avant.
 type Reply = Box<dyn FnOnce(Vec<Suggestion>)>;
 
+/// Ce que l'éditeur fait du texte d'une info-bulle ; `None` si le serveur n'a rien à dire à cet endroit.
+type HoverReply = Box<dyn FnOnce(Option<String>)>;
+
 /// Dernières anomalies publiées par le serveur, avec le texte pour lequel il les a calculées.
 pub type Diagnosed = Option<(String, Vec<Diagnostic>)>;
 
@@ -31,6 +34,8 @@ struct Channel {
     link: Cell<Link>,
     socket: RefCell<Option<WebSocket>>,
     pending: RefCell<HashMap<u32, Reply>>,
+    /// Demandes d'info-bulle en attente de leur réponse, par identifiant.
+    hovers: RefCell<HashMap<u32, HoverReply>>,
     next_id: Cell<u32>,
     /// Version du texte connu du serveur, à partir de 1 après son ouverture.
     version: Cell<u32>,
@@ -110,6 +115,28 @@ impl LanguageChannel {
         true
     }
 
+    /// Demande l'info-bulle à `position` dans `text`. Rend `false` si le
+    /// canal n'est pas prêt : il n'y a alors rien à montrer.
+    pub fn hover(
+        &self,
+        text: &str,
+        position: Position,
+        reply: impl FnOnce(Option<String>) + 'static,
+    ) -> bool {
+        let channel = &self.0;
+        channel.latest.replace(text.to_owned());
+        if !channel.link.get().is_ready() {
+            channel.connect_if_due();
+            return false;
+        }
+        channel.sync(text);
+        let id = channel.next_id.get();
+        channel.next_id.set(id.wrapping_add(1));
+        channel.hovers.borrow_mut().insert(id, Box::new(reply));
+        channel.send(&ClientMessage::Hover { id, position });
+        true
+    }
+
     /// Ferme la session : le serveur s'arrête avec elle.
     pub fn close(&self) {
         self.0.send(&ClientMessage::Close);
@@ -131,6 +158,7 @@ impl Channel {
             link: Cell::new(Link::Idle),
             socket: RefCell::new(None),
             pending: RefCell::new(HashMap::new()),
+            hovers: RefCell::new(HashMap::new()),
             next_id: Cell::new(0),
             version: Cell::new(0),
             synced: RefCell::new(None),
@@ -174,7 +202,7 @@ impl Channel {
         }
     }
 
-    /// Message du central. Les info-bulles sont l'affaire du lot c2.
+    /// Message du central.
     fn received(&self, data: &str) {
         let Ok(message) = serde_json::from_str::<ServerMessage>(data) else {
             return;
@@ -201,7 +229,12 @@ impl Channel {
                     let _ = self.diagnostics.try_set(Some((text, items)));
                 }
             }
-            ServerMessage::Hover { .. } => {}
+            ServerMessage::Hover { id, text } => {
+                let reply = self.hovers.borrow_mut().remove(&id);
+                if let Some(reply) = reply {
+                    reply(text);
+                }
+            }
         }
     }
 
@@ -245,6 +278,7 @@ impl Channel {
     /// Détache et ferme le socket ; les réponses attendues sont abandonnées.
     fn release(&self) {
         self.pending.borrow_mut().clear();
+        self.hovers.borrow_mut().clear();
         let _ = self.diagnostics.try_set(None);
         if let Some(socket) = self.socket.take() {
             socket.set_onmessage(None);

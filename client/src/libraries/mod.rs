@@ -6,6 +6,8 @@ mod code_editor;
 mod draft;
 mod form;
 mod history;
+mod language_channel;
+mod language_logic;
 mod packs;
 mod requirements_editor;
 mod resources;

@@ -3,9 +3,11 @@
 //! d'une grille, que le conteneur fait défiler d'un bloc. Les jetons viennent du central.
 
 use super::diagnostic_marks::{self, MarkedToken, mark_class};
+use super::hover_tip::HoverTip;
 use super::language_channel::{Diagnosed, LanguageChannel};
 use super::language_logic::{self, char_before};
 use super::suggestions::{self, MIN_PREFIX_CHARS, Suggestion};
+use super::typing_pause::after_pause;
 use crate::api;
 use forgearr_shared::highlight::{CodeToken, HighlightRequest, HighlightedCode, TokenKind};
 use forgearr_shared::local::ScriptInterpreter;
@@ -101,33 +103,6 @@ fn insert_indent(code: &str, start: usize, end: usize) -> (String, usize) {
     (String::from_utf16_lossy(&next), caret)
 }
 
-/// Appelle `run` avec ce que lit `read` une fois `delay` écoulé sans nouvelle valeur. `run` reçoit aussi de
-/// quoi savoir, plus tard, si cette valeur est toujours la dernière (une réponse tardive ne doit pas la
-/// remplacer).
-fn after_pause<T: 'static>(
-    read: impl Fn() -> T + 'static,
-    delay: Duration,
-    run: impl Fn(T, Rc<dyn Fn() -> bool>) + Clone + 'static,
-) {
-    let generation = StoredValue::new(0_u64);
-    Effect::new(move |_| {
-        let value = read();
-        generation.update_value(|count| *count += 1);
-        let ticket = generation.get_value();
-        let run = run.clone();
-        set_timeout(
-            move || {
-                let current: Rc<dyn Fn() -> bool> =
-                    Rc::new(move || generation.try_get_value() == Some(ticket));
-                if current() {
-                    run(value, current);
-                }
-            },
-            delay,
-        );
-    });
-}
-
 /// Demande la coloration après une pause de frappe ; une frappe plus récente annule l'appel en attente.
 fn schedule_highlight(
     code: RwSignal<String>,
@@ -220,6 +195,7 @@ pub fn CodeEditor(
     });
     // Une réponse du serveur n'est prise en compte que si aucune frappe plus récente ne l'a rendue caduque.
     let request = StoredValue::new(0_u64);
+    let hover = HoverTip::new(code, channel, area_ref);
 
     // Recalcule la liste d'après le mot qui précède le curseur.
     let refresh = move |area: &HtmlTextAreaElement| {
@@ -288,6 +264,9 @@ pub fn CodeEditor(
     };
 
     let on_keydown = move |ev: leptos::ev::KeyboardEvent| {
+        if !read_only && hover.key(&ev) {
+            return;
+        }
         let key = ev.key();
         if let Some(open) = popup.get_untracked() {
             let last = open.items.len().saturating_sub(1);
@@ -367,6 +346,7 @@ pub fn CodeEditor(
                     }}
                     "\n"
                 </pre>
+                {hover.ruler()}
                 <textarea id="script-code" node_ref=area_ref
                     class="code-editor__layer code-editor__input"
                     required=true disabled=read_only spellcheck="false" wrap="off"
@@ -378,8 +358,13 @@ pub fn CodeEditor(
                             refresh(&area);
                         }
                     }
-                    on:blur=move |_| popup.set(None)
+                    on:blur=move |_| {
+                        popup.set(None);
+                        hover.leave();
+                    }
                     on:click=move |_| popup.set(None)
+                    on:mousemove=move |ev| hover.moved(&ev)
+                    on:mouseleave=move |_| hover.leave()
                     on:keydown=on_keydown />
                 {move || popup.get().map(|open| {
                     let selected = open.selected;
@@ -401,6 +386,7 @@ pub fn CodeEditor(
                         </ul>
                     }
                 })}
+                {hover.tooltip()}
             </div>
         </div>
         {move || diagnostic_marks::summary(&current_diagnostics.get()).map(|text| view! {

@@ -79,7 +79,7 @@ async fn serve(
     } = launched;
     let spec = SessionSpec {
         server,
-        id,
+        workspace: workspace.path().to_path_buf(),
         process_id: std::process::id(),
         timings: Timings::default(),
     };

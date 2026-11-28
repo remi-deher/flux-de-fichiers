@@ -14,14 +14,13 @@ use forgearr_shared::language::{
     ClientMessage, LanguageServer, Position, ServerMessage, UnavailableReason,
 };
 use serde_json::{Value, json};
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, path::PathBuf, time::Duration};
 use tokio::{
     io::{AsyncBufRead, AsyncWrite, AsyncWriteExt},
     sync::mpsc,
     task::JoinHandle,
     time::{Instant, sleep_until, timeout_at},
 };
-use uuid::Uuid;
 
 /// Arrêt après ce délai sans message de la page.
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
@@ -55,10 +54,11 @@ impl Default for Timings {
 }
 
 /// Ce qui identifie une session auprès du serveur de langage.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct SessionSpec {
     pub server: LanguageServer,
-    pub id: Uuid,
+    /// Dossier de travail de la session : le serveur y trouve le document et en fait la racine de son projet.
+    pub workspace: PathBuf,
     /// Identifiant du processus de Forgearr, annoncé au serveur (il peut s'arrêter avec lui).
     pub process_id: u32,
     pub timings: Timings,
@@ -135,7 +135,7 @@ struct Session<W> {
 impl<W: AsyncWrite + Unpin> Session<W> {
     fn new(spec: SessionSpec, writer: W, to_client: mpsc::Sender<ServerMessage>) -> Self {
         Self {
-            uri: protocol::document_uri(spec.id, spec.server),
+            uri: protocol::document_uri(&spec.workspace, spec.server),
             spec,
             writer,
             to_client,
@@ -161,7 +161,7 @@ impl<W: AsyncWrite + Unpin> Session<W> {
     /// Poignée de main : `initialize`, sa réponse, puis `initialized`. Les requêtes que le serveur adresse
     /// entre-temps reçoivent leur réponse. La page est prévenue par `Ready`.
     async fn handshake(&mut self, frames: &mut mpsc::Receiver<Value>) -> Flow {
-        let params = protocol::initialize_params(self.spec.process_id, self.spec.id);
+        let params = protocol::initialize_params(self.spec.process_id, &self.spec.workspace);
         self.send(protocol::request(
             INITIALIZE_ID,
             protocol::INITIALIZE,

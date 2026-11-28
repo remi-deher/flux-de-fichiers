@@ -18,7 +18,7 @@ use forgearr::{
 use forgearr_shared::language::{LANGUAGE_SESSION_PATH, LanguageServer};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 use tokio::{
     io::{BufReader, DuplexStream, duplex},
     net::TcpStream,
@@ -28,7 +28,6 @@ use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
     tungstenite::{Error as WebSocketError, Message, client::IntoClientRequest, http::HeaderValue},
 };
-use uuid::Uuid;
 
 type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -240,7 +239,7 @@ async fn relayed(upgrade: WebSocketUpgrade, check_every: Duration, allowed: bool
         tokio::spawn(fake_language_server(fake_reads, fake_writes));
         let spec = SessionSpec {
             server: LanguageServer::Bash,
-            id: Uuid::nil(),
+            workspace: PathBuf::from("/data/language/test"),
             process_id: std::process::id(),
             timings: Timings::default(),
         };

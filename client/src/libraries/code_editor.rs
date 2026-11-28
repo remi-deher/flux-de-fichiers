@@ -6,6 +6,7 @@ use super::diagnostic_marks::{self, MarkedToken, mark_class};
 use super::hover_tip::HoverTip;
 use super::language_channel::{Diagnosed, LanguageChannel};
 use super::language_logic::{self, char_before};
+use super::script_rules;
 use super::suggestions::{self, MIN_PREFIX_CHARS, Suggestion};
 use super::typing_pause::after_pause;
 use crate::api;
@@ -176,13 +177,20 @@ pub fn CodeEditor(
         };
         after_pause(move || code.get(), DIAGNOSTICS_DELAY, follow);
     }
-    // Les anomalies du serveur, ramenées sur le texte tel qu'il est maintenant.
+    // Les anomalies du serveur, ramenées sur le texte tel qu'il est maintenant, et celles des règles de
+    // Forgearr, qui lisent le texte même.
     let current_diagnostics = Memo::new(move |_| {
         let text = code.get();
-        diagnosed
+        let mut found = diagnosed
             .get()
             .map(|(computed_for, items)| diagnostic_marks::remap(&computed_for, &text, &items))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        found.extend(script_rules::check(
+            interpreter.get(),
+            &text,
+            &declared.get(),
+        ));
+        found
     });
     Effect::new(move |_| {
         let interpreter = interpreter.get();
